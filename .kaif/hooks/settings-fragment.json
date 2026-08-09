@@ -1,0 +1,42 @@
+{
+  "_readme": "SAMPLE Claude Code hooks config for the optional KAIF refresh-hooks module (.kaif/hooks/README.md explains it). This file is NEVER applied automatically: KAIF does not edit your settings.json — wiring the hooks is an explicit opt-in step done by the project owner (or by the agent with the owner's quoted consent). Merge the `hooks` object below into .claude/settings.json (project) or settings.local.json (personal).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/session-start-refresh.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/prompt-refresh-timer.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/stop-status-guard.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

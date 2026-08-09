@@ -1,0 +1,18 @@
+{
+  "framework": "KAIF",
+  "version": "2.2",
+  "released": "2026-08-08",
+  "origin": "https://github.com/MikalaiKryvusha/KAIF",
+  "tracking": "origin",
+  "sphere": "programming",
+  "agents": [
+    "claude-code",
+    "codex",
+    "grok-build",
+    "cline",
+    "zoo-code"
+  ],
+  "language": "ru",
+  "canonArtifacts": [],
+  "projectName": "KAGO"
+}

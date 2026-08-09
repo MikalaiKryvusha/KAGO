@@ -1,0 +1,126 @@
+# TESTING_FRAMEWORK — how the agent tests what it creates
+
+Raw generated content — code, a document, an analysis, anything — **must not be trusted**. It may *look*
+logical and working and still be broken, or fail the owner's actual requirements (the idea, the plan, the
+vision). An early defect that rides silently to production is the most expensive kind — it destroys
+projects from the inside. Testing is a distinct, first-class part of ALL work, not a formality after it.
+This document is the agent's testing canon; it applies to **every artifact in every sphere** — a function,
+a dataset, a legal clause, a bridge design, a thought (what "verify" means in your sphere is defined by
+the project's sphere library: its *Verification by observation* and *Minimum evidence set* sections).
+
+## The seven principles of testing (the canon)
+
+1. **Testing shows the presence of defects, not their absence.** A green suite never proves the product
+   has no bugs — bugs ALWAYS exist; testing lowers the risk, never to zero.
+2. **Exhaustive testing is impossible.** You cannot check every input/state combination — prioritize by
+   risk and value instead of pretending completeness.
+3. **Early testing saves the budget.** Verify at the requirements/plan stage; the later a defect is
+   found, the more it costs (the waterfall skyscraper on an untested foundation).
+4. **Defects cluster.** Most bugs live in a few narrow modules — where one was found, hunt for more
+   (the fable-method twin check is this principle mechanized).
+5. **The pesticide paradox.** The same tests stop finding new bugs — vary the tests, angles, and data.
+6. **Testing is context-dependent.** Methods are chosen per project and sphere — a payment system, a
+   research paper, and a landing page are not tested alike.
+7. **The absence-of-errors fallacy.** A defect-free product that does not solve the user's task is
+   worthless — always test against the OWNER'S requirements (`GOAL.md`, the idea, the plan), not only
+   against the code's own consistency.
+
+## Test-status markers — the trust contract
+
+Every non-trivial artifact the agent generates carries an explicit, grep-friendly test status in its
+comment / accompanying note. The marker strings are canonical English (like the `DONE` tag), regardless
+of the project language:
+
+- **`[NOT-TESTED]`** — freshly generated, raw. **Do not trust it.** The LLM "thought" it was right;
+  that is not evidence.
+- **`[TESTED: <date> · <how it was verified / what was observed>]`** — verified by observation, with
+  the evidence named (a run, a render, a recomputation, a check against the source).
+
+**The rules:**
+
+1. **Creating raw content** (a non-trivial block/method/module/section) → write `[NOT-TESTED]` into its
+   comment at birth. Commenting is already mandatory (`AGENT_GUIDE.md`); the marker is part of the
+   initial comment.
+2. **Meeting `[NOT-TESTED]`** (yours or inherited) → do not build on it blindly: plan its verification,
+   verify **by observation** (fable-method Step 5: it ran, it rendered, it counted — never inferred from
+   reading), then flip the marker to `[TESTED: …]` with the evidence named.
+3. **Meeting `[TESTED: …]`** → you may trust it and need not re-test — but keep a grain of doubt
+   (principle 1: bugs always exist). If evidence contradicts the marker, the marker is wrong: investigate.
+4. **Testing found a defect** → file it (`/report-bug`, method: `BUG_FIXING_FRAMEWORK.md`), fix, re-test,
+   and only then mark `[TESTED]`.
+5. **A false `[TESTED]`** — the marker present with no verification actually performed — is a fraud;
+   `/fable-judge` hunts it like any false completion claim. Never flip a marker without the observation.
+6. **Carrier by artifact type:** code → the block/method comment; a document → the section's note; any
+   other sphere → the nearest commentable carrier the sphere convention offers.
+
+Markers are the persistent memory of verification: fable-method's Step 5 verifies *in the moment*; the
+marker preserves that fact **across sessions**, for future agents and posterity — who else will know the
+foundation was load-tested?
+
+## The work produces its own means of checking
+
+"Raw deserves no trust" binds the PRODUCER, not only the checker: building something includes
+building what checks it — a test suite, a check-list, test cases, a fixture, a guard. They are
+planned WITH the work and land in the SAME step, never "later": verification postponed to a later
+step is verification that never happens, and verification that lives only in a session's scratchpad
+dies with the session. This is principle 3 (early testing) applied to production rather than to
+inspection, and it is why the harness section below exists — the harness is what makes the checking
+repeatable once it exists.
+
+Two operational consequences, one on each side of the work:
+
+- **New behaviour is born with the check that watches it** — and the check is proven on the broken
+  version before its green is trusted (gate 5 below; `BUG_FIXING_FRAMEWORK.md` → Guards).
+- **A closed defect is born with the guard for its CLASS** — that rule already lives in
+  `BUG_FIXING_FRAMEWORK.md` ("a fix without a guard is a fix on credit") and is not restated here.
+
+The triviality gate applies: a trivial change verified by its one obvious check needs no ceremony
+beyond the usual comment and marker. What is never legal is finishing non-trivial work with nothing
+that can re-check it.
+
+## Green tests ≠ working — the observation gates
+
+A green suite is one observation, not the verdict (principle 1): whole classes of defects are invisible
+to every test and obvious to one minute of looking. Before "done" on anything that runs, renders, or
+ships, walk the gates that apply:
+
+1. **Live smoke with your eyes on the log.** Run the real process (not only the tests) and read its
+   first working cycle in the log — startup, the key operation, no silent error spam.
+2. **Self-sufficiency of the shipped artifact.** The image/bundle/package must start in isolation (a
+   fresh container/directory) — a build that only works inside your working tree is not shipped.
+3. **Domain invariants, before/after.** Before the work, write down the numbers that must not change
+   (counts, sums, sizes); after, compare. Comparing two numbers is the one check any session performs
+   perfectly — and its signal is among the highest there is.
+4. **Countable quality proxies.** Where quality is visual or subjective, find what can be counted
+   (animations per screen, panel-opacity checks, bundle growth): a zero on the counter is a stop-defect.
+   A proxy never replaces the owner's eye — it catches the zeros *before* the owner has to.
+5. **A check that has never failed proves nothing.** Every new guard/check is verified on a broken
+   version first (see `BUG_FIXING_FRAMEWORK.md` → Guards); goldens for refactors are byte-exact —
+   an empty diff is proof, "the numbers look the same" is not.
+
+## The taste class — when the observer must be human
+
+A subjectively-perceptual acceptance criterion (a perception adjective: beautiful, natural,
+pleasant, "feels right") is still verified by observation — but the OBSERVER is the human, by
+necessity, not the agent. The agent's role is to PREPARE the observation: produce a mock-up on the
+project's own material and hand over an artifact to perceive (`AGENT_GUIDE.md` → "The taste
+class"; the homework doc with its two standing fields). The agent's own "sounds good to me" is not
+a verification and never flips a marker; the owner's recorded verdict is.
+
+## How this composes with the rest of KAIF
+
+- **`REQUIREMENTS_FRAMEWORK.md`** — shapes what is REQUIRED before anything is made; this framework
+  verifies what was MADE against it. Principle 3 (early testing) is executed at the requirements
+  stage by that canon; bugs are what is born where the two meet (`BUG_FIXING_FRAMEWORK.md`).
+- **fable-method** — Step 5 (verify by observation) is HOW a single check is performed; this framework
+  says WHAT must carry a status and how trust propagates. The triviality gate still applies: a trivial
+  change verified by its one obvious check needs no ceremony beyond its normal comment.
+- **`/fable-judge`** — treats test-status markers as claims: a `[TESTED]` it cannot reproduce is REFUTED.
+- **`BUG_FIXING_FRAMEWORK.md`** — where testing's findings go (one doc per defect; 3 attempts → research).
+- **Spheres** (`.kaif/spheres/`) — define the sphere's evidence, verification-by-observation meaning, and
+  fraud table; principle 6 lives there.
+- **The harness** — invest in tooling that makes verification observable and deterministic
+  (`AGENT_GUIDE.md` → Test harness); eyeballing is not testing.
+
+*Grounding: the seven principles are the ISTQB canon (istqb.org; ru: testbase.ru) — distilled here for an
+AI agent across all spheres.*
