@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0005 · 2026-08-09 · ❌ · #winget #windows #tooling #machine-mutation #probe
+**Context:** probing the toolchain for KAGO's epic — wanted to know whether Visual Studio had an update available before writing the fact into the environment dossier.
+**Tried / did:** `winget upgrade --id Microsoft.VisualStudio.2022.Community`, believing `winget upgrade` with an id *reports* on that package the way the bare `winget upgrade` lists packages.
+**Result:** ❌ it **performed** the upgrade. A VS installer started on the owner's machine at 22:21:07 and replaced MSVC toolset 14.40 with 14.44 mid-session. Symptom seen first, cause understood second: `cl.exe` and `vcvars64.bat` vanished *between two probes minutes apart*, and the contradictory readings looked like a sandbox artefact until the `dd_setup_*` logs and a live `msiexec` named the real cause.
+**Lesson:** in winget, **the query verb and the action verb are the same word** — bare `winget upgrade` lists, `winget upgrade --id X` installs. The read-only form is `winget list --id X --upgrade-available` (or `winget show`). Generalize past winget: before running any package-manager verb against a *named* package, ask which of list/install it is — an "am I up to date?" probe must never be able to install. A machine mutation the owner did not authorize is the failure here, not the newer compiler.   → link: researches/03 · AGENT_GUIDE.md (environment dossier)
+**Repro:** read-only check — `winget list --id <PackageId> --upgrade-available` (prints the row, changes nothing). Verify a mutation is NOT in flight before trusting any filesystem probe of that package: `Get-CimInstance Win32_Process -Filter "Name='msiexec.exe'"` plus `Get-ChildItem $env:TEMP -Filter dd_*.log | Sort LastWriteTime -Desc | Select -First 3`.
+**Trigger:** about to run a package manager against a named package (`winget` / `choco` / `npm i -g`) to LEARN something → use the list/show form, and if the verb could install, ask the owner first.
+**Not for:** cases where the owner asked for the upgrade — then the action verb is the point. The owner's ask here was "update **if needed**", and "if needed" was exactly the question I destroyed by answering it with the action.
+
 ### EXP-0004 · 2026-08-09 · ❌→✅ · #pdf #encoding #tooling #windows
 **Context:** reading the owner's `RTX_5070Ti_Undervolting_Master_Plan.pdf` — the project's source brief, written in Russian.
 **Tried / did:** `pdftotext -layout` (present at `/mingw64/bin`). It exited 0 and produced a plausible-looking 167-line file.

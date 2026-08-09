@@ -189,13 +189,15 @@ honest, an invented one is a defect (`PHILOSOPHY.md` → the three doors).
 |---|---|---|
 | OS | Windows 11 Pro 10.0.26200 | `cmd /c ver` |
 | GPU (the subject under test) | GeForce RTX 5070 Ti · driver 610.88 · VBIOS 98.03.58.40.8b · power limit 250–300 W · max clock 3090 MHz | `npm run gpu:info` |
-| CPU / RAM | `— not probed yet —` | `wmic cpu get name,numberofcores` · `systeminfo \| findstr Memory` |
+| CPU / RAM | AMD Ryzen 7 5700G · 8 cores / 16 threads · 32 GB | `Get-CimInstance Win32_Processor` · `Get-CimInstance Win32_ComputerSystem` |
 | Shells available | PowerShell 5.1 (`powershell.exe`, primary) · Git Bash (MSYS2, `/usr/bin/bash`) | `$PSVersionTable` · `bash --version` |
-| Console / ANSI encoding | `— not probed yet —` | `chcp` · `[Console]::OutputEncoding` |
-| Locale per shell | `— not probed yet —` | `Get-Culture` · `locale` |
-| Runtimes and build tools | Node v24.15.0 · npm bundled · Python 3.14 (**no pip**) and Python 3.10 (**pip 24.2 — use this one**) · git 2.43.0.windows.1 · gh 2.95.0 · CUDA 13.3 | `node -v` · `python -V` · `git --version` · `gh --version` |
-| `tar` / `curl` / `find` per shell | `— not probed yet —` | `type tar` in EACH shell (not `which`) |
-| VCS line-ending policy | `— not probed yet —` | `git config --get core.autocrlf` |
+| Console / ANSI encoding | console codepage **65001**, `[Console]` in/out **utf-8** — but the **default ANSI is windows-1251**, so PowerShell 5 `Set-Content`/`Add-Content` without `-Encoding utf8` writes cp1251 | `chcp` · `[Console]::OutputEncoding` · `[System.Text.Encoding]::Default` |
+| Locale per shell | PowerShell: culture `ru-RU`, UI culture `en-US` · Git Bash: `LANG` empty, `LC_CTYPE=C.UTF-8` | `Get-Culture` · `Get-UICulture` · `locale` |
+| Runtimes and build tools | Node v24.15.0 · npm bundled · Python 3.14 (**no pip**) and Python 3.10 (**pip 24.2 — use this one**) · git 2.43.0.windows.1 · gh 2.95.0 | `node -v` · `python -V` · `git --version` · `gh --version` |
+| CUDA build toolchain | **CUDA Toolkit 13.3 with `nvcc`** on PATH (`…\CUDA\v13.3\bin`). `nvcc` needs an MSVC host compiler and **does not find one on its own** — load `vcvars64.bat` (or `vcvarsx86_amd64.bat` for the x86-hosted cross build, which is proven to work and yields the same checksum). MSVC lives under VS 2022 Community; locate it with `vswhere`, never by a hard-coded version path | `nvcc --version` · `vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath` |
+| Windows Event Log access | `Get-WinEvent` on the `System` log works **unelevated**. Live providers: `Display` · `Microsoft-Windows-Kernel-Power` (id 41 has real history here) · `Microsoft-Windows-WHEA-Logger` (**no events at all** — detectors need fixtures) | `Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Display'} -MaxEvents 5` |
+| `tar` / `curl` / `find` per shell | **Different worlds — check the TYPE.** PowerShell: `tar` = `C:\Windows\system32\tar.exe` (bsdtar) · `curl` = an **ALIAS to `Invoke-WebRequest`**, not curl.exe · `find` = `C:\Windows\system32\find.exe` (the DOS text filter, NOT GNU find). Git Bash: `tar` = `/usr/bin/tar` · `curl` = `/mingw64/bin/curl` · `find` = `/usr/bin/find` | `type tar` in EACH shell (not `which`) · `Get-Command tar` |
+| VCS line-ending policy | `core.autocrlf = true` · credential helper `manager` | `git config --get core.autocrlf` · `git config --get credential.helper` |
 | Package manager | winget · chocolatey · npm | `winget -v` · `choco -v` |
 | PDF text extraction | `pdftotext` at `/mingw64/bin` — **but it silently drops Cyrillic** on these PDFs (no ToUnicode map). PyMuPDF under Python 3.10 extracts it correctly. `pdftoppm`/`pdffonts` are absent; ImageMagick is present but has no Ghostscript delegate, so PDF→image does not work | `pdftotext -layout in.pdf out.txt` · `py310 -c "import pymupdf"` |
 | Quirks paid for by incidents | see `EXPERIENCE.md` | — |
@@ -372,7 +374,7 @@ automation-engine/
 ├── engine.mjs              ← the Vmin sweep loop (search + guardband)
 ├── setup-desktop.mjs       ← builds profiles, shortcuts, autostart, tray registration
 └── lib/
-    ├── hardware-mon.mjs    ← telemetry: nvidia-smi + HWiNFO64 CSV
+    ├── hardware-mon.mjs    ← telemetry: nvidia-smi only (researches/03 retired HWiNFO64)
     ├── profile-manager.mjs ← APPLIES profiles — an interface over swappable backends
     ├── stress-tester.mjs   ← runs workloads, compares output against golden references
     ├── event-logger.mjs    ← Windows Event Log watch: TDR / WHEA / BSOD

@@ -40,6 +40,8 @@ profiles and build the owner-facing surface. They never search and never test.
 | R4 | **A stability verdict needs BOTH `stress-tester` and `event-logger`.** | Crash detection alone misses silent data corruption, which is the majority failure mode (`researches/02`). |
 | R5 | **Every write has its rollback in the same module.** | A function that changes hardware and cannot undo itself does not ship. |
 | R6 | **Profiles carry the driver and VBIOS they were proved on.** | A driver update can silently change voltage behaviour — it did in `595.71`. A profile whose stamp no longer matches is invalid until re-validated. |
+| R7 | **Telemetry comes from `nvidia-smi` alone; no GUI monitoring app is ever a source.** | `GOAL.md` forbids a third-party GUI dependency, and the sensor HWiNFO64 was there for (hotspot / memory junction) is disabled at driver level on RTX 50 — this card returns `N/A` (`researches/03` §3.5). |
+| R8 | **The workload build locates its own toolchain.** | `nvcc` does not find an MSVC host compiler by itself, and a machine's PATH is not KAGO's to assume — `toolchain.mjs` resolves it via `vswhere`, with the x86-hosted cross compiler as a proven fallback (`researches/03` §2.1). |
 
 ## 3. Blast radius — what to check before you edit
 

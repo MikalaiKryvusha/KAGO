@@ -32,19 +32,27 @@ KAGO/
 │   ├── engine.mjs                planned the Vmin sweep loop
 │   ├── setup-desktop.mjs         planned profiles → shortcuts → autostart → tray
 │   └── lib/
-│       ├── hardware-mon.mjs      planned telemetry (nvidia-smi, HWiNFO64 CSV)
+│       ├── hardware-mon.mjs      planned telemetry — nvidia-smi ONLY (see below)
+│       ├── toolchain.mjs         planned locates nvcc + the MSVC dev environment via vswhere
 │       ├── profile-manager.mjs   planned APPLIES profiles — interface over swappable backends
 │       ├── stress-tester.mjs     planned workload runner + golden-reference comparison
 │       ├── event-logger.mjs      planned Windows Event Log watch (TDR / WHEA / BSOD)
 │       └── desktop-shortcuts.mjs planned .lnk generation via WScript.Shell
+│
+├── workloads/                    planned KAGO's OWN loads — .cu sources, built on the machine
+│   ├── sdc_fma.cu                planned fixed-loop arithmetic, output hashed — the SDC shape
+│   └── branchy.cu                planned divergent control flow — the crash shape
 │
 ├── profiles/                     planned measured profiles, bound to driver + VBIOS
 ├── logs/ · runs/                 planned telemetry and sweep artefacts — git-ignored
 │
 ├── researches/                   ·live·  recon before code
 │   ├── 01_gpu_control_paths.md   ·live·  can it be done without MSI Afterburner — and how
-│   └── 02_vmin_guardband_...md   ·live·  the per-point Vmin search and the safety margin
-├── plans/ · ideas/ · bugs/ · interviews/ · homeworks/ · reports/   ·live· KAIF working dirs
+│   ├── 02_vmin_guardband_...md   ·live·  the per-point Vmin search and the safety margin
+│   └── 03_headless_verificat....md ·live· what loads the card, what watches it, who says PASS
+├── plans/                        ·live·  01_EPIC_kago_orchestrator · 02_epic01_phase1_...
+├── interviews/                   ·live·  001_harness_boundaries — open, awaiting the owner
+├── ideas/ · bugs/ · homeworks/ · reports/   ·live· KAIF working dirs
 │
 └── (KAIF canon: AGENT_GUIDE · PHILOSOPHY · STATUS · EXPERIENCE · the frameworks · .kaif/ · skills)
 ```
