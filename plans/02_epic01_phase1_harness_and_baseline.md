@@ -2,7 +2,7 @@
 
 > **Created:** 2026-08-09 22:42 +03:00 (agent)
 > **Parent:** `plans/01_EPIC_kago_orchestrator.md` — phase 1
-> **Status:** 🟡 in progress · 3.1–3.5 closed (3.5 on 2026-08-10 00:36 +03:00) · next: 3.6 stress-tester
+> **Status:** 🟡 in progress · 3.1–3.6 closed (3.6 on 2026-08-10 00:52 +03:00) · next: 3.7 capture the baseline
 > **Outbound:** the environment-dossier rows → `AGENT_GUIDE.md` · the new harness commands → the
 > `AGENT_GUIDE.md` test-harness table · closure → `MASTER_PLAN.md` phase 1
 
@@ -148,17 +148,44 @@ from reading the diff (`TESTING_FRAMEWORK.md`).
         hours off the start of every window. Now a date-only argument is LOCAL midnight, and
         `--until <date>` means through the END of that day.
 
-### 3.6 — `automation-engine/lib/stress-tester.mjs` — the verdict
+### 3.6 — `automation-engine/lib/stress-tester.mjs` — the verdict ✅ CLOSED 2026-08-10
 
 *Anchor: epic §2 AC3 — "no crash and no silent corruption".*
 
-- [ ] Run a workload, capture its checksum, compare against the golden reference; ask
-      `event-logger.mjs` for faults in the same window; return **PASS / SDC / CRASH**.
-- [ ] The transient scheduler lives here (step 3.3).
-- [ ] **SDC is the dangerous verdict and must be loud** — a mismatch is never rounded to "probably
-      fine".
-- **Verify:** feed it a deliberately corrupted golden file and watch it return SDC — the guard must
-  go red before its green is trusted (`BUG_FIXING_FRAMEWORK.md` → Guards).
+- [x] Runs a workload, captures its checksum, compares against the golden reference, asks
+      `event-logger.mjs` for faults over the same window, returns **PASS / SDC / CRASH** — or
+      **UNKNOWN**, which is a fourth honest outcome and the one that keeps the other three truthful.
+- [x] The transient scheduler lives here, on config's duty cycle.
+- [x] SDC is loud: never averaged, never retried until it agrees, and printed inside a banner.
+- [x] **Verdict ORDER is the design.** A dead process or a logged fault outranks everything (a run
+      that fell over says nothing about its checksum); a mismatch observed directly is SDC even when
+      the event log could not be read — seeing beats not-looking; PASS requires that nothing died,
+      nothing mismatched, AND every witness actually answered.
+- [x] **A GOLDEN REFERENCE IS ONLY VALID FOR THE CONDITIONS IT WAS CAPTURED UNDER.** The stamp
+      carries driver + VBIOS (R6) **and the run arguments**, and a mismatch of either makes the
+      verdict UNKNOWN rather than a verdict. The arguments half was NOT designed in — it was found by
+      a real run, see the verification below.
+- [x] **Verified 2026-08-10 00:52 +03:00 by observation:**
+      · `npm run stress -- --selftest` — 10 blocks covering all five outcomes, each produced by
+        MAKING IT HAPPEN through an injected runner, never by asserting what the code would do;
+      · **the guard this step demands, on a real file:** one hex digit changed in
+        `runs/baseline/sdc_fma.json` → `ВЕРДИКТ: SDC`, exit 1, «25 из 25 прогонов разошлись с
+        эталоном»; restored → PASS again;
+      · **the self-test itself mutation-proved red:** rounding SDC to PASS in `decideVerdict` turned
+        two blocks red — ten green blocks that cannot fail would prove nothing;
+      · real runs on this card: `sdc_fma` 82 bursts in 10 s → PASS against a baseline captured from
+        the card itself, checksum `e27ec24a82d509d7`, which independently matches `MANIFEST.json`;
+      · **the transient shape observed with our OWN sampler** — `hardware-mon` running alongside
+        showed utilization alternating ~30 % / ~4 % in five-second blocks, exactly config's duty cycle.
+
+> **A LIMITATION FOUND WHILE MEASURING, recorded rather than smoothed over.** One burst is one
+> PROCESS, and process startup (~140 ms) dwarfs the kernel (0–25 ms at default arguments), so even
+> during the ON half the card only reaches **~20–30 % utilization**. The transient SHAPE is real and
+> that is what phase 1 needed; but a load that never saturates will not expose Vmin the way a
+> sustained kernel does. **Phase 5 needs a workload that loops internally for N seconds instead of
+> running once and exiting** — raising `iters` does not fix it (a heavier burst measured 23 % peak,
+> because the spawn cost stays). Recorded here so the Vmin engine does not inherit a blunt instrument
+> believing it is sharp.
 
 ### 3.7 — Capture the baseline
 
