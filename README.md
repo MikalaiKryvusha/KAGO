@@ -11,7 +11,7 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-phase%200%3A%20research%20done%2C%20engine%20not%20written-E67E22.svg?style=flat-square)](STATUS.md)
+[![Status](https://img.shields.io/badge/Status-phase%201%3A%20harness%20in%20progress%2C%20engine%20not%20written-E67E22.svg?style=flat-square)](STATUS.md)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
@@ -182,7 +182,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Состояние](https://img.shields.io/badge/Состояние-фаза%200%3A%20разведка%20есть%2C%20движка%20нет-E67E22.svg?style=flat-square)](STATUS.md)
+[![Состояние](https://img.shields.io/badge/Состояние-фаза%201%3A%20стенд%20строится%2C%20движка%20нет-E67E22.svg?style=flat-square)](STATUS.md)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)

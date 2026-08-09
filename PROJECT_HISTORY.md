@@ -27,6 +27,76 @@
 
 ## Entries (newest first)
 
+### 2026-08-09 — Session 2: the epic planned, the review contour built, phase 1 opened
+
+Moved from `STATUS.md` at `/end-chat`. Eight commits, `e5dfa67` … `406f0bf`.
+
+**The planning ladder, on the owner's instruction to open the session with it**
+
+- **`researches/03_headless_verification_toolchain.md`** — the third recon doc: what loads the card,
+  what watches it, who says PASS. Its decisive finding was proved by running it: CUDA Toolkit 13.3
+  and MSVC are on this machine, a test kernel compiled and returned the same checksum on three
+  consecutive runs — so KAGO can build its own deterministic workload and needs no third-party
+  binary. It also found that every mature benchmark sells script automation only in a paid tier,
+  that `nvidia-smi` has no voltage field at all (so phase 5 depends on phase 4 by evidence), and
+  that HWiNFO64 must leave the architecture.
+- **`plans/01_EPIC_kago_orchestrator.md`** — the meta-plan: goal vector, seven acceptance criteria
+  with Scale/Meter/Target, six phases with their order argued, entry and exit gates, tiered risks.
+  Written in English first, rewritten in Russian on the owner's decision (see below).
+- **`plans/02_epic01_phase1_harness_and_baseline.md`** — the operational plan for phase 1 only.
+
+**The owner-review contour, built on the owner's mid-session instruction** *«если нужно будет от
+меня слово — разворачивай интерактивный контур KAIF»*
+
+Five files, ≈3 470 lines, zero external dependencies: `tools/lib/review-core.mjs` (the one truth —
+normalization, hash, parsing, decision writes, the renderer), `tools/questions-guard.mjs` (four
+axes with a ratchet), `tools/review.mjs` (page, server, signal, queue), `tools/review-gate.mjs`
+(fail-closed `checkApproval`), `tools/send-upstream.mjs` (its real consumer — a KAIF ticket via
+`gh`). Proven by observation, not claimed: the guard red on a new violation and green on an excused
+one; the full save cycle writing all three places and the server terminating on its own; the gate's
+five behaviours including that a real content change voids an approval while CRLF+BOM does not.
+Field report filed as [KAIF#7](https://github.com/MikalaiKryvusha/KAIF/issues/7).
+
+**Interview 001 — the contour's first live cycle, closed without one clarification in chat**
+
+| Question | Owner's answer (2026-08-09 23:23 +03:00) |
+|---|---|
+| What measures performance acceptance (3DMark automation is Professional-only) | **A** — the automated gate uses KAGO's own numbers; the percentage of stock is one manual 3DMark run at the close of phase 6 |
+| Does FurMark go on the bench | **A** — not adopted at all, neither as a dependency nor as a bench tool |
+| Does the compiled binary ship | **B** — **it ships**, against the agent's recommendation, so KAGO works on a machine with no CUDA Toolkit |
+
+Answers propagated to every declared target before the status flip; the return-leg guard reports
+`проверок 3 · нарушений 0`.
+
+**Phase 1 opened — three steps closed**
+
+- `automation-engine/config.mjs` — every safety number named, each with the line it came from, each
+  audited by grep. The thermal policy is written as an observation (the card never declared a
+  throttle) rather than as an invented ceiling; the power range is probed, never hard-coded.
+- `automation-engine/lib/toolchain.mjs` — three lookup strategies for `nvcc` + the MSVC environment,
+  with the x86-hosted cross compiler as a proven fallback and a NAMED refusal instead of a stack.
+- `workloads/sdc_fma.cu` and `workloads/branchy.cu` + `tools/build-workloads.mjs` — the SDC-prone
+  and crash-prone shapes, each deterministic across five repeats (P1-AC1), shipped with
+  `MANIFEST.json` so a committed binary can be verified rather than trusted.
+
+**The KAIF language defect, found by the owner**
+
+The canon routed document language by directory, so the epic meta-plan — which the same guide calls
+"where the owner sees the whole shape once" — came out in English in a Russian-language project.
+Contradiction three lines apart in one file. Fixed locally by routing on a QUESTION (*does the owner
+read this?*) with an audience table; filed as [KAIF#6](https://github.com/MikalaiKryvusha/KAIF/issues/6)
+with corroborating evidence from this project's own install report, which had recorded the ambiguity
+hours earlier without it being acted on. `plans/01_EPIC` and `STATUS.md` rewritten in Russian.
+
+**The machine incident, recorded because it cost real time**
+
+`winget upgrade --id Microsoft.VisualStudio.2022.Community`, run believing it a read-only check,
+started an unrequested Visual Studio upgrade; interrupting it left MSVC half-installed. Repaired the
+same evening (finished 22:50, toolset 14.44 with both hosts restored). The detour bought one useful
+fact: the same kernel produced an identical checksum on three different toolchain configurations, so
+the golden reference survives a compiler change. Lessons `EXP-0005` and `EXP-0007`; a `deny` rule in
+the harness permission file now blocks the whole verb class.
+
 ### 2026-08-09 — Session 1: KAIF deployed, phase 0 closed, project published 🎉
 
 Moved verbatim from `STATUS.md` at `/end-chat`.
