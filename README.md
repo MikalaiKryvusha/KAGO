@@ -55,8 +55,21 @@ else's numbers.
 
 ## 2. Where the project actually is
 
-Phase 0 of six. The research base and the architecture are done; **the orchestrator itself is not
-written yet.** What runs today is the read-only probe:
+Two phases of six are closed. The research base, the architecture and **the test bench** are done;
+the orchestrator's engine is not written yet.
+
+The bench samples the card, loads it with KAGO's own CUDA workloads, watches the Windows event log,
+and returns a three-way verdict — PASS, SDC or CRASH — by comparing a run against a golden reference
+captured at stock. SDC is the one that matters: more than half of undervolting failures corrupt data
+before anything crashes, so "it did not fall over" is not a passing run. One command runs the whole
+phase-1 acceptance:
+
+```bash
+npm run phase1:accept
+```
+
+**Nothing built so far writes to the GPU.** There is no write path in the code at all — phase 2 is
+the first that will have one.
 
 ```bash
 npm run gpu:info
@@ -67,11 +80,16 @@ GPU            NVIDIA GeForce RTX 5070 Ti
 Driver / VBIOS 610.88 / 98.03.58.40.8b
 Power limit    300.00 W (default 300.00 W)
 Power range    250.00 … 300.00 W  → only 50 W of headroom
-Graphics clock 1425 MHz (max 3090 MHz)
-Temperature    49 °C   Perf state P3
+Graphics clock 1050 MHz (max 3090 MHz)
+Temperature    52 °C   Perf state P5
+Memory clocks  405, 810, 7001, 13801, 14001 MHz
+Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (phase 5's search space)
+               identical on all 4 full memory rungs — sweep the graphics clock once
+Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
+               This is the CLOCK grid. The VOLTAGE grid is still unmeasured (phase 4).
 ```
 
-That last line about headroom is the finding that shaped everything else. The driver will only move
+That headroom line is the finding that shaped everything else. The driver will only move
 the power ceiling from 300 W down to 250 W — 50 W. The targets this project was built for need two
 to three times that, so power limiting alone was never going to be enough, and curve editing became
 mandatory. The full reasoning is in [`researches/01`](researches/01_gpu_control_paths.md); the
@@ -225,8 +243,20 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 ## 2. Где проект находится на самом деле
 
-Фаза 0 из шести. Разведка и архитектура готовы, **самого оркестратора ещё нет.** Сегодня работает
-зонд, который только читает:
+Закрыты две фазы из шести. Разведка, архитектура и **испытательный стенд** готовы, движка
+оркестратора ещё нет.
+
+Стенд снимает телеметрию, грузит карту своими ядрами на CUDA, читает журнал Windows и выносит
+вердикт из трёх — PASS, SDC или CRASH, — сверяя прогон с эталоном, снятым на заводских настройках.
+Важен средний: больше половины отказов от андервольта портят данные раньше, чем что-нибудь упадёт,
+поэтому «не свалилось» — это не пройденный прогон. Вся приёмка первой фазы идёт одной командой:
+
+```bash
+npm run phase1:accept
+```
+
+**Ничего из построенного в GPU не пишет.** Пути записи в коде нет вовсе — первой его получит вторая
+фаза.
 
 ```bash
 npm run gpu:info
@@ -237,11 +267,16 @@ GPU            NVIDIA GeForce RTX 5070 Ti
 Driver / VBIOS 610.88 / 98.03.58.40.8b
 Power limit    300.00 W (default 300.00 W)
 Power range    250.00 … 300.00 W  → only 50 W of headroom
-Graphics clock 1425 MHz (max 3090 MHz)
-Temperature    49 °C   Perf state P3
+Graphics clock 1050 MHz (max 3090 MHz)
+Temperature    52 °C   Perf state P5
+Memory clocks  405, 810, 7001, 13801, 14001 MHz
+Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (phase 5's search space)
+               identical on all 4 full memory rungs — sweep the graphics clock once
+Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
+               This is the CLOCK grid. The VOLTAGE grid is still unmeasured (phase 4).
 ```
 
-Последняя строка про запас и определила всё остальное. Потолок мощности драйвер двигает только с
+Строка про запас и определила всё остальное. Потолок мощности драйвер двигает только с
 300 Вт до 250 Вт — на 50 Вт. Цели, ради которых проект затевался, требуют в два-три раза больше,
 так что одним потолком мощности их было не взять никогда, и правка кривой стала обязательной. Весь
 разбор — в [`researches/01`](researches/01_gpu_control_paths.md), дорожная карта — в

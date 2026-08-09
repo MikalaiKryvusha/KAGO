@@ -441,7 +441,9 @@ export function availableWorkloads() {
  * by asserting what the code would do. No GPU is touched: the whole suite runs on injected data, so
  * it is honest to run on a machine with no card at all.
  *
- * [TESTED: 2026-08-10 · 6 blocks green; and each was watched red first by inverting its expectation]
+ * [TESTED: 2026-08-10 · 10 blocks green, AND the suite mutation-proved red: rounding SDC to PASS
+ * inside decideVerdict turned two blocks red («испорченный эталон» and «прогоны разошлись между
+ * собой»), exit 1. Not every block was individually inverted — that is not claimed]
  */
 export function selfTest() {
   const V = config.VERDICT;
