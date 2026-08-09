@@ -44,3 +44,14 @@ config.local.mjs
 # Agent harness permissions for THIS machine (owner's grant, 2026-08-09). Machine-local by
 # nature — one owner, one machine — and this repository is public, so the grant never ships.
 .claude/settings.local.json
+
+# --- owner-review contour: derived pages and session state ---
+# The HTML page is DERIVED from the markdown (invariant I1) — the source ships, the render does not.
+# Locks carry a pid and a port: they describe one machine at one moment and nothing else.
+# NOTE what is deliberately NOT ignored: interviews/decisions/*.json. Those are the owner's
+# recorded decisions with by/at provenance — the machine memory that makes the archive readable
+# months later. They belong in history.
+interviews/*.html
+interviews/decisions/*.lock
+_probe.html
+*.review.html

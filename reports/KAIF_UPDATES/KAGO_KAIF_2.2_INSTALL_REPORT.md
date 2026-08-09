@@ -160,6 +160,7 @@ Adaptation checkpoints recorded: `study` · `project-name` · `placeholders` · 
 gate that fired, fired correctly and named its file. The gap that mattered had no gate at all, and
 the owner found it — see §2.3.
 
+<!-- owner-review:allow because=historical record of a queue that is CLOSED: both tickets were delivered on the owner's word 2026-08-09 as KAIF#3 and KAIF#4, and this report is an append-only chronicle whose past tense is not rewritten -->
 ## 5. Awaiting the owner's word — delivery
 
 Two tickets are written and **sitting local**, which is what the canon prescribes: `reports/README.md`

@@ -1,0 +1,528 @@
+// review-core.mjs — the single source of truth for the owner-review contour.
+//
+// Everything that reads an interview document goes through THIS module: the page, the send gate
+// and the questions guard. A duplicated parser is a second truth — in the field a guard's private
+// copy diverged from the core on "a comment is not an answer" inside a single day
+// (`/owner-reviews` → C1).
+//
+// Zero external dependencies by design: Node stdlib only.
+//
+// Contract anchors cited by name so a future session can find the rule that shaped each function:
+//   C3  — normalization and hash, written before either side of the gate
+//   C4  — the five parsing rules, written against live text
+//   C6  — decision writes: three places, derived names, never clobber the owner's words
+//   I2  — an answer is recorded in three places
+//   I3  — approval binds to the sha-256 of the normalized BODY
+//   I6  — quiet hours override everything, and the window crosses midnight
+//   I24 — the renderer strips HTML comments; every path showing document text goes through it
+//
+// [NOT-TESTED] at birth — the self-test in verify-review-contour.mjs flips this marker.
+
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { dirname, basename, resolve, join } from 'node:path';
+
+// ---------------------------------------------------------------------------------------------
+// 1. Normalization and hash (C3, I3)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The ONE normalization both sides of the gate must agree on. The field's costliest defect was a
+ * page hashing raw file bytes while the sender hashed normalized text: both self-tests green, and
+ * the gate would have refused every artifact forever.
+ *
+ * Order matters: BOM first (it would otherwise survive as content), then line endings, then the
+ * trailing whitespace tail, then exactly one final newline.
+ */
+export function normalize(s) {
+  let t = String(s);
+  if (t.charCodeAt(0) === 0xfeff) t = t.slice(1);   // strip BOM
+  t = t.replace(/\r\n?/g, '\n');                     // CRLF and lone CR to LF
+  t = t.replace(/[ \t\n]+$/, '');                    // drop the trailing whitespace tail
+  return t + '\n';                                   // exactly one final newline
+}
+
+/** sha-256 over the NORMALIZED text. Never over raw bytes — see normalize(). */
+export function hashBody(s) {
+  return createHash('sha256').update(normalize(s), 'utf8').digest('hex');
+}
+
+// ---------------------------------------------------------------------------------------------
+// 2. Quiet hours (I6)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Quiet hours override everything, including an explicitly requested voice level.
+ *
+ * The window CROSSES MIDNIGHT (23:00–09:00 by default). A naive `from <= now <= to` is silent all
+ * day and loud all night — the exact inversion of the intent — so the crossing case is handled
+ * explicitly and carries its own self-test.
+ *
+ * @param {Date} now
+ * @param {string} from "HH:MM"
+ * @param {string} to   "HH:MM"
+ */
+export function inQuietHours(now, from = '23:00', to = '09:00') {
+  const mins = (hhmm) => {
+    const [h, m] = String(hhmm).split(':').map(Number);
+    return h * 60 + m;
+  };
+  const n = now.getHours() * 60 + now.getMinutes();
+  const a = mins(from);
+  const b = mins(to);
+  if (a === b) return false;              // a zero-width window is no window
+  if (a < b) return n >= a && n < b;      // an ordinary same-day window
+  return n >= a || n < b;                 // the window crosses midnight
+}
+
+// ---------------------------------------------------------------------------------------------
+// 3. Parsing an interview document (C4)
+// ---------------------------------------------------------------------------------------------
+
+// Rule 5: `\w` and `\b` stay ASCII-only in Node even under the `u` flag, so a guard written with
+// them silently misses its own language. Every letter class below is `\p{L}` with `u`.
+const RE_HEADING = /^(#{1,6})\s+(.*)$/;
+const RE_HRULE = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
+
+// Rule 3 + G6: recognition is built NEGATIVELY. "A letter NOT followed by another letter" instead
+// of enumerating the allowed separators — to enumerate the allowed is to one day not enumerate,
+// and in the field two options out of three silently did not show under a green counting check.
+const RE_OPTION_START = /^\s*[-*]?\s*\*\*\s*([A-Za-zА-Яа-я])(?!\p{L})/u;
+
+// The answer field, in either working language. Rule 2: a field labelled as a COUNTER-question is
+// not an answer — those labels are listed separately and excluded.
+const RE_ANSWER_FIELD = /^\s*\*\*\s*(Ответ|Answer)\s*:?\s*\*\*\s*:?\s*(.*)$/iu;
+const RE_COUNTER_FIELD = /^\s*\*\*\s*(Встречный вопрос|Counter-question|Уточнение|Clarification)\s*:?\s*\*\*/iu;
+
+// A comment is a thought, not a decision (C6) — parsed, but never closes a question.
+const RE_COMMENT_FIELD = /^\s*\*\*\s*(Комментарий|Comment)\s*:?\s*\*\*\s*:?\s*(.*)$/iu;
+
+// The document status line. Rule 4: the truth about whether an interview is closed is the DOCUMENT
+// STATUS, never the fullness of its fields.
+const RE_STATUS_LINE = /^\s*\*\*\s*(Status|Статус)\s*:?\s*\*\*\s*:?\s*(.*)$/iu;
+
+// A question heading: "## Вопрос 1." / "## Question 2 —" / "## Q3:"
+const RE_QUESTION_HEADING = /^#{2,4}\s*(Вопрос|Question|Q)\s*(\d+)/iu;
+
+/**
+ * Parse an interview document into a structure both the page and the guard agree on.
+ *
+ * Rule 1 is the subtle one: a question block is closed not only by the next heading but ALSO by a
+ * horizontal rule. Without it the rule lands inside the answer text and an empty question reads as
+ * "answered" — the single worst outcome for a contour whose whole job is knowing what is unanswered.
+ */
+export function parseInterview(text, { file = '<memory>' } = {}) {
+  const src = normalize(text);
+  const lines = src.split('\n');
+
+  const doc = {
+    file,
+    title: null,
+    status: null,
+    statusIsWaiting: null,
+    questions: [],
+    documentComments: [],
+  };
+
+  // --- document-level fields -----------------------------------------------------------------
+  for (const line of lines) {
+    const h = line.match(RE_HEADING);
+    if (h && h[1].length === 1 && doc.title === null) doc.title = h[2].trim();
+    const s = line.match(RE_STATUS_LINE);
+    if (s && doc.status === null) doc.status = s[2].trim();
+  }
+  if (doc.status !== null) {
+    // "waiting" is decided by the status TEXT, not by field fullness (rule 4).
+    doc.statusIsWaiting = /🔴|ждёт|ожида|waiting|awaits|open/iu.test(doc.status);
+  }
+
+  // --- question blocks -----------------------------------------------------------------------
+  // Collect block boundaries first, then parse each block. Two passes are cheaper to reason about
+  // than one pass with state, and this parser is read by every consumer of the contour.
+  const starts = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (RE_QUESTION_HEADING.test(lines[i])) starts.push(i);
+  }
+
+  for (let qi = 0; qi < starts.length; qi++) {
+    const start = starts[qi];
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) {
+      // Rule 1: closed by the next heading OR by a horizontal rule.
+      if (RE_HEADING.test(lines[i]) || RE_HRULE.test(lines[i])) { end = i; break; }
+    }
+    const block = lines.slice(start, end);
+    doc.questions.push(parseQuestionBlock(block, qi + 1));
+  }
+
+  // --- document-wide comments (P7) ------------------------------------------------------------
+  // Appended by the contour as dated blocks at the END of the file; they accumulate, never
+  // overwrite. Recognised so a re-render shows them back to the owner.
+  const dated = src.match(/<!--\s*owner-review:comment\s+at="([^"]+)"\s+by="([^"]+)"\s*-->\n([\s\S]*?)(?=\n<!--\s*owner-review:|$)/gu);
+  if (dated) {
+    for (const blockText of dated) {
+      const m = blockText.match(/at="([^"]+)"\s+by="([^"]+)"\s*-->\n([\s\S]*)/u);
+      if (m) doc.documentComments.push({ at: m[1], by: m[2], text: m[3].trim() });
+    }
+  }
+
+  return doc;
+}
+
+/** Parse one question block. Exported so the guard's counting cross-check (G11) can call it. */
+export function parseQuestionBlock(blockLines, index) {
+  const heading = blockLines[0].replace(/^#{2,4}\s*/u, '').trim();
+  const q = {
+    index,
+    heading,
+    id: `Q${index}`,
+    body: [],
+    options: [],
+    answer: null,
+    answerLine: null,
+    comment: null,
+    answerTarget: null,      // I18 — where the answer must propagate
+    optionCandidateLines: 0, // G11 — the independent count for the cross-check
+  };
+
+  let i = 1;
+  let current = null; // the option being accumulated (rule 3: options are MULTILINE)
+
+  const flush = () => {
+    if (!current) return;
+    // Rule 3: collect the item with its indented continuations FIRST, only then look for the
+    // closing `**`. A single-line parse silently eats every option whose text wraps.
+    const joined = current.raw.join('\n');
+    const m = joined.match(/^\s*[-*]?\s*\*\*\s*([A-Za-zА-Яа-я])(?!\p{L})([^*]*)\*\*(?:\s*[—:.\-–]\s*)?([\s\S]*)$/u);
+    if (m) {
+      q.options.push({
+        letter: m[1].toUpperCase(),
+        label: (m[2] || '').replace(/^[\s.):—-]+/u, '').trim(),
+        text: (m[3] || '').trim(),
+        recommended: /рекомендую|рекомендовано|recommended/iu.test(joined),
+      });
+    }
+    current = null;
+  };
+
+  for (; i < blockLines.length; i++) {
+    const line = blockLines[i];
+
+    // The answer-target declaration (I18), written together with the question.
+    const at = line.match(/<!--\s*owner-review:target\s+(.*?)\s*-->/u);
+    if (at) { q.answerTarget = at[1]; continue; }
+
+    if (RE_COUNTER_FIELD.test(line)) { flush(); continue; }   // rule 2: not an answer
+
+    const ans = line.match(RE_ANSWER_FIELD);
+    if (ans) {
+      flush();
+      // Everything from here to the end of the block, minus later labelled fields, is the answer.
+      const tail = [ans[2] ?? ''];
+      for (let j = i + 1; j < blockLines.length; j++) {
+        if (RE_COMMENT_FIELD.test(blockLines[j]) || RE_COUNTER_FIELD.test(blockLines[j])) break;
+        tail.push(blockLines[j]);
+      }
+      const text = tail.join('\n').trim();
+      q.answer = text.length ? text : null;
+      q.answerLine = i;
+      continue;
+    }
+
+    const cm = line.match(RE_COMMENT_FIELD);
+    if (cm) {
+      flush();
+      q.comment = (cm[2] || '').trim() || null;
+      continue;
+    }
+
+    if (RE_OPTION_START.test(line)) {
+      flush();
+      q.optionCandidateLines++;
+      current = { raw: [line] };
+      continue;
+    }
+
+    if (current) {
+      // An indented continuation, or a blank line inside the item.
+      if (/^\s{2,}\S/u.test(line) || line.trim() === '') { current.raw.push(line); continue; }
+      flush();
+    }
+
+    q.body.push(line);
+  }
+  flush();
+
+  q.bodyText = q.body.join('\n').trim();
+  // A comment WITHOUT an answer never closes a question (C6): answered-ness is the answer alone.
+  q.answered = q.answer !== null;
+  return q;
+}
+
+// ---------------------------------------------------------------------------------------------
+// 4. Decision records (I2, C6)
+// ---------------------------------------------------------------------------------------------
+
+/** Decision file names are DERIVED from the document — a shared name is overwritten by the next. */
+export function decisionPaths(docPath) {
+  const dir = dirname(resolve(docPath));
+  const base = basename(docPath).replace(/\.md$/iu, '');
+  const decisionsDir = join(dir, 'decisions');
+  return {
+    decisionsDir,
+    archiveDir: join(decisionsDir, 'archive'),
+    decision: join(decisionsDir, `${base}.decision.json`),
+    queue: join(decisionsDir, 'queue.json'),
+    archiveFor: (iso) => join(decisionsDir, 'archive', `${base}--${iso.replace(/[:.]/gu, '-')}.json`),
+  };
+}
+
+export function readDecision(docPath) {
+  const { decision } = decisionPaths(docPath);
+  if (!existsSync(decision)) return null;
+  try { return JSON.parse(readFileSync(decision, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Write the decision to two of its three places (the third — back into the source md — is
+ * applyAnswersToDocument below, because it must run bottom-up over the live text).
+ */
+export function writeDecision(docPath, record) {
+  const p = decisionPaths(docPath);
+  mkdirSync(p.archiveDir, { recursive: true });
+  const body = JSON.stringify(record, null, 2) + '\n';
+  writeFileSync(p.decision, body, 'utf8');
+  writeFileSync(p.archiveFor(record.at), body, 'utf8');   // archive copies are never overwritten
+  return p;
+}
+
+/**
+ * Write answers back into the source markdown.
+ *
+ * Two rules paid for by a field pilot, both non-obvious:
+ *  - questions are applied BOTTOM-UP: an inserted line shifts everything below it, and stale
+ *    positions wrote one answer's tail onto a neighbouring OPTION line;
+ *  - an answer the owner already wrote is NEVER overwritten — new text arrives as a dated
+ *    follow-up field, and the original stays verbatim.
+ */
+export function applyAnswersToDocument(docPath, answers, { by, at, atHuman }) {
+  // I22/I23: two representations of one moment, and neither replaces the other. The ISO stamp goes
+  // into the HTML comment (machine memory); the line a HUMAN reads carries LOCAL time in words.
+  // Showing UTC or an ISO string to the owner is a lie about the owner's own action.
+  const human = atHuman || humanTime(new Date(at));
+  const original = readFileSync(docPath, 'utf8');
+  const doc = parseInterview(original, { file: docPath });
+  const lines = normalize(original).split('\n');
+
+  // Map question ids to their absolute answer-field line numbers.
+  const absolute = [];
+  {
+    let qi = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (RE_QUESTION_HEADING.test(lines[i])) {
+        qi++;
+        const q = doc.questions[qi - 1];
+        if (!q) continue;
+        if (q.answerLine !== null) absolute.push({ q, line: i + q.answerLine });
+      }
+    }
+  }
+
+  // BOTTOM-UP — the whole reason this function is not a simple forEach.
+  absolute.sort((a, b) => b.line - a.line);
+
+  for (const { q, line } of absolute) {
+    const given = answers[q.id];
+    if (!given || (!given.choice && !given.text)) continue;
+    const rendered = [given.choice, given.text].filter(Boolean).join(' — ');
+
+    if (q.answered) {
+      // Never clobber the owner's own words: append a dated follow-up instead.
+      lines.splice(line + 1, 0,
+        '',
+        `<!-- owner-review:followup at="${at}" by="${by}" -->`,
+        `**Дополнено ${human}:** ${rendered}`);
+    } else {
+      lines[line] = `**Ответ:** ${rendered}`;
+      lines.splice(line + 1, 0, `<!-- owner-review:answer at="${at}" by="${by}" -->`);
+    }
+    if (given.comment) {
+      lines.splice(line + 1, 0, `**Комментарий:** ${given.comment}`);
+    }
+  }
+
+  writeFileSync(docPath, normalize(lines.join('\n')), 'utf8');
+}
+
+/** The document-wide comment (P7) appends as a dated block at the END — it never overwrites. */
+export function appendDocumentComment(docPath, text, { by, at, atHuman }) {
+  const human = atHuman || humanTime(new Date(at));   // I23 — local time in words for the reader
+  const original = readFileSync(docPath, 'utf8');
+  const block = [
+    '',
+    `<!-- owner-review:comment at="${at}" by="${by}" -->`,
+    `> **Комментарий владельца, ${human}:**`,
+    ...String(text).split('\n').map((l) => `> ${l}`),
+    '',
+  ].join('\n');
+  writeFileSync(docPath, normalize(original + block), 'utf8');
+}
+
+// ---------------------------------------------------------------------------------------------
+// 5. The markdown mini-renderer (P8, I24)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * ~120 lines, zero dependencies, escaping as the FIRST action.
+ *
+ * I24: HTML comments are STRIPPED — but only outside fenced code, where they are content. Every
+ * path that shows document text to the owner must go through this one node; an answer excerpt on
+ * a card that bypasses it re-leaks the service markers (field pilot, same class as the original).
+ */
+export function renderMarkdown(md) {
+  const src = normalize(md);
+
+  // Pull fenced code out first so nothing else touches it.
+  const fences = [];
+  let text = src.replace(/```[\s\S]*?```/gu, (m) => {
+    fences.push(m);
+    return ` FENCE${fences.length - 1} `;
+  });
+
+  // I24 — service comments never reach the owner's eyes.
+  text = text.replace(/<!--[\s\S]*?-->/gu, '');
+
+  const esc = (s) => s
+    .replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;');
+
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/gu, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/gu, '<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*/gu, '$1<em>$2</em>')
+    .replace(/~~([^~]+)~~/gu, '<del>$1</del>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/gu, '<a href="$2" rel="noreferrer">$1</a>');
+
+  const out = [];
+  const lines = text.split('\n');
+  let inList = false;
+  let inQuote = false;
+  let table = null;
+
+  const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+  const closeQuote = () => { if (inQuote) { out.push('</blockquote>'); inQuote = false; } };
+  const closeTable = () => {
+    if (!table) return;
+    const head = table.rows[0] || [];
+    const body = table.rows.slice(table.hasHeader ? 2 : 1);
+    out.push('<div class="tw"><table>');
+    if (table.hasHeader) {
+      out.push('<thead><tr>' + head.map((c) => `<th>${inline(c)}</th>`).join('') + '</tr></thead>');
+    }
+    out.push('<tbody>' + body.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</tbody>');
+    out.push('</table></div>');
+    table = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    const fence = line.match(/^ FENCE(\d+) $/u);
+    if (fence) {
+      closeList(); closeQuote(); closeTable();
+      const raw = fences[Number(fence[1])].replace(/^```[^\n]*\n?/u, '').replace(/```$/u, '');
+      out.push(`<pre><code>${esc(raw)}</code></pre>`);
+      continue;
+    }
+
+    if (/^\s*\|/u.test(line)) {
+      const cells = line.trim().replace(/^\||\|$/gu, '').split('|').map((c) => c.trim());
+      if (!table) table = { rows: [], hasHeader: false };
+      if (/^[\s|:-]+$/u.test(line) && table.rows.length === 1) { table.hasHeader = true; table.rows.push(cells); }
+      else table.rows.push(cells);
+      continue;
+    }
+    closeTable();
+
+    if (RE_HRULE.test(line)) { closeList(); closeQuote(); out.push('<hr>'); continue; }
+
+    const h = line.match(RE_HEADING);
+    if (h) {
+      closeList(); closeQuote();
+      const level = Math.min(h[1].length + 1, 6);   // demote: the page owns <h1>
+      out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+      continue;
+    }
+
+    const q = line.match(/^\s*>\s?(.*)$/u);
+    if (q) {
+      closeList();
+      if (!inQuote) { out.push('<blockquote>'); inQuote = true; }
+      out.push(`<p>${inline(q[1])}</p>`);
+      continue;
+    }
+    closeQuote();
+
+    const li = line.match(/^\s*[-*]\s+(.*)$/u);
+    if (li) {
+      if (!inList) { out.push('<ul>'); inList = true; }
+      out.push(`<li>${inline(li[1])}</li>`);
+      continue;
+    }
+    closeList();
+
+    if (line.trim() === '') continue;
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  closeList(); closeQuote(); closeTable();
+  return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------------------------
+// 6. The queue (I7, C9)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The queue is a STATE FILE. Live documents are NEVER moved into a pending folder — moving them
+ * breaks every link to them from status and plans (I7).
+ */
+export function readQueue(interviewsDir) {
+  const p = join(resolve(interviewsDir), 'decisions', 'queue.json');
+  if (!existsSync(p)) return { items: [], notices: [] };
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return { items: [], notices: [] }; }
+}
+
+export function writeQueue(interviewsDir, queue) {
+  const dir = join(resolve(interviewsDir), 'decisions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'queue.json'), JSON.stringify(queue, null, 2) + '\n', 'utf8');
+}
+
+/** Every interview document on disk, parsed. The guard and the batch page share this listing. */
+export function listInterviews(interviewsDir) {
+  const dir = resolve(interviewsDir);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => /^interview[_-].*\.md$/iu.test(f))
+    .sort()
+    .map((f) => {
+      const full = join(dir, f);
+      return parseInterview(readFileSync(full, 'utf8'), { file: full });
+    });
+}
+
+/** Local time in words for the owner (I22, I23) — never UTC in an interface. */
+export function humanTime(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** ISO with the local offset — the machine representation of the same moment (I22). */
+export function isoLocal(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const oh = pad(Math.floor(Math.abs(off) / 60));
+  const om = pad(Math.abs(off) % 60);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${oh}:${om}`;
+}
