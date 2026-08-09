@@ -2,6 +2,9 @@
 
 kaif-fp: `KAIF_ADAPTATION_TASK.md#placeholders` + `kaif-core.mjs checkpoint placeholders` :: gate-scope-wider-than-instruction :: v2.2
 
+**Delivered upstream:** https://github.com/MikalaiKryvusha/KAIF/issues/3 — filed 2026-08-09 on the
+owner's approval (chat), under the owner's account.
+
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.2 · project KAGO · sphere `programming` · language `ru` ·
 i18n 8 owner docs localized · tracking `origin` · agent system claude-code (+4 mirrored) ·
 OS Windows 11 Pro 10.0.26200 · Node v24.15.0

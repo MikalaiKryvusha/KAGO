@@ -2,6 +2,9 @@
 
 kaif-fp: `KAIF_ADAPTATION_TASK.md` (item set) + `AGENT_GUIDE.md#checklist-step-19` :: obligation-exists-but-no-deploy-step :: v2.2
 
+**Delivered upstream:** https://github.com/MikalaiKryvusha/KAIF/issues/4 — filed 2026-08-09 on the
+owner's approval (chat), under the owner's account.
+
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.2 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0
 
