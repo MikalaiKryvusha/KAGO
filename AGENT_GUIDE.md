@@ -641,6 +641,10 @@ is gone.
 |---------|--------------|
 | `npm run check` | The build gate — parses every project `.mjs`. Exit 1 on the first syntax error. |
 | `npm run gpu:info` | Read-only GPU probe (`--json` for machine output). |
+| `npm run questions` | The questions guard — four axes plus the debt ratchet over the place-of-questions rule. |
+| `npm run ask <doc.md>` / `ask:batch` | Raise the owner-review page on a document / on everything waiting. |
+| `npm run verify:contour` | The owner-review contour's QA run — 13 blocks over hostile fixtures, ~4 s, no browser. `--only <id>` for one block. Run it after ANY edit to `review.mjs`, `review-core.mjs`, `review-gate.mjs` or `send-upstream.mjs`. |
+| `npm run workloads:build` / `workloads:verify` | Build KAGO's own CUDA loads and prove determinism / re-check the manifest. |
 | `npm run kaif:version` / `kaif:check` / `kaif:update` | KAIF machinery: report version, validate the deployment, update from origin. |
 | `node .kaif/tools/kaif-canon-lint.mjs check` | Canon linter for the owner's canon artifacts. |
 | `node .kaif/tools/kaif-provenance.mjs check` | `[AI]` provenance-mark integrity. |
