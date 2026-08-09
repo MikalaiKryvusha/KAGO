@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0006 · 2026-08-09 · ❌→✅ · #canon #rules #language #kaif #audience
+**Context:** first `/plan-epic` run in this deployment produced the epic meta-plan in English, in a project whose working language is Russian.
+**Tried / did:** followed the canon's *Languages* section literally — it routes by file and directory, and `plans/` sits on the English side.
+**Result:** ❌ the owner had to notice it himself. Three lines earlier the SAME file says the meta-plan is "where the owner sees the whole shape once" — the guide contradicted itself, and following one half of it broke the other.
+**Lesson:** **a rule written as a LIST cannot govern artifacts created after the list was written.** Skills mint new documents for months; any enumeration made at install time is stale by construction. Express such a rule as a QUESTION the agent can ask about any future artifact — here, *"does the owner read this?"* — and keep the list only as examples under the question. Generalize past language: the same failure shape hits any canon rule phrased as "these files are X" (which dirs are gitignored, which docs need provenance marks, which outputs must be deterministic).   → link: bugs/KAIF/03 · KAIF#6
+**Repro:** when you meet a canon rule phrased as a list of files or directories, ask what property the list is a proxy for, then check the newest artifact in the project against the PROPERTY, not the list: `ls -t plans/ interviews/ researches/ | head -5` and route each by audience.
+**Trigger:** writing a new document into a knowledge directory → ask "who reads this?" and pick the language from the answer, never from the directory it lands in.
+**Not for:** rules whose set genuinely is closed and small (the three root key documents, the `.kaif/` machinery) — there a list is honest and cheaper than a question.
+
 ### EXP-0005 · 2026-08-09 · ❌ · #winget #windows #tooling #machine-mutation #probe
 **Context:** probing the toolchain for KAGO's epic — wanted to know whether Visual Studio had an update available before writing the fact into the environment dossier.
 **Tried / did:** `winget upgrade --id Microsoft.VisualStudio.2022.Community`, believing `winget upgrade` with an id *reports* on that package the way the bare `winget upgrade` lists packages.

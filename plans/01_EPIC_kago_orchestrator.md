@@ -1,147 +1,148 @@
-# Epic 01 — KAGO: from zero lines of code to two proven undervolt profiles on a shortcut
+# Эпик 01 — KAGO: от нуля строк кода до двух доказанных профилей на ярлыке
 
-> **Created:** 2026-08-09 22:41 +03:00 (agent, on the owner's instruction *«следующий чат начнём с
-> эпик планирования и нарезания эпика на фазы и операционные планы»*)
-> **Parent:** `MASTER_PLAN.md` phases 1–6 — this document refines their shape, it does not replace
-> them. Evidence base: `researches/01` (control paths) · `researches/02` (Vmin and the guardband) ·
-> `researches/03` (the headless harness).
-> **Status:** 🟡 phase 1 planned and open · phases 2–6 are skeletons by design (an operational plan
-> for phase N+1 is written when phase N closes)
-> **Outbound:** three forks → `interviews/interview_001_harness_boundaries.md` (open) · the phase
-> reordering evidence → `MASTER_PLAN.md` decision log
-> **Descendants:** `plans/02_epic01_phase1_harness_and_baseline.md`
+> **Создан:** 2026-08-09 22:41 +03:00 (агент, по слову владельца *«следующий чат начнём с эпик
+> планирования и нарезания эпика на фазы и операционные планы»*)
+> **Родитель:** `MASTER_PLAN.md`, фазы 1–6 — этот документ уточняет их форму, а не заменяет их.
+> Доказательная база: `researches/01` (пути управления) · `researches/02` (Vmin и запас) ·
+> `researches/03` (стенд без графического интерфейса).
+> **Статус:** 🟡 фаза 1 распланирована и открыта · фазы 2–6 намеренно оставлены скелетом
+> (операционный план фазы N+1 пишется на закрытии фазы N)
+> **Вовне:** три развилки → `interviews/interview_001_harness_boundaries.md` (открыто) ·
+> доказательство порядка фаз → журнал решений `MASTER_PLAN.md`
+> **Дети:** `plans/02_epic01_phase1_harness_and_baseline.md`
 
 ---
 
-## 1. Goal vector
+## 1. Вектор цели
 
-**The pain.** The owner's RTX 5070 Ti runs hotter and louder than it needs to, and every ordinary
-route to fixing that has a defect the owner named himself: it requires installing a third-party GUI
-tuning application, and it judges the result by *"it didn't crash"*. `researches/02` measured what
-that verdict misses — 37 of 57 programs corrupt data **silently** before they ever crash, and the
-failure is a cliff, not a slope (error rate 3 % → 90 % across 2 % of voltage).
+**Боль.** Видеокарта греется и шумит сильнее, чем должна, а любой обычный путь это починить несёт
+дефект, который вы назвали сами: он требует поставить стороннее GUI-приложение для разгона, и он
+судит результат по принципу «не упало». `researches/02` измерил, что этот вердикт пропускает: из
+57 программ **37 портят данные молча**, ещё до всякого падения, а отказ у края — обрыв, а не
+пологий склон (вероятность ошибки 3 % → 90 % на двух процентах напряжения).
 
-**Where we want to be.** Two profiles, measured on **this** card, each proved against silent
-corruption as well as crashes, switched by a desktop shortcut, remembered across a reboot — and
-factory state always one shortcut or one power cycle away, with no action required from the owner
-and no third-party GUI anywhere in the dependency list.
+**Куда идём.** Два профиля, измеренных на **этой** карте, каждый проверен и на молчаливую порчу
+данных, и на падения, переключаются ярлыком с рабочего стола, помнятся через перезагрузку. А
+заводское состояние всегда в одном ярлыке или одном выключении питания — без единого действия с
+вашей стороны и без стороннего GUI где бы то ни было в зависимостях.
 
-**Goal types in play:** *Achieve* — the two profiles and the surface. *Maintain* — factory state as
-the default, and the zero-GUI constraint. *Avoid* — a profile that corrupts data silently.
+**Типы целей:** *Достичь* — два профиля и оболочка управления. *Удерживать* — заводское состояние
+по умолчанию и ноль сторонних GUI. *Избежать* — профиля, который молча портит данные.
 
-## 2. Acceptance criteria for the epic
+## 2. Критерии приёмки эпика
 
-Each criterion carries Scale · Meter · Target (`REQUIREMENTS_FRAMEWORK.md` → the fit criterion).
-A criterion whose target comes from the owner's PDF says so; nothing here is invented.
+У каждого — шкала, чем меряем и цель (`REQUIREMENTS_FRAMEWORK.md` → критерий соответствия). Где
+цифра пришла из вашего PDF, это сказано. Ничего здесь не выдумано.
 
-| # | Criterion | Scale · Meter · Target |
+| № | Критерий | Шкала · Чем меряем · Цель |
 |---|---|---|
-| **AC1** | WHEN a shortcut is double-clicked, the orchestrator shall apply its profile and confirm it by reading the state back. | Scale: shortcuts whose write→read-back matches · Meter: `profile-manager.mjs` verification log · **Target: 3 of 3** |
-| **AC2** | WHILE the machine boots, the card shall end at either the remembered profile or factory state — never at an unverified intermediate. | Scale: boots ending in a verified state · Meter: `npm run gpu:info -- --json` diffed against the remembered record · **Target: 5 of 5 consecutive reboots** |
-| **AC3** | The acceptance run shall produce no crash and no silent corruption. | Scale: count of CRASH + SDC verdicts · Meter: `event-logger.mjs` + `stress-tester.mjs` over the phase-6 suite · **Target: 0** |
-| **AC4** | *Silent Cold* shall cut package power under the standard transient load. | Scale: W, median over the run · Meter: `hardware-mon.mjs` samples, stock vs. profile · **Target: ≥ 100 W below stock** (source: owner's PDF, −100…−120 W) |
-| **AC5** | *Max Optimal* shall hold performance near stock. | Scale: % of stock throughput · Meter: **gated on `interview_001` Q1** · **Target: ≥ 97 %** (source: owner's PDF) |
-| **AC6** | The dependency list shall contain no third-party GUI application. | Scale: count of such dependencies · Meter: read `package.json` + the tree · **Target: 0** (source: `GOAL.md`, owner's words) |
-| **AC7** | IF the driver or VBIOS version changes, THEN every stored profile shall be marked invalid until re-validated. | Scale: profiles applied with a stale stamp · Meter: the stamp check in `profile-manager.mjs` · **Target: 0** |
+| **AC1** | КОГДА нажат ярлык, оркестратор применяет профиль и **подтверждает это перечитыванием состояния**. | Шкала: ярлыки, у которых запись↔перечитывание сошлись · Меряем: журнал проверки `profile-manager.mjs` · **Цель: 3 из 3** |
+| **AC2** | ПОКА идёт загрузка ПК, карта приходит либо к запомненному профилю, либо к заводскому состоянию — и никогда к непроверенному промежуточному. | Шкала: загрузки, закончившиеся в проверенном состоянии · Меряем: `npm run gpu:info -- --json` против записи о запомненном состоянии · **Цель: 5 из 5 подряд** |
+| **AC3** | Приёмочный прогон не даёт ни падения, ни молчаливой порчи данных. | Шкала: число вердиктов CRASH + SDC · Меряем: `event-logger.mjs` + `stress-tester.mjs` на наборе фазы 6 · **Цель: 0** |
+| **AC4** | *Silent Cold* снижает потребление под стандартной переходной нагрузкой. | Шкала: ватты, медиана по прогону · Меряем: выборки `hardware-mon.mjs`, сток против профиля · **Цель: на ≥ 100 Вт ниже стока** (источник: ваш PDF, −100…−120 Вт) |
+| **AC5** | *Max Optimal* держит производительность у стоковой. | Шкала: % от стоковой пропускной способности · Меряем: **зависит от вашего ответа в `interview_001`, вопрос 1** · **Цель: ≥ 97 %** (источник: ваш PDF) |
+| **AC6** | В списке зависимостей нет ни одного стороннего GUI-приложения. | Шкала: число таких зависимостей · Меряем: чтение `package.json` и дерева · **Цель: 0** (источник: `GOAL.md`, ваши слова) |
+| **AC7** | ЕСЛИ сменились драйвер или VBIOS, ТО каждый сохранённый профиль помечается недействительным до перепроверки. | Шкала: профили, применённые с устаревшей отметкой · Меряем: проверка отметки в `profile-manager.mjs` · **Цель: 0** |
 
-These may be edited as phases teach — changing a criterion is an edit, not a failure. AC5's meter is
-deliberately blank until the owner answers `interview_001`; that blank is a known gap, not an
-oversight.
+Критерии можно править по ходу — изменение критерия это правка, а не провал. У AC5 намеренно
+пустая графа «чем меряем»: она ждёт вашего ответа. Это известный пробел, а не недосмотр.
 
-## 3. The phases, their order, and why that order
+## 3. Фазы, их порядок и почему именно такой
 
 ```
-  1 Harness & baseline ──► 2 Silent Cold ──► 3 Surface ──►  [a complete, useful product]
-                                                    │
-                                                    ▼
-                                        4 NVAPI bridge ──► 5 Vmin engine ──► 6 Two profiles
+  1 Стенд и база ──► 2 Silent Cold ──► 3 Оболочка ──►  [законченный полезный продукт]
+                                            │
+                                            ▼
+                                  4 Мост к NVAPI ──► 5 Движок Vmin ──► 6 Два профиля
 ```
 
-**Phase 1 — Harness and baseline.** *Nothing can be judged before it can be observed.* Telemetry,
-the fault watcher, KAGO's own workload runners, and the golden references captured at stock. Zero
-GPU writes in this whole phase — which is exactly why it is first: it is the only phase that carries
-no risk to the owner's hardware, and everything after it depends on its verdicts being trustworthy.
+**Фаза 1 — Стенд и базовая линия.** *Нельзя судить о том, чего не видишь.* Телеметрия, сторож
+неисправностей, собственные нагрузки KAGO и золотые эталоны, снятые на стоке. **Ни одной записи в
+GPU за всю фазу** — именно поэтому она первая: это единственная фаза без риска для вашего железа, а
+всё дальнейшее опирается на то, что её вердиктам можно верить.
 
-**Phase 2 — Silent Cold on `nvidia-smi`.** The first real profile, on the backend already proven to
-write (`researches/01` §5: 300 → 290 W, read back, restored). Locking the core clock walks the card
-down its stock curve; that reaches *cold and quiet* and cannot reach *fast and cool*.
+**Фаза 2 — Silent Cold на одном `nvidia-smi`.** Первый настоящий профиль, на бэкенде, который уже
+доказал, что пишет (`researches/01` §5: 300 → 290 Вт, перечитано, возвращено). Фиксация частоты
+ядра гонит карту вниз по её же стоковой кривой; это даёт *холодно и тихо* и принципиально не даёт
+*быстро и холодно*.
 
-**Phase 3 — The surface.** Three shortcuts, the passive tray, autostart, and elevation through a
-Scheduled Task (`researches/03` §3.6). Placed **before** the expensive NVAPI work on purpose: after
-phase 3 the owner has a finished, daily-useful product — one profile, on a shortcut, that survives a
-reboot. That is the Pareto cut of this epic; everything after it buys the second profile.
+**Фаза 3 — Оболочка.** Три ярлыка, пассивный трей, автозапуск и повышение прав через задачу
+планировщика (`researches/03` §3.6). Поставлена **раньше** дорогой работы с NVAPI намеренно: после
+фазы 3 у вас на руках законченный продукт, которым можно пользоваться каждый день — профиль на
+ярлыке, переживающий перезагрузку. Это парето-срез эпика; всё, что дальше, покупает второй профиль.
 
-**Phase 4 — KAGO's own NVAPI bridge.** FFI to `nvapi64.dll` for the V/F curve. The most expensive
-and least certain phase, and the one with a named fallback (`green-curve` as a backend, which the
-phase-2 interface already permits).
+**Фаза 4 — Собственный мост к NVAPI.** FFI к `nvapi64.dll` ради V/F-кривой. Самая дорогая и
+наименее предсказуемая фаза — и единственная с названным запасным путём (`green-curve` как бэкенд,
+что интерфейс из фазы 2 уже допускает).
 
-**Phase 5 — The Vmin sweep engine.** *Formally gated on phase 4, by evidence rather than by taste:*
-`nvidia-smi` has no voltage field at all (`researches/03` §2), so until the bridge exists the search
-cannot observe its own control variable.
+**Фаза 5 — Движок поиска Vmin.** *Формально зависит от фазы 4, и это доказательство, а не вкус:*
+у `nvidia-smi` **вообще нет поля напряжения** (`researches/03` §2), так что до появления моста
+поиску нечем наблюдать собственную управляющую переменную.
 
-**Phase 6 — Two profiles and acceptance.** Assembly, the long runs, the owner's verdict.
+**Фаза 6 — Два профиля и приёмка.** Сборка, длинные прогоны, ваш вердикт.
 
-## 4. Gates
+## 4. Ворота фаз
 
-A phase is not closed by feeling finished. Entry and exit are checkable.
+Фаза не закрывается ощущением законченности. Вход и выход проверяемы.
 
-| Phase | Entry gate | Exit gate |
+| Фаза | Ворота входа | Ворота выхода |
 |---|---|---|
-| **1** | `researches/03` exists (✅) | `npm run check` green · every workload runner returns a byte-identical checksum on repeat runs · the fault watcher goes **red** against a real historical event · golden references stored with driver + VBIOS stamp · every new module carries `[NOT-TESTED]`/`[TESTED: …]` honestly |
-| **2** | phase 1 exit gate green | a profile applies, reads back, and matches · its rollback is exercised, not merely written · `[TESTED]` markers carry the observation |
-| **3** | phase 2 exit gate green | AC1 and AC2 met · the reset shortcut proven from a non-factory state · the tray survives being killed without changing GPU state |
-| **4** | phase 3 exit gate green · owner's consent for curve writes (a new write class — `researches/01` risk list) | read-after-write on the curve matches, or the profile is refused · the voltage grid step measured on the live curve, not assumed |
-| **5** | phase 4 exit gate green | per point: three-way verdict, edge bracketed, guardband ≥ 4 grid steps and ≥ 25 mV (`researches/02` §3) · worst-case across the whole workload set, never the first failure found |
-| **6** | phase 5 exit gate green | AC3, AC4, AC5 met · `/fable-judge` pass · the owner's acceptance |
+| **1** | `researches/03` существует (✅) | `npm run check` зелёный · каждая нагрузка даёт бит в бит одинаковую сумму на повторных прогонах · сторож неисправностей **краснеет** на настоящем историческом событии · золотые эталоны сохранены с отметкой драйвера и VBIOS · у каждого нового модуля честный маркер `[NOT-TESTED]`/`[TESTED: …]` |
+| **2** | ворота выхода фазы 1 зелёные | профиль применяется, перечитывается и совпадает · его откат **прогнан**, а не просто написан · маркеры `[TESTED]` несут наблюдение |
+| **3** | ворота выхода фазы 2 зелёные | AC1 и AC2 взяты · ярлык сброса проверен из не-заводского состояния · трей переживает убийство, не меняя состояния GPU |
+| **4** | ворота выхода фазы 3 зелёные · **ваше согласие на запись в кривую** (новый класс записи — список рисков `researches/01`) | чтение-после-записи на кривой совпадает, иначе профиль отвергается · шаг сетки напряжения **измерен на живой кривой**, а не принят на веру |
+| **5** | ворота выхода фазы 4 зелёные | по каждой точке: трёхзначный вердикт, край взят в вилку, запас ≥ 4 шага сетки и ≥ 25 мВ (`researches/02` §3) · порог точки — худший по всему набору нагрузок, никогда не первый найденный |
+| **6** | ворота выхода фазы 5 зелёные | AC3, AC4, AC5 взяты · проход `/fable-judge` · ваша приёмка |
 
-Every phase also closes with a `/fable-judge` pass before the next phase's operational plan is
-written (`AGENT_GUIDE.md` → task execution discipline).
+Каждая фаза дополнительно закрывается проходом `/fable-judge` до того, как будет написан
+операционный план следующей (`AGENT_GUIDE.md` → дисциплина исполнения задач).
 
-## 5. Open forks
+## 5. Открытые развилки
 
-Three, all filed with their material quoted in full in
-**`interviews/interview_001_harness_boundaries.md`**: the acceptance-benchmark question (3DMark
-automation is Professional-only), the graphics-load question (our own vs. FurMark on the bench),
-and the shipped-binary question. **None of them blocks phase 1** — phase 1 proceeds while they wait.
+Три, и все с материалом, процитированным целиком, лежат в
+**`interviews/interview_001_harness_boundaries.md`**: чем мерить приёмку по производительности
+(автоматизация 3DMark только в платной редакции), пускать ли FurMark на стенд, и едет ли собранный
+бинарник нагрузки в публичный репозиторий. **Ни одна из них не блокирует фазу 1.**
 
-## 6. Risks, tiered
+## 6. Риски по ярусам
 
-**(a) Highest — defended, not merely listed.**
+**(а) Высшие — с построенной защитой, а не просто перечисленные.**
 
-- *A profile that passes our tests and corrupts data in the owner's real work.* Defence: the
-  golden-reference oracle (proven buildable, `researches/03` §2.1), the diverse workload set, and a
-  guardband sized from what the search could not see.
-- *A GPU write with no way back.* Defence: R5 of the internal map — every write has its rollback in
-  the same module — plus the fact that profiles live in volatile memory, so a power cycle is always
-  the last resort.
-- *A driver update silently changing voltage behaviour* (it happened: `595.71`). Defence: AC7 — the
-  stamp check.
+- *Профиль, который проходит наши тесты и портит данные в вашей настоящей работе.* Защита: оракул
+  на золотых эталонах (уже доказано, что он строится — `researches/03` §2.1), разнородный набор
+  нагрузок и запас, рассчитанный от того, чего поиск увидеть не мог.
+- *Запись в GPU без дороги назад.* Защита: правило R5 внутренней карты — у каждой записи откат в
+  том же модуле — плюс то, что профили живут в энергозависимой памяти, так что выключение питания
+  всегда остаётся последним средством.
+- *Обновление драйвера, молча меняющее поведение напряжений* (так уже было: `595.71`). Защита:
+  AC7 — проверка отметки.
 
-**(b) Plausible — contingency named.**
+**(б) Вероятные — с названным планом на случай.**
 
-- *Blackwell resists the NVAPI curve writes.* → fall back to `green-curve` as a backend; the phase-2
-  interface was designed for exactly this.
-- *The toolchain that builds our workload is absent or broken on a future machine.* → already seen
-  in the field tonight; phase 1 locates it via `vswhere` rather than assuming a PATH.
+- *Blackwell не поддастся записи в кривую через NVAPI.* → откат на `green-curve` как бэкенд;
+  интерфейс фазы 2 спроектирован ровно под это.
+- *Тулчейн, собирающий нашу нагрузку, отсутствует или сломан.* → уже случилось в поле в этот же
+  вечер; фаза 1 ищет его через `vswhere`, а не полагается на PATH.
 
-**(c) Least likely — recorded so they are not forgotten.**
+**(в) Наименее вероятные — записаны, чтобы не забылись.**
 
-- Task Scheduler policy changes break the no-UAC elevation pattern.
-- The tray icon's Windows API changes across a feature update.
+- Политика планировщика задач меняется и ломает схему повышения прав без запросов UAC.
+- Меняется API иконки в трее на очередном обновлении Windows.
 
-## 7. Trace
+## 7. Трассировка
 
-Children are named `NN_epic01_<phase>_<name>.md`, and every operational step cites the line of this
-document it executes. A step that cannot be anchored here is scope drift, caught before the diff.
+Дети называются `NN_epic01_<фаза>_<имя>.md`, и каждый операционный шаг цитирует строку этого
+документа, которую он исполняет. Шаг, который не к чему привязать, — это уползание области работ,
+пойманное до того, как появился диф.
 
-## 8. Decisions made without the owner
+## 8. Решения, принятые без владельца
 
-*Filled at epic close. Running list so far:*
+*Заполняется на закрытии эпика. Текущий список:*
 
-- **HWiNFO64 removed from the architecture** — it is a third-party GUI application (`GOAL.md`
-  forbids it) and the sensor it existed for is disabled at driver level on RTX 50; this card returns
-  `N/A`. Recorded in `researches/03` §3.5.
-- **Phase 3 placed before phase 4** — to put a complete, useful product in the owner's hands before
-  the expensive and uncertain bridge work.
-- **Phase 1 widened** from "telemetry" to "harness and baseline", because `researches/03` showed the
-  workload runners cannot be bought and must be built here.
+- **HWiNFO64 убран из архитектуры** — это стороннее GUI-приложение (`GOAL.md` запрещает), а датчик,
+  ради которого он там стоял, на RTX 50 отключён на уровне драйвера; эта карта возвращает `N/A`.
+  Записано в `researches/03` §3.5.
+- **Фаза 3 поставлена раньше фазы 4** — чтобы законченный полезный продукт оказался у вас на руках
+  до дорогой и непредсказуемой работы с мостом.
+- **Фаза 1 расширена** с «телеметрии» до «стенда», потому что `researches/03` показал: нагрузки
+  купить нельзя, их надо писать здесь.

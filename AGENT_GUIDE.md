@@ -317,13 +317,31 @@ The ladder is not ceremony for its own sake: research is where the epic gets its
 the meta-plan is where the owner sees the whole shape once, and phase-by-phase operational plans are
 what keeps a context-losing session executing the RIGHT next step instead of re-deriving the epic.
 
-### Languages — two audiences, two languages
+### Languages — routed by AUDIENCE, never by directory
 
-Agent-internal documents (this guide, `PHILOSOPHY.md`, `BUG_FIXING_FRAMEWORK.md`, `STATUS.md`,
-`EXPERIENCE.md`, the maps, working notes in `plans/`/`bugs/`/`researches/`, the skills) are written and
-maintained in **English** — the language models read most reliably. Owner-facing documents (`GOAL.md`,
-`KAIF_FRAMEWORK.md`, the directory READMEs) and every chat report to the owner are in
-**ru**. Keep this split as you create new documents.
+**The rule is a question, not a list:** *does the OWNER read this document?* If yes, it is written in
+the owner's working language (`.kaif/kaif.json` → `language`, here **ru**). If it is read only by the
+agent, it is written in **English** — the language models read most reliably.
+
+A list cannot carry this rule, and the field proved why: the upstream wording routed by file and
+directory, so the epic meta-plan came out in English although this same guide says *"the meta-plan is
+where the owner sees the whole shape once"* — a contradiction three lines apart in one file. The
+owner had to notice it himself (2026-08-09). Local fix; filed upstream as `bugs/KAIF/03`.
+
+| Audience | Documents | Language |
+|---|---|---|
+| **The owner reads it** | `GOAL.md` · `MASTER_PLAN.md` · `STATUS.md` · `KAIF_FRAMEWORK.md` · **epic meta-plans** (`plans/NN_EPIC_*.md`) · everything in `interviews/` · the directory READMEs · `README.md` · release notes · every chat report | **ru** |
+| **Only the agent reads it** | this guide · `PHILOSOPHY.md` · the three frameworks · `EXPERIENCE.md` · the two maps · operational plans (`plans/NN_epicMM_*.md`) · `bugs/` · `researches/` · the skills | **English** |
+
+Two boundaries that keep the rule from drifting:
+
+- **A document promoted to the owner's eyes is rewritten, not annotated.** When an agent-internal
+  document starts being read by the owner, it changes language — the audience decides, and the
+  audience changed.
+- **Recon and executor detail stay English even when the owner may glance at them** (`researches/`,
+  operational plan steps). The owner meets their conclusions through the meta-plan and the
+  interviews, which quote the material in his language — that is what makes a question
+  self-sufficient (the place-of-questions rule below).
 
 ### Experience log — `EXPERIENCE.md`
 
