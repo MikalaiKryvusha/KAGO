@@ -1,0 +1,34 @@
+.kaif/install/
+KAIF.md
+KAIF-LOADER.mjs
+KAIF_ADAPTATION_TASK.md
+KAIF_UPDATE_TASK.md
+KAIF_UPDATE_TASK.superseded.md
+KAIF_ADAPTATION_TASK.superseded.md
+.kaif/backup-*/
+.kaif/heartbeat.log
+.kaif/refresh-marker.json
+
+# --- KAGO: ignore-first, before the tool that produces the file exists ---
+
+# The owner's voice portrait is PRIVATE — it quotes personal corpora, and this repository is public.
+# Projects reference it at d:\work\krinik_voice\AUTHOR_STYLOMETRY.md; they never keep a copy.
+AUTHOR_STYLOMETRY.md
+
+# Dependencies.
+node_modules/
+
+# Telemetry and run artefacts: HWiNFO64 exports, sweep logs, captured golden references.
+# These are megabytes of one machine's readings — they belong on disk, not in history.
+logs/
+runs/
+*.hwinfo.csv
+
+# Measured profiles are machine-specific and unsafe to reuse on another card
+# (card-to-card Vmin varies by up to 70 mV — researches/02). Never share them as if portable.
+profiles/*.local.json
+
+# Secrets and machine-local overrides.
+.env
+.env.*
+config.local.mjs
