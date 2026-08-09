@@ -11,8 +11,10 @@ KAIF_ADAPTATION_TASK.superseded.md
 
 # --- KAGO: ignore-first, before the tool that produces the file exists ---
 
-# The owner's voice portrait is PRIVATE — it quotes personal corpora, and this repository is public.
-# Projects reference it at d:\work\krinik_voice\AUTHOR_STYLOMETRY.md; they never keep a copy.
+# The owner's voice portrait — the FULL private core, pulled in on the owner's instruction
+# (2026-08-09) so the agent works from the richest version. It carries verbatim quotes from the
+# owner's personal writing, and this repository is public: the file lives on disk and never ships.
+# Refresh it with: cp d:\work\krinik_voice\AUTHOR_STYLOMETRY.md .
 AUTHOR_STYLOMETRY.md
 
 # Dependencies.

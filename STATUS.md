@@ -69,6 +69,16 @@ document asserts came from a live probe (`npm run gpu:info`) — keep it that wa
 
 ## ❓ Awaiting human review (interviews / homework)
 
+- 📤 **Two KAIF tickets are written and NOT sent — they need the owner's word.** Delivery to the
+  origin goes under the owner's own account, never automatically (`reports/README.md`, `/report-bug`
+  step 4). Both carry a deterministic repro or verbatim evidence, so the sender quality gate is met.
+  - `bugs/KAIF/01_placeholder_gate_scans_sphere_library.md` — the placeholder gate scans the sphere
+    library, which the task item does not list. Low severity; the gate named its file.
+  - `bugs/KAIF/02_adaptation_task_has_no_owner_voice_step.md` — the adaptation task never installs
+    the owner's voice portrait, so the README got written before the portrait arrived. Found by the
+    owner. Proposes a tenth adaptation item.
+  - `reports/KAIF_UPDATES/KAGO_KAIF_2.2_INSTALL_REPORT.md` — the install field report; mandatory to
+    write, optional to send.
 - 🧰 **Confirm `nvidia-smi -pl` actually writes on this card.** Needs an elevated shell and the
   owner's consent — it is the first GPU *write* the project will ever make. The card reports a
   250–300 W range, which implies support, but implication is not observation.

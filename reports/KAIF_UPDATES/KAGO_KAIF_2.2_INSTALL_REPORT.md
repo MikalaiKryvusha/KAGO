@@ -58,13 +58,53 @@ sake) — but arriving as an unbroken run-on immediately after the sha256 lines,
 warning about something having gone wrong. It has not. **Suggested improvement:** split the notice
 into "localized: N" and "English by design: N" with the list behind a count.
 
-### 2.3. Nothing else broke
+### 2.3. The adaptation task never installs the owner's voice portrait — the owner caught it
+
+**The heaviest finding of this install, and it was found by the owner, not by the agent.**
+
+The nine adaptation items contain no step that installs `AUTHOR_STYLOMETRY.md`, and none that asks
+whether the owner has one. The obligation to *use* it exists — `AGENT_GUIDE.md` checklist step 19
+and the context router row — but both are reactive and both are hedged with *"when the project has
+one"*. Nothing in the deployment ever makes the project have one.
+
+Consequence, in order: **this project's README was written before its author's voice portrait was
+installed.** The one document in a fresh deployment that most needs the owner's voice is the one
+written earliest, and the portrait arrives — if at all — after it.
+
+The owner intervened twice. Verbatim:
+
+> «мой стилометрический портрет уже готов, и забрать его можно из <…>»
+
+> «и стилометрию НУЖНО установить, это моя прямая команда»
+
+and named the cause himself:
+
+> «Это должно было быть выполнено по успеху установки KAIF, а ты не выполнил. Значит тебя не
+> достаточно ясно проинструктировали»
+
+The diagnosis is correct and the framing is the framework's own: the agent followed the item list
+exactly, so the defect is in the list. Filed as `bugs/KAIF/02` (template B) with a proposed tenth
+item — placed *before* any owner-facing text is written, and carrying the ignore decision in the
+same step, because a public project that installs a quote-bearing portrait without an ignore line
+publishes the owner's private writing and the agent will not notice.
+
+**Resolved locally on the owner's instruction:** the full private core was copied to the project
+root and git-ignored (this repository is public), with the refresh command recorded in
+`AGENT_GUIDE.md`. The owner's own steer — *«можем сюда затянуть стилометрическое ядро но поставить
+его под гитигнор»* — is the pattern worth carrying upstream: the agent gets the richest version, the
+public gets nothing.
+
+### 2.4. Nothing else broke
 
 No network retries, no sha256 mismatch, no bare-run accident, no file the machinery refused to
 write. The self-cleaning behaviour and the `checkpoint` mechanics did exactly what the thin
 `KAIF.md` said they would.
 
 ## 3. What confused a cold agent — top 3
+
+0. **The heaviest one is §2.3 and it is not in this list** — because it did not confuse the agent.
+   It never reached the agent at all. That is the worse failure mode: a confusing instruction gets
+   questioned, a missing one gets obeyed.
 
 1. **Which document wins when two owner sources disagree.** The owner's PDF names MSI Afterburner
    as the profile applier; `GOAL.md` forbids a third-party GUI dependency. Both are the owner's
@@ -116,5 +156,25 @@ Adaptation checkpoints recorded: `study` · `project-name` · `placeholders` · 
 - ⚠️ **No GPU write was performed.** `nvidia-smi -pl` support is *implied* by the reported 250–300 W
   range, not observed. The distinction is preserved everywhere it appears.
 
-**Verdict: install GREEN, adaptation GREEN, product NOT STARTED.** The framework did its job — the
-one gate that fired, fired correctly and named its file.
+**Verdict: install GREEN, adaptation GREEN WITH ONE OWNER-CAUGHT GAP, product NOT STARTED.** The
+gate that fired, fired correctly and named its file. The gap that mattered had no gate at all, and
+the owner found it — see §2.3.
+
+## 5. Awaiting the owner's word — delivery
+
+Two tickets are written and **sitting local**, which is what the canon prescribes: `reports/README.md`
+says a report *"stays LOCAL until the owner says otherwise — there is no automatic delivery
+upstream"*, and `/report-bug` routes an `origin` deployment's signal *"ON THE OWNER'S BEHALF, and
+only through the project's send gate / with the owner's quotable standing authorization"*.
+
+| Ticket | Subject | Sender gate |
+|---|---|---|
+| `bugs/KAIF/01` | The placeholder gate scans the sphere library, which the task item does not list | deterministic repro + verbatim gate output ✅ |
+| `bugs/KAIF/02` | The adaptation task never installs the owner's voice portrait | verbatim owner quotes + the ordering evidence ✅ |
+| this report | The install field report | mandatory to write, optional to send |
+
+**Process note against a repeat.** Ticket 01 was written and then left silent — it sat in a file
+without ever reaching the owner's table, and the owner discovered it by opening the tree. That is
+the failure the canon names: everything the agent wants FROM the owner belongs where the owner
+looks, not in the tail of a document. Both tickets are now listed in `STATUS.md` under "Awaiting
+human review", where the backlog rituals will keep surfacing them until they are answered.

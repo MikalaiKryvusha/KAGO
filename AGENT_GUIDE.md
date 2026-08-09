@@ -883,11 +883,21 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   видеокарты"* — per-point voltage sits just above the failure threshold, with margin.
   `researches/02` is the answer.
 
-**The owner's voice.** The canonical portrait is `AUTHOR_STYLOMETRY.md`, kept in the owner's single
-voice store on this machine — **`d:\work\krinik_voice\AUTHOR_STYLOMETRY.md`**. Per the owner's
-decision №39, projects **reference** it and keep no copy. KAGO is a PUBLIC repository and the
-portrait quotes the owner's personal corpora, so a copy here would publish private material:
-`AUTHOR_STYLOMETRY.md` is in `.gitignore` for that reason.
+**The owner's voice — installed here, and deliberately not shipped.** `AUTHOR_STYLOMETRY.md` sits in
+the project root: the **full private core**, pulled in on the owner's instruction (2026-08-09) so the
+agent works from the richest version rather than a stripped one. It carries verbatim quotes from the
+owner's personal writing and this repository is public, so the file is **git-ignored and stays that
+way**. A fresh clone has to fetch it:
+
+```bash
+cp d:\work\krinik_voice\AUTHOR_STYLOMETRY.md .
+```
+
+The single source of truth is the owner's voice store, `d:\work\krinik_voice\` (decision №39: one
+portrait per owner, not per project). The copy here is a working mirror — never edit it; edit the
+store and re-copy. A public, quote-stripped snapshot of the same portrait exists in the KAIF
+repository; it is not what is installed here, and the two must not be confused.
+
 Open it and run its checklist before handing over any text the owner signs or reads as their own —
 `README`, release notes, the landing copy. Skill: `/owner-voice`.
 
