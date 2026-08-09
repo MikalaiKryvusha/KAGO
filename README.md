@@ -126,8 +126,13 @@ The measurements behind each of these are cited in
 | Power saved | 60–80 W | 100–120 W |
 | Applied | At boot, plus a shortcut | By shortcut, when you want it |
 
+A **third shortcut resets the card to factory settings**, and all three write the state that gets
+re-applied at boot — so whichever you clicked last is what you come back to. The tray icon shows
+which profile is live and does nothing else: no menu, no buttons.
+
 These are **acceptance targets, not measured results.** Nothing here has been validated on hardware
-yet — that is phase 6.
+yet — that is phase 6. What *has* been proven on hardware is narrower and worth stating exactly: the
+driver accepts a power-limit write on this card (300 → 290 W, read back, restored).
 
 ---
 
@@ -290,7 +295,13 @@ Temperature    49 °C   Perf state P3
 | Экономия мощности | 60–80 Вт | 100–120 Вт |
 | Как применяется | При старте ПК и ярлыком | Ярлыком, когда захочется |
 
+**Третий ярлык возвращает карту к заводским настройкам**, и все три записывают состояние, которое
+применится при следующем старте ПК, — куда кликнули последним, туда и вернётесь. Иконка в трее
+показывает активный профиль и больше ничего не делает: ни меню, ни кнопок.
+
 Это **цели приёмки, а не измеренный результат.** На железе пока не проверено ничего — это фаза 6.
+Проверено на железе кое-что поуже, и стоит сказать точно: драйвер принимает запись потолка мощности
+на этой карте (300 → 290 Вт, чтение, возврат).
 
 ---
 

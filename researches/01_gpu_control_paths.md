@@ -118,9 +118,25 @@ document supersedes that choice.
   validated against, and KAGO re-validates when either changes.**
 - **Blackwell curve writes are unproven for us.** Path C ships only behind a read-back check: write
   the curve, read it back, and refuse the profile if the two disagree.
-- **`nvidia-smi -pl` was not exercised.** The card reports a min/max range, which strongly implies
-  support, but a *write* was deliberately not performed on the owner's hardware during deployment.
-  First task of Phase 1 is to confirm it.
+- ~~**`nvidia-smi -pl` was not exercised.**~~ **RESOLVED 2026-08-09 22:4x +03:00** — confirmed by
+  observation, on the owner's explicit consent, from an elevated shell:
+
+  ```
+  before:   300.00 W (default 300.00 W)
+  nvidia-smi -i 0 -pl 290
+            Power limit for GPU 00000000:01:00.0 was set to 290.00 W from 300.00 W. All done.
+  readback: 290.00 W
+  nvidia-smi -i 0 -pl 300      ← restored
+  readback: 300.00 W (default 300.00 W)
+  ```
+
+  **`-pl` writes on this GeForce card under Windows.** The path A backend is real, not assumed.
+
+  **Quirk worth knowing before it costs a debugging hour:** the restore printed *"was set to
+  300.00 W **from 300.00 W**"* while the limit was actually 290 W — `nvidia-smi` reports the
+  *default* in the "from" field, not the previous value. **Never parse that message to learn the
+  prior state; read it back.** `profile-manager.mjs` must verify by query, never by the tool's own
+  success text.
 - **A killed tray process cannot run an exit handler.** `GOAL.md` requires the GPU to return to
   factory state when the tray icon is killed. `SIGKILL`/Task-Manager termination runs nothing, so
   the reset cannot live in an exit hook — it needs a heartbeat the applier watches, or a watchdog

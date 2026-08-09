@@ -876,9 +876,11 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   records how it is satisfied.
 - *"последний установленный по ярлыку профиль — должен запоминаться для автозапуска на старте ПК"* —
   the last shortcut-applied profile is remembered and re-applied at boot.
-- *"Если убить её — профиль сбрасывается, GPU переводится в режим по умолчанию, как была изначально
-  с завода."* — killing the tray icon returns the card to factory state. Note the hard part: a
-  killed process runs no exit handler, so the reset cannot live in one.
+- ~~*"Если убить её — профиль сбрасывается…"*~~ — **SUPERSEDED by the owner, 2026-08-09:** *"в трее
+  делаем без кнопок, а просто показ статуса, а сброс до заводских настроек — по третьему ярлыку с
+  записью в автозагрузку"*. Three shortcuts (Max Optimal · Silent Cold · Reset to factory), each
+  becoming the remembered boot state; the tray only displays. Killing the tray costs the indicator,
+  not the profile. Full reasoning: `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4.
 - *"нужна методология, как так настроить, чтобы напряжения были в каждой точке чуть выше точки сбоев
   видеокарты"* — per-point voltage sits just above the failure threshold, with margin.
   `researches/02` is the answer.

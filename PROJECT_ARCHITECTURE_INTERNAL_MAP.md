@@ -51,18 +51,39 @@ profiles and build the owner-facing surface. They never search and never test.
 | `event-logger.mjs` | the crash half of every verdict | mutation-prove it: it must go red against a known TDR event, or it is not a detector |
 | `desktop-shortcuts.mjs` / `setup-desktop.mjs` | the owner's Desktop and Task Scheduler | these touch the owner's environment — never run them to "see what happens" |
 
-## 4. The unsolved joint
+## 4. The joint that was open, and how the owner closed it
 
-**Reset-on-kill has no owner yet.** `GOAL.md` requires the card to return to factory state when the
-tray icon is killed, but a process terminated by Task Manager runs no exit handler — so the reset
-cannot live in one. Three candidate designs, to be settled in phase 3:
+**Settled by the owner, 2026-08-09 (chat):** *"в трее делаем без кнопок, а просто показ статуса, а
+сброс до заводских настроек — по третьему ярлыку с записью в автозагрузку"*.
 
-1. **Heartbeat** — the applier watches a liveness file or pipe and resets when it goes stale.
-2. **Watchdog process** — a second small process owns the reset and observes the tray.
-3. **Windows Job Object** — bind the pair so the OS itself tears both down.
+The design is now three shortcuts and a passive tray:
 
-Until one is chosen and proved by actually killing the process, the requirement is **not met**, and
-no document may claim otherwise.
+| Shortcut | Applies | Becomes the remembered boot state |
+|---|---|---|
+| 🚀 **Max Optimal** | the sweet-spot profile | yes |
+| ❄️ **Silent Cold** | the deep-undervolt profile | yes |
+| ⏹ **Reset to factory** | stock — `-rgc`, power limit back to default | yes |
+
+**The tray icon displays the active profile and nothing else.** No menu, no buttons, no click
+actions. It reads state; it never writes it.
+
+**What this supersedes, stated plainly rather than dropped.** `GOAL.md` asks: *"Если убить её —
+профиль сбрасывается, GPU переводится в режим по умолчанию"*. With a status-only tray that owns no
+state, killing it no longer resets anything — the profile stays applied until a shortcut changes it.
+The owner's later instruction is the more specific one and governs. **A killed tray now means the
+owner loses the indicator, not the profile**, and the deliberate way back to stock is the third
+shortcut.
+
+**Why this is the better design, and not merely the easier one:** a process killed by Task Manager
+runs no exit handler, so kill-detection would have needed a heartbeat, a watchdog, or a Job Object —
+a second moving part whose failure mode is *resetting the GPU when nothing was wrong*. An explicit
+shortcut has no failure mode at all. The safety property that actually matters is untouched:
+profiles live in volatile GPU memory, so a reboot or a driver reload still returns the card to
+stock without anyone doing anything.
+
+**Consequence for the applier:** every shortcut, reset included, writes the same "remembered state"
+record that the boot task reads. Reset is a profile like the other two — the stock one — not a
+special case in the code.
 
 ## 5. Contours
 
