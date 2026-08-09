@@ -1,0 +1,51 @@
+{
+  "kernel_power_41__captured.xml": {
+    "provenance": "CAPTURED on this machine",
+    "what": "unexpected shutdown — the one detector this machine can prove red with real history",
+    "provider": "Microsoft-Windows-Kernel-Power",
+    "eventId": 41,
+    "level": 1,
+    "timeCreated": "2026-08-06T17:35:10.1586898Z",
+    "fault": true,
+    "means": "CRASH"
+  },
+  "display_4107_not_a_fault__captured.xml": {
+    "provenance": "CAPTURED on this machine",
+    "what": "a REAL event from a provider we watch, at an id we do not — must NOT be a fault",
+    "provider": "Display",
+    "eventId": 4107,
+    "level": 4,
+    "timeCreated": "2026-08-01T07:16:06.5042348Z",
+    "fault": false
+  },
+  "display_4101_tdr__constructed.xml": {
+    "provenance": "CONSTRUCTED from the captured Display 4107 shape — this machine has no TDR history",
+    "what": "display driver reset (TDR)",
+    "provider": "Display",
+    "eventId": 4101,
+    "level": 3,
+    "timeCreated": "2026-08-01T07:16:06.5042348Z",
+    "fault": true,
+    "means": "CRASH"
+  },
+  "whea_logger_17__constructed.xml": {
+    "provenance": "CONSTRUCTED — this machine has ZERO WHEA-Logger events of any id",
+    "what": "corrected machine-check / hardware error",
+    "provider": "Microsoft-Windows-WHEA-Logger",
+    "eventId": 17,
+    "level": 3,
+    "timeCreated": "2026-08-01T07:16:06.5042348Z",
+    "fault": true,
+    "means": "CRASH"
+  },
+  "wer_1001_bugcheck__constructed.xml": {
+    "provenance": "CONSTRUCTED — this machine has ZERO WER-SystemErrorReporting events",
+    "what": "bugcheck (BSOD) report",
+    "provider": "Microsoft-Windows-WER-SystemErrorReporting",
+    "eventId": 1001,
+    "level": 2,
+    "timeCreated": "2026-08-06T17:35:10.1586898Z",
+    "fault": true,
+    "means": "CRASH"
+  }
+}

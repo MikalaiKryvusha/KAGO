@@ -14,6 +14,7 @@
     "questions": "node tools/questions-guard.mjs",
     "verify:contour": "node tools/verify-review-contour.mjs",
     "mon": "node automation-engine/lib/hardware-mon.mjs",
+    "events": "node automation-engine/lib/event-logger.mjs",
     "kaif:version": "node .kaif/kaif-core.mjs version",
     "kaif:check": "node .kaif/kaif-core.mjs check",
     "kaif:update": "node .kaif/kaif-core.mjs update",

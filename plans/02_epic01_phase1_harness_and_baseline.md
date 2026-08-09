@@ -2,7 +2,7 @@
 
 > **Created:** 2026-08-09 22:42 +03:00 (agent)
 > **Parent:** `plans/01_EPIC_kago_orchestrator.md` — phase 1
-> **Status:** 🟡 in progress · 3.1–3.4 closed (3.4 on 2026-08-10 00:27 +03:00) · next: 3.5 event-logger
+> **Status:** 🟡 in progress · 3.1–3.5 closed (3.5 on 2026-08-10 00:36 +03:00) · next: 3.6 stress-tester
 > **Outbound:** the environment-dossier rows → `AGENT_GUIDE.md` · the new harness commands → the
 > `AGENT_GUIDE.md` test-harness table · closure → `MASTER_PLAN.md` phase 1
 
@@ -117,20 +117,36 @@ from reading the diff (`TESTING_FRAMEWORK.md`).
         «карта знает причину «SW Power Cap», а таблица — нет» and exit 1;
       · a bogus `nvidia-smi` path produces the named refusal, not a stack.
 
-### 3.5 — `automation-engine/lib/event-logger.mjs` — the crash half of the oracle
+### 3.5 — `automation-engine/lib/event-logger.mjs` — the crash half of the oracle ✅ CLOSED 2026-08-10
 
 *Anchor: epic §4, phase-1 exit gate — "the fault watcher goes red against a real historical event".*
 
-- [ ] Query four providers over a time window: `Display` (id 4101), `Microsoft-Windows-WHEA-Logger`
-      (17, 18, 19, 47), `Microsoft-Windows-Kernel-Power` (41),
-      `Microsoft-Windows-WER-SystemErrorReporting` (1001).
-- [ ] `Get-WinEvent` works **unelevated** here (probed) — do not demand admin for reading.
-- [ ] Each detector carries its own honest proof status in its comment: Kernel-Power 41 is
-      **red-provable on this machine**; TDR and WHEA are **fixture-provable only** (no local
-      history) — `[TESTED: … via fixture]` says so explicitly rather than blurring the two.
-- [ ] Fixtures live in `automation-engine/lib/__fixtures__/` as captured event XML.
-- **Verify:** run it over a window covering 06.08.2026 and watch it return the real Kernel-Power 41
-  event (P1-AC2); run the fixture suite (P1-AC3).
+- [x] Four providers queried over a window, ids exactly from `config.FAULT_PROVIDERS` — no second
+      copy of the id list in this module.
+- [x] `Get-WinEvent` run **unelevated**; admin is never demanded.
+- [x] **"Found nothing" and "could not look" are different answers.** Every provider carries its own
+      status (`ok` / `no-events` / `error`), and `verdictFor()` returns UNKNOWN — never "clean" —
+      when any provider failed to answer. A silent empty result read as an all-clear is the exact
+      defect the contour's own review found one level up.
+- [x] Proof status split and kept split: Kernel-Power 41 **red-proved on real history**; Display
+      4101, WHEA and WER **fixture-proved only**, and the fixtures' filenames carry
+      `__captured` / `__constructed` so nobody has to open a README to know which is which.
+- [x] Fixtures in `automation-engine/lib/__fixtures__/` with `expectations.json` and a README stating
+      the boundary: a constructed fixture proves the PARSER handles a shape, never that this machine
+      would emit it.
+- [x] **Verified 2026-08-10 00:36 +03:00 by observation:**
+      · **P1-AC2** — `npm run events -- --since 2026-07-01 --until 2026-08-10` returned all THREE real
+        `Kernel-Power` 41 events (29.07 10:00:36Z, 05.08 19:14:30Z, 06.08 17:35:10Z) and the verdict
+        `CRASH`; the other three providers reported `no-events` separately, not as one silent zero.
+      · **P1-AC3** — `npm run events -- --fixtures`: 5 fixtures, all match, exit 0.
+      · **Mutation-proved red:** pointing the Display rule at 4107 turned the REAL negative fixture
+        into a fault — suite red, exit 1, «fault: true != false».
+      · **Mutation-proved red:** a provider forced to `status: 'error'` yields
+        `{verdict: null}` with the reason, never `clean`.
+      · A defect found by READING THE TOOL'S OWN OUTPUT, not the code: `--since 2026-07-01` printed
+        «ОКНО: 2026-07-01T03:00:00» — a bare date is UTC midnight by spec, which on +03:00 cut three
+        hours off the start of every window. Now a date-only argument is LOCAL midnight, and
+        `--until <date>` means through the END of that day.
 
 ### 3.6 — `automation-engine/lib/stress-tester.mjs` — the verdict
 
