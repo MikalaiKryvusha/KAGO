@@ -91,12 +91,19 @@ function blockMd(s) {
 /**
  * Document text rendered INLINE (a heading, an option label). Still goes through the core renderer
  * — bypassing it to "just escape" a heading is exactly how the service markers re-leaked in the
- * field pilot (I24) — and only the single wrapping <p> is peeled off.
+ * field pilot (I24) — and the paragraph wrapping is peeled off.
+ *
+ * PEELS EVERY PARAGRAPH, not just a single one (`bugs/01` → P8/P1). `core.renderMarkdown` emits one
+ * `<p>` per SOURCE line, so an option label that wraps in the document — which is every option of
+ * the live interview 001 — came back as a STACK of paragraphs, the single-paragraph peel was
+ * skipped, and block markup landed inside a `<span>` and inside an `<h3>`.
+ *
+ * [TESTED: 2026-08-09 · tools/verify-review-contour.mjs block P8]
  */
 function inlineMd(s) {
   const html = blockMd(s).trim();
-  if (/^<p>[\s\S]*<\/p>$/u.test(html) && html.indexOf('<p>', 1) === -1) {
-    return html.slice(3, -4);
+  if (/^(?:<p>[\s\S]*?<\/p>\s*)+$/u.test(html)) {
+    return html.split(/<\/p>\s*<p>/u).join(' ').replace(/^<p>/u, '').replace(/<\/p>$/u, '');
   }
   return html;
 }
@@ -159,47 +166,53 @@ function stripFrontMatter(text) {
 }
 
 /**
- * Split a document into the parts the page shows around the question cards.
+ * Cut a document into the ORDERED parts the page shows: prose segments and question cards, in the
+ * order they stand in the source.
  *
  * WHY: an owner facing bare options answers "I don't know what we are deciding here" (SKILL.md,
- * field pilot). The preamble carries "what has already been checked on your machine" and the
- * epilogue carries "what I decided myself" — dropping them turns an interview into a quiz.
+ * field pilot). Prose carries "what has already been checked on your machine" and "what I decided
+ * myself" — dropping any of it turns an interview into a quiz.
  *
- * Question heading POSITIONS are found by matching the headings the CORE already parsed, so this
- * function never owns a second copy of the question-heading rule (C1).
+ * WHY THE SHAPE CHANGED (`bugs/01` → A1, A2). The previous version reconstructed only a HEAD and a
+ * TAIL: prose sitting between two questions never reached the page at all, and an epilogue with no
+ * heading after it was dropped, because the tail was found by scanning for a heading. Both are the
+ * same defect — the page rebuilt the document instead of walking it. It now walks it, and the block
+ * boundaries come from the CORE (C1) rather than from a second copy of the rule here; that second
+ * copy is what diverged.
+ *
+ * [TESTED: 2026-08-09 · tools/verify-review-contour.mjs blocks A1/A2 — both red before this change]
  */
-function splitAround(text, doc) {
-  const lines = stripFrontMatter(text).split('\n');
-  const headings = new Set(doc.questions.map((q) => q.heading));
+function splitDocument(text) {
+  const lines = core.normalize(text).split('\n');
+  const ranges = core.questionBlockRanges(text);
 
-  // Drop the document H1: the page header already carries the title (P9).
+  // The front matter is machinery, not the owner's text, and the page header already carries the
+  // H1 (P9) — so the walk starts after both.
   let start = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^#\s+/u.test(lines[i])) { start = i + 1; break; }
+  if (lines[0] !== undefined && lines[0].trim() === '---') {
+    for (let i = 1; i < lines.length; i++) {
+      if (/^(-{3,}|\.{3})\s*$/u.test(lines[i])) { start = i + 1; break; }
+    }
   }
-
-  const qLines = [];
   for (let i = start; i < lines.length; i++) {
-    if (/^#{2,4}\s+/u.test(lines[i]) && headings.has(lines[i].replace(/^#{2,4}\s*/u, '').trim())) {
-      qLines.push(i);
-    }
+    if (/^#\s+/u.test(lines[i])) { start = i + 1; break; }
+    if (ranges.length && i >= ranges[0].start) break;   // a question came first: there is no H1
   }
 
-  if (!qLines.length) return { preamble: lines.slice(start).join('\n').trim(), epilogue: '' };
+  const parts = [];
+  const prose = (from, to) => {
+    const t = lines.slice(Math.max(from, start), Math.max(to, start)).join('\n').trim();
+    if (t) parts.push({ kind: 'prose', text: t });
+  };
 
-  const preamble = lines.slice(start, qLines[0]).join('\n').trim();
-
-  // The epilogue starts at the first heading after the LAST question that is not itself a question.
-  let epiStart = lines.length;
-  for (let i = qLines[qLines.length - 1] + 1; i < lines.length; i++) {
-    if (/^#{1,6}\s+/u.test(lines[i]) && !headings.has(lines[i].replace(/^#{1,6}\s*/u, '').trim())) {
-      epiStart = i;
-      break;
-    }
+  let cursor = start;
+  for (let i = 0; i < ranges.length; i++) {
+    prose(cursor, ranges[i].start);
+    parts.push({ kind: 'question', index: i });
+    cursor = ranges[i].end;
   }
-  const epilogue = lines.slice(epiStart).join('\n').trim();
-
-  return { preamble, epilogue };
+  prose(cursor, lines.length);
+  return parts;
 }
 
 /** Load one document into the shape the page and the server both use. */
@@ -213,7 +226,7 @@ function loadDoc(file, queue) {
   // I37: a notice is a NAMED class, declared by metadata (or, as a convenience, by the file name).
   const isNotice = meta.kind === 'notice' || /^notice[_-]/iu.test(base);
 
-  const parts = splitAround(text, doc);
+  const parts = splitDocument(text);
   const answered = doc.questions.filter((q) => q.answered).length;
   const awaiting = doc.questions.length - answered;
 
@@ -228,8 +241,7 @@ function loadDoc(file, queue) {
     meta,
     isNotice,
     title: meta.title || doc.title || base,
-    preamble: parts.preamble,
-    epilogue: parts.epilogue,
+    parts,
     answered,
     awaiting,
     noticeRead: !!(noticeState && noticeState.read),
@@ -237,15 +249,28 @@ function loadDoc(file, queue) {
 }
 
 /**
- * Is this document still waiting for the owner? Rule 4 of the parsing contract: the truth is the
- * DOCUMENT STATUS, never field fullness — but a document with no status line at all falls back to
- * "has unanswered questions", otherwise a plain md would never make it onto a batch page.
+ * Is this document still waiting for the OWNER — that is, does the contour have anything left to
+ * raise a window for?
+ *
+ * TWO QUESTIONS THAT WERE ONE, AND HAD TO BE SPLIT (`bugs/01` → B5). "Is this interview CLOSED?" is
+ * the agent's question and its truth is the document's `**Status:**` line — closing an interview
+ * means propagating the answers to their declared targets and only then changing the status
+ * (`AGENT_GUIDE.md`). "Has the owner anything left to click?" is the CONTOUR's question, and the
+ * contour answers it by counting. Binding the second to the first meant the queue never cleared
+ * itself: nothing in the contour writes that status line, so an interview whose every question was
+ * answered stayed "waiting" forever, and `refreshQueue`'s promise that a woken agent can read how
+ * many are left was hollow. In session 2 the status was flipped by hand at closure, which MASKED it.
+ *
+ * The protective direction of rule 4 is kept intact: a status that says CLOSED still closes the
+ * document, whatever the fields say. Only the stuck-open direction is fixed.
+ *
+ * [TESTED: 2026-08-09 · tools/verify-review-contour.mjs block B5 — red before this change]
  */
 function isWaiting(d) {
   if (d.isNotice) return !d.noticeRead;
-  if (d.doc.statusIsWaiting === true) return true;
-  if (d.doc.statusIsWaiting === false) return false;
-  return d.awaiting > 0;
+  if (d.doc.statusIsWaiting === false) return false;      // the agent declared it closed — believe it
+  if (d.doc.questions.length) return d.awaiting > 0;      // countable: has the owner clicks left?
+  return d.doc.statusIsWaiting === true;                  // nothing to count — the status is all there is
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -508,7 +533,7 @@ const PAGE_JS = [
   '',
   '// --- I13: the pulse. The page says OUT LOUD the moment the server goes silent — the human',
   '// learns of the trouble immediately, not an hour later at the click.',
-  'var pulseMiss = 0;',
+  'var pulseMiss = 0, pulseTimer = null;',
   'function setPulse(ok, why){',
   '  var el = D.getElementById("pulse");',
   '  if (!el) return;',
@@ -516,7 +541,10 @@ const PAGE_JS = [
   '  else { el.className = "note warn"; el.textContent = "Сервер молчит (" + why + "). Не закрывайте страницу: ваш текст сохранён в браузере, кнопка «Сохранить» покажет его целиком."; }',
   '}',
   'function pulse(){',
-  '  if (!C.serve) return;',
+  // `bugs/01` (I13, found by three lenses): the server DIES on purpose ~2.5 s after a successful
+  // save, and an uncleared pulse then painted the red "Сервер молчит" warning right beside the green
+  // "Записано" — the contour frightening the owner about a save that had just worked.
+  '  if (!C.serve || saved) return;',
   '  try {',
   '    var xhr = new XMLHttpRequest();',
   '    xhr.open("GET", "/alive?t=" + Date.now(), true);',
@@ -610,6 +638,8 @@ const PAGE_JS = [
   '// --- I27/DEF2: auto-close is an ATTEMPT, never a promise. If the browser refuses, the page says',
   '// so honestly instead of hanging as if nothing happened.',
   'function onSaved(j){',
+  '  if (pulseTimer){ W.clearInterval(pulseTimer); pulseTimer = null; }',
+  '  setPulse(true, "");',
   '  setStatus("Записано: " + (j && j.summary ? j.summary : "решение сохранено") + ". Окно попробует закрыться само.", "ok");',
   '  try { W.localStorage.removeItem(dkey()); } catch(e){}',
   '  W.setTimeout(function(){ try { W.close(); } catch(e){} }, C.closeAttempt);',
@@ -646,7 +676,7 @@ const PAGE_JS = [
   '  });',
   '  var rr = D.getElementById("rescueretry");',
   '  if (rr) rr.addEventListener("click", function(){ doSave(); });',
-  '  if (C.serve){ pulse(); W.setInterval(pulse, C.pulseMs); }',
+  '  if (C.serve){ pulse(); pulseTimer = W.setInterval(pulse, C.pulseMs); }',
   '  else { setPulse(false, "страница собрана без сервера"); }',
   '}',
   'if (D.readyState === "loading") D.addEventListener("DOMContentLoaded", boot); else boot();',
@@ -783,9 +813,13 @@ function buildPage(model) {
       out.push('<p class="dmeta">' + attr(d.name) + ' · отвечено ' + d.answered + ' из ' +
         d.doc.questions.length + '</p>');
     }
-    if (d.preamble) out.push('<div class="intro md">' + blockMd(d.preamble) + '</div>');
-    for (const q of d.doc.questions) out.push(renderQuestion(d, q));
-    if (d.epilogue) out.push('<div class="intro md">' + blockMd(d.epilogue) + '</div>');
+    // The WHOLE document, in source order: prose where the document has prose, a card where it has
+    // a question. Nothing between the cards is dropped (`bugs/01` → A1, A2).
+    for (const part of d.parts) {
+      if (part.kind === 'prose') { out.push('<div class="intro md">' + blockMd(part.text) + '</div>'); continue; }
+      const q = d.doc.questions[part.index];
+      if (q) out.push(renderQuestion(d, q));
+    }
 
     // Previously recorded document-wide comments come back to the owner (they accumulate, C6).
     for (const c of d.doc.documentComments) {
@@ -924,8 +958,22 @@ function markNoticeRead(dir, d, { by, at, comment }) {
 //    drafts, because the port is part of the web origin.
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The lock is keyed by the DOCUMENT, never by the run (`bugs/01` → B6). A batch run used to lock a
+ * single key `_batch`, so it could never collide with a single-document window on a document it was
+ * itself showing — "one document, one window" simply did not hold, and two windows are two drafts on
+ * two ports (T6). A run now takes one lock per document it shows.
+ *
+ * [TESTED: 2026-08-09 · tools/verify-review-contour.mjs block B6 — red before this change]
+ */
 function lockPath(decisionsDir, key) {
   return join(decisionsDir, '.review-lock-' + key + '.json');
+}
+
+/** Read a lock file, or null when there is none / it is unreadable. */
+function readLock(path) {
+  if (!existsSync(path)) return null;
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
 }
 
 /**
@@ -1215,13 +1263,31 @@ function recordDecision(model, payload, opts) {
       markNoticeRead(model.dir, d, { by, at, comment: docComment });
       touched.push(d.name + ' — прочитано');
     } else {
-      if (Object.keys(answers).length) {
-        core.applyAnswersToDocument(d.file, answers, { by, at });
+      // I2 + `bugs/01` → B4: the summary is built from the writer's REPORT of what landed in the
+      // document, never from the payload the page posted. A question with no `**Ответ:**` field has
+      // nowhere to receive an answer, and the contour used to report "ответов: 1" over a document it
+      // had not touched — a report of its own writing that nothing had verified.
+      const report = Object.keys(answers).length
+        ? core.applyAnswersToDocument(d.file, answers, { by, at })
+        : { written: [], skipped: [] };
+
+      // Whatever had no field to land in is carried into the document-wide comment: the owner's work
+      // is never dropped, and never silently counted either (I10).
+      const carried = [...commentOnly];
+      for (const s of report.skipped) {
+        const a = answers[s.id] || {};
+        carried.push(s.id + ': ' + [a.choice, a.text].filter(Boolean).join(' — ') + '  (' + s.reason + ')');
       }
-      const tail = [docComment, commentOnly.join('\n')].filter(Boolean).join('\n\n');
+      const tail = [docComment, carried.join('\n')].filter(Boolean).join('\n\n');
       if (tail) core.appendDocumentComment(d.file, tail, { by, at });
-      const n = Object.values(answers).filter((a) => a.choice || a.text).length;
-      touched.push(d.name + ' — ' + (n ? ('ответов: ' + n) : 'только комментарий'));
+
+      record.written = report.written;
+      record.not_written = report.skipped;
+      const n = report.written.length;
+      touched.push(d.name + ' — ' + (n ? ('ответов: ' + n) : 'только комментарий') +
+        (report.skipped.length
+          ? (', в поля не легло: ' + report.skipped.length + ' — перенесено в комментарий')
+          : ''));
     }
 
     core.writeDecision(d.file, record);
@@ -1241,9 +1307,12 @@ function serve(model, opts) {
   let strikes = 0;
   let beaconTimer = null;
   let tick = null;
-  const lock = lockPath(decisionsDir, model.key);
+  // One lock per DOCUMENT shown by this run, not one per run (see lockPath).
+  const locks = model.docs.map((d) => lockPath(decisionsDir, d.key));
 
-  const releaseLock = () => { try { unlinkSync(lock); } catch { /* already gone */ } };
+  const releaseLock = () => {
+    for (const l of locks) { try { unlinkSync(l); } catch { /* already gone */ } }
+  };
 
   /**
    * I25: exactly THREE outcomes, all visible in the process log. "He is probably still thinking"
@@ -1367,9 +1436,12 @@ function serve(model, opts) {
     const port = server.address().port;
     const url = 'http://127.0.0.1:' + port;
 
-    writeFileSync(lock, JSON.stringify({
-      pid: process.pid, address: url, doc: model.key, at: core.isoLocal(new Date()),
-    }, null, 2) + '\n', 'utf8');
+    for (let i = 0; i < locks.length; i++) {
+      writeFileSync(locks[i], JSON.stringify({
+        pid: process.pid, address: url, doc: model.docs[i].key, run: model.key,
+        at: core.isoLocal(new Date()),
+      }, null, 2) + '\n', 'utf8');
+    }
 
     console.log('СТРАНИЦА: ' + url);
     console.log('ДОКУМЕНТЫ: ' + model.docs.map((d) => d.name).join(', '));
@@ -1515,15 +1587,6 @@ function main(argv) {
     storageKey: key + ':' + docs.map((d) => d.name).join('|'),
   };
 
-  // The queue is a state file: it records that these documents were shown, and it NEVER moves them
-  // (I7 — moving breaks every link to them from status and plans).
-  try {
-    mkdirSync(decisionsDir, { recursive: true });
-    syncQueue(dir, docs);
-  } catch (e) {
-    console.log('ОЧЕРЕДЬ: не смог обновить queue.json (' + (e && e.message) + ') — продолжаю без неё.');
-  }
-
   const totalQ = docs.reduce((n, d) => n + d.doc.questions.length, 0);
   const totalAwait = docs.reduce((n, d) => n + (d.isNotice ? 0 : d.awaiting), 0);
   console.log('ПРОЕКТ: ' + PROJECT);
@@ -1548,30 +1611,46 @@ function main(argv) {
     return;
   }
 
-  // --- serve, call, wait ------------------------------------------------------------------------
-  const lock = lockPath(decisionsDir, key);
-  let existing = null;
-  if (existsSync(lock)) {
-    try { existing = JSON.parse(readFileSync(lock, 'utf8')); } catch { existing = null; }
+  // The queue is a state file: it records that these documents were SHOWN, and it NEVER moves them
+  // (I7 — moving breaks every link to them from status and plans). It is stamped only on a run that
+  // actually shows something: `syncQueue` used to run before the `--no-serve` branch above, so the
+  // very command that ends by printing RENDER IS NOT YET A SHOW wrote `lastShownAt` for a page
+  // nobody was ever shown (`bugs/01` → I15).
+  try {
+    mkdirSync(decisionsDir, { recursive: true });
+    syncQueue(dir, docs);
+  } catch (e) {
+    console.log('ОЧЕРЕДЬ: не смог обновить queue.json (' + (e && e.message) + ') — продолжаю без неё.');
   }
 
-  // I29/T6: one document, one window. A second launch prints the LIVE address and exits — never
-  // restarts under a live window, because the port is part of the origin and a new server orphans
-  // the draft the owner is in the middle of writing.
-  lockIsLive(existing, (live) => {
-    if (live) {
-      console.log('');
-      console.log('УЖЕ ОТКРЫТО: этот документ уже показывается в другом окне.');
-      console.log('АДРЕС: ' + existing.address + ' (процесс ' + existing.pid + ')');
-      console.log('Второе окно — это второй черновик и второй зов, поэтому я не поднимаю его.');
-      process.exit(0);
+  // --- serve, call, wait ------------------------------------------------------------------------
+  // I29/T6: one DOCUMENT, one window. Every document this run would show is checked, so a batch page
+  // and a single-document page can see each other (`bugs/01` → B6). A second launch prints the LIVE
+  // address and exits — never restarts under a live window, because the port is part of the origin
+  // and a new server orphans the draft the owner is in the middle of writing.
+  const held = docs.map((d) => ({ name: d.name, path: lockPath(decisionsDir, d.key) }))
+    .map((l) => ({ ...l, record: readLock(l.path) }));
+
+  const checkFrom = (i) => {
+    if (i >= held.length) {
+      for (const l of held) {
+        if (l.record) { try { unlinkSync(l.path); } catch { /* already gone */ } }
+      }
+      serve(model, opts);
       return;
     }
-    if (existing) {
-      try { unlinkSync(lock); } catch { /* already gone */ }
-    }
-    serve(model, opts);
-  });
+    const l = held[i];
+    if (!l.record) { checkFrom(i + 1); return; }
+    lockIsLive(l.record, (live) => {
+      if (!live) { checkFrom(i + 1); return; }
+      console.log('');
+      console.log('УЖЕ ОТКРЫТО: документ ' + l.name + ' уже показывается в другом окне.');
+      console.log('АДРЕС: ' + l.record.address + ' (процесс ' + l.record.pid + ')');
+      console.log('Второе окно — это второй черновик и второй зов, поэтому я не поднимаю его.');
+      process.exit(0);
+    });
+  };
+  checkFrom(0);
 }
 
 // T9: a module others may import must not execute on import — otherwise a consumer inherits our
@@ -1580,4 +1659,4 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   main(process.argv.slice(2));
 }
 
-export { buildPage, callPhrase, chooseSignalRoute, collectDocs, loadDoc, readMeta, isWaiting, splitAround };
+export { buildPage, callPhrase, chooseSignalRoute, collectDocs, loadDoc, readMeta, isWaiting, splitDocument };

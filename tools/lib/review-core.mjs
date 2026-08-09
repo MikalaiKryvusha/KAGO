@@ -105,11 +105,37 @@ const RE_STATUS_LINE = /^\s*\*\*\s*(Status|Статус)\s*:?\s*\*\*\s*:?\s*(.*)
 const RE_QUESTION_HEADING = /^#{2,4}\s*(Вопрос|Question|Q)\s*(\d+)/iu;
 
 /**
- * Parse an interview document into a structure both the page and the guard agree on.
+ * The line ranges of the question blocks, over NORMALIZED text. `[{start, end}]`, `end` exclusive.
  *
- * Rule 1 is the subtle one: a question block is closed not only by the next heading but ALSO by a
- * horizontal rule. Without it the rule lands inside the answer text and an empty question reads as
- * "answered" — the single worst outcome for a contour whose whole job is knowing what is unanswered.
+ * Rule 1 is the subtle one and it lives HERE, alone: a question block is closed not only by the
+ * next heading but ALSO by a horizontal rule. Without it the rule lands inside the answer text and
+ * an empty question reads as "answered" — the single worst outcome for a contour whose whole job is
+ * knowing what is unanswered.
+ *
+ * Exported because the PAGE needs the same boundaries: everything outside these ranges is document
+ * prose the owner must see, and a second copy of "where does a block end" in the renderer is a
+ * second truth (C1). That second copy is exactly what silently dropped the text between two
+ * questions (`bugs/01` → A1).
+ *
+ * [TESTED: 2026-08-09 · tools/verify-review-contour.mjs blocks A1/A2 — red on the old split, green
+ * on this one]
+ */
+export function questionBlockRanges(text) {
+  const lines = normalize(text).split('\n');
+  const ranges = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!RE_QUESTION_HEADING.test(lines[i])) continue;
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (RE_HEADING.test(lines[j]) || RE_HRULE.test(lines[j])) { end = j; break; }
+    }
+    ranges.push({ start: i, end });
+  }
+  return ranges;
+}
+
+/**
+ * Parse an interview document into a structure both the page and the guard agree on.
  */
 export function parseInterview(text, { file = '<memory>' } = {}) {
   const src = normalize(text);
@@ -139,20 +165,9 @@ export function parseInterview(text, { file = '<memory>' } = {}) {
   // --- question blocks -----------------------------------------------------------------------
   // Collect block boundaries first, then parse each block. Two passes are cheaper to reason about
   // than one pass with state, and this parser is read by every consumer of the contour.
-  const starts = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (RE_QUESTION_HEADING.test(lines[i])) starts.push(i);
-  }
-
-  for (let qi = 0; qi < starts.length; qi++) {
-    const start = starts[qi];
-    let end = lines.length;
-    for (let i = start + 1; i < lines.length; i++) {
-      // Rule 1: closed by the next heading OR by a horizontal rule.
-      if (RE_HEADING.test(lines[i]) || RE_HRULE.test(lines[i])) { end = i; break; }
-    }
-    const block = lines.slice(start, end);
-    doc.questions.push(parseQuestionBlock(block, qi + 1));
+  const ranges = questionBlockRanges(src);
+  for (let qi = 0; qi < ranges.length; qi++) {
+    doc.questions.push(parseQuestionBlock(lines.slice(ranges[qi].start, ranges[qi].end), qi + 1));
   }
 
   // --- document-wide comments (P7) ------------------------------------------------------------
@@ -304,6 +319,14 @@ export function writeDecision(docPath, record) {
  *    positions wrote one answer's tail onto a neighbouring OPTION line;
  *  - an answer the owner already wrote is NEVER overwritten — new text arrives as a dated
  *    follow-up field, and the original stays verbatim.
+ *
+ * RETURNS A REPORT — `{written:[qid], skipped:[{id, reason}]}` — and the caller's summary is built
+ * from it, never from the payload it posted. A question with no `**Ответ:**` field has nowhere to
+ * receive an answer, so this function silently wrote nothing while the contour reported "ответов:
+ * 1": a contour whose report of its own writing is unverified is the fraud class the framework
+ * hunts (`bugs/01` → B4).
+ *
+ * [TESTED: 2026-08-09 · tools/verify-review-contour.mjs block B4 — red before, green after]
  */
 export function applyAnswersToDocument(docPath, answers, { by, at, atHuman }) {
   // I22/I23: two representations of one moment, and neither replaces the other. The ISO stamp goes
@@ -331,6 +354,7 @@ export function applyAnswersToDocument(docPath, answers, { by, at, atHuman }) {
   // BOTTOM-UP — the whole reason this function is not a simple forEach.
   absolute.sort((a, b) => b.line - a.line);
 
+  const written = [];
   for (const { q, line } of absolute) {
     const given = answers[q.id];
     if (!given || (!given.choice && !given.text)) continue;
@@ -349,9 +373,24 @@ export function applyAnswersToDocument(docPath, answers, { by, at, atHuman }) {
     if (given.comment) {
       lines.splice(line + 1, 0, `**Комментарий:** ${given.comment}`);
     }
+    written.push(q.id);
+  }
+
+  // What the owner answered but this function had nowhere to put. The caller carries these into the
+  // document-wide comment block — the human's work is never dropped, and never silently counted.
+  const skipped = [];
+  for (const [qid, given] of Object.entries(answers)) {
+    if (!given || (!given.choice && !given.text)) continue;
+    if (written.includes(qid)) continue;
+    const known = doc.questions.some((q) => q.id === qid);
+    skipped.push({
+      id: qid,
+      reason: known ? 'у вопроса нет поля «Ответ:» — записывать некуда' : 'такого вопроса в документе нет',
+    });
   }
 
   writeFileSync(docPath, normalize(lines.join('\n')), 'utf8');
+  return { written, skipped };
 }
 
 /** The document-wide comment (P7) appends as a dated block at the END — it never overwrites. */
@@ -386,8 +425,9 @@ export function renderMarkdown(md) {
   const fences = [];
   let text = src.replace(/```[\s\S]*?```/gu, (m) => {
     fences.push(m);
-    return ` FENCE${fences.length - 1} `;
+    return `\n FENCE${fences.length - 1} \n`;
   });
+  const fenceBody = (i) => String(fences[i] ?? '').replace(/^```[^\n]*\n?/u, '').replace(/```$/u, '');
 
   // I24 — service comments never reach the owner's eyes.
   text = text.replace(/<!--[\s\S]*?-->/gu, '');
@@ -427,11 +467,10 @@ export function renderMarkdown(md) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    const fence = line.match(/^ FENCE(\d+) $/u);
+    const fence = line.match(/^\s* FENCE(\d+) \s*$/u);
     if (fence) {
       closeList(); closeQuote(); closeTable();
-      const raw = fences[Number(fence[1])].replace(/^```[^\n]*\n?/u, '').replace(/```$/u, '');
-      out.push(`<pre><code>${esc(raw)}</code></pre>`);
+      out.push(`<pre><code>${esc(fenceBody(Number(fence[1])))}</code></pre>`);
       continue;
     }
 
@@ -475,7 +514,14 @@ export function renderMarkdown(md) {
     out.push(`<p>${inline(line)}</p>`);
   }
   closeList(); closeQuote(); closeTable();
-  return out.join('\n');
+
+  // The exact sweep. A NUL cannot occur in the source text, so any placeholder still standing
+  // here came from a fenced span that was NOT alone on its line — it becomes inline code rather
+  // than the literal word FENCE on the owner's page (`bugs/01` -> A3).
+  return out.join('\n').replace(
+    new RegExp(String.fromCharCode(0) + 'FENCE(\\d+)' + String.fromCharCode(0), 'gu'),
+    (_, n) => `<code>${esc(fenceBody(Number(n)))}</code>`,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

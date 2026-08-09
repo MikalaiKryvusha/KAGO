@@ -57,5 +57,10 @@ config.local.mjs
 # months later. They belong in history.
 interviews/*.html
 interviews/decisions/*.lock
+# The lock the contour actually writes is `.review-lock-<document>.json` — a `.json`, which the
+# note above deliberately keeps tracked. Named explicitly, so a pid and a loopback port cannot ride
+# into a public repository under the rule that protects the owner's decisions (`bugs/01` → I29).
+interviews/decisions/.review-lock-*.json
+interviews/decisions/*.preview.html
 _probe.html
 *.review.html

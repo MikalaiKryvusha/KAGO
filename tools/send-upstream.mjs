@@ -57,10 +57,19 @@ const GH_TIMEOUT_MS = 120_000;
 export function repoFromTarget(target) {
   const t = String(target ?? '').trim();
   if (!t) return null;
-  const m = t.match(/(?:https?:\/\/)?(?:www\.)?(?:github\.com[/:])?([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*?)(?:\.git)?(?:[/#?].*)?$/);
+
+  // A target that carries a HOST must carry github.com. Without this line the pattern below, being
+  // unanchored, happily produced `gitlab.com/acme` from a GitLab URL and `docs.google.com/document`
+  // from a Google Docs link — a guard that cannot fail, handing the sender a fabricated addressee
+  // (`bugs/01` → C7). An unknown host is refused, never re-hosted.
+  const host = t.match(/^(?:https?:\/\/)?(?:www\.)?([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})[/:]/);
+  if (host && !/^github\.com$/i.test(host[1])) return null;
+
+  // ANCHORED AT BOTH ENDS. "github.com/Owner/Repo" and "Owner/Repo" land here; anything with more
+  // path segments (an issue link, a file link) is not a repository root and is refused rather than
+  // trimmed into one — which is what the previous wording promised and the previous regex did not do.
+  const m = t.match(/^(?:https?:\/\/)?(?:www\.)?(?:github\.com[/:])?([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*?)(?:\.git)?\/?$/);
   if (!m) return null;
-  // "github.com/Owner/Repo" and "Owner/Repo" both land here; anything with more path segments is
-  // not a repository root and is refused rather than trimmed into one.
   return `${m[1]}/${m[2]}`;
 }
 
@@ -157,8 +166,11 @@ export function sendUpstream(documentPath, artifactId, { apply = false, run = de
   // Below here the OWNER has approved these exact bytes. What remains are the sender's own
   // preconditions — its addressee must be one it can actually reach, and it must not file twice.
   const entry = verdict.decision.artifacts[id];
-  if (entry.delivered && entry.delivered.url) {
-    console.error(`  ОТКАЗ: артефакт уже отправлен — ${entry.delivered.url}`);
+  // The guard binds to the PRESENCE of a delivery, not to its url — this same file writes
+  // `url: null` whenever gh's stdout carries no address, and the old guard then did not see its own
+  // record and filed the ticket a second time (`bugs/01` → C9).
+  if (entry.delivered) {
+    console.error(`  ОТКАЗ: артефакт уже отправлен — ${entry.delivered.url || `отметка от ${entry.delivered.at || 'без времени'}, адрес gh не вернул`}`);
     console.error('  Повторный запуск создал бы вторую задачу. Если отправка нужна снова — уберите поле delivered из решения.');
     return { code: 1, ok: false, called, url: null, verdict };
   }
@@ -166,7 +178,14 @@ export function sendUpstream(documentPath, artifactId, { apply = false, run = de
     console.error(`  ОТКАЗ: адресат «${artifact.target ?? ''}» не читается как репозиторий GitHub (нужно owner/repo).`);
     return { code: 1, ok: false, called, url: null, verdict };
   }
-  if (artifact.format && !/issue|markdown|(^|[^a-z])md([^a-z]|$)/i.test(artifact.format)) {
+  // An UNDECLARED format is not a licence. The check used to be skipped entirely when `format` was
+  // absent — and `format` is optional, so half the addressee defence was disabled by omission
+  // (`bugs/01` → C8). Fail-closed (I4): say what to write instead of guessing what was meant.
+  if (!artifact.format) {
+    console.error(`  ОТКАЗ: у артефакта «${id}» не объявлен format. Этот отправитель умеет только задачи GitHub — впишите «format: issue».`);
+    return { code: 1, ok: false, called, url: null, verdict };
+  }
+  if (!/issue|markdown|(^|[^a-z])md([^a-z]|$)/i.test(artifact.format)) {
     console.error(`  ОТКАЗ: этот отправитель умеет только задачи GitHub, а формат артефакта — «${artifact.format}».`);
     return { code: 1, ok: false, called, url: null, verdict };
   }
