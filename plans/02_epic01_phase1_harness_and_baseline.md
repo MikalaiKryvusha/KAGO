@@ -2,7 +2,7 @@
 
 > **Created:** 2026-08-09 22:42 +03:00 (agent)
 > **Parent:** `plans/01_EPIC_kago_orchestrator.md` — phase 1
-> **Status:** 🔲 open · not started
+> **Status:** 🟡 in progress · 3.1–3.4 closed (3.4 on 2026-08-10 00:27 +03:00) · next: 3.5 event-logger
 > **Outbound:** the environment-dossier rows → `AGENT_GUIDE.md` · the new harness commands → the
 > `AGENT_GUIDE.md` test-harness table · closure → `MASTER_PLAN.md` phase 1
 
@@ -90,19 +90,32 @@ from reading the diff (`TESTING_FRAMEWORK.md`).
 - **Verify:** build each through `toolchain.mjs`, run 5×, compare checksums (P1-AC1); then verify
   the manifest by recomputing every sha-256 in it.
 
-### 3.4 — `automation-engine/lib/hardware-mon.mjs` — the sampler
+### 3.4 — `automation-engine/lib/hardware-mon.mjs` — the sampler ✅ CLOSED 2026-08-10
 
 *Anchor: epic §2 AC4 — the meter for Silent Cold's power reduction.*
 
-- [ ] Sample exactly the fields probed available in `researches/03` §2: `pstate`,
-      `temperature.gpu`, `temperature.gpu.tlimit`, `fan.speed`, `power.draw.instant`, `power.limit`,
-      `clocks.gr`, `clocks.sm`, `clocks.mem`, `utilization.gpu`, `utilization.memory`,
-      `clocks_event_reasons.active`. **Do not sample `temperature.memory` — it returns `N/A` here.**
-- [ ] Write JSONL with a monotonic sample index; sorted keys, no `Date.now()` inside compared
-      output (`AGENT_GUIDE.md` → canonical order).
-- [ ] Throttle reasons decoded to names, not left as a hex mask.
-- **Verify:** sample for 30 s at idle, read the file, confirm every field is present and populated;
-  confirm two runs differ only in the timestamp column.
+- [x] Sample exactly the fields probed available in `researches/03` §2 — **and from ONE source:** the
+      module reads `config.TELEMETRY_FIELDS` rather than carrying its own copy, so the pair step 3.9
+      asked for became a single truth instead of two lists to keep in step. It REFUSES to run if
+      config's list ever contains a field named in `TELEMETRY_FIELDS_UNAVAILABLE_HERE`
+      (`temperature.memory`, `N/A` on this card).
+- [x] JSONL with a monotonic sample index; sorted keys; no `Date.now()` anywhere in the output. The
+      header record carries gpu / driver / vbios / fields / period — every one of them stable, so two
+      runs produce a byte-identical header.
+- [x] Throttle reasons decoded to names in `config.THERMAL_THROTTLE_REASONS`' own notation, with the
+      raw mask kept beside them; an unrecognised bit is surfaced as `unknown_bit_0x…`, never dropped.
+- [x] **Verified 2026-08-10 00:27 +03:00 by observation** — `npm run mon -- --seconds 30 --out
+      runs/idle_a.jsonl`, twice:
+      · 60 records each, index monotonic `0..59`;
+      · **zero nulls across 120 records × 13 keys** (P1-AC4: every probed field present and
+        populated, and the one probed absent is not there);
+      · headers byte-identical between runs; record skeletons byte-identical;
+      · the only columns that move are `t` and card-reported values (`clocks.gr`, `clocks.sm`,
+        `power.draw.instant`, `utilization.*`) — **none of our bookkeeping**;
+      · `npm run mon -- --check-decode` holds the throttle table against the card's own named list in
+        BOTH directions and was **mutation-proved red**: a mistyped `smiLabel` produced
+        «карта знает причину «SW Power Cap», а таблица — нет» and exit 1;
+      · a bogus `nvidia-smi` path produces the named refusal, not a stack.
 
 ### 3.5 — `automation-engine/lib/event-logger.mjs` — the crash half of the oracle
 
