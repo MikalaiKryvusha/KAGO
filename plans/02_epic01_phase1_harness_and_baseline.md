@@ -2,7 +2,7 @@
 
 > **Created:** 2026-08-09 22:42 +03:00 (agent)
 > **Parent:** `plans/01_EPIC_kago_orchestrator.md` — phase 1
-> **Status:** 🟡 in progress · 3.1–3.6 closed (3.6 on 2026-08-10 00:52 +03:00) · next: 3.7 capture the baseline
+> **Status:** 🟡 in progress · 3.1–3.7 closed (3.7 on 2026-08-10 00:53 +03:00) · next: 3.8 the supported-clock ladder
 > **Outbound:** the environment-dossier rows → `AGENT_GUIDE.md` · the new harness commands → the
 > `AGENT_GUIDE.md` test-harness table · closure → `MASTER_PLAN.md` phase 1
 
@@ -187,14 +187,42 @@ from reading the diff (`TESTING_FRAMEWORK.md`).
 > because the spawn cost stays). Recorded here so the Vmin engine does not inherit a blunt instrument
 > believing it is sharp.
 
-### 3.7 — Capture the baseline
+### 3.7 — Capture the baseline ✅ CLOSED 2026-08-10
 
 *Anchor: epic §2 AC7 — the driver/VBIOS stamp.*
 
-- [ ] Run every workload at stock, store outputs in `runs/baseline/` with driver `610.88`, VBIOS
-      `98.03.58.40.8b`, timestamp and the full `gpu:info` dump alongside.
-- [ ] `runs/` is already git-ignored — confirm before the first write (ignore-first rule).
-- **Verify:** read one baseline file and confirm the stamp (P1-AC5).
+- [x] Both workloads captured at stock into `runs/baseline/`, each with checksum, **run arguments**,
+      repeat count, driver `610.88`, VBIOS `98.03.58.40.8b` and a local timestamp; the full
+      `gpu:info` dump sits beside them as `_card.json`, taken by RUNNING `tools/gpu-info.mjs --json`
+      rather than by a second copy of the probe.
+- [x] Ignore-first confirmed BEFORE the first write: `git check-ignore -v runs/baseline/sdc_fma.json`
+      → `.gitignore:26:runs/`.
+- [x] **P1-AC5 is now EXECUTABLE, not a sentence:** `npm run stress -- --verify-baseline` reads every
+      baseline, refuses one missing any stamp field, and holds each stamp against the card RIGHT NOW —
+      so the day a driver update lands, the baselines announce themselves invalid instead of waiting
+      to be believed (R6). An acceptance criterion only a human can check is one nobody checks after
+      the day it was written.
+- [x] **Verified 2026-08-10 00:53 +03:00 by observation:**
+      · `--verify-baseline` → «эталонов 2, без штампа — 0», exit 0 — P1-AC5 met;
+      · **mutation-proved red twice:** deleting `gpu.vbios` from one baseline → exit 1, «нет полей
+        gpu.vbios — правило R6 не выполнено»; rewriting the driver stamp to `000.00` → exit 1, AND a
+        real stress run against that same stale golden returned **НЕИЗВЕСТНО, not PASS**;
+      · both workloads run against the fresh baseline: `branchy` 54 bursts → PASS, `sdc_fma` 67
+        bursts → PASS, checksums `67e95c85bb6299a2` / `e27ec24a82d509d7` — the same values
+        `workloads/MANIFEST.json` recorded on 2026-08-09, i.e. the reference reproduced across a day
+        and across a re-capture.
+
+> **A canon defect caught by reading the captured file, not the code.** `captured_at` was written as
+> UTC (`2026-08-09T21:52Z`) while the owner's clock read `2026-08-10 00:52` — a machine receipt dated
+> the PREVIOUS DAY, which is precisely the collision `AGENT_GUIDE.md` → "A stamp carries the DATE AND
+> THE TIME" exists to prevent. Receipts are now local ISO 8601 with the offset.
+
+> **What ships and what does not.** `runs/` is git-ignored by design, so the baseline is LOCAL state:
+> a fresh clone has no golden and `npm run stress` will answer НЕИЗВЕСТНО until
+> `--capture-baseline` is run once. The shipped copy of the same truth is `workloads/MANIFEST.json`,
+> which carries each binary's `run_checksum` with the same driver/VBIOS stamp. Two artefacts, one
+> fact — and the stress tester deliberately does NOT fall back to the manifest, because a missing
+> baseline must be visible rather than papered over.
 
 ### 3.8 — Extend `tools/gpu-info.mjs` with the supported-clock ladder
 

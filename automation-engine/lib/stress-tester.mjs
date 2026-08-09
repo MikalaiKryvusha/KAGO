@@ -28,7 +28,8 @@
 // Usage:
 //   node automation-engine/lib/stress-tester.mjs --workload sdc_fma --seconds 30
 //   node automation-engine/lib/stress-tester.mjs --workload branchy --transient --seconds 60
-//   node automation-engine/lib/stress-tester.mjs --capture-baseline          (used by step 3.7)
+//   node automation-engine/lib/stress-tester.mjs --capture-baseline          golden + card dump (3.7)
+//   node automation-engine/lib/stress-tester.mjs --verify-baseline           P1-AC5, executable
 //   node automation-engine/lib/stress-tester.mjs --selftest                  the guard, proven red
 //
 // Verified 2026-08-10 by observation — see the [TESTED] markers per function.
@@ -326,10 +327,100 @@ export function captureBaseline({ name, args = [], dir = BASELINE_DIR, repeats =
     args: args.map(String),
     repeats,
     gpu: { name: card.name, driver: card.driver, vbios: card.vbios },
-    captured_at: new Date().toISOString(),
+    captured_at: stampNow(),
   };
   writeFileSync(join(dir, `${name}.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
   return record;
+}
+
+/**
+ * The full card dump that travels WITH the baseline (plan §3.7).
+ *
+ * It is taken by running `tools/gpu-info.mjs --json` rather than by re-probing here: that tool is
+ * the one owner of the card probe, and a second copy of the query would be a mirror that drifts.
+ * The dump is what makes a baseline re-checkable months later — a checksum with no record of the
+ * envelope it was measured in is a number without a source, and PHILOSOPHY.md is blunt about those.
+ *
+ * [TESTED: 2026-08-10 · written and read back; the driver/VBIOS inside it match both the per-workload
+ * stamps and what the card reports live]
+ */
+export function captureCardDump({ dir = BASELINE_DIR } = {}) {
+  const r = spawnSync(process.execPath, [join(ROOT, 'tools', 'gpu-info.mjs'), '--json'], {
+    encoding: 'utf8', timeout: 30_000, windowsHide: true,
+  });
+  if (!r || r.status !== 0) {
+    throw new Error(`не смог снять дамп карты: gpu-info вышел с кодом ${r ? r.status : 'неизвестно'}`);
+  }
+  let info;
+  try { info = JSON.parse(r.stdout); } catch (e) { throw new Error(`дамп карты не разобрался как JSON: ${e.message}`); }
+
+  mkdirSync(dir, { recursive: true });
+  const record = { captured_at: stampNow(), source: 'tools/gpu-info.mjs --json', gpu_info: info };
+  writeFileSync(join(dir, '_card.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  return record;
+}
+
+/**
+ * P1-AC5 made executable: "The golden reference shall carry the driver and VBIOS it was captured on.
+ * Scale: baseline files missing the stamp · Meter: read `runs/baseline/*.json` · **Target: 0**."
+ *
+ * An acceptance criterion that only a human can check is a criterion nobody checks after the day it
+ * was written. This one runs. It also holds every stamp against the card RIGHT NOW, so the moment a
+ * driver update lands, the baselines announce themselves as invalid instead of waiting to be
+ * believed (R6).
+ *
+ * [TESTED: 2026-08-10 · green on the captured set; mutation-proved red by deleting `gpu.vbios` from
+ * one baseline and by rewriting a driver stamp to 000.00]
+ */
+export function verifyBaseline({ dir = BASELINE_DIR } = {}) {
+  const problems = [];
+  if (!existsSync(dir)) return { ok: false, files: [], problems: [`каталога эталонов нет: ${dir} — снимите: npm run stress -- --capture-baseline`] };
+
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== '_card.json').sort();
+  if (!files.length) problems.push(`в ${dir} нет ни одного эталона — судить будет не с чем`);
+
+  const card = probeCard();
+  const dumpPath = join(dir, '_card.json');
+  if (!existsSync(dumpPath)) problems.push('нет _card.json — дамп карты рядом с эталоном обязателен (план §3.7)');
+
+  const rows = [];
+  for (const f of files) {
+    const name = f.replace(/\.json$/u, '');
+    let g;
+    try { g = JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch (e) { problems.push(`${f}: не читается как JSON (${e.message})`); continue; }
+
+    const missing = [];
+    if (!g.checksum) missing.push('checksum');
+    if (!g.gpu || !g.gpu.driver) missing.push('gpu.driver');
+    if (!g.gpu || !g.gpu.vbios) missing.push('gpu.vbios');
+    if (!g.captured_at) missing.push('captured_at');
+    if (!Array.isArray(g.args)) missing.push('args');
+    if (missing.length) problems.push(`${f}: нет полей ${missing.join(', ')} — правило R6 не выполнено`);
+
+    const stamp = checkGoldenStamp(g, card, g.args || []);
+    if (!stamp.ok) problems.push(`${f}: ${stamp.why}`);
+    rows.push({ name, checksum: g.checksum, driver: g.gpu && g.gpu.driver, vbios: g.gpu && g.gpu.vbios, ok: stamp.ok && !missing.length });
+  }
+  return { ok: problems.length === 0, files: rows, problems, card };
+}
+
+/**
+ * A machine receipt carries the moment in the OWNER'S local time with its offset, never UTC
+ * (`AGENT_GUIDE.md` → "A stamp carries the DATE AND THE TIME"). Caught by reading a captured file:
+ * `captured_at` said `2026-08-09T21:52Z` while the owner's clock said `2026-08-10 00:52` — a receipt
+ * dated the PREVIOUS DAY, which is exactly the collision the convention exists to prevent.
+ *
+ * Deliberately NOT imported from the review contour's `review-core.isoLocal`: that module is the
+ * owner-review subsystem's core, and coupling the GPU engine to it to save five lines would tie two
+ * unrelated stacks together. Same convention, two subsystems, stated here so nobody "fixes" it into
+ * a dependency.
+ */
+function stampNow(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    + `${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`;
 }
 
 /** The workloads present on disk, by the binaries that actually exist. */
@@ -420,11 +511,12 @@ export function selfTest() {
 // =================================================================================================
 
 function parseArgs(argv) {
-  const o = { workload: null, seconds: 30, transient: false, selftest: false, capture: false, args: [], json: false };
+  const o = { workload: null, seconds: 30, transient: false, selftest: false, capture: false, verifyBaseline: false, args: [], json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--selftest') o.selftest = true;
     else if (a === '--capture-baseline') o.capture = true;
+    else if (a === '--verify-baseline') o.verifyBaseline = true;
     else if (a === '--transient') o.transient = true;
     else if (a === '--json') o.json = true;
     else if (a === '--workload') o.workload = argv[++i];
@@ -450,10 +542,27 @@ async function main(argv) {
     return r.ok ? 0 : 1;
   }
 
+  if (o.verifyBaseline) {
+    const r = verifyBaseline();
+    for (const f of r.files) {
+      console.log(`${f.ok ? 'OK  ' : 'ПЛОХО'} ${f.name}: ${f.checksum} · драйвер ${f.driver}, VBIOS ${f.vbios}`);
+    }
+    for (const p of r.problems) console.log(`ПЛОХО ${p}`);
+    console.log('');
+    console.log(r.ok
+      ? `P1-AC5: эталонов ${r.files.length}, без штампа — 0. Штампы сходятся с картой (драйвер ${r.card.driver}, VBIOS ${r.card.vbios}).`
+      : `P1-AC5 НЕ ВЫПОЛНЕН: расхождений ${r.problems.length}.`);
+    return r.ok ? 0 : 1;
+  }
+
   const names = o.workload ? [o.workload] : availableWorkloads();
   if (!names.length) { console.error('ОШИБКА: нагрузок на диске нет — соберите их через npm run workloads:build'); return 1; }
 
   if (o.capture) {
+    try {
+      const dump = captureCardDump();
+      console.log(`ДАМП КАРТЫ: ${dump.gpu_info.name} · драйвер ${dump.gpu_info.driver_version}, VBIOS ${dump.gpu_info.vbios_version}`);
+    } catch (e) { console.error(`ДАМП КАРТЫ: ${e.message}`); return 1; }
     for (const name of names) {
       try {
         const rec = captureBaseline({ name, args: o.args });
