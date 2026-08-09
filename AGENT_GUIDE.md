@@ -181,14 +181,14 @@ header carries three things: the **date the facts were taken**, the **regenerati
 the **staleness rule**. A fact never probed is written `— not probed yet —`: a missing fact is
 honest, an invented one is a defect (`PHILOSOPHY.md` → the three doors).
 
-> **Environment dossier.** Taken: `2026-08-09` · Regeneration: `/refresh-context` → the dossier step
+> **Environment dossier.** Taken: `2026-08-09`, extended `2026-08-10` (phase-1 harness rows) · Regeneration: `/refresh-context` → the dossier step
 > (re-run the probes in column 3 and rewrite the values and this date) · **Staleness: facts older
 > than four weeks are HYPOTHESES — re-probe before relying on them.**
 
 | Fact | Value | Probe |
 |---|---|---|
 | OS | Windows 11 Pro 10.0.26200 | `cmd /c ver` |
-| GPU (the subject under test) | GeForce RTX 5070 Ti · driver 610.88 · VBIOS 98.03.58.40.8b · power limit 250–300 W · max clock 3090 MHz | `npm run gpu:info` |
+| GPU (the subject under test) | GeForce RTX 5070 Ti · driver 610.88 · VBIOS 98.03.58.40.8b · power limit 250–300 W · max clock 3090 MHz. **Supported-clock ladder (phase 5's search space):** 5 memory rungs (405 / 810 / 7001 / 13801 / 14001 MHz); the four full rungs each offer the SAME 389 graphics points, 180…3090 MHz, gap alternating 7 and 8 MHz — so the clock grid is measured, while the VOLTAGE grid stays unmeasured until phase 4 | `npm run gpu:info` |
 | CPU / RAM | AMD Ryzen 7 5700G · 8 cores / 16 threads · 32 GB | `Get-CimInstance Win32_Processor` · `Get-CimInstance Win32_ComputerSystem` |
 | Shells available | PowerShell 5.1 (`powershell.exe`, primary) · Git Bash (MSYS2, `/usr/bin/bash`) | `$PSVersionTable` · `bash --version` |
 | Console / ANSI encoding | console codepage **65001**, `[Console]` in/out **utf-8** — but the **default ANSI is windows-1251**, so PowerShell 5 `Set-Content`/`Add-Content` without `-Encoding utf8` writes cp1251 | `chcp` · `[Console]::OutputEncoding` · `[System.Text.Encoding]::Default` |
@@ -196,12 +196,16 @@ honest, an invented one is a defect (`PHILOSOPHY.md` → the three doors).
 | Runtimes and build tools | Node v24.15.0 · npm bundled · Python 3.14 (**no pip**) and Python 3.10 (**pip 24.2 — use this one**) · git 2.43.0.windows.1 · gh 2.95.0 | `node -v` · `python -V` · `git --version` · `gh --version` |
 | CUDA build toolchain | **CUDA Toolkit 13.3 with `nvcc`** on PATH (`…\CUDA\v13.3\bin`). `nvcc` needs an MSVC host compiler and **does not find one on its own** — load `vcvars64.bat` (or `vcvarsx86_amd64.bat` for the x86-hosted cross build, which is proven to work and yields the same checksum). MSVC lives under VS 2022 Community; locate it with `vswhere`, never by a hard-coded version path | `nvcc --version` · `vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath` |
 | Windows Event Log access | `Get-WinEvent` on the `System` log works **unelevated**. Live providers: `Display` · `Microsoft-Windows-Kernel-Power` (id 41 has real history here) · `Microsoft-Windows-WHEA-Logger` (**no events at all** — detectors need fixtures) | `Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Display'} -MaxEvents 5` |
+| `/tmp` from the Bash tool | **Not one path.** `/tmp` exists for bash itself (MSYS2 mount) and writes fine, but a NODE process launched from that same bash resolves `/tmp` to `D:	mp`, which does not exist — `writeFileSync('/tmp/x')` fails ENOENT while the neighbouring `echo > /tmp/x` succeeds. Use the session scratchpad for anything a script must write | `node -e "console.log(require('path').resolve('/tmp'), require('fs').existsSync('/tmp'))"` vs `ls -d /tmp` |
+| Windows event log, no-match detection | `Get-WinEvent` signals "no events" as an ERROR, and its message is localized (ru-RU here). The locale-independent discriminator is `$_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*'` — matching the message text is a guard that works in one language only | `try { Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-WHEA-Logger'} -ErrorAction Stop } catch { $_.FullyQualifiedErrorId }` |
+| Fault history available for proofs | `Kernel-Power` 41 — THREE real events (29.07, 05.08, 06.08.2026), so that detector is red-provable here. `Display` has 4107 events but no 4101; `WHEA-Logger` and `WER-SystemErrorReporting` have **zero events of any id** — those detectors are fixture-provable only | `npm run events -- --since 2026-07-01 --until 2026-08-10` |
+| Workload burst cost | One workload run is one PROCESS, and startup (~140 ms) dwarfs the kernel (0–25 ms at default arguments): even under continuous bursting the card reaches only ~20–30 % utilization. Raising the iteration count does not fix it. **Phase 5 needs a workload that loops internally for N seconds** | `npm run mon -- --seconds 12 --out runs/x.jsonl` alongside `npm run stress` |
 | `tar` / `curl` / `find` per shell | **Different worlds — check the TYPE.** PowerShell: `tar` = `C:\Windows\system32\tar.exe` (bsdtar) · `curl` = an **ALIAS to `Invoke-WebRequest`**, not curl.exe · `find` = `C:\Windows\system32\find.exe` (the DOS text filter, NOT GNU find). Git Bash: `tar` = `/usr/bin/tar` · `curl` = `/mingw64/bin/curl` · `find` = `/usr/bin/find` | `type tar` in EACH shell (not `which`) · `Get-Command tar` |
 | VCS line-ending policy | `core.autocrlf = true` · credential helper `manager` | `git config --get core.autocrlf` · `git config --get credential.helper` |
 | Env vars that do NOT propagate to children | `ProgramFiles` set in a PowerShell session does **not** reach a child process — Windows hands new processes its own value. `PATH` and `CUDA_PATH` propagate normally. Cost the first attempt at proving a refusal path; test such branches through an injected seam, not by editing the environment | `$env:ProgramFiles='X'; node -e "console.log(process.env.ProgramFiles)"` |
 | Package manager | winget · chocolatey · npm | `winget -v` · `choco -v` |
 | PDF text extraction | `pdftotext` at `/mingw64/bin` — **but it silently drops Cyrillic** on these PDFs (no ToUnicode map). PyMuPDF under Python 3.10 extracts it correctly. `pdftoppm`/`pdffonts` are absent; ImageMagick is present but has no Ghostscript delegate, so PDF→image does not work | `pdftotext -layout in.pdf out.txt` · `py310 -c "import pymupdf"` |
-| Quirks paid for by incidents | see `EXPERIENCE.md` | — |
+| Quirks paid for by incidents | see `EXPERIENCE.md` — EXP-0003…EXP-0005 (tooling, winget), EXP-0007 (Grep is not byte-faithful), EXP-0008 (prove a guard red against `HEAD`), EXP-0009 (a summarized bug doc is not an inventory), EXP-0010 (Read renders NUL bytes as spaces) | `grep -n 'EXP-00' EXPERIENCE.md` |
 
 **The DRY boundary with "Document and text hygiene"** below: the dossier holds FACTS of the
 machine (what is installed, what `tar` is, which encoding); hygiene holds RULES OF BEHAVIOUR
@@ -438,15 +442,48 @@ driver. Two rules shape it, both paid for by `researches/02`:
 
 | Command | What it does |
 |---------|--------------|
-| `npm run gpu:info` | Read-only probe: model, driver, VBIOS, power-limit range, clocks, temperature. Re-derives the numbers the plans rest on. Add `--json` for machine output. |
-| `npm run gpu:info -- --json` | Same, as JSON — for diffing a profile's effect before/after. |
+| `npm run gpu:info` | Read-only probe: model, driver, VBIOS, power-limit range, clocks, temperature — plus the **supported-clock ladder** (phase 5's search space). Re-derives the numbers the plans rest on. |
+| `npm run gpu:info -- --json` | Same, as JSON, ladder included — for diffing a profile's effect before/after. |
+| `npm run mon -- --once` | One telemetry sample to stdout. |
+| `npm run mon -- --seconds 30 --out runs/x.jsonl` | Sample into JSONL: monotonic index, sorted keys, no `Date.now()` in compared output. Only the driver's `t` column moves between two runs. |
+| `npm run mon -- --check-decode` | **A guard, not a report.** Holds the throttle-bit table against the card's OWN named reasons, in both directions. Exit 1 on any disagreement. |
+| `npm run events -- --last 24h` | The four fault providers over a window. Each carries its own status — `ok` / `no-events` / `error` — because "found nothing" and "could not look" are different answers. |
+| `npm run events -- --fixtures` | The fault-parser fixture suite (P1-AC3). Two fixtures captured off this machine, three constructed; the filename says which. |
+| `npm run stress -- --workload <name> --seconds N` | The three-way verdict: checksum vs golden **and** the event log over the same window → PASS / SDC / CRASH, or UNKNOWN when a comparison could not happen. |
+| `npm run stress -- --workload <name> --transient` | The same, stepping the load between full and idle on config's duty cycle. **This is the shape that exposes an unsafe profile**; steady load is the wrong load. |
+| `npm run stress -- --capture-baseline` | Capture the golden references at stock plus the full card dump beside them. |
+| `npm run stress -- --verify-baseline` | **P1-AC5 as a command:** every baseline carries its stamp, and every stamp still matches the card. |
+| `npm run stress -- --selftest` | The verdict logic over all five outcomes, on injected data — runs without a GPU. |
+| `npm run workloads:build` / `workloads:verify` | Build KAGO's own CUDA loads and prove determinism / re-check the manifest. |
 | `nvidia-smi -q -d SUPPORTED_CLOCKS,PERFORMANCE,POWER` | The raw driver view when the wrapper is not enough. |
 
-> The workload runners, the golden-reference store and the Event Log watcher arrive with phase 1 of
-> `MASTER_PLAN.md`; add their rows here as they land.
+> **`runs/` is git-ignored, so the golden reference is LOCAL STATE.** A fresh clone has no baseline
+> and `npm run stress` answers UNKNOWN until `--capture-baseline` has run once. The shipped copy of
+> the same fact is `workloads/MANIFEST.json`. The tester deliberately does NOT fall back to it — a
+> missing baseline must be visible, not papered over.
 >
 > **Never write to the GPU to satisfy curiosity.** A write changes the owner's hardware state. Probes
-> are free; writes belong to a planned step with a stated rollback.
+> are free; writes belong to a planned step with a stated rollback. Every command in this table is
+> read-only with respect to GPU state: `stress` LOADS the card by running compute, and sets nothing.
+
+### The truth↔mirror pairs registry
+
+One row per pair, with the command that catches the drift (`Document & text hygiene` below explains
+why this registry exists at all: the costliest field defects were drift between a source of truth and
+its mirror, and drift is caught only by CHECKING PAIRS, never by reading one file carefully).
+
+| Truth | Mirror | The check |
+|---|---|---|
+| `researches/03` §2 — the fields probed available on this card | `config.TELEMETRY_FIELDS` | `npm run mon -- --once` — every field must come back populated; a field probed absent must not be in the list, and `hardware-mon` refuses to run if it is |
+| The card's own named clock-event reasons | `THROTTLE_BITS` in `hardware-mon.mjs`, and `config.THERMAL_THROTTLE_REASONS` | `npm run mon -- --check-decode` — both directions, plus config's names must exist in the table |
+| The Windows event schema per provider | `config.FAULT_PROVIDERS` + `__fixtures__/expectations.json` | `npm run events -- --fixtures` — a fixture with no expectation, or an expectation with no fixture, fails the suite |
+| The card's live driver / VBIOS | the stamp inside every `runs/baseline/*.json` | `npm run stress -- --verify-baseline` (R6) |
+| `workloads/MANIFEST.json` → `run_checksum` | `runs/baseline/<name>.json` → `checksum` | `npm run workloads:verify` and `npm run stress -- --verify-baseline`; the two numbers are the same fact recorded twice, one shipped and one local |
+| The sampled field list | the `fields` array in each JSONL header | reading the header — it is written from the same constant the sampler uses |
+
+**`hardware-mon` deliberately has NO second field list.** The pair `researches/03` ↔ sampler that the
+phase-1 plan asked for was collapsed into one truth instead: the module reads `config.TELEMETRY_FIELDS`
+directly, so there is nothing to drift. A pair that can be removed beats a pair that must be watched.
 
 ---
 
