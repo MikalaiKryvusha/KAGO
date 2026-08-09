@@ -30,12 +30,12 @@
 // injected process runner was never called (also confirmed black-box with gh removed from PATH —
 // the refusal, not an ENOENT, is what printed).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { decisionPaths, isoLocal, normalize } from './lib/review-core.mjs';
+import { isoLocal, normalize, writeDecision } from './lib/review-core.mjs';
 import { checkApproval, parseMetaBlock } from './review-gate.mjs';
 
 // A hard deadline on the child (C9 in spirit): every call this tool makes must terminate, so a
@@ -251,14 +251,14 @@ export function sendUpstream(documentPath, artifactId, { apply = false, run = de
  * decisionPaths(), so the naming rule keeps living in exactly one place (C1).
  */
 function recordDelivery(docPath, record, artifactId, delivered) {
-  const p = decisionPaths(docPath);
   record.artifacts[artifactId].delivered = delivered;
-  const body = JSON.stringify(record, null, 2) + '\n';
-  mkdirSync(p.archiveDir, { recursive: true });
-  writeFileSync(p.decision, body, 'utf8');
-  const archive = p.archiveFor(delivered.at);
-  writeFileSync(archive, body, 'utf8');
-  return { decision: p.decision, archive };
+  // Goes through the core's writeDecision, which MERGES: `record` is a snapshot parsed at the START
+  // of this run, before `gh` ran under a 120 s deadline, and writing it whole used to erase every
+  // answer the owner recorded on the page during the send window. The delivery gets its own archive
+  // stamp — archiving under the owner's decision time would rewrite the copy taken at approval, and
+  // archive copies are never overwritten (I2, C6).
+  const written = writeDecision(docPath, { artifacts: record.artifacts }, { archiveAt: delivered.at });
+  return { decision: written.decision, archive: written.archive };
 }
 
 // ---------------------------------------------------------------------------------------------

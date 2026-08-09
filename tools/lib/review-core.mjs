@@ -301,14 +301,36 @@ export function readDecision(docPath) {
 /**
  * Write the decision to two of its three places (the third — back into the source md — is
  * applyAnswersToDocument below, because it must run bottom-up over the live text).
+ *
+ * MERGES, NEVER CLOBBERS (`bugs/01` → the gate blocker and the sender's I2/C6 findings). Two writers
+ * share this file and each owns different keys: the PAGE owns `answers`, `comment`, `by`, `at`; the
+ * SEND side owns `artifacts` (the per-artifact approval the gate verifies) and `delivered`. The page
+ * used to rewrite the file whole, so a hand-authored artifact approval was destroyed by the owner's
+ * next answer — which made the send gate's only reachable verdict a refusal, forever. Keys absent
+ * from the new record survive; keys present in it win.
+ *
+ * The archive copy never overwrites: `archiveFor` names the file from a SECOND-resolution stamp, so
+ * two writes inside one second used to land on the same path.
+ *
+ * [TESTED: 2026-08-10 · tools/verify-review-contour.mjs block GATE]
  */
-export function writeDecision(docPath, record) {
+export function writeDecision(docPath, record, { archiveAt = null } = {}) {
   const p = decisionPaths(docPath);
   mkdirSync(p.archiveDir, { recursive: true });
-  const body = JSON.stringify(record, null, 2) + '\n';
+
+  const previous = existsSync(p.decision)
+    ? (() => { try { return JSON.parse(readFileSync(p.decision, 'utf8')); } catch { return {}; } })()
+    : {};
+  const merged = { ...previous, ...record };
+  const body = JSON.stringify(merged, null, 2) + '\n';
+
   writeFileSync(p.decision, body, 'utf8');
-  writeFileSync(p.archiveFor(record.at), body, 'utf8');   // archive copies are never overwritten
-  return p;
+
+  let archive = p.archiveFor(archiveAt || record.at);
+  for (let n = 2; existsSync(archive); n++) archive = archive.replace(/\.json$/u, `-${n}.json`);
+  writeFileSync(archive, body, 'utf8');
+
+  return { ...p, archive, merged };
 }
 
 /**

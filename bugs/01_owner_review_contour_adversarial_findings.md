@@ -1,6 +1,7 @@
 # Bug 01 — the owner-review contour: the adversarial review, its true inventory, and the first fix pass
 
-**Status:** 🟡 PARTIAL — 15 findings fixed and guarded, 1 refuted, 38 still open
+**Status:** 🟡 PARKED — every blocker closed · 23 fixed and guarded · 1 refuted · 30 parked by the
+owner's ruling ("чини явные блокеры, и переходим к KAGO", 2026-08-10)
 **Version/build:** contour at `6879592` / `03ae141` · fix pass at session 3 (2026-08-09 → 10)
 **When/context:** filed 2026-08-09 session 2; re-verified and partly fixed session 3
 
@@ -45,8 +46,9 @@ node tools/verify-review-contour.mjs --only A1  # one block
 
 Every block asserts the CORRECT behaviour, never the current one, so the same file re-verifies the
 findings and then guards the fixes. **Proven red before green:** the file was run against `HEAD`
-(a `git archive HEAD` copy of `tools/`) before a single line was changed — 12 of 13 blocks failed
-there, and the 13th (`I4b`) passed, which is what refutes its finding.
+(a `git archive HEAD` copy of `tools/`) before a single line was changed. Of the 18 blocks the file
+carries today, every one went red on the version it judges — except `I4b`, which is green on HEAD
+too, and that is precisely what refutes its finding.
 
 ## What session 3 did
 
@@ -57,7 +59,7 @@ there, and the 13th (`I4b`) passed, which is what refutes its finding.
    document instead of rebuilding a head and a tail). P8+P1 are one peel. C7/C8/C9 are three guards
    that could not fail, fixed as three refusals.
 3. **Built `tools/verify-review-contour.mjs`** as part of the fix rather than after it (the bug's
-   own fix plan, step 3) — 13 blocks, run in ~4 s, no browser needed.
+   own fix plan, step 3) — 18 blocks, ~7 s, no browser needed.
 
 Two defects were found *while* fixing and are recorded here because they belong to the same class:
 
@@ -83,30 +85,39 @@ over the owner's language and never executed against it.** Four of the 14 `quest
 findings are the same rake — `\w` is ASCII-only in Node even under `/u`, which the file's own header
 warns about three lines above the code that commits it.
 
-## The remaining work, in order
+## The blockers are closed. What is left, and the owner's ruling on it
 
-The blocker below is first because it makes the send half of the contour inoperable, not merely
-wrong:
+**All 6 blockers are fixed and guarded** (session 3, second pass):
 
-1. 🔴 **`review-gate.mjs` blocker — nothing ever writes `decision.artifacts`.** The page's
-   `recordDecision` writes `{kind, document, by, at, at_human, comment, answers}`; the gate requires
-   `artifacts.<id>.status === 'approved'` plus a sha-256. So for any artifact the owner approves
-   *through the contour*, the gate's only reachable verdict is a refusal. The one passing proof in
-   the build report needed a hand-written decision file. This needs a decision about the contract,
-   not a patch: either the page grows an artifact-approval surface, or the artifact approval is
-   declared a separate, hand-authored record and the gate says so in its refusal.
-2. 🔴 **`questions-guard.mjs` — four Cyrillic-blind patterns** (`\w` under `/u`). Each one is a guard
-   that reports CLEAN because it cannot match its own language. Fix with `\p{L}`, and prove each
-   pattern red on the string it is meant to catch.
-3. 🔴 **The sender's remaining major findings** — the decision snapshot clobbered by
-   `recordDelivery`, `repo`/`title` living outside the approved hash, the timeout that asserts "no
-   delivery happened" when it cannot know, and the archive filename colliding at second resolution.
-4. 🔴 **The page's remaining major findings** — the silence clock starting before the page loads,
-   `process.exit(0)` on the ALREADY-OPEN branch meaning "recorded" to a waiting agent, the partial
-   write in `recordDecision` reported as "nothing was written", and `refreshQueue` rewriting the
-   whole queue from one run's narrow list.
+1. ✅ **`review-gate.mjs` — nothing ever wrote `decision.artifacts`,** so the gate's only reachable
+   verdict for a contour-recorded approval was a refusal, forever. Two halves, both closed:
+   `core.writeDecision` now **merges** instead of rewriting the file whole, so a hand-authored
+   artifact approval survives the owner's next answer; and the refusal itself now says what the
+   page does and does not record, and prints the exact `artifacts` block to write. The approval
+   stays hand-authored ON PURPOSE — approving a SEND is a different act from answering a question,
+   and deriving one from the other would be a send nobody authorized. Guard: block `GATE`.
+2. ✅ **`questions-guard.mjs` — four Cyrillic-blind patterns.** `\w` is ASCII-only in Node even under
+<!-- owner-review:allow because=цитата шаблона сторожа как доказательство находки, а не вопрос владельцу -->
+   `/u`, so «Вопросы владельцу», «Нужно ваше решение», «Владелец, подтвердите» and every form of
+   «развилка» walked straight past a guard that then reported ЧИСТО. Measured before the fix: **13
+   of 18 real owner-questions invisible.** Now `\p{L}`, plus the nominative stem the address case
+   actually uses. Guards: `G1a`–`G1c`; `G1d` holds the no-false-alarm baseline (G9).
 
-Every one of them gets a block in `tools/verify-review-contour.mjs`, proven red first.
+The owner's ruling on the rest, 2026-08-10: **"чини явные блокеры, и переходим к KAGO, срать на
+леса"**. So the remaining 30 findings are PARKED, not scheduled. The list below stays
+because it is a list — a future session picks any row up cold. The one operational consequence to
+know while they are parked:
+
+> **`send-upstream.mjs` has never delivered anything and is not on the happy path.** Upstream KAIF
+> tickets are filed BY HAND, as KAIF#7 was. Do not reach for the sender until its remaining major
+> findings are closed — chiefly `repo` and `title` living OUTSIDE the approved hash, and the
+> timeout that asserts "no delivery happened" when it cannot know.
+
+When work resumes here, the order is: the sender's majors → the page's majors (the silence clock
+starting before the page loads · `process.exit(0)` on the ALREADY-OPEN branch meaning "recorded" to
+a waiting agent · a partial write reported as "nothing was written" · `refreshQueue` rewriting the
+whole queue from one run's narrow list) → the minors. Every one gets a block in
+`tools/verify-review-contour.mjs`, proven red first.
 
 ## Full inventory — 54 distinct findings
 
@@ -114,20 +125,20 @@ Deduped by file + quoted line from 71 raw findings across nine reviewers. `why` 
 its first ~420 characters; the reviewers' full text lives nowhere else, so what is here is what
 survives. ✅ fixed in session 3 · ⚪ refuted · 🔴 open.
 
-Open by severity: **5 blocker · 17 major · 16 minor.**
+Open by severity: **0 blocker · 15 major · 15 minor.**
 
-#### `tools/questions-guard.mjs` — 14 findings, 14 still open
+#### `tools/questions-guard.mjs` — 14 findings, 10 still open
 
-- 🔴 **blocker** · rake 7 (also C4 rule 5) · seen by 2 lens(es)
+- ✅ **blocker** · rake 7 (also C4 rule 5) · seen by 2 lens(es) · **FIXED:** G1a — \p{L}, not \w
   - quote: `{ re: /вопрос\w*\s+(?:к\s+владельцу|для\s+владельца|владельцу)(?!\p{L})/iu, why: 'заголовок «вопросы владельцу»' },`
   - why: The file's own head comment (line 23) promises «every letter class is \p{L} with the `u` flag; \w and \b stay ASCII-only in Node and a guard written with them silently misses its own language» — and then uses \w in five live patterns (lines 73, 74, 101, 102, 103). This is not a comment-only implementation of rake 7, it is the inverse: the id is invoked in prose while the code commits the exact rake. Measured on the r
-- 🔴 **blocker** · rake 7 / G1 (sign b) · seen by 3 lens(es)
+- ✅ **blocker** · rake 7 / G1 (sign b) · seen by 3 lens(es) · **FIXED:** G1b — \p{L}, not \w
   - quote: `{ re: /(?:нужн\w+|требуетс\w+|не\s+хватает)\s+(?:ваш\w+|решени\w+\s+владельца|ответ\w*\s+владельца|подтвержден\w+\s+влад`
   - why: Every branch of this rule except one requires \w+ to consume a Cyrillic suffix, which it cannot. Executed: 'нужно ваше решение' → MISS, 'нужно решение владельца' → MISS, 'требуется подтверждение владельца' → MISS, 'не хватает ответа владельца' → MISS, 'не хватает слова владельца' → MISS. The only string that fires is the ungrammatical 'не хватает ответ владельца' → HIT. So the whole «запрос решения владельца» sign — 
-- 🔴 **blocker** · G1 (sign b — an address at the START of a line) · seen by 3 lens(es)
+- ✅ **blocker** · G1 (sign b — an address at the START of a line) · seen by 3 lens(es) · **FIXED:** G1c — the nominative «владелец» is matched at last
   - quote: `{ re: /^владельц[ую]?\s*[,:]|^владельц[ую]?\s+[—–-]\s/iu, anchored: true, why: 'обращение «Владелец, …»' },`
   - why: The pattern cannot match the example named in its own `why` string. The Russian nominative — the case an address actually uses — is «владелец», with no soft sign; the stem «владельц» occurs only in oblique cases. Executed: 'Владелец, подтвердите частоту.' → MISS, 'Владелец: подтвердите частоту.' → MISS, 'Владелец — подтвердите.' → MISS; only 'Владельцу, подтвердите.' (dative, which nobody writes as an address) → HIT.
-- 🔴 **blocker** · G1 · seen by 1 lens(es)
+- ✅ **blocker** · G1 · seen by 1 lens(es) · **FIXED:** G1a — \p{L}, not \w
   - quote: `{ re: /развилк\w*\s+(?:для\s+владельца|к\s+владельцу|владельцу)(?!\p{L})/iu, why: 'заголовок «развилки для владельца»' }`
   - why: `\w` is ASCII-only in Node even under `u` — the exact rake the file's own header claims to have avoided (line 23: «\w and \b stay ASCII-only in Node and a guard written with them silently misses its own language»). `развилк` is followed by a Cyrillic vowel in EVERY real Russian form, so `\w*` matches empty, `\s+` then meets «а»/«и»/«е» and fails. Measured on the built file: `Развилка для владельца` ✗, `Развилки для в
 - 🔴 **major** · G2 (debt baseline / ratchet) · seen by 2 lens(es)
@@ -161,9 +172,9 @@ Open by severity: **5 blocker · 17 major · 16 minor.**
   - quote: `const freeze = argv.includes('--freeze');`
   - why: argv is never validated — the CLI only asks `includes()` three times, so any unrecognized flag is silently accepted. Reproduced: `node tools/questions-guard.mjs --frezee --bogus` prints the full clean report ending `ИТОГ: ЧИСТО. Новых нарушений нет.` and exits 0. The owner who typos `--freeze` is told the run was clean and believes the ratchet is armed when nothing was written — which is consistent with the state act
 
-#### `tools/review-gate.mjs` — 7 findings, 6 still open
+#### `tools/review-gate.mjs` — 7 findings, 5 still open
 
-- 🔴 **blocker** · I4 · seen by 2 lens(es)
+- ✅ **blocker** · I4 · seen by 2 lens(es) · **FIXED:** GATE — writeDecision merges, so a hand-authored approval survives; the refusal now names the truth
   - quote: `const entry = decision.artifacts && decision.artifacts[id];`
   - why: Nothing in this repository ever writes `decision.artifacts`. The contour's only decision producer is review.mjs → recordDecision(), whose record is verbatim `const record = {` / `kind: d.isNotice ? 'notice' : 'interview',` / `document: d.name,` / `by,` / `at,` / `at_human: human,` / `comment: docComment,` / `answers,` / `};` (tools/review.mjs:1201-1209) — no `artifacts` key, and `grep -ni "artifact|артефакт" tools/re
 - 🔴 **minor** · I10 · seen by 1 lens(es)
@@ -263,12 +274,12 @@ Open by severity: **5 blocker · 17 major · 16 minor.**
   - quote: `const fence = line.match(/^ FENCE(\d+) $/u);`
   - why: The fence placeholder is only recognised when it occupies the whole line, but the substitution above it replaces a fenced block wherever it sits — including indented inside a list item, where the placeholder ends up mid-line. The line then falls through to the paragraph branch and the owner is shown the literal token instead of the code, while the code itself is dropped. Reproduced end-to-end through the page, not ju
 
-#### `tools/send-upstream.mjs` — 10 findings, 7 still open
+#### `tools/send-upstream.mjs` — 10 findings, 4 still open
 
-- 🔴 **major** · I2 · seen by 3 lens(es)
+- ✅ **major** · I2 · seen by 3 lens(es) · **FIXED:** GATE — the page no longer rewrites the decision wholesale
   - quote: `if (entry.delivered && entry.delivered.url) {`
   - why: The only guard against filing the owner's ticket twice lives inside `<doc>.decision.json` — a file the page rewrites WHOLESALE. review.mjs:1227 calls `core.writeDecision(d.file, record)`, and review-core.mjs:294 is ` writeFileSync(p.decision, body, 'utf8');` with the record shown in the blocker above, which carries no `artifacts` key. So the owner answering one more question, or leaving one comment, on that same docu
-- 🔴 **major** · C6 · seen by 1 lens(es)
+- ✅ **major** · C6 · seen by 1 lens(es) · **FIXED:** GATE — recordDelivery merges instead of writing a stale snapshot
   - quote: `record.artifacts[artifactId].delivered = delivered;`
   - why: `record` is `verdict.decision` — a snapshot JSON.parse'd at the START of the run, before `gh` ran under a 120 s deadline. recordDelivery then serializes that whole stale snapshot back over `<doc>.decision.json` (line 239). Any decision the owner records on the page during the send window — a new answer, a comment, a rejection of another artifact — is silently overwritten by a record read minutes earlier. There is no 
 - 🔴 **major** · I10 · seen by 1 lens(es)
@@ -292,7 +303,7 @@ Open by severity: **5 blocker · 17 major · 16 minor.**
 - 🔴 **minor** · I4 · seen by 1 lens(es)
   - quote: `const flags = new Set(argv.filter((a) => a.startsWith('--')));`
   - why: `flags.has('--apply')` is an exact match and every other `--` token is swallowed without a word — the tolerance documented for `--no-serve` extends to typos. `--apply=true`, `--Apply`, `--aply` all yield a DRY RUN that returns `{ code: 0, ok: true }` (line 194). The screen does say СУХОЙ ПРОГОН, so it is not fully silent to a watching human — but the exit code says success to a ritual or an autoloop, and the ticket t
-- 🔴 **minor** · I2 · seen by 2 lens(es)
+- ✅ **minor** · I2 · seen by 2 lens(es) · **FIXED:** GATE — the archive copy never collides at second resolution
   - quote: `const archive = p.archiveFor(delivered.at);`
   - why: `delivered.at` is `isoLocal(now)` — SECOND resolution — and `archiveFor` builds the filename from it, so two writes inside one second land on the same file and the second silently overwrites the first. Observed in the double-send probe: both runs printed 'Копия в архиве: …\decisions\archive\doc--2026-08-09T23-25-25+03-00.json' — the same path twice. I2/C6 say the archive copy is never overwritten, and this function's
 

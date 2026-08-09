@@ -70,8 +70,8 @@ const QUEUE_HEADING_PATTERNS = [
   // (dative) is a question TO the owner — a violation; «вопрос владельца» (genitive) is a question
   // BY the owner, which is ordinary prose about what the owner once asked. Both live in this repo,
   // and the genitive form produced 2 of the first 4 hits (measured, first run).
-  { re: /вопрос\w*\s+(?:к\s+владельцу|для\s+владельца|владельцу)(?!\p{L})/iu, why: 'заголовок «вопросы владельцу»' },
-  { re: /развилк\w*\s+(?:для\s+владельца|к\s+владельцу|владельцу)(?!\p{L})/iu, why: 'заголовок «развилки для владельца»' },
+  { re: /вопрос\p{L}*\s+(?:к\s+владельцу|для\s+владельца|владельцу)(?!\p{L})/iu, why: 'заголовок «вопросы владельцу»' },
+  { re: /развилк\p{L}*\s+(?:для\s+владельца|к\s+владельцу|владельцу)(?!\p{L})/iu, why: 'заголовок «развилки для владельца»' },
   { re: /awaiting\s+(?:the\s+)?owner/iu, why: 'заголовок «awaiting the owner»' },
   { re: /awaits?\s+(?:the\s+)?owner/iu, why: 'заголовок «awaits the owner»' },
   { re: /open\s+questions?/iu, why: 'заголовок «open questions»' },
@@ -95,12 +95,18 @@ const OWNER_ADDRESS_PATTERNS = [
   // a compound word: «owner-vs-owner» opened a line in a report and was read as an address to the
   // owner on the first run — a false alarm of exactly the kind that teaches the owner to ignore the
   // tool (G9), so the separator is spelled out instead of hidden inside a character class.
-  { re: /^владельц[ую]?\s*[,:]|^владельц[ую]?\s+[—–-]\s/iu, anchored: true, why: 'обращение «Владелец, …»' },
+  // The NOMINATIVE is the case an address actually uses, and the first version could not match it:
+  // «владелец» has no soft sign, while the stem written here was «владельц», which occurs only in
+  // oblique cases. So «Владелец, подтвердите…» — the exact string this pattern's own `why` names —
+  // walked past the guard (`bugs/01` → G1 sign b). `[ье]` covers both stems; `[ую]?` keeps the
+  // dative and stays away from the genitive «владельца», which is prose about the owner, not an
+  // address to him.
+  { re: /^владел[ье]ц[ую]?\s*[,:]|^владел[ье]ц[ую]?\s+[—–-]\s/iu, anchored: true, why: 'обращение «Владелец, …»' },
   { re: /^owner\s*[,:]|^owner\s+[—–-]\s/iu, anchored: true, why: 'обращение «Owner, …»' },
   // Dative only — see the case note above the heading patterns.
   { re: /вопрос\w*\s+(?:к\s+владельцу|для\s+владельца|владельцу)(?!\p{L})/iu, why: 'вопрос владельцу вне interviews/' },
-  { re: /(?:нужн\w+|требуетс\w+|не\s+хватает)\s+(?:ваш\w+|решени\w+\s+владельца|ответ\w*\s+владельца|подтвержден\w+\s+владельца|слов\w+\s+владельца)/iu, why: 'запрос решения владельца' },
-  { re: /жду\s+(?:ваш\w+|ответа|решения|подтверждения|слова)/iu, why: 'ожидание ответа владельца' },
+  { re: /(?:нужн\p{L}+|требуетс\p{L}+|не\s+хватает)\s+(?:ваш\p{L}+|решени\p{L}+\s+владельца|ответ\p{L}*\s+владельца|подтвержден\p{L}+\s+владельца|слов\p{L}+\s+владельца)/iu, why: 'запрос решения владельца' },
+  { re: /жду\s+(?:ваш\p{L}+|ответа|решения|подтверждения|слова)/iu, why: 'ожидание ответа владельца' },
   { re: /прошу\s+(?:подтвердить|решить|выбрать|ответить|утвердить|согласовать)/iu, why: 'просьба к владельцу решить' },
   { re: /^(?:подтвердите|выберите|решите|ответьте|утвердите|согласуйте)(?!\p{L})/iu, anchored: true, why: 'повелительное обращение к владельцу' },
   { re: /questions?\s+(?:for|to)\s+the\s+owner/iu, why: 'вопрос владельцу вне interviews/' },

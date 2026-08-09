@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as core from './lib/review-core.mjs';
 import { repoFromTarget, sendUpstream } from './send-upstream.mjs';
+import { scanDocumentForOwnerQuestions } from './questions-guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REVIEW = join(HERE, 'review.mjs');
@@ -496,6 +497,109 @@ block('I4b', 'a decision that rejects an artifact is refused even with no docume
   const res = sendUpstream(docPath, 'art1', { apply: true, run: () => { throw new Error('gh must not be reached'); } });
   must(res.ok === false && res.called === false,
     'a rejected artifact passed the gate when the record carried no document-level status');
+});
+
+// ---------------------------------------------------------------------------------------------
+// 4b. The questions guard — the blockers are patterns that cannot match the owner's language
+//
+// `\w` and `\b` are ASCII-only in Node even under `/u`, so a Russian stem followed by `\w*` matches
+// the empty string and the pattern dies on the very suffix that makes the phrase grammatical. The
+// guard then reports ЧИСТО because it is blind, which is the worst state a guard can be in: a false
+// green nobody audits. The file's own header warns about this rake three lines above the code that
+// commits it (`bugs/01` → rake 7 / G1).
+// ---------------------------------------------------------------------------------------------
+
+/** Feed one line to the guard as a whole document and say whether it was caught. */
+function guardCatches(line) {
+  const text = ['# Проверочный документ', '', line, ''].join('\n');
+  return scanDocumentForOwnerQuestions('plans/probe.md', text).length > 0;
+}
+
+block('G1a', 'the guard catches an owner-question heading in every Russian form, not only the bare stem', async () => {
+  const mustCatch = [
+    '## Вопросы владельцу',
+    '## Вопросов владельцу накопилось',
+    '## Вопрос владельцу',
+    '## Развилки для владельца',
+    '## Развилка для владельца',
+    '## Развилку владельцу',
+  ];
+  const missed = mustCatch.filter((l) => !guardCatches(l));
+  must(missed.length === 0, `${missed.length} heading(s) the guard cannot see: ${missed.join(' | ')}`);
+});
+
+block('G1b', 'the guard catches a request for the owner\'s decision in every Russian form', async () => {
+  const mustCatch = [
+    'Нужно ваше решение по частоте.',
+    'Нужна ваша оценка риска.',
+    'Требуется подтверждение владельца.',
+    'Не хватает вашего слова по этому пункту.',
+    'Жду вашего ответа по варианту B.',
+  ];
+  const missed = mustCatch.filter((l) => !guardCatches(l));
+  must(missed.length === 0, `${missed.length} request(s) the guard cannot see: ${missed.join(' | ')}`);
+});
+
+block('G1c', 'the guard catches an address to the owner in the NOMINATIVE — the case an address uses', async () => {
+  const mustCatch = [
+    'Владелец, подтвердите частоту.',
+    'Владелец: подтвердите частоту.',
+    'Владелец — подтвердите частоту.',
+    'Владельцу, подтвердите частоту.',
+  ];
+  const missed = mustCatch.filter((l) => !guardCatches(l));
+  must(missed.length === 0, `${missed.length} address(es) the guard cannot see: ${missed.join(' | ')}`);
+});
+
+block('G1d', 'the guard still stays quiet on the forms that are NOT a question to the owner (G9)', async () => {
+  // A false alarm is worse than a miss: widening the patterns must not swallow ordinary prose.
+  // The genitive is a question BY the owner — the case carries the direction (the file's own note).
+  const mustStaySilent = [
+    'Вопрос владельца был закрыт ещё в прошлой сессии.',
+    'Вопросы владельца из чата перенесены в интервью.',
+    'Развилка владельца уже описана в мастер-плане.',
+    'owner-vs-owner сравнение двух прогонов',
+    'В отчёте есть раздел про решения владельца, принятые ранее.',
+  ];
+  const fired = mustStaySilent.filter((l) => guardCatches(l));
+  must(fired.length === 0, `${fired.length} ordinary line(s) raised a false alarm: ${fired.join(' | ')}`);
+});
+
+block('GATE', 'an artifact approval survives the owner\'s next answer, and the refusal names the truth', async () => {
+  const dir = freshDir('gate');
+  const docPath = join(dir, 'interview_903_single.md');
+  writeFileSync(docPath, docWithOneAnswerableQuestion(), 'utf8');
+
+  // Before any approval exists the gate must REFUSE — and say why, not just that.
+  const { checkApproval } = await import('./review-gate.mjs');
+  const blind = checkApproval(docPath, 'art1');
+  must(blind.ok === false, 'the gate approved a document with no decision at all');
+
+  // A hand-authored approval, exactly as the refusal instructs.
+  const p = core.decisionPaths(docPath);
+  const body = '# Тело\n\nтекст\n';
+  writeFileSync(join(dir, 'art1_body.md'), body, 'utf8');
+  core.writeDecision(docPath, {
+    kind: 'interview', document: 'interview_903_single.md', by: 'Mikalai Kryvusha',
+    at: core.isoLocal(new Date()), answers: {},
+    artifacts: { art1: { status: 'approved', sha256: core.hashBody(body) } },
+  });
+
+  // The owner then answers a question on the page — the write that used to erase the approval.
+  const run = startContour([docPath, '--no-signal', '--no-open']);
+  try {
+    const url = await run.url;
+    const res = await postSave(url, { documents: { interview_903_single: { comment: '', noticeRead: false, answers: { Q1: { choice: 'A', text: '', comment: '' } } } } });
+    must(res.json && res.json.ok, `the answer was refused: ${res.text}`);
+    await run.exit;
+  } finally {
+    run.kill();
+  }
+
+  const after = JSON.parse(readFileSync(p.decision, 'utf8'));
+  must(after.artifacts && after.artifacts.art1 && after.artifacts.art1.status === 'approved',
+    `the owner's answer destroyed the artifact approval — the send gate can never pass again. Record now: ${tail(JSON.stringify(after), 240)}`);
+  must(after.answers && after.answers.Q1, 'the answer itself did not survive the merge');
 });
 
 // ---------------------------------------------------------------------------------------------

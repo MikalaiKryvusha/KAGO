@@ -255,8 +255,23 @@ export function checkApproval(documentPath, artifactId) {
 
     const entry = decision.artifacts && decision.artifacts[id];
     if (!entry) {
+      // THE REFUSAL NAMES THE TRUTH (`bugs/01` → the gate blocker). Nothing in the contour writes
+      // `decision.artifacts`: the page records the owner's ANSWERS, and it has no
+      // approve-this-send card at all. So this branch is the ONLY verdict reachable for any
+      // artifact the owner "approved" through the page, and the old message — a bare "there is no
+      // record" — sent him hunting through a file for something that was never going to be there.
+      // The approval is hand-authored on purpose: approving a SEND is a different act from
+      // answering a question, and inventing it from an answer would be a send nobody authorized.
       const known = Object.keys(decision.artifacts || {}).join(', ') || 'ни одного';
-      return refuse(`в решении нет записи об артефакте «${id}»; в решении есть: ${known}`);
+      return refuse(
+        `в решении нет записи об артефакте «${id}»; в решении есть: ${known}. `
+        + 'Страница контура записывает ОТВЕТЫ владельца и не записывает одобрения отправки — такой '
+        + 'карточки на ней нет. Одобрение пишется в решение руками, полем artifacts: '
+        + `{"artifacts": {"${id}": {"status": "approved", "sha256": "<sha-256 тела>"}}}. `
+        + 'Сумму даёт: node -e "import(\'./tools/lib/review-core.mjs\').then(m=>console.log('
+        + 'm.hashBody(require(\'fs\').readFileSync(process.argv[1],\'utf8\'))))" <файл тела>. '
+        + 'Ответ владельца это поле больше не затирает — запись решения теперь сливается, а не перезаписывается.',
+      );
     }
     const status = String(entry.status ?? '');
     if (status !== 'approved') {
