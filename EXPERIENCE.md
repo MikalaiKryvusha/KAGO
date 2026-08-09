@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0007 · 2026-08-09 · ❌→✅ · #tooling #reading #verification #false-lead
+**Context:** reviewing code written by subagents — reading `tools/questions-guard.mjs` and `tools/review.mjs` through the Grep tool's content output.
+**Tried / did:** read Grep's `-C` context lines as if they were the file's bytes, and started diagnosing two "syntax defects": comment lines beginning `\ T9:` instead of `// T9:`, and a Windows fallback spawning `cmd.exe` with `'\c'` instead of `'/c'`.
+**Result:** ❌→✅ both were phantoms. `node --check` passed all along, and opening the same lines with Read showed correct `//` and `'/c'`. Grep's rendering is not byte-faithful for slashes and backslashes in context lines; twice in one session it nearly sent me fixing code that was already right.
+**Lesson:** **Grep locates, Read verifies.** Never conclude anything about EXACT CHARACTERS — slashes, escapes, quotes, invisible bytes — from a search tool's context output; re-open the span with Read before believing a syntax defect exists. The cheap tell is a contradiction between two instruments: if the parser says the file is fine and your eyes say it is broken, suspect the eyes' transport first. Same family as EXP-0004 (a tool exiting 0 while silently dropping characters) — the instrument, not the artifact, is the thing lying.   → link: tools/review.mjs · tools/questions-guard.mjs
+**Repro:** `node --check <file>` first; if it passes, any "syntax defect" you think you see came from your reader — confirm with `Read` on the exact line range before editing.
+**Trigger:** about to fix a syntax-level defect spotted in grep/search output → run `node --check` and re-read the span with Read first.
+**Not for:** semantic review — grep output is perfectly good for finding WHERE something is, and for reading prose, names and structure.
+
 ### EXP-0006 · 2026-08-09 · ❌→✅ · #canon #rules #language #kaif #audience
 **Context:** first `/plan-epic` run in this deployment produced the epic meta-plan in English, in a project whose working language is Russian.
 **Tried / did:** followed the canon's *Languages* section literally — it routes by file and directory, and `plans/` sits on the English side.

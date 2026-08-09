@@ -1121,7 +1121,12 @@ function openWindow(url) {
   if (browser) {
     try {
       spawn(browser.path, ['--app=' + url, DEF8_WINDOW_SIZE], { detached: true, stdio: 'ignore' }).unref();
-      console.log('ОКНО: отдельное окно ' + browser.name + ' (' + DEF8_WINDOW_SIZE + ')');
+      // I27 in miniature: report the ACTION, never the outcome. Spawning the browser we found on
+      // disk does not prove the window that appears belongs to it — observed 2026-08-09, when Edge
+      // was found and launched, and the page came up in Chrome because the system handed the URL
+      // on. A line claiming "a separate Edge window" would have been a small, confident lie.
+      console.log('ОКНО: запросил отдельное окно ' + browser.name + ' (' + DEF8_WINDOW_SIZE + ')');
+      console.log('      Если система открыла другим браузером — так решила она, не контур.');
       return true;
     } catch { /* fall through to the honest fallback */ }
   }
