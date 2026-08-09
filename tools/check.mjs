@@ -7,7 +7,9 @@
 //
 // Usage:  npm run check        (this is <BUILD_COMMAND> for the framework's purposes)
 // Exit:   0 = every file parses · 1 = at least one file failed to parse
-// [TESTED: 2026-08-09 · `npm run check` → "checked 3 .mjs file(s), 0 failed", exit 0]
+// [TESTED: 2026-08-09 · `npm run check` → "checked 2 .mjs file(s), 0 failed", exit 0. The count was 3
+//  before verify-final removed the installer's KAIF-LOADER.mjs from the root — the file count tracks
+//  the tree, so re-read it rather than expecting this number.]
 
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
