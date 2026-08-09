@@ -25,12 +25,16 @@ node_modules/
 logs/
 runs/
 
-# Compiled workload binaries. The .cu sources ship; the built artefacts are machine-local
-# (KAGO builds them via toolchain.mjs). Pending the owner's answer in interview_001 Q3.
-workloads/*.exe
+# Compiled workload binaries: **the .exe SHIPS** — owner's decision, interview 001 Q3 = B
+# (2026-08-09 23:23 +03:00), chosen over the agent's recommendation so KAGO works on a machine
+# with no CUDA Toolkit. The ignore line for *.exe that stood here until that answer is REMOVED
+# rather than commented out; a cancelled rule left alive keeps steering the tree.
+# Build intermediates still have no business in history — they are not the artefact, only its swarf.
 workloads/*.obj
 workloads/*.exp
 workloads/*.lib
+workloads/*.pdb
+workloads/*.lib.exp
 
 # Measured profiles are machine-specific and unsafe to reuse on another card
 # (card-to-card Vmin varies by up to 70 mV — researches/02). Never share them as if portable.

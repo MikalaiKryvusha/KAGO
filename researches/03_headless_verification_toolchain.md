@@ -88,7 +88,7 @@ Two properties matter, and both are now observed rather than hoped for:
 | UNIGINE Superposition / Heaven | Command-line automation + CSV reports exist | **Professional edition only** | rejected — paid, and a GUI app |
 | 3DMark (TimeSpy, SpeedWay) | CLI automation exists | **Professional edition only** | the PDF's acceptance matrix rests on it — see the fork in §6 |
 | OCCT | Fully automatable via command-line switches | **Enterprise licence only**; free tier is personal-use GUI | rejected as an engine dependency |
-| FurMark 2 | CLI parameters documented (`-demo`, `-furmark-vram-test-gb`, presets) | free for personal use | usable *as a harness tool*, but it is a flat-load test — the **wrong** load shape per `researches/02` §2 (voltage noise dominates, transients expose instability, sustained 100 % does not) |
+| FurMark 2 | CLI parameters documented (`-demo`, `-furmark-vram-test-gb`, presets) | free for personal use | **NOT ADOPTED — owner's decision, interview 001 Q2 = A, 2026-08-09.** Not a dependency and not a bench tool either: the owner read his own constraint literally. It was also the wrong load shape — flat 100 %, while `researches/02` §2 found transients are what expose instability |
 
 **The pattern is consistent enough to be a finding, not an accident:** the exact capability KAGO
 needs — *drive a GPU load from a script and read a machine-parseable result* — is the feature these
@@ -201,13 +201,19 @@ Windows ships.
   markers per `TESTING_FRAMEWORK.md`, distinguishing the two.
 - **A build-time toolchain locator** is a named phase-1 step, not an assumption.
 
-## 6. Forks for the owner
+## 6. Forks for the owner — CLOSED
 
-Per `AGENT_GUIDE.md` → *the place of questions*, the open forks are **not** listed here. They live,
-with the material needed to decide them quoted in full, in
-**`interviews/interview_001_harness_boundaries.md`** — three questions: the acceptance-benchmark
-question (3DMark is Professional-only), the graphics-load question (write our own vs. allow FurMark
-as a harness-only tool), and the shipped-binary question (does the compiled workload get committed).
+All three were answered on **2026-08-09 23:23 +03:00** through the review contour
+(`interviews/interview_001_harness_boundaries.md`, record in `interviews/decisions/`):
+
+| Fork | Answer | Consequence for this document |
+|---|---|---|
+| Acceptance benchmark (3DMark automation is Professional-only) | **A** | the automated gate uses KAGO's own numbers; the percentage-of-stock figure is one manual 3DMark run by the owner at the close of phase 6 |
+| FurMark on the bench | **A** | not adopted at all — §3.1 updated |
+| Does the compiled binary ship | **B** | **it ships**, against the agent's recommendation. §3.2's conclusion is unaffected — we still write our own loads and still build them from source; what changes is that a machine without the CUDA Toolkit can now run them |
+
+The `.gitignore` line that excluded `workloads/*.exe` was REMOVED rather than commented out: a
+cancelled rule left alive keeps steering the tree (`/owner-reviews` I19).
 
 ## 7. Sources
 

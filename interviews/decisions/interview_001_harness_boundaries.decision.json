@@ -1,0 +1,25 @@
+{
+  "kind": "interview",
+  "document": "interview_001_harness_boundaries.md",
+  "by": "Mikalai Kryvusha",
+  "at": "2026-08-09T23:23:45+03:00",
+  "at_human": "09.08.2026 23:23",
+  "comment": "",
+  "answers": {
+    "Q1": {
+      "choice": "A",
+      "text": "",
+      "comment": ""
+    },
+    "Q2": {
+      "choice": "A",
+      "text": "",
+      "comment": ""
+    },
+    "Q3": {
+      "choice": "B",
+      "text": "",
+      "comment": ""
+    }
+  }
+}

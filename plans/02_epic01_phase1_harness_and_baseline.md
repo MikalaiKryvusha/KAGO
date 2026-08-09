@@ -63,6 +63,10 @@ from reading the diff (`TESTING_FRAMEWORK.md`).
       already proven to build and produce the same checksum (`researches/03` §2.1 and the repair
       episode of 2026-08-09).
 - [ ] Absent toolchain is a clean, named failure — never a crash, and never a silent skip.
+      **Changed by the owner, interview 001 Q3 = B (2026-08-09):** an absent toolchain no longer
+      costs the sweep, because the built binaries ship in the repository. The locator's job is now
+      to REBUILD when a source changes or when a binary's checksum does not match its manifest —
+      not to be the only way a workload can exist.
 - **Verify:** run it on this machine and print the resolved paths; then run it with `PATH` stripped
   of the CUDA bin directory and watch it fail with the named error rather than a stack trace.
 
@@ -78,7 +82,13 @@ from reading the diff (`TESTING_FRAMEWORK.md`).
 - [ ] `workloads/README.md` — what each load is FOR, in terms of the failure class it exposes.
 - [ ] The transient shape is **not** a third kernel: it is a scheduler in `stress-tester.mjs` that
       steps the loads between idle and full (config's duty cycle).
-- **Verify:** build each through `toolchain.mjs`, run 5×, compare checksums (P1-AC1).
+- [ ] **The built `.exe` ships** (owner, interview 001 Q3 = B). Because a committed binary is the
+      one artefact nobody can review by eye, it travels with `workloads/MANIFEST.json`: for each
+      binary its sha-256, the source it was built from, the toolchain that built it, and the
+      checksum its own run produces on this card. Anyone — including a future session — rebuilds
+      and compares instead of trusting the bytes.
+- **Verify:** build each through `toolchain.mjs`, run 5×, compare checksums (P1-AC1); then verify
+  the manifest by recomputing every sha-256 in it.
 
 ### 3.4 — `automation-engine/lib/hardware-mon.mjs` — the sampler
 
