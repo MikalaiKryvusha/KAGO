@@ -86,7 +86,8 @@ instead of judging them.
 | **P5-AC5** | The ratchet holds: a point that ever failed is never lowered again. | Scale: closed points whose final offset is ≥ any offset that ever failed there · Meter: a selftest block over a store fixture carrying a past failure · **Target: 0** |
 | **P5-AC6** | A whole-curve candidate survives a LONG burn, not an express test. | Scale: seconds of sustained load per shape at the candidate, with the verdict · Meter: `stress --sustain 60` per shape + `--lowload` + `power --capture` · **Target: ≥ 60 s per shape, all PASS, and the compared sides' start temperatures within 3 °C** |
 | **P5-AC7** | The profile's SHAPE is decided by measurement, not by preference: is the safe offset the same across the operating band, and can the ceiling live inside the curve? | Scale: max passing offset per tested cap (≥ 3 caps) and the delivered clock under a flattened tail · Meter: §4.5 and §4.1 runs · **Target: a number per cap with the spread stated, plus a yes/no on the in-curve ceiling backed by `clocks.gr` under load** |
-| **P5-AC8** | The watt payoff is stated as a measured effect, not a single reading. | Scale: watts saved at a held clock, with the meter's own floor beside it · Meter: `power --spread` over TWO independent series (EXP-0018) · **Target: two series, pooled floor quoted, delta thicker than it — the current −14.67 W is single-sourced and does not satisfy this** |
+| **P5-AC8** | The watt payoff is stated as a measured effect, not a single reading. | Scale: watts saved at the same delivered clock, with the meter's own floor beside it · Meter: `power --spread` over TWO independent series (EXP-0018) · **Target: two series, pooled floor quoted, delta thicker than it — −14.67 W and −7.71 W are both single-sourced and neither satisfies this** |
+| **P5-AC9** | The PRICE is stated on an observable that can carry it, and each observable keeps its own job. | Scale: which field each claim rests on · Meter: the automatic gate reports the **delivered clock** (exact to the hardware grid); **ops/s** is reported as the clock-stretching detector it was built to be; the performance PERCENTAGE comes from the owner's manual 3DMark run (interview 001, Q1 = A) · **Target: no percentage claim resting on ops/s across runs — measured 4.3 % stock-to-stock scatter (EXP-0030)** |
 
 ## 4. Steps
 
@@ -152,6 +153,65 @@ made non-monotone by construction.
 **Verification by observation:** the delivered clock under load (= stock max, not above), the idle clock
 under the same vector (= still falling), the serving point's voltage (= lower), and a byte-exact
 rollback. **P5-AC7 half one.**
+
+#### DONE 2026-08-10 — the evidence, and the three things it taught
+
+`npm run vfstep -- --shape --mhz 45 [--cap-at N]`, both sides cooled to 42 °C first, no clock lock at
+any point. Offline half: `npm run nvapi -- --selftest-shape`, 17 blocks, mutation-proved with four
+mutations against addressees named before the run.
+
+| cap | delivered clock | watts | °C | voltage for the cap | blocks |
+|---|---|---|---|---|---|
+| **3172 — the curve's TOP** | 2887 → **2932** | 137.3 → 137.1 | 57 → 54 | 1240 → 1200 mV | the cap bound NOTHING |
+| **2887 — the stock median** | 2887 → **2857** | 136.95 → **126.42** | 57 → 53 | 1065 → 1040 mV | 15 of 16 |
+| **2917 — median + 30** | 2887 → **2887, exactly stock** | 137.15 → **129.44** | 58 → 53 | 1075 → 1050 mV | **16 of 16** |
+
+1. **A cap at the curve's top is not a cap.** The card never reaches 3172 under load — it sits at 2887 —
+   so nothing was bound and the raise was taken as SPEED at unchanged watts, exactly as `researches/02`
+   §6.2 predicts. The cap must sit at the OPERATING clock. Consequence for the vector: points above the
+   cap need NEGATIVE offsets, so "no negative offsets are needed" was true only for a cap at the top.
+2. **The card delivers a little BELOW its cap**, so the cap's placement is a knob with a measured
+   exchange rate: 2887 → 2857 MHz and −10.53 W; 2917 → 2887 MHz and −7.71 W. **30 MHz of clock costs
+   2.8 W.** The `--cap-at 2917` row is the `Max Optimal` candidate shape: the stock clock delivered
+   exactly, for 7.71 W (5.6 %) and 5 °C.
+3. **THE PRICE METER CANNOT CARRY A 1–4 % CLAIM, and this run is what proved it.** The two STOCK sides
+   measured 40 minutes apart gave **15.58 and 14.94 ×10¹² ops/s — 4.3 % apart** while their watts agreed
+   within 0.15 % and their delivered clock was identical (2887 both). So phase 2's "price 0.18 %" is a
+   WITHIN-series figure and cannot be used across runs (EXP-0018's trap, reproduced on a different
+   quantity — now EXP-0030). Until P5-AC8's two independent series exist, **"no performance loss" is
+   claimed about the DELIVERED CLOCK, which is a direct observation, and not about ops/s.**
+
+#### THE PRICE OBSERVABLE, settled by the owner's question — and ops/s is NOT it
+
+He asked directly: *«оп/c — это индустриальный стандарт замера производительности для видеокарты?
+оверклокеры так и делают?»* **No, and the answer reassigns a role rather than adjusting a number.** The
+industry and the overclocking community measure **frames per second and frametime stability**, plus
+benchmark scores (3DMark Time Spy / Port Royal / Steel Nomad, Superposition). Nobody tunes a card by
+operations per second.
+
+**Why ops/s exists here anyway, and it is a good reason:** it was never built as a performance metric. It
+is the **clock-stretching detector** (internal map R4/R4a, `researches/04` §2) — under an unsafe
+undervolt a card can quietly skip work while still REPORTING the locked clock, with a correct checksum
+and zero events in the Windows log. Work-per-second is the only observable that sees that, and it was
+validated against an independently-authored second reading (EXP-0017). That job it does well.
+
+**So the three roles are split, and none of them is "ops/s as the price":**
+
+| Question | Observable | Why this one |
+|---|---|---|
+| did the card quietly skip work? | **ops/s** — its real job | nothing else sees clock stretching or memory replay |
+| what did the profile cost automatically? | **the DELIVERED CLOCK** (`clocks.gr` median under load) | a direct observation, exact to the hardware's 7/8 MHz grid, and it read 2887 vs 2887 while ops/s wandered 4.3 % |
+| what is the performance percentage? | **the owner's own 3DMark run**, plus his Palworld session | already his decision — interview 001, Q1 = A, and it is written into the epic's AC5 |
+
+**And automating a graphics benchmark is not an option we are declining out of taste:** third-party GUI
+applications are forbidden by `GOAL.md`, FurMark was excluded by the owner himself (interview 001, Q2 =
+A), and `researches/03` measured that UNIGINE, 3DMark and OCCT sell automation only in paid editions.
+That is the whole reason KAGO writes its own CUDA loads — and it is also why the final percentage was
+always going to be one manual run by him.
+
+**What this step does NOT deliver:** a profile. One workload, 30 s, no guardband, one Δ, and the watt
+figures are single-sourced. §4.3 (the diverse set), §4.6 (the margin) and §4.7 (the long burn and the two
+series) are what turn this shape into one.
 
 ### 4.2 — The ratchet store: a point's history IS the state of the search 🔲
 
