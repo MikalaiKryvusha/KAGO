@@ -56,6 +56,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import config from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ } from './lib/vf-step.mjs';
+import { DIVERSE_SET } from './lib/stress-tester.mjs';
 import { VMIN_DIR, allowedOffset, append, openStore, readAll, partitionByStamp, summarizePoint } from './lib/vmin-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -136,6 +137,10 @@ export async function searchEdge({
   point,
   workload = 'sdc_fma',
   shape = 'sustained',
+  // THE SET a candidate is judged by. `null` is the single-shape atom — legal, and honestly narrower:
+  // a threshold found that way is the edge of ONE PROGRAM, and researches/02 §4 measured Vmin
+  // spreading up to 100 mV between programs on the same card.
+  shapes = null,
   seconds = 30,
   sustain = 30,
   coarseMhz = ASCENT_COARSE_MHZ,
@@ -179,27 +184,49 @@ export async function searchEdge({
       bitDistMin: m?.bitDistMin ?? null,
       launches: m?.launches ?? null,
       verdict: result.verdict ?? null,
+      // WHICH SHAPE DECIDED IT. A threshold without the load that produced it is not a threshold —
+      // Vmin spreads ~100 mV between programs (researches/02 §4).
+      worstShape: result.worstShape ?? null,
+      shapesRun: Array.isArray(result.shapes) ? result.shapes.map((e) => e.id) : null,
       reason: result.reason
+        ?? result.stress?.reason
         ?? ((result.blocks || []).filter((b) => !b.ok).map((b) => b.name).join('; ') || null),
     };
     out.attempts.push(attempt);
     if (store) {
       // PERSIST BEFORE THE NEXT STEP — a killed search keeps every verdict it paid for.
-      append(store, {
-        point, offsetMhz, workload, shape, seconds,
-        verdict: attempt.verdict, reason: attempt.reason,
-        driver: card.driver, vbios: card.vbios,
-        capMhz,
-        tempStartC: result.tempStartC ?? null,
-        tempReachedC: result.tempReachedC ?? null,
-        servingPoint: attempt.servingPoint,
-        servingMv: attempt.servingMv,
-        launches: attempt.launches,
-        badElemsMax: attempt.badElemsMax,
-        faultRate: attempt.faultRate,
-        bitDistMin: attempt.bitDistMin,
-        opsPerSecond: m?.opsPerSecond ?? null,
-      });
+      //
+      // ONE RECORD PER SHAPE, not one per attempt. The store's own contract is «one record per
+      // (point, offset, shape)» (§4.2) and AC3 is measured off it — «distinct load shapes each
+      // closed point was judged by, target ≥ 3». Collapsing a set into one row would leave that
+      // criterion unanswerable from the evidence it names as its meter.
+      const rows = Array.isArray(result.shapes) && result.shapes.length
+        ? result.shapes.map((e) => ({
+          workload: e.workload, shape: e.shape,
+          verdict: e.verdict ?? null,
+          reason: e.reason ?? null,
+          meters: e.meters ?? null,
+        }))
+        : [{ workload, shape, verdict: attempt.verdict, reason: attempt.reason, meters: m }];
+
+      for (const row of rows) {
+        const rm = row.meters ?? null;
+        append(store, {
+          point, offsetMhz, workload: row.workload, shape: row.shape, seconds,
+          verdict: row.verdict, reason: row.reason,
+          driver: card.driver, vbios: card.vbios,
+          capMhz,
+          tempStartC: result.tempStartC ?? null,
+          tempReachedC: result.tempReachedC ?? null,
+          servingPoint: attempt.servingPoint,
+          servingMv: attempt.servingMv,
+          launches: rm?.launches ?? null,
+          badElemsMax: rm?.badElemsMax ?? null,
+          faultRate: rm?.faultRate ?? null,
+          bitDistMin: rm?.bitDistMin ?? null,
+          opsPerSecond: rm?.opsPerSecond ?? null,
+        });
+      }
     }
     if (onAttempt) onAttempt(attempt);
     return attempt;
@@ -215,7 +242,7 @@ export async function searchEdge({
   }
 
   for (const offsetMhz of ladder) {
-    const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz });
+    const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes });
     const a = await record(offsetMhz, result);
     if (isPass(a.verdict)) { out.lastPass = offsetMhz; continue; }
     // RULE 1 and 2: anything that is not PASS closes the direction, and it is NOT re-tested.
@@ -249,7 +276,7 @@ export async function searchEdge({
   while (hi - lo > fineMhz) {
     const mid = lo + Math.floor((hi - lo) / 2 / fineMhz) * fineMhz;
     if (mid <= lo || mid >= hi) break;
-    const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz });
+    const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes });
     const a = await record(mid, result);
     if (isPass(a.verdict)) { lo = mid; out.lastPass = mid; continue; }
     if (a.verdict === null) {
@@ -297,6 +324,8 @@ export async function searchEdge({
  *   4. ignore the ratchet limit in the ladder        → «храповик ограничивает лестницу с самого начала»
  *   5. keep ascending after the first failure        → «первый отказ закрывает направление»
  *   6. report a bracket wider than one fine step     → «вилка сходится до одного точного шага»
+ *   7. collapse the set into ONE store record        → «в хранилище ложится запись НА КАЖДУЮ ФОРМУ»
+ *   8. drop `shapes` on the way to the atom          → «набор доезжает до атома, а не теряется в движке»
  */
 export function selfTest() {
   const results = [];
@@ -412,6 +441,47 @@ export function selfTest() {
       ok('и записи несут вердикт, а не только сдвиг', saved.every((s) => 'verdict' in s), true);
       ok('храповик после поиска запрещает сбойнувший сдвиг',
         allowedOffset(saved, 95, { fineStepMhz: ASCENT_FINE_MHZ }).limitMhz, r4.firstFail - ASCENT_FINE_MHZ);
+
+      // --- THE DIVERSE SET, end to end through the engine (plans/05 §4.3). The decision logic of
+      // the set itself is proved in `stress-tester --selftest`; what is proved HERE is the wiring:
+      // that the set reaches the atom, and that the store can answer AC3's question afterwards
+      // («distinct load shapes each closed point was judged by, target ≥ 3»).
+      const handed = [];
+      const setRunner = async ({ offsetMhz, shapes: given }) => {
+        handed.push(given);
+        // what a real `runStep` returns when it judged by a set: the reduced verdict plus one entry
+        // per shape, the deciding one named
+        const fails = offsetMhz >= 200;
+        const ran = DIVERSE_SET.map((s, i) => ({
+          id: s.id, workload: s.workload, shape: s.shape, bearsVerdict: true,
+          verdict: (fails && i === 2) ? config.VERDICT.SDC : P,
+          reason: (fails && i === 2) ? 'подставная порча на третьей форме' : null,
+          meters: { badElemsMax: i, faultRate: i / 1e6, bitDistMin: 1, launches: 100, opsPerSecond: 5e10 },
+        }));
+        return {
+          verdict: fails ? config.VERDICT.SDC : P,
+          // the last shape decides in both cases here: it fails when the offset is too high, and it
+          // is the last one to pass when it is not
+          worstShape: 'branchy/sustained',
+          shapes: ran,
+          stress: { reason: 'подставной набор' },
+        };
+      };
+      const r5 = await searchEdge({
+        capMhz: 2842, point: 97, store, shapes: DIVERSE_SET,
+        card: { driver: '610.88', vbios: 'v1' },
+        runStepFn: setRunner,
+      });
+      ok('набор доезжает до атома, а не теряется в движке',
+        handed.every((g) => Array.isArray(g) && g.length === 3), true);
+      const setRows = readAll(store).records.filter((s) => s.point === 97);
+      ok('в хранилище ложится запись НА КАЖДУЮ ФОРМУ, а не одна на попытку',
+        setRows.length, r5.attempts.length * 3);
+      ok('и по хранилищу видно, СКОЛЬКИМИ формами судилась точка (это и есть мера P5-AC3)',
+        new Set(setRows.map((s) => `${s.workload}/${s.shape}`)).size, 3);
+      ok('и форма, решившая исход, названа в попытке', r5.attempts.at(-1).worstShape, 'branchy/sustained');
+      ok('вердикт набора ведёт поиск так же, как вердикт одиночной формы',
+        r5.lastPass < 200 && r5.firstFail >= 200, true);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
@@ -449,9 +519,21 @@ async function main(argv) {
 
   const capMhz = Number(arg('cap'));
   if (!Number.isFinite(capMhz)) { console.error('ОШИБКА: --search требует --cap <МГц>'); return 2; }
-  const workload = arg('workload', 'sdc_fma');
   const seconds = Number(arg('seconds', 30));
   const dryRun = argv.includes('--dry-run');
+
+  // THE SET IS THE DEFAULT, and the narrow mode has to be asked for by name. A threshold found with
+  // one program is that program's threshold: researches/02 §4 measured Vmin spreading up to 100 mV
+  // between programs on the same card, so the single-shape run is a legitimate probe and is NOT a
+  // measurement that closes a point (P5-AC3).
+  const singleShape = argv.includes('--single-shape');
+  const workload = arg('workload', 'sdc_fma');
+  if (argv.includes('--workload') && !singleShape) {
+    console.error('ОШИБКА: --workload задаёт ОДНУ нагрузку, а по умолчанию точка судится НАБОРОМ форм.');
+    console.error('        Нужен узкий прогон — скажите это вслух: --single-shape --workload <имя>.');
+    return 2;
+  }
+  const shapes = singleShape ? null : DIVERSE_SET;
 
   const vf = await import('./lib/vf-step.mjs');
   const nvapi = await import('./lib/nvapi.mjs');
@@ -483,7 +565,15 @@ async function main(argv) {
   console.log('ПОИСК КРАЯ — то, чего этот проект ещё ни разу не делал');
   console.log('');
   console.log(`  ПОТОЛОК:   ${capMhz} МГц · обслуживает точка ${serving.pointIndex} (${serving.mv} мВ, ${serving.mhz} МГц)`);
-  console.log(`  НАГРУЗКА:  ${workload}, устойчивая, ${seconds} с — оракул трёхзначный, «не упало» вердиктом не является`);
+  if (shapes) {
+    console.log(`  НАБОР:     ${shapes.length} формы, порог точки = ХУДШАЯ из них, по ${seconds} с каждая:`);
+    for (const s of shapes) console.log(`             · ${s.id}`);
+    console.log('             самая чувствительная идёт первой, и после первого не-PASS остальные НЕ прогоняются');
+  } else {
+    console.log(`  НАГРУЗКА:  ${workload}, устойчивая, ${seconds} с — ОДНА форма (--single-shape).`);
+    console.log('             Это НЕ закрывает точку по P5-AC3: край одной программы — не край карты');
+  }
+  console.log('             оракул трёхзначный, «не упало» вердиктом не является');
   console.log(`  ШАГИ:      грубый ${ASCENT_COARSE_MHZ} МГц (≈25 мВ) · точный ${ASCENT_FINE_MHZ} МГц (≈5 мВ, один ИЗМЕРЕННЫЙ шаг сетки)`);
   console.log(`  ХРАПОВИК:  ${summary.ratchet.limitMhz === Infinity ? 'ограничений нет — точка ни разу не сбоила' : `≤ ${summary.ratchet.limitMhz} МГц (самый низкий отказ ${summary.ratchet.lowestFailure})`}`);
   console.log(`  ЛЕСТНИЦА:  ${coarseLadder({ limitMhz: summary.ratchet.limitMhz }).join(', ') || '—'} МГц`);
@@ -499,6 +589,7 @@ async function main(argv) {
     capMhz,
     point: serving.pointIndex,
     workload,
+    shapes,
     seconds,
     card,
     store,
@@ -509,7 +600,8 @@ async function main(argv) {
       const grad = a.badElemsMax === null || a.badElemsMax === undefined
         ? 'градиент не снят'
         : `испорчено элементов ${a.badElemsMax} (доля ${a.faultRate === null ? '—' : a.faultRate.toExponential(2)}), бит-дистанция ${a.bitDistMin}, запусков ${a.launches}`;
-      console.log(`  ПОПЫТКА +${a.offsetMhz} МГц (${a.servingMv ?? '?'} мВ) → ${a.verdict ?? 'НЕИЗВЕСТНО'} · ${grad}`);
+      const by = a.worstShape ? ` · решила форма ${a.worstShape}` : '';
+      console.log(`  ПОПЫТКА +${a.offsetMhz} МГц (${a.servingMv ?? '?'} мВ) → ${a.verdict ?? 'НЕИЗВЕСТНО'}${by} · ${grad}`);
     },
   });
 

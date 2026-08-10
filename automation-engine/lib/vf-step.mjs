@@ -132,6 +132,11 @@ export async function runStep({
   dryRun = false,
   allPoints = false,
   capMhz = null,
+  // THE DIVERSE SET (plans/05 §4.3). `null` keeps the historical single-shape atom, which is what an
+  // operator asks for by hand; an ARRAY judges this one offset by the whole set — one write, one
+  // armed watchdog, one rollback, several loads inside. Applying and rolling back per shape would
+  // measure three different thermal states of three different writes and call it one point.
+  shapes = null,
 } = {}) {
   const nvapi = await import('./nvapi.mjs');
   const wd = await import('./watchdog.mjs');
@@ -188,8 +193,13 @@ export async function runStep({
     // ---- 2. THE WATCHDOG, ARMED BEFORE THE WRITE
     // The lease covers the whole load run plus a wide margin, and it is RENEWED from inside the burst
     // loop — a long test must not be kept alive by one long lease, or a hang mid-test waits it out.
-    const ttlMs = (seconds + 60) * 1000;
-    watchdog = wd.arm({ what: `АНДЕРВОЛЬТ: точка ${point} (+${offsetMhz} МГц), нагрузка ${workload}`, ttlMs });
+    // THE LEASE COVERS THE WHOLE SET, not one load. The set runs three shapes back to back under one
+    // write, and between them `stressTest` re-probes the card and queries the Windows log — seconds
+    // during which no burst renews the lease. A lease sized for ONE shape would let the guard fire
+    // mid-set and reset a card nothing was wrong with.
+    const shapeCount = Array.isArray(shapes) && shapes.length ? shapes.length : 1;
+    const ttlMs = (seconds * shapeCount + 60) * 1000;
+    watchdog = wd.arm({ what: `АНДЕРВОЛЬТ: точка ${point} (+${offsetMhz} МГц), нагрузка ${Array.isArray(shapes) ? `набор из ${shapeCount} форм` : workload}`, ttlMs });
     block('сторож взведён ДО записи', Boolean(watchdog.guardPid),
       `pid ${watchdog.guardPid}, аренда ${ttlMs / 1000} с, откат — полный возврат к заводскому`);
 
@@ -242,6 +252,48 @@ export async function runStep({
     }
 
     // ---- 4. THE ORACLE — the full three-way verdict under real load
+    //
+    // With a SET, the point's verdict is the WORST over the set and the deciding shape is named
+    // (plans/05 §4.3). Without one, this stays the single-shape atom it has always been.
+    if (Array.isArray(shapes) && shapes.length) {
+      const judged = await stress.judgeCandidate({
+        shapes,
+        // The mapping «shape -> how to run it» lives in stress-tester as a pure function with its
+        // own blocks: a run labelled one shape and executed as another is invisible from here.
+        runShapeFn: (s) => stress.stressTest({
+          ...stress.runOptionsForShape(s, { seconds, sustain }),
+          onBurst: () => { watchdog.beat(); },
+        }),
+        onShape: () => { watchdog.beat(); },
+      });
+      out.verdict = judged.verdict;
+      out.worstShape = judged.worstShape;
+      // ONE ENTRY PER SHAPE, because the store keeps one record per (point, offset, shape) and
+      // AC3's meter is «distinct load shapes each closed point was judged by». A single collapsed
+      // row could never answer that question.
+      out.shapes = judged.ran;
+      out.judged = judged;
+      // The graded numbers of the DECIDING shape ride in the usual place, so every existing consumer
+      // keeps working; per-shape meters live in `out.shapes`.
+      const decided = judged.ran.find((e) => e.id === judged.worstShape) ?? judged.ran.at(-1) ?? null;
+      out.meters = decided?.meters ?? null;
+      out.stress = {
+        verdict: judged.verdict,
+        reason: judged.reason,
+        shapes: judged.ran.map((e) => e.id),
+        skipped: judged.skipped,
+        meters: out.meters,
+      };
+      for (const e of judged.ran) {
+        block(`форма ${e.id}: ${e.verdict ?? 'НЕИЗВЕСТНО'}${e.witnessOnly ? ' (свидетель, PASS не выдаёт)' : ''}`,
+          e.bearsVerdict ? e.verdict === config.VERDICT.PASS : e.verdict === null,
+          e.reason ?? '');
+      }
+      block(`ВЕРДИКТ НАБОРА под нагрузкой: ${judged.verdict ?? 'НЕИЗВЕСТНО'}`,
+        judged.verdict === config.VERDICT.PASS, judged.reason);
+      return out;
+    }
+
     const result = await stress.stressTest({
       name: workload,
       seconds,

@@ -537,6 +537,32 @@ export function preflightGoldens(shapes, { card = null, baselineDir = BASELINE_D
 }
 
 /**
+ * Turn one member of the set into the options `stressTest` takes.
+ *
+ * A separate pure function for one reason, and it is the failure class this project keeps paying
+ * for: a run LABELLED one shape and EXECUTED as another is invisible from the outside. Every record
+ * would carry the right name, every verdict would look sound, and the transient shape — the one that
+ * matters most, because voltage noise lives in the transitions — would quietly never have run. The
+ * mapping is three booleans; the reason it is exported is so those three can go red.
+ *
+ * [TESTED: 2026-08-10 23:5x · every member of DIVERSE_SET mapped and asserted, including that the
+ *  sustained members do NOT ask for a duty cycle and that the transient one does]
+ */
+export function runOptionsForShape(s, { seconds = 30, sustain = 30 } = {}) {
+  const shape = s.shape ?? 'sustained';
+  if (!['sustained', 'transient', 'lowload'].includes(shape)) {
+    throw new Error(`неизвестная форма нагрузки: ${shape} (знаем sustained, transient, lowload)`);
+  }
+  return {
+    name: s.workload,
+    seconds: s.seconds ?? seconds,
+    sustain: s.sustain ?? sustain,
+    transient: shape === 'transient',
+    lowload: shape === 'lowload',
+  };
+}
+
+/**
  * Judge ONE candidate offset by the whole set, and name the shape that decided it.
  *
  * The card is expected to be ALREADY at the candidate state when this is called — one write, one
@@ -914,6 +940,21 @@ export async function selfTest() {
     // the set's ORDER is a decision too: the shape most likely to fail runs first
     check('самая чувствительная форма идёт первой — переходная', set[0].id, 'sdc_fma/transient');
     check('в наборе три формы, несущие вердикт', set.filter((s) => s.bearsVerdict).length, 3);
+
+    // THE MAPPING «форма -> как её ЗАПУСКАТЬ». A run labelled one shape and executed as another is
+    // invisible from the outside, and the transient member is exactly the one that would vanish.
+    {
+      const opt = (id) => runOptionsForShape(set.find((s) => s.id === id), { seconds: 30, sustain: 30 });
+      const t = opt('sdc_fma/transient');
+      check('переходная форма ЗАПУСКАЕТСЯ переходной, а не ровной', `${t.name} ${t.transient} ${t.lowload}`, 'sdc_fma true false');
+      const s1 = opt('sdc_fma/sustained');
+      check('ровная форма НЕ просит скважности', `${s1.name} ${s1.transient} ${s1.lowload} ${s1.sustain}`, 'sdc_fma false false 30');
+      const s2 = opt('branchy/sustained');
+      check('и вторая нагрузка запускается СВОИМ бинарником', s2.name, 'branchy');
+      let threwShape = false;
+      try { runOptionsForShape({ workload: 'x', shape: 'вымышленная' }); } catch { threwShape = true; }
+      check('незнакомая форма — отказ, а не тихий ровный прогон', threwShape, true);
+    }
 
     const runner = (script) => {
       const seen = [];
