@@ -552,6 +552,227 @@ export async function measureUndervolt({
 }
 
 // =================================================================================================
+// THE PROFILE'S SHAPE — plan 05 §4.1, and it is the OWNER'S REQUIREMENT turned into three observations
+// =================================================================================================
+
+/**
+ * Apply the shipped profile's shape — the whole curve raised, capped at the stock top, NO clock lock —
+ * and check the three things the owner's sentence actually demands.
+ *
+ * His words (chat 2026-08-10): *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но
+ * работала на пониженном напряжении согласно кривой VF профиля»*. Written as checks:
+ *
+ *   1. **it can still boost** — under load the delivered clock reaches the stock maximum, and NOT more
+ *      (more would mean the savings went into speed — `researches/02` §6.2);
+ *   2. **it can still clock down** — at idle the clock falls back into the idle range. This is the
+ *      property `-lgc {min: X, max: X}` destroys, which is why no clock lock is written here at all;
+ *   3. **at less voltage** — the point serving the top frequency is a LOWER-voltage point than at stock,
+ *      read straight off the curve, before any wattmeter is involved.
+ *
+ * The watts are measured too, and both sides are cooled to the same setpoint first (`nvapi.coolTo`) —
+ * because power follows the temperature a run REACHES (fact 10) and the curve itself derates with
+ * temperature (fact 18), so an uncooled pair is two experiments rather than a delta.
+ *
+ * Safety: one watchdog arm for the whole run, renewed across every phase; the curve write goes through
+ * the single `writeCurve` writer; the rollback is `zeroCurve` in a `finally` and it is VERIFIED.
+ *
+ * [NOT-TESTED] at birth — the offline half of this step is `nvapi --selftest-shape` (15 blocks,
+ * mutation-proved with three mutations against named addressees); this function is its live half.
+ */
+export async function runShapeExperiment({
+  deltaMhz = 45,
+  workload = 'sdc_fma',
+  seconds = 30,
+  sustain = 30,
+  coolToC = 42,
+  capAtMhz = null,
+  dryRun = false,
+} = {}) {
+  const nvapi = await import('./nvapi.mjs');
+  const wd = await import('./watchdog.mjs');
+  const power = await import('./power-baseline.mjs');
+
+  const out = { deltaMhz, workload, blocks: [], sides: [] };
+  const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
+
+  const stale = await wd.recover({});
+  if (stale.found && stale.ownerAlive) {
+    block('преполётная проверка: сторож свободен', false, `карту держит живой процесс pid ${stale.record.ownerPid}`);
+    return out;
+  }
+
+  const nv = nvapi.openNvapi();
+  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+  const handle = handles.readBigUInt64LE(0);
+
+  const idleClock = () => {
+    try {
+      const { execFileSync } = createRequire(import.meta.url)('node:child_process');
+      return Number(execFileSync('nvidia-smi', ['--query-gpu=clocks.gr', '--format=csv,noheader'],
+        { encoding: 'utf8' }).toString().replace('MHz', '').trim());
+    } catch { return null; }
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  let watchdog = null;
+  let touched = false;
+
+  try {
+    const before = nvapi.readVfOffsets(nv, handle);
+    block('старт: карта на стоке, все сдвиги нулевые', before.ok && before.nonZero === 0,
+      before.ok ? `ненулевых ${before.nonZero} из 128` : before.why);
+    if (!before.ok || before.nonZero !== 0) return out;
+
+    const curvePeek = nvapi.readVfCurve(nv, handle);
+    if (!curvePeek.ok) { block('стоковая кривая прочитана', false, curvePeek.why); return out; }
+    const peekTop = Math.max(...curvePeek.points.slice(0, nvapi.CLK_VF_POINT_COUNT - 1)
+      .filter((p) => p.freqKhz > 0).map((p) => p.mhz));
+    block('стоковая кривая прочитана (предварительно, для плана)', true,
+      `верх ${peekTop} МГц при ${cardTemperatureC()} °C. ВНИМАНИЕ: это чтение НЕ используется для сверки ` +
+      'после записи — кривая проседает с температурой (факт 18), поэтому вектор строится по чтению, ' +
+      'взятому за СЕКУНДЫ до записи, при той же температуре');
+
+    if (dryRun) {
+      const plan = nvapi.buildRaiseAndCapVector(curvePeek.points, deltaMhz, { capMhz: capAtMhz });
+      block(`СУХОЙ ПРОГОН: план вектора (+${deltaMhz} МГц, потолок ${plan.capMhz} МГц)`, plan.ok,
+        `полный шаг у ${plan.atFullDelta}, придавлено ${plan.raisedButCapped}, толкнуто вниз ${plan.pushedDown}, ` +
+        `нулевых ${plan.zero}; сдвиги ${plan.minOffset}…${plan.maxOffset} МГц. Запись НЕ делалась`);
+      return out;
+    }
+
+    watchdog = wd.arm({
+      // The lease's description cannot name the cap yet: the cap is the stock operating clock, and that
+      // is MEASURED on the first side, after this arm. Naming what we are about to do beats naming a
+      // number we do not have (the three-doors rule — an invented number is worse than a missing one).
+      what: `ФОРМА ПРОФИЛЯ: вся кривая +${deltaMhz} МГц с потолком на стоковой рабочей частоте, БЕЗ фиксации`,
+      ttlMs: (seconds * 6 + 600) * 1000,
+    });
+    block('сторож взведён ДО записи', Boolean(watchdog.guardPid),
+      `pid ${watchdog.guardPid}; откат — полный возврат к заводскому, включая вентиляторы`);
+
+    // ---- both sides, each from the SAME thermal starting state
+    for (const side of [{ tag: 'сток', applyVector: false }, { tag: `кривая +${deltaMhz}`, applyVector: true }]) {
+      watchdog.beat();
+      const cool = await nvapi.coolTo(nv, handle, { targetC: coolToC, beat: () => watchdog.beat() });
+      block(`${side.tag}: холодный старт ${coolToC} °C`, cool.ok,
+        `${cool.started} → ${cool.reached} °C за ${cool.seconds} с${cool.wrote ? '' : ' (вентиляторы не тронуты — уже было холоднее)'}`);
+
+      if (side.applyVector) {
+        // THE CAP IS THE STOCK OPERATING FREQUENCY, not the curve's top — measured on side A moments ago.
+        // With the cap at the top the card never reaches it under load and the cap binds nothing: the
+        // raise is taken as SPEED (measured: 2887 → 2932 MHz at the same 137 W). Anchoring at the clock
+        // the card actually delivers is the industry's "flatten the tail" (`researches/02` §6.2).
+        const stockClock = out.sides[0]?.clockMhz ?? null;
+        const cap = capAtMhz ?? stockClock;
+        if (cap === null) { block('потолок назначен', false, 'стоковая частота не измерена'); break; }
+
+        // THE VECTOR IS BUILT FROM A READING TAKEN SECONDS BEFORE THE WRITE, at this temperature. The
+        // first version built it from a curve read BEFORE the cool-down and then compared against a
+        // curve read after it — which measured the 3 °C, not our offset, and reddened its own check by
+        // 15 MHz (fact 18; the same trap this file's header warns about).
+        const curveNow = nvapi.readVfCurve(nv, handle);
+        if (!curveNow.ok) { block('кривая прочитана перед записью', false, curveNow.why); break; }
+        const tempAtBuild = cardTemperatureC();
+        const topNow = Math.max(...curveNow.points.slice(0, nvapi.CLK_VF_POINT_COUNT - 1)
+          .filter((p) => p.freqKhz > 0).map((p) => p.mhz));
+        const servingBefore = voltageForClock(curveNow.points, cap);
+        out.topMhz = topNow;
+
+        const vec = nvapi.buildRaiseAndCapVector(curveNow.points, deltaMhz, { capMhz: cap });
+        if (!vec.ok) { block('вектор построен', false, vec.why); break; }
+        block(`вектор: подъём +${deltaMhz} МГц, ПОТОЛОК ${cap} МГц (стоковая рабочая частота)`, true,
+          `верх кривой сейчас ${topNow} МГц при ${tempAtBuild} °C · полный шаг у ${vec.atFullDelta} точек, ` +
+          `придавлено ${vec.raisedButCapped}, ТОЛКНУТО ВНИЗ ${vec.pushedDown}, нулевых ${vec.zero}; ` +
+          `сдвиги ${vec.minOffset}…${vec.maxOffset} МГц`);
+
+        const w = nvapi.writeCurve(nv, handle, vec.offsets);
+        touched = true;
+        block(`${side.tag}: ЗАПИСЬ вектора одним писателем`, w.ok,
+          `записано ${w.written}, отказов ${w.failed}${w.failures.length ? ` — ${JSON.stringify(w.failures)}` : ''}`);
+        if (!w.ok) break;
+        watchdog.beat();
+
+        const curveAfter = nvapi.readVfCurve(nv, handle);
+        const newTop = curveAfter.ok
+          ? Math.max(...curveAfter.points.slice(0, nvapi.CLK_VF_POINT_COUNT - 1).filter((p) => p.freqKhz > 0).map((p) => p.mhz))
+          : null;
+        const servingNow = curveAfter.ok ? voltageForClock(curveAfter.points, cap) : null;
+        out.serving = { before: servingBefore, after: servingNow, capMhz: cap };
+        // Observation 3, and it needs no wattmeter: the SAME frequency, served by a cheaper point.
+        block('НАПРЯЖЕНИЕ ДЛЯ ТОЙ ЖЕ ЧАСТОТЫ УПАЛО — это и есть андервольт',
+          Boolean(servingBefore && servingNow) && servingNow.mv < servingBefore.mv,
+          servingBefore && servingNow
+            ? `${cap} МГц: точка ${servingBefore.pointIndex} (${servingBefore.mv} мВ) → точка ${servingNow.pointIndex} (${servingNow.mv} мВ), дешевле на ${(servingBefore.mv - servingNow.mv).toFixed(3)} мВ`
+            : 'не вычислено');
+        // Observation 1: the cap holds — and it is judged against the reading taken at the SAME
+        // temperature, seconds earlier, which is what makes the comparison legal at all.
+        block('ПОТОЛОК ДЕРЖИТ: выше него кривая ничего не предлагает',
+          newTop !== null && newTop <= cap + config.LOCK_DELIVERY_TOLERANCE_MHZ,
+          `верх кривой ${topNow} → ${newTop} МГц при потолке ${cap} (обе пробы при ${tempAtBuild}…${cardTemperatureC()} °C)`);
+      }
+
+      const rec = await power.capture({ workload, seconds, sustain, label: `shape_${side.applyVector ? deltaMhz : 0}` });
+      watchdog.beat();
+      const m = (f) => { const x = rec?.medians?.loaded?.[f]; return x && typeof x.median === 'number' ? x.median : null; };
+      out.sides.push({
+        tag: side.tag,
+        watts: m('power.draw.instant'),
+        clockMhz: m('clocks.gr'),
+        tempC: m('temperature.gpu'),
+        fan: m('fan.speed'),
+        opsPerSec: rec?.meters?.opsPerSecond ?? null,
+        tempStart: rec?.startTemperature ?? null,
+        verdict: rec?.verdict ?? null,
+      });
+      block(`${side.tag}: замер снят БЕЗ фиксации частоты`, Boolean(rec),
+        `${m('clocks.gr')} МГц · ${m('power.draw.instant')} Вт · ${m('temperature.gpu')} °C · вердикт ${rec?.verdict}`);
+
+      // Observation 2: the card must still fall. Checked on the undervolted side, where a pin would show.
+      if (side.applyVector) {
+        await sleep(4000);
+        watchdog.beat();
+        const idle = [idleClock(), await sleep(1500).then(idleClock), await sleep(1500).then(idleClock)];
+        out.idleClocks = idle;
+        block('КАРТА ПО-ПРЕЖНЕМУ СБРАСЫВАЕТ ЧАСТОТУ НА ПРОСТОЕ — фиксации нет',
+          idle.every((c) => c !== null) && Math.min(...idle) < (out.serving?.capMhz ?? out.topMhz) * 0.6,
+          `на простое ${idle.join(' / ')} МГц против потолка ${out.serving?.capMhz ?? out.topMhz} — ` +
+          'приколоченная карта (-lgc min=max) стояла бы на потолке и здесь');
+      }
+    }
+
+    // ---- the delta, judged against the meter's own floor
+    const [a, b] = out.sides;
+    if (a?.watts != null && b?.watts != null) {
+      const deltaW = Number((a.watts - b.watts).toFixed(2));
+      const floorW = config.POWER_METER_SPREAD_W ?? 1.28;
+      out.delta = { watts: deltaW, floorW, percent: Number(((deltaW / a.watts) * 100).toFixed(2)) };
+      block(`ВАТТЫ: дельта ${deltaW} Вт против собственного разброса прибора ${floorW} Вт`,
+        Math.abs(deltaW) > floorW,
+        `${a.watts} → ${b.watts} Вт; тоньше пола — это шум, а не эффект`);
+      block('ЧАСТОТА НЕ ПОТЕРЯНА: выданный клок сопоставим',
+        a.clockMhz != null && b.clockMhz != null && b.clockMhz >= a.clockMhz - config.LOCK_DELIVERY_TOLERANCE_MHZ,
+        `${a.clockMhz} → ${b.clockMhz} МГц; цена ${a.opsPerSec} → ${b.opsPerSec} оп/с`);
+      block('сравнение термически законно: старты сошлись',
+        a.tempStart != null && b.tempStart != null && Math.abs(a.tempStart - b.tempStart) <= 3,
+        `старт ${a.tempStart} → ${b.tempStart} °C, достигнуто ${a.tempC} → ${b.tempC} °C`);
+    }
+  } finally {
+    watchdog?.beat();
+    if (touched) {
+      const back = nvapi.zeroCurve(nv, handle);
+      block('ОТКАТ: кривая обнулена одним писателем, ненулевых не осталось', back.ok,
+        `отказов ${back.failed} · ненулевых ${back.remainingNonZero} из 128`);
+    }
+    watchdog?.disarm();
+    nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
+  }
+
+  return out;
+}
+
+// =================================================================================================
 // CLI
 // =================================================================================================
 
@@ -627,7 +848,53 @@ async function mainMeasure() {
   return failed === 0 ? 0 : 1;
 }
 
+async function mainShape() {
+  const deltaMhz = Number(arg('mhz', 45));
+  const seconds = Number(arg('seconds', 30));
+  const coolToC = Number(arg('cool-to', 42));
+  const capArg = arg('cap-at', null);
+  const capAtMhz = capArg === null ? null : Number(capArg);
+  const dryRun = process.argv.includes('--dry-run');
+
+  console.log('ФОРМА ПРОФИЛЯ — ТО, ЧТО ПОПРОСИЛ ВЛАДЕЛЕЦ, ПРОВЕРЕННОЕ ТРЕМЯ НАБЛЮДЕНИЯМИ');
+  console.log('');
+  console.log('  ЕГО СЛОВА: «карта сама могла и разгоняться и снижать частоты, но работала на');
+  console.log('             пониженном напряжении согласно кривой VF профиля».');
+  console.log(`  ЧТО ПИШЕМ: вся кривая вверх на +${deltaMhz} МГц, а выше ПОТОЛКА не предлагается ничего.`);
+  console.log(`  ПОТОЛОК:   ${capAtMhz === null ? 'стоковая РАБОЧАЯ частота, измеренная в этом же прогоне' : `${capAtMhz} МГц (задан)`}.`);
+  console.log('             Замерено: потолок на ВЕРХУ кривой не связывает ничего — под нагрузкой карта');
+  console.log('             туда не доходит, и подъём уходит в скорость (2887 → 2932 МГц при тех же 137 Вт).');
+  console.log('             Фиксации частоты (-lgc) НЕТ вовсе — карта свободна и вверх, и вниз.');
+  console.log('  ПРОВЕРЯЕМ: (1) под нагрузкой берётся стоковый максимум и НЕ выше — иначе экономия');
+  console.log('             ушла в скорость; (2) на простое частота по-прежнему падает — иначе это');
+  console.log('             прикол; (3) ту же частоту обслуживает точка с МЕНЬШИМ напряжением.');
+  console.log(`  ЧЕСТНОСТЬ: обе стороны стартуют с ${coolToC} °C — иначе это два опыта, а не дельта.`);
+  console.log('  ОТКАТ:     вся кривая в ноль одним писателем, в finally, под сторожем.');
+  if (dryRun) console.log('  РЕЖИМ:     СУХОЙ ПРОГОН — записи не будет.');
+  console.log('');
+
+  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun });
+
+  if (r.sides.length) {
+    console.log('  сторона        |  МГц |     Вт |  °C | старт °C | вент |      оп/с | вердикт');
+    for (const s of r.sides) {
+      console.log(`  ${String(s.tag).padEnd(14)} | ${String(s.clockMhz).padStart(4)} | ${String(s.watts).padStart(6)} | ${String(s.tempC).padStart(3)} | ${String(s.tempStart).padStart(8)} | ${String(s.fan).padStart(4)} | ${String(s.opsPerSec).padStart(9)} | ${s.verdict}`);
+    }
+    console.log('');
+  }
+  for (const b of r.blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}${b.detail ? `\n            ${b.detail}` : ''}`);
+
+  const failed = r.blocks.filter((b) => !b.ok).length;
+  console.log('');
+  if (r.delta) console.log(`ИТОГ ПО ВАТТАМ: ${r.delta.watts} Вт (${r.delta.percent} %), пол прибора ${r.delta.floorW} Вт.`);
+  console.log(`ИТОГ: блоков ${r.blocks.length}, провалов ${failed}.`);
+  console.log('ЧТО ЭТО НЕ ЗНАЧИТ: форма профиля доказана, САМ ПРОФИЛЬ — нет. Ни запаса, ни разнородного');
+  console.log('набора, ни длинного прожига (plans/05 §4.3, §4.6, §4.7).');
+  return failed === 0 ? 0 : 1;
+}
+
 async function main() {
+  if (process.argv.includes('--shape')) return mainShape();
   if (process.argv.includes('--measure')) return mainMeasure();
   if (process.argv.includes('--ascend')) return mainAscend();
   const point = Number(arg('point', DEFAULT_POINT));

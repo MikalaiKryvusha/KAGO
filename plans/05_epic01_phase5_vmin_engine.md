@@ -113,28 +113,45 @@ verification — read it back" (EXP-0024).
       author. No behaviour change intended → prove it by a byte-exact golden: `--prove-mask 64 -15`
       before and after the refactor must produce the same block list (`BUG_FIXING_FRAMEWORK.md` → Guards).
 
-**(b) Can the ceiling live inside the curve instead of in `-lgc`?** This decides what a profile IS, so
-it comes first. The practitioner method (`researches/02` §6.2, the MSI guide) is *raise the point, then
-flatten the tail* — expressible with our lever, because the offset is per point and signed
-(`CLOCK_OFFSET_MIN_MHZ = −1000`): for every point whose stock frequency exceeds the target F, write
-`F − stockFreq(point)`; below F, write the raise.
+**(b) The ceiling lives inside the curve, and this is no longer a hypothesis — THE OWNER SETTLED IT.**
+Asked whether to run this experiment, he answered with the requirement instead (chat, 2026-08-10):
 
-**Why this is not a stylistic preference.** `ladder.candidateProfile()` locks
-`graphicsClockLockMhz: {min: mhz, max: mhz}` — a **PIN**, not a ceiling. That is correct for a
-measurement (a held clock is what makes a watt delta legal, `vf-step.measureUndervolt`) and **wrong for
-a shipped profile**: a pinned minimum forbids the card from clocking down, so idle power and the
-zero-RPM behaviour would both change, and `GOAL.md`'s remembered-profile-at-boot would ship that. An
-in-curve ceiling has no such side effect — the low points keep offering low frequencies at low voltages.
+> *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но работала на пониженном напряжении
+> согласно кривой VF профиля»*
 
-- [ ] Build the raise+flatten vector for F = the stock sustained clock (~2842 MHz, phase 2 §4.5).
-- [ ] Apply it with **no `-lgc` at all**; load the card; read `clocks.gr` until two consecutive samples
-      agree (EXP-0014). Expect ≤ F + `LOCK_DELIVERY_TOLERANCE_MHZ`.
-- [ ] Then observe the card at IDLE under the same vector: it must still clock down. This is the
-      property `-lgc min=max` destroys, and the reason the experiment exists.
-- [ ] Rollback: `zeroCurve()` in a `finally`, 0 non-zero of 128 verified, under an armed watchdog.
+So `-lgc` is retired as a profile mechanism (full reasoning: `AGENT_GUIDE.md` → Notes from the human).
+`ladder.candidateProfile()`'s `{min: mhz, max: mhz}` is a **PIN**: the card can go neither up nor down, so
+at idle it would hold the locked clock instead of dropping to 180 MHz. Correct for a MEASUREMENT, wrong
+for anything he boots into.
 
-**Verification by observation:** the delivered clock under load, the idle clock under the same vector,
-and a byte-exact rollback. **P5-AC7 half one.**
+**THE VECTOR, as arithmetic.** With `F_top` = the stock curve's highest frequency and `Δ` = the raise:
+
+```
+offset_i = clamp(F_top − F_i , 0 , Δ)
+```
+
+Points well below the top take the full `Δ`, so every frequency they serve now needs less voltage; points
+near the top take a SMALLER offset, so none can offer more than `F_top` and the maximum boost is provably
+unchanged — which is what keeps the savings from being spent on speed (`researches/02` §6.2). Two
+properties make this the safest shape available, and both were found by doing the arithmetic rather than
+by planning: **every offset is non-negative** (the earlier draft of this step assumed the tail would need
+NEGATIVE offsets — it does not), and `min(F_i + Δ, F_top)` preserves monotonicity, so the curve cannot be
+made non-monotone by construction.
+
+- [ ] `buildRaiseAndCapVector(points, deltaMhz)` — the formula above, as a pure function with its own
+      offline blocks: full Δ in the middle, a shrinking offset at the top, offset 0 on the top point,
+      monotonicity preserved, and nothing negative anywhere.
+- [ ] Apply it with **no `-lgc` at all**, under the watchdog; load the card; read `clocks.gr` until two
+      consecutive samples agree (EXP-0014). Expect the stock maximum, **not more**.
+- [ ] **Then observe the card at IDLE under the same vector: it must still drop to the idle range.** This
+      is the property a pin destroys, and it is the owner's requirement stated as a check.
+- [ ] Confirm the undervolt itself by curve read-back: the point serving the top frequency must be a
+      LOWER-voltage point than at stock (`voltageForClock`, already written and proved).
+- [ ] Rollback: `zeroCurve()` in a `finally`, 0 non-zero of 128 verified.
+
+**Verification by observation:** the delivered clock under load (= stock max, not above), the idle clock
+under the same vector (= still falling), the serving point's voltage (= lower), and a byte-exact
+rollback. **P5-AC7 half one.**
 
 ### 4.2 — The ratchet store: a point's history IS the state of the search 🔲
 

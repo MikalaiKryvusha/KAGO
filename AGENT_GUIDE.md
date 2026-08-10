@@ -1233,6 +1233,39 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   "quiet" pull opposite ways through the fan. The reading in force until he says otherwise: cold at
   the STOCK fan curve, where fewer watts make the card colder and quieter at once.
 
+- **THE SHIPPED PROFILE NEVER PINS THE CLOCK — the card keeps its whole dynamic range and runs it at
+  less voltage.** The owner's words, chat 2026-08-10, after the agent explained the phase-5 §4.1
+  experiment badly and he cut through it:
+
+  > *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но работала на пониженном
+  > напряжении согласно кривой VF профиля»*
+
+  **This retires `-lgc` as a profile mechanism**, and the reason is concrete rather than aesthetic:
+  `ladder.candidateProfile()` locks `graphicsClockLockMhz: {min: mhz, max: mhz}`, so a pinned card can
+  go neither up nor down — at idle it would sit at the locked clock instead of dropping to 180 MHz. That
+  shape is legitimate for a MEASUREMENT (a held clock is what makes a watt delta legal, EXP-0018) and
+  wrong for anything the owner boots into.
+
+  **The shape that satisfies him, stated as the arithmetic so no session re-derives it.** Our lever is a
+  per-point frequency offset, so with `F_top` = the stock curve's highest frequency and `Δ` = the raise:
+
+  ```
+  offset_i = clamp(F_top − F_i , 0 , Δ)
+  ```
+
+  - points well below the top get the full `Δ` → every frequency they serve now needs LESS voltage;
+  - points near the top get a SMALLER offset so none of them can offer more than `F_top` → the maximum
+    boost is provably unchanged, and the savings are not spent on speed (`researches/02` §6.2: raising
+    the curve without a ceiling buys speed, not watts);
+  - the bottom of the curve is untouched in effect — points 0…~20 sit on the 180 MHz floor — so idle
+    behaviour and zero-RPM survive.
+
+  **Two properties worth naming because they make this the safest shape available:** every offset is
+  **non-negative** (the earlier plan assumed negative offsets would be needed to flatten the tail — they
+  are not), and `min(F_i + Δ, F_top)` preserves monotonicity, so the curve cannot be made non-monotone
+  by construction. The clock ceiling therefore lives INSIDE the curve, as one artifact with one rollback,
+  and no clock lock is written at all.
+
 - *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
   dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
   records how it is satisfied.

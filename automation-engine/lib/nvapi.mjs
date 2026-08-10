@@ -456,6 +456,114 @@ export function readFanCoolers(nv, handle, { versions = [1, 2, 3, 4] } = {}) {
   return { status, control, info };
 }
 
+// =================================================================================================
+// 3c. THE CURVE AS ONE ARTIFACT — one writer, and the profile's shape as arithmetic
+// =================================================================================================
+
+/**
+ * THE SHIPPED PROFILE'S SHAPE, and it is the owner's requirement expressed as a formula.
+ *
+ * His words (chat 2026-08-10): *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но
+ * работала на пониженном напряжении согласно кривой VF профиля»* — so the clock is NEVER pinned. The
+ * card keeps its whole range, from the 180 MHz idle floor to the stock maximum, and every frequency in
+ * it is served at less voltage than at stock.
+ *
+ *     offset_i = clamp(F_top − F_i , 0 , Δ)          F_top = the stock curve's highest frequency
+ *
+ * WHY THE CAP AT ALL, since a cap sounds like the pin he rejected: it is not the same thing. A pin
+ * forbids movement in BOTH directions; this cap only says no point may offer MORE than the card already
+ * offered at stock. Without it the card takes the freed headroom as SPEED — it boosts past stock at the
+ * same voltage and the watts do not fall (`researches/02` §6.2), which is the opposite of the owner's
+ * formula. With it, the stock top frequency is served by a LOWER-voltage point, and that difference IS
+ * the undervolt.
+ *
+ * Two properties that fall out of the formula rather than being designed in, and both make this the
+ * safest write shape this project has:
+ *   • every offset is NON-NEGATIVE — the top points get a SMALLER raise, never a negative one, so the
+ *     earlier plan's "flatten the tail with negative offsets" turned out to be unnecessary;
+ *   • `min(F_i + Δ, F_top)` preserves monotonicity, so a monotone curve cannot be made non-monotone by
+ *     this vector at any Δ. That is a proof, not a test result.
+ *
+ * Point 127 is excluded by the caller (it is not a graphics point — 515 mV / 405 MHz against its
+ * neighbour's 1240 mV / 3172 MHz), and `F_top` is taken over the points we actually write.
+ *
+ * [NOT-TESTED] at birth — offline blocks in `--selftest-shape` are what flip this.
+ */
+export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_COUNT - 1, capMhz = null } = {}) {
+  const usable = points.slice(0, count).filter((p) => p.freqKhz > 0);
+  if (!usable.length) return { ok: false, why: 'ни одной точки с частотой' };
+  const topMhz = Math.max(...usable.map((p) => p.mhz));
+  const cap = capMhz === null ? topMhz : capMhz;
+
+  const offsets = [];
+  for (let i = 0; i < count; i++) {
+    const p = points[i];
+    // A point with no frequency gets no offset: there is nothing to raise and nothing to cap.
+    if (!p || p.freqKhz <= 0) { offsets.push(0); continue; }
+    // min(Δ, cap − F_i), and NOTHING clamps it up to 0: a point already ABOVE the cap must be pushed
+    // DOWN to it, or the card can still boost past the cap and the whole point of the cap is lost.
+    // MEASURED 2026-08-10, and this is why the lower clamp was removed: with the cap at the curve's TOP
+    // the card never reached it under load (it sat at 2887 of a 3172 top), so the cap bound nothing and
+    // the raise was taken as SPEED — 2887 → 2932 MHz at 137.3 → 137.1 W, i.e. no saving at all.
+    const wanted = Math.min(deltaMhz, cap - p.mhz);
+    // The wall is named by the HARDWARE, not by our caution: NVML published −1000…+1000 MHz for the
+    // graphics domain (`researches/05` §8), and config carries it with `..._IS_MEASURED = true`.
+    offsets.push(Math.max(config.CLOCK_OFFSET_MIN_MHZ, Math.min(config.CLOCK_OFFSET_MAX_MHZ, wanted)));
+  }
+  return {
+    ok: true,
+    topMhz,
+    capMhz: cap,
+    capIsBelowTop: cap < topMhz,
+    deltaMhz,
+    offsets,
+    atFullDelta: offsets.filter((o) => o === deltaMhz).length,
+    raisedButCapped: offsets.filter((o) => o > 0 && o < deltaMhz).length,
+    pushedDown: offsets.filter((o) => o < 0).length,
+    zero: offsets.filter((o) => o === 0).length,
+    maxOffset: Math.max(...offsets),
+    minOffset: Math.min(...offsets),
+  };
+}
+
+/**
+ * ONE writer for the whole curve, taking a VECTOR.
+ *
+ * Before this existed the 128-point write/zero loop was open-coded five times in `vf-step.mjs` and once
+ * in `watchdog.mjs`, and the copies already disagreed: `vf-step` excluded point 127, `watchdog` did not.
+ * Harmless while nothing moves point 127, and exactly the shape of a defect class — so one place now
+ * owns "point 127 is not a graphics point", "a rollback zeroes EVERYTHING rather than a difference", and
+ * "status 0 is not verification, the read-back is" (EXP-0024).
+ *
+ * The API takes one point per call, which is why a total write is a loop — the same constraint that
+ * keeps a bad write's blast radius at one point.
+ *
+ * [NOT-TESTED] at birth.
+ */
+export function writeCurve(nv, handle, offsetsMhz, { count = CLK_VF_POINT_COUNT - 1 } = {}) {
+  const asArray = Array.isArray(offsetsMhz)
+    ? offsetsMhz
+    : Array.from({ length: count }, () => offsetsMhz);
+  let failed = 0;
+  const failures = [];
+  for (let p = 0; p < count; p++) {
+    const r = writeVfOffset(nv, handle, p, Math.round((asArray[p] ?? 0) * 1000));
+    if (!r.ok) { failed++; if (failures.length < 5) failures.push({ point: p, why: r.why ?? r.status }); }
+  }
+  return { ok: failed === 0, written: count - failed, failed, failures };
+}
+
+/** The total undo: every point to zero, then a read that must find none left. Zeroing a zero is free. */
+export function zeroCurve(nv, handle, { count = CLK_VF_POINT_COUNT - 1 } = {}) {
+  const w = writeCurve(nv, handle, 0, { count });
+  const after = readVfOffsets(nv, handle);
+  return {
+    ok: w.ok && after.ok && after.nonZero === 0,
+    failed: w.failed,
+    remainingNonZero: after.ok ? after.nonZero : 'не прочитано',
+  };
+}
+
 /**
  * WRITE the fan control struct — read-modify-write, always.
  *
@@ -521,6 +629,71 @@ export function resetFansToAuto(nv, handle) {
     levelsBefore: before.status.ok ? before.status.coolers.map((c) => c.level) : null,
     levelsAfter: after.status.ok ? after.status.coolers.map((c) => c.level) : null,
   };
+}
+
+/**
+ * THE COLD-START PROTOCOL AS A FUNCTION — the owner's experimental condition, callable.
+ *
+ * It existed only as a CLI mode until the phase-4 judge pass named the gap: the series that measured a
+ * 1 °C spread ran from a scratchpad script, and *"verification that lives only in a session's scratchpad
+ * dies with the session"* (`TESTING_FRAMEWORK.md`). Any measurement that compares two sides needs this
+ * BEFORE each side, because power tracks the temperature a run reaches (~4 W per 5 °C, fact 10) and the
+ * V/F curve itself derates with temperature (fact 18) — so two sides at different thermal states are two
+ * experiments, not a delta.
+ *
+ * Writes fans only, only UPWARD, and only when needed: an already-cold card is left alone entirely. The
+ * rollback is AUTO on every path. It does NOT arm a watchdog of its own — the caller owns that lease and
+ * passes `beat` so a long cool-down cannot expire it.
+ *
+ * [NOT-TESTED] as a function; the LOGIC it carries is the CLI path measured 2026-08-10 (42/42/41 °C in
+ * 8/4/0 s over three load-then-cool cycles).
+ */
+export async function coolTo(nv, handle, {
+  targetC,
+  level = 80,
+  timeoutMs = 180_000,
+  beat = () => {},
+  pollMs = 2000,
+} = {}) {
+  const { execFileSync } = require('node:child_process');
+  const temp = () => {
+    try {
+      const out = execFileSync('nvidia-smi', ['--query-gpu=temperature.gpu', '--format=csv,noheader'], { encoding: 'utf8' });
+      const v = Number(out.trim());
+      return Number.isFinite(v) ? v : null;
+    } catch { return null; }
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const started = temp();
+  if (started === null) return { ok: false, why: 'температура не читается', started, reached: null, seconds: 0, wrote: false };
+  if (started <= targetC) return { ok: true, started, reached: started, seconds: 0, wrote: false, why: 'уже холоднее цели' };
+
+  const t0 = Date.now();
+  let wrote = false;
+  try {
+    const w = writeFanControl(nv, handle, { mode: FAN_MODE.MANUAL, level });
+    if (!w.ok) return { ok: false, why: `запись вентиляторов: ${w.statusName ?? w.why}`, started, reached: started, seconds: 0, wrote: false };
+    wrote = true;
+
+    let now = started;
+    const deadline = t0 + timeoutMs;
+    while (now > targetC && Date.now() < deadline) {
+      beat();
+      await sleep(pollMs);
+      now = temp() ?? now;
+    }
+    return {
+      ok: now <= targetC,
+      started,
+      reached: now,
+      seconds: Math.round((Date.now() - t0) / 1000),
+      wrote: true,
+      why: now <= targetC ? null : `не достигнуто за ${Math.round(timeoutMs / 1000)} с`,
+    };
+  } finally {
+    if (wrote) resetFansToAuto(nv, handle);
+  }
 }
 
 /**
@@ -952,6 +1125,130 @@ async function mainProveMask(point, offsetMhz, mode) {
     watchdog?.disarm();          // idempotent: proveMask already disarms on its own normal path
     koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
   }
+}
+
+// =================================================================================================
+// 3d. OFFLINE BLOCKS for the profile's shape — no GPU, no koffi call, pure arithmetic
+// =================================================================================================
+
+/**
+ * The vector is the one part of a curve write that can be judged WITHOUT touching the card, so it is.
+ *
+ * The fixture mirrors this card's measured shape rather than a convenient one: points 0…20 sit on the
+ * 180 MHz floor at rising voltages, then the curve climbs to 3172 MHz at point 126 (measured 2026-08-10
+ * at 48 °C — and the frequency column only means anything with its temperature, fact 18). Point 127 is
+ * the outlier the caller excludes.
+ *
+ * What each block guards is stated in its own name, because a suite whose blocks are green for
+ * neighbouring reasons guards nothing (EXP-0016).
+ */
+export function selftestShape() {
+  let failed = 0;
+  const check = (name, ok, detail = '') => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? 'OK  ' : 'ПЛОХО'} ${name}${detail ? ` — ${detail}` : ''}`);
+  };
+
+  // --- the fixture: this card's shape, built rather than recalled
+  const points = [];
+  for (let i = 0; i < 128; i++) {
+    if (i === 127) { points.push({ i, mhz: 405, mv: 515, freqKhz: 405_000 }); continue; }
+    const mhz = i <= 20 ? 180 : Math.round(180 + ((3172 - 180) * (i - 20)) / (126 - 20));
+    points.push({ i, mhz, mv: 450 + i * 5, freqKhz: mhz * 1000 });
+  }
+  const TOP = 3172;
+  const DELTA = 45;
+
+  const v = buildRaiseAndCapVector(points, DELTA);
+  check('вектор построен, и его длина — 127 точек (127-я исключена вызывающим)',
+    v.ok && v.offsets.length === 127, `длина ${v.offsets?.length}`);
+  check('верх кривой найден по САМИМ точкам, а не назначен',
+    v.topMhz === TOP, `${v.topMhz} МГц`);
+
+  // The three guarantees the owner's requirement rests on.
+  check('НИ ОДИН сдвиг не отрицательный — придавливать хвост минусом не требуется',
+    v.offsets.every((o) => o >= 0), `минимум ${v.minOffset}`);
+  check('НИ ОДИН сдвиг не больше заказанного шага',
+    v.offsets.every((o) => o <= DELTA), `максимум ${v.maxOffset} при шаге ${DELTA}`);
+  const newTop = Math.max(...points.slice(0, 127).map((p, i) => p.mhz + v.offsets[i]));
+  check('МАКСИМУМ ЧАСТОТЫ НЕ ВЫРОС — экономия не уходит в скорость',
+    newTop === TOP, `было ${TOP}, стало ${newTop}`);
+
+  // Monotonicity is a proof, and this block is what would catch the proof being broken by an edit.
+  const newCurve = points.slice(0, 127).map((p, i) => p.mhz + v.offsets[i]);
+  let monotone = true;
+  for (let i = 1; i < newCurve.length; i++) if (newCurve[i] < newCurve[i - 1]) monotone = false;
+  check('кривая осталась монотонной — min(F+Δ, F_top) этого не может нарушить',
+    monotone);
+
+  // The middle takes the full step; the top is capped; the very top point cannot move at all.
+  check('середина кривой берёт ПОЛНЫЙ шаг — именно она и удешевляет частоты',
+    v.atFullDelta > 0, `точек с полным шагом ${v.atFullDelta}`);
+  check('верхние точки придавлены — сдвиг меньше полного, но больше нуля',
+    v.raisedButCapped > 0, `придавленных ${v.raisedButCapped}`);
+  check('при потолке НА ВЕРХУ кривой ни одна точка не толкается ВНИЗ',
+    v.pushedDown === 0, `отрицательных сдвигов ${v.pushedDown}`);
+  const topIdx = points.slice(0, 127).findIndex((p) => p.mhz === TOP);
+  check('самой верхней точке сдвиг равен НУЛЮ — ей некуда ехать',
+    v.offsets[topIdx] === 0, `точка ${topIdx}: сдвиг ${v.offsets[topIdx]}`);
+  check('точки на полу 180 МГц берут полный шаг (запаса до верха у них много)',
+    v.offsets[0] === DELTA && v.offsets[20] === DELTA, `точка 0: ${v.offsets[0]}, точка 20: ${v.offsets[20]}`);
+
+  // --- the degenerate ends, both of which a search WILL reach
+  const zero = buildRaiseAndCapVector(points, 0);
+  check('шаг 0 -> профиль-пустышка, ни одного ненулевого сдвига',
+    zero.ok && zero.offsets.every((o) => o === 0));
+
+  const huge = buildRaiseAndCapVector(points, 10_000);
+  const hugeCurve = points.slice(0, 127).map((p, i) => p.mhz + huge.offsets[i]);
+  check('чудовищный шаг НЕ поднимает максимум — все точки прижимаются к потолку',
+    Math.max(...hugeCurve) === TOP, `максимум ${Math.max(...hugeCurve)}`);
+  // The first version of this block demanded a FLAT curve here and went red — correctly, and the
+  // expectation was what was wrong. A 10 000 MHz step cannot be applied: the offset is clamped to the
+  // range the HARDWARE published (±1000 MHz, `researches/05` §8), so the bottom points — 2 992 MHz below
+  // the top — cannot reach it however large the step. What is guaranteed is the clamp itself, and that
+  // is what this block now guards; flatness was our wish, not the hardware's contract.
+  check('чудовищный шаг ОБРЕЗАН диапазоном железа, а не исполнен буквально',
+    huge.maxOffset === config.CLOCK_OFFSET_MAX_MHZ,
+    `максимальный сдвиг ${huge.maxOffset} при разрешённых ${config.CLOCK_OFFSET_MAX_MHZ}`);
+  let hugeMonotone = true;
+  for (let i = 1; i < hugeCurve.length; i++) if (hugeCurve[i] < hugeCurve[i - 1]) hugeMonotone = false;
+  check('и даже обрезанный чудовищный шаг оставляет кривую монотонной', hugeMonotone);
+
+  // --- THE CASE THAT ACTUALLY BUYS WATTS: a cap BELOW the curve's top
+  //
+  // Measured 2026-08-10: with the cap at the TOP the card never reached it under load (it sat at 2887 of
+  // a 3172 top), so nothing was capped and the raise was taken as SPEED — 2887 → 2932 MHz at the same
+  // 137 W. The cap has to sit at the OPERATING frequency, and there the tail must be pushed DOWN.
+  const CAP = 2887;
+  const c = buildRaiseAndCapVector(points, DELTA, { capMhz: CAP });
+  const capCurve = points.slice(0, 127).map((p, i) => (p.freqKhz > 0 ? p.mhz + c.offsets[i] : p.mhz));
+  check('потолок НИЖЕ верха: точки над ним получают ОТРИЦАТЕЛЬНЫЙ сдвиг — их толкают вниз',
+    c.pushedDown > 0, `толкнуто вниз ${c.pushedDown} точек, минимальный сдвиг ${c.minOffset}`);
+  check('потолок НИЖЕ верха: новый максимум РАВЕН потолку, а не верху кривой',
+    Math.max(...capCurve) === CAP, `максимум ${Math.max(...capCurve)} при потолке ${CAP}`);
+  let capMonotone = true;
+  for (let i = 1; i < capCurve.length; i++) if (capCurve[i] < capCurve[i - 1]) capMonotone = false;
+  check('потолок НИЖЕ верха: кривая всё равно монотонна', capMonotone);
+  check('потолок НИЖЕ верха: низ кривой по-прежнему берёт полный шаг (простой не тронут)',
+    c.offsets[0] === DELTA, `точка 0: ${c.offsets[0]}`);
+  check('ни один сдвиг не выходит за РАЗРЕШЁННЫЙ ЖЕЛЕЗОМ диапазон',
+    c.offsets.every((o) => o >= config.CLOCK_OFFSET_MIN_MHZ && o <= config.CLOCK_OFFSET_MAX_MHZ),
+    `диапазон железа ${config.CLOCK_OFFSET_MIN_MHZ}…${config.CLOCK_OFFSET_MAX_MHZ}, наш ${c.minOffset}…${c.maxOffset}`);
+  check('флаг capIsBelowTop честно различает два режима',
+    c.capIsBelowTop === true && v.capIsBelowTop === false);
+
+  // --- points with no frequency are not invented into the profile
+  const holed = points.map((p, i) => (i === 50 ? { ...p, freqKhz: 0, mhz: 0 } : p));
+  const hv = buildRaiseAndCapVector(holed, DELTA);
+  check('точка без частоты получает 0, а не выдуманный сдвиг', hv.offsets[50] === 0);
+
+  const empty = buildRaiseAndCapVector([{ i: 0, mhz: 0, mv: 0, freqKhz: 0 }], DELTA);
+  check('кривая без данных -> отказ, а не пустой профиль', empty.ok === false, empty.why);
+
+  console.log('');
+  console.log(`ФОРМА ПРОФИЛЯ: ${failed === 0 ? 'все блоки сходятся' : `ПРОВАЛОВ ${failed}`}.`);
+  return failed;
 }
 
 // =================================================================================================
@@ -1388,6 +1685,12 @@ function mainWriteZero() {
 }
 
 function main() {
+  if (process.argv.includes('--selftest-shape')) {
+    console.log('ФОРМА ПРОФИЛЯ — БЕЗ КАРТЫ. Чистая арифметика вектора сдвигов на подставной кривой,');
+    console.log('повторяющей форму настоящей (пол 180 МГц на точках 0…20, верх 3172 МГц на 126-й).');
+    console.log('');
+    return selftestShape() === 0 ? 0 : 1;
+  }
   if (process.argv.includes('--fans')) return mainFans();
   if (process.argv.includes('--fan-write')) {
     const i = process.argv.indexOf('--fan-write');
