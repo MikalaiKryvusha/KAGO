@@ -271,6 +271,129 @@ export async function runStep({
 }
 
 // =================================================================================================
+// THE ASCENT — researches/02 §3 steps 1–2, with the owner's two modes mapped onto our lever
+// =================================================================================================
+
+/**
+ * THE OWNER'S TWO SEARCH MODES, TRANSLATED — and the translation is the whole reason this constant
+ * exists rather than a round number.
+ *
+ * He specified them in VOLTS (chat, 2026-08-10): *«грубый меняет напряжение на 25 мВ… точный режим —
+ * меняет напряжение на 5 мВ»*. Our lever is a FREQUENCY offset, so the modes have to be converted,
+ * and the conversion is measured on this card's own curve: the points at the top are spaced ~15 MHz
+ * apart per 5 mV of voltage. So moving the serving point down one voltage step costs ~15 MHz of
+ * curve offset, and:
+ *
+ *   fine   = 5 mV  ->  ~15 MHz   (one curve point)
+ *   coarse = 25 mV ->  ~75 MHz   (five curve points)
+ *
+ * His rule that the fine step IS the hardware's own minimum step is honoured: 5 mV is the MEASURED
+ * voltage grid (fact 6), so the fine mode moves exactly one grid step.
+ */
+export const ASCENT_COARSE_MHZ = 75;
+export const ASCENT_FINE_MHZ = 15;
+
+/**
+ * Walk the whole curve upward until the oracle stops saying PASS.
+ *
+ * `researches/02` §3 step 2: coarse ascent to the first failure, then refine. And its §6.4 warning is
+ * built into the shape rather than left in prose — the edge is a PROBABILITY, not a line, so:
+ *
+ *   • the ascent NEVER dwells at a failing offset — it rolls back the moment a verdict is not PASS;
+ *   • the result is reported as "the highest offset that PASSED in this run", never as "the limit";
+ *   • a guardband is subtracted before anything could be called a profile, and this function does not
+ *     produce a profile at all.
+ *
+ * ONE ARM FOR THE WHOLE ASCENT: the watchdog is armed once and its lease renewed at every step, so
+ * the card is covered continuously rather than in gaps between steps.
+ */
+export async function runAscent({
+  capMhz = 2842,
+  stepMhz = ASCENT_COARSE_MHZ,
+  maxMhz = 150,
+  workload = 'sdc_fma',
+  seconds = 30,
+  sustain = 10,
+} = {}) {
+  const nvapi = await import('./nvapi.mjs');
+  const wd = await import('./watchdog.mjs');
+  const stress = await import('./stress-tester.mjs');
+
+  const out = { capMhz, stepMhz, maxMhz, workload, steps: [], bestPassMhz: 0, stoppedBy: null };
+
+  const stale = await wd.recover({});
+  if (stale.found && stale.ownerAlive) {
+    out.stoppedBy = `карту держит живой процесс pid ${stale.record.ownerPid}`;
+    return out;
+  }
+
+  const nv = nvapi.openNvapi();
+  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+  const handle = handles.readBigUInt64LE(0);
+
+  const POINTS = nvapi.CLK_VF_POINT_COUNT - 1;                 // point 127 is not a graphics point
+  const writeAll = (mhz) => {
+    let failed = 0;
+    for (let p = 0; p < POINTS; p++) if (!nvapi.writeVfOffset(nv, handle, p, mhz * 1000).ok) failed++;
+    return failed;
+  };
+
+  const watchdog = wd.arm({ what: `ВОСХОЖДЕНИЕ: вся кривая, шаг +${stepMhz} МГц до +${maxMhz}`, ttlMs: (seconds + 90) * 1000 });
+  let touched = false;
+
+  try {
+    const curve0 = nvapi.readVfCurve(nv, handle);
+    const v0 = curve0.ok ? voltageForClock(curve0.points, capMhz) : null;
+    out.stockVolt = v0;
+
+    for (let offset = stepMhz; offset <= maxMhz; offset += stepMhz) {
+      watchdog.beat();
+      const failedWrites = writeAll(offset);
+      touched = true;
+      if (failedWrites) { out.stoppedBy = `отказов записи ${failedWrites} на +${offset} МГц`; break; }
+
+      const curve = nvapi.readVfCurve(nv, handle);
+      const v = curve.ok ? voltageForClock(curve.points, capMhz) : null;
+      const tempC = cardTemperatureC();
+
+      const res = await stress.stressTest({ name: workload, seconds, sustain, onBurst: () => watchdog.beat() });
+      const step = {
+        offsetMhz: offset,
+        servingPoint: v ? v.pointIndex : null,
+        mv: v ? v.mv : null,
+        savedMv: v0 && v ? Number((v0.mv - v.mv).toFixed(3)) : null,
+        tempC,
+        verdict: res.verdict,
+        reason: res.reason ?? null,
+      };
+      out.steps.push(step);
+
+      if (res.verdict !== config.VERDICT.PASS) { out.stoppedBy = `вердикт ${res.verdict} на +${offset} МГц`; break; }
+      out.bestPassMhz = offset;
+    }
+    if (!out.stoppedBy) out.stoppedBy = `дошли до потолка +${maxMhz} МГц, отказа не встретили`;
+  } finally {
+    watchdog.beat();
+    if (touched) {
+      let backFailed = 0;
+      for (let p = 0; p < POINTS; p++) if (!nvapi.writeVfOffset(nv, handle, p, 0).ok) backFailed++;
+      const check = nvapi.readVfOffsets(nv, handle);
+      out.rolledBack = backFailed === 0 && check.ok && check.nonZero === 0;
+      out.rollbackDetail = `отказов ${backFailed} · ненулевых ${check.ok ? check.nonZero : '—'} из 128`;
+    } else {
+      out.rolledBack = true;
+      out.rollbackDetail = 'записи не было';
+    }
+    watchdog.disarm();
+    nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
+  }
+
+  return out;
+}
+
+// =================================================================================================
 // CLI
 // =================================================================================================
 
@@ -279,7 +402,43 @@ function arg(name, fallback) {
   return i === -1 ? fallback : process.argv[i + 1];
 }
 
+async function mainAscend() {
+  const capMhz = Number(arg('cap', 2842));
+  const stepMhz = process.argv.includes('--fine') ? ASCENT_FINE_MHZ : Number(arg('step', ASCENT_COARSE_MHZ));
+  const maxMhz = Number(arg('max', 150));
+  const seconds = Number(arg('seconds', 30));
+
+  console.log('ВОСХОЖДЕНИЕ ПО КРИВОЙ — researches/02 §3, шаги 1–2');
+  console.log('');
+  console.log(`  ЧТО ДЕЛАЕМ: поднимаем ВСЮ кривую шагами +${stepMhz} МГц до +${maxMhz}, на каждом шаге судим оракулом.`);
+  console.log(`  МЕРА:       насколько подешевела частота ${capMhz} МГц — какая точка её обслуживает.`);
+  console.log(`  ПЕРЕВОД:    шаг +${ASCENT_FINE_MHZ} МГц ≈ 5 мВ (точный режим), +${ASCENT_COARSE_MHZ} ≈ 25 мВ (грубый) — по замеру этой кривой.`);
+  console.log('  ОСТАНОВКА:  первый вердикт, отличный от PASS. У края НЕ задерживаемся — сразу откат.');
+  console.log('  ОТКАТ:      вся кривая в ноль, в finally, под сторожем на весь прогон.');
+  console.log('');
+
+  const r = await runAscent({ capMhz, stepMhz, maxMhz, seconds });
+
+  if (r.stockVolt) console.log(`СТОК: ${capMhz} МГц обслуживает точка ${r.stockVolt.pointIndex} — ${r.stockVolt.mv} мВ`);
+  console.log('');
+  console.log('  сдвиг | обслуж. точка |    мВ | экономия |  °C | вердикт');
+  for (const s of r.steps) {
+    console.log(`  ${String('+' + s.offsetMhz).padStart(6)} | ${String(s.servingPoint).padStart(13)} | ${String(s.mv).padStart(5)} | ${String('-' + s.savedMv + ' мВ').padStart(8)} | ${String(s.tempC).padStart(3)} | ${s.verdict}`);
+  }
+  console.log('');
+  console.log(`ОСТАНОВЛЕНО: ${r.stoppedBy}`);
+  console.log(`НАИБОЛЬШИЙ СДВИГ, ПРОШЕДШИЙ В ЭТОМ ПРОГОНЕ: +${r.bestPassMhz} МГц`);
+  const best = r.steps.filter((s) => s.verdict === config.VERDICT.PASS).pop();
+  if (best) console.log(`  ему соответствует ${best.mv} мВ на ${capMhz} МГц вместо ${r.stockVolt?.mv} — на ${best.savedMv} мВ дешевле`);
+  console.log('');
+  console.log('ЧТО ЭТО НЕ ЗНАЧИТ: это НЕ предел и НЕ профиль. Отказ вероятностный (researches/02 §6.4),');
+  console.log('прогнана одна нагрузка, запас надёжности не применён.');
+  console.log(`ОТКАТ: ${r.rolledBack ? 'выполнен' : 'НЕ ВЫПОЛНЕН — РАЗБИРАТЬСЯ'} — ${r.rollbackDetail}`);
+  return r.rolledBack ? 0 : 1;
+}
+
 async function main() {
+  if (process.argv.includes('--ascend')) return mainAscend();
   const point = Number(arg('point', DEFAULT_POINT));
   const offsetMhz = Number(arg('mhz', DEFAULT_STEP_MHZ));
   const workload = String(arg('workload', 'sdc_fma'));
