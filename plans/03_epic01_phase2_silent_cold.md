@@ -54,7 +54,7 @@ one nobody checks after the day it was written (the lesson P1-AC5 paid for).
 | **P2-AC4** | IF any step of a multi-step apply fails, THEN the card shall be returned to the state it held before the apply began. | Scale: partial states left on the card · Meter: selftest with an injected failure between the power-limit write and the clock write · **Target: 0** |
 | **P2-AC5** | A profile shall carry the driver and VBIOS it was measured on, and applying one whose stamp no longer matches shall be REFUSED. | Scale: applies performed with a stale stamp · Meter: `npm run profile -- --apply <name>` against a profile whose stamp was edited · **Target: 0, and the refusal names the mismatching field** (rule R6) |
 | **P2-AC6** | The card under *Silent Cold* shall produce no CRASH and no SDC over the phase's verification run. | Scale: CRASH + SDC verdicts · Meter: `npm run stress -- --workload <each> --transient` under the profile, plus the event log over the same window · **Target: 0** |
-| **P2-AC7** | *Silent Cold* shall reduce median power under the sustained transient load, measured against stock under the SAME background. | Scale: watts, median over the run · Meter: `hardware-mon` samples, stock vs profile, background recorded in both · **Target: report the measured delta against the PDF's −100 W. This target is inherited, not proven reachable on this backend — see the risk below** |
+| **P2-AC7** | *Silent Cold* shall reduce median power under the sustained transient load, measured against stock under the SAME background — **and the report shall carry the meter's own run-to-run spread beside the delta.** | Scale: watts, median over the run · Meter: `hardware-mon` samples, stock vs profile, background recorded in both, plus two identical stock captures to measure the spread (§4.4) · **Target: report the measured delta and the spread. NOT a threshold.** Owner's word, 2026-08-10: the PDF's −100…−120 W is a reference, not a target — it floats between individual cards, and the design formula is «maximize the power reduction while the price stays ≤ N», with N set by the owner WITH the curve in hand. A delta thinner than the spread is not reported as an effect |
 | **P2-AC8** | `npm run check` shall stay green and no third-party GUI shall enter the dependencies. | Scale: exit code · dependencies of that kind · Meter: `npm run check` · read `package.json` · **Target: 0 · 0** (epic AC6) |
 
 ## 4. Steps
@@ -67,7 +67,7 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 
 *Anchor: internal map §4 — «Сброс — это профиль, как два других, а не особый случай в коде».*
 
-**DONE 2026-08-10 10:5x +03:00** — `automation-engine/lib/profile-store.mjs` · `profiles/factory.json` ·
+**DONE 2026-08-10 09:31 +03:00** — `automation-engine/lib/profile-store.mjs` · `profiles/factory.json` ·
 `profiles/README.md` · `npm run profiles`. No GPU write in this step.
 
 - [x] One JSON per profile: name, the settings (`powerLimitWatts`, `graphicsClockLockMhz {min,max}`),

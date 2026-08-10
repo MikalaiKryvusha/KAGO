@@ -1002,6 +1002,81 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   background and under a load heavy enough to dominate it — at hundreds of watts under load, a 6 W
   desktop wobble is noise in the third digit. Quieting apps matters only when comparing IDLE
   numbers, and even then the floor stays out of reach.
+- **THE PDF'S NUMBERS ARE NOT TARGETS — THE OPTIMUM IS SEARCHED FOR ON THIS SPECIFIC CARD.** The
+  owner, chat 2026-08-10 09:4x +03:00, verbatim and unedited:
+
+  > *«в мастерплане было написано про "перегиб кривой производительности" - что это является свит
+  > спот, и что он якоды на 97% - это чистой воды спекуляция. Нужно не доверять этиц цифрам, а
+  > ИСКАТЬ РЕАЛЬНЫЙ оптимум нашего конкретного экземпляра GPU, который мы тюним»*
+
+  And, minutes later, the reason and the authority order, in his words:
+
+  > *«то, что я сказал в чат - вот это главнее. Я сказал, что цифре 97 не верим, она может плавать
+  > от экземпляра видеокарты к экземпляру.»*
+
+  **THE AUTHORITY ORDER, STATED HERE BECAUSE THE PDF HAS BEEN TREATED AS THE SPEC:** the owner's
+  spoken word > `RTX_5070Ti_Undervolting_Master_Plan.pdf` > tests > current code behaviour. The PDF is
+  a source document the owner brought in, not a contract he signed; where the two disagree, the chat
+  wins and the PDF line is marked superseded rather than quietly kept.
+
+  **AND THE REASON IS PHYSICAL, NOT RHETORICAL: the figure FLOATS BETWEEN INDIVIDUAL CARDS.** A
+  percentage measured on somebody's die is not a property of the model — `researches/02` already
+  measured card-to-card Vmin spreading up to 70 mV, so a per-instance sweet spot is exactly what that
+  spread predicts. This is why the number cannot simply be re-checked once and adopted: it is a
+  property of the silicon in this machine.
+
+  **THE TRADE-OFF ITSELF IS AN ASSUMPTION, AND THE OWNER STRUCK IT DOWN TOO** (chat, same exchange):
+
+  > *«на некоторых картах вообще не наблюдается потери производительности при существенном снижении
+  > потребления»*
+
+  So the two profiles must NOT be designed as a bargain — "fast one" and "quiet one", performance
+  spent to buy silence. The honest shape is: **map this card's power↔performance curve first, then see
+  what the curve offers.** If a large power reduction with no measurable loss exists on this die,
+  `Max Optimal` IS that point, and "97 %" was never a ceiling to aim at — it was somebody else's
+  measurement standing in for ours.
+
+  **The consequence for the instrument, and it is a hard requirement, not a caveat:** *"no performance
+  loss"* is a claim about a DIFFERENCE, so it may only be made after the meter's own run-to-run
+  spread has been measured and shown to be SMALLER than the effect being denied. A 0 % loss reported
+  by an instrument that scatters 3 % between two identical stock runs is not a finding — it is a blunt
+  instrument. Measure the spread at stock first (the pattern is already written into
+  `plans/03` §4.4), state it next to every delta, and never report a difference thinner than it.
+
+  **AND THEN THE OWNER GAVE THE DESIGN FORMULA ITSELF** (chat, same exchange) — this is the answer to
+  "what is the optimum", and it means the agent never has to guess that definition again:
+
+  > *«профили проектируем по пронципу : "хотим снизить потребление видеокарты, и смотрим, чем за это
+  > платим. Снижаем потребление насколько можем до тех пор, пока не платим больше, чем N. Больше N
+  > платить не хотим. Ищем вменяемый оптимум и компромис."»*
+
+  **Written as the optimization it is: MAXIMIZE the power reduction, SUBJECT TO the price paid ≤ N.**
+  The controlled variable is power; performance is the CURRENCY, not the objective; N is a budget the
+  owner sets, and **a profile is simply one value of N.** Consequences the agent must not re-derive:
+  - The search descends while the price stays under budget and stops at the last point that does —
+    it does not aim at a percentage and it does not stop at a number somebody else measured.
+  - **N belongs to the owner, and it is asked WITH the curve in hand, never before it exists.** Asking
+    "what loss will you accept?" before the card's own power↔performance curve has been measured is
+    asking him to guess; the question carries the measured curve (the self-sufficient-question rule).
+  - If a cost other than performance turns up (a thinner stability margin, a fan-speed floor), it is
+    NAMED as part of the price rather than quietly left out of the budget.
+  - "Вменяемый компромис" is not a stop word here — it is made verifiable by N: once N is a number,
+    "sane compromise" means "the largest power reduction whose measured price is ≤ N".
+
+  Operationally, and it changes acceptance rather than only tone:
+  - **Every figure inherited from `RTX_5070Ti_Undervolting_Master_Plan.pdf` — ≥97 % of stock, −60…−80 W,
+    −100…−120 W, ≤65 °C / ≤58 °C, the "knee" of the curve — is a REFERENCE, never a target and never a
+    promise.** A criterion may cite one; it may not be PASSED or FAILED by one.
+  - **The acceptance criterion becomes the SEARCH and its evidence:** measure this card's own
+    performance-per-watt curve, show where its knee actually sits, and report the number found. A
+    profile is defined by the measured optimum of this silicon, not by hitting an inherited percentage.
+  - **This is the same class of finding the project already paid for twice** — the power-limit floor
+    turned out to be 250 W, not the PDF's assumption, and the hotspot sensor the PDF's thermal rows
+    rest on is disabled at driver level on RTX 50. The owner is generalizing what the measurements
+    already showed: the PDF describes a GPU model, and we are tuning ONE die.
+  - **The three-doors rule applies without an exception here** (`PHILOSOPHY.md`): where the optimum is
+    not yet measured, the honest answer is «не измерено», never a plausible inherited number.
+
 - *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
   dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
   records how it is satisfied.

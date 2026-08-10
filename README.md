@@ -138,11 +138,15 @@ The measurements behind each of these are cited in
 | | 🚀 **Max Optimal** | ❄️ **Silent Cold** |
 |---|---|---|
 | For | Everyday gaming, quiet but fast | Night sessions and light games |
-| Performance | ≥ 97 % of stock score | 90–93 % of stock score |
-| Core temperature | ≤ 65 °C | ≤ 58 °C |
-| Hotspot | ≤ 78 °C | ≤ 68 °C |
-| Power saved | 60–80 W | 100–120 W |
+| How its point is chosen | The largest power reduction whose performance cost is indistinguishable from zero **on this card** | The coldest and quietest point that still passes the stability oracle |
+| Performance · temperature · power saved | Measured, not inherited — **not measured yet** | Measured, not inherited — **not measured yet** |
 | Applied | At boot, plus a shortcut | By shortcut, when you want it |
+
+The source plan quoted figures — ≥ 97 % of stock, 60–120 W saved, 65 / 58 °C. KAGO does not carry
+them as targets: they float from one card to the next, and on some cards there is no performance cost
+at all for a substantial power reduction. So the numbers this table will carry are the ones measured
+on this die — reported next to the meter's own run-to-run spread, because "no loss" measured with a
+blunt instrument is not a finding.
 
 A **third shortcut resets the card to factory settings**, and all three write the state that gets
 re-applied at boot — so whichever you clicked last is what you come back to. The tray icon shows
@@ -324,11 +328,15 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 | | 🚀 **Max Optimal** | ❄️ **Silent Cold** |
 |---|---|---|
 | Для чего | Повседневная игра, тихо и быстро | Ночные сессии и лёгкие игры |
-| Производительность | ≥ 97 % от стока | 90–93 % от стока |
-| Температура ядра | ≤ 65 °C | ≤ 58 °C |
-| Горячая точка | ≤ 78 °C | ≤ 68 °C |
-| Экономия мощности | 60–80 Вт | 100–120 Вт |
+| Как выбирается точка | Наибольшее снижение потребления, у которого потеря производительности неотличима от нуля **на этой карте** | Самая холодная и тихая точка, которая ещё проходит оракул стабильности |
+| Производительность · температура · экономия | Измеряется, а не наследуется — **ещё не измерено** | Измеряется, а не наследуется — **ещё не измерено** |
 | Как применяется | При старте ПК и ярлыком | Ярлыком, когда захочется |
+
+Исходный план приводил числа — ≥ 97 % от стока, 60–120 Вт экономии, 65 / 58 °C. KAGO не несёт их как
+цели: они плавают от экземпляра к экземпляру, а на части карт существенное снижение потребления вообще
+не стоит производительности. Поэтому в этой таблице появятся числа, измеренные на этом кристалле, — и
+рядом с ними разброс самого прибора, потому что «потери нет», снятое тупым инструментом, находкой не
+является.
 
 **Третий ярлык возвращает карту к заводским настройкам**, и все три записывают состояние, которое
 применится при следующем старте ПК, — куда кликнули последним, туда и вернётесь. Иконка в трее
