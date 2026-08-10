@@ -1182,6 +1182,26 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   - **The three-doors rule applies without an exception here** (`PHILOSOPHY.md`): where the optimum is
     not yet measured, the honest answer is «не измерено», never a plausible inherited number.
 
+- **FOUR MODES, NOT TWO PROFILES — the owner's own taxonomy** (chat, 2026-08-10 18:5x). Quoted in full
+  in `GOAL.md` → «Четыре режима»; the reasoning and what is already measured per mode is
+  `MASTER_PLAN.md` → «Четыре режима». The names are his and ship as written: **Max Perfomance ·
+  Optimised · Silent Cold · Stock Default.** His framing: *«напрашивается четыре режима… и у всех них
+  разные критерии оптимальности»*.
+
+  | Mode | Maximizes | Pays with | Clock ceiling |
+  |---|---|---|---|
+  | 🚀 **Max Perfomance** | performance across the FULL clock range | nothing in performance; temperature is not optimized at all | the curve's TOP |
+  | ⚖️ **Optimised** | the optimum between performance and cold | **≤ 5 %** of performance | at the stock operating clock |
+  | ❄️ **Silent Cold** | COLD, and only cold | **up to 10 %** | well below the stock operating clock |
+  | ⏹ **Stock Default** | — | — | none; every offset to 0 |
+
+  **This SUPERSEDES the two-profile table below**, which is kept because its reasoning about the knee and
+  the two levers is still what `Optimised` runs on. What changed: the old `Max Optimal` was one profile
+  serving two different optima, and it splits. **One mechanism serves all three working modes** — the
+  whole curve raised, `offset_i = min(Δ, cap − F_i)`, differing only in where the ceiling sits — and NONE
+  of them uses a clock lock (his requirement, and also a necessity: `-lgc min=max` forbids clocking down).
+  Consequence for the surface: **four shortcuts, not three** (internal map §4 updated).
+
 - **THE TWO PROFILES, DEFINED BY THE OWNER IN OPERATIONAL TERMS** (chat, 2026-08-10, after he caught
   the agent describing CLOCK CLAMPING while he meant UNDERVOLTING). His words, verbatim:
 

@@ -63,11 +63,18 @@ profiles and build the owner-facing surface. They never search and never test.
 
 The design is now three shortcuts and a passive tray:
 
+**SUPERSEDED 2026-08-10 18:5x — there are FOUR shortcuts, not three.** The owner split the modes by their
+objective functions (`GOAL.md` → «Четыре режима»; the long form is `MASTER_PLAN.md`). What changed
+structurally: the old `Max Optimal` was one profile trying to serve two different optima, and it becomes
+two modes. Nothing in the applier changes — all three working modes are the SAME mechanism (the whole V/F
+curve raised, with the clock ceiling at a different place) and none of them uses a clock lock.
+
 | Shortcut | Applies | Becomes the remembered boot state |
 |---|---|---|
-| 🚀 **Max Optimal** | the sweet-spot profile | yes |
-| ❄️ **Silent Cold** | the deep-undervolt profile | yes |
-| ⏹ **Reset to factory** | stock — `-rgc`, power limit back to default | yes |
+| 🚀 **Max Perfomance** | curve raised, ceiling at the curve's TOP — the gain goes into clock | yes |
+| ⚖️ **Optimised** | curve raised, ceiling at the stock operating clock — measured: stock clock at −7.71 W / −5 °C | yes |
+| ❄️ **Silent Cold** | curve raised, ceiling well below stock — the cold mode, ~10 % paid deliberately | yes |
+| ⏹ **Stock Default** | factory — every offset to 0, `-rgc`, power limit back to default | yes |
 
 **The tray icon displays the active profile and nothing else.** No menu, no buttons, no click
 actions. It reads state; it never writes it.
