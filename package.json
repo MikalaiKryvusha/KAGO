@@ -29,7 +29,8 @@
     "workloads:verify": "node tools/build-workloads.mjs --verify",
     "nvapi": "node automation-engine/lib/nvapi.mjs",
     "nvml": "node automation-engine/lib/nvml.mjs",
-    "watchdog": "node automation-engine/lib/watchdog.mjs"
+    "watchdog": "node automation-engine/lib/watchdog.mjs",
+    "vfstep": "node automation-engine/lib/vf-step.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
