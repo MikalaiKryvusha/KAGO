@@ -32,10 +32,14 @@
 //   node tools/fan-ladder.mjs --levels 60,70,80     only those rungs, for a second opinion
 //   node tools/fan-ladder.mjs --hold 15             a longer listening window
 //   node tools/fan-ladder.mjs --dry-run             the schedule, and NOT a single write
+//   node tools/fan-ladder.mjs --no-cue              without the leading 100 % marker
 //   node tools/fan-ladder.mjs --selftest            the ladder logic, no GPU
 //
-// [NOT-TESTED]
+// [TESTED: 2026-08-10 21:xx, OFFLINE HALF · 25 selftest blocks green, eight mutations each reddening
+//  the block named for it BEFORE the run (§3). NOT TESTED: the ladder has never been played — no fan
+//  has been commanded by this file, and the owner has not listened yet.]
 
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -48,6 +52,24 @@ export const FAN_FLOOR_PCT = 30;
 export const DEFAULT_LEVELS = Object.freeze([30, 40, 50, 60, 70, 80, 90, 100]);
 /** His listening window per rung. */
 export const DEFAULT_HOLD_SECONDS = 10;
+
+/**
+ * THE CUE — a leading 100 % rung, asked for by the owner so the 100 → 30 drop marks the start of
+ * the test for his ears: *«так я акустически услышу начало теста по переходу 100 в 30»*.
+ *
+ * It is a separate concept from the ladder on purpose. The ladder is upward-only because a fan left
+ * LOW is the failure that costs the card, not the ears — so the descent lives here, with its own
+ * guard, and `buildLadder` stays exactly as strict as it was.
+ */
+export const DEFAULT_CUE_LEVEL = 100;
+
+/**
+ * The cue DESCENDS to the floor, so it is refused on a warm card — that is the precise situation the
+ * upward-only rule exists for. 60 °C is chosen well above this card's idle (45 °C observed tonight)
+ * and well below the 75–77 °C it reaches under load, so the guard never fires on an idle desktop and
+ * always fires on a card that has just been working.
+ */
+export const CUE_MAX_TEMP_C = 60;
 /** How long we allow a fan to reach its commanded level before calling the rung unproven (EXP-0028:
  *  measured ~8 s to target on this card, so 30 s is a generous ceiling rather than an expectation). */
 const RAMP_TIMEOUT_MS = 30_000;
@@ -56,6 +78,17 @@ const RAMP_POLL_MS = 500;
 const RAMP_TOLERANCE_PCT = 3;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** The card's temperature right now — read-only, and the cue's guard depends on it. */
+export function cardTemperatureC() {
+  try {
+    const { execFileSync } = createRequire(import.meta.url)('node:child_process');
+    const out = execFileSync('nvidia-smi', ['--query-gpu=temperature.gpu', '--format=csv,noheader'],
+      { encoding: 'utf8' });
+    const n = Number(String(out).trim());
+    return Number.isFinite(n) ? n : null;
+  } catch { return null; }
+}
 
 // =================================================================================================
 // 1. The ladder — validated before anything is written
@@ -91,13 +124,32 @@ export function buildLadder(levels = DEFAULT_LEVELS, { floorPct = FAN_FLOOR_PCT 
 
 /** The schedule a human can read BEFORE the noise starts: what will play, and roughly when. The ramp
  *  is an estimate and says so — the run reports what actually happened. [NOT-TESTED] */
-export function schedule(levels, { holdSeconds = DEFAULT_HOLD_SECONDS, rampEstimateS = 8 } = {}) {
+export function schedule(levels, { holdSeconds = DEFAULT_HOLD_SECONDS, rampEstimateS = 8, cueLevel = null } = {}) {
   let t = 0;
-  return levels.map((level) => {
+  const all = cueLevel === null ? levels : [cueLevel, ...levels];
+  return all.map((level) => {
     const startsAt = t + rampEstimateS;
     t = startsAt + holdSeconds;
     return { level, listenFromS: startsAt, listenToS: t };
   });
+}
+
+/**
+ * May the cue play right now? A pure decision, so the rule is testable without a card.
+ *
+ * Refusing is not a failure of the run — the cue is a convenience for the ear and the ladder plays
+ * without it. Saying WHY it was refused is what keeps the refusal honest.
+ *
+ * [NOT-TESTED]
+ */
+export function cueAllowed(temperatureC, { maxC = CUE_MAX_TEMP_C } = {}) {
+  if (!Number.isFinite(temperatureC)) {
+    return { ok: false, why: 'температура не прочиталась — спуск на пол вслепую не делаем' };
+  }
+  if (temperatureC > maxC) {
+    return { ok: false, why: `карта ${temperatureC} °C, а спуск на пол разрешён только холодной (≤ ${maxC} °C)` };
+  }
+  return { ok: true, why: `карта ${temperatureC} °C — холодная, отсечка разрешена` };
 }
 
 /** mm:ss — so the owner can follow the ladder by a clock instead of by the screen. */
@@ -135,6 +187,7 @@ export function reachedLevel(coolers, target, { tolerancePct = RAMP_TOLERANCE_PC
 export async function runLadder({
   levels = DEFAULT_LEVELS,
   holdSeconds = DEFAULT_HOLD_SECONDS,
+  cueLevel = DEFAULT_CUE_LEVEL,
   dryRun = false,
   onRung = null,
 } = {}) {
@@ -174,7 +227,19 @@ export async function runLadder({
     });
     out.watchdogPid = watchdog.guardPid;
 
-    for (const level of built.levels) {
+    // THE CUE IS DECIDED HERE, ON A FRESH TEMPERATURE, and the decision is recorded either way.
+    // It descends to the floor, so it is allowed only while the card is cold — the one situation
+    // the upward-only rule exists to prevent is a fan dropped low on a hot card.
+    let plan = [...built.levels];
+    if (cueLevel !== null) {
+      const t0 = cardTemperatureC();
+      const verdict = cueAllowed(t0);
+      out.cue = { level: cueLevel, ...verdict, temperatureC: t0 };
+      if (verdict.ok) plan = [cueLevel, ...built.levels];
+      if (onRung) onRung({ phase: 'cue', ...out.cue });
+    }
+
+    for (const level of plan) {
       watchdog.beat();
       const started = Date.now();
       const w = nvapi.writeFanControl(nv, handle, { mode: nvapi.FAN_MODE.MANUAL, level });
@@ -194,6 +259,7 @@ export async function runLadder({
 
       const rung = {
         level,
+        isCue: out.cue?.ok === true && out.rungs.length === 0,
         commanded: w.ok,
         reached,
         rampSeconds: Number((rampMs / 1000).toFixed(1)),
@@ -237,6 +303,9 @@ export async function runLadder({
  *   2. accept a rung below the card's floor                  → «ступень ниже пола карты — отказ»
  *   3. call a level reached when only ONE cooler arrived      → «уровень достигнут только когда ДОШЛИ ВСЕ кулеры»
  *   4. treat two agreeing samples as arrival                  → «пустой список кулеров — это НЕ достигнутый уровень»
+ *   5. let the cue play on a hot card                          → «на горячей карте отсечка ОТКАЗАНА — спуск на пол это и есть тот случай, ради которого правило»
+ *   6. assume cold when the temperature did not read         → «непрочитанная температура — тоже отказ, а не «наверное холодно»»
+ *   7. let the cue relax the ladder rule                       → «ЛЕСТНИЦА ОТ ЭТОГО НЕ ПОДОБРЕЛА: спуск внутри неё по-прежнему отказ»
  */
 export function selfTest() {
   const results = [];
@@ -262,7 +331,20 @@ export function selfTest() {
   ok('пустой список кулеров — это НЕ достигнутый уровень', reachedLevel([], 70), false);
   ok('нечитаемый уровень — не достигнутый', reachedLevel([{ level: null }], 70), false);
 
+  // THE CUE — the owner's audible start marker, and the one descent this tool performs
+  ok('на холодной карте отсечка разрешена', cueAllowed(45).ok, true);
+  ok('на горячей карте отсечка ОТКАЗАНА — спуск на пол это и есть тот случай, ради которого правило',
+    cueAllowed(75).ok, false);
+  ok('и отказ называет обе температуры', /75 °C.*60 °C/.test(cueAllowed(75).why), true);
+  ok('непрочитанная температура — тоже отказ, а не «наверное холодно»', cueAllowed(null).ok, false);
+  ok('граница включительно: ровно порог ещё разрешён', cueAllowed(60).ok, true);
+  ok('ЛЕСТНИЦА ОТ ЭТОГО НЕ ПОДОБРЕЛА: спуск внутри неё по-прежнему отказ',
+    buildLadder([100, 30, 40]).ok, false);
+
   // the schedule a human reads
+  const withCue = schedule([30, 40], { holdSeconds: 10, rampEstimateS: 8, cueLevel: 100 });
+  ok('отсечка идёт ПЕРВОЙ ступенью расписания', withCue[0].level, 100);
+  ok('и не вытесняет ни одной ступени лестницы', withCue.length, 3);
   const s = schedule([30, 40], { holdSeconds: 10, rampEstimateS: 8 });
   ok('расписание: слушать начинаем ПОСЛЕ разгона', s[0].listenFromS, 8);
   ok('и следующая ступень стартует после окна предыдущей', s[1].listenFromS, 26);
@@ -292,6 +374,8 @@ async function main(argv) {
   };
   const levels = (arg('levels') ?? DEFAULT_LEVELS.join(',')).split(',').map((s) => Number(s.trim()));
   const holdSeconds = Number(arg('hold', DEFAULT_HOLD_SECONDS));
+  const noCue = argv.includes('--no-cue');
+  const cueLevel = noCue ? null : Number(arg('cue', DEFAULT_CUE_LEVEL));
   const dryRun = argv.includes('--dry-run');
 
   const built = buildLadder(levels);
@@ -301,7 +385,9 @@ async function main(argv) {
     return 2;
   }
 
-  const plan = schedule(built.levels, { holdSeconds });
+  const t0 = cardTemperatureC();
+  const cueVerdict = cueLevel === null ? { ok: false, why: 'отсечка выключена флагом --no-cue' } : cueAllowed(t0);
+  const plan = schedule(built.levels, { holdSeconds, cueLevel: cueVerdict.ok ? cueLevel : null });
   console.log('АКУСТИЧЕСКАЯ ЛЕСТНИЦА — слушает ВЛАДЕЛЕЦ, карта здесь прибор');
   console.log('');
   console.log(`  СТУПЕНИ:   ${built.levels.join(' → ')} %`);
@@ -309,12 +395,16 @@ async function main(argv) {
   console.log('             до команды. Вентилятор разгоняется ~8 с, и десять секунд «сразу после');
   console.log('             команды» дали бы вам послушать разгон, а не уровень (EXP-0028).');
   console.log(`  ВСЕГО:     примерно ${mmss(plan.at(-1).listenToS)} звучания`);
+  console.log(`  ОТСЕЧКА:   ${cueVerdict.ok ? `ДА — ${cueLevel} % первой ступенью, чтобы переход ${cueLevel} → ${built.levels[0]} % отметил старт для уха` : `НЕТ — ${cueVerdict.why}`}`);
   console.log('  ПИШЕМ:     только вентиляторы. Ни частот, ни напряжений, ни потолка мощности.');
   console.log('  ОТКАТ:     AUTO в finally, с перечитыванием; сторож взводится ДО первой записи и');
   console.log('             вернёт кулеры в AUTO сам, если этот процесс умрёт.');
   console.log('');
   console.log('  РАСПИСАНИЕ (оценка, разгон может отличаться):');
-  for (const p of plan) console.log(`    ${String(p.level).padStart(3)} %  слушать с ${mmss(p.listenFromS)} до ${mmss(p.listenToS)}`);
+  for (const [i, p] of plan.entries()) {
+    const mark = (cueVerdict.ok && i === 0) ? '  ← ОТСЕЧКА: за ней услышите падение на пол' : '';
+    console.log(`    ${String(p.level).padStart(3)} %  слушать с ${mmss(p.listenFromS)} до ${mmss(p.listenToS)}${mark}`);
+  }
   console.log('');
 
   if (dryRun) {
@@ -327,6 +417,7 @@ async function main(argv) {
     r = await runLadder({
       levels: built.levels,
       holdSeconds,
+      cueLevel,
       onRung: (x) => {
         if (x.phase === 'listen') {
           console.log(`  ▶ ${String(x.level).padStart(3)} % — ОБОРОТЫ ДОШЛИ за ${x.rampSeconds} с `
