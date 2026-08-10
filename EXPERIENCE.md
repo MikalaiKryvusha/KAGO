@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0014 · 2026-08-10 · ❌→✅ · #gpu #write #readback #observation #owner-machine
+**Context:** the first GPU write of phase 2 — finding out whether `nvidia-smi -lgc` works on this GeForce and, harder, what can READ THE LOCK BACK, since `nvidia-smi` carries no locked-clocks field: `-q -d CLOCK` answers *"Requested functionality has been deprecated"* for Applications Clocks and has no Locked Clocks section at all.
+**Tried / did:** locked the core to an exact point of the measured ladder (`-lgc 1200,1200`), read the state, released with `-rgc`, read the state again immediately.
+**Result:** ❌→✅ two findings, one useful and one alarming. USEFUL: the lock IS directly observable and needs no load — the idle clock went 180 → exactly 1200 MHz and stopped moving, so `clocks.gr` is the read-back; `clocks_event_reasons.active` stayed `0x0000000000000000`, so the event mask is NOT the observable and a future session must not reach for it. ALARMING: the read taken immediately after `-rgc` still reported 1200 MHz next to exit 0 and *"All done"* — the release surfaced about a second later, and in that gap my own report read to the owner as "the reset did not work".
+**Lesson:** **a GPU write settles ASYNCHRONOUSLY — a single read straight after it can return the PREVIOUS value, and the tool's success text is not evidence either** (`researches/01` §5 already caught the same tool lying in its "from" field). Read-back therefore means *poll until two consecutive samples agree*, never one query. The corollary is the stronger half: a value that stops VARYING proves a lock better than any status field — pinned it was exactly 1200 and constant, released it wandered 810…1065, which a lock cannot produce. And the process half, which is what actually cost something: I ran a state-changing flag without reading its documentation first, and the owner had to say so.   → link: `AGENT_GUIDE.md` → the owner's-machine rule · `researches/01` §5
+**Repro:** `node -e "const{execSync}=require('child_process');let p=null,n=0;const t=()=>{const v=execSync('nvidia-smi --query-gpu=clocks.gr --format=csv,noheader').toString().trim();n=(v===p)?n+1:0;p=v;console.log(v,n?'STABLE':'settling');if(!n)setTimeout(t,700)};t()"` — treats a value as read back only when two consecutive samples match.
+**Trigger:** about to verify ANY write to the card → poll the written field until two consecutive samples agree; never trust the first read, and never the tool's stdout.
+**Not for:** read-only probes, and fields the card reports as pure state rather than as a target it converges toward (driver, VBIOS, the power-limit range) — those answer correctly on the first read.
+
 ### EXP-0013 · 2026-08-10 · ✅ · #dry #architecture #drift #pairs
 **Context:** phase 1 asked for a truth↔mirror pair — the field list in `researches/03` §2 ↔ the fields `hardware-mon.mjs` samples — to be entered in the registry and watched.
 **Tried / did:** did not create the pair. Made the sampler read `config.TELEMETRY_FIELDS` directly, so the second list never came into existence, and wrote into the module a refusal to run if that list ever contains a field probed absent on this card.

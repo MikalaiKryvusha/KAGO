@@ -466,6 +466,47 @@ driver. Two rules shape it, both paid for by `researches/02`:
 > are free; writes belong to a planned step with a stated rollback. Every command in this table is
 > read-only with respect to GPU state: `stress` LOADS the card by running compute, and sets nothing.
 
+### THE OWNER'S-MACHINE RULE — stands above everything else in this guide
+
+The owner's standing law, said in chat **2026-08-10 09:1x +03:00**, verbatim and unedited:
+
+> *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАНО!!!! ТРИЖДЫЙ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО_ТО ДЕЛАТЬ!
+> НЕ ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗАДАТЕЛЕН!»*
+
+This is not a preference to weigh against speed. It is the machine the owner works and lives on, and
+KAGO is the one project in the tree whose whole job is to change that machine's hardware state.
+**Before ANY action that changes machine state** — a GPU write, a registry key, a scheduler task,
+installing or removing software, writing outside the repository — walk these five, in order:
+
+1. **Look it up FIRST — never learn a state-changing flag's semantics by running it.** Read the
+   vendor's documentation (`nvidia-smi --help`, the NVML/NVAPI reference, `learn.microsoft.com`) or
+   this project's own `researches/` before the first invocation, not after the surprise. A lookup
+   costs a minute; an unexplained state on the owner's machine costs his trust. The verb you think
+   you know is exactly the one that bites — EXP-0005 is a `winget` query verb that installed.
+2. **Name the rollback out loud, and confirm it exists, BEFORE the write** — in the chat, in the
+   plan step, in the bug document. A write whose undo is discovered afterwards is not a write, it is
+   a hope (rule R5 of the internal map).
+3. **Smallest reversible form.** Downward, narrower, shorter. One card, one setting, one value taken
+   from a MEASURED list rather than a round number you liked.
+4. **Confirm by RE-READING the state — and POLL UNTIL IT IS STABLE.** The tool's own success text
+   is not evidence: `nvidia-smi` prints the DEFAULT in its "from" field (`researches/01` §5), and —
+   observed 2026-08-10 — `-rgc` answered *"All done"* with exit 0 while `clocks.gr` still reported
+   the locked 1200 MHz; the release only showed up on the next sample about a second later. **A
+   single read taken immediately after a write can return the previous value.** Read until two
+   consecutive samples agree, then report.
+5. **Report what you did and what the card reads NOW** — in numbers, next to the numbers from before.
+
+Two boundaries that keep this rule from being read narrowly:
+
+- **A permission entry is not a reason to act.** The allow-lines in `.claude/settings.local.json`
+  remove the CONFIRMATION PROMPT and nothing else. They do not supply the lookup, the rollback, the
+  plan, or the judgement. When a prompt stops appearing, the five steps above become MORE important,
+  not less — the friction that used to catch a careless call is now yours to provide.
+- **"Destructive" is wider than "deletes data".** Here it includes: installing / upgrading /
+  uninstalling software, writing anywhere outside this repository, changing registry or Task
+  Scheduler state, and any GPU write with no proven way back. When in doubt about which side of the
+  line an action sits on, it is on the destructive side — ask.
+
 ### The truth↔mirror pairs registry
 
 One row per pair, with the command that catches the drift (`Document & text hygiene` below explains
@@ -933,6 +974,11 @@ interpretation. Interviews are for vision-level forks that outlive the task.
 
 **The owner's standing constraints for KAGO** (their words, `GOAL.md` and chat, 2026-08-09):
 
+- *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАНО!!!! ТРИЖДЫЙ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО_ТО ДЕЛАТЬ! НЕ
+  ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗАДАТЕЛЕН!»* (chat, 2026-08-10) — the standing law
+  above every other line in this guide. Its executable form is **the owner's-machine rule** in the
+  test-harness section: look it up first · name the rollback before the write · smallest reversible
+  form · re-read until stable · report the numbers. A permission entry is not a reason to act.
 - *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
   dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
   records how it is satisfied.
