@@ -1,6 +1,7 @@
 # Bug 02 — the edge search writes ONE curve point, so the clock it claims to undervolt is never undervolted
 
-**Status:** 🔬 RESEARCH-ONLY — cause found and proved, fix NOT applied
+**Status:** 🟡 PARTIAL — cause proved, **the GUARD is applied and has fired on the live card**; the
+search's write shape is not corrected yet (step 1 of the fix plan)
 **Version/build:** driver 610.88 · VBIOS 98.03.58.40.8b · `engine.mjs` as of commit `90b07dc`
 **When/context:** 2026-08-11 00:0x, during `plans/05` §4.5 — the first edge search judged by the
 diverse load set (§4.3, closed the same evening)
@@ -107,11 +108,18 @@ one-line patch, and it is the kind of choice this project has already paid for m
    already exists, is proved offline, and is what the shipped profile applies. Searching in the same
    shape the profile ships makes the searched quantity and the shipped quantity the same thing —
    which is the whole reason the bracket may be converted to volts at all.
-2. **The engine must REFUSE to convert to volts when the write shape cannot move the cap's serving
-   point.** A guard, not a comment: if `voltageForClock` at the cap is unchanged by the applied
-   vector, the run reports «этот сдвиг НЕ удешевляет потолок» and does not print a millivolt figure.
-   The guard exists in the atom already (the RED block above) — it must become a STOP in the engine
-   rather than one red line among twelve.
+2. ✅ **DONE 2026-08-11 00:2x — the engine REFUSES.** `refuseWithoutUndervolt()` reads the atom's own
+   `undervolt.savedMv` (the voltage serving the cap before the write minus after, both from the
+   card's curve) and, when it is not positive, **halts the search on that rung**, reports no bracket
+   and no millivolts. Eight offline blocks — zero saving, negative saving, a real saving passing
+   through, and the ABSENCE of the observation passing through untouched (absence is not an
+   observation of zero) — plus two mutations, each reddening the block named for it before the run.
+   **Then fired for real** against the very search that produced this bug: it now stops at +75 MHz
+   with «эта запись НЕ удешевляет потолок … экономия 0 мВ» instead of walking seven rungs.
+
+   **Consequence, stated plainly: `npm run engine -- --search` cannot produce a result until step 1
+   lands.** That is the intended state — a search that cannot support its own claim should refuse,
+   not produce a number somebody will quote.
 3. **Re-run the edge search at 2842 MHz in the corrected shape**, and replace fact 28's number with
    what that run measures.
 4. **Correct the canon rather than delete it:** fact 28 and EXP-0034 get a correction block; the

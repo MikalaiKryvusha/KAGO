@@ -68,6 +68,45 @@ export function isPass(verdict) {
   return verdict === config.VERDICT.PASS;
 }
 
+/**
+ * REFUSE TO SEARCH WHEN THE WRITE DOES NOT UNDERVOLT THE CAP — the guard `bugs/02` was born from.
+ *
+ * The atom already computes this: `undervolt.savedMv` is the voltage serving `capMhz` BEFORE the
+ * write minus the voltage serving it AFTER, both read from the card's own curve seconds apart. A
+ * value of zero means the vector we applied cannot cheapen the clock we are testing, so every
+ * conclusion the search would draw — a bracket, a Vmin, a margin — would be about a quantity that
+ * never moved.
+ *
+ * **This is a STOP, not a warning, and the reason is a defect that actually happened.** The block
+ * existed, it went RED on 2026-08-10 23:5x saying «экономия 0 мВ», and it was read as a curiosity
+ * of a single-point write rather than as a verdict on the search — which then ran seven rungs and
+ * reported an edge in millivolts the card had never been at. A guard that fires and is explained
+ * away is a guard that did not fire; the cure is to remove the option of explaining it away.
+ *
+ * Silence is not a stop: a `runStepFn` that reports no `undervolt` block at all (every offline
+ * fixture, and the atom in `--dry-run`) is left alone. The guard judges an OBSERVATION, never its
+ * absence — the same rule the oracle itself obeys.
+ *
+ * [TESTED: 2026-08-11 00:2x · eight blocks — zero saving, negative saving, a real saving passing
+ *  through, and the absence of the block passing through — mutation-proved with two mutations
+ *  (drop the refusal · treat absence as zero), each reddening the block named for it in the header
+ *  above BEFORE the run. AND FIRED FOR REAL on the live card against the very search that produced
+ *  bugs/02: the run now stops on the first rung instead of reporting seven]
+ */
+export function refuseWithoutUndervolt(out, result, offsetMhz) {
+  const saved = result?.undervolt?.savedMv;
+  if (saved === null || saved === undefined) return false;
+  if (saved > 0) return false;
+  out.halted = true;
+  out.noUndervoltAtCap = true;
+  out.bracketMhz = null;
+  out.stopped = `СТОП на +${offsetMhz} МГц: эта запись НЕ удешевляет потолок — напряжение, обслуживающее `
+    + `${result?.undervolt?.capMhz ?? out.capMhz} МГц, осталось прежним (экономия ${saved} мВ). `
+    + 'Искать край дальше значило бы измерять сдвиг, а докладывать о напряжении, которого карта не видела '
+    + '(bugs/02). Ни вилки, ни милливольтов этот прогон не даёт.';
+  return true;
+}
+
 // =================================================================================================
 // 1. The plan — computed before anything is written, so a dry run shows the real thing
 // =================================================================================================
@@ -244,6 +283,8 @@ export async function searchEdge({
   for (const offsetMhz of ladder) {
     const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes });
     const a = await record(offsetMhz, result);
+    const noUndervolt = refuseWithoutUndervolt(out, result, offsetMhz);
+    if (noUndervolt) return out;
     if (isPass(a.verdict)) { out.lastPass = offsetMhz; continue; }
     // RULE 1 and 2: anything that is not PASS closes the direction, and it is NOT re-tested.
     out.firstFail = offsetMhz;
@@ -278,6 +319,7 @@ export async function searchEdge({
     if (mid <= lo || mid >= hi) break;
     const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes });
     const a = await record(mid, result);
+    if (refuseWithoutUndervolt(out, result, mid)) return out;
     if (isPass(a.verdict)) { lo = mid; out.lastPass = mid; continue; }
     if (a.verdict === null) {
       // Same rule inside the bisection: an unobserved verdict cannot narrow a bracket.
@@ -326,6 +368,8 @@ export async function searchEdge({
  *   6. report a bracket wider than one fine step     → «вилка сходится до одного точного шага»
  *   7. collapse the set into ONE store record        → «в хранилище ложится запись НА КАЖДУЮ ФОРМУ»
  *   8. drop `shapes` on the way to the atom          → «набор доезжает до атома, а не теряется в движке»
+ *   9. keep searching when the cap was not cheapened → «поиск ОСТАНАВЛИВАЕТСЯ, если запись не удешевила потолок»
+ *  10. treat a MISSING undervolt block as zero       → «отсутствие наблюдения — не наблюдение нуля»
  */
 export function selfTest() {
   const results = [];
@@ -404,6 +448,36 @@ export function selfTest() {
     const steep = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withVolts((o) => 1040 - o / 5) });
     ok('разные напряжения — вилка докладывается в милливольтах', steep.bracketMv > 0, true);
     ok('и вероятностным краем это НЕ называется', Boolean(steep.probabilisticEdge), false);
+
+    // --- THE GUARD bugs/02 WAS BORN FROM. The search's whole premise is that the offset it walks
+    // makes the CAPPED CLOCK cheaper. When the applied write cannot do that, a bracket in
+    // millivolts is a claim about a voltage the card was never at — which is exactly what happened
+    // on 2026-08-11, for seven rungs, while the block saying so sat red among twelve green ones.
+    {
+      const withSaving = (savedMv) => async ({ offsetMhz }) => ({
+        verdict: offsetMhz < 200 ? P : config.VERDICT.SDC,
+        undervolt: { capMhz: 2842, savedMv, after: { pointIndex: 94, mv: 1040 } },
+      });
+      const inert = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withSaving(0) });
+      ok('поиск ОСТАНАВЛИВАЕТСЯ, если запись не удешевила потолок', inert.noUndervoltAtCap, true);
+      ok('и делает это на ПЕРВОЙ же ступени, а не после всей лестницы', inert.attempts.length, 1);
+      ok('и вилки при этом не выдаёт вовсе', inert.bracketMhz, null);
+      ok('и причина названа так, что её не прочесть как курьёз', /НЕ удешевляет потолок/.test(inert.stopped), true);
+
+      // a NEGATIVE saving is the same refusal — the cap got MORE expensive
+      const worse = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withSaving(-5) });
+      ok('подорожавший потолок — тот же отказ, а не «почти ноль»', worse.noUndervoltAtCap, true);
+
+      // and a real saving must NOT be stopped
+      const real = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withSaving(155) });
+      ok('настоящая экономия поиск не останавливает', Boolean(real.noUndervoltAtCap), false);
+      ok('и вилка у него есть', real.bracketMhz, ASCENT_FINE_MHZ);
+
+      // ABSENCE OF THE OBSERVATION IS NOT AN OBSERVATION OF ZERO — every offline fixture and the
+      // atom's own dry run report no undervolt block at all, and they must pass through untouched.
+      const silent = await run((o) => (o < 200 ? P : config.VERDICT.SDC));
+      ok('отсутствие наблюдения — не наблюдение нуля', Boolean(silent.noUndervoltAtCap), false);
+    }
 
     // --- THE STORE PATH, and it is here because its ABSENCE cost a live run.
     // Every block above ran with `store: null`, so the persistence branch was never executed once —
