@@ -11,7 +11,7 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-phase%201%3A%20harness%20in%20progress%2C%20engine%20not%20written-E67E22.svg?style=flat-square)](STATUS.md)
+[![Status](https://img.shields.io/badge/Status-phase%202%20closing%2C%20phase%204%20bridge%20live-E67E22.svg?style=flat-square)](STATUS.md)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
@@ -55,8 +55,9 @@ else's numbers.
 
 ## 2. Where the project actually is
 
-Two phases of six are closed. The research base, the architecture and **the test bench** are done;
-the orchestrator's engine is not written yet.
+Two phases of six are closed, and the card has been measured. The research base, the architecture and
+**the test bench** are done; KAGO now writes to the GPU and takes the write back; the search engine is
+not written yet.
 
 The bench samples the card, loads it with KAGO's own CUDA workloads, watches the Windows event log,
 and returns a three-way verdict — PASS, SDC or CRASH — by comparing a run against a golden reference
@@ -68,8 +69,16 @@ phase-1 acceptance:
 npm run phase1:accept
 ```
 
-**Nothing built so far writes to the GPU.** There is no write path in the code at all — phase 2 is
-the first that will have one.
+**KAGO writes to the card, and the way back is executed rather than promised.** One module owns every
+write; a profile is applied, re-read until two consecutive samples agree, and rolled back — the round
+trip has run on the live card. The card also has its own bridge now: KAGO talks to the NVIDIA driver
+API directly from Node, with no third-party GUI and no compiled binary, and reads the 128-point
+voltage/frequency curve.
+
+The measurement it produced first is the one that licenses every other number: the meter's **own**
+run-to-run spread, taken over ten stock runs in two independent series — **1.28 W (0.65 %)** on power
+and 0.18 % on throughput. A difference thinner than that is not an effect, and the tool prints that
+sentence beside every delta it computes.
 
 ```bash
 npm run gpu:info
@@ -86,7 +95,7 @@ Memory clocks  405, 810, 7001, 13801, 14001 MHz
 Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (phase 5's search space)
                identical on all 4 full memory rungs — sweep the graphics clock once
 Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
-               This is the CLOCK grid. The VOLTAGE grid is still unmeasured (phase 4).
+               This is the CLOCK grid. The VOLTAGE grid is 5 mV, read off the live curve.
 ```
 
 That headroom line is the finding that shaped everything else. The driver will only move
@@ -138,7 +147,7 @@ The measurements behind each of these are cited in
 | | 🚀 **Max Optimal** | ❄️ **Silent Cold** |
 |---|---|---|
 | For | Everyday gaming, quiet but fast | Night sessions and light games |
-| How its point is chosen | The largest power reduction whose performance cost is indistinguishable from zero **on this card** | The coldest and quietest point that still passes the stability oracle |
+| How its point is chosen | **The knee of the curve** — the point after which giving up more performance stops paying. The owner's ceiling is 5 %, and it is a ceiling, not a destination | **The coldest the card can go** for a price fixed in advance: **~10 %** of performance, spent deliberately |
 | Performance · temperature · power saved | Measured, not inherited — **not measured yet** | Measured, not inherited — **not measured yet** |
 | Applied | At boot, plus a shortcut | By shortcut, when you want it |
 
@@ -152,9 +161,13 @@ A **third shortcut resets the card to factory settings**, and all three write th
 re-applied at boot — so whichever you clicked last is what you come back to. The tray icon shows
 which profile is live and does nothing else: no menu, no buttons.
 
-These are **acceptance targets, not measured results.** Nothing here has been validated on hardware
-yet — that is phase 6. What *has* been proven on hardware is narrower and worth stating exactly: the
-driver accepts a power-limit write on this card (300 → 290 W, read back, restored).
+These are **acceptance targets, not shipped profiles.** No profile has been fixed yet — that is
+phase 6, and it waits on the owner's own listening test. What *has* been proven on this hardware is
+worth stating exactly, because it is more than it was: the driver accepts power-limit and clock-lock
+writes and gives them back (300 → 290 W and a core pinned to 1200 MHz, each re-read to stability and
+rolled back); the card's power↔performance curve has been measured across ten points; the meter's own
+spread is 1.28 W; and KAGO's own NVAPI bridge reads the 128-point voltage/frequency curve, whose
+voltage grid turned out to be 5 mV rather than the 6.25 mV folklore assumes.
 
 ---
 
@@ -247,8 +260,8 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 ## 2. Где проект находится на самом деле
 
-Закрыты две фазы из шести. Разведка, архитектура и **испытательный стенд** готовы, движка
-оркестратора ещё нет.
+Закрыты две фазы из шести, и карта измерена. Разведка, архитектура и **испытательный стенд** готовы;
+KAGO пишет в карту и умеет забрать запись назад; движка поиска ещё нет.
 
 Стенд снимает телеметрию, грузит карту своими ядрами на CUDA, читает журнал Windows и выносит
 вердикт из трёх — PASS, SDC или CRASH, — сверяя прогон с эталоном, снятым на заводских настройках.
@@ -259,8 +272,16 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 npm run phase1:accept
 ```
 
-**Ничего из построенного в GPU не пишет.** Пути записи в коде нет вовсе — первой его получит вторая
-фаза.
+**KAGO пишет в карту, и обратная дорога не обещана, а пройдена.** Записывает один-единственный
+модуль; профиль применяется, перечитывается до совпадения двух проб подряд и откатывается — круговой
+рейс прогнан на живой карте. И у карты теперь есть свой мост: KAGO разговаривает с драйвером NVIDIA
+напрямую из Node, без стороннего GUI и без единого скомпилированного бинарника, и читает кривую
+«напряжение — частота» из 128 точек.
+
+Первым же замером он выдал число, которое даёт право на все остальные: **собственный разброс прибора**
+между прогонами — десять стоковых прогонов двумя независимыми сериями, **1,28 Вт (0,65 %)** по
+мощности и 0,18 % по производительности. Разница тоньше этой — не эффект, и инструмент печатает эту
+фразу рядом с каждой дельтой, которую считает.
 
 ```bash
 npm run gpu:info
@@ -277,7 +298,7 @@ Memory clocks  405, 810, 7001, 13801, 14001 MHz
 Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (phase 5's search space)
                identical on all 4 full memory rungs — sweep the graphics clock once
 Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
-               This is the CLOCK grid. The VOLTAGE grid is still unmeasured (phase 4).
+               This is the CLOCK grid. The VOLTAGE grid is 5 mV, read off the live curve.
 ```
 
 Строка про запас и определила всё остальное. Потолок мощности драйвер двигает только с
@@ -328,7 +349,7 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 | | 🚀 **Max Optimal** | ❄️ **Silent Cold** |
 |---|---|---|
 | Для чего | Повседневная игра, тихо и быстро | Ночные сессии и лёгкие игры |
-| Как выбирается точка | Наибольшее снижение потребления, у которого потеря производительности неотличима от нуля **на этой карте** | Самая холодная и тихая точка, которая ещё проходит оракул стабильности |
+| Как выбирается точка | **Перегиб кривой** — точка, после которой дальнейшая отдача производительности перестаёт окупаться. Потолок владельца — 5 %, и это именно потолок, а не цель | **Максимальный холод**, какой карта может дать, за назначенную заранее плату: **~10 %** производительности |
 | Производительность · температура · экономия | Измеряется, а не наследуется — **ещё не измерено** | Измеряется, а не наследуется — **ещё не измерено** |
 | Как применяется | При старте ПК и ярлыком | Ярлыком, когда захочется |
 
@@ -342,9 +363,13 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 применится при следующем старте ПК, — куда кликнули последним, туда и вернётесь. Иконка в трее
 показывает активный профиль и больше ничего не делает: ни меню, ни кнопок.
 
-Это **цели приёмки, а не измеренный результат.** На железе пока не проверено ничего — это фаза 6.
-Проверено на железе кое-что поуже, и стоит сказать точно: драйвер принимает запись потолка мощности
-на этой карте (300 → 290 Вт, чтение, возврат).
+Это **цели приёмки, а не отгруженные профили.** Ни один профиль ещё не зафиксирован — это фаза 6, и
+она ждёт, пока владелец послушает кандидатов ушами. А вот что на этом железе уже проверено, и сказать
+это стоит точно, потому что список вырос: драйвер принимает запись потолка мощности и фиксацию частоты
+и отдаёт их назад (300 → 290 Вт и ядро на 1200 МГц, каждая перечитана до устойчивости и откачена);
+кривая мощность↔производительность этой карты снята по десяти точкам; собственный разброс прибора —
+1,28 Вт; а свой мост к NVAPI читает кривую «напряжение — частота» из 128 точек, и шаг её сетки
+оказался **5 мВ**, а не 6,25 мВ, как гласит фольклор.
 
 ---
 

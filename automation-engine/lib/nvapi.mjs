@@ -38,6 +38,8 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
+import config from '../config.mjs';
+
 const require = createRequire(import.meta.url);
 
 // =================================================================================================
@@ -428,7 +430,12 @@ function mainCurve() {
     console.log(`  шаг:           ${g.stepMinMv} … ${g.stepMaxMv} мВ, различных значений шага ${g.distinctSteps}`);
     console.log(`  первые шаги:   ${g.stepsMv.join(' · ')} мВ`);
     console.log('');
-    console.log(`  СВЕРКА: config.VOLTAGE_GRID_STEP_MV = 6.25 (ПРОВИЗОРНО, из фольклора). Измерено: ${g.stepMinMv} мВ минимальный.`);
+    // The comparison reads config rather than carrying a copy of its value: a hard-coded "6.25" here
+    // became a lie the moment the measurement landed, which is the drift the pairs registry exists for.
+    const agrees = Number(config.VOLTAGE_GRID_STEP_MV) === Number(g.stepMinMv);
+    console.log(`  СВЕРКА С КОНФИГОМ: VOLTAGE_GRID_STEP_MV = ${config.VOLTAGE_GRID_STEP_MV} мВ `
+      + `(измерен: ${config.VOLTAGE_GRID_STEP_IS_MEASURED ? 'да' : 'НЕТ'}) · с живой кривой: ${g.stepMinMv} мВ `
+      + `— ${agrees ? 'сходится' : 'РАСХОДИТСЯ, конфиг устарел'}`);
     return 0;
   } finally {
     const un = resolve(0xD22BDD7E);

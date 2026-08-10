@@ -464,7 +464,7 @@ driver. Two rules shape it, both paid for by `researches/02`:
 | `npm run power -- --spread <label-prefix>` | **The number without which no delta may be called an effect.** The meter's own run-to-run scatter across the matching captures — watts, temperature, fan, clock, AND the price (ops/s) — and it REFUSES to compare records whose driver, VBIOS, workload, arguments, shape or profile differ (EXP-0011). Measured at stock on this card: **1.28 W = 0.65 % over ten runs, price 0.18 %.** A background difference is named, not refused. |
 | `npm run power -- --selftest` | 28 blocks on injected data, no GPU. Mutation-proved: seven guarantees broken one at a time, each reddening the block that belongs to it (EXP-0016). |
 | `npm run descend -- --points 2400,1800,1200` | **WRITES TO THE GPU.** Locks each ladder point through `profile-manager` (rule R1), measures it, and **releases the card in a `finally` after every candidate** — including on a failed capture, and aborting the whole descent if a release itself ever fails. Prints the power↔performance curve with the meter's floor applied. `--dry-run` plans and snaps without writing. |
-| `npm run descend -- --selftest` | 32 blocks, no GPU: the safety shape driven through an injected backend and an injected meter (apply fails · capture fails · release fails), the lock proof, the ladder snap, the price rows. Mutation-proved with nine mutations, each reddening its own block. |
+| `npm run descend -- --selftest` | 39 blocks, no GPU: the safety shape driven through an injected backend and an injected meter (apply fails · capture fails · release fails), the lock proof, the ladder snap, the price rows. Mutation-proved with twelve mutations, each reddening its own block. |
 | `nvidia-smi -q -d SUPPORTED_CLOCKS,PERFORMANCE,POWER` | The raw driver view when the wrapper is not enough. |
 
 > **`runs/` is git-ignored, so the golden reference is LOCAL STATE.** A fresh clone has no baseline
@@ -732,7 +732,7 @@ is gone.
 | `npm run gpu:info` | Read-only GPU probe (`--json` for machine output). |
 | `npm run questions` | The questions guard — four axes plus the debt ratchet over the place-of-questions rule. |
 | `npm run ask <doc.md>` / `ask:batch` | Raise the owner-review page on a document / on everything waiting. |
-| `npm run verify:contour` | The owner-review contour's QA run — 13 blocks over hostile fixtures, ~4 s, no browser. `--only <id>` for one block. Run it after ANY edit to `review.mjs`, `review-core.mjs`, `review-gate.mjs` or `send-upstream.mjs`. |
+| `npm run verify:contour` | The owner-review contour's QA run — 18 blocks over hostile fixtures, ~4 s, no browser. `--only <id>` for one block. Run it after ANY edit to `review.mjs`, `review-core.mjs`, `review-gate.mjs` or `send-upstream.mjs`. |
 | `npm run workloads:build` / `workloads:verify` | Build KAGO's own CUDA loads and prove determinism / re-check the manifest. |
 | `npm run kaif:version` / `kaif:check` / `kaif:update` | KAIF machinery: report version, validate the deployment, update from origin. |
 | `node .kaif/tools/kaif-canon-lint.mjs check` | Canon linter for the owner's canon artifacts. |
