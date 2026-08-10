@@ -615,7 +615,7 @@ export const Q2RTX_LAUNCH_TIMEOUT_MS = 900_000;
 // state and does not transfer to a MECHANICAL one — a ramping quantity has plateaus, and a plateau
 // agrees with itself.» A RANGE gate alone is exactly that mistake at window scale: a run climbing
 // 2 °C/min sits inside a 3 °C band for ninety seconds at a time. So each quantity must pass BOTH:
-//   · RANGE — max minus min over the window, which catches wobble;
+//   · BAND — the p5…p95 spread over the window, which catches wobble;
 //   · DRIFT — a RATE: the median of the window's second half minus the median of its first half,
 //     divided by the time between the two halves' centroids, which catches a slow climb that the range
 //     gate waves through.
@@ -634,13 +634,18 @@ export const Q2RTX_LAUNCH_TIMEOUT_MS = 900_000;
 export const PLATEAU_WINDOW_SECONDS = 60;
 
 /**
- * SOURCE: measured, not chosen. The last 20 seconds of the four saturated game captures on disk — the
- * slowest part of the thermal approach, i.e. the closest this project has come to equilibrium — carry a
- * temperature band of **1, 2, 2 and 3 °C**. `nvidia-smi` reports whole degrees, so the quantity itself
- * is quantized at 1 °C. Three is the observed worst case, and a band tighter than the noise would
- * reject equilibrium itself.
+ * SOURCE: THE FIRST GENUINELY SETTLED RUN THIS PROJECT HAS EVER TAKEN — 2400 MHz pinned under the RT
+ * game, 555 s of load, measured 2026-08-10 22:5x. From 300 s onward the rung held four consecutive
+ * minute-windows with zero drift; across its 510 settled samples the **p5…p95 band is 2 °C** (465 of
+ * them sit on 65-66 °C). Three admits that with one degree to spare.
+ *
+ * WHY IT IS A PERCENTILE BAND AND NOT MIN-MAX, which is what the first draft used: min-max over the
+ * same settled samples reads **10 °C**, decided entirely by five demo-transition samples at 58-62 °C.
+ * A gate on min-max would refuse a perfectly settled card whenever the demo changed scene inside the
+ * window — i.e. it would pass by luck. The earlier value (3 °C from min-max) came from the last 20 s of
+ * SIXTY-SECOND runs, a window too short to contain a scene change, which is why it looked plausible.
  */
-export const PLATEAU_TEMP_RANGE_C = 3;
+export const PLATEAU_TEMP_BAND_C = 3;
 
 /**
  * DEGREES PER MINUTE, and the unit is the whole point (see the section header).
@@ -652,24 +657,32 @@ export const PLATEAU_TEMP_RANGE_C = 3;
  * anyway. Asking for less is asking for a number this instrument cannot resolve: medians of whole
  * degrees quantize the drift to 0.5 °C steps, and over a 60 s window that IS 1 °C/min.
  *
- * CALIBRATED BY WHAT IT REFUSES, which is the only honest way to set a gate: run
- * `npm run thermal -- --analyze` over the captures already on disk — every one of them is refused, and
- * the printed rates say by how much. A gate that passes everything already measured would be decoration.
+ * CALIBRATED BY WHAT IT REFUSES, which is the only honest way to set a gate: on the 555 s settled run
+ * the minute-by-minute drift went **+4 → +2 → +1 → −4 → 0 → 0 → 0 → 0 → 0** °C/min, so this value
+ * admits the tail and refuses the approach. And `npm run thermal -- --analyze` refuses every one of the
+ * thirteen captures that predate it. A gate that passes everything already measured would be decoration.
  */
 export const PLATEAU_TEMP_DRIFT_C_PER_MIN = 1;
 
 /**
- * SOURCE: measured in the same four windows as the temperature band — **2, 3, 3 and 4 pp**.
+ * SOURCE: the same settled run — across its 510 settled samples the fan's **p5…p95 band is 1 pp**
+ * (54-55 %). Three admits it with room for the quantization of a whole-percent reading.
  */
-export const PLATEAU_FAN_RANGE_PCT = 4;
+export const PLATEAU_FAN_BAND_PCT = 3;
 
 /**
- * PERCENTAGE POINTS PER MINUTE — DERIVED, not chosen independently, and that is the point. This card's
- * own AUTO curve, read off the twelve pairs measured under the game (GOAL.md): 61 °C/36 % … 72 °C/61 %,
- * i.e. **≈ 2.3 pp of fan per °C**. So the temperature's 1 °C/min allowance is worth ≈ 2 pp/min of fan,
- * and picking a third number here would let one quantity's gate quietly contradict the other's.
+ * PERCENTAGE POINTS PER MINUTE — and this number was DERIVED first and then MEASURED, which is the only
+ * reason it is now correct. The derivation ran: the AUTO curve moves ≈ 2.3 pp per °C, so 1 °C/min of
+ * allowed temperature drift is worth ≈ 2 pp/min of fan. **The premise was wrong.** On the first settled
+ * run the temperature's drift was exactly ZERO while the fan still fell 2 %/min — the fan is not merely
+ * following the temperature, it has its own slow convergence, and a gate of 2 accepted a window while
+ * the fan still had 2-4 pp of travel left in it. That is not a rounding error: the two 2400 MHz runs
+ * reported 59 % and 53 % as "equilibrium" while the true settled value is 55 %.
+ *
+ * MEASURED REPLACEMENT: on the 555 s run the fan's minute-by-minute drift went **+20 → +4 → +2 → 0 →
+ * −2 → 0 → 0 → 0 → −2** pp/min. One admits the settled tail and refuses every approach window.
  */
-export const PLATEAU_FAN_DRIFT_PCT_PER_MIN = 2;
+export const PLATEAU_FAN_DRIFT_PCT_PER_MIN = 1;
 
 /**
  * How long one rung may be held before the run gives up and REPORTS that it never settled.
@@ -840,9 +853,9 @@ export default Object.freeze({
   Q2RTX_FPS_SPREAD_SERIES,
   Q2RTX_LAUNCH_TIMEOUT_MS,
   PLATEAU_WINDOW_SECONDS,
-  PLATEAU_TEMP_RANGE_C,
+  PLATEAU_TEMP_BAND_C,
   PLATEAU_TEMP_DRIFT_C_PER_MIN,
-  PLATEAU_FAN_RANGE_PCT,
+  PLATEAU_FAN_BAND_PCT,
   PLATEAU_FAN_DRIFT_PCT_PER_MIN,
   PLATEAU_TIMEOUT_SECONDS,
   PLATEAU_LOAD_UTILIZATION_PCT,

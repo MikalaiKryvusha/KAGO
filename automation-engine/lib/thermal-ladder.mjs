@@ -138,11 +138,31 @@ export function toPlateauPoints(rows, { loadPct = config.PLATEAU_LOAD_UTILIZATIO
 // 2. THE PLATEAU — two gates per quantity, because one is the mistake this project already paid for
 // =================================================================================================
 
-/** min/max/median/range over a numeric column, or nulls when the column is unusable. */
+/**
+ * The spread of a column — as a PERCENTILE BAND (p5…p95), not as min-max.
+ *
+ * MEASURED REASON, and min-max was the first draft. In the 510 samples of a genuinely settled rung,
+ * **465 sit on 65-66 °C** — and min-max reports a 10 °C spread, because FIVE samples land at 58-62 °C.
+ * Those five are demo transitions that squeaked past the load threshold (utilization 52-71 %, power
+ * 114-138 W against a settled 225 W). Min-max is decided by the worst single sample in the window, so
+ * one transition per minute is enough to make a perfectly settled card look unstable — and the gate
+ * then only passes by luck, on whichever window happens to miss a scene change. The p5…p95 band of the
+ * same 510 samples is **2 °C** for the temperature and **1 pp** for the fan, which is what settled
+ * actually looks like on this instrument.
+ *
+ * `min`/`max` are still reported, because a reader wants to see the outliers — they are just not what
+ * the gate is decided on.
+ *
+ * [NOT-TESTED]
+ */
 function bandOf(values) {
   const v = values.filter((x) => Number.isFinite(x));
   if (v.length !== values.length || !v.length) return null;
-  return { median: median(v), min: Math.min(...v), max: Math.max(...v), range: Math.max(...v) - Math.min(...v) };
+  const sorted = [...v].sort((a, b) => a - b);
+  const at = (p) => sorted[Math.floor((sorted.length - 1) * p)];
+  const p5 = at(0.05);
+  const p95 = at(0.95);
+  return { median: median(v), min: sorted[0], max: sorted[sorted.length - 1], p5, p95, band: p95 - p5 };
 }
 
 /**
@@ -170,9 +190,9 @@ function bandOf(values) {
  * [NOT-TESTED]
  */
 export function judgeWindow(points, from, to, {
-  tempRangeC = config.PLATEAU_TEMP_RANGE_C,
+  tempBandC = config.PLATEAU_TEMP_BAND_C,
   tempDriftC = config.PLATEAU_TEMP_DRIFT_C_PER_MIN,
-  fanRangePct = config.PLATEAU_FAN_RANGE_PCT,
+  fanBandPct = config.PLATEAU_FAN_BAND_PCT,
   fanDriftPct = config.PLATEAU_FAN_DRIFT_PCT_PER_MIN,
 } = {}) {
   const slice = points.slice(from, to + 1);
@@ -205,12 +225,12 @@ export function judgeWindow(points, from, to, {
 
   const signed = (x) => `${x > 0 ? '+' : ''}${x.toFixed(1)}`;
   const failures = [];
-  if (temperature.range > tempRangeC) failures.push(`температура гуляет на ${temperature.range} °C (допуск ${tempRangeC})`);
+  if (temperature.band > tempBandC) failures.push(`температура гуляет на ${temperature.band} °C (полоса p5…p95, допуск ${tempBandC})`);
   if (temperature.driftPerMin === null) failures.push('окно не делится на половины — дрейф температуры не посчитать');
   else if (Math.abs(temperature.driftPerMin) > tempDriftC) {
     failures.push(`температура ещё ${temperature.driftPerMin > 0 ? 'РАСТЁТ' : 'ПАДАЕТ'}: ${signed(temperature.driftPerMin)} °C/мин (допуск ±${tempDriftC})`);
   }
-  if (fan.range > fanRangePct) failures.push(`обороты гуляют на ${fan.range} % (допуск ${fanRangePct})`);
+  if (fan.band > fanBandPct) failures.push(`обороты гуляют на ${fan.band} % (полоса p5…p95, допуск ${fanBandPct})`);
   if (fan.driftPerMin === null) failures.push('окно не делится на половины — дрейф оборотов не посчитать');
   else if (Math.abs(fan.driftPerMin) > fanDriftPct) {
     failures.push(`вентилятор ещё ${fan.driftPerMin > 0 ? 'РАСКРУЧИВАЕТСЯ' : 'ЗАМЕДЛЯЕТСЯ'}: ${signed(fan.driftPerMin)} %/мин (допуск ±${fanDriftPct})`);
@@ -223,26 +243,34 @@ export function judgeWindow(points, from, to, {
     fan,
     failures,
     why: failures.length === 0
-      ? `равновесие: ${temperature.median} °C (размах ${temperature.range}, дрейф ${signed(temperature.driftPerMin)} °C/мин) · `
-        + `вентилятор ${fan.median} % (размах ${fan.range}, дрейф ${signed(fan.driftPerMin)} %/мин) за ${spanSeconds.toFixed(0)} с`
+      ? `равновесие: ${temperature.median} °C (полоса ${temperature.band}, дрейф ${signed(temperature.driftPerMin)} °C/мин) · `
+        + `вентилятор ${fan.median} % (полоса ${fan.band}, дрейф ${signed(fan.driftPerMin)} %/мин) за ${spanSeconds.toFixed(0)} с`
       : failures.join(' · '),
   };
 }
 
 /**
- * Find the EARLIEST window in which the card had settled — or report how far it got.
+ * THE PLATEAU IS THE RUN'S TAIL — the LONGEST TRAILING window that satisfies the gates.
  *
- * EARLIEST, not last, and the choice is not cosmetic: the question this measurement answers is «at
- * what temperature does this rung settle», and the first window that satisfies the gates is the moment
- * it did. Taking the last window would silently report the tail of the run, which is the same value
- * when the card really settled and a WRONG value when it drifted afterwards — the failure would be
- * invisible precisely when it matters.
+ * THE FIRST VERSION TOOK THE EARLIEST QUALIFYING WINDOW, and a real run refuted it within the hour.
+ * The argument for "earliest" was that it names the moment the card arrived. The argument against it is
+ * arithmetic: the card's fan is quantized to whole percent and moves slowly, so during a five-minute
+ * approach SOME minute will read flat by luck. On the first 555 s rung that is exactly what happened —
+ * the earliest qualifying window reported the fan at **51 %** while the card went on to settle at
+ * **55 %** and hold it for four more minutes. An early window is not an early arrival, it is a slow
+ * signal caught mid-step.
  *
- * NO WINDOW MAY STRADDLE A GAP IN THE LOAD. A dip below the load threshold (the game between demo
- * loops, a loading screen) is a different thermal regime, and a window that spans one averages two.
+ * ANCHORED AT THE END, the rule states what the measurement actually needs: **the run must FINISH
+ * settled.** Extending the window backwards while it still passes then yields the settled stretch, and
+ * a longer window is strictly harder to pass (more drift accumulates inside it), so the extension stops
+ * by itself where the approach ended. No second parameter, and the reported medians come from every
+ * sample that is genuinely at equilibrium rather than from the first sixty that looked like it.
+ *
+ * NO WINDOW MAY STRADDLE A GAP IN THE LOAD. A dip below the load threshold (a loading screen, the game
+ * between demo repetitions) is a different thermal regime, and a window that spans one averages two.
  *
  * ON FAILURE THE NUMBERS STILL COME BACK. «Не вышла на плато» alone would send the next session to
- * re-run blind; «температура ещё РАСТЁТ: +3.0 °C за окно» says what to change (hold the rung longer).
+ * re-run blind; «температура ещё РАСТЁТ: +3.0 °C/мин» says what to change (hold the rung longer).
  * A refusal that carries its own evidence is the difference between a report and a shrug.
  *
  * [NOT-TESTED]
@@ -255,29 +283,15 @@ export function findPlateau(points, {
   const empty = { ok: false, window: null, temperature: null, fan: null, failures: [], candidates: 0 };
   if (list.length < 2) return { ...empty, why: `проб всего ${list.length} — окна не построить` };
 
-  let last = null;
-  let candidates = 0;
+  // The run's FINAL contiguous loaded stretch — the only place a trailing window may live.
+  let end = list.length - 1;
+  while (end >= 0 && !list[end].loaded) end--;
+  let start = end;
+  while (start > 0 && list[start - 1].loaded) start--;
 
-  for (let i = 0; i < list.length; i++) {
-    if (!list[i].loaded) continue;
-    let j = i;
-    let broken = false;
-    while (j + 1 < list.length && list[j].seconds - list[i].seconds < windowSeconds) {
-      j++;
-      if (!list[j].loaded) { broken = true; break; }
-    }
-    if (broken) { i = j; continue; }                      // resume AFTER the gap, never across it
-    if (list[j].seconds - list[i].seconds < windowSeconds) break;  // the tail is shorter than a window
-    candidates++;
-    const verdict = judgeWindow(list, i, j, gates);
-    last = verdict;
-    if (verdict.ok) return { ...verdict, candidates };
-  }
-
-  if (last) return { ...last, ok: false, candidates, why: `плато не найдено. Ближайшее окно: ${last.why}` };
   const spanned = list.length ? list[list.length - 1].seconds - list[0].seconds : 0;
   const stretch = longestLoadedStretch(list);
-  return {
+  const tooShort = () => ({
     ...empty,
     longestLoadedSeconds: stretch.seconds,
     why: stretch.samples === 0
@@ -288,8 +302,30 @@ export function findPlateau(points, {
       // over the captures already on disk).
       // One decimal, not zero: at the boundary «60 с, а окну нужно 60 с» reads as a contradiction, and
       // a report a reader has to argue with is a defect of its own.
-      : `самый длинный НАГРУЖЕННЫЙ отрезок — ${stretch.seconds.toFixed(1)} с, а окну нужно ${windowSeconds} с `
-        + `(весь прогон ${spanned.toFixed(0)} с, проб под нагрузкой ${stretch.samples} из ${list.length}). Держать ступень дольше`,
+      : `ХВОСТ прогона под нагрузкой — ${(end >= 0 && start <= end ? list[end].seconds - list[start].seconds : 0).toFixed(1)} с `
+        + `(самый длинный отрезок за прогон ${stretch.seconds.toFixed(1)} с), а окну нужно ${windowSeconds} с. `
+        + `Весь прогон ${spanned.toFixed(0)} с, проб под нагрузкой ${stretch.samples} из ${list.length}. Держать ступень дольше`,
+  });
+
+  if (end < 0 || list[end].seconds - list[start].seconds < windowSeconds) return tooShort();
+
+  // Walk the window's START from the earliest possible (the whole trailing stretch) forward: the FIRST
+  // one that passes is the LONGEST trailing window that qualifies.
+  let candidates = 0;
+  let shortest = null;
+  for (let i = start; i <= end; i++) {
+    if (list[end].seconds - list[i].seconds < windowSeconds) break;
+    candidates++;
+    const verdict = judgeWindow(list, i, end, gates);
+    shortest = verdict;                                   // the last one considered is the shortest
+    if (verdict.ok) return { ...verdict, candidates };
+  }
+
+  return {
+    ...(shortest ?? empty),
+    ok: false,
+    candidates,
+    why: `плато не найдено — прогон закончился НЕ устоявшимся. Хвостовое окно: ${shortest ? shortest.why : '—'}`,
   };
 }
 
@@ -476,7 +512,8 @@ function enrich(row, analyses, labelPrefix) {
  *   2. delete the fan DRIFT gate                    → «температура встала, а вентилятор ещё разгоняется — НЕ плато»
  *   3. delete the RANGE gates                       → «шумная полка — НЕ плато: размах шире допуска»
  *   4. start a window on an unloaded sample         → «окно начинается с первой НАГРУЖЕННОЙ пробы, а не с простоя перед ней»
- *   5. return the LAST window instead of the first  → «плато берётся с момента ВЫХОДА на равновесие, а не с конца прогона»
+ *   5. judge a window anchored at its START instead of at the run's END
+ *                                                   → «ложная полка ПОСРЕДИ подъёма — не плато…»
  *   6. accept a window shorter than the requirement → «окно короче требуемого — не плато»
  *   7. divide the drift by the window's NOMINAL half instead of the halves' centroid separation
  *                                                   → «скорость считается между ЦЕНТРОИДАМИ половин…»
@@ -484,6 +521,7 @@ function enrich(row, analyses, labelPrefix) {
  *   9. let a window straddle a gap in the load      → «окно не перешагивает провал нагрузки»
  *  10. pick the LOWEST qualifying rung              → «Silent Cold — САМАЯ ВЫСОКАЯ ступень под потолком»
  *  11. let an unsettled rung qualify                → «ступень без плато в выбор не попадает»
+ *  12. measure the spread as min-max, not p5…p95    → «одиночные провалы сцены не рушат плато…»
  */
 export function selfTest() {
   const results = [];
@@ -534,8 +572,20 @@ export function selfTest() {
   ok('ровная полка под нагрузкой — это плато', flatFound.ok, true);
   ok('плато сообщает равновесную температуру и обороты',
     [flatFound.temperature.median, flatFound.fan.median], [61, 36]);
-  ok('плато берётся с момента ВЫХОДА на равновесие, а не с конца прогона', flatFound.window.fromIndex, 0);
+  ok('плато охватывает ВЕСЬ устоявшийся хвост, а не первые 60 секунд', flatFound.window.fromIndex, 0);
   ok('окно плато не короче требуемого', flatFound.window.seconds >= 60, true);
+
+  // ПЛАТО — ЭТО ХВОСТ, и вот фикстура, которая это доказывает: карта минуту стоит ровно ПОСРЕДИ
+  // подъёма, а потом продолжает греться. Правило «самое раннее окно» объявило бы её устоявшейся на
+  // ложной полке — ровно то, что случилось на живом прогоне (вентилятор доложен 51 % при истинных 55).
+  const falseShelf = [
+    ...series(60, 60, 40),                                          // 30 с подъёма
+    ...series(140, 63, 45, { from: 30 }),                           // 70 с ЛОЖНОЙ ровной полки
+    ...series(200, (k) => 63 + k * 0.05, (k) => 45 + k * 0.05, { from: 100 }), // и снова вверх
+  ];
+  const shelf = findPlateau(falseShelf, W);
+  ok('ложная полка ПОСРЕДИ подъёма — не плато: карта обязана ЗАКОНЧИТЬ устоявшейся', shelf.ok, false);
+  ok('и отказ говорит именно это', /закончился НЕ устоявшимся/.test(shelf.why), true);
 
   // A slow climb: 1.5 °C per minute. The RANGE gate passes it for ninety seconds at a time — this is
   // EXP-0028's trap at window scale, and only the drift gate refuses it.
@@ -548,7 +598,7 @@ export function selfTest() {
   ok('отказ несёт числа: НАСКОЛЬКО не дошли', Number.isFinite(climbFound.temperature?.driftPerMin), true);
   ok('и число — это скорость, а не разница', Number((climbFound.temperature?.driftPerMin ?? 0).toFixed(1)), 1.5);
   ok('размах у этого же окна В ДОПУСКЕ — то есть один гейт бы пропустил',
-    (climbFound.temperature?.range ?? 99) <= config.PLATEAU_TEMP_RANGE_C, true);
+    (climbFound.temperature?.band ?? 99) <= config.PLATEAU_TEMP_BAND_C, true);
 
   // The temperature settles while the fan is still spinning up — the exact 15 °C-spread failure
   // (STATUS fact 33) in miniature. THE RAMP IS DELIBERATELY SLOW (3 %/min): at 6 %/min the fan's
@@ -559,7 +609,7 @@ export function selfTest() {
   ok('температура встала, а вентилятор ещё разгоняется — НЕ плато', fanFound.ok, false);
   ok('отказ называет именно вентилятор', /РАСКРУЧИВАЕТСЯ/.test(fanFound.why), true);
   ok('и размах вентилятора при этом В ДОПУСКЕ — ловит именно дрейф',
-    (fanFound.fan?.range ?? 99) <= config.PLATEAU_FAN_RANGE_PCT, true);
+    (fanFound.fan?.band ?? 99) <= config.PLATEAU_FAN_BAND_PCT, true);
 
   // Noisy but TRENDLESS: a spike every fourth sample leaves the median at 61 in BOTH halves, so the
   // drift is exactly zero and only the range gate can refuse this. Written that way on purpose, and the
@@ -571,6 +621,16 @@ export function selfTest() {
   ok('шумная полка — НЕ плато: размах шире допуска', noisyFound.ok, false);
   ok('отказ по шуму называет размах', /гуляет/.test(noisyFound.why), true);
   ok('и дрейф у этой же полки РОВНО НОЛЬ — то есть ловит именно размах', noisyFound.temperature?.driftPerMin, 0);
+
+  // ОДИНОЧНЫЕ ПРОВАЛЫ СЦЕНЫ — то, на чём первая редакция этого гейта развалилась бы. В настоящем
+  // устоявшемся прогоне 465 проб из 510 стоят на 65-66 °C, а минимум-максимум показывает 10 °C,
+  // потому что ПЯТЬ проб — переходы демо. Карта устоялась; сцена сменилась. Полоса p5…p95 это
+  // различает, минимум-максимум — нет.
+  const withDips = series(200, (k) => ([40, 90, 140].includes(k) ? 57 : 65), 55);
+  ok('одиночные провалы сцены не рушат плато: полоса берётся по p5…p95, а не по минимуму-максимуму',
+    findPlateau(withDips, W).ok, true);
+  ok('и выбросы при этом ВИДНЫ в записи, а не стёрты',
+    [findPlateau(withDips, W).temperature?.min, findPlateau(withDips, W).temperature?.band], [57, 0]);
 
   // THE FALSE PLATEAU THE LOAD GATE EXISTS FOR: 90 s of a cold, silent, perfectly stable idle card
   // before the game starts, then the climb. Without the flag this is the most confident wrong answer
@@ -602,17 +662,22 @@ export function selfTest() {
   // Physically this is the game between demo loops — utilization drops for a second, the aluminium
   // does not notice.
   const gapped = [
-    ...series(80, 61, 36),                                             // 40 s loaded
-    ...series(4, 61, 36, { loaded: () => false, from: 40 }),           // utilization drops, heat does not
-    ...series(80, 61, 36, { from: 42 }),                               // 40 s loaded again
+    ...series(160, 61, 36),                                            // 80 s loaded
+    ...series(4, 61, 36, { loaded: () => false, from: 80 }),           // utilization drops, heat does not
+    ...series(160, 61, 36, { from: 82 }),                              // 80 s loaded again
   ];
-  ok('окно не перешагивает провал нагрузки', findPlateau(gapped, W).ok, false);
+  const gapFound = findPlateau(gapped, W);
+  // Both stretches are long enough and identical, so the VERDICT cannot tell the rule apart — only the
+  // window's START can. Without the rule the trailing window would reach back across the gap to index 0.
+  ok('окно не перешагивает провал нагрузки', gapFound.window?.fromIndex ?? null, 164);
+  ok('и плато при этом найдено — в последнем нагруженном отрезке', gapFound.ok, true);
 
   // A run that ends before a window can be formed at all.
   const tooShort = series(60, 61, 36);                                 // 30 s
   const shortFound = findPlateau(tooShort, W);
   ok('окно короче требуемого — не плато', shortFound.ok, false);
-  ok('короткий прогон говорит, сколько он длился', /весь прогон 30/.test(shortFound.why), true);
+  ok('короткий прогон говорит, сколько он длился', /Весь прогон 30 с/.test(shortFound.why), true);
+  ok('и называет ХВОСТ, потому что судят именно его', /ХВОСТ прогона под нагрузкой — 29\.5 с/.test(shortFound.why), true);
   ok('пустой ряд не роняет детектор', findPlateau([], W).ok, false);
   ok('ряд без нагрузки назван именно так', /не грузилась/.test(findPlateau(series(200, 42, 0, { loaded: () => false }), W).why), true);
 
@@ -692,6 +757,23 @@ function parseArgs(argv) {
 
 const fmt = (n, d = 1) => (n === null || n === undefined || !Number.isFinite(Number(n)) ? '—' : Number(n).toFixed(d));
 
+/**
+ * The card's state, read until two consecutive samples agree on the clock (EXP-0014). Reports whether
+ * they agreed rather than pretending they did — a read-back that could not settle is a different answer
+ * from one that did. [NOT-TESTED]
+ */
+async function stableState({ attempts = 8, gapMs = 700 } = {}) {
+  const backend = nvidiaSmiBackend();
+  let previous = null;
+  for (let i = 0; i < attempts; i++) {
+    const now = readState(backend);
+    if (previous && previous.clockMhz === now.clockMhz) return { ...now, agreed: true };
+    previous = now;
+    await new Promise((r) => setTimeout(r, gapMs));
+  }
+  return { ...previous, agreed: false };
+}
+
 /** Re-run the detector over captures already on disk — free, and the only honest way to calibrate it. */
 function analyze(prefix) {
   if (!existsSync(GRAPHICS_DIR)) { console.error('ОШИБКА: runs/graphics пуст — анализировать нечего'); return 1; }
@@ -699,7 +781,7 @@ function analyze(prefix) {
   if (!files.length) { console.error(`ОШИБКА: нет записей телеметрии с меткой «${prefix}*»`); return 1; }
   console.log(`ДЕТЕКТОР ПЛАТО ПО УЖЕ СНЯТЫМ ПРОГОНАМ: ${files.length} шт.`);
   console.log(`ТРЕБОВАНИЕ: ${config.PLATEAU_WINDOW_SECONDS} с, температура ±${config.PLATEAU_TEMP_DRIFT_C_PER_MIN} °C дрейфа `
-    + `и ${config.PLATEAU_TEMP_RANGE_C} °C размаха · вентилятор ±${config.PLATEAU_FAN_DRIFT_PCT_PER_MIN} % и ${config.PLATEAU_FAN_RANGE_PCT} %`);
+    + `и ${config.PLATEAU_TEMP_BAND_C} °C размаха · вентилятор ±${config.PLATEAU_FAN_DRIFT_PCT_PER_MIN} % и ${config.PLATEAU_FAN_BAND_PCT} %`);
   console.log('');
   let settled = 0;
   for (const f of files) {
@@ -744,8 +826,8 @@ async function main(argv) {
   console.log(`СТУПЕНИ: ${snapped.map((s) => (s.snapped ? `${s.from}→${s.mhz}` : `${s.mhz}`)).join(' · ')} МГц`);
   console.log(`НАГРУЗКА: Q2RTX, лучей ${o.bounceRays}, прогонов демо на ступень ${o.runs}`);
   console.log(`ПЛАТО: обе величины устойчивы ≥ ${config.PLATEAU_WINDOW_SECONDS} с `
-    + `(температура ±${config.PLATEAU_TEMP_DRIFT_C_PER_MIN} °C дрейфа, ${config.PLATEAU_TEMP_RANGE_C} °C размаха · `
-    + `вентилятор ±${config.PLATEAU_FAN_DRIFT_PCT_PER_MIN} %, ${config.PLATEAU_FAN_RANGE_PCT} %)`);
+    + `(температура ±${config.PLATEAU_TEMP_DRIFT_C_PER_MIN} °C дрейфа, ${config.PLATEAU_TEMP_BAND_C} °C размаха · `
+    + `вентилятор ±${config.PLATEAU_FAN_DRIFT_PCT_PER_MIN} %, ${config.PLATEAU_FAN_BAND_PCT} %)`);
   console.log('ЗАПИСЬ В КАРТУ: только фиксация частоты (-lgc) на время замера. Ни кривой, ни напряжения, ни потолка мощности.');
   console.log('ОТКАТ, НАЗВАННЫЙ ДО ЗАПИСИ: resetToFactory() (-rgc + заводской потолок) в finally после КАЖДОЙ ступени,');
   console.log('       включая падение замера; провал отката обрывает всю лестницу. Сверху — внешний сторож.');
@@ -789,9 +871,16 @@ async function main(argv) {
     watchdog.disarm();
   }
 
-  const final = readState(nvidiaSmiBackend());
+  // READ UNTIL TWO SAMPLES AGREE, never once. A single read taken right after a write returns the
+  // PREVIOUS value (the owner's-machine rule, step 4; EXP-0014) — and it did: the first version of this
+  // line printed «2392 МГц» straight after the release, which is exactly the clock we had pinned, while
+  // the card was already free and idling at 225 MHz. The release itself is proved inside
+  // `resetToFactory`; this line is the REPORT, and a report that can print the old value is a report
+  // that will be believed on the wrong day.
+  const final = await stableState();
   console.log('');
-  console.log(`КАРТА ПОСЛЕ ЛЕСТНИЦЫ: ${final.powerLimitW} Вт (заводской ${final.powerDefaultW}) · частота ${final.clockMhz} МГц`);
+  console.log(`КАРТА ПОСЛЕ ЛЕСТНИЦЫ: ${final.powerLimitW} Вт (заводской ${final.powerDefaultW}) · частота ${final.clockMhz} МГц`
+    + ` (${final.agreed ? 'две пробы подряд сошлись' : 'ПРОБЫ НЕ СОШЛИСЬ — перечитайте: npm run mon -- --once'})`);
 
   if (out.aborted) {
     console.error(`ЛЕСТНИЦА ПРЕРВАНА на ${out.aborted.mhz} МГц — ${out.aborted.why}`);
@@ -805,9 +894,9 @@ async function main(argv) {
     load: { game: 'q2rtx-timedemo', bounceRays: o.bounceRays, timedemoRuns: o.runs },
     gates: {
       windowSeconds: config.PLATEAU_WINDOW_SECONDS,
-      tempRangeC: config.PLATEAU_TEMP_RANGE_C,
+      tempBandC: config.PLATEAU_TEMP_BAND_C,
       tempDriftCPerMin: config.PLATEAU_TEMP_DRIFT_C_PER_MIN,
-      fanRangePct: config.PLATEAU_FAN_RANGE_PCT,
+      fanBandPct: config.PLATEAU_FAN_BAND_PCT,
       fanDriftPctPerMin: config.PLATEAU_FAN_DRIFT_PCT_PER_MIN,
     },
     rows: out.rows,

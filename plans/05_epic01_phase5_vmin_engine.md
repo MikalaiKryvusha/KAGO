@@ -325,11 +325,11 @@ power is constant and the temperature reaches a true equilibrium; `-pl` only cap
 may or may not reach. The ladder therefore yields the table directly:
 **clock cap → equilibrium temperature → equilibrium fan.**
 
-- [ ] Rungs across the operating band (the ladder is measured — 389 points, 7/8 MHz apart), loaded by
+- [x] Rungs across the operating band (the ladder is measured — 389 points, 7/8 MHz apart), loaded by
       **the RT game**, not by a compute shape: the thermal load of path tracing is what the owner runs.
-- [ ] **Hold each rung to a PLATEAU, defined and detected, not timed by hope:** temperature AND fan
+- [x] **Hold each rung to a PLATEAU, defined and detected, not timed by hope:** temperature AND fan
       both stable for ≥ 60 s. A rung that never plateaus is reported as such rather than averaged.
-- [ ] The card is RELEASED in a `finally` after every rung — including on a failed capture — which
+- [x] The card is RELEASED in a `finally` after every rung — including on a failed capture — which
       `ladder-descent.mjs` already does and must keep doing.
 - [ ] Output: the table, and from it `Silent Cold` reads directly as **the highest rung whose
       equilibrium fan is ≤ 40 %**. That is «maximum performance under the temperature ceiling» with no
@@ -338,6 +338,51 @@ may or may not reach. The ladder therefore yields the table directly:
 **What already exists and what is missing:** `ladder-descent.mjs` pins a rung and releases it safely ·
 `graphics-load.mjs` runs the RT game · `hardware-mon` samples per second. **Missing: the plateau
 detector, and the join** — the ladder currently loads the card with a compute shape.
+
+#### 2026-08-10 22:2x — THE INSTRUMENT IS BUILT, AND THE FIRST RUNG SAYS THE PROJECT HAS NEVER SEEN EQUILIBRIUM
+
+`automation-engine/lib/thermal-ladder.mjs` (`npm run thermal`). **The safety shape was NOT
+re-implemented:** the rung loop is `ladder-descent.descend()`, which already owns apply → measure →
+prove the lock under load → release in a `finally` → abort the ladder if a release fails, and is
+mutation-proved over 39 blocks. What is new is a different LOAD and a different STOPPING RULE, joined
+through the `captureFn` seam that module already exposed.
+
+**The stopping rule, and why it is two gates per quantity rather than one.** A window qualifies when
+BOTH the temperature and the fan pass a RANGE gate (noise) and a DRIFT gate (trend). One gate is the
+mistake this project has already paid for: EXP-0028 says «a ramping quantity has plateaus, and a
+plateau agrees with itself», and a range check at window scale is that same error wearing a longer
+sleeve — a card climbing 2 °C/min sits inside a 3 °C band for ninety seconds at a time.
+
+**The medians of every table row are computed OVER THE PLATEAU WINDOW, not over the run.** One
+substitution buys three things: equilibrium watts and degrees instead of averages that include the
+climb; `verifyLockUnderLoad` applied exactly where the pin has to hold; and a rung that never settled
+THROWS, so it is recorded as a failed row and the card is still released.
+
+**Proved:** 46 offline blocks · 11 mutations, addressees named before the run, each reddening its own
+block. The mutation pass paid immediately — four blocks were green for a NEIGHBOURING reason and were
+rewritten (EXP-0016). **And the detector was calibrated against the ARCHIVE before the card**
+(`npm run thermal -- --analyze`, EXP-0036): **0 of 13 captures on disk ever reached a plateau** — none
+of them even held 60 s of unbroken load. That pass also found the inherited load threshold
+(`utilization ≥ 50 %`) sitting inside the game's own frame-boundary noise, which is now
+`PLATEAU_LOAD_UTILIZATION_PCT = 30` with the two measured clusters written into the constant.
+
+**First live rung — 2400 MHz pinned, 20 timedemo loops.** The pin held at 2392 MHz in every sample;
+rollback clean, card at 2670 MHz afterwards.
+
+| what | value |
+|---|---|
+| plateau window | **164 → 224 s** — every previous run in this project lasted ~60 s in total |
+| equilibrium | **63 °C · fan 59 % · 218.1 W · 49.87 FPS** |
+| approach | **from ABOVE, through an overshoot**: 72 °C / 65 % at 20 s, then down |
+| residual drift at the window | temperature **0 °C/min** · fan **−2.0 %/min**, i.e. still falling |
+
+**Two consequences, and the second one is a correction to this plan's own gate.** (1) The
+fan↔temperature pairs the project has been reasoning from are transients by a wide margin — the card
+needs about three minutes, and the fan is the slow half. (2) The fan drift tolerance was DERIVED from
+the temperature's through the AUTO curve's 2.3 pp/°C, on the assumption that the fan moves only
+because the temperature moves. This run refutes the assumption: the temperature's drift was exactly
+zero while the fan still fell 2 %/min. The fan has its own dynamics, so its gate needs its own
+measured number — a longer rung is running to supply it rather than to argue about it.
 
 **The `-lgc` boundary, restated so nobody widens it:** pinning is legal for a MEASUREMENT (a held clock
 is what makes a watt comparison legal, EXP-0018) and stays OUT of any shipped profile, where `min = max`
