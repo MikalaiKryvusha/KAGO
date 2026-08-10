@@ -48,7 +48,16 @@
 //   npm run vfstep -- --point 95 --mhz 15 --workload sdc_fma --seconds 30
 //   npm run vfstep -- --dry-run          the whole plan, the snapshot, and NO write
 //
-// [NOT-TESTED] at birth.
+// [TESTED: 2026-08-10, PARTIALLY, and the boundary is the point of this marker · `runStep` ran live on
+//  point 95 at +15 MHz: the curve confirmed 2842 -> 2857 MHz at the same voltage, the oracle returned
+//  PASS with the checksum matching the golden and zero faults logged, and the rollback left 0 non-zero
+//  offsets of 128. `runAscent` and `measureUndervolt` also ran (+180 MHz, −14.67 W at a held clock).
+//  WHAT IS *NOT* TESTED, named so nobody reads the marker as more than it says: this module has NO
+//  OFFLINE SELFTEST — its logic has never been driven through an injected backend, unlike every other
+//  writer here (`watchdog` 21 blocks, `descend` 39, `profile-manager` 15). The watt figure is
+//  single-sourced against EXP-0018's two-series rule, one workload has been run out of the three the
+//  method requires, and no guardband was applied. `plans/05` treats all of that as work, not as done:
+//  the selftest is §4.4's last checkbox and the two series are P5-AC8]
 
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';

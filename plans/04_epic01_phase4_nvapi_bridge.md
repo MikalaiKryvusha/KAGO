@@ -2,7 +2,10 @@
 
 > **Created:** 2026-08-10 17:0x +03:00 (agent, LATE — see §0; the phase was already in flight)
 > **Parent:** `plans/01_EPIC_kago_orchestrator.md` — phase 4
-> **Status:** 🟡 open · steps 4.1–4.6 CLOSED by observation on 2026-08-10 · 4.7–4.8 remain
+> **Status:** ✅ **CLOSED 2026-08-10 18:0x +03:00** — all eight steps, all seven acceptance criteria,
+> each re-run by the `/fable-judge` pass in §4.8 (verdict: VERIFIED WITH CAVEATS; two caveats fixed on
+> the spot, the third routed into `plans/05` §4.7). Milestones: 4.1–4.6 closed by observation earlier the
+> same day · 4.7 (fans) closed 17:5x · 4.8 (judge) 18:0x
 > **Outbound:** the measured struct layout → `researches/05` §8 (done) · the offset range and meter
 > floor → `config.mjs` (done) · fan control → phase 2's §4.4/§4.5 protocol, which cannot control its
 > initial conditions without it · closure → `MASTER_PLAN.md` phase 4 and the phase-5 entry gate
@@ -97,9 +100,16 @@ driver `610.88` and `NVIDIA GeForce RTX 5070 Ti`, matching `nvidia-smi` exactly.
 - [x] `ClkVfPointsGetStatus`, struct version probed rather than guessed.
 - [x] Derive the grid step from the live curve.
 
-**Evidence:** 128 of 128 points, 450…1240 mV, 180…3157 MHz, **step 5 mV** (some 10 mV gaps). The
-folklore 6.25 mV is refuted; the owner's own figure was right. `VOLTAGE_GRID_STEP_MV = 5`,
-`VOLTAGE_GRID_STEP_IS_MEASURED = true`. **P4-AC3 met.**
+**Evidence:** 128 of 128 points, 450…1240 mV, **step 5 mV** (some 10 mV gaps). The folklore 6.25 mV is
+refuted; the owner's own figure was right. `VOLTAGE_GRID_STEP_MV = 5`,
+`VOLTAGE_GRID_STEP_IS_MEASURED = true`. **P4-AC3 met, and re-verified by the judge pass — 5 mV again.**
+
+⚠️ **The FREQUENCY bound of that range was written condition-free, and the judge pass caught it.** The
+original line said "180…3157 MHz" as if it were a property of the curve. It is not: the curve derates
+with temperature (this plan's own §4.7 finding, STATUS fact 18), and the top point reads **3172 MHz at
+48 °C · 3157 at 53 °C · 3135 at 65 °C** — three observations of the same point. The VOLTAGE range and the
+grid STEP are stable; the frequency column is only true with its temperature beside it (EXP-0011). Stated
+here rather than quietly corrected, because the number is quoted in several documents.
 
 ### 4.3 — Locate the offset field inside the control record ✅ CLOSED 2026-08-10
 
@@ -180,11 +190,45 @@ experimental protocol; the strict temperature-matched comparison the 14.67 W mea
 lacks; and fact 18 — the CURVE ITSELF derates with temperature, so curves taken at different thermal
 states are not comparable either.
 
-### 4.8 — Phase closure 🔲 OPEN
+### 4.8 — Phase closure ✅ CLOSED 2026-08-10 18:0x
 
-- [ ] `/fable-judge` pass over everything claimed closed above (the epic requires it BEFORE the next
-      phase's plan is written).
-- [ ] `MASTER_PLAN.md` phase 4 → closed, with the date and the evidence.
+- [x] `/fable-judge` pass over everything claimed closed above.
+
+**VERDICT: VERIFIED WITH CAVEATS.** Every load-bearing claim was re-run rather than read: ids 17/17
+(12/12 needed) · the chain on three independent readings of driver and card name · the 5 mV grid again ·
+`--prove-mask 64 -15` 9 blocks / 0 failures with a byte-exact rollback over 9 248 bytes · the
+measured-layout guard 5/5 **with the published layout going red for its own reason** · the drill firing
+and restoring the card in **2.2 s** · the fan cool-down spread of **1 °C** · 142 offline selftest blocks
+(22+17+15+28+39+21) with 0 failures, 5 fixtures, and the throttle decode agreeing in both directions.
+
+**No frauds found:** no weakened checks (the pre-existing suites — `stress`, `profile-manager`,
+`ladder-descent`, `power-baseline` — were not touched anywhere in the phase's commit range), no scope
+creep, no debris, no new binaries, no outward-facing action.
+
+**Three caveats, and two of them were fixed on the spot rather than filed:**
+
+1. **Every module of the phase still carried `[NOT-TESTED]`, and three of those comments had become
+   FALSE** (`nvapi.mjs` claimed the fan layouts had never been run; `watchdog.mjs` said the drill "is
+   what flips this marker" after it had fired twice; `nvml.mjs` said the deciding run was still ahead).
+   Not the dangerous direction — a false `[TESTED]` is the fraud — but it destroys exactly what markers
+   exist for: a future session meeting `[NOT-TESTED]` is instructed to distrust the code and plan its
+   verification, i.e. to pay again for what is already paid. **FIXED:** all five flipped to `[TESTED: …]`
+   with the evidence named, and `vf-step.mjs` got a deliberately PARTIAL marker that states what is not
+   tested (no offline selftest, one workload of three, a single-sourced watt figure).
+2. **Condition-free numbers.** "180…3157 MHz" and "2.5 s" were written bare while this project's own
+   fact 18 and EXP-0018 forbid exactly that. **FIXED:** the curve's frequency bound now carries its three
+   observations (3172 at 48 °C · 3157 at 53 °C · 3135 at 65 °C) and the drill carries both timings.
+3. **P4-AC7 has no re-runnable METER, only a re-runnable step.** The series that produced the 1 °C ran
+   from a scratchpad script, which dies with the session; the criterion is currently reproduced by three
+   manual invocations. NOT fixed here on purpose — the reusable form is `power --capture --cold-start`,
+   and it is planned where it is actually needed (`plans/05` §4.7, matched thermal state).
+
+**Deliberately not re-run:** the −14.67 W measurement and the +180 MHz ascent. Both are recorded as
+DRIFT in §5, STATUS fact 20 already states the watt figure is single-sourced, and `plans/05` P5-AC8
+requires two independent series before it counts as a result. Re-running them here would have judged
+phase 5 by phase 4's gate.
+
+- [x] `MASTER_PLAN.md` phase 4 → closed, with the date and the evidence.
 - [x] Write `plans/05_epic01_phase5_vmin_engine.md` — and only then continue phase-5 work.
       **DONE 2026-08-10 17:04 +03:00, and OUT OF ORDER:** the owner opened the new session with
       *«начнём с планирования»*, so the plan was written before the judge pass above. The waiver is

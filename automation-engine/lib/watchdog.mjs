@@ -53,7 +53,13 @@
 //   npm run watchdog -- --selftest    the decision logic on an injected clock and an injected resetter
 //   npm run watchdog -- --guard       the loop itself; spawned detached by arm(), not run by hand
 //
-// [NOT-TESTED] at birth — the drill below is what flips this marker.
+// [TESTED: 2026-08-10 · the drill has FIRED FOR REAL, twice. A victim process wrote −20 MHz into point
+//  110 and died via `process.exit` so no `finally` of its own could run; the detached guard restored the
+//  card unaided in 2.5 s, and 2.2 s when the phase-4 judge pass re-ran it — the spread between those two
+//  is the honest precision of the figure. Both runs left a report naming THAT drill, not merely a
+//  non-empty directory (EXP-0025). Offline: `--selftest` 21 blocks, 0 failures, mutation-proved — five
+//  mutations each reddening its own block, plus two more for the fan step added 2026-08-10, of which the
+//  one that keeps the step but makes it PIN a level instead of restoring AUTO reddens that block ALONE]
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

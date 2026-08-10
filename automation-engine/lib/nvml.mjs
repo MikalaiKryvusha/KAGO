@@ -49,7 +49,13 @@
 // Usage:
 //   node automation-engine/lib/nvml.mjs                READ-ONLY: driver, card, and the offset range
 //
-// [NOT-TESTED] at birth — the run that follows is what decides which of these lines is true.
+// [TESTED: 2026-08-10 · `npm run nvml` proves the chain on values two other instruments already gave us
+//  (driver 610.88 and "NVIDIA GeForce RTX 5070 Ti", agreeing with `nvidia-smi` AND with NVAPI) and reads
+//  the allowed offset range `ClkDomainsGetInfo` never yielded: graphics −1000…+1000 MHz, memory
+//  −2000…+6000. The SM domain answers ERROR_INVALID_ARGUMENT here and that refusal is recorded in
+//  `researches/05` §8 rather than swallowed. `--verify-decode` re-run by the phase-4 judge pass: 5
+//  blocks, 0 failures, and the PUBLISHED layout goes red for its own reason (0 of 128) while the
+//  measured one sees the applied offset in 127 entries. Every write path rolls back in a `finally`]
 
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
