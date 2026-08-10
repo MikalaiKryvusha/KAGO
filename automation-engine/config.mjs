@@ -111,6 +111,30 @@ export const TRANSIENT_OFF_SECONDS = 5;
 export const ADAPTIVE_INTENSITY_BAND = Object.freeze([0.40, 0.60]);
 
 /**
+ * THE LOW-LOAD SHAPE — a short burst against a long idle.
+ *
+ * SOURCE for its EXISTENCE: `researches/04` §3.1, plus the owner's own account of the same trap on
+ * CPUs (`AGENT_GUIDE.md` → Notes from the human): an undervolt can be *conditionally* stable —
+ * surviving sustained heavy stress and dying at idle or on a browser click, because the LOW end of
+ * the V/F curve has stability requirements of its own. A heavy test never visits that region, so it
+ * cannot qualify a profile however long it runs.
+ *
+ * SOURCE for the NUMBERS: ours, and chosen to be checkable rather than tasteful. The requirement is
+ * that the card spends most of the window falling back toward its idle clocks while still being
+ * woken repeatedly, so the run exercises BOTH the low-clock dwell and the idle→burst edge. A 1 s / 9 s
+ * duty gives a 10 % duty cycle and ~6 wake edges per minute. **The choice is validated by
+ * measurement, not by this comment: the shape prints the clocks it actually reached, and if the card
+ * does not fall to low clocks the shape is not doing its job and the numbers must change.**
+ *
+ * WHY IT IS NOT THE SAME AS `--transient`. The transient shape (5 s / 5 s) exists to hit the card
+ * with di/dt transitions at HIGH load — voltage noise is the dominant Vmin factor (researches/02 §2).
+ * This one exists to hold the card LOW. Same machinery, opposite purpose, and one is not a substitute
+ * for the other.
+ */
+export const LOWLOAD_ON_SECONDS = 1;
+export const LOWLOAD_OFF_SECONDS = 9;
+
+/**
  * SOURCE: researches/02 §3 Step 1 — the express test runs at each step of the descent; repeats are
  * what turn one observation into a determinism claim. The count is ours: five repeats is the
  * smallest number that makes a single-run fluke visible, and phase 1's acceptance criterion
@@ -300,6 +324,8 @@ export default Object.freeze({
   TRANSIENT_ON_SECONDS,
   TRANSIENT_OFF_SECONDS,
   ADAPTIVE_INTENSITY_BAND,
+  LOWLOAD_ON_SECONDS,
+  LOWLOAD_OFF_SECONDS,
   DETERMINISM_REPEATS,
   THERMAL_THROTTLE_REASONS,
   THERMAL_SOAK_SECONDS,

@@ -65,6 +65,23 @@ export function burstTimeoutMs(sustainSeconds = 0) {
   return Math.max(BURST_TIMEOUT_FLOOR_MS, asked + BURST_TIMEOUT_SLACK_MS);
 }
 
+/**
+ * Two duty shapes with opposite purposes cannot both be in force: `--transient` hammers the card at
+ * HIGH load to produce di/dt transitions, `--lowload` holds it at LOW clocks. Resolving the clash
+ * silently would run one shape and report the other's name in the log — the sort of quiet mismatch
+ * nobody notices until a verdict is being explained months later.
+ *
+ * A separate exported function rather than an inline `if`, purely so it can be PROVEN: the throw
+ * inside an async `stressTest` becomes a rejected promise, which the synchronous self-test cannot
+ * catch. A rule that cannot be tested is a rule that will be broken quietly.
+ */
+export function assertOneShape({ transient = false, lowload = false } = {}) {
+  if (transient && lowload) {
+    throw new Error('--transient и --lowload — противоположные формы (высокая нагрузка с переходами против удержания на низких частотах); выберите одну');
+  }
+  return true;
+}
+
 // =================================================================================================
 // 1. Running one burst of a workload
 // =================================================================================================
@@ -301,6 +318,7 @@ export async function stressTest({
   name,
   seconds = config.EXPRESS_TEST_SECONDS,
   transient = false,
+  lowload = false,
   sustain = 0,
   baselineDir = BASELINE_DIR,
   args = [],
@@ -308,6 +326,8 @@ export async function stressTest({
   queryLog = true,
   onBurst = null,
 } = {}) {
+  assertOneShape({ transient, lowload });
+
   const card = probeCard();
   const golden = loadGolden(name, { dir: baselineDir });
   const stamp = checkGoldenStamp(golden, card, args);
@@ -318,18 +338,29 @@ export async function stressTest({
   let cycleStart = started;
   let loading = true;
 
-  // How long ONE burst is asked to hold the card. In the transient shape it is capped at the ON half
-  // of the duty cycle: `spawnSync` cannot be interrupted, so a burst longer than the ON window would
-  // run straight through the OFF half and destroy the very shape `researches/02` says exposes an
-  // unsafe profile — voltage noise dominates Vmin, and the transitions are the test.
-  const burstSeconds = transient
-    ? Math.min(sustain || 0, config.TRANSIENT_ON_SECONDS)
+  // The duty cycle, as ONE concept with two settings rather than two near-identical loops.
+  //   transient — 5 s on / 5 s off at HIGH load: di/dt transitions, the dominant Vmin factor.
+  //   lowload   — 1 s on / 9 s off: holds the card at LOW clocks and wakes it repeatedly, the region
+  //               where a conditionally-stable undervolt dies while every heavy test passes
+  //               (researches/04 §3.1). Opposite purpose, same machinery; neither substitutes for
+  //               the other, so asking for both at once is refused rather than silently resolved.
+  const duty = transient
+    ? { on: config.TRANSIENT_ON_SECONDS, off: config.TRANSIENT_OFF_SECONDS }
+    : lowload
+      ? { on: config.LOWLOAD_ON_SECONDS, off: config.LOWLOAD_OFF_SECONDS }
+      : null;
+
+  // How long ONE burst is asked to hold the card. Under a duty cycle it is capped at the ON half:
+  // `spawnSync` cannot be interrupted, so a burst longer than the ON window would run straight
+  // through the OFF half and destroy the very shape the run exists to produce.
+  const burstSeconds = duty
+    ? Math.min(sustain || 0, duty.on)
     : (sustain || 0);
 
   while ((Date.now() - started) < seconds * 1000) {
-    if (transient) {
+    if (duty) {
       const elapsed = (Date.now() - cycleStart) / 1000;
-      const limit = loading ? config.TRANSIENT_ON_SECONDS : config.TRANSIENT_OFF_SECONDS;
+      const limit = loading ? duty.on : duty.off;
       if (elapsed >= limit) { loading = !loading; cycleStart = Date.now(); continue; }
       if (!loading) { await sleep(100); continue; }     // the OFF half of the duty cycle
     }
@@ -597,6 +628,22 @@ export function selfTest() {
       summarizeMeters([{ ok: true, died: false, checksum: 'aaaa', fields: { checksum: 'aaaa' } }]), null);
   }
 
+  // 3d. The two duty shapes are mutually exclusive, and the refusal is checked rather than trusted.
+  {
+    const threw = (o) => { try { assertOneShape(o); return false; } catch { return true; } };
+    check('переходная и низкая формы вместе -> отказ', threw({ transient: true, lowload: true }), true);
+    check('только переходная -> проходит', threw({ transient: true }), false);
+    check('только низкая -> проходит', threw({ lowload: true }), false);
+    check('ни одной -> проходит', threw({}), false);
+  }
+
+  // 3e. The burst timeout is a FLOOR, not a ceiling: a 60 s burn asked for must not read as a hung
+  // kernel. Before 2026-08-10 this was a constant and would have turned the owner's own request —
+  // «мерить на длительных, например, минуту» — into an invented CRASH.
+  check('тайм-аут прогона: без sustain — пол 60 с', burstTimeoutMs(0), 60_000);
+  check('тайм-аут прогона: 60-секундный прожиг получает запас, а не отказ', burstTimeoutMs(60), 90_000);
+  check('тайм-аут прогона: короткий sustain не опускает пол', burstTimeoutMs(5), 60_000);
+
   // 4. a dead process outranks everything
   check('процесс умер -> CRASH',
     decideVerdict({ bursts: [{ ok: false, died: true, checksum: null, reason: 'код 1' }], golden: goldenOf('aaaa'), stamp: { ok: true, why: '' }, faults: noFaults }).verdict, V.CRASH);
@@ -650,6 +697,7 @@ function parseArgs(argv) {
     else if (a === '--capture-baseline') o.capture = true;
     else if (a === '--verify-baseline') o.verifyBaseline = true;
     else if (a === '--transient') o.transient = true;
+    else if (a === '--lowload') o.lowload = true;
     else if (a === '--json') o.json = true;
     else if (a === '--workload') o.workload = argv[++i];
     else if (a === '--seconds') o.seconds = Number(argv[++i]);
@@ -708,9 +756,9 @@ async function main(argv) {
 
   let worst = 0;
   for (const name of names) {
-    const r = await stressTest({ name, seconds: o.seconds, transient: o.transient, sustain: o.sustain, args: o.args });
+    const r = await stressTest({ name, seconds: o.seconds, transient: o.transient, lowload: o.lowload, sustain: o.sustain, args: o.args });
     console.log('');
-    console.log(`НАГРУЗКА: ${name} · ${o.transient ? `переходная ${config.TRANSIENT_ON_SECONDS}/${config.TRANSIENT_OFF_SECONDS} с` : 'ровная'} · ${o.seconds} с`);
+    console.log(`НАГРУЗКА: ${name} · ${o.transient ? `переходная ${config.TRANSIENT_ON_SECONDS}/${config.TRANSIENT_OFF_SECONDS} с` : o.lowload ? `низкая ${config.LOWLOAD_ON_SECONDS}/${config.LOWLOAD_OFF_SECONDS} с` : 'ровная'} · ${o.seconds} с`);
     console.log(`  прогонов: ${r.bursts} · суммы: ${r.checksums.join(', ') || '—'}`);
     console.log(`  эталон:   ${r.golden ? r.golden.checksum : 'нет'} · ${r.stamp.why}`);
     for (const p of r.faults.providers || []) console.log(`  журнал:   ${p.provider} — ${p.status}${p.detail ? `, ${p.detail}` : ''}`);

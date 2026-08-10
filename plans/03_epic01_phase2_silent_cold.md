@@ -194,10 +194,28 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
       (GPU-side, host overhead excluded) · warm up before timing · keep each timed unit far above the
       ~10 µs floor where the timer's own overhead dominates · defeat the caches between timed calls ·
       and report the **run-to-run spread**, because a delta thinner than the spread is not an effect.
-- [ ] **A low-load dwell and an idle→burst edge** join the shapes. `researches/04` §3.1: an undervolt
+- [x] **A low-load dwell and an idle→burst edge** join the shapes. `researches/04` §3.1: an undervolt
       can be *conditionally* stable — surviving sustained heavy stress and dying at idle or in a
       browser, because the low end of the V/F curve has its own requirements. A heavy test never
       visits that region, so it cannot qualify a profile.
+      **Shipped as `npm run stress -- --lowload`** — the same duty machinery as `--transient` with the
+      opposite duty (1 s on / 9 s off, `config.LOWLOAD_*`), so one is not a second copy of the other.
+      Asking for both is REFUSED rather than silently resolved: running one shape while logging the
+      other's name is a mismatch nobody notices until a verdict is being explained months later.
+      **Measured with telemetry alongside, 30 s run:**
+
+      | | частота мед | мин | util мед | Вт мед |
+      |---|---|---|---|---|
+      | `--lowload` | **1237 МГц** | 967 | **5 %** | **39,4** |
+      | устойчивая `branchy` | 2887 МГц | — | 97 % | 194,8 |
+
+      The per-sample series shows the shape working: a spike to 2887–2902, a decay
+      1642 → 1395 → 1275 → … → 967, then another spike. **The honest caveat: the card does NOT reach
+      its 180 MHz idle floor in the 9 s off window — it settles around 967–1000 MHz.** That is not the
+      shape failing; it is EXP-0015's floor, `dwm.exe` holding the card awake while Windows is
+      displayed on it. Which means this shape tests **the region the card actually occupies during
+      desk work** — precisely the owner's «клик по иконке» case, and not a deep idle the machine never
+      visits.
 - **Verify:** run it with `hardware-mon` sampling alongside and read the utilization column — the
   same way phase 1 caught the 30 % ceiling in the first place (EXP-0012: the tests check what you
   thought to assert, the output shows what you built).
