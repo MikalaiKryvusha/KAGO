@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0015 · 2026-08-10 · ❌→✅ · #windows #processes #electron #owner-machine #measurement
+**Context:** the owner asked for the GPU's background load to be removed — stop NVIDIA Broadcast and LosslessScaling, which held the card awake.
+**Tried / did:** enumerated both process trees and stopped every PID, children before the root.
+**Result:** ❌→✅ LosslessScaling died and stayed dead; **NVIDIA Broadcast came back with fresh PIDs within two seconds**. The new root's command line named the cause: `--render-crash-relaunch`. Killing a renderer child of an Electron app IS a renderer crash from the app's point of view, and the main process dutifully resurrected itself. Re-run root-first — one `Stop-Process` on the root took the whole six-process tree with it, 0 survivors, nothing to finish off.
+**Lesson:** **an Electron/Chromium app must be stopped ROOT FIRST — killing children first triggers its own crash-recovery and it restarts itself.** Generalize past Electron: before concluding "this process resurrects itself / a service is guarding it", read the NEW process's command line — a supervisor names itself there, and the difference between "something is guarding it" and "I made it think it crashed" is one field. The second half is about measurement rather than processes: stopping those two apps bought only **~6 W** and did NOT return the card to its 180 MHz / 21.76 W floor, because the biggest remaining GPU client is `dwm.exe` — the desktop compositor, unstoppable while Windows is displayed on that card. **A quiet desktop is not a reachable state; design measurements as a delta under a dominating load, not as an absence of background.**   → link: `AGENT_GUIDE.md` → the owner's-machine rule · `STATUS.md` (machine state)
+**Repro:** `Get-CimInstance Win32_Process -Filter "Name='X.exe'"` → the root is the one whose `ParentProcessId` is NOT in that PID set → `Stop-Process -Id <root> -Force` → re-enumerate. If new PIDs appear, print their `CommandLine` before killing again.
+**Trigger:** about to stop a multi-process desktop app (Electron, Chromium, anything with `--type=renderer` children) → stop the root first, and if it comes back, read the new command line instead of killing in a loop.
+**Not for:** single-process programs and services — a service is restarted by the SCM and the fix there is the service's start mode, not the kill order.
+
 ### EXP-0014 · 2026-08-10 · ❌→✅ · #gpu #write #readback #observation #owner-machine
 **Context:** the first GPU write of phase 2 — finding out whether `nvidia-smi -lgc` works on this GeForce and, harder, what can READ THE LOCK BACK, since `nvidia-smi` carries no locked-clocks field: `-q -d CLOCK` answers *"Requested functionality has been deprecated"* for Applications Clocks and has no Locked Clocks section at all.
 **Tried / did:** locked the core to an exact point of the measured ladder (`-lgc 1200,1200`), read the state, released with `-rgc`, read the state again immediately.

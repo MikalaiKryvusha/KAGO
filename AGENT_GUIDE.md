@@ -468,10 +468,11 @@ driver. Two rules shape it, both paid for by `researches/02`:
 
 ### THE OWNER'S-MACHINE RULE — stands above everything else in this guide
 
-The owner's standing law, said in chat **2026-08-10 09:1x +03:00**, verbatim and unedited:
+The owner's standing law, said in chat **2026-08-10 09:1x +03:00** — typos fixed on his own
+instruction; the unedited original is in git history, commit `8ef55af`:
 
-> *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАНО!!!! ТРИЖДЫЙ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО_ТО ДЕЛАТЬ!
-> НЕ ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗАДАТЕЛЕН!»*
+> *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАТНО!!!! ТРИЖДЫ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО-ТО ДЕЛАТЬ!
+> НЕ ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗИДАТЕЛЕН!»*
 
 This is not a preference to weigh against speed. It is the machine the owner works and lives on, and
 KAGO is the one project in the tree whose whole job is to change that machine's hardware state.
@@ -974,11 +975,31 @@ interpretation. Interviews are for vision-level forks that outlive the task.
 
 **The owner's standing constraints for KAGO** (their words, `GOAL.md` and chat, 2026-08-09):
 
-- *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАНО!!!! ТРИЖДЫЙ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО_ТО ДЕЛАТЬ! НЕ
-  ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗАДАТЕЛЕН!»* (chat, 2026-08-10) — the standing law
-  above every other line in this guide. Its executable form is **the owner's-machine rule** in the
-  test-harness section: look it up first · name the rollback before the write · smallest reversible
-  form · re-read until stable · report the numbers. A permission entry is not a reason to act.
+- *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАТНО!!!! ТРИЖДЫ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО-ТО ДЕЛАТЬ! НЕ
+  ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗИДАТЕЛЕН!»* (chat, 2026-08-10; typos fixed on his
+  instruction, the unedited original is in commit `8ef55af`) — the standing law above every other
+  line in this guide. Its executable form is **the owner's-machine rule** in the test-harness
+  section: look it up first · name the rollback before the write · smallest reversible form ·
+  re-read until stable · report the numbers. A permission entry is not a reason to act.
+- *«при измерениях всё, что создаёт фоновую нагрузку — останавливай»* (chat, 2026-08-10) — during a
+  measurement run the agent MAY stop what heats the card. Bounded by the rule above, so the boundary
+  is named rather than assumed: stop the consumer apps that hold the GPU awake (NVIDIA Broadcast,
+  LosslessScaling, PotPlayer, Chrome, the NVIDIA app overlay, the LG Hub tray); **never** touch what
+  is a channel to the machine or holds someone else's work (Parsec, NordVPN, the IDE hosting the
+  session, Docker with running containers). **Everything stopped is started again when the run
+  ends** — a measurement that leaves the owner's desktop stripped has no rollback, and that makes it
+  the destructive class.
+
+  **Measured 2026-08-10, and it bounds how much this permission is worth: stopping apps buys ~6 W and
+  cannot reach the idle floor.** With NVIDIA Broadcast and LosslessScaling fully stopped the card
+  still sat at 825–950 MHz / ~28 W against the 180 MHz / 21.76 W seen earlier that morning, because
+  the largest remaining GPU client is **`dwm.exe`** — the Windows compositor, i.e. the desktop
+  itself, which cannot be stopped while Windows is displayed on this card. The 180 MHz floor is not
+  "no background"; it is "nothing repainted for a while". **So a stock-vs-profile delta is NOT
+  obtained by silencing the desktop.** It is obtained by measuring both sides under the SAME
+  background and under a load heavy enough to dominate it — at hundreds of watts under load, a 6 W
+  desktop wobble is noise in the third digit. Quieting apps matters only when comparing IDLE
+  numbers, and even then the floor stays out of reach.
 - *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
   dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
   records how it is satisfied.
