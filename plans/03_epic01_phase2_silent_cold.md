@@ -113,22 +113,29 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 
 *Anchor: internal map R1, R2, R5 — one writer · swappable backends · rollback in the same module.*
 
-- [ ] **Interface first, backend behind it.** `apply(profile)` · `readState()` · `resetToFactory()` ·
+**DONE 2026-08-10 10:5x…11:4x +03:00** — `automation-engine/lib/profile-manager.mjs` · `npm run profile`.
+**The first module in the project that writes to the GPU**, and its round trip was RUN on the live card,
+not merely written: 300 → 290 W, core pinned to 1200 MHz, both writes re-read to stability, rollback
+executed and every compared field back to its initial value. `npm run profile -- --selftest` — 13 blocks
+on fake backends, no card touched; mutation-proved, and the mutation run is what found the fixture that
+did not guard its own rule (EXP-0016).
+
+- [x] **Interface first, backend behind it.** `apply(profile)` · `readState()` · `resetToFactory()` ·
       `roundTrip(profile)`. The `nvidia-smi` backend is one object; nothing outside this module ever
       calls a GPU-control tool (R1/R2). Phase 4's NVAPI bridge replaces the backend, not the callers.
-- [ ] **`readState()` re-reads, never infers:** power limit, default power limit, `clocks.gr`, and
+- [x] **`readState()` re-reads, never infers:** power limit, default power limit, `clocks.gr`, and
       the card's identity for the stamp check. It does not consult its own memory of what it wrote.
-- [ ] **`readBackStable()` is the primitive every write goes through** — poll `clocks.gr` (and the
+- [x] **`readBackStable()` is the primitive every write goes through** — poll `clocks.gr` (and the
       power limit) until **two consecutive samples agree**, with a named timeout that FAILS rather
       than returning the last sample. This is P2-AC2, and it exists because `-rgc` lied for a second
       (§2 row 3).
-- [ ] **Apply order is fixed and its reverse is the rollback:** power limit, then the clock lock. Any
+- [x] **Apply order is fixed and its reverse is the rollback:** power limit, then the clock lock. Any
       step that fails triggers the reverse of the steps already done, then a `readState()` to prove
       the card is back. The rollback is not a comment — it is the code path taken by the failure test
       in P2-AC4.
-- [ ] **Refuse on a stale stamp** (R6): compare the profile's driver/VBIOS against the card right now
+- [x] **Refuse on a stale stamp** (R6): compare the profile's driver/VBIOS against the card right now
       and refuse before any write, naming the field that differs.
-- [ ] **A selftest that runs without touching the GPU**, on an injected runner — the shape phase 1
+- [x] **A selftest that runs without touching the GPU**, on an injected runner — the shape phase 1
       proved works (`stress-tester --selftest`, 10 blocks). Blocks it must carry: a runner that
       returns the stale value once · a runner whose success text lies while the state did not change ·
       a failure injected between the two writes · a stale stamp · a clock off the ladder.
@@ -141,8 +148,8 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 *Anchor: `plans/02_epic01_phase1` §3.6, the limitation recorded rather than smoothed over: «нагрузки
 идут процесс на прогон … Фазе 5 нужна нагрузка, крутящаяся внутри себя N секунд».*
 
-**MOSTLY DONE 2026-08-10 12:2x…13:0x +03:00.** Remaining: the low-load dwell and the idle→burst edge
-(last bullet). Everything above it is measured and committed.
+**DONE 2026-08-10 12:2x…13:2x +03:00.** Every bullet below is measured and committed, the low-load
+dwell and the idle→burst edge included (`npm run stress -- --lowload`).
 
 - [x] The host loops the launch inside ONE process for N seconds instead of one process per burst.
       The kernel and its arguments stay untouched, so the checksum stays the same deterministic
@@ -226,18 +233,69 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 
 *Anchor: epic §2 AC4 — the meter for Silent Cold's power reduction.*
 
-- [ ] Median power, temperature, fan speed and clock at stock under the sustained transient shape,
-      into `runs/`, stamped like every other baseline.
-- [ ] **The background is part of the record**, because it is part of the measurement: the GPU client
-      list at capture time goes into the file. Stock and profile are compared only across
-      **comparable** backgrounds (§2 row 4).
-- [ ] **The profile is deliberately NOT part of the golden checksum's stamp.** EXP-0011 makes the
+**DONE 2026-08-10 14:1x…15:0x +03:00** — `automation-engine/lib/power-baseline.mjs` · `npm run power`.
+**No GPU write in this step:** the module reads the card and runs compute on it; it sets nothing. The
+profile a capture was taken under is a LABEL the caller supplies — this module never applies one.
+
+- [x] Median power, temperature, fan speed and clock at stock under the sustained shape, into
+      `runs/power/`, stamped like every other baseline (driver · VBIOS · workload · args · shape ·
+      seconds · sustain · profile). **The verdict rides along in the same record**, because a power
+      number taken during a run that produced SDC is not a baseline — it is a measurement of a broken
+      card, and two separate commands would let a future session quote the watts without ever looking
+      at the verdict.
+- [x] **The background is part of the record.** `nvidia-smi --query-compute-apps` lists the GRAPHICS
+      clients too on this Windows machine (probed: 25 clients, `dwm.exe` among them), so the vendor's
+      own instrument answers it and no second tool is needed. Names without paths, with counts, sorted.
+      A comparison NAMES a background difference rather than refusing on it — the client list drifts by
+      one browser tab, and §2 row 4 asks for COMPARABLE backgrounds, not identical ones.
+- [x] **The profile is deliberately NOT part of the golden checksum's stamp.** EXP-0011 makes the
       stamp carry everything the value depends on — and the arithmetic result must NOT depend on the
       clock. If the checksum changes when only the clock changed, that IS silent data corruption, and
       it is the whole point of the oracle. Written down here so a future session does not
       "helpfully" add the profile to the stamp and quietly destroy the detector.
-- **Verify:** capture twice at stock and compare the medians — a spread wider than the effect we are
-  hunting means the meter is not sharp enough yet and the run length must grow.
+- [x] **The sampler runs in its own PROCESS, and the load waits for its header line.** `runBurst` uses
+      `spawnSync`, which blocks Node's event loop for the whole burst, so an in-process sampler records
+      zero samples over exactly the window that matters (§4.3). A spawned process is a guess; a written
+      header is an observation, so the capture polls for it and fails loudly if it never appears.
+- [x] **The run is split into its LOADED and IDLE halves** at `config.LOAD_PHASE_UTILIZATION_PCT`
+      (50 %). A whole-run median under a duty cycle sits between two lobes and moves with sample
+      alignment instead of with the card. Both halves report their SAMPLE COUNTS and their own
+      utilization medians, so a split that failed to split is visible in the output (EXP-0012).
+
+**Verified by observation — TEN stock captures in two independent series of five, every one PASS with
+the checksum matching the golden:**
+
+| | медиана Вт | разброс | цена, операций/с | разброс цены |
+|---|---|---|---|---|
+| серия A (5 прогонов) | 197,1 | 0,67 Вт = 0,34 % | 5,1155e10 | 0,18 % |
+| серия B (5 прогонов) | 196,2 | 0,49 Вт = 0,25 % | 5,1162e10 | 0,07 % |
+| **вместе (10)** | **196,6** | **1,28 Вт = 0,65 %** | **5,1157e10** | **0,18 %** |
+
+**THE NUMBER THIS STEP EXISTS TO PRODUCE, and the form it must be quoted in: the meter's own floor is
+1.28 W (0.65 %) on power and 0.18 % on price. A delta thinner than that is NOT an effect.** P2-AC7 is
+satisfied by the tool printing exactly that sentence beside every spread it computes.
+
+**Two findings the runs produced, neither of them planned:**
+
+1. **The WITHIN-series spread understates the floor.** Series A scattered 0.67 W and series B 0.49 W,
+   yet their MEDIANS sit 0.9 W apart — further than either series' own width. Runs inside one series
+   share a thermal and background state, so their agreement is partly an artefact of that sharing. The
+   honest floor is the pooled range over independent series, and it is what the tool reports when
+   given both (`npm run power -- --spread stock`).
+2. **Power tracks the temperature the run REACHES.** Ten runs that settled at 62–63 °C drew
+   196.0…197.3 W; the one run that reached 68 °C drew 201.2 W — 5 °C worth ~4 W, three times the
+   scatter of the ten. So a stock-vs-profile comparison is only legal between runs at comparable
+   temperature, and `startTemperature` / `startFanSpeed` ride in every record so the condition is
+   visible. **What this does NOT say** (the first draft of the finding said it and the next series
+   refuted it within the hour): the starting FAN speed does not predict the outcome on its own — one
+   run started with the fan at 0 and still settled in the 63 °C group.
+
+**Its own means of checking** (`TESTING_FRAMEWORK.md` → the work produces it): `npm run power --
+--selftest` — 28 blocks on injected data, no GPU. **Mutation-proved:** seven guarantees broken one at
+a time (the loaded/idle split · the empty-set null · the empty-half nulls · the condition-field
+comparison · the R6 driver check · the two-measurement minimum · the client counting), each reddening
+THE BLOCK THAT BELONGS TO IT, with the suite's completion line demanded present so a crashed verifier
+cannot pass as green (EXP-0016).
 
 ### 4.5 — Find the Silent Cold point
 
@@ -345,3 +403,25 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
   choice is observed rather than assumed.
 - **`profiles/` ships**, keeping the earlier session's `.gitignore` line untouched; the reasons now
   live in `profiles/README.md` instead of in a session's head.
+
+*From §4.4, 2026-08-10:*
+
+- **The power meter is its OWN module** (`power-baseline.mjs`), not a flag on `stress-tester.mjs`. The
+  tester answers *"is the card still computing correctly"*; this one answers *"what did the card cost
+  while it did"*. It IMPORTS the tester rather than re-running the load itself, so there is one runner
+  and no second copy to drift. *Reversible:* fold it in, one file move.
+- **The capture and the spread live in ONE command.** P2-AC7 requires the delta to be reported beside
+  the meter's scatter; two commands would let a project ship the delta and forget the scatter.
+- **The measurement was NOT taken against a silenced desktop**, although the owner permits stopping
+  background apps during runs. §2 row 4 and EXP-0015: quieting apps buys ~6 W, cannot reach the idle
+  floor, and the compared numbers must share a background rather than lack one. Recording the client
+  list costs nothing and touches nothing of the owner's.
+- **A differing background is NAMED, not refused.** The client list drifts by one browser tab; refusing
+  on it would make the meter unusable, while refusing on driver / VBIOS / workload / args / shape /
+  profile is mandatory (EXP-0011 — a comparison across differing conditions has no verdict).
+- **The loaded/idle splitter is an absolute 50 % of utilization.** Measured utilization on this card is
+  strongly bimodal (5 % dwell · 57 % `sdc_fma` · 97 % `branchy`), so 50 % sits in the gap for every
+  shape measured. The record always prints both halves' sample counts, so a split that stopped working
+  announces itself. *Reversible:* one constant in `config.mjs`.
+- **The pooled range across INDEPENDENT series is the reported floor**, not the tighter within-series
+  spread — measured: two series scattered 0.67 and 0.49 W while their medians sat 0.9 W apart.

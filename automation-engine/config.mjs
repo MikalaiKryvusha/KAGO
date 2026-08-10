@@ -142,6 +142,35 @@ export const LOWLOAD_OFF_SECONDS = 9;
  */
 export const DETERMINISM_REPEATS = 5;
 
+/**
+ * THE SPLITTER between a run's LOADED and IDLE halves, in percent of GPU utilization.
+ *
+ * SOURCE: ours, and chosen against a MEASUREMENT rather than by taste. Utilization under these
+ * shapes is strongly bimodal — measured 2026-08-10 (plans/03 §4.3): 5 % in the low-load dwell,
+ * 8 % under the spawn-per-burst shape, 57 % under sustained `sdc_fma`, 97 % under sustained
+ * `branchy`. A whole-run median across a duty cycle sits BETWEEN the two lobes and moves with
+ * sample alignment instead of with the card, which is why the halves are separated at all.
+ *
+ * WHY AN ABSOLUTE NUMBER IS HONEST HERE, and how it announces its own failure: 50 % sits in the gap
+ * for every shape measured on this card. If a future workload lands near the line, the split stops
+ * meaning anything — so the record always carries the SAMPLE COUNT of both halves and each half's own
+ * utilization median, and a split that failed to split is then visible in the output rather than
+ * hidden inside one number (EXP-0012).
+ */
+export const LOAD_PHASE_UTILIZATION_PCT = 50;
+
+/**
+ * How much longer the telemetry sampler runs than the load it is measuring, in seconds.
+ *
+ * SOURCE: ours, and it exists because of an OBSERVED mechanic rather than a preference: the sampler
+ * must be a SEPARATE PROCESS (`runBurst` uses `spawnSync` and blocks Node's event loop, so an
+ * in-process sampler records zero samples — plans/03 §4.3), and a separate process starts and stops
+ * at times that do not exactly bracket the load. Two seconds at a 500 ms period is four samples of
+ * margin on each side; the loaded/idle split then discards the edges by itself, since a sample taken
+ * before the load started is an idle sample and lands in the other half.
+ */
+export const BASELINE_SAMPLER_PAD_SECONDS = 2;
+
 // =============================================================================================
 // 3. Thermal policy — expressed as an OBSERVATION, not as an invented ceiling
 // =============================================================================================
@@ -327,6 +356,8 @@ export default Object.freeze({
   LOWLOAD_ON_SECONDS,
   LOWLOAD_OFF_SECONDS,
   DETERMINISM_REPEATS,
+  LOAD_PHASE_UTILIZATION_PCT,
+  BASELINE_SAMPLER_PAD_SECONDS,
   THERMAL_THROTTLE_REASONS,
   THERMAL_SOAK_SECONDS,
   THERMAL_SOAK_IS_MEASURED,
