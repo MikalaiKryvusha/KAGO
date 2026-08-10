@@ -455,6 +455,8 @@ driver. Two rules shape it, both paid for by `researches/02`:
 | `npm run stress -- --verify-baseline` | **P1-AC5 as a command:** every baseline carries its stamp, and every stamp still matches the card. |
 | `npm run stress -- --selftest` | The verdict logic over all five outcomes, on injected data — runs without a GPU. |
 | `npm run workloads:build` / `workloads:verify` | Build KAGO's own CUDA loads and prove determinism / re-check the manifest. |
+| `npm run profiles` | Loads every file in `profiles/` against the LIVE card and prints it. Proves each profile's clock sits on the card's measured ladder, its power limit inside the card's range, and its stamp still matches the driver/VBIOS in front of us (R6). Read-only. |
+| `npm run profiles -- --selftest` | **The format's guard, and it runs without a GPU.** 14 hostile fixtures, each carrying exactly one defect and naming the field the validator must point at. Mutation-proved: breaking the ladder check, the stamp-required derivation, or the `takenAt` offset rule each turns blocks red. |
 | `nvidia-smi -q -d SUPPORTED_CLOCKS,PERFORMANCE,POWER` | The raw driver view when the wrapper is not enough. |
 
 > **`runs/` is git-ignored, so the golden reference is LOCAL STATE.** A fresh clone has no baseline

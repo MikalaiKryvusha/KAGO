@@ -1,0 +1,8 @@
+{
+  "name": "factory",
+  "title": "⏹ Сброс к заводским",
+  "settings": {
+    "powerLimitWatts": null,
+    "graphicsClockLockMhz": null
+  }
+}

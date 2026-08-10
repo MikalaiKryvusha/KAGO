@@ -67,20 +67,47 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 
 *Anchor: internal map §4 — «Сброс — это профиль, как два других, а не особый случай в коде».*
 
-- [ ] One JSON per profile: name, the settings (`powerLimitWatts`, `graphicsClockLockMhz {min,max}`),
+**DONE 2026-08-10 10:5x +03:00** — `automation-engine/lib/profile-store.mjs` · `profiles/factory.json` ·
+`profiles/README.md` · `npm run profiles`. No GPU write in this step.
+
+- [x] One JSON per profile: name, the settings (`powerLimitWatts`, `graphicsClockLockMhz {min,max}`),
       the stamp (driver, VBIOS, taken-at as local ISO 8601 with offset), and the evidence the profile
       was accepted on (verdicts, median power / temperature / fan, the background it was measured
-      against).
-- [ ] **The factory profile is a profile file like the others** — `-rgc` plus the power limit back to
+      against). **`title` added** — the owner-facing label phase 3 puts on the shortcut, taken from his
+      own three names. **`evidence` is optional at the FORMAT level and visible at the LIST level**
+      (`⚠ БЕЗ ДОКАЗАТЕЛЬСТВ`): making it mandatory would block §4.2's round trip, which by construction
+      runs before any profile has been proven.
+- [x] **The factory profile is a profile file like the others** — `-rgc` plus the power limit back to
       the card's own `power.default_limit`. Not a special branch: the third shortcut of phase 3 and
       the failure path of every apply are then the same code.
-- [ ] Clock values are taken from the MEASURED ladder (`gpu:info --json`), never from a round number
+      **How it is achieved:** one convention, `null` = the card's own factory value, for BOTH settings.
+      The factory profile is then simply the file with both nulls, and the applier has no branch to take.
+      **A consequence worth naming:** the stamp is required *iff* the profile sets something, so the
+      factory profile carries none — and MUST carry none, or a reset would start refusing to run after
+      a driver update, which is the worst failure available to the one path that must always work.
+      The rule is DERIVED from the settings, not held in a `factory: true` flag someone must sync.
+- [x] Clock values are taken from the MEASURED ladder (`gpu:info --json`), never from a round number
       a human liked. A value off the ladder is rejected at load time with the nearest two named.
-- [ ] `.gitignore` decision made BEFORE the first file is written: profiles encode one card's silicon
-      (`PROJECT_STRUCTURE_EXTERNAL_MAP.md` §3), so decide explicitly whether they ship, and write the
-      reason into the file rather than leaving it to the next session's guess.
-- **Verify:** load every profile in `profiles/` and print it; an off-ladder clock and a missing stamp
-  field must each produce a named refusal.
+      **The ladder's shape was re-observed rather than assumed:** 4 full memory rungs × 389 identical
+      points 180…3090 MHz, and the low 405 MHz rung's 95 points are a strict SUBSET — so the full-rung
+      ladder is the complete valid set and no union/intersection choice arises. A card that ever
+      disagrees between its full rungs produces NO ladder instead of a silent blend.
+- [x] `.gitignore` decision made BEFORE the first file is written. **Already encoded by a previous
+      session** — the tree ignores only `profiles/*.local.json`, i.e. profiles ship by default. Kept,
+      and the reasons written into `profiles/README.md` as the step demands: a measured profile is
+      expensive state rather than regenerable output (unlike `runs/`); a foreign or stale profile
+      refuses itself mechanically via the R6 stamp check, so published numbers cannot mislead another
+      card; and `factory.json` must exist in a fresh clone or the reset shortcut has nothing to apply.
+- **Verified by observation:** `npm run profiles` loads `profiles/factory.json` against the live card
+  and prints it (driver 610.88 · VBIOS 98.03.58.40.8b · 250…300 W · ladder 389 points). `npm run
+  profiles -- --selftest` — **14 hostile fixtures, 0 failures, no GPU touched**, covering the
+  off-ladder clock (names the nearest two), the missing stamp field, the whole-stamp absence, a `Z`
+  timestamp, a mistyped setting key, an omitted setting, a name disagreeing with its filename, a power
+  limit below the card's floor, a stale driver (R6), `min > max`, a factory profile carrying a stamp,
+  and a missing shortcut label. **Mutation-proved:** breaking the ladder check → 1 red; breaking the
+  "sets something ⇒ needs a stamp" derivation → 5 red; relaxing the `takenAt` offset rule → 1 red.
+  (The first mutation run reported a CRASHED verifier as green; the harness now separates
+  «НЕ ПРОГНАЛСЯ» from «ЗЕЛЁНЫЙ» — `BUG_FIXING_FRAMEWORK.md` → a finding is not a finding, point 3.)
 
 ### 4.2 — `automation-engine/lib/profile-manager.mjs` — the one writer
 
@@ -223,3 +250,28 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
   sleep. A sleep is a guess about the card; agreement is an observation. *Reversible:* swap in a
   fixed settle delay if the polling ever proves costly.
 - **The factory state is modelled as a profile**, not as a special code path.
+
+*From §4.1, 2026-08-10:*
+
+- **The format lives in its own module** (`profile-store.mjs`), not inside the writer. R1's audit is
+  only worth what it costs, and it costs least when the writing module stays small and rarely
+  imported; the format needs no card, so it is provable on fixtures alone. *Reversible:* fold it into
+  the manager, one file move.
+- **`null` = the card's own factory value**, for both settings. This is what makes the factory profile
+  a file rather than a branch, and it is the single convention the whole format rests on.
+- **A missing setting key is a refusal, not a default.** «Leave as is» and «restore factory» are
+  different instructions; an omitted key would let the applier pick one.
+- **The stamp is required iff the profile sets something** — derived from the settings, not from a
+  flag. Its point is the factory profile's exemption, which must hold across driver updates.
+- **`title` is part of the format**, carrying the owner's own shortcut names (🚀 / ❄️ / ⏹) so phase 3
+  reads them from the profile instead of re-deciding them. Quoting his words, not naming anything.
+- **`evidence` is optional in the format and flagged in the listing.** Enforcing it would block
+  §4.2's round trip, which necessarily runs before any profile is proven. *Confirmed at §4.6:* the
+  shipped Silent Cold profile carries evidence or the phase does not close.
+- **`stamp.takenAt` refuses a `Z` timestamp**, accepting only a local ISO 8601 with offset — a guard
+  for the defect EXP-0012 already paid for.
+- **The valid clock set is the FULL memory rungs' ladder**, and a card whose full rungs disagree gets
+  no ladder at all instead of a blended one. On this card the low rung is a strict subset, so the
+  choice is observed rather than assumed.
+- **`profiles/` ships**, keeping the earlier session's `.gitignore` line untouched; the reasons now
+  live in `profiles/README.md` instead of in a session's head.
