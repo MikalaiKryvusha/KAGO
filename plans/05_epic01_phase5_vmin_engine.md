@@ -352,14 +352,24 @@ conservative one until he speaks.
       **`guardband`** — `config.guardbandMillivolts()` → max(4 × 5 mV, 25 mV) = **25 mV** above V_fail;
       **`ratchet`** — one fine step (5 mV) above V_fail, then the whole-curve retest and the ratchet
       carry the risk instead of the margin.
-- [ ] Default `guardband`: it is the epic's own exit gate (§4). `ratchet` is unlocked only by the
-      owner's word, recorded.
+- [x] ~~Default `guardband`~~ — **SETTLED BY THE OWNER 2026-08-10 21:xx, and the default is now
+      `ratchet`.** His words, verbatim: *«Моё слово о пинимальном шаге не 25 мВ. А 5 мВ. Если карта
+      начала сбоить на условных 850 мВ, а на 855 мВ в этой точке частоты работала - точка фиксируется
+      на 855 мВ - на минимальный шаг 5 мВ выше отказа.»* So `interview_004` is NOT raised — the
+      question it was going to carry has been answered directly. `guardband` stays implemented as the
+      alternative, and the record still names which mode produced a number.
+      **The risk this trades away, stated once and not re-litigated:** the edge measured that same
+      evening is PROBABILISTIC (885 mV both passed and crashed), which is exactly what a 25 mV static
+      margin was buying protection against. The owner's loop attacks it differently — whole-curve
+      retest, the ratchet, and his own Palworld session as a second witness. Defence by observation
+      instead of by assumption, legitimate where the observation is actually taken.
 - [ ] The record carries which mode produced the number, so a later session cannot mistake one for the
       other.
-- [ ] `interviews/interview_004_margin_policy.md` — the question with the SUBJECT QUOTED INSIDE IT (the
-      self-sufficient-question rule): the measured V_fail per cap, what each policy costs in mV, and what
-      that costs in watts off the §4.5 table. Raised with `npm run ask`, together with the already-open
-      `interview_003` (N).
+- [x] ~~`interviews/interview_004_margin_policy.md`~~ — **NOT NEEDED: the owner answered the question
+      directly in chat before it was raised** (2026-08-10 21:xx). The place-of-questions rule is
+      satisfied by the answer existing, not by the document existing — filing an interview to ask what
+      has already been decided would be ceremony, and the decision is recorded in `GOAL.md` where the
+      owner's words live.
 - [ ] Nothing ships at V_fail under either policy — that is not a mode, it is the thing both modes exist
       to prevent.
 
