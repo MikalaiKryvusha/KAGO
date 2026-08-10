@@ -135,6 +135,14 @@ export function readState(backend) {
 /**
  * THE PRIMITIVE EVERY WRITE GOES THROUGH (P2-AC2).
  *
+ * ⚠️ WHAT A READ-BACK PROVES, AND WHAT IT DOES NOT (map rule R4a, `researches/04` §3.2): it proves the
+ * command TOOK — not that the card is delivering that much work. NVIDIA parts can **clock-stretch**:
+ * when a frequency/voltage point is unstable the hardware skips instructions instead of crashing, and
+ * `clocks.gr` keeps reporting the locked value the whole time. So a green read-back here is evidence
+ * about the COMMAND. Evidence about DELIVERED performance is a throughput measurement, and it lives
+ * in the stress harness, not in this function. Do not let this function's confidence leak into a
+ * claim it cannot support.
+ *
  * Polls until `agreeing` CONSECUTIVE samples satisfy `expect`. One expectation covers both
  * directions of the only two writes we make, which is why there is one primitive and not two:
  *   locking   -> expect: the clock sits inside [min,max]   (two agreeing samples are equal ones)

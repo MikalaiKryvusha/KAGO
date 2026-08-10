@@ -146,6 +146,22 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
       function it is today and every existing baseline remains valid.
 - [ ] Report the utilization actually reached, as a number, next to the ~20–30 % the spawn-per-burst
       shape reached. If the new shape does not saturate either, that is a finding, not a detail.
+- [ ] **REPORT THROUGHPUT — work per second — and record `clocks.gr` alongside it.** Added
+      2026-08-10 from `researches/04`; it is not scope creep but the closing of a blind spot the
+      harness has carried since phase 1. **Clock stretching** (the card skips work while still
+      reporting the locked clock) and **memory error replay** (GDDR7 carries internal ECC + CRC) both
+      yield a CORRECT checksum and NO event — so today's oracle would stamp such a profile PASS. The
+      only observable is work-per-second against stock, WITH the clock recorded: a throughput drop at
+      an unchanged clock is stretching, a throughput drop with a lower clock is merely a lower clock.
+      One instrument, two jobs — it is also the price column P2-AC7 and the owner's N both need.
+- [ ] Method, from the benchmarking practice surveyed in `researches/04` §5: time with CUDA events
+      (GPU-side, host overhead excluded) · warm up before timing · keep each timed unit far above the
+      ~10 µs floor where the timer's own overhead dominates · defeat the caches between timed calls ·
+      and report the **run-to-run spread**, because a delta thinner than the spread is not an effect.
+- [ ] **A low-load dwell and an idle→burst edge** join the shapes. `researches/04` §3.1: an undervolt
+      can be *conditionally* stable — surviving sustained heavy stress and dying at idle or in a
+      browser, because the low end of the V/F curve has its own requirements. A heavy test never
+      visits that region, so it cannot qualify a profile.
 - **Verify:** run it with `hardware-mon` sampling alongside and read the utilization column — the
   same way phase 1 caught the 30 % ceiling in the first place (EXP-0012: the tests check what you
   thought to assert, the output shows what you built).
