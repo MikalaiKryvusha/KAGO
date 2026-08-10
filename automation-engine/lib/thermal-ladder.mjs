@@ -138,6 +138,9 @@ export function toPlateauPoints(rows, { loadPct = config.PLATEAU_LOAD_UTILIZATIO
 // 2. THE PLATEAU — two gates per quantity, because one is the mistake this project already paid for
 // =================================================================================================
 
+/** A signed rate, always with its sign, so «0.0» and «−0.0» never read as different things. */
+const signedNum = (x) => (Number.isFinite(x) ? `${x > 0 ? '+' : ''}${x.toFixed(1)}` : '—');
+
 /**
  * The spread of a column — as a PERCENTILE BAND (p5…p95), not as min-max.
  *
@@ -223,7 +226,7 @@ export function judgeWindow(points, from, to, {
   temperature.driftPerMin = driftOf((p) => p.temperature);
   fan.driftPerMin = driftOf((p) => p.fan);
 
-  const signed = (x) => `${x > 0 ? '+' : ''}${x.toFixed(1)}`;
+  const signed = signedNum;
   const failures = [];
   if (temperature.band > tempBandC) failures.push(`температура гуляет на ${temperature.band} °C (полоса p5…p95, допуск ${tempBandC})`);
   if (temperature.driftPerMin === null) failures.push('окно не делится на половины — дрейф температуры не посчитать');
@@ -275,6 +278,13 @@ export function judgeWindow(points, from, to, {
  *
  * [NOT-TESTED]
  */
+/** The index at which a window of `windowSeconds` ending at `end` begins. [NOT-TESTED] */
+function lastWindowStart(list, end, windowSeconds) {
+  let i = end;
+  while (i > 0 && list[i - 1].loaded && list[end].seconds - list[i - 1].seconds <= windowSeconds) i--;
+  return i;
+}
+
 export function findPlateau(points, {
   windowSeconds = config.PLATEAU_WINDOW_SECONDS,
   ...gates
@@ -313,12 +323,47 @@ export function findPlateau(points, {
   // one that passes is the LONGEST trailing window that qualifies.
   let candidates = 0;
   let shortest = null;
+  let shortestFrom = null;
   for (let i = start; i <= end; i++) {
     if (list[end].seconds - list[i].seconds < windowSeconds) break;
     candidates++;
     const verdict = judgeWindow(list, i, end, gates);
     shortest = verdict;                                   // the last one considered is the shortest
-    if (verdict.ok) return { ...verdict, candidates };
+    shortestFrom = i;
+    if (verdict.ok) {
+      // THE LONG WINDOW PROVES SETTLEDNESS; THE LAST MINUTE REPORTS THE VALUE — and the two must not be
+      // the same window. A drift RATE tolerance admits a large TOTAL change once the window is long: at
+      // 2100 MHz the settled stretch ran 483 s while the card drifted 61 → 59 °C and the fan 44 → 40 %,
+      // i.e. 0.25 °C/min, comfortably inside the gate. The median over all of that is dragged toward the
+      // approach — it reported the fan at 41 % where the card actually finished at 40, and 40 is exactly
+      // the owner's ceiling, so the bias decided the answer rather than colouring it.
+      const lastMinute = judgeWindow(list, lastWindowStart(list, end, windowSeconds), end, gates);
+      // THE VERDICT COMES FROM THE LONG WINDOW, THE NUMBERS FROM THE LAST MINUTE — and the two must not
+      // be swapped. Over sixty seconds the drift estimate is noise: the fan reads whole percent, so one
+      // sample of 54 among 55s is a "−2 %/min trend" that does not exist. Over four hundred seconds the
+      // same estimate is a statement. The first draft took `ok` from the last minute too, and printed
+      // «ПЛАТО … температура ещё РАСТЁТ» — a verdict at war with its own explanation.
+      return {
+        ok: true,
+        candidates,
+        window: lastMinute.window,
+        temperature: lastMinute.temperature,
+        fan: lastMinute.fan,
+        failures: [],
+        // The evidence: how long the settled condition actually held, and from when.
+        settled: {
+          fromIndex: verdict.window.fromIndex,
+          fromSeconds: verdict.window.fromSeconds,
+          seconds: verdict.window.seconds,
+          n: verdict.window.n,
+        },
+        why: `равновесие: ${lastMinute.temperature.median} °C · вентилятор ${lastMinute.fan.median} % `
+          + `(медианы последних ${windowSeconds} с) · устойчиво ${verdict.window.seconds.toFixed(0)} с, `
+          + `дрейф по отрезку ${signedNum(verdict.temperature.driftPerMin)} °C/мин и ${signedNum(verdict.fan.driftPerMin)} %/мин`,
+        // Kept so a reader can see the whole settled stretch's own numbers beside the final ones.
+        overStretch: { temperature: verdict.temperature, fan: verdict.fan },
+      };
+    }
   }
 
   return {
@@ -572,8 +617,23 @@ export function selfTest() {
   ok('ровная полка под нагрузкой — это плато', flatFound.ok, true);
   ok('плато сообщает равновесную температуру и обороты',
     [flatFound.temperature.median, flatFound.fan.median], [61, 36]);
-  ok('плато охватывает ВЕСЬ устоявшийся хвост, а не первые 60 секунд', flatFound.window.fromIndex, 0);
+  ok('устоявшийся отрезок охватывает ВЕСЬ хвост, а не первые 60 секунд', flatFound.settled.seconds, 99.5);
   ok('окно плато не короче требуемого', flatFound.window.seconds >= 60, true);
+
+  // ДОКАЗАТЕЛЬСТВО И ДОКЛАД — РАЗНЫЕ ОКНА, и вот фикстура, где это решает ответ. Карта дрейфует
+  // 0,25 °C/мин — внутри допуска, — поэтому устоявшимся признаётся весь восьмиминутный хвост; но
+  // медиана по нему тянется к НАЧАЛУ хвоста, а не к концу. Именно это случилось на живой ступени
+  // 2100 МГц: доложено 41 % при фактических 40 на последней минуте, а 40 — ровно потолок владельца.
+  const slowSettle = Array.from({ length: 960 }, (_, k) => ({
+    seconds: k * 0.5,
+    temperature: 61 - Math.floor(k / 480),   // 61 первые 4 минуты, 60 вторые
+    fan: 44 - Math.floor(k / 240),           // 44 → 43 → 42 → 41 по минутам
+    loaded: true,
+  }));
+  const slow = findPlateau(slowSettle, W);
+  ok('доклад берётся с ПОСЛЕДНЕЙ минуты, а не по всему устоявшемуся отрезку', slow.fan?.median, 41);
+  ok('а доказательство — весь отрезок, и его длительность названа', slow.settled.seconds >= 400, true);
+  ok('и числа по всему отрезку тоже сохранены, чтобы перекос был виден', slow.overStretch?.fan?.median, 42.5);
 
   // ПЛАТО — ЭТО ХВОСТ, и вот фикстура, которая это доказывает: карта минуту стоит ровно ПОСРЕДИ
   // подъёма, а потом продолжает греться. Правило «самое раннее окно» объявило бы её устоявшейся на
@@ -653,7 +713,7 @@ export function selfTest() {
     ...series(200, 61, 36, { from: 0.5 }),
   ];
   ok('окно начинается с первой НАГРУЖЕННОЙ пробы, а не с простоя перед ней',
-    findPlateau(idlePrefix, W).window?.fromIndex ?? null, 1);
+    findPlateau(idlePrefix, W).settled?.fromIndex ?? null, 1);
 
   // A GAP IN THE LOAD SPLITS THE RUN INTO TWO REGIMES, and no window may span one. The gap's samples
   // are deliberately IDENTICAL in temperature and fan to the load around them: a gap that also moved
@@ -669,7 +729,7 @@ export function selfTest() {
   const gapFound = findPlateau(gapped, W);
   // Both stretches are long enough and identical, so the VERDICT cannot tell the rule apart — only the
   // window's START can. Without the rule the trailing window would reach back across the gap to index 0.
-  ok('окно не перешагивает провал нагрузки', gapFound.window?.fromIndex ?? null, 164);
+  ok('окно не перешагивает провал нагрузки', gapFound.settled?.fromIndex ?? null, 164);
   ok('и плато при этом найдено — в последнем нагруженном отрезке', gapFound.ok, true);
 
   // A run that ends before a window can be formed at all.
@@ -788,7 +848,16 @@ function analyze(prefix) {
     const rows = readSamples(join(GRAPHICS_DIR, f)).filter((r) => r && r.i >= 0 && r.sample);
     const p = findPlateau(toPlateauPoints(rows));
     if (p.ok) settled++;
-    console.log(`  ${f.replace(/\.jsonl$/, '').padEnd(30)} ${p.ok ? 'ПЛАТО ' : 'НЕТ   '} ${p.why}`);
+    // The watts come from the SAME window as the temperature and the fan, so the whole row describes
+    // one state. Re-deriving a table from recorded telemetry costs nothing and needs no card — which is
+    // what makes a corrected gate re-answer every past run instead of demanding they be re-run.
+    let watts = null;
+    if (p.ok) {
+      const slice = rows.slice(p.window.fromIndex, p.window.toIndex + 1);
+      watts = summarizeSamples(slice).loaded['power.draw.instant']?.median ?? null;
+    }
+    console.log(`  ${f.replace(/\.jsonl$/, '').padEnd(30)} ${p.ok ? 'ПЛАТО ' : 'НЕТ   '} ${p.why}`
+      + (watts === null ? '' : ` · ${watts.toFixed(1)} Вт`));
   }
   console.log('');
   console.log(`ВЫШЛИ НА ПЛАТО: ${settled} из ${files.length}.`);
