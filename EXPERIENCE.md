@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0035 · 2026-08-10 · ❌ · #tooling #shell #argv #text #canon #mechanize
+**Context:** editing Russian canon documents (STATUS, GOAL, plans) dozens of times in one session, using `node -e "…"` one-liners from bash because it felt faster than writing a script file.
+**Tried / did:** passed replacement strings containing markdown backticks — ``-pl``, ``plans/05``, ``descend`` — inside a double-quoted shell argument.
+**Result:** ❌ **FIVE TIMES in one session the shell EXECUTED the backticked text as a command and deleted it from the document.** Every time the exit code was 0, every time the file was written successfully, and every time the damage was a HOLE in Russian prose the owner would have read: «уровень подбирать через .», «мощности ( →», «Есть:  (закрепляет и ОСВОБОЖДАЕТ в ),  (игра)». Twice it also produced `command not found` noise that I read past. This is face 2 of the text-through-argv class the guide already documents — the one that «prints ok and the document gets HOLES, no error at all».
+**Lesson:** **the rule «text travels through files, never through command-line arguments» is not about ENCODING — it is about the shell being a PROGRAM RUNNER that also rewrites its arguments.** I knew the rule, quoted it twice in commit messages the same evening, and still broke it five times, because each individual edit looked too small to deserve a file. That reasoning is the trap: the cost of the mistake is not proportional to the size of the edit. **Two strikes were supposed to mechanize it; five means the text form has failed and the fix is a HABIT WITH NO EXCEPTIONS — markdown text is edited with Write/Edit tools, and `node -e` is reserved for arithmetic and probes that produce no prose.** The one companion rule that saved every occurrence: READ THE RESULT BACK. Nothing else would have caught it.
+**Repro:** `node -e "console.log('a `x` b')"` from bash — the backticked span vanishes and bash reports `x: command not found`. Then check the file: exit code 0, content mutilated.
+**Trigger:** about to edit any document containing markdown, Cyrillic, or backticks → use Write/Edit, or write a script FILE. If the fingers have already typed `node -e` and the payload contains prose, stop and switch.
+**Not for:** shell one-liners whose payload is ASCII arithmetic or a probe with no prose in it — those are fine and rewriting them as files is ceremony.
+
 ### EXP-0034 · 2026-08-10 · ❌→✅ · #measurement #units #search #probabilistic #gpu #verification
 **Context:** the first live edge search — walk a curve offset UP in 75 MHz steps until the SDC oracle stops saying PASS, then bisect to 15 MHz. The project had never once observed a failure from undervolting, so this was the run that would answer the owner's question.
 **Tried / did:** ran it, got a textbook result — PASS through +525, CRASH at +600, bisection closing on **+540 PASS / +555 CRASH**, a 15 MHz bracket. Then, before reporting it, converted the offsets into the quantity the conclusion is actually about: **volts**.
