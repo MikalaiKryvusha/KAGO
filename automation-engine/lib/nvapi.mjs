@@ -121,6 +121,9 @@ export function openNvapi({ dll = 'nvapi64.dll' } = {}) {
     GetFullName: koffi.proto('int NvAPI_GPU_GetFullName(uint64_t gpu, _Out_ void *name)'),
     GetDriverAndBranch: koffi.proto('int NvAPI_SYS_GetDriverAndBranchVersion(_Out_ void *ver, _Out_ void *branch)'),
     ClkVfPointsGetStatus: koffi.proto('int ClkVfPointsGetStatus(uint64_t gpu, void *pts)'),
+    ClkVfPointsGetControl: koffi.proto('int ClkVfPointsGetControl(uint64_t gpu, void *ctl)'),
+    ClkDomainsGetInfo: koffi.proto('int ClkDomainsGetInfo(uint64_t gpu, void *info)'),
+    ClkVfPointsSetControl: koffi.proto('int ClkVfPointsSetControl(uint64_t gpu, void *ctl)'),
   };
 
   /** Resolve one id. A null pointer is the SAFE failure mode of a wrong id — report, never throw. */
@@ -302,6 +305,88 @@ export function voltageGrid(points) {
   };
 }
 
+/**
+ * Probe an undocumented struct whose SIZE we do not know either.
+ *
+ * Both the size and the version number are unknown for these two entries — our sources name sizes only
+ * for GetStatus and SetControl. So walk the candidate pairs and let the driver tell us: -9 means the
+ * layout is wrong and NOTHING happened, which makes this the cheapest possible search. A probe that
+ * guessed one pair and reported "unsupported" would be inventing a conclusion.
+ *
+ * Read-only: these are Get* calls.
+ */
+export function probeStruct(nv, handle, { id, proto, sizes, versions = [1, 2, 3, 4, 5] }) {
+  const { koffi, resolve } = nv;
+  const entry = resolve(id);
+  if (!entry.ok) return { ok: false, why: 'id не разрешился' };
+  const tried = [];
+  for (const size of sizes) {
+    for (const v of versions) {
+      const buf = Buffer.alloc(size);
+      buf.writeUInt32LE(nvapiVersion(size, v), 0);
+      buf.fill(0xFF, 0x04, 0x14);
+      const status = koffi.call(entry.ptr, proto, handle, buf);
+      tried.push({ size, version: v, status });
+      if (status === 0) return { ok: true, size, version: v, buf, tried };
+    }
+  }
+  return { ok: false, tried };
+}
+
+export const CLK_VF_CONTROL_SIZE = 0x2420;
+export const CLK_VF_CONTROL_STRIDE = 0x48;
+export const CLK_VF_CONTROL_DATA_OFFSET = 0x20;
+
+/**
+ * Build the control struct for ONE point — the only shape the API accepts.
+ *
+ * "The mask must have only ONE bit set per call; setting all 128 bits returns -1" (researches/05 §3.4).
+ * That constraint is also the safety property: a write's blast radius is one curve point, by the
+ * vendor's own design rather than by our discipline.
+ *
+ * @param offsetKhz signed frequency offset in kHz. +15000 = +15 MHz AT THAT VOLTAGE POINT, which is
+ *   the same statement as "this frequency now needs less voltage" — the undervolt, in the API's units.
+ */
+export function buildVfControl(pointIndex, offsetKhz, { version = 1 } = {}) {
+  const buf = Buffer.alloc(CLK_VF_CONTROL_SIZE);
+  buf.writeUInt32LE(nvapiVersion(CLK_VF_CONTROL_SIZE, version), 0);
+  buf[0x04 + (pointIndex >> 3)] = 1 << (pointIndex & 7);      // exactly one bit
+  buf.writeInt32LE(offsetKhz, CLK_VF_CONTROL_DATA_OFFSET + pointIndex * CLK_VF_CONTROL_STRIDE);
+  return buf;
+}
+
+/** Read every per-point offset currently applied (read-only). */
+export function readVfOffsets(nv, handle, { version = 1 } = {}) {
+  const { koffi, protos, resolve } = nv;
+  const entry = resolve(0x23F1B133);
+  const buf = Buffer.alloc(CLK_VF_CONTROL_SIZE);
+  buf.writeUInt32LE(nvapiVersion(CLK_VF_CONTROL_SIZE, version), 0);
+  buf.fill(0xFF, 0x04, 0x14);
+  const status = koffi.call(entry.ptr, protos.ClkVfPointsGetControl, buf === null ? 0 : handle, buf);
+  if (status !== 0) return { ok: false, status, why: statusName(status) };
+  const offsets = [];
+  for (let i = 0; i < CLK_VF_POINT_COUNT; i++) {
+    offsets.push(buf.readInt32LE(CLK_VF_CONTROL_DATA_OFFSET + i * CLK_VF_CONTROL_STRIDE));
+  }
+  return { ok: true, offsets, nonZero: offsets.filter((o) => o !== 0).length };
+}
+
+/**
+ * WRITE one point's frequency offset.
+ *
+ * ⚠️ THE ONLY DEVICE WRITE IN THIS FILE. Its rollback is this same function with `offsetKhz = 0`, and
+ * the physical backstop is that offsets live in volatile driver state — a reboot clears them with no
+ * action from the owner (MASTER_PLAN.md → заводское состояние по умолчанию).
+ */
+export function writeVfOffset(nv, handle, pointIndex, offsetKhz, { version = 1 } = {}) {
+  const { koffi, protos, resolve } = nv;
+  const entry = resolve(0x0733E009);
+  if (!entry.ok) return { ok: false, why: 'ClkVfPointsSetControl не разрешился' };
+  const buf = buildVfControl(pointIndex, offsetKhz, { version });
+  const status = koffi.call(entry.ptr, protos.ClkVfPointsSetControl, handle, buf);
+  return { ok: status === 0, status, why: statusName(status) };
+}
+
 // =================================================================================================
 // 3. CLI
 // =================================================================================================
@@ -351,8 +436,85 @@ function mainCurve() {
   }
 }
 
+function mainControl() {
+  const nv = openNvapi();
+  const { koffi, protos, resolve } = nv;
+  const st = koffi.call(resolve(0x0150E828).ptr, protos.Initialize);
+  if (st !== 0) { console.error(`NvAPI_Initialize: ${statusName(st)}`); return 1; }
+  try {
+    const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+    koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
+    const handle = handles.readBigUInt64LE(0);
+
+    const SIZES = [0x2420, 0x1C28, 0x1B48, 0x0C08, 0x0408, 0x0208];
+    for (const [label, id, proto] of [
+      ['ClkVfPointsGetControl', 0x23F1B133, protos.ClkVfPointsGetControl],
+      ['ClkDomainsGetInfo', 0x64B43A6A, protos.ClkDomainsGetInfo],
+    ]) {
+      const r = probeStruct(nv, handle, { id, proto, sizes: SIZES });
+      console.log('');
+      if (!r.ok) {
+        const codes = [...new Set(r.tried.map((t) => t.status))];
+        console.log(`${label}: НЕ ПРИНЯТА ни одна пара (размер, версия) — попыток ${r.tried.length}, коды ${codes.join(', ')}`);
+        console.log('  (это НЕ «не поддерживается» — это «мы ещё не знаем раскладку»)');
+        continue;
+      }
+      console.log(`${label}: ПРИНЯТО — размер 0x${r.size.toString(16).toUpperCase()}, версия ${r.version}`);
+      const words = [];
+      for (let o = 0; o < Math.min(r.size, 0x60); o += 4) words.push(`+0x${o.toString(16).padStart(2, '0')}=${r.buf.readInt32LE(o)}`);
+      console.log('  первые слова: ' + words.slice(0, 16).join(' '));
+      const nonZero = [];
+      for (let o = 0; o < r.size; o += 4) { const v = r.buf.readInt32LE(o); if (v !== 0) nonZero.push(o); }
+      console.log(`  ненулевых 32-битных слов: ${nonZero.length} из ${r.size / 4}`);
+    }
+    return 0;
+  } finally {
+    koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
+  }
+}
+
+/**
+ * THE FIRST WRITE, and it is deliberately a no-op: offset 0 on one point.
+ *
+ * It changes nothing by construction, which is exactly why it is the right first write — it proves the
+ * struct, the mask, the version and the call path while risking nothing. Read-back before and after.
+ */
+function mainWriteZero() {
+  const nv = openNvapi();
+  const { koffi, protos, resolve } = nv;
+  const st = koffi.call(resolve(0x0150E828).ptr, protos.Initialize);
+  if (st !== 0) { console.error(`NvAPI_Initialize: ${statusName(st)}`); return 1; }
+  try {
+    const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+    koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
+    const handle = handles.readBigUInt64LE(0);
+    const POINT = 64;
+
+    const before = readVfOffsets(nv, handle);
+    console.log(`ДО ЗАПИСИ:  сдвигов ненулевых ${before.ok ? before.nonZero : '—'} из 128${before.ok ? '' : ` (${before.why})`}`);
+    console.log('ОТКАТ:      тот же вызов со сдвигом 0; плюс сдвиги энергозависимы — перезагрузка снимает их сама.');
+    console.log(`ЗАПИСЬ:     точка ${POINT}, сдвиг 0 кГц — операция, не меняющая ничего по построению.`);
+
+    const w = writeVfOffset(nv, handle, POINT, 0);
+    console.log(`РЕЗУЛЬТАТ:  ${w.ok ? 'ПРИНЯТО' : 'ОТКАЗ'} — ${w.why}`);
+
+    const after = readVfOffsets(nv, handle);
+    console.log(`ПОСЛЕ:      сдвигов ненулевых ${after.ok ? after.nonZero : '—'} из 128`);
+    if (before.ok && after.ok) {
+      const same = JSON.stringify(before.offsets) === JSON.stringify(after.offsets);
+      console.log(`СВЕРКА:     кривая ${same ? 'НЕ ИЗМЕНИЛАСЬ — как и обещано' : 'ИЗМЕНИЛАСЬ, чего быть не должно'}`);
+      return same && w.ok ? 0 : 1;
+    }
+    return w.ok ? 0 : 1;
+  } finally {
+    koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
+  }
+}
+
 function main() {
   if (process.argv.includes('--curve')) return mainCurve();
+  if (process.argv.includes('--control')) return mainControl();
+  if (process.argv.includes('--write-zero')) return mainWriteZero();
   let report;
   try {
     report = probe();
