@@ -297,6 +297,42 @@ export const READBACK_AGREEING_SAMPLES = 2;
 export const READBACK_INTERVAL_MS = 250;
 export const READBACK_TIMEOUT_MS = 10_000;
 
+/**
+ * HOW CLOSE THE DELIVERED CLOCK COMES TO THE REQUESTED ONE — measured, not assumed.
+ *
+ * SOURCE: observed on this card 2026-08-10 under sustained load, with ZERO throttle reasons active in
+ * every sample: `-lgc 2400,2400` delivered a rock-constant 2392 · `-lgc 2392` delivered 2385 ·
+ * `-lgc 1800` delivered 1792 · `-lgc 1200` and `-lgc 900` delivered 1200 and 900, and their sample
+ * series show the card alternating between the point and its lower neighbour (1200/1192, 900/892).
+ * So the card honours a lock TO WITHIN ONE LADDER STEP and jitters across that step. The ladder's own
+ * step alternates 7 and 8 MHz (measured, `gpu:info`), so one step is at most 8.
+ *
+ * WHY THIS IS A TOLERANCE AND NOT A WEAKENED TEST: the quantity being checked is still "did the card
+ * take the lock", and the evidence is still that the clock STOPS VARYING (EXP-0014). What this number
+ * admits is the hardware's own delivery granularity, which was measured rather than guessed — and it
+ * is expressed as the ladder's step so a card with a different ladder gets a different tolerance.
+ *
+ * WHERE IT MUST NOT BE USED: as an excuse to accept a clock far from the request. A delivered value
+ * outside this tolerance is a REFUSAL, and the descent rejects that candidate rather than recording it.
+ */
+export const LOCK_DELIVERY_TOLERANCE_MHZ = 8;
+
+/**
+ * WHERE A CLOCK LOCK CAN BE PROVED AT ALL — an observation that corrected a design assumption.
+ *
+ * SOURCE: the same 2026-08-10 runs. At IDLE, a lock to 1500…2850 leaves the clock wandering wherever
+ * idle management puts it (observed 1260, 1717, 1935, 1980 for four different requests — and the same
+ * request read differently in two runs), so an idle read-back can neither confirm nor refute a high
+ * lock. Under LOAD the same lock is dead constant. The earlier rule — «the lock is directly observable
+ * at idle and needs no load» (EXP-0014, plan §2 row 2) — was measured at 1200 MHz, which happens to sit
+ * inside the idle clock range on this card, and generalized from there. It holds only there.
+ *
+ * The consequence is structural, which is why it lives in config rather than in a comment: a clock
+ * lock is verified UNDER LOAD, and an applier that cannot load the card may only report the write as
+ * COMMANDED, never as delivered.
+ */
+export const LOCK_IS_OBSERVABLE_AT_IDLE = false;
+
 // =============================================================================================
 // 8. Power limit — read from the card, never hard-coded
 // =============================================================================================
@@ -369,4 +405,6 @@ export default Object.freeze({
   READBACK_AGREEING_SAMPLES,
   READBACK_INTERVAL_MS,
   READBACK_TIMEOUT_MS,
+  LOCK_DELIVERY_TOLERANCE_MHZ,
+  LOCK_IS_OBSERVABLE_AT_IDLE,
 });

@@ -204,7 +204,7 @@ export function resolveTarget(profile, state) {
  *
  * @returns {Promise<{applied:boolean, steps:Array, before:object, after:object, lockedTo:number|null}>}
  */
-export async function apply(backend, profile, { card, timing = {} } = {}) {
+export async function apply(backend, profile, { card, timing = {}, verifyLock = 'idle' } = {}) {
   const before = readState(backend);
 
   // R6 and the format, both before the first write (P2-AC5).
@@ -251,6 +251,24 @@ export async function apply(backend, profile, { card, timing = {} } = {}) {
       run: async () => {
         const r = backend.lockGraphicsClocksMhz(min, max);
         if (!r.ok) throw new Error(`фиксация частоты не удалась (код ${r.status}): ${r.stderr || r.stdout}`);
+
+        // WHERE A LOCK CAN BE PROVED, and it is not here for every clock. Measured 2026-08-10: at idle
+        // a lock to 1500…2850 leaves the clock wandering wherever idle management puts it (1260, 1717,
+        // 1935, 1980 observed for four requests, and one request read differently in two runs), while
+        // under load the same lock is dead constant. EXP-0014's «the lock is observable at idle» was
+        // taken at 1200 MHz — a point that happens to sit inside this card's idle range — and
+        // generalized from there; `config.LOCK_IS_OBSERVABLE_AT_IDLE` now records that it does not hold.
+        //
+        // So the caller says where the proof will come from. `idle` keeps the strict historical
+        // behaviour — converge or throw. `deferred` is for a caller that is ABOUT TO LOAD THE CARD and
+        // will verify there; it returns a NAMED unproven status rather than a quiet success, so the
+        // difference between «proved» and «commanded» never disappears into a boolean.
+        if (verifyLock === 'deferred') {
+          const s1 = sampleWritable(backend);
+          await sleep(timing.intervalMs ?? READBACK_INTERVAL_MS);
+          const s2 = sampleWritable(backend);
+          return { value: s2, samples: [s1, s2], proof: 'deferred-to-load' };
+        }
         return readBack(backend, (s) => s.clockMhz >= min && s.clockMhz <= max,
           { what: `частота должна встать в ${min}…${max} МГц`, ...timing });
       },
@@ -288,8 +306,12 @@ export async function apply(backend, profile, { card, timing = {} } = {}) {
     try {
       const proof = await step.run();
       done.push(step);
-      log.push(`${step.what} — перечитано: ${proof.value.powerLimitW} Вт / ${proof.value.clockMhz} МГц` +
-        (proof.proof === 'reported-only' ? ' (только доложено: снятие несуществующей фиксации доказать нечем)' : ''));
+      const caveat = proof.proof === 'reported-only'
+        ? ' (только доложено: снятие несуществующей фиксации доказать нечем)'
+        : proof.proof === 'deferred-to-load'
+          ? ' (КОМАНДА ОТДАНА, доставка не доказана: на простое фиксация высокой частоты не наблюдается — проверка под нагрузкой)'
+          : '';
+      log.push(`${step.what} — перечитано: ${proof.value.powerLimitW} Вт / ${proof.value.clockMhz} МГц${caveat}`);
     } catch (e) {
       // P2-AC4: any failing step returns the card to the state it held before the apply began.
       const undone = [];
@@ -310,7 +332,12 @@ export async function apply(backend, profile, { card, timing = {} } = {}) {
     }
   }
 
-  return { applied: true, steps: log, before, after: readState(backend), lockedTo: target.lock ? target.lock.min : null };
+  return {
+    applied: true, steps: log, before, after: readState(backend),
+    lockedTo: target.lock ? target.lock.min : null,
+    // The caller must be able to ASK whether the lock was proved, not infer it from a log string.
+    lockProof: target.lock ? (verifyLock === 'deferred' ? 'deferred-to-load' : 'read-back') : null,
+  };
 }
 
 /**
@@ -550,6 +577,30 @@ async function cmdSelftest() {
     try {
       await apply(b, silentColdFixture(), { card: SELFTEST_CARD, timing: FAST });
       return 'применение прошло, хотя частота не менялась — поверили stdout';
+    } catch (e) {
+      if (!/перечитывание не сошлось/u.test(e.message)) return `провал не по той причине: ${e.message}`;
+      return null;
+    }
+  });
+
+  // The two blocks below guard the deferral added 2026-08-10, when the card showed that a HIGH lock is
+  // invisible at idle (config.LOCK_IS_OBSERVABLE_AT_IDLE). The fake with `lieOn: 'lock'` reproduces
+  // exactly that: the write is accepted, the clock keeps wandering. The pair matters more than either
+  // half — one proves the relaxation exists, the other proves it did NOT leak into the default path.
+  block('режим deferred: частота не встала на простое -> применение НЕ падает, но доставка помечена НЕдоказанной', async () => {
+    const b = fakeBackend({ lieOn: 'lock' });
+    const r = await apply(b, silentColdFixture(), { card: SELFTEST_CARD, timing: FAST, verifyLock: 'deferred' });
+    if (!r.applied) return 'применение провалилось, хотя проверка отложена под нагрузку';
+    if (r.lockProof !== 'deferred-to-load') return `доставка не помечена отложенной: ${r.lockProof}`;
+    if (!r.steps.some((s) => /КОМАНДА ОТДАНА/u.test(s))) return 'в журнале нет пометки, что доставка не доказана';
+    return null;
+  });
+
+  block('режим deferred НЕ становится умолчанием: тот же подставной сценарий по умолчанию по-прежнему ПРОВАЛЕН', async () => {
+    const b = fakeBackend({ lieOn: 'lock' });
+    try {
+      await apply(b, silentColdFixture(), { card: SELFTEST_CARD, timing: FAST });
+      return 'по умолчанию применение прошло — послабление протекло в строгий путь';
     } catch (e) {
       if (!/перечитывание не сошлось/u.test(e.message)) return `провал не по той причине: ${e.message}`;
       return null;

@@ -36,7 +36,8 @@ morning, and every step below rests on them rather than re-deriving them.
 | Question | Answer, observed | Consequence for the design |
 |---|---|---|
 | Does `-lgc` write on this GeForce at all? | **Yes.** `nvidia-smi -i 0 -lgc 1200,1200` → exit 0; the idle clock moved 180 → **exactly 1200 MHz** and stopped varying | The path-A backend is complete, not half-proven — `-pl` was already confirmed 2026-08-09 |
-| How is a clock lock READ BACK? `nvidia-smi` has no locked-clocks field: `-q -d CLOCK` answers *"Requested functionality has been deprecated"* for Applications Clocks, and there is no `Locked Clocks` section | **`clocks.gr` itself, at idle.** Under the lock it equals the locked value and holds constant; released, it wanders (observed 810…1065 MHz). **A value that stops VARYING is the proof** | Read-back needs no load and no new instrument. **`clocks_event_reasons.active` stayed `0x0` under the lock — it is NOT the observable, and a future session must not reach for it** |
+| How is a clock lock READ BACK? `nvidia-smi` has no locked-clocks field: `-q -d CLOCK` answers *"Requested functionality has been deprecated"* for Applications Clocks, and there is no `Locked Clocks` section | **`clocks.gr` itself — but ONLY UNDER LOAD. ⚠️ CORRECTED 2026-08-10 in §4.5.** The original row read *"at idle … read-back needs no load"*; that was measured at 1200 MHz and generalized. It is FALSE for high clocks: at idle a lock to 1500…2850 leaves the clock wandering (1260 · 1717 · 1935 · 1980 observed for four requests, and one request read differently in two runs). Under load the same lock is dead constant. **A value that stops VARYING is still the proof — the mistake was about WHERE to look for it** | The lock is COMMANDED before the load and PROVED under it (`apply(..., {verifyLock:'deferred'})` + `verifyLockUnderLoad()`; `config.LOCK_IS_OBSERVABLE_AT_IDLE = false`). **`clocks_event_reasons.active` stayed `0x0` under the lock — it is NOT the observable, and a future session must not reach for it** |
+| What does the card DELIVER for a requested clock? *(question added 2026-08-10 — nobody had asked it)* | **The requested point or its lower neighbour.** Asked 2400 → ran 2392 · asked 2392 → 2385 · asked 1800 → 1792 · asked 1200 → 1200 · asked 900 → 900, all rock-constant under load with **zero throttle reasons active** in every sample; the per-sample series shows the card alternating across one ladder step (1200/1192, 900/892) | A lock counts as delivered when the loaded clock is constant AND within **one ladder step** of the request (`config.LOCK_DELIVERY_TOLERANCE_MHZ = 8`, the ladder's own largest step). The profile records what was DELIVERED, never only what was asked |
 | Is the tool's success text evidence? | **No, twice over.** `-rgc` printed *"All done"* with exit 0 while the very next read still reported the locked 1200 MHz; the release surfaced ~1 s later. `researches/01` §5 already caught the same tool printing the DEFAULT in its "from" field | **Read-back = poll until two consecutive samples agree.** A single read after a write is not a read-back (EXP-0014) |
 | Can the measurement be taken against a silent desktop? | **No.** With the two heaviest consumer apps fully stopped the card still sat at 825–950 MHz / ~28 W against 180 MHz / 21.76 W earlier the same morning — the largest remaining client is `dwm.exe`, the compositor, unstoppable while Windows is displayed on this card | **Stock and profile are measured under the SAME background, under a load heavy enough to dominate it.** Silencing the desktop buys ~6 W and is not a strategy (EXP-0015) |
 
@@ -113,7 +114,7 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 
 *Anchor: internal map R1, R2, R5 — one writer · swappable backends · rollback in the same module.*
 
-**DONE 2026-08-10 10:5x…11:4x +03:00** — `automation-engine/lib/profile-manager.mjs` · `npm run profile`.
+**DONE 2026-08-10 09:39 +03:00** (commit receipt `8d11c73`) — `automation-engine/lib/profile-manager.mjs` · `npm run profile`.
 **The first module in the project that writes to the GPU**, and its round trip was RUN on the live card,
 not merely written: 300 → 290 W, core pinned to 1200 MHz, both writes re-read to stability, rollback
 executed and every compared field back to its initial value. `npm run profile -- --selftest` — 13 blocks
@@ -148,8 +149,8 @@ did not guard its own rule (EXP-0016).
 *Anchor: `plans/02_epic01_phase1` §3.6, the limitation recorded rather than smoothed over: «нагрузки
 идут процесс на прогон … Фазе 5 нужна нагрузка, крутящаяся внутри себя N секунд».*
 
-**DONE 2026-08-10 12:2x…13:2x +03:00.** Every bullet below is measured and committed, the low-load
-dwell and the idle→burst edge included (`npm run stress -- --lowload`).
+**DONE 2026-08-10 12:46 +03:00** (commit receipt `d3c902c`)**.** Every bullet below is measured and
+committed, the low-load dwell and the idle→burst edge included (`npm run stress -- --lowload`).
 
 - [x] The host loops the launch inside ONE process for N seconds instead of one process per burst.
       The kernel and its arguments stay untouched, so the checksum stays the same deterministic
@@ -233,7 +234,7 @@ dwell and the idle→burst edge included (`npm run stress -- --lowload`).
 
 *Anchor: epic §2 AC4 — the meter for Silent Cold's power reduction.*
 
-**DONE 2026-08-10 14:1x…15:0x +03:00** — `automation-engine/lib/power-baseline.mjs` · `npm run power`.
+**DONE 2026-08-10 13:13 +03:00** (commit receipt `9758441`) — `automation-engine/lib/power-baseline.mjs` · `npm run power`.
 **No GPU write in this step:** the module reads the card and runs compute on it; it sets nothing. The
 profile a capture was taken under is a LABEL the caller supplies — this module never applies one.
 
@@ -301,20 +302,54 @@ cannot pass as green (EXP-0016).
 
 *Anchor: epic §3 phase 2 — «подбор точки по температуре и шуму».*
 
-- [ ] Descend the measured ladder from stock, not by a search for a failure edge — **that is phase 5's
+**DONE 2026-08-10** — `automation-engine/lib/ladder-descent.mjs` · `npm run descend`. Six candidates
+measured on the live card, every one PASS with the checksum matching the golden.
+
+- [x] Descend the measured ladder from stock, not by a search for a failure edge — **that is phase 5's
       job and it needs the NVAPI bridge** (`researches/03` §2: `nvidia-smi` has no voltage field at
       all). Here the card stays inside its own stock V/F curve, so every point is a point the card
       already considers safe.
-- [ ] At each candidate: the sustained transient run, the three-way verdict, and the medians. The
-      candidate list is short and named up front — this is a descent over a handful of rungs, not a
-      sweep.
-- [ ] **Fan speed is the countable proxy for "quiet"** (`TESTING_FRAMEWORK.md` → countable quality
-      proxies). It never replaces the owner's ear: the phase hands him two or three candidates to
-      LISTEN to, and his verdict is what closes the choice (the taste class, `AGENT_GUIDE.md`). The
-      agent's own "sounds quiet to me" is not a verification.
-- [ ] **Never leave the card locked at the end of a run.** Every candidate run ends in
-      `resetToFactory()` plus a stable read-back, including on failure.
-- **Verify:** the candidate table with its numbers, and the card read back at stock afterwards.
+- [x] At each candidate: the sustained run, the three-way verdict, and the medians. The candidate list
+      is short and named up front — a descent over a handful of rungs, not a sweep.
+- [x] **Fan speed is the countable proxy for "quiet"** (`TESTING_FRAMEWORK.md` → countable quality
+      proxies). It never replaces the owner's ear: the phase hands him candidates to LISTEN to, and his
+      verdict is what closes the choice (the taste class, `AGENT_GUIDE.md`).
+- [x] **Never leave the card locked at the end of a run.** `resetToFactory()` runs in a `finally` after
+      every candidate — proved on a fake card by three selftest blocks (apply fails · capture fails ·
+      reset itself fails → the descent aborts instead of stacking a second lock) and mutation-proved.
+
+**THE CURVE OF THIS CARD** — sustained `branchy`, stock reference 196.6 W / 5.1157e10 ops/s,
+meter floor 1.28 W · 0.18 % (§4.4). Every delta below is far outside that floor:
+
+| просили | выдано | Вт | °C | вент | операций/с | −Вт | цена | **Вт за 1 % цены** |
+|---|---|---|---|---|---|---|---|---|
+| сток | 2842 | 196,6 | 62–63 | **44 %** | 5,116e10 | — | — | — |
+| 2400 | 2392 | 125,8 | 58 | **30 %** | 4,517e10 | −70,7 | −11,7 % | **6,04** |
+| 2100 | 2092 | 96,5 | 53 | 32 % | 3,904e10 | −100,1 | −23,7 % | 4,23 |
+| 1800 | 1792 | 78,8 | 49 | 30 % | 3,295e10 | −117,7 | −35,6 % | 3,31 |
+| 1500 | 1492 | 70,7 | 46 | 30 % | 2,693e10 | −125,9 | −47,4 % | 2,66 |
+| 1200 | 1200 | 65,2 | 57* | 30 % | 2,087e10 | −131,4 | −59,2 % | 2,22 |
+| 900 | 900 | 56,5 | 50* | 30 % | 1,609e10 | −140,1 | −68,6 % | 2,04 |
+
+\* the 1200 and 900 rows were taken in the first descent, with the card warmer from four failed
+attempts; their temperatures are not comparable with the rest of the column (§4.4's finding — power
+tracks the temperature reached). Their WATTS are, being far outside the floor.
+
+**THE FINDING THAT DECIDES THE PHASE: the fan floor is reached at the very first step down.** Fan speed
+is the phase's countable proxy for "quiet", and it drops 44 % → 30 % at 2400 MHz and then **stops** —
+30–32 % at every point below, all the way to 900. So descending past 2400 buys watts and degrees but
+**no further quiet**, while the price climbs from 11.7 % to 68.6 %. Whatever the owner's N turns out to
+be, a *Silent Cold* below ~1800 MHz is paying performance for something the fan no longer delivers.
+
+**The exchange rate collapses in the same direction:** 6.04 W per 1 % of performance at 2400,
+4.23 at 2100, and 2.04 by 900. The knee of THIS die sits high — nothing like a 97 % target, and nothing
+that had to be assumed.
+
+- **Verified by observation:** the table above, and the card read back at stock after every run
+  (`КАРТА ПОСЛЕ СПУСКА` line, plus `npm run profile -- --state`).
+- **Outbound — the owner's decision, with the curve in hand:** `interviews/interview_003_profile_budget_n.md`.
+  N was never askable before this table existed (`MASTER_PLAN.md` → ведущие принципы 4a: asking before
+  the curve is measured is asking him to guess).
 
 ### 4.6 — Prove the profile, then store it
 
