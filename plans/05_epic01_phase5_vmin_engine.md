@@ -290,6 +290,13 @@ The mechanism is already proved: under a held clock C, exactly one point serves 
 (`vf-step.voltageForClock`), so **the ascent at cap C IS the Vmin search for the point serving C**. Run
 it at several caps and the per-point curve falls out of one mechanism.
 
+**AND SINCE 2026-08-10 18:5x THESE THREE CAPS ARE THE THREE MODES** — the owner split the profiles by
+objective function (`GOAL.md` → «Четыре режима»), and the split lands exactly on this step's axis: the
+ceiling's PLACE is what distinguishes the modes, so the three-cap sweep below is not a survey any more, it
+is the measurement that sizes all three at once. **Max Perfomance** = ceiling at the curve's top (already
+observed: 2887 → 2932 MHz at unchanged watts) · **Optimised** = ceiling at the stock operating clock
+(already measured: stock clock delivered at −7.71 W / −5 °C) · **Silent Cold** = ceiling well below it.
+
 - [ ] Search at ≥ 3 caps spanning the operating band: the stock sustained clock (~2842), the clock-axis
       knee (2392, `plans/03` §4.5), and a mid rung (1800).
 - [ ] Report max passing offset per cap, converted to mV, with each run's temperature beside it — the
