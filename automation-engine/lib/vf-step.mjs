@@ -1089,6 +1089,11 @@ async function main() {
   const allPoints = process.argv.includes('--all-points');
   const capArg = arg('cap', null);
   const capMhz = capArg === null ? null : Number(capArg);
+  // THE DIVERSE SET as an operator command (plans/05 §4.3). One write, one watchdog, three loads:
+  // the shape that decides the point is named in the block list.
+  const useSet = process.argv.includes('--set');
+  const stress = await import('./stress-tester.mjs');
+  const shapes = useSet ? stress.DIVERSE_SET : null;
 
   console.log('ПЕРВЫЙ ПОЛОЖИТЕЛЬНЫЙ СДВИГ — ЭТО И ЕСТЬ АНДЕРВОЛЬТ');
   console.log('');
@@ -1099,7 +1104,15 @@ async function main() {
     console.log('              подходящая точка, поэтому подъём одной ничего не удешевляет (researches/02 §6.2).');
   }
   if (capMhz) console.log(`  ПОТОЛОК:    ${capMhz} МГц — на этой частоте и меряется удешевление (пока ВЫЧИСЛЯЕТСЯ по кривой, замок не ставится).`);
-  console.log(`  НАГРУЗКА:   ${workload}, ${seconds} с, устойчивыми пачками по ${sustain} с.`);
+  if (shapes) {
+    console.log(`  НАБОР:      ${shapes.length} формы по ${seconds} с, порог точки = ХУДШАЯ из них:`);
+    for (const s of shapes) console.log(`              · ${s.id}`);
+    console.log('              Vmin расходится между ПРОГРАММАМИ до 100 мВ (researches/02 §4), поэтому');
+    console.log('              край одной нагрузки — это край одной нагрузки, а не карты.');
+    console.log('              Самая чувствительная идёт первой; после первого не-PASS остальные НЕ прогоняются.');
+  } else {
+    console.log(`  НАГРУЗКА:   ${workload}, ${seconds} с, устойчивыми пачками по ${sustain} с (ОДНА форма; набор — флаг --set).`);
+  }
   console.log('  ОРАКУЛ:     сумма против эталона И журнал Windows И работа в секунду — «не упало» вердиктом не является.');
   console.log('  ОТКАТ:      тот же вызов со сдвигом 0, в finally, на любом пути.');
   console.log('  СТОРОЖ:     взводится ДО записи и продлевается самой нагрузкой; при зависании');
@@ -1107,13 +1120,14 @@ async function main() {
   if (dryRun) console.log('  РЕЖИМ:      СУХОЙ ПРОГОН — записи не будет.');
   console.log('');
 
-  const r = await runStep({ point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, capMhz });
+  const r = await runStep({ point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, capMhz, shapes });
   for (const b of r.blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}${b.detail ? `\n            ${b.detail}` : ''}`);
 
   const failed = r.blocks.filter((b) => !b.ok).length;
   console.log('');
   console.log(`ИТОГ: блоков ${r.blocks.length}, провалов ${failed}.`);
   if (r.verdict) console.log(`ВЕРДИКТ ТОЧКИ ${r.point} НА ШАГЕ +${r.offsetMhz} МГц: ${r.verdict}`);
+  if (r.worstShape) console.log(`РЕШИЛА ФОРМА: ${r.worstShape}${r.judged?.skipped?.length ? ` · не прогонялись: ${r.judged.skipped.join(', ')}` : ''}`);
   return failed === 0 ? 0 : 1;
 }
 

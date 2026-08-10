@@ -235,23 +235,24 @@ produced, so escalation is a ratchet rather than a fresh guess.»*
 **Verification:** the selftest's completion line PRESENT plus ≥1 failed block per mutation (a crashed
 verifier is not a green verifier).
 
-### 4.3 — A point's verdict is the WORST over the diverse set 🟡
+### 4.3 — A point's verdict is the WORST over the diverse set ✅
 
 *Anchor: `plans/01_EPIC` §4 — «порог точки — худший по всему набору нагрузок, никогда не первый
 найденный»; `researches/02` §4.*
 
-- [ ] `judgeCandidate()` — runs the set, returns the worst verdict AND which shape produced it.
-- [ ] The set, and why each member is in it:
+- [x] `judgeCandidate()` — runs the set, returns the worst verdict AND which shape produced it.
+- [x] The set, and why each member is in it:
       `sdc_fma --sustain` (SDC shape — fixed-loop arithmetic corrupts silently) ·
       `branchy --sustain` (crash shape — control-heavy code dies instead) ·
       `sdc_fma --transient` (**the most important one**: voltage noise dominates Vmin, `researches/02` §2).
 - [ ] `--lowload` is the FOURTH shape and it runs at whole-curve iterations (§4.7), not at every step:
       it exercises the low end that a capped run never touches, and an undervolt can survive every heavy
-      test and die on a browser click.
-- [ ] Baselines exist for both workloads (`runs/baseline/sdc_fma.json`, `branchy.json`). Confirm the
+      test and die on a browser click. **Still open — it belongs to §4.7 and is not part of this closure.**
+- [x] Baselines exist for both workloads (`runs/baseline/sdc_fma.json`, `branchy.json`). Confirm the
       ARGS the engine will run match each golden's stamp — a mismatch must return `UNKNOWN`, and a false
       SDC is worse than a missed one (EXP-0011: a wrong-args run once reported 58 of 58 corrupted).
-- [ ] `UNKNOWN` is a STOP in the engine, never progress. Stated as a named branch with its own test.
+      **Done better than asked: the check runs BEFORE the load, so a stale golden costs zero watts.**
+- [x] `UNKNOWN` is a STOP in the engine, never progress. Stated as a named branch with its own test.
 
 **Verification:** a fixture run where one shape fails and another passes must yield the failing shape's
 verdict as the point's threshold, named.
@@ -282,6 +283,70 @@ for it before the run. Live half **[NOT-TESTED]** — the game has not been laun
 may not exceed. That is a claim about FRAMES, so it is measured here — and `--spread` exists because a
 5 % budget compared against an instrument whose own across-launch scatter is unmeasured decides nothing
 (EXP-0018).
+
+#### 2026-08-10 23:5x — STEP CLOSED. THE SET RUNS, AND IT RAN ON THE CARD
+
+`judgeCandidate()` in `stress-tester.mjs`, joined to the write atom through `runStep({ shapes })` and
+to the search through `searchEdge({ shapes })`. Commands: `npm run vfstep -- --set …` for one
+candidate, and the engine now judges by the set BY DEFAULT — `--single-shape --workload <name>` is
+the narrow mode and has to be asked for by name.
+
+**Four rules, each executable rather than remembered:**
+
+1. **The order is a decision:** the shape most likely to fail runs FIRST (`sdc_fma --transient` —
+   voltage noise lives in the transitions), and after the first non-PASS **the remaining shapes do
+   not run at all**. A failing candidate costs one shape instead of three, and the card spends the
+   least possible time at an offset already shown to break it.
+2. **`UNKNOWN` is a stop**, not a skipped shape — the same rule the ascent already obeys.
+3. **An observed failure outranks an absence of judgement.** An SDC beside an UNKNOWN reports SDC:
+   the shape that saw corruption saw it; the one with a stale golden saw nothing.
+4. **The goldens are checked BEFORE the first watt.** `stressTest` already refuses a mismatched
+   stamp — but it refuses AFTER holding an undervolted card under load for the full duration. Ninety
+   seconds at an unproven offset to learn a golden is stale is ninety seconds nobody needed to pay.
+
+**The store answers AC3 by construction:** one record per (point, offset, **shape**), so
+«distinct load shapes each closed point was judged by» is a query over the evidence rather than a
+claim about it.
+
+**Proved offline first:** `stress-tester --selftest` 55 blocks (29 new), `engine --selftest` 36
+blocks (5 new), and **eight mutations, every addressee named in the suites' own headers before the
+run**, each reddening its own block — prefer UNKNOWN over an observed failure · drop the
+short-circuit · count a clean witness · trust the witness's own verdict · run before the preflight ·
+return the first verdict instead of the worst · collapse the set into one store record · lose the
+set on the way to the atom.
+
+**Then live, point 96, +15 MHz (one fine step), cap 2842, 30 s per shape:**
+
+| shape | bursts | verdict |
+|---|---|---|
+| `sdc_fma/transient` | 3 (duty 5/5) | PASS |
+| `sdc_fma/sustained` | 1 | PASS |
+| `branchy/sustained` | 1 | PASS |
+
+Watchdog lease **150 s = 30 × 3 + 60** — sized for the whole set, which is the one thing this join
+had to get right: between shapes `stressTest` re-probes the card and queries the Windows log, and no
+burst renews the lease during those seconds. Rollback clean, 0 non-zero of 128; card afterwards
+44 °C / 885 MHz / 28 W with the watchdog disarmed.
+
+**AND THE RUN TURNED ONE BLOCK RED, CORRECTLY.** «АНДЕРВОЛЬТ на закреплённых 2842 МГц» failed with
+*«обслуживала точка 96 (1050 мВ) → теперь точка 96 (1050 мВ), экономия 0 мВ»*. Raising ONE point by
+15 MHz moved it 2850 → 2865 MHz, but the point serving 2842 MHz is still 96, because reaching 2842
+from a cheaper point needs point 95 raised too — and a single-point write did not raise it. That is
+`researches/02` §6.2 restated by our own instrument: **the whole curve is what buys the undervolt, a
+single point buys nothing at the cap.** The guard exists precisely to say so, and it said so.
+
+**One finding for the ratchet, and it is new** (the plan's risk (c) named the search half, not this
+half). At 53 °C the point serving 2842 MHz is **96 (1050 mV)**; the first live search, run cooler,
+recorded its failure against point **95 (1045 mV)**. The ratchet is keyed by POINT INDEX, so a
+failure measured at one temperature does not bound a search that starts at another. Nothing is
+unsafe — the two are genuinely different points and each is measured on its own — but «the ratchet
+protects this clock» is a claim that only holds per point, and the summary must say which. Recorded
+here rather than fixed: the fix belongs with §4.5, where several caps are searched and the
+per-point table is what the phase delivers.
+
+**What this step does NOT deliver:** the game shape as the fourth witness is implemented and proved
+offline (it may veto a candidate, and can never make one PASS), but it has not yet been joined to a
+live write — running Q2RTX with the card undervolted is a §4.7 step, not this one.
 
 ### 4.4 — `engine.mjs`: coarse ascent → bracket → bisect, and never dwell at the edge 🔲
 
