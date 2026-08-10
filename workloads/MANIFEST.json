@@ -1,6 +1,6 @@
 {
   "note": "Бинарники едут в репозиторий по решению владельца (интервью 001, Q3 = B). Манифест — способ проверить их, не веря байтам: пересоберите и сверьте.",
-  "built_at": "2026-08-10T12:27:19+03:00",
+  "built_at": "2026-08-10T12:36:27+03:00",
   "toolchain": "nvcc C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.3\\bin\\nvcc.exe (found by PATH) + MSVC env C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat [host x64 -> x64]",
   "gpu": {
     "name": "NVIDIA GeForce RTX 5070 Ti",
@@ -14,8 +14,8 @@
       "name": "branchy",
       "source": "branchy.cu",
       "binary": "branchy.exe",
-      "source_sha256": "9931f75a300188977d4221be237fd4985c80db44f792597cfe8a989f7bf75a77",
-      "binary_sha256": "c21a5808004021330504f4114f1a74735ddf7f2d70839e809ac2f1c49d952abf",
+      "source_sha256": "24592dbbeab7dae020108b95201b1dfc06fb744f02cfb05839cb90225efbb6dd",
+      "binary_sha256": "ab4ce03d048505eacd5e0953828cd5497bc4f45181c507fda9b20e2dee849ed1",
       "run_checksum": "67e95c85bb6299a2",
       "repeats": 5,
       "size_bytes": 178688
@@ -24,8 +24,8 @@
       "name": "sdc_fma",
       "source": "sdc_fma.cu",
       "binary": "sdc_fma.exe",
-      "source_sha256": "4374191c0f7a33b3d08bb5fa2885ae9c92c8767f9cc61ad38ad953b6f68ee2e8",
-      "binary_sha256": "539ac8c8f43603c5bbac080de2ba3aa2028d521454f83ac9400659a940dc67d3",
+      "source_sha256": "daf9dea026d83bc8366ca609194f744dda156f2bd7fe32c59d67d15427a941f7",
+      "binary_sha256": "b6318454db5931a84ce5de8f4a36944d9a8cb442af5c2ef763e92e1c1ff94a18",
       "run_checksum": "e27ec24a82d509d7",
       "repeats": 5,
       "size_bytes": 175616
