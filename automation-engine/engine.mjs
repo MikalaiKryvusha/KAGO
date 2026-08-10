@@ -162,8 +162,15 @@ export async function searchEdge({
   };
 
   const record = async (offsetMhz, result) => {
+    // The atom reports the serving point as `undervolt.after` — the engine used to ask for
+    // `result.servingMv`, which does not exist, and stored nulls. The consequence was not
+    // cosmetic: without the voltage, a bracket in MHz cannot be checked for whether its two ends
+    // are even different physically, and the first live search reported one that was not.
+    const serving = result.undervolt?.after ?? null;
     const attempt = {
       offsetMhz,
+      servingPoint: serving?.pointIndex ?? null,
+      servingMv: serving?.mv ?? null,
       verdict: result.verdict ?? null,
       reason: result.reason
         ?? ((result.blocks || []).filter((b) => !b.ok).map((b) => b.name).join('; ') || null),
@@ -178,8 +185,8 @@ export async function searchEdge({
         capMhz,
         tempStartC: result.tempStartC ?? null,
         tempReachedC: result.tempReachedC ?? null,
-        servingPoint: result.servingPoint ?? null,
-        servingMv: result.servingMv ?? null,
+        servingPoint: attempt.servingPoint,
+        servingMv: attempt.servingMv,
       });
     }
     if (onAttempt) onAttempt(attempt);
@@ -244,7 +251,25 @@ export async function searchEdge({
   }
 
   out.bracketMhz = out.firstFail - (out.lastPass ?? 0);
-  out.stopped = `край взят в вилку шириной ${out.bracketMhz} МГц`;
+
+  // THE BRACKET IN VOLTS — the unit the conclusion is about. Two offsets can map to the SAME
+  // curve point, and then a narrower MHz bracket buys no physical resolution whatsoever.
+  const mvOf = (offset) => out.attempts.find((a) => a.offsetMhz === offset)?.servingMv ?? null;
+  const passMv = mvOf(out.lastPass);
+  const failMv = mvOf(out.firstFail);
+  out.servingMv = { atLastPass: passMv, atFirstFail: failMv };
+  out.bracketMv = (passMv !== null && failMv !== null) ? Number((passMv - failMv).toFixed(3)) : null;
+
+  if (out.bracketMv === 0) {
+    // Not a defect and not a failure of the search — the honest name for what was observed.
+    out.probabilisticEdge = true;
+    out.stopped = `край ВЕРОЯТНОСТНЫЙ: обе стороны вилки обслуживает одно и то же напряжение `
+      + `${passMv} мВ — на нём карта и прошла, и упала. Это не линия, а вероятность отказа `
+      + `(researches/02 §6.4), и одиночный PASS точку не квалифицирует`;
+  } else {
+    out.stopped = `край взят в вилку ${out.bracketMhz} МГц`
+      + (out.bracketMv === null ? ' (напряжение не вычислено)' : ` = ${out.bracketMv} мВ: ${passMv} мВ прошло, ${failMv} мВ отказало`);
+  }
   return out;
 }
 
@@ -321,6 +346,23 @@ export function selfTest() {
     let threw = false;
     try { await searchEdge({ capMhz: 2842, point: 95 }); } catch { threw = true; }
     ok('без инжектированного писателя движок отказывается работать', threw, true);
+
+    // --- THE UNIT OF THE CONCLUSION, and these blocks exist because a live run reported a bracket
+    // whose two ends were the SAME VOLTAGE. Offsets are what we write; volts are what the card cares
+    // about, and one curve point can absorb several offsets.
+    const withVolts = (mvFor) => async ({ offsetMhz }) => ({
+      verdict: offsetMhz < 200 ? P : config.VERDICT.CRASH,
+      undervolt: { after: { pointIndex: 69, mv: mvFor(offsetMhz) } },
+    });
+    // both ends of the bracket land on the same point — exactly what the card did at 885 mV
+    const flat = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withVolts(() => 885) });
+    ok('одно напряжение по обе стороны вилки НАЗЫВАЕТСЯ вероятностным краем', flat.probabilisticEdge, true);
+    ok('и вилка в милливольтах при этом НОЛЬ, а не «очень узкая»', flat.bracketMv, 0);
+    ok('и отчёт не выдаёт это за измеренную линию', /ВЕРОЯТНОСТНЫЙ/.test(flat.stopped), true);
+    // ends that really differ in voltage report the difference
+    const steep = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withVolts((o) => 1040 - o / 5) });
+    ok('разные напряжения — вилка докладывается в милливольтах', steep.bracketMv > 0, true);
+    ok('и вероятностным краем это НЕ называется', Boolean(steep.probabilisticEdge), false);
 
     // --- THE STORE PATH, and it is here because its ABSENCE cost a live run.
     // Every block above ran with `store: null`, so the persistence branch was never executed once —
