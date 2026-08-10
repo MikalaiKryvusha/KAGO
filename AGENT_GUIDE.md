@@ -1191,9 +1191,34 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   | Mode | Maximizes | Pays with | Clock ceiling |
   |---|---|---|---|
   | 🚀 **Max Perfomance** | performance across the FULL clock range | nothing in performance; temperature is not optimized at all | the curve's TOP |
-  | ⚖️ **Optimised** | the optimum between performance and cold | **≤ 5 %** of performance | at the stock operating clock |
+  | ⚖️ **Optimised** | **watts, degrees and NOISE brought down hard** | **≤ 5 % of FPS, measured against Max Perfomance** | at the stock operating clock, **plus a power ceiling** |
   | ❄️ **Silent Cold** | COLD, and only cold | **up to 10 %** | well below the stock operating clock |
   | ⏹ **Stock Default** | — | — | none; every offset to 0 |
+
+  **`Optimised` WAS SHARPENED BY THE OWNER THE SAME EVENING (chat, 2026-08-10 19:1x +03:00), and the
+  change is structural rather than cosmetic** — he wrote it after the agent reported that every
+  stability result was taken at 137 W while he plays at 300 W and 77 °C. Verbatim in `GOAL.md` →
+  «Уточнение по Optimised»; the operative sentence: *«допускается просадка FPS не более 5%, но
+  покупаем на это СИЛЬНОЕ снижение можности… чтобы она молотила не на 300 Вт, а сильно ниже, и выше не
+  поднималась… Выть можно и греться на режиме Max Perfomance.»*
+
+  Four consequences the agent must not re-derive:
+  - **The objective and the constraint swapped places.** `Optimised` MAXIMIZES the reduction in watts,
+    temperature and noise, SUBJECT TO FPS ≥ 95 %. It is the owner's own «снижаем потребление, пока цена
+    ≤ N» formula with **N = 5 % of FPS** — and the reference is **Max Perfomance, not stock**.
+  - **A THIRD LEVER enters the mechanism: a power ceiling.** "Выше не поднималась" is a bound, and a
+    raised curve with a clock cap bounds consumption only indirectly. `nvidia-smi -pl` is the hard one,
+    and under a game load it is finally live (the card sits at 300 W throttling on `sw_power_cap`).
+    So the "one mechanism, only the ceiling's place differs" line above now holds for `Max Perfomance`
+    and `Silent Cold`; `Optimised` is that mechanism PLUS `-pl`.
+  - **That lever's range is narrow and it is measured, not assumed:** `-pl` moves only 300 → 250 W on
+    this card (`researches/01`). Everything below 250 W has to come from the raised curve and the clock
+    cap, which lower the draw itself rather than its limit. Working shape: both at once — the curve sets
+    the level, `-pl` stands above it as insurance.
+  - **Noise became an acceptance criterion with a measured floor.** This card's fan does not go below
+    **30 %**; under the game it ran at **72–75 %**, which is where the room to be quieter actually is.
+  - **The instrument is FPS.** The criterion is stated about frames, so it is measured by the graphics
+    load (`plans/05` §4.3) — not by ops/s and not by the delivered clock.
 
   **This SUPERSEDES the two-profile table below**, which is kept because its reasoning about the knee and
   the two levers is still what `Optimised` runs on. What changed: the old `Max Optimal` was one profile

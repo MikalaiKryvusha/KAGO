@@ -66,13 +66,22 @@ The design is now three shortcuts and a passive tray:
 **SUPERSEDED 2026-08-10 18:5x — there are FOUR shortcuts, not three.** The owner split the modes by their
 objective functions (`GOAL.md` → «Четыре режима»; the long form is `MASTER_PLAN.md`). What changed
 structurally: the old `Max Optimal` was one profile trying to serve two different optima, and it becomes
-two modes. Nothing in the applier changes — all three working modes are the SAME mechanism (the whole V/F
-curve raised, with the clock ceiling at a different place) and none of them uses a clock lock.
+two modes. None of them uses a clock lock.
+
+**AND AT 19:1x THE SAME EVENING THE APPLIER GAINED A SECOND LEVER, so the line "nothing in the applier
+changes" no longer holds and is corrected here rather than left standing.** The owner sharpened
+`Optimised`: FPS within 5 % of `Max Perfomance`, bought with a hard reduction in watts, heat and noise,
+*«чтобы она молотила не на 300 Вт, а сильно ниже, и выше не поднималась»*. A raised curve with a clock cap
+bounds consumption only indirectly, so `Optimised` additionally sets a **power limit** — which means the
+applier composes the NVAPI backend (the curve) with the `nvidia-smi` backend (`-pl`) in one profile. R1 is
+untouched (`profile-manager.mjs` remains the only writer, and it already owns both backends); what changes
+is that a profile is no longer a single-backend artifact, and its rollback must undo BOTH parts — the same
+totality rule R9a states for the watchdog. Range, measured: `-pl` moves 300 → 250 W only.
 
 | Shortcut | Applies | Becomes the remembered boot state |
 |---|---|---|
 | 🚀 **Max Perfomance** | curve raised, ceiling at the curve's TOP — the gain goes into clock | yes |
-| ⚖️ **Optimised** | curve raised, ceiling at the stock operating clock — measured: stock clock at −7.71 W / −5 °C | yes |
+| ⚖️ **Optimised** | curve raised, ceiling at the stock operating clock, **AND a power limit through `-pl`** — the only mode that uses two backends' levers at once | yes |
 | ❄️ **Silent Cold** | curve raised, ceiling well below stock — the cold mode, ~10 % paid deliberately | yes |
 | ⏹ **Stock Default** | factory — every offset to 0, `-rgc`, power limit back to default | yes |
 
