@@ -600,6 +600,12 @@ export async function runShapeExperiment({
   sustain = 30,
   gfxRuns = config.Q2RTX_TIMEDEMO_RUNS,
   gfxBounceRays = config.Q2RTX_BOUNCE_RAYS,
+  // THE THIRD KNOB OF `Optimised`, named by the owner 2026-08-10: *«И pl 250 установить»*. Applied
+  // through `profile-manager` and nowhere else — that module is the project's only power-limit writer
+  // (rule R1), it re-reads until the value is stable, and it owns the undo. Combined with `--mhz 0`
+  // this measures the power cap ALONE, which is the cell of the trade matrix that decides whether the
+  // cap is worth its price at all.
+  powerLimitW = null,
   coolToC = 42,
   capAtMhz = null,
   dryRun = false,
@@ -609,6 +615,9 @@ export async function runShapeExperiment({
   const wd = await import('./watchdog.mjs');
   const power = await import('./power-baseline.mjs');
   const gfx = load === 'graphics' ? await import('./graphics-load.mjs') : null;
+  const pm = powerLimitW !== null ? await import('./profile-manager.mjs') : null;
+  let pmBackend = null;
+  let powerLimitApplied = false;
 
   const out = { deltaMhz, workload: load === 'graphics' ? 'q2rtx-timedemo' : workload, load, blocks: [], sides: [] };
   const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
@@ -677,7 +686,16 @@ export async function runShapeExperiment({
       block(`${side.tag}: холодный старт ${coolToC} °C`, cool.ok,
         `${cool.started} → ${cool.reached} °C за ${cool.seconds} с${cool.wrote ? '' : ' (вентиляторы не тронуты — уже было холоднее)'}`);
 
-      if (side.applyVector) {
+      // «No raise AND no cap asked for» means exactly that: do not touch the curve. Without this
+      // the cap still defaulted to the stock operating clock and pushed 36 points DOWN by up to
+      // 405 MHz — a pure clock cap masquerading as an untouched curve, which is a different
+      // experiment from the one the caller asked for.
+      const writesCurve = side.applyVector && !(deltaMhz === 0 && capAtMhz === null);
+      if (side.applyVector && !writesCurve) {
+        block('КРИВАЯ НЕ ТРОГАЕТСЯ: подъёма нет и потолок не запрошен', true,
+          'меряется только другой рычаг — это и заказывали');
+      }
+      if (writesCurve) {
         // THE CAP IS THE STOCK OPERATING FREQUENCY, not the curve's top — measured on side A moments ago.
         // With the cap at the top the card never reaches it under load and the cap binds nothing: the
         // raise is taken as SPEED (measured: 2887 → 2932 MHz at the same 137 W). Anchoring at the clock
@@ -731,7 +749,33 @@ export async function runShapeExperiment({
           `верх кривой ${topNow} → ${newTop} МГц при потолке ${cap} (обе пробы при ${tempAtBuild}…${cardTemperatureC()} °C)`);
       }
 
-      const label = `shape_${load}_${side.applyVector ? deltaMhz : 0}`;
+      // The power cap goes on WITH the vector — same side, so one comparison answers what the
+      // whole configuration costs rather than what one of its halves costs. profile-manager owns
+      // the write, the read-back-until-stable and the undo (rule R1).
+      if (side.applyVector && powerLimitW !== null) {
+        pmBackend = pm.nvidiaSmiBackend();
+        const stBefore = pm.readState(pmBackend);
+        pmBackend.setPowerLimitWatts(powerLimitW);
+        powerLimitApplied = true;
+        // `readBack` THROWS when it cannot agree and RETURNS the reading when it can — it has no
+        // `.ok` field, and asking for one turned a successful write into a red block and aborted
+        // the measurement. Use the contract the function actually has.
+        let plOk = false;
+        let plDetail = '';
+        try {
+          const proof = await pm.readBack(pmBackend, (s) => Math.abs(s.powerLimitW - powerLimitW) < 0.5,
+            { what: `потолок мощности должен стать ${powerLimitW} Вт` });
+          plOk = true;
+          plDetail = `перечитано до устойчивости за ${proof.agreedAfterMs} мс: ${proof.value.powerLimitW} Вт`;
+        } catch (e) { plDetail = e.message; }
+        block(`ПОТОЛОК МОЩНОСТИ ${stBefore.powerLimitW} → ${powerLimitW} Вт (через profile-manager, R1)`,
+          plOk, plDetail);
+        if (!plOk) break;
+        watchdog.beat();
+      }
+
+      const label = `shape_${load}_${side.applyVector ? deltaMhz : 0}`
+        + `${side.applyVector && powerLimitW !== null ? `_pl${powerLimitW}` : ''}`;
       const rec = load === 'graphics'
         ? await gfx.capture({ label: `${label}_b${gfxBounceRays}`, runs: gfxRuns, bounceRays: gfxBounceRays, profile: side.applyVector ? `curve+${deltaMhz}` : null })
         : await power.capture({ workload, seconds, sustain, label });
@@ -758,7 +802,9 @@ export async function runShapeExperiment({
         + ` · вердикт ${rec?.verdict ?? (rec?.faultFree ? 'БЕЗ СБОЕВ (не PASS)' : 'НЕИЗВЕСТНО')}`);
 
       // Observation 2: the card must still fall. Checked on the undervolted side, where a pin would show.
-      if (side.applyVector) {
+      // Only meaningful when a curve WAS written: a pin is what this block hunts, and no write
+      // means no pin to hunt. Running it anyway compared against an undefined cap and reddened.
+      if (side.applyVector && writesCurve) {
         await sleep(4000);
         watchdog.beat();
         const idle = [idleClock(), await sleep(1500).then(idleClock), await sleep(1500).then(idleClock)];
@@ -778,7 +824,9 @@ export async function runShapeExperiment({
       out.delta = { watts: deltaW, floorW, percent: Number(((deltaW / a.watts) * 100).toFixed(2)) };
       block(`ВАТТЫ: дельта ${deltaW} Вт против собственного разброса прибора ${floorW} Вт`,
         Math.abs(deltaW) > floorW,
-        `${a.watts} → ${b.watts} Вт; тоньше пола — это шум, а не эффект`);
+        `${a.watts} → ${b.watts} Вт; `
+        + (Math.abs(deltaW) > floorW ? 'толще пола прибора — это эффект'
+          : 'тоньше пола — это шум, а не эффект'));
       block('ЧАСТОТА НЕ ПОТЕРЯНА: выданный клок сопоставим',
         a.clockMhz != null && b.clockMhz != null && b.clockMhz >= a.clockMhz - config.LOCK_DELIVERY_TOLERANCE_MHZ,
         `${a.clockMhz} → ${b.clockMhz} МГц; цена `
@@ -810,6 +858,21 @@ export async function runShapeExperiment({
     }
   } finally {
     watchdog?.beat();
+    // The power cap is undone FIRST and re-read, because it is the write that outlives a crash least
+    // visibly: a card left at 250 W looks perfectly healthy and is quietly slower forever after.
+    if (powerLimitApplied && pmBackend) {
+      const st = pm.readState(pmBackend);
+      pmBackend.setPowerLimitWatts(st.powerDefaultW);
+      let backOk = false;
+      let backDetail = '';
+      try {
+        const proof = await pm.readBack(pmBackend, (s) => Math.abs(s.powerLimitW - st.powerDefaultW) < 0.5,
+          { what: `потолок мощности должен вернуться на ${st.powerDefaultW} Вт` });
+        backOk = true;
+        backDetail = `${proof.value.powerLimitW} Вт, устойчиво за ${proof.agreedAfterMs} мс`;
+      } catch (e) { backDetail = e.message; }
+      block('ОТКАТ: потолок мощности возвращён к заводскому и перечитан', backOk, backDetail);
+    }
     if (touched) {
       const back = nvapi.zeroCurve(nv, handle);
       block('ОТКАТ: кривая обнулена одним писателем, ненулевых не осталось', back.ok,
@@ -908,6 +971,8 @@ async function mainShape() {
   const load = arg('load', 'compute');
   const gfxRuns = Number(arg('gfx-runs', config.Q2RTX_TIMEDEMO_RUNS));
   const gfxBounceRays = Number(arg('gfx-bounce', config.Q2RTX_BOUNCE_RAYS));
+  const plArg = arg('pl', null);
+  const powerLimitW = plArg === null ? null : Number(plArg);
 
   console.log('ФОРМА ПРОФИЛЯ — ТО, ЧТО ПОПРОСИЛ ВЛАДЕЛЕЦ, ПРОВЕРЕННОЕ ТРЕМЯ НАБЛЮДЕНИЯМИ');
   console.log('');
@@ -926,7 +991,7 @@ async function mainShape() {
   if (dryRun) console.log('  РЕЖИМ:     СУХОЙ ПРОГОН — записи не будет.');
   console.log('');
 
-  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun, load, gfxRuns, gfxBounceRays });
+  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun, load, gfxRuns, gfxBounceRays, powerLimitW });
 
   if (r.sides.length) {
     const isGfx = r.load === 'graphics';
