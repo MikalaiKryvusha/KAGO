@@ -430,6 +430,215 @@ export function summarizeMeters(bursts) {
   };
 }
 
+// =================================================================================================
+// 4b. THE DIVERSE SET — a point's verdict is the WORST over several load shapes, never the first
+// =================================================================================================
+//
+// Plan anchor (plans/05 §4.3): «judgeCandidate() — runs the set, returns the worst verdict AND which
+// shape produced it», and the epic's own line: «порог точки — худший по всему набору нагрузок,
+// никогда не первый найденный».
+//
+// WHY A SET AT ALL, IN ONE NUMBER: researches/02 §4 measured Vmin varying by up to **100 mV between
+// PROGRAMS on the same card**. Every threshold this project owns came from ONE workload in ONE shape
+// for thirty seconds — so 885 mV is the edge of `sdc_fma --sustain`, not the edge of the card, and a
+// margin policy applied to it is a margin above the wrong number.
+//
+// THE THREE MEMBERS, and why each is in the set:
+//   • `sdc_fma --sustain`   — the SDC shape: fixed-loop arithmetic that corrupts silently.
+//   • `branchy --sustain`   — the CRASH shape: control-heavy code dies instead of corrupting.
+//   • `sdc_fma --transient` — THE MOST IMPORTANT ONE. Voltage noise dominates Vmin (researches/02
+//     §2), and noise lives in the TRANSITIONS, not in a flat plateau.
+
+/**
+ * The order is not alphabetical and not historical — **the shape most likely to fail runs FIRST**.
+ *
+ * Two consequences, both wanted: a failing candidate costs one shape's worth of load instead of
+ * three, and the card spends the least possible time sitting at an offset that has already been
+ * shown to break it («never dwell at the edge», plans/05 §4.4 rule 1).
+ *
+ * `bearsVerdict` is the field that keeps the graphics load honest. `graphics-load.mjs` has NO
+ * checksum half — there is no golden reference on the graphics path — so it never returns PASS and
+ * must never be reduced together with the shapes that do (plans/05 §4.3: «"worst" cannot be computed
+ * by mixing a verdict with a non-verdict»). A witness may VETO a candidate; it may not bless one.
+ *
+ * [TESTED: 2026-08-10 23:5x, OFFLINE HALF · the ordering and the membership are asserted in
+ *  `--selftest`; the whole set of 29 new blocks is mutation-proved (six mutations, each reddening
+ *  the block named for it before the run). NOT TESTED: no candidate has been judged by this set on
+ *  the live card yet]
+ */
+export const DIVERSE_SET = Object.freeze([
+  Object.freeze({ id: 'sdc_fma/transient', workload: 'sdc_fma', shape: 'transient', bearsVerdict: true }),
+  Object.freeze({ id: 'sdc_fma/sustained', workload: 'sdc_fma', shape: 'sustained', bearsVerdict: true }),
+  Object.freeze({ id: 'branchy/sustained', workload: 'branchy', shape: 'sustained', bearsVerdict: true }),
+]);
+
+/**
+ * Reduce a list of per-shape verdicts to the one that describes the candidate.
+ *
+ * THE ORDER IS THE DESIGN, and it is the same order `decideVerdict` already uses one level down:
+ * an OBSERVED failure outranks an ABSENCE of judgement. A shape that saw corruption saw it; a shape
+ * whose golden was stale saw nothing at all. Reporting UNKNOWN over an observed SDC would hide a
+ * measurement behind a missing one.
+ *
+ *   CRASH / SDC  (observed failure — the direction is closed, and by evidence)
+ *   UNKNOWN      (null — the oracle could not judge; a STOP, never progress)
+ *   PASS         (only when every verdict-bearing shape passed)
+ *
+ * CRASH and SDC are NOT ranked against each other: both close the direction, neither is the safer
+ * one to be standing on, and inventing a preference between them would be a claim nothing measured.
+ * The first one observed in run order is the one reported, and the full list rides alongside it.
+ *
+ * [TESTED: 2026-08-10 23:5x · six blocks over every list shape it will meet, including the mixed
+ *  UNKNOWN+SDC one; mutation 1 (prefer UNKNOWN) and mutation 6 (return the first verdict) each
+ *  reddened their own block]
+ */
+export function worstVerdict(verdicts) {
+  const list = [...verdicts];
+  if (!list.length) return { verdict: null, index: -1 };
+  const failed = list.findIndex((v) => v === config.VERDICT.CRASH || v === config.VERDICT.SDC);
+  if (failed >= 0) return { verdict: list[failed], index: failed };
+  const unknown = list.findIndex((v) => v === null || v === undefined);
+  if (unknown >= 0) return { verdict: null, index: unknown };
+  return { verdict: config.VERDICT.PASS, index: list.length - 1 };
+}
+
+/**
+ * Check, WITHOUT loading the card, that every verdict-bearing shape has a golden it may legally be
+ * compared against.
+ *
+ * This runs before the first burst on purpose. `stressTest` already refuses a mismatched stamp — but
+ * it refuses AFTER holding an undervolted card under load for the full duration, and then reports
+ * UNKNOWN, which the engine treats as a stop. Ninety seconds at an unproven offset to learn that a
+ * golden is stale is ninety seconds nobody needed to pay (EXP-0011: the mismatch is not hypothetical,
+ * it once produced «58 из 58 прогонов разошлись с эталоном» on a perfectly healthy card).
+ *
+ * [TESTED: 2026-08-10 23:5x, OFFLINE · a stale-driver golden refuses and a matching one passes, both
+ *  on an injected loader; mutation 5 (run the set before the preflight) reddened the block that
+ *  asserts the card is not loaded at all in that case]
+ */
+export function preflightGoldens(shapes, { card = null, baselineDir = BASELINE_DIR, loadFn = null, args = [] } = {}) {
+  const theCard = card || probeCard();
+  const load = loadFn || ((name) => loadGolden(name, { dir: baselineDir }));
+  const checks = shapes
+    .filter((s) => s.bearsVerdict !== false)
+    .map((s) => {
+      const golden = load(s.workload);
+      const stamp = checkGoldenStamp(golden, theCard, s.args ?? args);
+      return { id: s.id, workload: s.workload, ok: stamp.ok, why: stamp.why };
+    });
+  const bad = checks.filter((c) => !c.ok);
+  return {
+    ok: bad.length === 0,
+    checks,
+    why: bad.length
+      ? `эталон не годится для ${bad.map((b) => b.id).join(', ')}: ${bad[0].why}`
+      : `штампы сходятся у всех ${checks.length} форм(ы)`,
+  };
+}
+
+/**
+ * Judge ONE candidate offset by the whole set, and name the shape that decided it.
+ *
+ * The card is expected to be ALREADY at the candidate state when this is called — one write, one
+ * armed watchdog, one rollback, several loads inside. Applying and rolling back per shape would
+ * measure three different thermal states of three different writes and call it one point.
+ *
+ * `runShapeFn(shape)` is injected, so the entire decision walks offline against a scripted oracle.
+ * That is not scaffolding for its own sake: this function is what decides how hard the owner's
+ * display adapter gets pushed, and «a check that has never failed proves nothing».
+ *
+ * @returns {{verdict:string|null, worstShape:string|null, reason:string, ran:Array, preflight:object,
+ *            stoppedEarly:boolean, skipped:string[]}}
+ *
+ * [TESTED: 2026-08-10 23:5x, OFFLINE HALF ONLY · 21 blocks on a scripted oracle — the whole set
+ *  passing, a failure in the LAST shape becoming the point's verdict, the short-circuit proved by
+ *  counting which shapes actually ran, UNKNOWN as a stop, the preflight refusing before any load,
+ *  and the witness able to veto but never to bless. NOT TESTED: never yet joined to a real write —
+ *  `runStep` still judges a candidate with one shape]
+ */
+export async function judgeCandidate({
+  shapes = DIVERSE_SET,
+  runShapeFn,
+  preflightFn = null,
+  onShape = null,
+} = {}) {
+  if (typeof runShapeFn !== 'function') throw new Error('judgeCandidate требует runShapeFn — сам он карту не грузит');
+
+  const bearers = shapes.filter((s) => s.bearsVerdict !== false);
+  const witnesses = shapes.filter((s) => s.bearsVerdict === false);
+  const out = {
+    verdict: null, worstShape: null, reason: '',
+    ran: [], skipped: [], stoppedEarly: false, preflight: null,
+  };
+
+  // ---- 0. the goldens, before a single watt is spent
+  const pre = preflightFn ? await preflightFn(bearers) : preflightGoldens(bearers);
+  out.preflight = pre;
+  if (!pre.ok) {
+    out.skipped = shapes.map((s) => s.id);
+    out.verdict = null;
+    out.worstShape = pre.checks.find((c) => !c.ok)?.id ?? null;
+    out.reason = `НЕИЗВЕСТНО ДО НАГРУЗКИ: ${pre.why}. Карту не грузили — сравнивать было бы не с чем`;
+    return out;
+  }
+
+  // ---- 1. the verdict-bearing shapes, hardest first, stopping at the first non-PASS
+  for (const s of bearers) {
+    const r = await runShapeFn(s);
+    const entry = {
+      id: s.id, workload: s.workload, shape: s.shape, bearsVerdict: true,
+      verdict: r?.verdict ?? null,
+      reason: r?.reason ?? null,
+      meters: r?.meters ?? null,
+    };
+    out.ran.push(entry);
+    if (onShape) onShape(entry);
+    if (entry.verdict !== config.VERDICT.PASS) {
+      out.stoppedEarly = true;
+      out.skipped = [...bearers, ...witnesses].slice(out.ran.length).map((x) => x.id);
+      break;
+    }
+  }
+
+  // ---- 2. the witnesses, and ONLY if the set has not already been closed. A witness carries the
+  // crash half and the throughput half of R4; it has no checksum half, so its clean run is
+  // `faultFree`, never PASS. A verdict field on a witness result is IGNORED by construction — that
+  // is the whole reason `bearsVerdict` is a property of the SET and not of the runner's answer.
+  if (!out.stoppedEarly) {
+    for (const s of witnesses) {
+      const r = await runShapeFn(s);
+      const clean = r?.faultFree === true;
+      const entry = {
+        id: s.id, workload: s.workload, shape: s.shape, bearsVerdict: false,
+        verdict: clean ? null : config.VERDICT.CRASH,
+        witnessOnly: true,
+        reason: clean
+          ? 'свидетель чист: сбоев в окне нет (PASS этот путь не выдаёт — сверки с эталоном на нём нет)'
+          : (r?.reason ?? 'свидетель увидел сбой'),
+        meters: r?.meters ?? null,
+      };
+      out.ran.push(entry);
+      if (onShape) onShape(entry);
+      if (!clean) { out.stoppedEarly = true; out.skipped = witnesses.slice(witnesses.indexOf(s) + 1).map((x) => x.id); break; }
+    }
+  }
+
+  // ---- 3. the reduction. A witness contributes only its veto: a clean one is dropped from the
+  // list entirely, so it can never be the thing that makes a candidate PASS.
+  const counted = out.ran.filter((e) => !e.witnessOnly || e.verdict !== null);
+  const w = worstVerdict(counted.map((e) => e.verdict));
+  out.verdict = w.verdict;
+  out.worstShape = w.index >= 0 ? counted[w.index]?.id ?? null : null;
+  const decided = counted[w.index] ?? null;
+
+  out.reason = out.verdict === config.VERDICT.PASS
+    ? `все ${out.ran.filter((e) => e.bearsVerdict).length} форм(ы) набора прошли; худшая из них — ${out.worstShape}`
+    : `${out.verdict ?? 'НЕИЗВЕСТНО'} на форме ${out.worstShape}: ${decided?.reason ?? 'причина не названа'}`
+      + (out.skipped.length ? ` · остальные формы НЕ прогонялись (${out.skipped.join(', ')}) — на сбойнувшем сдвиге карту не держат` : '');
+
+  return out;
+}
+
 /**
  * Capture a golden reference at stock. Used by step 3.7, which adds the full `gpu:info` dump
  * alongside; the RUN logic lives here so there is one runner, not two that drift.
@@ -568,11 +777,13 @@ export function availableWorkloads() {
  * by asserting what the code would do. No GPU is touched: the whole suite runs on injected data, so
  * it is honest to run on a machine with no card at all.
  *
- * [TESTED: 2026-08-10 · 10 blocks green, AND the suite mutation-proved red: rounding SDC to PASS
- * inside decideVerdict turned two blocks red («испорченный эталон» and «прогоны разошлись между
- * собой»), exit 1. Not every block was individually inverted — that is not claimed]
+ * [TESTED: 2026-08-10 · 51 blocks green, AND the suite mutation-proved red twice over: rounding SDC
+ * to PASS inside decideVerdict turned two blocks red («испорченный эталон» and «прогоны разошлись
+ * между собой»), exit 1; and the diverse-set half (29 blocks, added 2026-08-10 23:5x) was proved by
+ * six mutations, each reddening the block named for it in the header above BEFORE the run. Not every
+ * block was individually inverted — that is not claimed]
  */
-export function selfTest() {
+export async function selfTest() {
   const V = config.VERDICT;
   const results = [];
   const check = (what, got, want) => results.push({ what, ok: got === want, got, want });
@@ -676,6 +887,123 @@ export function selfTest() {
   check('те же аргументы -> сравнение состоялось',
     checkGoldenStamp(goldWithArgs, card, ['100000']).ok, true);
 
+  // 6c. THE DIVERSE SET (plans/05 §4.3). Everything here runs on a scripted oracle — no GPU, no
+  // game, no goldens on disk. The set is a DECISION, and a decision is exactly the thing that must
+  // be provable without the hardware it decides about.
+  //
+  // MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+  //   1. worstVerdict prefers UNKNOWN over an observed failure  → «наблюдённый отказ старше ненаблюдённого»
+  //   2. drop the short-circuit, keep running after a non-PASS  → «после отказа остальные формы НЕ прогоняются»
+  //   3. count a CLEAN witness into the reduction               → «чистый свидетель не делает кандидата прошедшим»
+  //   4. trust the witness's own `verdict` field                → «вердикт свидетеля игнорируется по построению»
+  //   5. run the set BEFORE the preflight                       → «при негодном штампе карту не грузят вовсе»
+  //   6. worstVerdict returns the FIRST verdict of the list     → «порог набора — ХУДШАЯ форма, а не первая»
+  {
+    const okPre = async () => ({ ok: true, checks: [], why: 'штампы сходятся (подставные)' });
+    const set = DIVERSE_SET;
+    const GFX = { id: 'q2rtx/graphics', workload: 'q2rtx', shape: 'graphics', bearsVerdict: false };
+
+    // the pure reducer, on lists it will really meet
+    check('пустой набор вердикта не даёт', worstVerdict([]).verdict, null);
+    check('все прошли -> PASS', worstVerdict([V.PASS, V.PASS, V.PASS]).verdict, V.PASS);
+    check('порог набора — ХУДШАЯ форма, а не первая', worstVerdict([V.PASS, V.PASS, V.SDC]).verdict, V.SDC);
+    check('и она названа по месту в наборе', worstVerdict([V.PASS, V.PASS, V.SDC]).index, 2);
+    check('наблюдённый отказ старше ненаблюдённого', worstVerdict([null, V.SDC]).verdict, V.SDC);
+    check('а без наблюдения остаётся НЕИЗВЕСТНО', worstVerdict([V.PASS, null]).verdict, null);
+
+    // the set's ORDER is a decision too: the shape most likely to fail runs first
+    check('самая чувствительная форма идёт первой — переходная', set[0].id, 'sdc_fma/transient');
+    check('в наборе три формы, несущие вердикт', set.filter((s) => s.bearsVerdict).length, 3);
+
+    const runner = (script) => {
+      const seen = [];
+      const fn = async (s) => { seen.push(s.id); return script(s); };
+      fn.seen = seen;
+      return fn;
+    };
+
+    // all three pass
+    {
+      const run = runner(() => ({ verdict: V.PASS }));
+      const r = await judgeCandidate({ shapes: set, runShapeFn: run, preflightFn: okPre });
+      check('набор прошёл целиком -> PASS', r.verdict, V.PASS);
+      check('и прогнаны ВСЕ формы набора, а не первая удачная', run.seen.length, 3);
+    }
+
+    // the LAST shape is the one that fails — the whole reason a set exists
+    {
+      const run = runner((s) => ({ verdict: s.id === 'branchy/sustained' ? V.SDC : V.PASS, reason: 'подставная порча' }));
+      const r = await judgeCandidate({ shapes: set, runShapeFn: run, preflightFn: okPre });
+      check('сбойнула третья форма -> её вердикт становится вердиктом точки', r.verdict, V.SDC);
+      check('и форма НАЗВАНА', r.worstShape, 'branchy/sustained');
+    }
+
+    // the FIRST shape fails: the card must not be held under the remaining two
+    {
+      const run = runner((s) => ({ verdict: s.id === 'sdc_fma/transient' ? V.CRASH : V.PASS, reason: 'подставной крах' }));
+      const r = await judgeCandidate({ shapes: set, runShapeFn: run, preflightFn: okPre });
+      check('после отказа остальные формы НЕ прогоняются', run.seen.length, 1);
+      check('и пропущенные названы поимённо', r.skipped.join(','), 'sdc_fma/sustained,branchy/sustained');
+      check('вердикт — тот, что наблюдён', r.verdict, V.CRASH);
+    }
+
+    // UNKNOWN inside the set is a STOP, exactly as it is in the engine
+    {
+      const run = runner((s) => ({ verdict: s.id === 'sdc_fma/sustained' ? null : V.PASS, reason: 'оракул не смог' }));
+      const r = await judgeCandidate({ shapes: set, runShapeFn: run, preflightFn: okPre });
+      check('НЕИЗВЕСТНО в наборе — это СТОП, а не пропуск формы', r.verdict, null);
+      check('и оно тоже обрывает набор', run.seen.length, 2);
+    }
+
+    // the preflight: a stale golden must cost ZERO watts
+    {
+      const run = runner(() => ({ verdict: V.PASS }));
+      const badPre = async () => ({ ok: false, why: 'эталон снят на другом драйвере', checks: [{ id: 'sdc_fma/transient', ok: false, why: 'другой драйвер' }] });
+      const r = await judgeCandidate({ shapes: set, runShapeFn: run, preflightFn: badPre });
+      check('при негодном штампе карту не грузят вовсе', run.seen.length, 0);
+      check('и вердикт — НЕИЗВЕСТНО, а не ложный SDC', r.verdict, null);
+      check('и сказано, что это случилось ДО нагрузки', /ДО НАГРУЗКИ/.test(r.reason), true);
+    }
+    // …and the real preflight function must catch the same thing on a real stamp
+    {
+      const stale = { name: 'sdc_fma', checksum: 'aaaa', gpu: { driver: '000.00', vbios: 'x' }, args: [] };
+      const p = preflightGoldens(set, { card, loadFn: () => stale });
+      check('предполётная сверка ловит чужой драйвер', p.ok, false);
+      const good = { name: 'sdc_fma', checksum: 'aaaa', gpu: { driver: card.driver, vbios: card.vbios }, args: [] };
+      check('и пропускает свой', preflightGoldens(set, { card, loadFn: () => good }).ok, true);
+    }
+
+    // THE WITNESS. It has no checksum half, so it may veto and may not bless.
+    {
+      const run = runner((s) => (s.bearsVerdict === false
+        ? { faultFree: true, verdict: V.PASS }      // ← a runner that WOULD hand us a verdict
+        : { verdict: V.PASS }));
+      const r = await judgeCandidate({ shapes: [...set, GFX], runShapeFn: run, preflightFn: okPre });
+      check('свидетель прогоняется последним, после несущих вердикт', run.seen[3], 'q2rtx/graphics');
+      check('вердикт свидетеля игнорируется по построению', r.ran.at(-1).verdict, null);
+      check('чистый свидетель не делает кандидата прошедшим', r.worstShape, 'branchy/sustained');
+    }
+    {
+      const run = runner((s) => (s.bearsVerdict === false
+        ? { faultFree: false, reason: 'TDR в окне прогона игры' }
+        : { verdict: V.PASS }));
+      const r = await judgeCandidate({ shapes: [...set, GFX], runShapeFn: run, preflightFn: okPre });
+      check('а ВЕТО свидетеля кандидата закрывает', r.verdict, V.CRASH);
+      check('и закрывает именно он', r.worstShape, 'q2rtx/graphics');
+    }
+    {
+      // a set of witnesses ALONE can never produce a PASS — there is nothing in it that can
+      const run = runner(() => ({ faultFree: true }));
+      const r = await judgeCandidate({ shapes: [GFX], runShapeFn: run, preflightFn: okPre });
+      check('набор из одних свидетелей PASS не выдаёт никогда', r.verdict, null);
+    }
+    {
+      let threw = false;
+      try { await judgeCandidate({ shapes: set }); } catch { threw = true; }
+      check('без инжектированного бегуна набор отказывается работать', threw, true);
+    }
+  }
+
   // 7. the runner seam: a non-zero exit is a death, not an empty success
   const died = runBurst({ name: 'probe', run: () => ({ status: 1, stdout: '', stderr: 'boom' }) });
   check('exit≠0 -> died', died.died, true);
@@ -714,7 +1042,7 @@ async function main(argv) {
   try { o = parseArgs(argv); } catch (e) { console.error(`ОШИБКА: ${e.message}`); return 2; }
 
   if (o.selftest) {
-    const r = selfTest();
+    const r = await selfTest();
     for (const x of r.results) {
       console.log(`${x.ok ? 'OK  ' : 'ПЛОХО'} ${x.what}${x.ok ? '' : `  -> получено ${JSON.stringify(x.got)}, ждали ${JSON.stringify(x.want)}`}`);
     }
