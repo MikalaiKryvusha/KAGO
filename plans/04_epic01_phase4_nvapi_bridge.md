@@ -80,7 +80,7 @@ rather than judge it.
 | **P4-AC4** | A curve write reads back as written, or the profile is refused. *(the epic's own exit gate)* | Scale: written value vs read-back · Meter: `npm run nvapi -- --prove-mask <point> <-MHz>` · Target: equal, and exactly ONE entry changed |
 | **P4-AC5** | A write that can take the display down is made only under an armed watchdog that has FIRED at least once. | Scale: seconds from an abrupt writer death to a restored card · Meter: `npm run watchdog -- --drill` · Target: restored, unaided, and a report naming that drill |
 | **P4-AC6** | Every curve write has a rollback that is EXECUTED, not merely written. | Scale: bytes differing from the pre-write snapshot after rollback · Meter: the rollback block of each write tool · Target: 0 of 9 248 |
-| **P4-AC7** | The fans obey us well enough to give two runs the same starting state. | Scale: °C spread at the start of N runs after a forced cool-down · Meter: `ClientFanCoolersSetControl` + `power --capture` start temperatures · Target: **OPEN — see step 4.7** |
+| **P4-AC7** | The fans obey us well enough to give two runs the same starting state. | Scale: °C spread of the achieved start temperature across N cool-downs · Meter: `npm run nvapi -- --fan-write 80 --cool-to 42` after a load · **Target: ≤ 3 °C. ✅ MET — 1 °C over three cycles (42/42/41 °C in 8/4/0 s), 2026-08-10** |
 
 ## 4. Steps
 
@@ -140,17 +140,40 @@ internal map.
 **Evidence:** point 95 +15 MHz → curve confirms the shift at the same voltage; oracle **PASS** with the
 checksum matching the golden and zero faults logged; rollback clean.
 
-### 4.7 — FANS: read, then write, then a cold-start protocol 🔲 OPEN — the phase's remaining work
+### 4.7 — FANS: read, then write, then a cold-start protocol ✅ CLOSED 2026-08-10 17:5x
 
 *Anchor: `researches/05` §7 step 3 — "Fans, read then write… Deliverable: the cold-start protocol the
 owner asked for — and with it, phase 2's §4.4/§4.5 numbers become reproducible."*
 
-- [ ] `ClientFanCoolersGetInfo` / `GetStatus` / `GetControl` — read the current policy and limits.
-- [ ] ONE write to a fixed level, with the read-back-until-stable discipline and **return to automatic
-      policy as the named rollback**, under the watchdog.
-- [ ] A cold-start helper: spin up, wait for a target temperature, report the achieved start state.
-- [ ] Decide P4-AC7's Target from what the hardware actually allows (the 30 % floor phase 2 saw may be
-      a firmware limit the API cannot go under — `researches/05` §6).
+- [x] The struct LAYOUTS collected from two independently-authored sources BEFORE any code
+      (`researches/05` §9.1–§9.2) — the recon this step was missing, since §3.2 carried only the ids.
+- [x] `ClientFanCoolersGetInfo` / `GetStatus` / `GetControl` — `npm run nvapi -- --fans`, read-only.
+- [x] ONE write to a fixed level, read-back-until-stable, **return to automatic policy as the named
+      rollback**, under the watchdog — `npm run nvapi -- --fan-write <level>`.
+- [x] **The watchdog's total undo learned fans FIRST**, before the first write existed: a writer that
+      died holding MANUAL used to leave the fans pinned with nothing to bring them back. Mutation-proved
+      with two mutations, and the one that KEEPS the step but makes it pin a level instead of restoring
+      AUTO reddens that block ALONE (EXP-0016).
+- [x] A cold-start helper: `--cool-to <°C>` — spins up, waits, reports the achieved state and **how long
+      it took**; refuses to write at all when the card is already colder than the setpoint.
+- [x] P4-AC7's Target decided by measurement.
+
+**Evidence** (`researches/05` §9.4 carries the full tables): all three structs accepted at version 1 on
+the first attempt · **3 coolers, 3 000 rpm each, and `currentMinLevel` = 30 % — the 30 % phase 2 kept
+seeing is the card's OWN FLOOR, not where the stock curve landed** · 60 % → `nvidia-smi` 61 %, rpm
+1878/1860/1873 · 80 % → 79 %, rpm 2404/2366/2401 · every rollback verified with 0 coolers left in MANUAL
+and rpm 0/0/0 · **three load-then-cool cycles reached 42 / 42 / 41 °C in 8 / 4 / 0 s.**
+
+**P4-AC7's Target, now that the hardware has answered:** *Scale:* °C spread of the achieved start
+temperature across N cool-downs · *Meter:* `--fan-write 80 --cool-to 42` after a load · **Target: ≤ 3 °C.
+MET — measured 1 °C over three cycles.** Bounded honestly: the cool-down was proved from 46…51 °C, not
+from the 65 °C a long burn reaches, so the DURATION does not generalize even though the setpoint does.
+
+**One finding that outranks the step itself and changed a project rule:** the same command read back
+768 rpm at 2 s and 1856 rpm at 14 s. **A fan RAMPS instead of flipping**, so EXP-0014's "two consecutive
+samples agree" is not sufficient for a mechanical actuator — the read-back must also require the TARGET
+(`config.FAN_LEVEL_TOLERANCE_PCT`, `FAN_RAMP_TIMEOUT_MS`, both measured). The first version of the check
+passed at 30 % against a commanded 60 %.
 
 **Why this is the priority and not optional.** It closes THREE debts at once: the owner's explicit
 experimental protocol; the strict temperature-matched comparison the 14.67 W measurement currently
@@ -203,7 +226,7 @@ From the epic §4, quoted: *"чтение-после-записи на крив�
 |---|---|
 | Read-after-write on the curve agrees | ✅ met — step 4.4, three points, byte-exact rollback |
 | Voltage grid step measured on the live curve | ✅ met — step 4.2, 5 mV |
-| *(this plan adds)* fans give a repeatable starting state | 🔲 step 4.7 |
+| *(this plan adds)* fans give a repeatable starting state | ✅ met — step 4.7, 1 °C over three cool-downs |
 | *(this plan adds)* `/fable-judge` pass | 🔲 step 4.8 |
 
 ## 8. Decisions made without the owner

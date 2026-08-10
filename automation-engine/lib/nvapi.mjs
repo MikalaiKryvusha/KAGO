@@ -138,6 +138,13 @@ export function openNvapi({ dll = 'nvapi64.dll' } = {}) {
     ClkVfPointsGetControl: koffi.proto('int ClkVfPointsGetControl(uint64_t gpu, void *ctl)'),
     ClkDomainsGetInfo: koffi.proto('int ClkDomainsGetInfo(uint64_t gpu, void *info)'),
     ClkVfPointsSetControl: koffi.proto('int ClkVfPointsSetControl(uint64_t gpu, void *ctl)'),
+    // Fans — the READ half only. `SetControl` gets its prototype in the same step that names its
+    // rollback and arms the watchdog for it (researches/05 §9.3); a prototype that exists is a call a
+    // future session can make by accident.
+    ClientFanCoolersGetInfo: koffi.proto('int ClientFanCoolersGetInfo(uint64_t gpu, void *info)'),
+    ClientFanCoolersGetStatus: koffi.proto('int ClientFanCoolersGetStatus(uint64_t gpu, void *st)'),
+    ClientFanCoolersGetControl: koffi.proto('int ClientFanCoolersGetControl(uint64_t gpu, void *ctl)'),
+    ClientFanCoolersSetControl: koffi.proto('int ClientFanCoolersSetControl(uint64_t gpu, void *ctl)'),
   };
 
   /** Resolve one id. A null pointer is the SAFE failure mode of a wrong id — report, never throw. */
@@ -253,6 +260,34 @@ export const CLK_VF_POINT_STRIDE = 0x1C;
 export const CLK_VF_POINTS_DATA_OFFSET = 0x48;
 export const CLK_VF_POINT_COUNT = 128;
 
+// -------------------------------------------------------------------------------------------------
+// The FAN client structs. Derived arithmetically from the field lists of TWO independently-authored
+// sources that agree field for field (researches/05 §9.1: nvfancontrol, Rust/Windows — and
+// LibreHardwareMonitor, C#). Every member is a 4-byte unsigned, so each item struct's alignment is 4
+// and `Pack = 8` adds no padding; the sizes below are therefore derivations, not guesses.
+//
+//   status  header 0x28 + 32 items x 0x34 = 1704 = 0x6A8
+//   control header 0x2C + 32 items x 0x2C = 1452 = 0x5AC
+//   info    header 0x2C + 32 items x 0x30 = 1580 = 0x62C
+//
+// `count` is filled BY THE DRIVER on every read — we send 0 and read back how many coolers this card
+// actually has. A count of 0 or of exactly 32 would mean the layout is wrong rather than the card being
+// unusual (researches/05 §9.4).
+// [NOT-TESTED] — nothing here has been run on this card yet; this is the probe's own hypothesis.
+export const FAN_COOLER_MAX = 32;
+export const FAN_STATUS_SIZE = 0x28 + FAN_COOLER_MAX * 0x34;
+export const FAN_STATUS_DATA_OFFSET = 0x28;
+export const FAN_STATUS_STRIDE = 0x34;
+export const FAN_CONTROL_SIZE = 0x2C + FAN_COOLER_MAX * 0x2C;
+export const FAN_CONTROL_DATA_OFFSET = 0x2C;
+export const FAN_CONTROL_STRIDE = 0x2C;
+export const FAN_INFO_SIZE = 0x2C + FAN_COOLER_MAX * 0x30;
+export const FAN_INFO_DATA_OFFSET = 0x2C;
+export const FAN_INFO_STRIDE = 0x30;
+
+/** The client interface's control mode. Both sources state these values (researches/05 §9.2). */
+export const FAN_MODE = Object.freeze({ AUTO: 0, MANUAL: 1 });
+
 /**
  * Read the 128-point V/F curve.
  *
@@ -319,6 +354,189 @@ export function voltageGrid(points) {
     distinctSteps: uniq.length,
     stepsMv: uniq.slice(0, 12).map((d) => d / 1000),
   };
+}
+
+// =================================================================================================
+// 3b. The FANS — READ ONLY, and the read is worth a whole step of its own
+// =================================================================================================
+
+/**
+ * Read every fan cooler this card reports: how many, at what level, and WHAT FLOOR THE CARD ITSELF
+ * NAMES.
+ *
+ * Research anchor (`researches/05` §7 step 3): *"Fans, read then write. `ClientFanCoolersGetStatus`
+ * first"* — and §9.4 says why the read earns its own step even if the write is later refused: the
+ * status item carries `currentMinLevel`, which is the card's own statement of its firmware floor. Phase
+ * 2 saw the fan sit at 30 % across five ladder rungs and could not tell whether that was a floor or
+ * just where the stock curve lands. This read answers it without changing anything.
+ *
+ * THE VERSION IS PROBED, NOT ASSUMED — same discipline as `readVfCurve`. Both sources say version
+ * number 1, but a source is not this driver: a wrong encoding answers -9 INCOMPATIBLE_STRUCT_VERSION,
+ * which is a clean refusal that changes no state (`researches/05` §5.6).
+ *
+ * Read-only. Nothing here writes to the device: `GetStatus`, `GetControl` and `GetInfo` only fill a
+ * buffer we own.
+ *
+ * [NOT-TESTED] at birth — flipped by the first run against `nvidia-smi --query-gpu=fan.speed`, which is
+ * the second, independently-authored reading of the same quantity (EXP-0017).
+ */
+export function readFanCoolers(nv, handle, { versions = [1, 2, 3, 4] } = {}) {
+  const { koffi, protos, resolve } = nv;
+
+  /** One read: walk the candidate version numbers, decode with `parse` on the first acceptance. */
+  const readOne = (id, protoName, size, parse) => {
+    const entry = resolve(id);
+    if (!entry.ok) return { ok: false, why: `${protoName} не разрешился`, attempts: [] };
+    const attempts = [];
+    for (const v of versions) {
+      const buf = Buffer.alloc(size);
+      buf.writeUInt32LE(nvapiVersion(size, v), 0);
+      const status = koffi.call(entry.ptr, protos[protoName], handle, buf);
+      attempts.push({ version: v, status, name: statusName(status) });
+      if (status === 0) return { ok: true, version: v, attempts, ...parse(buf) };
+    }
+    return { ok: false, attempts, why: 'ни одна версия структуры не принята' };
+  };
+
+  const status = readOne(0x35AED5E8, 'ClientFanCoolersGetStatus', FAN_STATUS_SIZE, (buf) => {
+    const count = buf.readUInt32LE(0x04);
+    const coolers = [];
+    for (let i = 0; i < Math.min(count, FAN_COOLER_MAX); i++) {
+      const at = FAN_STATUS_DATA_OFFSET + i * FAN_STATUS_STRIDE;
+      coolers.push({
+        id: buf.readUInt32LE(at),
+        rpm: buf.readUInt32LE(at + 0x04),
+        minLevel: buf.readUInt32LE(at + 0x08),
+        maxLevel: buf.readUInt32LE(at + 0x0C),
+        level: buf.readUInt32LE(at + 0x10),
+      });
+    }
+    return { count, coolers, raw: buf };
+  });
+
+  const control = readOne(0x814B209F, 'ClientFanCoolersGetControl', FAN_CONTROL_SIZE, (buf) => {
+    const count = buf.readUInt32LE(0x08);
+    const coolers = [];
+    for (let i = 0; i < Math.min(count, FAN_COOLER_MAX); i++) {
+      const at = FAN_CONTROL_DATA_OFFSET + i * FAN_CONTROL_STRIDE;
+      const mode = buf.readUInt32LE(at + 0x08);
+      coolers.push({
+        id: buf.readUInt32LE(at),
+        level: buf.readUInt32LE(at + 0x04),
+        mode,
+        modeName: mode === FAN_MODE.MANUAL ? 'MANUAL' : mode === FAN_MODE.AUTO ? 'AUTO' : `неизвестный(${mode})`,
+      });
+    }
+    return { count, coolers, raw: buf };
+  });
+
+  const info = readOne(0xFB85B01E, 'ClientFanCoolersGetInfo', FAN_INFO_SIZE, (buf) => {
+    const count = buf.readUInt32LE(0x08);
+    const coolers = [];
+    for (let i = 0; i < Math.min(count, FAN_COOLER_MAX); i++) {
+      const at = FAN_INFO_DATA_OFFSET + i * FAN_INFO_STRIDE;
+      coolers.push({ id: buf.readUInt32LE(at), maxRpm: buf.readUInt32LE(at + 0x0C) });
+    }
+    return { count, coolers, raw: buf };
+  });
+
+  return { status, control, info };
+}
+
+/**
+ * WRITE the fan control struct — read-modify-write, always.
+ *
+ * `researches/05` §9.3 item 2 states the rule and its reason: unlike the curve struct (where
+ * `--zero-filled` proved read-modify-write was NOT what fixed the silent no-op — EXP-0024), the fan
+ * control record's reserved words come from the DRIVER and we do not know what they mean. So the buffer
+ * we send is the buffer we were given, with `level` and `controlMode` changed and nothing else touched.
+ *
+ * `mode = FAN_MODE.AUTO` is THE ROLLBACK, and it is idempotent: it is what the card boots with, it needs
+ * no memory of what was applied, and setting AUTO on an already-automatic cooler cannot be wrong. That
+ * is the same reasoning rule R9 uses for the curve — after a crash nobody knows what was applied, so
+ * the only honest undo is the factory state.
+ *
+ * `level` is ignored by the card in AUTO and is sent as the read-back value rather than zeroed, so a
+ * rollback never asks for 0 % on a card that would obey it.
+ *
+ * [NOT-TESTED] at birth.
+ */
+export function writeFanControl(nv, handle, { mode, level = null, coolerIds = null } = {}) {
+  const { koffi, protos, resolve } = nv;
+  const setEntry = resolve(0xA58971A5);
+  if (!setEntry.ok) return { ok: false, why: 'ClientFanCoolersSetControl не разрешился' };
+
+  // READ first — the buffer we write is the buffer the driver gave us.
+  const current = readFanCoolers(nv, handle);
+  if (!current.control.ok) return { ok: false, why: `GetControl не принят: ${current.control.why}` };
+
+  const buf = Buffer.from(current.control.raw);
+  const count = buf.readUInt32LE(0x08);
+  const touched = [];
+  for (let i = 0; i < Math.min(count, FAN_COOLER_MAX); i++) {
+    const at = FAN_CONTROL_DATA_OFFSET + i * FAN_CONTROL_STRIDE;
+    const id = buf.readUInt32LE(at);
+    if (coolerIds && !coolerIds.includes(id)) continue;
+    buf.writeUInt32LE(mode, at + 0x08);
+    if (mode === FAN_MODE.MANUAL && level !== null) buf.writeUInt32LE(level, at + 0x04);
+    touched.push(id);
+  }
+
+  const status = koffi.call(setEntry.ptr, protos.ClientFanCoolersSetControl, handle, buf);
+  // Status 0 is NOT the verification (EXP-0024) — the caller must read the state back. This function
+  // reports what it asked for and what the API said; the proof lives in the read that follows.
+  return { ok: status === 0, status, statusName: statusName(status), touched, mode, level };
+}
+
+/** The named rollback of every fan write, in one call. See `writeFanControl` for why AUTO is total. */
+export function resetFansToAuto(nv, handle) {
+  const before = readFanCoolers(nv, handle);
+  const r = writeFanControl(nv, handle, { mode: FAN_MODE.AUTO });
+  const after = readFanCoolers(nv, handle);
+  const manualLeft = after.control.ok
+    ? after.control.coolers.filter((c) => c.mode === FAN_MODE.MANUAL).length
+    : 'не прочитано';
+  return {
+    ok: r.ok && manualLeft === 0,
+    status: r.statusName ?? r.why,
+    coolers: r.touched ?? [],
+    manualLeft,
+    levelsBefore: before.status.ok ? before.status.coolers.map((c) => c.level) : null,
+    levelsAfter: after.status.ok ? after.status.coolers.map((c) => c.level) : null,
+  };
+}
+
+/**
+ * The SANITY of the decode, judged by the shape of the answer rather than by whether a call returned 0.
+ *
+ * A wrong layout does not usually announce itself with an error — it announces itself with nonsense
+ * that looks like data (EXP-0024: a well-formed request to do the wrong thing has no error code). So
+ * the decode is held against what a two-fan graphics card MUST look like:
+ *
+ *   • the count is small and non-zero — 0 or exactly 32 means we are reading the wrong field;
+ *   • levels are percentages, so 0…100;
+ *   • the cooler ids agree between the three structs, because they describe the same coolers.
+ */
+export function fanDecodeLooksSane({ status, control, info }) {
+  const problems = [];
+  if (!status.ok) problems.push(`GetStatus не принят: ${status.why}`);
+  else {
+    if (!(status.count > 0 && status.count < FAN_COOLER_MAX)) {
+      problems.push(`count = ${status.count} — не похоже на число вентиляторов карты`);
+    }
+    for (const c of status.coolers) {
+      if (c.level > 100 || c.minLevel > 100 || c.maxLevel > 100) {
+        problems.push(`кулер ${c.id}: уровни вне 0…100 (${c.minLevel}/${c.level}/${c.maxLevel})`);
+      }
+    }
+  }
+  if (status.ok && control.ok && status.count !== control.count) {
+    problems.push(`число кулеров расходится: status ${status.count}, control ${control.count}`);
+  }
+  if (status.ok && info.ok && status.count !== info.count) {
+    problems.push(`число кулеров расходится: status ${status.count}, info ${info.count}`);
+  }
+  return { ok: problems.length === 0, problems };
 }
 
 /**
@@ -723,6 +941,310 @@ async function mainProveMask(point, offsetMhz, mode) {
 // 3. CLI
 // =================================================================================================
 
+/**
+ * `--fans` — the READ half of the fan step, and the cross-check that makes it believable.
+ *
+ * Prints what the card says about its own coolers and holds our decode against `nvidia-smi`'s
+ * `fan.speed`, which is a reading of the SAME quantity by another author (EXP-0017). Writes nothing.
+ */
+function mainFans() {
+  const nv = openNvapi();
+  const { koffi, protos, resolve } = nv;
+  const st = koffi.call(resolve(0x0150E828).ptr, protos.Initialize);
+  if (st !== 0) { console.error(`NvAPI_Initialize: ${statusName(st)}`); return 1; }
+  try {
+    const handles = Buffer.alloc(64 * 8);
+    const count = Buffer.alloc(4);
+    koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
+    if (count.readUInt32LE(0) < 1) { console.error('карт не найдено'); return 1; }
+    const handle = handles.readBigUInt64LE(0);
+
+    console.log('ВЕНТИЛЯТОРЫ — ТОЛЬКО ЧТЕНИЕ. Ни одного вызова записи в этом режиме.');
+    console.log('');
+    console.log('  ЗАЧЕМ ЧТЕНИЕ ОТДЕЛЬНЫМ ШАГОМ: в записи статуса есть currentMinLevel — это ПОЛ,');
+    console.log('  который называет сама карта. Фаза 2 видела вентилятор на 30 % на пяти ступенях');
+    console.log('  лестницы и не могла отличить пол железа от того, где просто стоит стоковая кривая.');
+    console.log('  РАСКЛАДКИ: researches/05 §9 — два независимых источника, сходятся поле в поле.');
+    console.log('');
+
+    const fans = readFanCoolers(nv, handle);
+    for (const [name, r] of Object.entries(fans)) {
+      const tries = r.attempts.map((a) => `v${a.version}:${a.name}`).join(' · ');
+      console.log(`  ${name.padEnd(8)} ${r.ok ? `ПРИНЯТ на версии ${r.version}` : `НЕ ПРИНЯТ — ${r.why}`}${tries ? `\n           попытки: ${tries}` : ''}`);
+    }
+    console.log('');
+
+    if (fans.status.ok) {
+      console.log(`КУЛЕРОВ ПО СТАТУСУ: ${fans.status.count}`);
+      console.log('');
+      console.log('  id | об/мин |  пол % | потолок % | сейчас % | режим');
+      for (const c of fans.status.coolers) {
+        const ctl = fans.control.ok ? fans.control.coolers.find((x) => x.id === c.id) : null;
+        console.log(`  ${String(c.id).padStart(2)} | ${String(c.rpm).padStart(6)} | ${String(c.minLevel).padStart(6)} | ${String(c.maxLevel).padStart(9)} | ${String(c.level).padStart(8)} | ${ctl ? ctl.modeName : '—'}`);
+      }
+      if (fans.info.ok) {
+        console.log('');
+        for (const c of fans.info.coolers) console.log(`  кулер ${c.id}: максимум ${c.maxRpm} об/мин (из GetInfo)`);
+      }
+    }
+
+    const sane = fanDecodeLooksSane(fans);
+    console.log('');
+    console.log(`ФОРМА ОТВЕТА ПРАВДОПОДОБНА: ${sane.ok ? 'да' : 'НЕТ'}`);
+    for (const p of sane.problems) console.log(`  · ${p}`);
+
+    // The second, independently-authored reading of the same quantity.
+    let smi = null;
+    try {
+      const { execFileSync } = require('node:child_process');
+      smi = execFileSync('nvidia-smi', ['--query-gpu=fan.speed,temperature.gpu', '--format=csv,noheader'], { encoding: 'utf8' }).trim();
+    } catch (e) { smi = `не прочитано: ${e.message}`; }
+    console.log('');
+    console.log(`ВТОРОЕ ЧТЕНИЕ (nvidia-smi, другой автор): ${smi}`);
+    if (fans.status.ok && fans.status.coolers.length) {
+      const ours = fans.status.coolers.map((c) => `${c.level} %`).join(' / ');
+      console.log(`  наше чтение уровня: ${ours} — расхождение с чужим прибором означает НЕВЕРНУЮ РАСКЛАДКУ,`);
+      console.log('  а не странную карту (EXP-0024: правильно оформленный запрос не туда не даёт кода ошибки).');
+    }
+
+    console.log('');
+    console.log('ЗАПИСИ НЕ БЫЛО. Откат записи назван заранее — researches/05 §9.3: controlMode = 0 (AUTO)');
+    console.log('на каждом кулере тем же вызовом, плюс тот же откат обязан войти в сторожа (правило R9).');
+    return sane.ok && fans.status.ok ? 0 : 1;
+  } finally {
+    koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
+  }
+}
+
+/**
+ * `--fan-write <level>` — THE FIRST FAN WRITE, and `--cool-to <°C>` — the protocol it exists for.
+ *
+ * Research anchor (`researches/05` §7 step 3): *"only then a single write to a fixed level, with the
+ * read-back-until-stable discipline phase 2 already owns, and the return to automatic policy as its
+ * named rollback. Deliverable: the cold-start protocol the owner asked for."*
+ *
+ * WHY THE OWNER ASKED FOR THIS AT ALL, restated because it is the whole justification for touching the
+ * fans: this card does not cool passively. Measured — 115 s of idle straight after a run went 47 → 50 °C
+ * with the fan at 0 %, because the zero-RPM regime plus a live desktop drifts the temperature UP. So
+ * "wait for it to cool" is not a protocol on this card, and two measurements cannot be given the same
+ * starting state without the fans. Two facts make that a correctness issue and not a nicety: power
+ * tracks the temperature a run REACHES (~4 W per 5 °C), and the V/F curve ITSELF derates with
+ * temperature (−15…−22 MHz over 12 °C).
+ *
+ * THE DISCIPLINE, and every clause of it is paid for:
+ *   • the watchdog is armed BEFORE the write and its undo now includes fans (rule R9);
+ *   • the direction is UP only — a fan stuck high costs noise, a fan stuck low costs the card;
+ *   • the read-back polls until TWO CONSECUTIVE SAMPLES AGREE, through `nvidia-smi` — an instrument we
+ *     did not author (EXP-0014: `-rgc` once answered "All done" while the old value was still being
+ *     reported);
+ *   • the rollback runs in a `finally` on every path and is VERIFIED, not assumed.
+ */
+async function mainFanWrite(level, coolToC) {
+  const wd = await import('./watchdog.mjs');
+  const nv = openNvapi();
+  const { koffi, protos, resolve } = nv;
+
+  const stale = await wd.recover({});
+  if (stale.found && stale.ownerAlive) {
+    console.error(`ОТКАЗ: карту держит живой процесс pid ${stale.record.ownerPid} («${stale.record.what}»)`);
+    return 1;
+  }
+
+  const st = koffi.call(resolve(0x0150E828).ptr, protos.Initialize);
+  if (st !== 0) { console.error(`NvAPI_Initialize: ${statusName(st)}`); return 1; }
+
+  // `--format=csv,noheader` is NOT optional and the first run of this tool proved it: without it
+  // `nvidia-smi` prints its human TABLE, the parse yields NaN, and the block that exists to confirm the
+  // write with a foreign instrument reported NaN instead of a value. It went red, which is the correct
+  // behaviour — but the defect was in the reader, not the card (EXP-0012: the output shows what you
+  // actually built; the tests only show what you thought to assert).
+  const smiFan = () => {
+    try {
+      const { execFileSync } = require('node:child_process');
+      const out = execFileSync('nvidia-smi',
+        ['--query-gpu=fan.speed,temperature.gpu', '--format=csv,noheader'], { encoding: 'utf8' });
+      const [f, t] = out.trim().split(',').map((x) => Number(x.replace('%', '').trim()));
+      return { fan: Number.isFinite(f) ? f : null, temp: Number.isFinite(t) ? t : null };
+    } catch { return { fan: null, temp: null }; }
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /**
+   * Poll until two consecutive readings agree — AND, when a target is given, until they agree WITH THE
+   * TARGET.
+   *
+   * The `target` argument is not decoration; it is the correction this tool's own first two runs
+   * demanded. A fan RAMPS instead of flipping (`config.FAN_RAMP_*`, measured: 768 rpm at 2 s and
+   * 1856 rpm at 14 s for the SAME command), so plain agreement can settle on a plateau on the way up —
+   * and the first version of the block below passed with 30 % against a commanded 60 % because its
+   * predicate only asked for "at least the floor". A weak predicate that a neighbouring condition also
+   * satisfies is not a check (EXP-0016).
+   */
+  const settled = async (pick, { target = null, everyMs = 700, timeoutMs = config.FAN_RAMP_TIMEOUT_MS } = {}) => {
+    const deadline = Date.now() + timeoutMs;
+    let prev = null; let samples = 0;
+    while (Date.now() < deadline) {
+      const v = pick();
+      samples++;
+      const agrees = prev !== null && v === prev;
+      const onTarget = target === null || (v !== null && Math.abs(v - target) <= config.FAN_LEVEL_TOLERANCE_PCT);
+      if (agrees && onTarget) return { value: v, stable: true, onTarget: true, samples };
+      prev = v;
+      await sleep(everyMs);
+    }
+    return {
+      value: prev,
+      stable: false,
+      onTarget: target === null || (prev !== null && Math.abs(prev - target) <= config.FAN_LEVEL_TOLERANCE_PCT),
+      samples,
+    };
+  };
+
+  const blocks = [];
+  const block = (name, ok, detail = '') => { blocks.push({ name, ok, detail }); };
+
+  let watchdog = null;
+  let wrote = false;
+  let out_coolResult = null;
+  try {
+    const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+    koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
+    const handle = handles.readBigUInt64LE(0);
+
+    const before = readFanCoolers(nv, handle);
+    const smiBefore = smiFan();
+    if (!before.status.ok || !before.control.ok) {
+      block('старт: вентиляторы читаются', false, before.status.why ?? before.control.why);
+      return 1;
+    }
+    const floor = Math.max(...before.status.coolers.map((c) => c.minLevel));
+    block('старт: карта на автоматической политике',
+      before.control.coolers.every((c) => c.mode === FAN_MODE.AUTO),
+      `кулеров ${before.status.count}, уровни ${before.status.coolers.map((c) => c.level).join('/')} %, пол карты ${floor} %, ` +
+      `nvidia-smi: ${smiBefore.fan} % при ${smiBefore.temp} °C`);
+
+    if (level < floor) {
+      block(`запрошенный уровень ${level} % ниже пола карты ${floor} %`, false,
+        'ОТКАЗ ДО ЗАПИСИ: карта сама назвала минимум, и просить меньше — просить необъяснимого состояния');
+      return 1;
+    }
+
+    // ALREADY COLD ENOUGH -> NO WRITE AT ALL. Found by the P4-AC7 series: its third cycle "cooled" in
+    // 0 s because the card was already below the setpoint, having spun the fans up for nothing first.
+    // The owner's ears are the reason this is a guard and not a comment: the smallest reversible form of
+    // an action is not performing it (the owner's-machine rule, step 3).
+    if (coolToC !== null && smiBefore.temp !== null && smiBefore.temp <= coolToC) {
+      block(`ЗАПИСИ НЕ ТРЕБУЕТСЯ: карта уже холоднее цели (${smiBefore.temp} °C ≤ ${coolToC} °C)`, true,
+        'вентиляторы не тронуты, режим остался автоматическим');
+      out_coolResult = { started: smiBefore.temp, reached: smiBefore.temp, seconds: 0, target: coolToC };
+      return 0;
+    }
+
+    watchdog = wd.arm({ what: `ВЕНТИЛЯТОРЫ: ручной режим ${level} %`, ttlMs: 300_000 });
+    block('сторож взведён ДО записи', Boolean(watchdog.guardPid),
+      `pid ${watchdog.guardPid}; его полный откат теперь включает возврат вентиляторов в AUTO`);
+
+    const w = writeFanControl(nv, handle, { mode: FAN_MODE.MANUAL, level });
+    wrote = true;
+    block(`ЗАПИСЬ: ручной режим ${level} % на кулерах ${w.touched.join(', ')}`, w.ok, w.statusName ?? w.why);
+    if (!w.ok) return 1;
+    watchdog.beat();
+
+    const ours = readFanCoolers(nv, handle);
+    block('перечитано НАШИМ прибором: режим сменился на ручной',
+      ours.control.ok && ours.control.coolers.every((c) => c.mode === FAN_MODE.MANUAL && c.level === level),
+      ours.control.ok ? ours.control.coolers.map((c) => `${c.id}:${c.modeName}@${c.level}%`).join(' ') : ours.control.why);
+
+    const spun = await settled(() => smiFan().fan, { target: level });
+    watchdog.beat();
+    block(`перечитано ЧУЖИМ прибором: скорость ДОШЛА до заказанных ${level} % (±${config.FAN_LEVEL_TOLERANCE_PCT} п.п.)`,
+      spun.stable && spun.onTarget,
+      `nvidia-smi fan.speed = ${spun.value} % за ${spun.samples} проб, было ${smiBefore.fan} %. ` +
+      'Статус 0 верификацией не является (EXP-0024), и одной устойчивости мало: вентилятор РАЗГОНЯЕТСЯ, ' +
+      'поэтому две совпавшие пробы могут стоять на полке по дороге вверх');
+
+    const rpm = readFanCoolers(nv, handle);
+    if (rpm.status.ok) {
+      const rpms = rpm.status.coolers.map((c) => c.rpm);
+      // The ceiling comes from the card's own GetInfo, never from a literal: 3000 rpm is what THIS card
+      // reported, and a constant would silently lie on any other one.
+      const maxRpm = rpm.info.ok && rpm.info.coolers.length ? rpm.info.coolers[0].maxRpm : null;
+      const expected = maxRpm === null ? null : Math.round((maxRpm * level) / 100);
+      // rpm is the SECOND observable of the same command, and it is the more physical one: a percentage
+      // could be a field we decoded wrongly, but a tachometer cannot be talked into a number.
+      block(expected === null
+        ? 'вентиляторы крутятся (потолок оборотов картой не назван — соответствие не судим)'
+        : `обороты соответствуют заказанному уровню (ждём ~${expected} из ${maxRpm} об/мин)`,
+        expected === null
+          ? rpms.every((r) => r > 0)
+          : rpms.every((r) => r > 0 && Math.abs(r - expected) <= maxRpm * 0.15),
+        `об/мин: ${rpms.join(' / ')}`);
+    }
+
+    // --- the protocol itself, when asked for
+    if (coolToC !== null) {
+      const started = smiFan().temp;
+      const t0 = Date.now();
+      const deadline = t0 + 180_000;
+      let now = started;
+      const track = [];
+      while (now > coolToC && Date.now() < deadline) {
+        watchdog.beat();
+        await sleep(2000);
+        now = smiFan().temp;
+        track.push(`${Math.round((Date.now() - t0) / 1000)}s:${now}`);
+      }
+      // The SECONDS are half the deliverable. A protocol that reaches a setpoint at an unknown cost in
+      // time cannot be put in front of a measurement series — a session planning N runs has to know
+      // whether each cool-down costs 20 s or 3 minutes, and the plan's P4-AC7 target is a spread across
+      // N runs, which is only meaningful with the duration beside it.
+      const seconds = Math.round((Date.now() - t0) / 1000);
+      block(`ОХЛАЖДЕНИЕ до ${coolToC} °C`, now <= coolToC,
+        `${started} → ${now} °C за ${seconds} с${now > coolToC ? ' — НЕ достигнуто за 180 с, докладываю достигнутое' : ''}` +
+        `${track.length ? `\n            ход: ${track.join(' ')}` : ' (уже было холоднее цели)'}`);
+      out_coolResult = { started, reached: now, seconds, target: coolToC };
+    }
+  } finally {
+    if (wrote) {
+      const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+      koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
+      const handle = handles.readBigUInt64LE(0);
+      const back = resetFansToAuto(nv, handle);
+      const backSmi = await settled(() => smiFan().fan);
+      const backRpm = readFanCoolers(nv, handle);
+      // The GUARANTEE is the MODE: every cooler back on the automatic policy. The rpm is reported and
+      // deliberately NOT asserted — on a hot card the stock curve may legitimately keep the fans
+      // turning, so demanding zero here would be a check that fails when the card is behaving. What
+      // would be a defect is a cooler still in MANUAL, and that is what the predicate says.
+      // The `level` field keeps its last written value under AUTO; it is ignored by the card, so
+      // "уровни [60,60,60]" next to mode AUTO is expected and is not a failed rollback.
+      block('ОТКАТ: все кулеры вернулись в AUTO, и это перечитано',
+        back.ok && back.manualLeft === 0,
+        `в ручном режиме осталось ${back.manualLeft}; поле level сохранило ${JSON.stringify(back.levelsAfter)} ` +
+        `(в AUTO карта его игнорирует); об/мин ${backRpm.status.ok ? backRpm.status.coolers.map((c) => c.rpm).join('/') : '—'}; ` +
+        `nvidia-smi ${backSmi.value} %${backSmi.stable ? ' (устойчиво)' : ' (НЕ устоялось за 14 с — вентилятор ещё сбрасывает обороты)'}`);
+    }
+    watchdog?.disarm();
+    koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
+
+    // THE REPORT LIVES HERE, and that is a fix rather than a style choice. Printing after the
+    // try/finally meant every early `return` inside the try — a refused write, a level below the card's
+    // floor, an already-cold card — exited with the block list unprinted, so a FAILURE reported nothing
+    // at all. The finally runs on every path including a return, so this is the only placement that
+    // cannot be bypassed. (`ИТОГ` is computed here too, for the same reason.)
+    for (const b of blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}${b.detail ? `\n            ${b.detail}` : ''}`);
+    console.log('');
+    if (out_coolResult) {
+      console.log(`ХОЛОДНЫЙ СТАРТ: ${out_coolResult.started} → ${out_coolResult.reached} °C за ${out_coolResult.seconds} с ` +
+        `(цель ${out_coolResult.target}). Это ОДНО наблюдение; воспроизводимость — разброс достигнутой ` +
+        'температуры по N прогонам (замерено: 42/42/41 °C, разброс 1 °C).');
+    }
+    console.log(`ИТОГ: блоков ${blocks.length}, провалов ${blocks.filter((b) => !b.ok).length}.`);
+  }
+
+  return blocks.filter((b) => !b.ok).length === 0 ? 0 : 1;
+}
+
 function mainCurve() {
   const nv = openNvapi();
   const { koffi, protos, resolve } = nv;
@@ -849,6 +1371,26 @@ function mainWriteZero() {
 }
 
 function main() {
+  if (process.argv.includes('--fans')) return mainFans();
+  if (process.argv.includes('--fan-write')) {
+    const i = process.argv.indexOf('--fan-write');
+    const level = Number(process.argv[i + 1]);
+    const ci = process.argv.indexOf('--cool-to');
+    const coolToC = ci === -1 ? null : Number(process.argv[ci + 1]);
+    if (!Number.isFinite(level) || level <= 0 || level > 100) {
+      console.error('--fan-write <уровень 1…100>');
+      return 1;
+    }
+    console.log('ПЕРВАЯ ЗАПИСЬ В ВЕНТИЛЯТОРЫ — под взведённым сторожем, откат в finally');
+    console.log('');
+    console.log(`  ЧТО ДЕЛАЕМ: ручной режим ${level} % на всех кулерах${coolToC !== null ? `, затем ждём остывания до ${coolToC} °C` : ''}.`);
+    console.log('  НАПРАВЛЕНИЕ: только ВВЕРХ. Застрявший высоко вентилятор стоит шума, застрявший низко — карты.');
+    console.log('  ОТКАТ:      controlMode = 0 (AUTO) на каждом кулере тем же вызовом, в finally, и он ПЕРЕЧИТЫВАЕТСЯ.');
+    console.log('  СТОРОЖ:     взводится ДО записи; его полный откат с сегодня включает вентиляторы (R9).');
+    console.log('  ПРОВЕРКА:   до устойчивости двумя совпавшими пробами через nvidia-smi — чужой прибор (EXP-0014).');
+    console.log('');
+    return mainFanWrite(level, coolToC);
+  }
   if (process.argv.includes('--curve')) return mainCurve();
   if (process.argv.includes('--control')) return mainControl();
   if (process.argv.includes('--write-zero')) return mainWriteZero();

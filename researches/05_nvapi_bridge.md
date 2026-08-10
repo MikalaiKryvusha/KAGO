@@ -2,7 +2,7 @@
 
 > **Created:** 2026-08-10 (agent, on the owner's instruction *«давай займёмся инструментарием NVAPI. Я вижу, что без него мы сильно ограничены»*)
 > **Parent:** `MASTER_PLAN.md` phase 4 · `plans/01_EPIC_kago_orchestrator.md`
-> **Status:** 🟢 recon VERIFIED on this machine — 17 ids of 17 resolve on driver 610.88 (2026-08-10); the curve reads (128 points, voltage grid 5 mV); **the control record's geometry was MEASURED 2026-08-10 15:2x +03:00 and the published layout in §3.4 is WRONG on this card — see §8, which supersedes it**
+> **Status:** 🟢 recon VERIFIED on this machine — 17 ids of 17 resolve on driver 610.88 (2026-08-10); the curve reads (128 points, voltage grid 5 mV); **the control record's geometry was MEASURED 2026-08-10 15:2x +03:00 and the published layout in §3.4 is WRONG on this card — see §8, which supersedes it** · **§9 added 2026-08-10 17:1x — the FAN struct layouts, from two independently-authored sources, NOT yet run on this card**
 > **Outbound:** the operational plan for phase 4 · `config.VOLTAGE_GRID_STEP_IS_MEASURED` (this phase's first duty) · the measurement protocol of phase 2 §4.4–§4.5, which cannot control its initial conditions without fan control
 
 ---
@@ -340,9 +340,155 @@ two APIs clobbering each other is the reason the quarantine is explicit rather t
 
 ---
 
+## 9. THE FAN STRUCTS — layouts taken from TWO independently-authored sources
+
+**Collected 2026-08-10 17:1x +03:00, before a single line of fan code**, because §3.2 carried the fan
+ids and no layouts, and the owner's-machine rule forbids learning a state-changing call's semantics by
+running it. Nothing in this section has been run yet: it is the thing the first probe CHECKS.
+
+### 9.1 Why two sources, and what agreement buys
+
+The layouts below are asserted **identically** by two projects that did not copy each other's code:
+
+| Source | Language / platform | What it is |
+|---|---|---|
+| [nvfancontrol](https://github.com/foucault/nvfancontrol/blob/master/src/nvctrl/os/windows.rs) | Rust, **Windows** — our platform | dynamic fan control daemon; the origin of §3.2's ids |
+| [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/master/LibreHardwareMonitorLib/Interop/NvApi.cs) | C#, Windows | hardware monitor; `NvFanCoolersStatus` / `NvFanCoolerControl` |
+
+Agreement between two authors is evidence of a different KIND from care inside one reading (EXP-0017),
+and here it matters more than usual: this is the first struct in the project we will WRITE without a
+documented lever to cross-check it against — NVML has no fan-control call, so the ruler trick of §8 is
+not available.
+
+**Where they differ, and it is cosmetic:** LHM spells the status header's 32 reserved bytes as four
+`ulong`s and nvfancontrol as eight `u32`s — the same 32 bytes. LHM also carries a third constant
+(`MAX_COOLERS_PER_GPU = 20`) belonging to the LEGACY interface; the client structs use 32 in both.
+
+### 9.2 The layouts, and the sizes derived from them
+
+All fields are 4-byte unsigned unless said otherwise, so `Pack = 8` adds no padding — the largest
+member of every item struct is 4 bytes, which fixes each struct's alignment at 4 (status's `ulong`
+reserved block being the one 8-byte-aligned member, at an offset that is already a multiple of 8).
+
+**`ClientFanCoolersGetStatus` (id `0x35AED5E8`) — 1 704 bytes = 0x6A8**
+
+```
+0x00  version                 (1 << 16) | 1704  = 0x000106A8
+0x04  count                   ← the driver FILLS this; send 0
+0x08 .. 0x27  reserved[8]
+0x28 + i*0x34   item i, 52 bytes:
+        +0x00  coolerId
+        +0x04  currentRpm
+        +0x08  currentMinLevel      ← the firmware floor, if there is one
+        +0x0C  currentMaxLevel
+        +0x10  currentLevel         ← percent, the same quantity `nvidia-smi` reads as fan.speed
+        +0x14 .. +0x33  reserved[8]
+```
+
+**`ClientFanCoolersGetControl` / `SetControl` (ids `0x814B209F` / `0xA58971A5`) — 1 452 bytes = 0x5AC**
+
+```
+0x00  version                 (1 << 16) | 1452  = 0x000105AC
+0x04  reserved
+0x08  count
+0x0C .. 0x2B  reserved[8]
+0x2C + i*0x2C   item i, 44 bytes:
+        +0x00  coolerId
+        +0x04  level                percent
+        +0x08  controlMode          0 = AUTO, 1 = MANUAL
+        +0x0C .. +0x2B  reserved[8]
+```
+
+**`ClientFanCoolersGetInfo` (id `0xFB85B01E`) — 1 580 bytes = 0x62C**, same header as Control, item 48
+bytes: `coolerId · reserved · reserved · maxRpm · reserved[8]`.
+
+**Version number is 1 in both sources** for all three structs, and the size is part of the encoding, so
+a wrong guess answers `-9 = INCOMPATIBLE_STRUCT_VERSION` — a clean refusal, exactly as §5.6 describes.
+The probe therefore walks version numbers rather than betting on one, the same shape `readVfCurve`
+already uses.
+
+### 9.3 The write, and its rollback — named BEFORE the code exists (rule R5)
+
+1. **Read first, for a whole step.** `GetStatus` and `GetControl` before anything is written: how many
+   coolers this card has, what level each sits at, what `currentMinLevel` says, and whether the mode is
+   already AUTO.
+2. **The write is read-modify-write on the CONTROL struct** — `GetControl`, change `level` and set
+   `controlMode = 1`, `SetControl`. Never a zero-filled buffer: unlike the curve struct (§8.7, where
+   `--zero-filled` proved RMW was not the fix), here the reserved words come from the driver and we do
+   not know what they mean.
+3. **THE ROLLBACK IS `controlMode = 0` (AUTO) ON EVERY COOLER**, through the same call. It is
+   idempotent, it is what the card boots with, and it needs no memory of what we set.
+4. **The direction of the first write is UP, and that is a safety property, not a preference.** A fan
+   stuck at a HIGH level costs noise until the next reset; a fan stuck LOW under load costs the card.
+   The cold-start protocol only ever needs UP, so the low direction is not exercised at all.
+5. **The watchdog must learn fans, or layer 2 has a hole.** `watchdog.mjs`'s total undo currently
+   restores clocks, power limit and the 128 curve offsets — **not** the fan policy. A writer that dies
+   holding MANUAL leaves the fans pinned, and while pinned-high is the harmless direction, "harmless"
+   is not the same as "restored". Returning every cooler to AUTO is one call and belongs in the same
+   undo (rule R9).
+6. **`nvidia-smi` gives the second reading.** `fan.speed` is a read field on this card, so every fan
+   write is verified by an instrument we did not author — and by the poll-until-two-samples-agree
+   discipline that already caught `-rgc` answering early (EXP-0014).
+
+### 9.4 MEASURED ON THIS CARD, 2026-08-10 17:3x…17:5x — §9.2 held, and the floor is the card's own word
+
+Everything in §9.2 was accepted by the driver **on the first attempt, at version number 1**, for all
+three structs. Nothing needed a second guess.
+
+| Quantity | MEASURED here | What it settles |
+|---|---|---|
+| coolers reported | **3** | a plausible count for this board, and not 0 or 32 — the layout is right |
+| ceiling per cooler | **3 000 rpm** (`GetInfo`) | the rpm cross-check below has a denominator that is not a literal |
+| `currentMinLevel` | **30 %** on all three | **the 30 % phase 2 kept seeing on five ladder rungs is the card's own FLOOR, not where the stock curve happened to land** (`plans/03` §4.5 recorded the puzzle; this is the answer) |
+| level / mode at rest | 0 % / AUTO | zero-RPM is reachable in AUTO even though the manual field's floor is 30 — the two are different statements |
+| manual write | **accepted, and obeyed** | 60 % → `nvidia-smi` 61 %, rpm 1878/1860/1873 against an expected 1800; 80 % → 79 %, rpm 2404/2366/2401 |
+| rollback to AUTO | **verified every time** | 0 coolers left in MANUAL, rpm back to 0/0/0, `nvidia-smi` 0 % stable |
+| cold-start protocol | **45 → 42 °C**, and repeatably | three cycles of load-then-cool: reached **42 / 42 / 41 °C**, spread **1 °C**, in **8 / 4 / 0 s** |
+
+**THE RAMP IS THE FINDING NOBODY PLANNED FOR, and it corrects a rule this project already had.** The
+same command (manual 60 %) read back **768 / 824 / 768 rpm** two seconds after the write and
+**1856 / 1861 / 1877 rpm** fourteen seconds after it. Nothing differed but the moment of reading. So a
+fan does not FLIP to its commanded value, it RAMPS — and EXP-0014's rule *"read until two consecutive
+samples agree"* can settle on a plateau on the way up. Agreement proves a settled DIGITAL state; a
+mechanical actuator additionally requires the TARGET (`config.FAN_LEVEL_TOLERANCE_PCT` = 8 pp,
+`FAN_RAMP_TIMEOUT_MS` = 30 s). The first version of the check passed at 30 % against a commanded 60 %,
+because its predicate only asked for "at least the floor" — a weak predicate satisfied by a
+neighbouring condition (EXP-0016).
+
+**What this does NOT establish, said plainly:** the cool-down was proved over a NARROW thermal range —
+the load used was a 25 s burst, so the card was cooled from 46…51 °C, not from the 65 °C a long burn
+reaches. From genuinely hot the protocol will take longer, and the 1 °C spread is a claim about the
+setpoint, not about the duration.
+
+**Commands:**
+
+```
+npm run nvapi -- --fans                        read-only: coolers, levels, the card's own floor, rpm ceiling
+npm run nvapi -- --fan-write 80                the write, under an armed watchdog, rollback to AUTO in finally
+npm run nvapi -- --fan-write 80 --cool-to 42   the cold-start protocol; refuses to write at all if already colder
+```
+
+### 9.5 The honest unknowns going in
+
+> Written BEFORE the run and kept unedited, because a prediction is only worth reading next to its
+> outcome. All three questions below were ANSWERED by §9.4: yes it accepts manual control, yes the 30 %
+> is the card's own floor, and it reports three coolers.
+
+- ~~**Whether this card accepts manual control at all.**~~ **ANSWERED: yes** — accepted at version 1,
+  obeyed at 60 % and 80 %, verified by rpm and by `nvidia-smi`.
+- ~~**Whether the 30 % readings phase 2 saw are that floor**~~ **ANSWERED: they are the floor**, stated
+  by `currentMinLevel` on every cooler.
+- ~~**How many coolers this card reports.**~~ **ANSWERED: 3**, each with a 3 000 rpm ceiling.
+- **Nothing about the LEGACY interface is planned.** `GetCoolerSettings` / `SetCoolerLevels` are kept
+  in the id table as a fallback (both resolve), and newer cards are reported to need the client family.
+  If the client family refuses, the fallback is tried — not before.
+
+---
+
 ## Sources
 
-- [nvfancontrol — Windows NVAPI fan control (Rust)](https://github.com/foucault/nvfancontrol/blob/master/src/nvctrl/os/windows.rs) — fan ids, init flow
+- [nvfancontrol — Windows NVAPI fan control (Rust)](https://github.com/foucault/nvfancontrol/blob/master/src/nvctrl/os/windows.rs) — fan ids, init flow, **and §9's struct layouts (version number 1 for all three client structs)**
+- [LibreHardwareMonitor — `Interop/NvApi.cs`](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/master/LibreHardwareMonitorLib/Interop/NvApi.cs) — the SECOND, independently-authored reading of §9's fan structs; `NvFanControlMode { Auto = 0, Manual = 1 }`
 - [LACT issue #936 — per-point V/F curve read/write via undocumented NvAPI, tested on RTX 5090 Blackwell](https://github.com/ilya-zlobintsev/LACT/issues/936) — curve ids, struct layouts, offsets, failure modes
 - [Koffi — C FFI for Node.js](https://koffi.dev/) · [function pointers](https://koffi.dev/pointers) — `koffi.proto` / `koffi.call` / `koffi.decode`
 - [NVAPI Reference Documentation](https://docs.nvidia.com/gameworks/content/gameworkslibrary/coresdk/nvapi/group__gpuclock.html) — the documented half (Initialize, EnumPhysicalGPUs, status codes)

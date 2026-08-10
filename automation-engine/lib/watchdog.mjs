@@ -251,6 +251,17 @@ export async function resetCardToFactory({ deps = null } = {}) {
     return r;
   });
 
+  // 4. FANS -> AUTO. Added 2026-08-10 17:2x, BEFORE the project's first fan write existed, because
+  //    without it layer 2 had a hole: a writer that died holding MANUAL left the fans pinned, and this
+  //    card's own floor for manual control is 30 % (measured — `researches/05` §9), so "pinned" means
+  //    the owner's idle card audibly changes and nothing brings it back. Pinned-HIGH is the harmless
+  //    direction and it is the only one the cold-start protocol ever asks for; harmless is still not
+  //    restored. AUTO is idempotent, so this step costs nothing on a card that was never touched.
+  await run('вентиляторы -> автоматическая политика', async () => {
+    const r = await d.resetFansToAuto();
+    return r;
+  });
+
   return { ok: steps.every((s) => s.ok), steps };
 }
 
@@ -298,6 +309,20 @@ async function realDeps() {
       const r = await pm.resetToFactory(backend);
       const s = r?.after ?? pm.readState(backend);
       return `потолок ${s.powerLimitW} Вт (по умолчанию ${s.powerDefaultW}), частота ${s.clockMhz} МГц`;
+    },
+
+    async resetFansToAuto() {
+      const nv = nvapi.openNvapi();
+      nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+      try {
+        const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+        nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+        const handle = handles.readBigUInt64LE(0);
+        const r = nvapi.resetFansToAuto(nv, handle);
+        return `кулеров ${r.coolers.length}, в ручном режиме осталось ${r.manualLeft}, уровни ${JSON.stringify(r.levelsAfter)} (${r.status})`;
+      } finally {
+        nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
+      }
     },
   };
 }
@@ -433,11 +458,20 @@ export async function selftest() {
     clearArmed({ file: tmp });
 
     // --- the undo: every step attempted, even when one throws
+    //
+    // The step keys live in ONE place and every block asserts against the SET, never against a count.
+    // A hard-coded `called.length === 3` is what the fan step broke when it was added: the block failed
+    // for a reason that had nothing to do with the guarantee it guards (the loop fires and resets), and
+    // a count says nothing about WHICH steps ran anyway — delete the fan step, duplicate another, and a
+    // count-only check stays green (EXP-0016).
+    const UNDO_STEPS = ['curve', 'nvml', 'clocks', 'fans'];
+    const allRan = (list) => UNDO_STEPS.every((k) => list.includes(k));
     let called = [];
     const failingDeps = {
       zeroAllCurveOffsets: async () => { called.push('curve'); throw new Error('кривая недоступна'); },
       zeroNvmlOffsets: async () => { called.push('nvml'); return { graphics: 'OK', memory: 'OK' }; },
       resetClocksAndPower: async () => { called.push('clocks'); return 'сброшено'; },
+      resetFansToAuto: async () => { called.push('fans'); return 'кулеров 3, в ручном режиме осталось 0'; },
     };
     // The call is wrapped because the guarantee under test IS the catching. Without the wrapper a
     // regression that removes step isolation throws straight out of the selftest and KILLS it — and a
@@ -445,10 +479,19 @@ export async function selftest() {
     let r = null; let threw = null;
     try { r = await resetCardToFactory({ deps: failingDeps }); } catch (e) { threw = e; }
     check('падение одного шага сброса НЕ отменяет остальные',
-      threw === null && called.length === 3 && called.includes('nvml') && called.includes('clocks'),
+      threw === null && allRan(called),
       threw ? `сброс выбросил «${threw.message}» вместо изоляции шага` : `выполнено шагов: ${called.join(', ')}`);
     check('сброс с упавшим шагом честно докладывает ok=false', threw === null && r?.ok === false,
       threw ? 'вердикта нет — сброс упал' : `провалов ${r.steps.filter((s) => !s.ok).length} из ${r.steps.length}`);
+
+    // The fan step is asserted BY NAME, not by the step count. A count-only check stays green if the
+    // fan step is deleted and any other step is duplicated, and this project has already paid twice for
+    // a block that was satisfied for the wrong reason (EXP-0016). AND the direction matters: the undo
+    // must return the fans to AUTOMATIC, never set a level — a rollback that pins a speed is not a
+    // rollback. So the block reads the step's own detail rather than trusting its title.
+    check('вентиляторы входят в полный откат — ИМЕНЕМ, а не по числу шагов',
+      threw === null && called.includes('fans') && r.steps.some((s) => /вентилятор/i.test(s.name) && /автоматическ/i.test(s.name)),
+      threw ? 'сброс упал' : `шаги: ${r.steps.map((s) => s.name).join(' | ')}`);
 
     // --- the loop
     called = [];
@@ -456,6 +499,7 @@ export async function selftest() {
       zeroAllCurveOffsets: async () => { called.push('curve'); return { written: 128, failed: 0, remainingNonZero: 0 }; },
       zeroNvmlOffsets: async () => { called.push('nvml'); return { graphics: 'OK', memory: 'OK' }; },
       resetClocksAndPower: async () => { called.push('clocks'); return 'сброшено'; },
+      resetFansToAuto: async () => { called.push('fans'); return 'кулеров 3, в ручном режиме осталось 0'; },
     };
 
     // The ordering fixture has to be observed FROM INSIDE the reset. Checking that the record is gone
@@ -475,7 +519,7 @@ export async function selftest() {
     writeArmed({ ownerPid: 999_999, deadlineMs: nowMs() + 60_000, what: 'мёртвый владелец' }, { file: tmp });
     const fired = await guardLoop({ file: tmp, pollMs: 5, maxTicks: 3, deps: orderingDeps });
     check('цикл срабатывает на мёртвом владельце и сбрасывает карту',
-      fired.fired === true && called.length === 3, `${fired.reason}`);
+      fired.fired === true && allRan(called), `${fired.reason} · шаги: ${called.join(', ')}`);
     check('цикл снимает запись ДО сброса (второй сторож не выстрелит поверх)',
       recordSeenByReset === null,
       recordSeenByReset === null ? 'в момент сброса записи уже не было'

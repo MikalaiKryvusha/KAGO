@@ -365,6 +365,28 @@ export const READBACK_INTERVAL_MS = 250;
 export const READBACK_TIMEOUT_MS = 10_000;
 
 /**
+ * THE SAME RULE DOES NOT TRANSFER TO A MECHANICAL ACTUATOR, and this card measured the difference.
+ *
+ * MEASURED 2026-08-10 17:3x on this card, two runs of the identical command (manual fan level 60 %):
+ * read ~2 s after the write the coolers reported **768 / 824 / 768 rpm** and `nvidia-smi` said 30 %;
+ * read ~14 s after the write they reported **1856 / 1861 / 1877 rpm** and the level matched what was
+ * commanded. Nothing changed between the runs except WHEN the reading was taken.
+ *
+ * So a fan does not FLIP to its commanded value, it RAMPS to it — and "two consecutive samples agree"
+ * (READBACK_AGREEING_SAMPLES above) can settle on a plateau ON THE WAY UP. Agreement is evidence of a
+ * settled DIGITAL state; for a ramping quantity the read-back must additionally require the TARGET.
+ *
+ * Hence two numbers instead of reusing the ones above:
+ *   • the tolerance is in percentage points, because the card reports a percentage that tracks rpm
+ *     (768/3000 = 26 % against a reported 30 %, so the two agree within a few points);
+ *   • the timeout is ~2x the 14 s at which the ramp was observed complete — generous on purpose, since
+ *     expiry here means "the card did not obey", which must be a failure and never a shrug.
+ */
+export const FAN_LEVEL_TOLERANCE_PCT = 8;
+export const FAN_RAMP_TIMEOUT_MS = 30_000;
+export const FAN_RAMP_IS_MEASURED = true;
+
+/**
  * HOW CLOSE THE DELIVERED CLOCK COMES TO THE REQUESTED ONE — measured, not assumed.
  *
  * SOURCE: observed on this card 2026-08-10 under sustained load, with ZERO throttle reasons active in
@@ -478,6 +500,9 @@ export default Object.freeze({
   READBACK_AGREEING_SAMPLES,
   READBACK_INTERVAL_MS,
   READBACK_TIMEOUT_MS,
+  FAN_LEVEL_TOLERANCE_PCT,
+  FAN_RAMP_TIMEOUT_MS,
+  FAN_RAMP_IS_MEASURED,
   LOCK_DELIVERY_TOLERANCE_MHZ,
   LOCK_IS_OBSERVABLE_AT_IDLE,
 });
