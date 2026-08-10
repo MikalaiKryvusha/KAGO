@@ -48,14 +48,21 @@
 //
 //   OFFLINE HALF — the parser, the cold-run drop, the statistics, the cap proof, the invocation
 //   builder, the geometry parser, the verdict and the comparability refusal:
-//   [TESTED: 2026-08-10 · 39 selftest blocks green, and SEVEN mutations each reddening the block
+//   [TESTED: 2026-08-10 · 43 selftest blocks green, and NINE mutations each reddening the block
 //    named for it BEFORE the run (the addressee list is in §9). One of those mutations earned its
 //    keep immediately: the direction rule in `capProof` stayed green when deleted, because the block
 //    asserted only `ok === false` — which the magnitude guard also delivers. The check now reads the
 //    refusal's REASON, so it guards what it claims to guard.]
 //
-//   LIVE HALF — `runTimedemo`, `capture`, `probeGeometry` against the real game and the real card:
-//   [NOT-TESTED] — nothing here has launched Q2RTX yet, and no number this module can print exists.
+//   LIVE HALF — `runTimedemo` and `probeGeometry` against the real game and the real card:
+//   [TESTED: 2026-08-10 19:2x…19:4x · FOUR full launches on this machine, exit 0 every time, 631
+//    frames per run every time. The cap-proof gate: expensive frame 57.586 fps, cheap frame 84.091 —
+//    **+46.03 %**, so the instrument demonstrably responds to its input and nothing is clamping it.
+//    Then two launches that refuted this module's own first draft about resolution: requested
+//    1280x720 → 57.721, requested 1920x1080 → 57.283, i.e. **0.76 % apart inside a 1.84 % scatter**.
+//    Both findings are written into `buildArgs`, and the second one is why the record now says the
+//    render size is UNOBSERVED instead of naming one.]
+//   `capture()` — [NOT-TESTED]: no capture with telemetry and a fault window has run yet.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -120,10 +127,25 @@ export function locateGame({ root = config.Q2RTX_ROOT } = {}) {
  * are the difference between measuring the card and measuring the owner's television (EXP-0032).
  * The full reasoning for each one is in `config.Q2RTX_FIXED_CVARS`.
  *
- * NO RESOLUTION IS SET, and that is a decision rather than an omission: in fullscreen this engine
- * renders at the DESKTOP's resolution and ignores `r_customwidth/height` (observed — a requested
- * 1920×1080 came out at the desktop's 1280×720). Imposing a mode would change the owner's display,
- * which his standing rule puts in the destructive class. The geometry is probed and RECORDED instead.
+ * RESOLUTION — AND THE TWO THINGS MEASURED ABOUT IT, because the first draft asserted a third that was
+ * false. It set nothing and recorded the DESKTOP's geometry as the run's condition, on the belief that
+ * fullscreen renders at the desktop resolution. Two live runs later, neither belief survives:
+ *
+ *   1. **The desktop's geometry does not describe the load.** At a 3840×2160 desktop the expensive
+ *      frame ran 57.59 fps, against 54.29 fps measured earlier at a 1280×720 desktop. Nine times the
+ *      pixels cannot be FASTER, so whatever the render size is, it is not the desktop's.
+ *   2. **`vid_geometry` does not control it either — measured, same session, same card:** requested
+ *      1280x720 → 57.721 fps; requested 1920x1080 → 57.283 fps. **0.76 % apart, inside the 1.84 %
+ *      scatter of the launch itself.** A knob that moves the number by less than the noise is not a
+ *      knob (the same discriminator as the cap proof, applied to a setting instead of an instrument).
+ *
+ * SO THE RENDER SIZE ON THIS BUILD IS **UNOBSERVED**, and the record says exactly that rather than
+ * naming a plausible number (PHILOSOPHY.md → the three doors: an invented number is worse than a
+ * missing one). What IS measured to drive the load is `pt_num_bounce_rays` — +46 % between 2 and 0.
+ * `vid_geometry` is still passed through when asked for and recorded as REQUESTED, because a setting
+ * we changed belongs in the conditions even after it was measured inert; it is never called the render
+ * size. `r_customwidth/height` stay untouched: those govern a WINDOW, and a requested 1920×1080 window
+ * was already observed coming out at the desktop's size.
  *
  * [NOT-TESTED]
  */
@@ -131,13 +153,18 @@ export function buildArgs({
   demo = config.Q2RTX_DEMO,
   runs = config.Q2RTX_TIMEDEMO_RUNS,
   bounceRays = config.Q2RTX_BOUNCE_RAYS,
+  geometry = null,
   extraCvars = [],
 } = {}) {
+  if (geometry !== null && !/^\d{3,4}x\d{3,4}$/.test(String(geometry))) {
+    throw new Error(`геометрия задаётся строкой вида 1280x720, дано ${geometry}`);
+  }
   if (!Number.isInteger(runs) || runs < 1) throw new Error(`число прогонов должно быть целым ≥ 1, дано ${runs}`);
   if (!Number.isFinite(Number(bounceRays))) throw new Error(`pt_num_bounce_rays должно быть числом, дано ${bounceRays}`);
   const args = [];
   for (const [name, value] of config.Q2RTX_FIXED_CVARS) args.push('+set', name, String(value));
   args.push('+set', 'pt_num_bounce_rays', String(bounceRays));
+  if (geometry !== null) args.push('+set', 'vid_geometry', String(geometry));
   for (const [name, value] of extraCvars) args.push('+set', name, String(value));
   // `timedemo` is a COUNT, not a flag: +timedemo 5 plays the demo five times from one launch and
   // prints five FPS lines (researches/06 §4a.2). It is set last so nothing can overwrite it.
@@ -326,12 +353,13 @@ export async function runTimedemo({
   demo = config.Q2RTX_DEMO,
   runs = config.Q2RTX_TIMEDEMO_RUNS,
   bounceRays = config.Q2RTX_BOUNCE_RAYS,
+  geometry = null,
   extraCvars = [],
   timeoutMs = config.Q2RTX_LAUNCH_TIMEOUT_MS,
   dryRun = false,
 } = {}) {
   const game = locateGame({ root });
-  const args = buildArgs({ demo, runs, bounceRays, extraCvars });
+  const args = buildArgs({ demo, runs, bounceRays, geometry, extraCvars });
   if (dryRun) return { dryRun: true, game, args, command: `${game.exePath} ${args.join(' ')}` };
   if (!game.ok) throw new Error(game.problems.join('; '));
 
@@ -381,6 +409,13 @@ export async function runTimedemo({
     demo,
     runsRequested: runs,
     bounceRays,
+    // What we ASKED for via `vid_geometry` — a SETTING, not the render size. Measured inert on this
+    // build (0.76 % between 720p and 1080p requests, inside the launch's own 1.84 % scatter), so it is
+    // recorded as a condition and never described as the resolution being rendered.
+    vidGeometryRequested: geometry,
+    // The render size itself: NOT OBSERVED. The engine's log prints no resolution line, and the two
+    // candidate explanations were both refuted by measurement. An honest null beats a plausible number.
+    renderGeometryObserved: null,
     logFresh,
     all,
     kept,
@@ -454,12 +489,13 @@ export async function capture({
   bounceRays = config.Q2RTX_BOUNCE_RAYS,
   runs = config.Q2RTX_TIMEDEMO_RUNS,
   demo = config.Q2RTX_DEMO,
+  geometry = null,
   timeoutMs = config.Q2RTX_LAUNCH_TIMEOUT_MS,
 } = {}) {
   mkdirSync(dir, { recursive: true });
   const jsonl = join(dir, `${label}.jsonl`);
 
-  const geometry = probeGeometry();
+  const desktop = probeGeometry();
   const card = probeCard();
   const backgroundBefore = gpuClients();
 
@@ -473,7 +509,7 @@ export async function capture({
 
   let run;
   try {
-    run = await runTimedemo({ demo, runs, bounceRays, timeoutMs });
+    run = await runTimedemo({ demo, runs, bounceRays, geometry, timeoutMs });
   } finally {
     try { child.kill(); } catch { /* already gone */ }
     await sleep(300); // let the last line land before we read the file
@@ -503,7 +539,12 @@ export async function capture({
     runsRequested: runs,
     bounceRays,
     cvars: config.Q2RTX_FIXED_CVARS.map(([k, v]) => `${k}=${v}`),
-    geometry: geometry.primary,
+    // THREE DIFFERENT FACTS, kept apart because conflating them is the defect the first live runs
+    // found: what we ASKED for, what the display IS, and what the card actually renders — which we do
+    // not know. See `buildArgs` for the two measurements that forced this split.
+    vidGeometryRequested: run.vidGeometryRequested,
+    renderGeometryObserved: run.renderGeometryObserved,
+    desktopGeometry: desktop.primary,
     profile,
     gpu: { name: card.name, driver: card.driver, vbios: card.vbios },
     verdict: decision.verdict,
@@ -537,20 +578,27 @@ export async function capture({
 // =================================================================================================
 
 /** The stamp fields that must agree before two graphics records may be compared at all. */
-export const COMPARABLE_FIELDS = Object.freeze(['load', 'demo', 'runsRequested', 'bounceRays', 'profile']);
+export const COMPARABLE_FIELDS = Object.freeze(['load', 'demo', 'runsRequested', 'bounceRays', 'profile', 'vidGeometryRequested']);
 
 /**
  * Refuse to compare records taken under different conditions, and NAME the field that differs.
  *
- * GEOMETRY IS IN THE LIST and it is the one power-baseline does not have: this load's cost is set by
- * the desktop's resolution, which the owner changes without telling anyone — the same evening the
- * bench was built it went from 1280×720 to 3840×2160. Comparing across that would manufacture a
- * "regression" of tens of percent out of a display setting.
+ * GEOMETRY GETS TWO DIFFERENT TREATMENTS, and which is which was decided by measurement rather than by
+ * caution:
+ *
+ *   · `vidGeometryRequested` — a SETTING WE CHANGED, so a difference is a REFUSAL. It was measured
+ *     inert on this build, and it is still refused on: runs configured differently are different runs,
+ *     and "inert" is one measurement, not a law.
+ *   · `desktopGeometry` — a CAVEAT, named and printed, never a refusal. Refusing here would block
+ *     legitimate comparisons over a quantity this bench was measured NOT to follow (the 4K desktop ran
+ *     FASTER than the 720p one). Naming what differs and letting a human judge is what power-baseline
+ *     already does with the background client list, for the same reason.
  *
  * [NOT-TESTED]
  */
 export function comparability(records) {
   const problems = [];
+  const caveats = [];
   if (records.length < 2) problems.push(`разброс требует минимум двух замеров, дано ${records.length}`);
   const first = records[0];
   if (first) {
@@ -559,9 +607,10 @@ export function comparability(records) {
         problems.push(`поле «${f}» расходится: ${[...new Set(records.map((r) => String(r[f] ?? '—')))].join(' / ')}`);
       }
     }
-    const geo = (r) => (r.geometry ? `${r.geometry.width}x${r.geometry.height}@${r.geometry.refreshHz}` : '—');
+    const geo = (r) => (r.desktopGeometry ? `${r.desktopGeometry.width}x${r.desktopGeometry.height}@${r.desktopGeometry.refreshHz}` : '—');
     if (records.some((r) => geo(r) !== geo(first))) {
-      problems.push(`геометрия экрана расходится (${[...new Set(records.map(geo))].join(' / ')}) — это разная нагрузка, а не разная скорость`);
+      caveats.push(`геометрия РАБОЧЕГО СТОЛА расходится (${[...new Set(records.map(geo))].join(' / ')}) — `
+        + 'замером эта нагрузка за ней НЕ следует (4K-стол дал больше кадров, чем 720p), поэтому это оговорка, а не отказ');
     }
     const cvars = (r) => (r.cvars || []).join(' ');
     if (records.some((r) => cvars(r) !== cvars(first))) problems.push('набор фиксированных cvar расходится между замерами');
@@ -570,7 +619,7 @@ export function comparability(records) {
       if (vals.length > 1) problems.push(`${key} расходится между замерами (${vals.join(' / ')}) — правило R6: сравнивать нечего`);
     }
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, caveats };
 }
 
 // =================================================================================================
@@ -584,9 +633,12 @@ export function comparability(records) {
  *   2. drop the cold run silently (return kept only)   → «холодный прогон отброшен И назван»
  *   3. compare only the magnitude in capProof          → «дешёвый кадр МЕДЛЕННЕЕ — это не пройденная проверка»
  *   4. let capProof pass on a tiny change              → «зажатая величина не проходит порог»
- *   5. drop geometry from comparability                → «разная геометрия экрана — отказ»
+ *   5. drop the DESKTOP geometry refusal                → «разная геометрия СТОЛА — тоже отказ, но по своей причине»
  *   6. return PASS from decideGraphicsVerdict          → «чистый прогон НЕ выдаёт PASS»
  *   7. average frame counts instead of flagging them   → «разное число кадров — это разные прогоны»
+ *   8. drop the requested geometry from the comparable fields → «разная ЗАПРОШЕННАЯ геометрия — отказ (настройку меняли мы)»
+ *   9. turn the desktop-geometry caveat into silence      → «и оговорка при этом названа вслух, а не проглочена»
+ *   9. accept a record whose render geometry is unset   → «незаданная геометрия рендера — отказ, а не молчаливое согласие»
  */
 export function selfTest() {
   const results = [];
@@ -644,10 +696,15 @@ export function selfTest() {
   ok('динамическое масштабирование выключено', /\+set drs_enable 0/.test(joined), true);
   ok('игра завершает себя сама', /\+set nextserver quit/.test(joined), true);
   ok('число прогонов уходит в timedemo', /\+set timedemo 5/.test(joined), true);
-  ok('разрешение НЕ навязывается', /r_customwidth|r_mode|vid_geometry/.test(joined), false);
+  ok('без явной геометрии движок не получает её вовсе', /vid_geometry|r_customwidth|r_mode/.test(joined), false);
+  ok('заданная геометрия уходит в движок как vid_geometry',
+    /\+set vid_geometry 1920x1080/.test(buildArgs({ geometry: '1920x1080' }).join(' ')), true);
   let threw = false;
   try { buildArgs({ runs: 0 }); } catch { threw = true; }
   ok('ноль прогонов — отказ, а не молчаливый запуск', threw, true);
+  let threwGeo = false;
+  try { buildArgs({ geometry: '4k' }); } catch { threwGeo = true; }
+  ok('геометрия мусором — отказ, а не молчаливая подстановка', threwGeo, true);
 
   // --- geometry parsing
   const geo = parseGeometry('SudoMaker Virtual Display Adapter\t1680\t1050\t288\nNVIDIA GeForce RTX 5070 Ti\t3840\t2160\t144');
@@ -673,13 +730,17 @@ export function selfTest() {
   // --- comparability
   const rec = (over = {}) => ({
     load: 'q2rtx-timedemo', demo: 'q2demo1.dm2', runsRequested: 5, bounceRays: 2, profile: null,
-    geometry: { width: 1280, height: 720, refreshHz: 144 }, cvars: ['vid_fullscreen=1'],
+    vidGeometryRequested: '1280x720', renderGeometryObserved: null,
+    desktopGeometry: { width: 1280, height: 720, refreshHz: 144 }, cvars: ['vid_fullscreen=1'],
     gpu: { driver: '610.88', vbios: 'v1' }, ...over,
   });
   ok('один замер — это ещё не разброс', comparability([rec()]).ok, false);
   ok('одинаковые условия — сравнение состоялось', comparability([rec(), rec()]).ok, true);
-  ok('разная геометрия экрана — отказ',
-    comparability([rec(), rec({ geometry: { width: 3840, height: 2160, refreshHz: 144 } })]).ok, false);
+  ok('разная ЗАПРОШЕННАЯ геометрия — отказ (настройку меняли мы)',
+    comparability([rec(), rec({ vidGeometryRequested: '1920x1080' })]).ok, false);
+  const deskDiff = comparability([rec(), rec({ desktopGeometry: { width: 3840, height: 2160, refreshHz: 144 } })]);
+  ok('разная геометрия СТОЛА — ОГОВОРКА, а не отказ: замером нагрузка за ней не следует', deskDiff.ok, true);
+  ok('и оговорка при этом названа вслух, а не проглочена', /РАБОЧЕГО СТОЛА/.test(deskDiff.caveats.join(' ')), true);
   ok('разное число лучей — отказ', comparability([rec(), rec({ bounceRays: 0 })]).ok, false);
   ok('сток и профиль не смешиваются', comparability([rec(), rec({ profile: 'optimised' })]).ok, false);
   const drv = comparability([rec(), rec({ gpu: { driver: '611.00', vbios: 'v1' } })]);
@@ -697,7 +758,7 @@ function parseArgs(argv) {
   const o = {
     run: false, capture: false, proveNotCapped: false, selftest: false, dryRun: false,
     spread: null, label: null, profile: null, runs: config.Q2RTX_TIMEDEMO_RUNS,
-    bounceRays: config.Q2RTX_BOUNCE_RAYS,
+    bounceRays: config.Q2RTX_BOUNCE_RAYS, geometry: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -711,6 +772,7 @@ function parseArgs(argv) {
     else if (a === '--profile') o.profile = argv[++i];
     else if (a === '--runs') o.runs = Number(argv[++i]);
     else if (a === '--bounce-rays') o.bounceRays = Number(argv[++i]);
+    else if (a === '--geometry') o.geometry = argv[++i];
     else throw new Error(`неизвестный флаг: ${a}`);
   }
   if (o.capture && !o.label) throw new Error('--capture требует --label <метка> — замер без имени нельзя сравнить');
@@ -766,7 +828,7 @@ async function main(argv) {
   }
 
   if (o.dryRun) {
-    const plan = await runTimedemo({ runs: o.runs, bounceRays: o.bounceRays, dryRun: true });
+    const plan = await runTimedemo({ runs: o.runs, bounceRays: o.bounceRays, geometry: o.geometry, dryRun: true });
     console.log('ПЛАН ЗАПУСКА (ничего не запущено):');
     console.log(`  ${plan.command}`);
     return 0;
@@ -777,12 +839,13 @@ async function main(argv) {
     // required to MOVE. Until this passes, nothing this bench prints means anything (STATUS fact 17).
     const geo = probeGeometry();
     console.log('ПРОВЕРКА, ЧТО ВЕЛИЧИНУ НИЧТО НЕ ДЕРЖИТ (факт 17, EXP-0032)');
-    console.log(`  ЭКРАН: ${geo.primary ? `${geo.primary.width}×${geo.primary.height} @ ${geo.primary.refreshHz} Гц — ${geo.primary.name}` : 'не опрошен'}`);
+    console.log(`  СТОЛ:   ${geo.primary ? `${geo.primary.width}×${geo.primary.height} @ ${geo.primary.refreshHz} Гц — ${geo.primary.name}` : 'не опрошен'}`);
+    console.log(`  vid_geometry: ${o.geometry ?? 'не задан'} · РАЗМЕР КАДРА НЕ НАБЛЮДАЕТСЯ (замерено: эта настройка на нагрузку не влияет)`);
     console.log(`\n  ЗАПУСК 1/2 — дорогой кадр (лучей ${config.Q2RTX_BOUNCE_RAYS})`);
-    const full = await runTimedemo({ runs: o.runs, bounceRays: config.Q2RTX_BOUNCE_RAYS });
+    const full = await runTimedemo({ runs: o.runs, bounceRays: config.Q2RTX_BOUNCE_RAYS, geometry: o.geometry });
     printRun(full);
     console.log(`\n  ЗАПУСК 2/2 — дешёвый кадр (лучей ${config.Q2RTX_BOUNCE_RAYS_CHEAP})`);
-    const cheap = await runTimedemo({ runs: o.runs, bounceRays: config.Q2RTX_BOUNCE_RAYS_CHEAP });
+    const cheap = await runTimedemo({ runs: o.runs, bounceRays: config.Q2RTX_BOUNCE_RAYS_CHEAP, geometry: o.geometry });
     printRun(cheap);
     const proof = capProof(full.stats, cheap.stats);
     console.log('');
@@ -792,9 +855,9 @@ async function main(argv) {
 
   if (o.run) {
     const geo = probeGeometry();
-    console.log(`ЭКРАН: ${geo.primary ? `${geo.primary.width}×${geo.primary.height} @ ${geo.primary.refreshHz} Гц` : 'не опрошен'}`
+    console.log(`СТОЛ: ${geo.primary ? `${geo.primary.width}×${geo.primary.height} @ ${geo.primary.refreshHz} Гц` : 'не опрошен'} · рендер ${o.geometry ?? 'НЕ ЗАДАН'}`
       + ` · лучей ${o.bounceRays} · прогонов ${o.runs}`);
-    const r = await runTimedemo({ runs: o.runs, bounceRays: o.bounceRays });
+    const r = await runTimedemo({ runs: o.runs, bounceRays: o.bounceRays, geometry: o.geometry });
     printRun(r);
     return r.ok ? 0 : 1;
   }
@@ -803,9 +866,10 @@ async function main(argv) {
     console.log(`ЗАМЕР: ${o.label}${o.profile ? ` · профиль ${o.profile}` : ' · сток'} · лучей ${o.bounceRays} · прогонов ${o.runs}`);
     let rec;
     try {
-      rec = await capture({ label: o.label, profile: o.profile, runs: o.runs, bounceRays: o.bounceRays });
+      rec = await capture({ label: o.label, profile: o.profile, runs: o.runs, bounceRays: o.bounceRays, geometry: o.geometry });
     } catch (e) { console.error(`ОШИБКА: ${e.message}`); return 1; }
-    console.log(`  ЭКРАН:   ${rec.geometry ? `${rec.geometry.width}×${rec.geometry.height} @ ${rec.geometry.refreshHz} Гц` : 'не опрошен'}`);
+    console.log(`  vid_geometry: ${rec.vidGeometryRequested ?? 'не задан'} · размер кадра не наблюдался`);
+    console.log(`  СТОЛ:    ${rec.desktopGeometry ? `${rec.desktopGeometry.width}×${rec.desktopGeometry.height} @ ${rec.desktopGeometry.refreshHz} Гц` : 'не опрошен'}`);
     console.log(`  ВЕРДИКТ: ${rec.verdict ?? (rec.faultFree ? 'БЕЗ СБОЕВ (не PASS)' : 'НЕИЗВЕСТНО')} — ${rec.reason}`);
     if (rec.fps.n) {
       console.log(`  FPS:     медиана ${rec.fps.median.toFixed(3)} · разброс ${rec.fps.spreadPct.toFixed(2)} % внутри запуска`
