@@ -35,9 +35,12 @@
 //   node tools/fan-ladder.mjs --no-cue              without the leading 100 % marker
 //   node tools/fan-ladder.mjs --selftest            the ladder logic, no GPU
 //
-// [TESTED: 2026-08-10 21:xx, OFFLINE HALF · 25 selftest blocks green, eight mutations each reddening
-//  the block named for it BEFORE the run (§3). NOT TESTED: the ladder has never been played — no fan
-//  has been commanded by this file, and the owner has not listened yet.]
+// [TESTED: 2026-08-10 21:3x · 34 selftest blocks green, TEN mutations each reddening the block named
+//  for it BEFORE the run (§3). PLAYED ONCE on the live card and the owner listened — and that run found
+//  the defect this file now guards against: arrival was decided on the driver ACK, so two rungs sounded
+//  at the WRONG speed (2907 rpm under a label of «30 %»). Arrival is now decided on an rpm plateau, and
+//  the mutation that restores the old behaviour reddens its block. NOT RE-TESTED: the corrected ladder
+//  has not been played yet, so the owner has still never heard the 30 % floor honestly.]
 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -124,9 +127,19 @@ export function buildLadder(levels = DEFAULT_LEVELS, { floorPct = FAN_FLOOR_PCT 
 
 /** The schedule a human can read BEFORE the noise starts: what will play, and roughly when. The ramp
  *  is an estimate and says so — the run reports what actually happened. [NOT-TESTED] */
-export function schedule(levels, { holdSeconds = DEFAULT_HOLD_SECONDS, rampEstimateS = 8, cueLevel = null } = {}) {
+export function schedule(levels, { holdSeconds = DEFAULT_HOLD_SECONDS, rampEstimateS = 8, cueLevel = null, periodSeconds = null } = {}) {
   let t = 0;
   const all = cueLevel === null ? levels : [cueLevel, ...levels];
+  // In PERIOD mode every rung is exactly N seconds from its command, so the boundaries are round and
+  // a human with a stopwatch can follow them. The ramp is inside the rung rather than before it.
+  if (periodSeconds !== null) {
+    return all.map((level, i) => ({
+      level,
+      listenFromS: i * periodSeconds,
+      listenToS: (i + 1) * periodSeconds,
+      rampInsideS: rampEstimateS,
+    }));
+  }
   return all.map((level) => {
     const startsAt = t + rampEstimateS;
     t = startsAt + holdSeconds;
@@ -172,6 +185,60 @@ export function reachedLevel(coolers, target, { tolerancePct = RAMP_TOLERANCE_PC
   return coolers.every((c) => Number.isFinite(c.level) && Math.abs(c.level - target) <= tolerancePct);
 }
 
+/**
+ * HAS THE FAN PHYSICALLY ARRIVED? — the question `reachedLevel` above CANNOT answer, and the first
+ * live run is what proved it.
+ *
+ * The driver reports the `level` field the instant it accepts the command, so a level-based test
+ * passes on the FIRST poll, 0.5 s in, while the blades are still spinning at the previous speed. In
+ * the owner's acoustic ladder that put 2907 rpm — nearly the 3000 rpm ceiling — under a rung labelled
+ * "30 %", and 207 rpm under one labelled "100 %". He listened to two rungs that were not what they
+ * said. **This is EXP-0028 inverted: that lesson said "read the TARGET, not mere stability"; the
+ * mistake here was reading the COMMAND instead of the physics.**
+ *
+ * So arrival is decided on RPM, and on rpm alone: the last `samples` readings must agree within
+ * `tolerancePct` of each other. A ramp changes rpm monotonically, so a plateau IS arrival — there is
+ * no "plateau on the way up" for this quantity, which is exactly why it is a legitimate test here
+ * while it was not for the level field.
+ *
+ * `history` is a list of readings, oldest first, each an array of coolers.
+ *
+ * [NOT-TESTED]
+ */
+export function rpmSettled(history, { samples = 3, tolerancePct = 2 } = {}) {
+  if (!Array.isArray(history) || history.length < samples) return false;
+  const last = history.slice(-samples);
+  if (last.some((snap) => !Array.isArray(snap) || !snap.length)) return false;
+  const coolerCount = last[0].length;
+  if (last.some((snap) => snap.length !== coolerCount)) return false;
+  for (let i = 0; i < coolerCount; i++) {
+    // NOT `Number(rpm)`: `Number(null)` is 0, and 0 is then read as "the fan is stopped" — so a
+    // reading that never arrived would masquerade as a settled, silent fan. «Could not look» and
+    // «nothing is happening» are different answers, and this module must not merge them (the same
+    // rule event-logger keeps between `error` and `no-events`). Caught by its own selftest.
+    const rpms = last.map((snap) => snap[i]?.rpm);
+    if (rpms.some((r) => typeof r !== 'number' || !Number.isFinite(r))) return false;
+    const lo = Math.min(...rpms);
+    const hi = Math.max(...rpms);
+    // A stopped fan is a legitimate settled state; treat 0 as settled only if every sample is 0.
+    if (hi === 0) continue;
+    if (((hi - lo) / hi) * 100 > tolerancePct) return false;
+  }
+  return true;
+}
+
+/**
+ * The rpm this card should show at a given level, from the line MEASURED during the owner's ladder:
+ * 40 % → 1000 rpm and 100 % → 2714 rpm, i.e. **28.55 rpm per percent**. It is a CROSS-CHECK printed
+ * beside the observation, never the arrival test — a predicted number that decided when to stop
+ * waiting would be the same mistake as trusting the command field, one layer up.
+ *
+ * [NOT-TESTED]
+ */
+export function expectedRpm(level) {
+  return Math.round(1000 + (level - 40) * 28.55);
+}
+
 // =================================================================================================
 // 2. The run
 // =================================================================================================
@@ -187,6 +254,7 @@ export function reachedLevel(coolers, target, { tolerancePct = RAMP_TOLERANCE_PC
 export async function runLadder({
   levels = DEFAULT_LEVELS,
   holdSeconds = DEFAULT_HOLD_SECONDS,
+  periodSeconds = null,
   cueLevel = DEFAULT_CUE_LEVEL,
   dryRun = false,
   onRung = null,
@@ -245,15 +313,18 @@ export async function runLadder({
       const w = nvapi.writeFanControl(nv, handle, { mode: nvapi.FAN_MODE.MANUAL, level });
       touched = true;
 
-      // WAIT FOR ARRIVAL, not for agreement (EXP-0028).
+      // WAIT FOR THE BLADES, not for the driver's acknowledgement. The level field is true the
+      // instant the command lands; the rpm is true when the fan actually got there.
       let reached = false;
       let last = null;
+      const history = [];
       while (Date.now() - started < RAMP_TIMEOUT_MS) {
         await sleep(RAMP_POLL_MS);
         watchdog.beat();
         const s = nvapi.readFanCoolers(nv, handle);
         last = s.status.ok ? s.status.coolers.map((c) => ({ id: c.id, level: c.level, rpm: c.rpm })) : null;
-        if (last && reachedLevel(last, level)) { reached = true; break; }
+        if (last) history.push(last);
+        if (last && reachedLevel(last, level) && rpmSettled(history)) { reached = true; break; }
       }
       const rampMs = Date.now() - started;
 
@@ -263,16 +334,31 @@ export async function runLadder({
         commanded: w.ok,
         reached,
         rampSeconds: Number((rampMs / 1000).toFixed(1)),
+        expectedRpm: expectedRpm(level),
         coolers: last,
         rpm: last ? last.map((c) => c.rpm) : null,
       };
       if (onRung) onRung({ ...rung, phase: 'listen' });
 
-      // The owner's window starts HERE, with the fan already at the level.
-      const listenStart = Date.now();
-      while (Date.now() - listenStart < holdSeconds * 1000) {
-        await sleep(1000);
-        watchdog.beat();
+      // TWO WAYS TO SPEND THE RUNG, and the owner picks by how he is measuring.
+      //  · holdSeconds — his listening window starts AFTER the ramp, so every rung is as long as its
+      //    ramp made it. Honest, and impossible to follow on a stopwatch.
+      //  · periodSeconds — every rung is exactly N seconds from the moment it was COMMANDED, so the
+      //    boundaries land on round multiples and he can follow by counting. Asked for 2026-08-10:
+      //    «давай шаги твоей лестницы сделаем по 15 секунд, мне так будет легко ориентироваться по
+      //    секундомеру». The ramp then lives INSIDE the rung, and the report says how much of it was
+      //    ramp — so he knows how much of each window was settled sound rather than a transition.
+      if (periodSeconds !== null) {
+        while (Date.now() - started < periodSeconds * 1000) {
+          await sleep(500);
+          watchdog.beat();
+        }
+      } else {
+        const listenStart = Date.now();
+        while (Date.now() - listenStart < holdSeconds * 1000) {
+          await sleep(1000);
+          watchdog.beat();
+        }
       }
       const after = nvapi.readFanCoolers(nv, handle);
       rung.coolersAtEnd = after.status.ok
@@ -331,6 +417,20 @@ export function selfTest() {
   ok('пустой список кулеров — это НЕ достигнутый уровень', reachedLevel([], 70), false);
   ok('нечитаемый уровень — не достигнутый', reachedLevel([{ level: null }], 70), false);
 
+  // --- ARRIVAL BY RPM, and these blocks exist because the level field lied to the owner's ears.
+  const snap = (rpm) => [{ rpm }, { rpm }, { rpm }];
+  ok('плато оборотов — это приезд', rpmSettled([snap(1000), snap(1005), snap(1000)]), true);
+  ok('РАЗГОН — это НЕ приезд, даже если поле level уже рапортует цель',
+    rpmSettled([snap(500), snap(1200), snap(1900)]), false);
+  ok('двух проб мало для плато', rpmSettled([snap(1000), snap(1000)]), false);
+  ok('один отставший кулер ломает плато', rpmSettled([[{ rpm: 1000 }, { rpm: 500 }], [{ rpm: 1000 }, { rpm: 900 }], [{ rpm: 1000 }, { rpm: 1000 }]]), false);
+  ok('остановленные кулеры — законное плато', rpmSettled([snap(0), snap(0), snap(0)]), true);
+  ok('нечитаемые обороты плато не дают', rpmSettled([snap(null), snap(null), snap(null)]), false);
+  // the cross-check line, taken from the owner's own ladder
+  ok('предсказание оборотов сходится с замером на 40 %', expectedRpm(40), 1000);
+  ok('и на 100 % — с точностью до оборота', expectedRpm(100), 2713);
+  ok('и на пороге владельца 60 %', expectedRpm(60), 1571);
+
   // THE CUE — the owner's audible start marker, and the one descent this tool performs
   ok('на холодной карте отсечка разрешена', cueAllowed(45).ok, true);
   ok('на горячей карте отсечка ОТКАЗАНА — спуск на пол это и есть тот случай, ради которого правило',
@@ -374,6 +474,8 @@ async function main(argv) {
   };
   const levels = (arg('levels') ?? DEFAULT_LEVELS.join(',')).split(',').map((s) => Number(s.trim()));
   const holdSeconds = Number(arg('hold', DEFAULT_HOLD_SECONDS));
+  const periodArg = arg('period', null);
+  const periodSeconds = periodArg === null ? null : Number(periodArg);
   const noCue = argv.includes('--no-cue');
   const cueLevel = noCue ? null : Number(arg('cue', DEFAULT_CUE_LEVEL));
   const dryRun = argv.includes('--dry-run');
@@ -387,11 +489,13 @@ async function main(argv) {
 
   const t0 = cardTemperatureC();
   const cueVerdict = cueLevel === null ? { ok: false, why: 'отсечка выключена флагом --no-cue' } : cueAllowed(t0);
-  const plan = schedule(built.levels, { holdSeconds, cueLevel: cueVerdict.ok ? cueLevel : null });
+  const plan = schedule(built.levels, { holdSeconds, periodSeconds, cueLevel: cueVerdict.ok ? cueLevel : null });
   console.log('АКУСТИЧЕСКАЯ ЛЕСТНИЦА — слушает ВЛАДЕЛЕЦ, карта здесь прибор');
   console.log('');
   console.log(`  СТУПЕНИ:   ${built.levels.join(' → ')} %`);
-  console.log(`  ОКНО:      ${holdSeconds} с на каждой — и оно начинается ПОСЛЕ того, как обороты ДОЙДУТ`);
+  console.log(periodSeconds !== null
+    ? `  ШАГ:       РОВНО ${periodSeconds} с на ступень от момента команды — границы падают на круглые`
+    : `  ОКНО:      ${holdSeconds} с на каждой — и оно начинается ПОСЛЕ того, как обороты ДОЙДУТ`);
   console.log('             до команды. Вентилятор разгоняется ~8 с, и десять секунд «сразу после');
   console.log('             команды» дали бы вам послушать разгон, а не уровень (EXP-0028).');
   console.log(`  ВСЕГО:     примерно ${mmss(plan.at(-1).listenToS)} звучания`);
@@ -417,6 +521,7 @@ async function main(argv) {
     r = await runLadder({
       levels: built.levels,
       holdSeconds,
+      periodSeconds,
       cueLevel,
       onRung: (x) => {
         if (x.phase === 'listen') {
