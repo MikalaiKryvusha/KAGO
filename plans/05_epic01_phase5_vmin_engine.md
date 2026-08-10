@@ -235,7 +235,7 @@ produced, so escalation is a ratchet rather than a fresh guess.»*
 **Verification:** the selftest's completion line PRESENT plus ≥1 failed block per mutation (a crashed
 verifier is not a green verifier).
 
-### 4.3 — A point's verdict is the WORST over the diverse set 🔲
+### 4.3 — A point's verdict is the WORST over the diverse set 🟡
 
 *Anchor: `plans/01_EPIC` §4 — «порог точки — худший по всему набору нагрузок, никогда не первый
 найденный»; `researches/02` §4.*
@@ -255,6 +255,33 @@ verifier is not a green verifier).
 
 **Verification:** a fixture run where one shape fails and another passes must yield the failing shape's
 verdict as the point's threshold, named.
+
+#### 2026-08-10 19:2x — THE FOURTH SHAPE ARRIVED, and it is the game one
+
+`automation-engine/lib/graphics-load.mjs` (`npm run gfx`) wraps Q2RTX's timedemo: the invocation with
+every measured trap closed on the command line, the FPS parser taken from `src/client/demo.c`, the cold
+opening run dropped and named, telemetry from a separate process, and the Windows fault window over the
+run's own interval. Offline half **[TESTED]** — 39 blocks, seven mutations each reddening the block named
+for it before the run. Live half **[NOT-TESTED]** — the game has not been launched by this code yet.
+
+**Three things this step must now carry that it did not when it was written:**
+
+- **This shape has NO checksum half, and the module refuses to pretend otherwise.** It never returns
+  `PASS`; a clean run is `faultFree`. `judgeCandidate()` must therefore treat it as a CRASH witness and
+  a THROUGHPUT witness (R4/R4a), never as a point's PASS — the worst-verdict rule stays, but "worst"
+  cannot be computed by mixing a verdict with a non-verdict.
+- **Its gate runs first, every session:** `npm run gfx -- --prove-not-capped`. Until the FPS is shown to
+  MOVE when the frame cost changes, none of its numbers mean anything (fact 17, EXP-0032).
+- **The desktop's geometry is a CONDITION and it already moved.** The §7b numbers (54 fps at 299.97 W)
+  were taken at 1280×720; the display read **3840×2160 @ 144 Hz** the same evening. Records carry the
+  geometry and `--spread` refuses to compare across it — a display setting must never surface as a
+  regression.
+
+**And the criterion this instrument now serves** (the owner, 2026-08-10 19:1x): `Optimised` is defined as
+**FPS within 5 % of `Max Perfomance`** while watts, heat and noise come down hard, with a ceiling the card
+may not exceed. That is a claim about FRAMES, so it is measured here — and `--spread` exists because a
+5 % budget compared against an instrument whose own across-launch scatter is unmeasured decides nothing
+(EXP-0018).
 
 ### 4.4 — `engine.mjs`: coarse ascent → bracket → bisect, and never dwell at the edge 🔲
 
