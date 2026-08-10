@@ -62,7 +62,12 @@
 //    1280x720 → 57.721, requested 1920x1080 → 57.283, i.e. **0.76 % apart inside a 1.84 % scatter**.
 //    Both findings are written into `buildArgs`, and the second one is why the record now says the
 //    render size is UNOBSERVED instead of naming one.]
-//   `capture()` — [NOT-TESTED]: no capture with telemetry and a fault window has run yet.
+//   `capture()` — [TESTED: 2026-08-10 19:5x · a real capture at stock, cooled to 42 °C first: 125
+//    telemetry samples (113 under load, 12 idle) taken from the child sampler, the fault window
+//    queried over the run's own interval, and the record written with the verdict «БЕЗ СБОЕВ (не
+//    PASS)» exactly as designed. The card it saw is the saturated one: 299.8 W median, 76 °C, fan
+//    72 %, 99 % utilization, delivered clock 2775 MHz — i.e. this bench reaches the envelope every
+//    other load in this project failed to reach.]
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
