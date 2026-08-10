@@ -1005,8 +1005,8 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   background and under a load heavy enough to dominate it — at hundreds of watts under load, a 6 W
   desktop wobble is noise in the third digit. Quieting apps matters only when comparing IDLE
   numbers, and even then the floor stays out of reach.
-- **THE PDF'S NUMBERS ARE NOT TARGETS — THE OPTIMUM IS SEARCHED FOR ON THIS SPECIFIC CARD.** The
-  owner, chat 2026-08-10 09:4x +03:00, verbatim and unedited:
+- **THE PDF'S NUMBERS ARE NOT TARGETS — THE OPTIMUM IS SEARCHED FOR ON THIS SPECIFIC CARD.** Quoted
+  from the owner's chat, 2026-08-10 09:4x +03:00, verbatim and unedited:
 
   > *«в мастерплане было написано про "перегиб кривой производительности" - что это является свит
   > спот, и что он якоды на 97% - это чистой воды спекуляция. Нужно не доверять этиц цифрам, а
