@@ -1023,6 +1023,14 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   line in this guide. Its executable form is **the owner's-machine rule** in the test-harness
   section: look it up first · name the rollback before the write · smallest reversible form ·
   re-read until stable · report the numbers. A permission entry is not a reason to act.
+- **THE BENCH MAY TAKE THE MACHINE — a standing permission, so no future session spends a turn asking
+  for it** (chat, 2026-08-10 19:4x): *«можешь занимать комп, не переживай по этому поводу»*. Said after
+  the agent asked whether to run a fullscreen game benchmark that would seize his display for minutes.
+  **What it covers:** occupying the screen and the card for measurement runs — fullscreen loads, long
+  burns, series taken back to back. **What it does NOT touch, because it is a different question
+  entirely:** the owner's-machine rule above. Permission to USE the machine is not permission to
+  CHANGE its state — a GPU write still walks the five steps, and installing software, touching the
+  registry or writing outside the repository is still the destructive class.
 - *«при измерениях всё, что создаёт фоновую нагрузку — останавливай»* (chat, 2026-08-10) — during a
   measurement run the agent MAY stop what heats the card. Bounded by the rule above, so the boundary
   is named rather than assumed: stop the consumer apps that hold the GPU awake (NVIDIA Broadcast,
