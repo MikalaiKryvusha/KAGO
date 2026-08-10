@@ -31,7 +31,8 @@
     "nvml": "node automation-engine/lib/nvml.mjs",
     "watchdog": "node automation-engine/lib/watchdog.mjs",
     "vfstep": "node automation-engine/lib/vf-step.mjs",
-    "gfx": "node automation-engine/lib/graphics-load.mjs"
+    "gfx": "node automation-engine/lib/graphics-load.mjs",
+    "vmin": "node automation-engine/lib/vmin-store.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"

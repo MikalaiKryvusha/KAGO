@@ -213,7 +213,7 @@ always going to be one manual run by him.
 figures are single-sourced. §4.3 (the diverse set), §4.6 (the margin) and §4.7 (the long burn and the two
 series) are what turn this shape into one.
 
-### 4.2 — The ratchet store: a point's history IS the state of the search 🔲
+### 4.2 — The ratchet store: a point's history IS the state of the search ✅
 
 *Anchor: `researches/02` §6.5 point 3 — «A point carries the history of every verdict it ever
 produced, so escalation is a ratchet rather than a fresh guess.»*
