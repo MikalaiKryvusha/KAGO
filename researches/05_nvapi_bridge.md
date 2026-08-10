@@ -2,7 +2,7 @@
 
 > **Created:** 2026-08-10 (agent, on the owner's instruction *«давай займёмся инструментарием NVAPI. Я вижу, что без него мы сильно ограничены»*)
 > **Parent:** `MASTER_PLAN.md` phase 4 · `plans/01_EPIC_kago_orchestrator.md`
-> **Status:** 🟡 recon complete, NOTHING VERIFIED ON THIS MACHINE YET — every id below is somebody else's observation until our own probe confirms it
+> **Status:** 🟢 recon VERIFIED on this machine — 17 ids of 17 resolve on driver 610.88 (2026-08-10); the curve reads (128 points, voltage grid 5 mV); **the control record's geometry was MEASURED 2026-08-10 15:2x +03:00 and the published layout in §3.4 is WRONG on this card — see §8, which supersedes it**
 > **Outbound:** the operational plan for phase 4 · `config.VOLTAGE_GRID_STEP_IS_MEASURED` (this phase's first duty) · the measurement protocol of phase 2 §4.4–§4.5, which cannot control its initial conditions without fan control
 
 ---
@@ -110,13 +110,15 @@ undefined behaviour — worth relying on as a probe signal.
                  +0x04  voltage,   µV    (uint32)
 ```
 
-**`ClkVfPointsSetControl`, 0x2420 bytes:**
+**`ClkVfPointsSetControl`, 0x2420 bytes — ⚠️ THE ENTRY LAYOUT BELOW IS SUPERSEDED BY §8.**
+It is kept because it is what the source says and what a future session will find if it re-reads
+LACT #936; §8 is what this card actually does.
 
 ```
 0x00 .. 0x03   version (version_number = 1)
 0x04 .. 0x13   mask — ⚠ EXACTLY ONE BIT SET PER CALL. All 128 bits set returns -1.
-0x20 + i*0x48  entry i, 72 bytes; the frequency offset lives at the entry's start,
-               signed int32, in kHz  (+50000 = +50 MHz on that point)
+0x20 + i*0x48  entry i, 72 bytes; the frequency offset lives at the entry's start,     ← WRONG HERE
+               signed int32, in kHz  (+50000 = +50 MHz on that point)                  ← see §8
 ```
 
 **Read this the right way round:** the write applies a **frequency offset to a point**, not a voltage.
@@ -189,10 +191,103 @@ The owner's-machine rule applies with full force (`AGENT_GUIDE.md`). Concretely,
 
 ---
 
+## 8. THE CONTROL RECORD, MEASURED — and how a documented API was used as a ruler
+
+**Measured 2026-08-10 on this card, driver 610.88.** This section supersedes the entry layout in §3.4.
+Nothing here is inferred from a source; every number below moved under a lever we controlled.
+
+### 8.1 The problem this solves
+
+Following §3.4 literally, the first write aimed at the dword at the start of each 72-byte entry. That
+dword turned out to be a **flag, not a frequency**: a `--write-zero` was accepted, the curve did not
+change (correct — it was a no-op), and the only non-zero word in the entire 0x2420 structure was
+`0x1220 = 1`, which had been there **before** we ever wrote. At that point writing a real offset would
+have been guessing at the owner's hardware — the door `PHILOSOPHY.md` forbids.
+
+### 8.2 The method — a documented lever, and subtraction
+
+NVIDIA documents a clock-offset API in **NVML**, and `researches/05` §5.5 records that it and NvAPI's
+`SetControl` **operate on the same hardware state**. For a product that is a hazard; for a probe it is
+the whole instrument. Apply a KNOWN offset through the documented call, re-read the undocumented
+structure, subtract.
+
+The vendor's own header on this machine —
+`C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\include\nvml.h` — settled which call to use:
+
+- `nvmlDeviceSetGpcClkVfOffset` (what an earlier `STATUS.md` step pointed at) is **`DEPRECATED(13.0)`**.
+- The current call is **`nvmlDeviceSetClockOffsets(nvmlDevice_t, nvmlClockOffset_t*)`**, with the
+  read-only twin `nvmlDeviceGetClockOffsets`. Struct (header lines 1176–1189), 24 bytes:
+  `version · nvmlClockType_t type · nvmlPstates_t pstate · int clockOffsetMHz · int minClockOffsetMHz ·
+  int maxClockOffsetMHz`; `version = sizeof | (1 << 24) = 0x01000018`.
+
+### 8.3 The measured layout
+
+| Quantity | Published (§3.4) | **MEASURED here** |
+|---|---|---|
+| entry stride | 0x48 = 72 B | **0x24 = 36 B** — exactly half |
+| frequency-offset field | entry's start, +0x00 | **+0x14 within the entry** |
+| unit | kHz | **kHz — confirmed** |
+| entry array | implied 0x20 … 0x2420 | **0x20 … 0x1220** (128 × 0x24 = 0x1200) |
+
+**The arithmetic closes on the old mystery.** 0x20 + 128 × 0x24 = **0x1220** — the address of that
+stray `1`. It was never a curve field: it is the first dword of whatever follows the entry array.
+
+**Confirmed at two independent magnitudes**, because one magnitude cannot separate a unit from a
+coincidence (EXP-0018): −100 MHz moved every field by exactly **−100000**; −37 MHz, a deliberately
+non-round value, by exactly **−37000**. Linear, kHz, same stride, same field both times.
+
+**The domain is bounded, by measurement rather than assumption.** The same experiment driven by the
+**memory** clock lever moved the card's memory offset (NVML read it back stable at −100 MHz) and
+changed **zero bytes** of this structure. So these entries are the **graphics domain alone**, and a
+stride mistake cannot reach memory settings.
+
+**What is NOT known, and no code may assume otherwise:** entries **1…127** moved; **entry 0 did not**.
+Whether point 0 is inactive or is a point the driver deliberately never shifts is unmeasured.
+
+### 8.4 The allowed offset range — the other unknown this retired
+
+`ClkDomainsGetInfo` (id `0x64B43A6A`) has refused all 30 size/version pairs tried, so "the permitted
+offset range is UNKNOWN" had been forcing microscopic first writes by POLICY rather than by permission.
+`nvmlDeviceGetClockOffsets` publishes it as a **documented, read-only output**, and on this card at P0:
+
+| Domain | Current offset | **Allowed range** |
+|---|---|---|
+| GRAPHICS | 0 MHz | **−1000 … +1000 MHz** |
+| MEM | 0 MHz | −2000 … +6000 MHz |
+| SM | — | `ERROR_INVALID_ARGUMENT` — not a valid domain for this call here |
+
+### 8.5 Safety, as actually executed
+
+Every run walked the owner's-machine rule in order: the vendor header read **before** the first call ·
+the rollback (**the same call with `clockOffsetMHz = 0`**) named out loud and placed in a `finally` so
+it runs on every path · the **negative** direction chosen deliberately, since a negative offset makes
+the card slower at the same voltage and cannot destabilize it · every read polled until **two
+consecutive samples agree** (EXP-0014) · and after each of the three runs the full 9 248-byte structure
+compared **byte for byte** against its pre-write snapshot — identical each time.
+
+A second, independently-authored witness rode along: `ClkVfPointsGetStatus` showed the curve's top move
+3172.0 → 3075.0 MHz under the −100 MHz offset (−97, the card snapping to its own 7/8 MHz clock grid) and
+return afterwards.
+
+### 8.6 Commands
+
+```
+npm run nvml                                    read-only: driver, card, offset + ALLOWED RANGE per domain
+npm run nvml -- --find-offset-field -100        the experiment; add --mem for the memory lever
+npm run nvml -- --verify-decode                 the guard: one buffer, both layouts, published must go red
+```
+
+**`nvml.mjs` is an INSTRUMENT, never a backend.** It is not called by `profile-manager.mjs` and never
+applies a profile — rule R1 stands, and the shipping write path remains NvAPI. §5.5's warning about the
+two APIs clobbering each other is the reason the quarantine is explicit rather than assumed.
+
+---
+
 ## Sources
 
 - [nvfancontrol — Windows NVAPI fan control (Rust)](https://github.com/foucault/nvfancontrol/blob/master/src/nvctrl/os/windows.rs) — fan ids, init flow
 - [LACT issue #936 — per-point V/F curve read/write via undocumented NvAPI, tested on RTX 5090 Blackwell](https://github.com/ilya-zlobintsev/LACT/issues/936) — curve ids, struct layouts, offsets, failure modes
 - [Koffi — C FFI for Node.js](https://koffi.dev/) · [function pointers](https://koffi.dev/pointers) — `koffi.proto` / `koffi.call` / `koffi.decode`
 - [NVAPI Reference Documentation](https://docs.nvidia.com/gameworks/content/gameworkslibrary/coresdk/nvapi/group__gpuclock.html) — the documented half (Initialize, EnumPhysicalGPUs, status codes)
+- **`nvml.h` from CUDA Toolkit 13.3, ON THIS MACHINE** (`C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\include\nvml.h`) — the authority for §8: `nvmlClockOffset_v1_t` (lines 1176–1189), `NVML_STRUCT_VERSION` (139), `nvmlClockType_t` (1107), `nvmlPstates_t` (1153), `nvmlReturn_t` (1296–1327), `nvmlDeviceGetClockOffsets` / `nvmlDeviceSetClockOffsets` (6306, 6328), the `DEPRECATED(13.0)` marking of `nvmlDeviceSetGpcClkVfOffset` (9280). A local header beats a web page: it is the version this driver ships against
 - Measured on this machine 2026-08-10: `nvidia-smi --help` write options (no fan control) · the idle warm-up 47 → 50 °C at fan 0 %

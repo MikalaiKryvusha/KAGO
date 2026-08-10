@@ -335,9 +335,48 @@ export function probeStruct(nv, handle, { id, proto, sizes, versions = [1, 2, 3,
   return { ok: false, tried };
 }
 
+/**
+ * THE CONTROL RECORD'S GEOMETRY — MEASURED ON THIS CARD, not taken from the source.
+ *
+ * WHAT THE SOURCE SAID (LACT #936, researches/05 §3.4): entries of 0x48 = 72 bytes, the frequency
+ * offset at the entry's START. Both halves are WRONG here, and believing them is what stalled this
+ * phase: with a 72-byte stride the writer aimed at a dword that turned out to be a FLAG, and the only
+ * non-zero word in the whole structure sat at 0x1220 and had been there before we ever wrote.
+ *
+ * WHAT THE MEASUREMENT SAID (2026-08-10, `nvml.mjs --find-offset-field`): a known offset was applied
+ * through NVIDIA's DOCUMENTED `nvmlDeviceSetClockOffsets` and this structure was re-read before and
+ * after. The changed dwords are spaced 0x24 apart — exactly HALF the published stride — and sit at
+ * +0x14 inside the entry. Confirmed twice at independent magnitudes: -100 MHz moved every field by
+ * exactly -100000, and -37 MHz by exactly -37000. Hence the unit is kHz and the relation is linear.
+ *
+ * THE ARITHMETIC CLOSES: 128 entries x 0x24 = 0x1200 bytes, which from 0x20 ends at exactly 0x1220 —
+ * the address of that mystery word. It was never a curve field at all; it is the first dword of
+ * whatever follows the entry array.
+ *
+ * THE DOMAIN IS BOUNDED, and this was measured rather than assumed: the same experiment run with the
+ * MEMORY clock lever (`--find-offset-field -100 --mem`) moved the card's memory offset and changed
+ * ZERO bytes of this structure. So these entries are the GRAPHICS domain alone, and a stride mistake
+ * cannot reach memory settings.
+ *
+ * WHAT IS NOT KNOWN, said plainly rather than smoothed over: entry 0's field did NOT move while
+ * entries 1..127 all did. Whether point 0 is inactive, or is a point the driver deliberately never
+ * shifts, is unmeasured — so no code may assume entry 0 behaves like the rest.
+ */
 export const CLK_VF_CONTROL_SIZE = 0x2420;
-export const CLK_VF_CONTROL_STRIDE = 0x48;
+export const CLK_VF_CONTROL_STRIDE = 0x24;
 export const CLK_VF_CONTROL_DATA_OFFSET = 0x20;
+export const CLK_VF_CONTROL_FREQ_OFFSET_FIELD = 0x14;
+/** The entry array's end — 0x20 + 128 * 0x24. Everything at or beyond this is NOT a curve entry. */
+export const CLK_VF_CONTROL_DATA_END = CLK_VF_CONTROL_DATA_OFFSET + CLK_VF_CONTROL_STRIDE * CLK_VF_POINT_COUNT;
+export const CLK_VF_CONTROL_GEOMETRY_IS_MEASURED = true;
+
+/** The byte address of one entry's frequency-offset field — the one place this arithmetic lives. */
+export function vfControlFieldAt(pointIndex) {
+  if (!Number.isInteger(pointIndex) || pointIndex < 0 || pointIndex >= CLK_VF_POINT_COUNT) {
+    throw new RangeError(`точка вне диапазона 0…${CLK_VF_POINT_COUNT - 1}: ${pointIndex}`);
+  }
+  return CLK_VF_CONTROL_DATA_OFFSET + pointIndex * CLK_VF_CONTROL_STRIDE + CLK_VF_CONTROL_FREQ_OFFSET_FIELD;
+}
 
 /**
  * Build the control struct for ONE point — the only shape the API accepts.
@@ -353,11 +392,19 @@ export function buildVfControl(pointIndex, offsetKhz, { version = 1 } = {}) {
   const buf = Buffer.alloc(CLK_VF_CONTROL_SIZE);
   buf.writeUInt32LE(nvapiVersion(CLK_VF_CONTROL_SIZE, version), 0);
   buf[0x04 + (pointIndex >> 3)] = 1 << (pointIndex & 7);      // exactly one bit
-  buf.writeInt32LE(offsetKhz, CLK_VF_CONTROL_DATA_OFFSET + pointIndex * CLK_VF_CONTROL_STRIDE);
+  buf.writeInt32LE(offsetKhz, vfControlFieldAt(pointIndex));  // MEASURED position, not the source's
   return buf;
 }
 
-/** Read every per-point offset currently applied (read-only). */
+/**
+ * Read every per-point offset currently applied (read-only).
+ *
+ * Returns the RAW buffer alongside the decoded offsets on purpose. The decode above rests on an
+ * assumption we have not yet proven — that the offset lives at the START of each 72-byte entry — and
+ * the first dword already turned out to be a FLAG rather than a frequency. So a caller that wants to
+ * FIND the real field must be able to diff all 9 248 bytes, not the 128 numbers we guessed out of them
+ * (see nvml.mjs → the offset-field experiment).
+ */
 export function readVfOffsets(nv, handle, { version = 1 } = {}) {
   const { koffi, protos, resolve } = nv;
   const entry = resolve(0x23F1B133);
@@ -368,9 +415,9 @@ export function readVfOffsets(nv, handle, { version = 1 } = {}) {
   if (status !== 0) return { ok: false, status, why: statusName(status) };
   const offsets = [];
   for (let i = 0; i < CLK_VF_POINT_COUNT; i++) {
-    offsets.push(buf.readInt32LE(CLK_VF_CONTROL_DATA_OFFSET + i * CLK_VF_CONTROL_STRIDE));
+    offsets.push(buf.readInt32LE(vfControlFieldAt(i)));
   }
-  return { ok: true, offsets, nonZero: offsets.filter((o) => o !== 0).length };
+  return { ok: true, offsets, nonZero: offsets.filter((o) => o !== 0).length, raw: buf };
 }
 
 /**

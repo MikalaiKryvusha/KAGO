@@ -93,17 +93,43 @@ export const GUARDBAND_MIN_MILLIVOLTS = 25;
  *
  * WHAT THIS NUMBER IS, PRECISELY — the same distinction config already warned about, now that it
  * matters: this is the SPACING BETWEEN ADJACENT CURVE POINTS. It is NOT the granularity of an applied
- * offset; that is a different quantity, read from `ClkDomainsGetInfo`, and it is still UNMEASURED. A
- * caller that needs the offset resolution must not use this constant for it.
+ * offset; that is a different quantity, and it is still UNMEASURED. A caller that needs the offset
+ * resolution must not use this constant for it.
  */
 export const VOLTAGE_GRID_STEP_MV = 5;
 export const VOLTAGE_GRID_STEP_IS_MEASURED = true;
 
 /**
- * The OFFSET granularity — a different quantity from the point spacing above, and still open.
- * SETTLED BY: `ClkDomainsGetInfo` (id 0x64B43A6A), which also publishes the allowed offset range.
+ * The OFFSET granularity — a different quantity from the point spacing above, and STILL OPEN.
+ *
+ * RENAMED 2026-08-10 from `VOLTAGE_OFFSET_GRANULARITY_IS_MEASURED`, because the old name lied about
+ * the unit and phase 5 was about to build a search on it. What this API actually applies to a curve
+ * point is a **FREQUENCY offset in kHz** — "this voltage point shall run at a higher frequency" — so
+ * calling its resolution a *voltage* granularity would have sent the fine search looking for millivolts
+ * in a kHz field. Nothing consumed the constant yet; renaming now costs one line and later costs a bug.
+ *
+ * WHAT IS MEASURED (2026-08-10, researches/05 §8): the field's POSITION, its UNIT (kHz) and its
+ * allowed RANGE, below. What is NOT: the smallest offset the driver actually honours. Two magnitudes
+ * were applied (-100 and -37 MHz) and both landed exactly, so the resolution is at worst 1 MHz — but
+ * "at worst 1 MHz" is a bound, not a measurement, and sub-MHz was never tried.
  */
-export const VOLTAGE_OFFSET_GRANULARITY_IS_MEASURED = false;
+export const CLOCK_OFFSET_GRANULARITY_IS_MEASURED = false;
+
+/**
+ * The allowed frequency-offset range for the graphics domain at P0, in MHz.
+ *
+ * MEASURED 2026-08-10 by the documented, READ-ONLY `nvmlDeviceGetClockOffsets`, which publishes min and
+ * max as outputs (researches/05 §8.4). This is a safety number and therefore lives here (rule R3), not
+ * at a call site.
+ *
+ * WHY IT MATTERS BEYOND ARITHMETIC: until it was read, the permitted range was UNKNOWN, and the plan's
+ * answer to that was to keep the first writes microscopic **by policy rather than by permission**. A
+ * bound the hardware itself states replaces a self-imposed guess — and it stays a CEILING, never a
+ * target: the search still climbs from small offsets, it simply now knows where the wall is.
+ */
+export const CLOCK_OFFSET_MIN_MHZ = -1000;
+export const CLOCK_OFFSET_MAX_MHZ = 1000;
+export const CLOCK_OFFSET_RANGE_IS_MEASURED = true;
 
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
@@ -409,7 +435,10 @@ export default Object.freeze({
   GUARDBAND_MIN_MILLIVOLTS,
   VOLTAGE_GRID_STEP_MV,
   VOLTAGE_GRID_STEP_IS_MEASURED,
-  VOLTAGE_OFFSET_GRANULARITY_IS_MEASURED,
+  CLOCK_OFFSET_GRANULARITY_IS_MEASURED,
+  CLOCK_OFFSET_MIN_MHZ,
+  CLOCK_OFFSET_MAX_MHZ,
+  CLOCK_OFFSET_RANGE_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,
   TRANSIENT_OFF_SECONDS,

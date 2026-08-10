@@ -26,7 +26,9 @@
     "kaif:update": "node .kaif/kaif-core.mjs update",
     "workloads:build": "node tools/build-workloads.mjs",
     "prove:gradient": "node tools/prove-error-gradient.mjs",
-    "workloads:verify": "node tools/build-workloads.mjs --verify"
+    "workloads:verify": "node tools/build-workloads.mjs --verify",
+    "nvapi": "node automation-engine/lib/nvapi.mjs",
+    "nvml": "node automation-engine/lib/nvml.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
