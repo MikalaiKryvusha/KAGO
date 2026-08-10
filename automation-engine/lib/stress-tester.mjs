@@ -47,8 +47,23 @@ const ROOT = resolve(HERE, '..', '..');
 const WORKLOADS_DIR = join(ROOT, 'workloads');
 const BASELINE_DIR = join(ROOT, 'runs', 'baseline');
 
-/** One burst must terminate. A hung kernel is itself a failure mode, not a reason to wait forever. */
-const BURST_TIMEOUT_MS = 60_000;
+/**
+ * One burst must terminate. A hung kernel is itself a failure mode, not a reason to wait forever.
+ *
+ * IT IS A FLOOR, NOT A CONSTANT, and that matters as of 2026-08-10: workloads now accept
+ * `--sustain <seconds>` and the owner asked for ≈1-minute burns after each whole-curve iteration
+ * («мерить не только на коротких импульсах, но и на длительных, например, минуту»). A fixed 60 s
+ * ceiling would report a healthy 60 s burn as ETIMEDOUT → `died: true` → **CRASH**, i.e. the harness
+ * would invent a fault at exactly the moment the owner asked for a longer look.
+ */
+const BURST_TIMEOUT_FLOOR_MS = 60_000;
+const BURST_TIMEOUT_SLACK_MS = 30_000;
+
+/** The wall-clock a burst is allowed, given how long it was ASKED to run. */
+export function burstTimeoutMs(sustainSeconds = 0) {
+  const asked = Number(sustainSeconds) > 0 ? Number(sustainSeconds) * 1000 : 0;
+  return Math.max(BURST_TIMEOUT_FLOOR_MS, asked + BURST_TIMEOUT_SLACK_MS);
+}
 
 // =================================================================================================
 // 1. Running one burst of a workload
@@ -67,19 +82,34 @@ const BURST_TIMEOUT_MS = 60_000;
  * [TESTED: 2026-08-10 · both real binaries on this card; and via the injected runner for exit≠0,
  * for a missing checksum line, and for ENOENT]
  */
-export function runBurst({ name, exe = null, args = [], run = null } = {}) {
+/**
+ * `sustainSeconds` is deliberately NOT part of `args`, and that is the whole answer to the stamp
+ * problem. `checkGoldenStamp` compares the golden's recorded `args` against the run's `args`; a
+ * baseline captured with `[]` must keep comparing `[] vs []`, or every sustained run would return
+ * НЕИЗВЕСТНО instead of a verdict. Keeping the duration outside `args` leaves EXP-0011's guard —
+ * the one that caught the false «58 из 58 прогонов разошлись с эталоном» — completely untouched.
+ *
+ * What licenses that exemption is not this comment but an executable check: `npm run workloads:build`
+ * re-proves on every build that the sustained mode yields the SAME checksum with `distinct=1`.
+ */
+export function runBurst({ name, exe = null, args = [], sustainSeconds = 0, run = null } = {}) {
   const binary = exe || join(WORKLOADS_DIR, `${name}.exe`);
+  const timeout = burstTimeoutMs(sustainSeconds);
   const launcher = run || ((cmd, a) => spawnSync(cmd, a, {
-    encoding: 'utf8', timeout: BURST_TIMEOUT_MS, windowsHide: true,
+    encoding: 'utf8', timeout, windowsHide: true,
   }));
 
-  const r = launcher(binary, args.map(String));
+  const argv = Number(sustainSeconds) > 0
+    ? [...args.map(String), '--sustain', String(sustainSeconds)]
+    : args.map(String);
+
+  const r = launcher(binary, argv);
 
   if (r && r.error && r.error.code === 'ENOENT') {
     return { ok: false, died: true, checksum: null, reason: `бинарника нет: ${binary}`, status: null };
   }
   if (r && r.error && r.error.code === 'ETIMEDOUT') {
-    return { ok: false, died: true, checksum: null, reason: `нагрузка не завершилась за ${BURST_TIMEOUT_MS} мс — зависшее ядро`, status: null };
+    return { ok: false, died: true, checksum: null, reason: `нагрузка не завершилась за ${timeout} мс — зависшее ядро`, status: null };
   }
   const status = r ? r.status : null;
   const stdout = String((r && r.stdout) || '');
@@ -209,6 +239,21 @@ export function decideVerdict({ bursts, golden, stamp, faults }) {
         + `Эталон ${golden.checksum}, получено ${got.join(', ')}. Ничего не упало — и это худший случай, а не лучший.`,
     };
   }
+  // SDC that happened INSIDE one burst. In sustained mode a burst is thousands of launches but
+  // prints ONE line, so the burst-to-burst comparison below can no longer see a launch that
+  // disagreed — the workload counts distinct checksums itself and reports the count. Without this
+  // branch, moving to the sustained shape would make the oracle BLINDER than the spawn-per-run shape
+  // it replaces, which is the opposite of why it exists.
+  const disagreed = bursts.filter((b) => b.fields && b.fields.distinct !== undefined && b.fields.distinct !== '1');
+  if (disagreed.length) {
+    return {
+      verdict: V.SDC,
+      reason: `ТИХОЕ ИСКАЖЕНИЕ ДАННЫХ ВНУТРИ ПРОГОНА: ${disagreed.length} из ${bursts.length} прогонов сами с собой не сошлись `
+        + `(distinct=${disagreed.map((b) => b.fields.distinct).join(', ')} при ${disagreed.map((b) => b.fields.launches).join(', ')} запусках). `
+        + 'Нагрузка детерминирована по построению и это доказано на сборке — значит разошлась не она.',
+    };
+  }
+
   // A run whose OWN bursts disagree with each other is corruption too, even with no golden at hand.
   if (got.length > 1) {
     return {
@@ -466,6 +511,24 @@ export function selfTest() {
   // 3. bursts disagreeing with each OTHER — corruption with no golden needed
   check('прогоны разошлись между собой -> SDC',
     decideVerdict({ bursts: [burst('aaaa'), burst('bbbb')], golden: goldenOf('aaaa'), stamp: { ok: true, why: '' }, faults: noFaults }).verdict, V.SDC);
+
+  // 3a. THE SUSTAINED-MODE BLIND SPOT. One sustained burst prints ONE line for thousands of
+  // launches, so block 3 above can no longer see a launch that disagreed inside it — the workload
+  // counts distinct checksums itself. Without this rule the sustained shape would be BLINDER than
+  // the spawn-per-run shape it replaces: the burst checksum matches the golden, nothing died, and
+  // the corruption at launch #500 passes as PASS.
+  check('внутри прогона суммы разошлись (distinct>1) -> SDC, хотя итоговая сумма совпала',
+    decideVerdict({
+      bursts: [{ ok: true, died: false, checksum: 'aaaa', fields: { checksum: 'aaaa', distinct: '3', launches: '6428' } }],
+      golden: goldenOf('aaaa'), stamp: { ok: true, why: '' }, faults: noFaults,
+    }).verdict, V.SDC);
+
+  // 3b. …and the ordinary sustained burst that agreed with itself must NOT be dragged into SDC.
+  check('distinct=1 -> вердикт не портится',
+    decideVerdict({
+      bursts: [{ ok: true, died: false, checksum: 'aaaa', fields: { checksum: 'aaaa', distinct: '1', launches: '6428' } }],
+      golden: goldenOf('aaaa'), stamp: { ok: true, why: '' }, faults: noFaults,
+    }).verdict, V.PASS);
 
   // 4. a dead process outranks everything
   check('процесс умер -> CRASH',

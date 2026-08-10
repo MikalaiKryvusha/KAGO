@@ -1063,6 +1063,53 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   - "Вменяемый компромис" is not a stop word here — it is made verifiable by N: once N is a number,
     "sane compromise" means "the largest power reduction whose measured price is ≤ N".
 
+  **THE SHIPPED POINT: THE OWNER CHOSE A CONVERGENCE LOOP, NOT A STATIC GUARDBAND** (chat,
+  2026-08-10, answering the A/B/C question the agent put to him about the guardband; verbatim):
+
+  > *«ну и было бы здорово мерить не телько на картоких импульсах, но и на длительных, например,
+  > минуту - но не на каждом шаге, а после очередной итерации тюнинга все кривой, чтобы проверить
+  > нагревы на длительном прожиге, и стабильность»*
+  >
+  > *«Хотелось бы, чтобы готовый профиль в точке вставал на минимальный шаг выше, а затем всеь
+  > профиль кривой из таких "хрупких около сбоя" точках напряжения тестировался. Если он показывает
+  > себя стабильно (я лично буду в Palworld играть и тестировать на реальном использвовании) - то его
+  > оставляем. Есил он будет "сбоить", то ищем точку, которая даёт сбои и у неё повышаем напряжение
+  > на один минимальный шаг вверх, и вновь тестируем всю кривую в стресс-тестах. То есть, хочется
+  > довольно аггресивно тюнить, искать минимально рабочее напряжение без сбоев.»*
+
+  **This is a fourth option, and it was not in the agent's A/B/C list.** It replaces a *static*
+  margin with an *empirically converged* one:
+
+  1. Each point ships at **one minimal hardware step above its measured failure point**.
+  2. The WHOLE curve of those fragile points is then tested as one profile — stress tests plus the
+     owner's own real use (Palworld).
+  3. Stable → kept. Misbehaving → **find the failing point, raise THAT point by one step, retest the
+     WHOLE curve**. Repeat.
+  4. **Long burns (≈1 minute) are run after each whole-curve iteration, not at every step** — to see
+     heat soak and stability, which short bursts cannot show.
+
+  **Why this is defensible rather than reckless, stated so no future session "corrects" it back:**
+  the 25 mV guardband is a PROXY for workloads we never ran (`researches/02`: Vmin spreads ~100 mV
+  between programs). The owner's loop attacks the same risk directly instead — by enlarging the
+  observation set (a real game, long thermal soaks) and by ratcheting any point that ever failed. A
+  margin earned by observation beats a margin assumed by proxy, where the observation is actually
+  taken.
+
+  **THE ONE CONDITION THAT MAKES THE LOOP SOUND, AND IT IS NOT OPTIONAL: the escalation trigger must
+  be the SDC ORACLE, never "it didn't crash".** More than half of undervolting failures are silent —
+  correct-looking frames, wrong numbers. A loop driven by crashes alone converges to *"nothing
+  visibly broke"* and parks the card INSIDE the corruption region, which is the worst outcome
+  available and the exact thing `researches/02` exists to prevent. So: every whole-curve retest
+  carries the checksum-versus-golden verdict AND the throughput check (`researches/04` §2 — clock
+  stretching and memory replay are invisible to both crashes and checksums), and the owner's Palworld
+  session is a SECOND witness beside them, never a replacement.
+
+  **What the loop still does not close, listed once and honestly:** silicon ages, so a point converged
+  to the edge today can fail in months; ambient temperature moves, so a profile settled in winter is
+  not proven for summer. Both are answered the same way — by RE-running the loop, which the design
+  makes cheap because it is a loop. Record per point: every verdict it ever produced, so an escalation
+  is a ratchet (a point that has failed is never lowered again) rather than a fresh guess.
+
   **THE SEARCH HAS TWO MODES, AND THE OWNER SPECIFIED THEM** (chat, 2026-08-10, verbatim):
 
   > *«для прогонов тюнинга нужно будет предусмотреть два режима - грубый и точный. Грубый меняет
