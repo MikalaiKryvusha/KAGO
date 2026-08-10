@@ -300,6 +300,101 @@ apply, it has crossed into the forbidden role.**
 has not been started even once. That boundary is real and stays recorded: the install is a fact, every
 performance claim about Q2RTX on this card is still absent.
 
+## 7b. RUN ON THIS CARD — it works, it saturates, and the first numbers were measuring a CAP
+
+**All measured 2026-08-10 18:3x…18:5x, driver 610.88, RTX 5070 Ti.**
+
+### It runs at all — which was the phase's biggest unknown
+
+The repository is discontinued and its authors never saw this driver or this architecture. The engine's
+own log answers it:
+
+```
+Picked physical device 0: NVIDIA GeForce RTX 5070 Ti
+Using VK_KHR_ray_query
+NVIDIA GPU detected. Driver version: 610.88
+FP16 support: yes
+631 frames, 4.46 seconds: 141.416397 fps
+```
+
+It launched, ray tracing initialized, the timedemo ran, the FPS line printed in exactly the format read
+out of `src/client/demo.c`, and the process **quit by itself** (`+set nextserver quit`), exit code 0.
+`demos/q2demo1.dm2` is the only demo in `pak0.pak` (135 KiB, verified by reading the pak's directory), and
+the `loading demo2` line in the log is the MAP (`demo2.bsp`) that demo plays — an earlier reading of this
+document called it a wrong demo name, and that was a misreading of the log, not a defect in the run.
+
+### THE FIRST NUMBERS WERE A CEILING, AND THE OWNER CAUGHT IT
+
+Ten runs in one launch produced 141.543 then **143.998154 nine times — identical to six decimals.** The
+first reading of that was "an extraordinarily precise instrument, 0.023 % spread". **That was wrong.** The
+owner named it immediately: *«144 кадра в секунду — это частота моего телевизора, может быть ограничение
+внутри драйвера NVidia»*.
+
+Proved by making the frame ~9× cheaper — 640×360 with `pt_num_bounce_rays 0`:
+
+```
+631 frames, 4.38 seconds: 143.998154 fps      ← the SAME value, to six decimals
+```
+
+A workload that gets identical frame times when its cost drops ninefold is not being measured; it is being
+**clamped**. Every windowed number here measured the cap, not the card. **Windowed mode on this machine
+paces to the display's refresh rate even with `vid_vsync 0`** — the engine's own vsync was off, so the cap
+is outside the engine (the desktop compositor; the desktop was reported at 1280×720 at the time, so the
+requested 1920×1080 window was not what got rendered either).
+
+**Fullscreen removes it and the variance comes back** — 79.08 / 79.53 / 79.27 / 79.98 fps at zero bounce
+rays, which is what a real bottleneck looks like.
+
+### AND FULLSCREEN SATURATES THE CARD COMPLETELY — the first load in this project that does
+
+`vid_fullscreen 1`, `pt_num_bounce_rays 2`, `drs_enable 0`, `timedemo 5`; telemetry sampled from a
+SEPARATE process (116 samples over ~58 s of load):
+
+| | Q2RTX fullscreen, 2 bounces | KAGO's own `sdc_fma --sustain` | what the difference means |
+|---|---|---|---|
+| GPU utilization | **99 %** (98–99) | 97 % | the percentages agree — and they are the misleading pair |
+| **power** | **299.97 W** median, peak **308.55** | ~137 W | **more than double**, and it is AT the 300 W limit |
+| throttle reasons | **`sw_power_cap`** | none | the card is being cut by the POWER CAP |
+| graphics clock | 2760 median, **min 2445** | 2887 | power-capped, so the card gives clock away |
+| temperature | **75 °C** (max 77) | 57 °C | the hottest state this project has produced |
+| fan | 72 % (max 75) | 30 % | it spun up on its own |
+| memory utilization | **62 %** | 15 % | four times the memory traffic |
+| FPS | 54.07…54.54, spread **0.88 %** | — | a real instrument with real variance |
+
+### FOUR CONSEQUENCES, and the third one is the serious one
+
+1. **`utilization.gpu` is a bad proxy for load, and this is the measurement that proves it.** 97 % and
+   99 % look the same; the power draw differs by more than 2×. Where a claim depends on how hard the card
+   is working, **power is the observable** — utilization only says "not idle".
+2. **The power-limit axis is alive after all.** `researches/04` recorded that a saturated card draws
+   194.8 W of a 300 W limit "so the power-limit axis cannot bite on that workload at all". True — *for
+   that workload*. Under a path-traced game `-pl` is a real lever, and the 250 W floor measured in
+   `researches/01` becomes meaningful.
+3. **EVERY STABILITY RESULT THIS PROJECT HAS WAS TAKEN AT HALF THE CARD'S POWER ENVELOPE.** The
+   undervolt that returned PASS did so at ~137 W and 57 °C. It is **not** evidence about 300 W and 77 °C,
+   which is where the owner actually plays. The oracle did not get worse — the region it certified turned
+   out to be narrow. `plans/05` §4.3's diverse set is therefore not a formality: this load belongs in it,
+   and the guardband arguments rest on it.
+4. **Under a game the payoff changes SHAPE, and this follows from the power cap rather than from taste.**
+   A power-capped card is already giving clock away (2445 MHz against a 2887 ceiling). Lower the voltage
+   and the same watts buy more clock — so under this load an undervolt shows up as **more FPS at the same
+   300 W**, not as fewer watts. The −7.71 W measured earlier was taken *below* the cap, which is why it
+   appeared as watts. Both are the same physics; which face it shows depends on which limit binds.
+
+### The invocation that works, for whoever needs it next
+
+```
+q2rtx.exe +set vid_fullscreen 1 +set vid_vsync 0 +set cl_maxfps 0 +set r_maxfps 0 \
+          +set drs_enable 0 +set pt_num_bounce_rays 2 +set flt_enable 1 \
+          +set timedemo 5 +demo q2demo1.dm2 +set nextserver quit
+```
+
+Each flag earns its place: **`vid_fullscreen 1`** or the compositor caps you at the refresh rate ·
+**`cl_maxfps 0`** or the engine caps you at 60 (its default) · **`drs_enable 0`** or dynamic resolution
+scaling quietly changes the load to hit a frame-rate target, which would make two runs incomparable ·
+**`timedemo 5`** because run one is cold and reads ~1.7 % low · **`+set nextserver quit`** so it ends
+itself.
+
 ## 8. What this document does NOT establish
 
 - **Nothing has been downloaded, installed or run.** Every mechanism in §4 is somebody else's claim; the
