@@ -202,7 +202,29 @@ export const VERDICT = Object.freeze({
 });
 
 // =============================================================================================
-// 7. Power limit — read from the card, never hard-coded
+// 7. Read-back after a write — how a written value is allowed to count as read
+// =============================================================================================
+
+/**
+ * SOURCE: EXP-0014, observed on this card 2026-08-10. `nvidia-smi -rgc` printed "All done" with exit
+ * 0 while the very next read still reported the locked 1200 MHz; the release surfaced about a second
+ * later. `researches/01` §5 had already caught the same tool printing the DEFAULT in its "from"
+ * field. So the tool's own success text is not evidence, and neither is a single read.
+ *
+ * THE RULE THESE THREE NUMBERS ENCODE: a written value counts as read back only when
+ * READBACK_AGREEING_SAMPLES consecutive samples agree with what was expected. Two is the smallest
+ * count that can distinguish a settled value from the stale one seen once — which is the exact shape
+ * the defect took (P2-AC2, plans/03 §4.2).
+ *
+ * The timeout is 10× the ~1 s settle actually observed, and on expiry the read-back FAILS rather
+ * than returning the last sample: a stale value silently accepted is precisely the defect.
+ */
+export const READBACK_AGREEING_SAMPLES = 2;
+export const READBACK_INTERVAL_MS = 250;
+export const READBACK_TIMEOUT_MS = 10_000;
+
+// =============================================================================================
+// 8. Power limit — read from the card, never hard-coded
 // =============================================================================================
 
 /**
@@ -266,4 +288,7 @@ export default Object.freeze({
   TELEMETRY_SAMPLE_MS,
   FAULT_PROVIDERS,
   VERDICT,
+  READBACK_AGREEING_SAMPLES,
+  READBACK_INTERVAL_MS,
+  READBACK_TIMEOUT_MS,
 });
