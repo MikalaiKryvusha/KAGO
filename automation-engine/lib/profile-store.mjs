@@ -23,7 +23,7 @@
 // work. That exemption follows from the data (all settings null) instead of from a `factory: true`
 // flag somebody has to keep in sync.
 //
-// [TESTED: 2026-08-10 · `node automation-engine/lib/profile-store.mjs --selftest` → 14 blocks, all
+// [TESTED: 2026-08-10 · `node automation-engine/lib/profile-store.mjs --selftest` → 17 blocks, all
 //  agreeing, on an injected card (no GPU touched); mutation-proved by breaking each of the three
 //  load-bearing guards in turn — the ladder check, the stamp-required derivation and the takenAt
 //  offset rule each turned its blocks red. `--list` loads profiles/factory.json against the live
@@ -55,7 +55,17 @@ const STAMP_KEYS = Object.freeze(['driver', 'vbios', 'takenAt']);
  */
 const LOCAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/u;
 
-const NAME_RE = /^[a-z0-9][a-z0-9-]*$/u;
+/**
+ * A profile name is both a CLI argument and half a path (`profiles/<name>.json`), so it stays
+ * lowercase letters, digits and hyphens — and the ONE suffix the project's own `.gitignore` requires:
+ * `.local`, which marks a profile that stays on this machine. The suffix is spelled out literally
+ * rather than by allowing dots in general, because a general dot would admit `..` and turn a name
+ * into a path traversal.
+ *
+ * Found by running the thing, not by reading it: the first live round trip refused its own probe
+ * profile, because the format did not know the convention its own directory README documents.
+ */
+const NAME_RE = /^[a-z0-9][a-z0-9-]*(\.local)?$/u;
 
 /** A refusal names the FIELD, so the message tells the owner what to fix rather than that something
  *  is wrong. Order of production is fixed, so two runs over one profile print identically. */
@@ -475,6 +485,24 @@ function cmdSelftest() {
       what: 'нет подписи для ярлыка -> отказ',
       profile: (() => { const p = factoryFixture(); delete p.title; return p; })(),
       expect: ['title'],
+    },
+    {
+      what: 'машинный профиль с суффиксом .local -> принят (соглашение .gitignore этого проекта)',
+      profile: (() => { const p = measuredFixture(); p.name = 'roundtrip-probe.local'; return p; })(),
+      fileName: 'roundtrip-probe.local.json',
+      expect: [],
+    },
+    {
+      what: 'имя с попыткой выйти из каталога -> отказ (имя это половина пути)',
+      profile: (() => { const p = measuredFixture(); p.name = '../evil'; return p; })(),
+      fileName: '../evil.json',
+      expect: ['name'],
+    },
+    {
+      what: 'точка НЕ в суффиксе .local -> отказ, форточка открыта ровно на одно слово',
+      profile: (() => { const p = measuredFixture(); p.name = 'silent.cold'; return p; })(),
+      fileName: 'silent.cold.json',
+      expect: ['name'],
     },
   ];
 
