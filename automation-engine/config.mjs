@@ -56,6 +56,27 @@ export const GUARDBAND_MIN_MILLIVOLTS = 25;
  * SETTLED BY: phase 4, the NVAPI bridge — its exit gate includes "the voltage grid step measured
  * on the live curve, not assumed" (plans/01_EPIC §4). Until then any millivolt figure derived from
  * this constant is an estimate, and callers must say so.
+ *
+ * THE OWNER'S RULE FOR THE FINE SEARCH MODE (chat, 2026-08-10, in answer to his own question
+ * "6,25 мВ - это минимальный шаг изменения, который позволяет сделать 5070 Ti?"): *«если да - тогда
+ * он будет шагом для точной настройки»*. So the fine mode's step is defined as **the hardware's own
+ * minimum step, whatever the measurement says it is** — not 5 mV, not 6.25 mV taken on faith. That
+ * definition is correct on any card, which is why it is the rule rather than a number.
+ *
+ * THE LEAD THAT WILL MEASURE IT (web recon 2026-08-10, researches/04 sources): NVIDIA exposes the
+ * V/F curve as a **128-point curve** through an UNDOCUMENTED NvAPI entry —
+ * `ClockClientClkVfPointsGetStatus`, function id `0x21537AD4`, a 0x1C28-byte struct of 128 × 28-byte
+ * entries, voltage in MICROVOLTS and frequency in kHz. Reported working on an RTX 5090 (Blackwell,
+ * GB202) on driver 590.48.01 — the same architecture family as this card.
+ *
+ * AND A REASON TO DOUBT 6.25 BEFORE TRUSTING IT: the example curve in that source shows voltage
+ * increments of 20…125 mV between the points it prints, which is not a uniform 6.25 mV grid. That
+ * refutes nothing on its own (the printed points may be a sparse selection), but it does mean the
+ * figure must be measured rather than adopted. Beware the confusion that makes this easy to get
+ * wrong — TWO different quantities wear the same name:
+ *   (1) the SPACING between adjacent curve points in voltage;
+ *   (2) the GRANULARITY of an offset that may be applied to a point (an Afterburner slider step).
+ * Folklore attaches 6.25 mV to (2). The fine mode needs whichever one actually binds.
  */
 export const VOLTAGE_GRID_STEP_MV = 6.25;
 export const VOLTAGE_GRID_STEP_IS_MEASURED = false;

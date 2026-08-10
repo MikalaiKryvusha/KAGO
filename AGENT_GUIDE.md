@@ -1063,6 +1063,29 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   - "Вменяемый компромис" is not a stop word here — it is made verifiable by N: once N is a number,
     "sane compromise" means "the largest power reduction whose measured price is ≤ N".
 
+  **THE SEARCH HAS TWO MODES, AND THE OWNER SPECIFIED THEM** (chat, 2026-08-10, verbatim):
+
+  > *«для прогонов тюнинга нужно будет предусмотреть два режима - грубый и точный. Грубый меняет
+  > напряжениена 25 мВ, тестит, фиксирует точку выше напряжения, при котором были отказы. А точный
+  > режим - меняет напряжение на 5 мВ и ищет точку отказа, и фиксирует режим на шаг на 5 мВ выше
+  > точки отказа.»*
+
+  Recorded here before it is reconciled, because the owner's words are the record and the
+  reconciliation is ours. **Two things in it need checking against the project's own measurements
+  rather than being implemented as read** — both are open at the time of writing:
+  - **5 mV may not be expressible — SETTLED by the owner the same day.** He asked whether 6.25 mV is
+    this card's minimum step; the honest answer is that nobody has measured it (`config.mjs` carries
+    `VOLTAGE_GRID_STEP_IS_MEASURED = false`, and `nvidia-smi` has no voltage field at all). His rule:
+    *«если да - тогда он будет шагом для точной настройки»* — so **the fine mode's step IS the
+    hardware's own minimum step, whatever the measurement says**, never a number taken on faith. That
+    formulation is correct on any card, which is why it is the rule instead of a figure.
+  - **"One step above the failure point" collides with the guardband** the project already measured
+    into `GUARDBAND_MIN_GRID_STEPS = 4` / `GUARDBAND_MIN_MILLIVOLTS = 25` (`researches/02`: the
+    error rate goes 3 % → 90 % across 2 % of voltage, and Vmin spreads ~100 mV between programs).
+    The likely reconciliation is that his three numbers describe the **search resolution** while the
+    guardband governs the **shipped operating point** — but that is the owner's call, not ours, and
+    it goes to him as a question with the arithmetic shown.
+
   Operationally, and it changes acceptance rather than only tone:
   - **Every figure inherited from `RTX_5070Ti_Undervolting_Master_Plan.pdf` — ≥97 % of stock, −60…−80 W,
     −100…−120 W, ≤65 °C / ≤58 °C, the "knee" of the curve — is a REFERENCE, never a target and never a
