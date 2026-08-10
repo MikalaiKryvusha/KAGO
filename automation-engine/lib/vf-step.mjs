@@ -775,7 +775,10 @@ export async function runShapeExperiment({
       }
 
       const label = `shape_${load}_${side.applyVector ? deltaMhz : 0}`
-        + `${side.applyVector && powerLimitW !== null ? `_pl${powerLimitW}` : ''}`;
+        + `${side.applyVector && powerLimitW !== null ? `_pl${powerLimitW}` : ''}`
+        // The cap belongs in the label too: two runs differing ONLY by it wrote to the same file
+        // and the first record was overwritten without a word.
+        + `${side.applyVector && capAtMhz !== null ? `_cap${capAtMhz}` : ''}`;
       const rec = load === 'graphics'
         ? await gfx.capture({ label: `${label}_b${gfxBounceRays}`, runs: gfxRuns, bounceRays: gfxBounceRays, profile: side.applyVector ? `curve+${deltaMhz}` : null })
         : await power.capture({ workload, seconds, sustain, label });
