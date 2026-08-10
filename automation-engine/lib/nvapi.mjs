@@ -110,7 +110,19 @@ export function statusName(code) {
  * parameters are raw Buffers for the same reason the struct work will need them — this API's real
  * surface is byte offsets, and pretending otherwise would only add a layer to debug through.
  */
+/**
+ * One bridge per process, cached.
+ *
+ * `koffi.proto()` registers each prototype under a GLOBAL name, so a second `openNvapi()` in the same
+ * process throws `Duplicate type name 'NvAPI_Initialize'`. Found by the watchdog drill, which opens the
+ * card repeatedly while it waits for the guard to act — and it would have hit any long-running caller
+ * (the search engine of phase 5 above all). The library and its prototypes are process-wide facts, so
+ * caching them is not an optimisation, it is the correct lifetime.
+ */
+let bridgeCache = null;
+
 export function openNvapi({ dll = 'nvapi64.dll' } = {}) {
+  if (bridgeCache && bridgeCache.dll === dll) return bridgeCache.bridge;
   const koffi = require('koffi');
   const lib = koffi.load(dll);
   const queryInterface = lib.func('void *nvapi_QueryInterface(uint32_t id)');
@@ -136,7 +148,9 @@ export function openNvapi({ dll = 'nvapi64.dll' } = {}) {
     return { ok: Boolean(ptr) && address !== 0n, ptr, address };
   };
 
-  return { koffi, lib, queryInterface, protos, resolve };
+  const bridge = { koffi, lib, queryInterface, protos, resolve };
+  bridgeCache = { dll, bridge };
+  return bridge;
 }
 
 /** A NvAPI_ShortString is char[64]; read it back as text up to the NUL. */
@@ -551,7 +565,7 @@ export function readVfOffsetsStable(nv, handle, { maxSamples = 12, gapMs = 250 }
  * The verdict this run produces is binary and it is the point: EXACTLY ONE entry changed, and it is
  * the one we addressed — or the mask does not isolate, which must be known before any real profile.
  */
-export function proveMask(handle, nv, { point = 64, offsetMhz = -15, mode = 'rmw' } = {}) {
+export function proveMask(handle, nv, { point = 64, offsetMhz = -15, mode = 'rmw', watchdog = null } = {}) {
   const offsetKhz = offsetMhz * 1000;
   const out = { point, offsetMhz, mode, blocks: [], written: false, rolledBack: false };
   const block = (name, ok, detail) => out.blocks.push({ name, ok, detail });
@@ -565,8 +579,16 @@ export function proveMask(handle, nv, { point = 64, offsetMhz = -15, mode = 'rmw
   const freqBefore = curveBefore.ok ? curveBefore.points[point].mhz : null;
 
   try {
+    // THE SWITCH IS ARMED BEFORE THE WRITE, NEVER AFTER — a switch armed after the write does not
+    // cover the write. From here until the `finally`, a hang, a kill or a black screen is answered by
+    // a SEPARATE process that returns the card to factory on its own (`watchdog.mjs`).
+    block('сторож взведён ДО записи', Boolean(watchdog),
+      watchdog ? `сторож pid ${watchdog.guardPid}, срок ${watchdog.record.ttlMs / 1000} с, откат — полный возврат к заводскому`
+        : 'НЕТ — запись без внешнего сторожа');
+
     const w = writeVfOffset(nv, handle, point, offsetKhz, { mode });
     block(`ЗАПИСЬ (${mode}): точка ${point}, сдвиг ${offsetMhz} МГц (${offsetKhz} кГц), один бит маски`, w.ok, w.why);
+    watchdog?.beat();
     if (!w.ok) return out;
     out.written = true;
 
@@ -629,15 +651,38 @@ export function proveMask(handle, nv, { point = 64, offsetMhz = -15, mode = 'rmw
       block('ОТКАТ: тот же вызов со сдвигом 0, структура побайтово равна исходной',
         out.rolledBack, `${r.why} · ${back.ok ? (identical ? '9 248 байт совпали' : 'БАЙТЫ РАСХОДЯТСЯ') : back.why}`);
     }
+    // Disarmed LAST, and only after the rollback has been verified. Disarming earlier would drop the
+    // net exactly while the riskiest part — the undo itself — is still in the air.
+    if (watchdog) {
+      const disarmed = watchdog.disarm();
+      block('сторож снят ПОСЛЕ проверенного отката', disarmed || !out.written,
+        disarmed ? 'запись убрана, карта свободна' : 'запись уже была снята (сторож мог сработать сам)');
+    }
   }
   return out;
 }
 
-function mainProveMask(point, offsetMhz, mode) {
+async function mainProveMask(point, offsetMhz, mode) {
+  const wd = await import('./watchdog.mjs');
+
+  // A record left behind means a previous run died holding the card. Never start new work on a state
+  // nobody can describe — reset first, say so, and only then proceed.
+  const rec = await wd.recover({});
+  if (rec.found && !rec.ownerAlive) {
+    console.log(`НАЙДЕНА ЗАБЫТАЯ ЗАПИСЬ СТОРОЖА («${rec.record.what}») — прошлый прогон умер, держа карту.`);
+    for (const s of rec.reset.steps) console.log(`  ${s.ok ? 'OK  ' : 'ПЛОХО'} ${s.name} — ${s.detail}`);
+    console.log('');
+  } else if (rec.found && rec.ownerAlive) {
+    console.error(`ОТКАЗ: сторож уже взведён живым процессом pid ${rec.record.ownerPid} («${rec.record.what}»).`);
+    console.error('Две записи в карту одновременно — это состояние, которое никто не сможет описать.');
+    return 1;
+  }
+
   const nv = openNvapi();
   const { koffi, protos, resolve } = nv;
   const st = koffi.call(resolve(0x0150E828).ptr, protos.Initialize);
   if (st !== 0) { console.error(`NvAPI_Initialize: ${statusName(st)}`); return 1; }
+  let watchdog = null;
   try {
     const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
     koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
@@ -655,7 +700,12 @@ function mainProveMask(point, offsetMhz, mode) {
     console.log('              и до доказанной маски её не трогаем.');
     console.log('');
 
-    const r = proveMask(handle, nv, { point, offsetMhz, mode });
+    watchdog = wd.arm({ what: `NvAPI: точка ${point}, сдвиг ${offsetMhz} МГц (${mode})`, ttlMs: 60_000 });
+    console.log(`  СТОРОЖ:     взведён, pid ${watchdog.guardPid}. Если этот процесс зависнет или умрёт —`);
+    console.log('              он вернёт карту к заводскому состоянию сам, по сроку или по смерти владельца.');
+    console.log('');
+
+    const r = proveMask(handle, nv, { point, offsetMhz, mode, watchdog });
     for (const b of r.blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}\n            ${b.detail}`);
 
     const failed = r.blocks.filter((b) => !b.ok).length;
@@ -664,6 +714,7 @@ function mainProveMask(point, offsetMhz, mode) {
     console.log(`ОТКАТ ВЫПОЛНЕН: ${r.rolledBack ? 'да, структура вернулась побайтово' : 'НЕТ — РАЗБИРАТЬСЯ НЕМЕДЛЕННО'}`);
     return failed === 0 ? 0 : 1;
   } finally {
+    watchdog?.disarm();          // idempotent: proveMask already disarms on its own normal path
     koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
   }
 }
@@ -850,5 +901,10 @@ function main() {
 
 // T9 — a module others import must not execute on import.
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  process.exit(main());
+  // `main()` returns a promise for the modes that await the watchdog; `Promise.resolve` covers both
+  // shapes so a sync mode keeps its old behaviour.
+  Promise.resolve(main()).then((code) => process.exit(code)).catch((e) => {
+    console.error(`ОШИБКА: ${e.message}`);
+    process.exit(1);
+  });
 }
