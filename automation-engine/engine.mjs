@@ -49,12 +49,14 @@
 //  reporting it as a measured edge — the plan says UNKNOWN is a STOP, and now the code does too.
 //  NOT TESTED: no live search has run. The edge of this card has still never been observed.]
 
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import config from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ } from './lib/vf-step.mjs';
-import { allowedOffset, append, openStore, readAll, partitionByStamp, summarizePoint } from './lib/vmin-store.mjs';
+import { VMIN_DIR, allowedOffset, append, openStore, readAll, partitionByStamp, summarizePoint } from './lib/vmin-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -319,6 +321,31 @@ export function selfTest() {
     let threw = false;
     try { await searchEdge({ capMhz: 2842, point: 95 }); } catch { threw = true; }
     ok('без инжектированного писателя движок отказывается работать', threw, true);
+
+    // --- THE STORE PATH, and it is here because its ABSENCE cost a live run.
+    // Every block above ran with `store: null`, so the persistence branch was never executed once —
+    // and the first real search died on its first record, on a field the store could have defaulted.
+    // A selftest that exercises only the paths without side effects is a selftest with a hole exactly
+    // where the side effects are.
+    const prodBefore = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
+    const sandbox = mkdtempSync(join(tmpdir(), 'kago-engine-'));
+    try {
+      const store = openStore({ dir: sandbox });
+      const r4 = await searchEdge({
+        capMhz: 2842, point: 95, store,
+        card: { driver: '610.88', vbios: 'v1' },
+        runStepFn: scripted((o) => (o < 200 ? P : config.VERDICT.SDC)),
+      });
+      const saved = readAll(store).records;
+      ok('каждая попытка ЛЕГЛА в хранилище, а не только в отчёт', saved.length, r4.attempts.length);
+      ok('и записи несут вердикт, а не только сдвиг', saved.every((s) => 'verdict' in s), true);
+      ok('храповик после поиска запрещает сбойнувший сдвиг',
+        allowedOffset(saved, 95, { fineStepMhz: ASCENT_FINE_MHZ }).limitMhz, r4.firstFail - ASCENT_FINE_MHZ);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+    const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
+    ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
 
     return { ok: results.every((r) => r.ok), results };
   })();

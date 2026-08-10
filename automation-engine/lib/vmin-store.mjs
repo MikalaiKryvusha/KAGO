@@ -88,8 +88,16 @@ function stampNow(d = new Date()) {
  * [NOT-TESTED]
  */
 export const REQUIRED_FIELDS = Object.freeze([
-  'point', 'offsetMhz', 'workload', 'shape', 'driver', 'vbios', 'at',
+  'point', 'offsetMhz', 'workload', 'shape', 'driver', 'vbios',
 ]);
+
+/**
+ * `at` IS NOT REQUIRED — and the first live search is what proved the earlier version wrong. It sat in
+ * the required list while ALSO carrying a default, so the default was dead code and the engine crashed
+ * on its very first record for want of a field the store was perfectly able to supply. The stamp of
+ * the MOMENT OF RECORDING is an observation this module makes, not a value it invents, so defaulting
+ * it is legitimate; demanding it from every caller was pure ceremony that cost a live run.
+ */
 
 /**
  * `verdict` IS REQUIRED BUT MAY BE `null`, and the distinction is not pedantry — it is the whole
