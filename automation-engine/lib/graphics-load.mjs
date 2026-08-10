@@ -71,6 +71,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -337,6 +338,56 @@ export function parseGeometry(text) {
 }
 
 // =================================================================================================
+// 5a. THE CPU, because "the GPU is not the limit" and "the CPU is the limit" are different claims
+// =================================================================================================
+
+/**
+ * Sample processor utilization across the run — asked for by the owner, 2026-08-10 20:2x:
+ * *«было бы хорошо смотреть загрузку процессора, чтобы исключать то, что ограничение кадров может
+ * быть вызвано лимитом по CPU»*. He is right that it is a hole: this bench had proved the frame rate
+ * ignores a 6.5 % core-clock increase, which says the GPU's clock is not the limit — it does NOT say
+ * what the limit is, and a CPU-bound game behaves exactly like that.
+ *
+ * **MAX-CORE, NOT AVERAGE, IS THE NUMBER THAT ANSWERS THE QUESTION.** A game bound on its render
+ * thread pegs ONE core while fifteen others idle: on this 8-core/16-thread part that is ~6 % total
+ * utilization and 100 % on one core. An average would call that "the CPU is nearly idle" and be
+ * precisely wrong — so both are recorded and the max is the one the report leads with.
+ *
+ * `os.cpus()` deltas rather than a perf counter: no process to spawn, no PowerShell, no permission,
+ * and the quantity is exactly what we want (busy vs idle ticks per core over the interval). The
+ * parent's event loop is free during the run — `runTimedemo` awaits a promise rather than blocking —
+ * which is what makes an in-process sampler legal here and illegal in power-baseline (`spawnSync`).
+ *
+ * [NOT-TESTED]
+ */
+export function cpuSnapshot() {
+  return cpus().map((c) => {
+    const t = c.times;
+    const busy = t.user + t.nice + t.sys + t.irq;
+    return { busy, total: busy + t.idle };
+  });
+}
+
+/** Per-core utilization between two snapshots, plus the two summary numbers. [NOT-TESTED] */
+export function cpuUsageBetween(before, after) {
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length || !before.length) {
+    return { cores: [], totalPct: null, maxCorePct: null, why: 'снимки несопоставимы' };
+  }
+  const cores = before.map((b, i) => {
+    const dTotal = after[i].total - b.total;
+    const dBusy = after[i].busy - b.busy;
+    return dTotal > 0 ? Number(((100 * dBusy) / dTotal).toFixed(1)) : null;
+  });
+  const valid = cores.filter((c) => Number.isFinite(c));
+  if (!valid.length) return { cores, totalPct: null, maxCorePct: null, why: 'ни одно ядро не дало интервала' };
+  return {
+    cores,
+    totalPct: Number((valid.reduce((s, c) => s + c, 0) / valid.length).toFixed(1)),
+    maxCorePct: Math.max(...valid),
+  };
+}
+
+// =================================================================================================
 // 6. One launch
 // =================================================================================================
 
@@ -512,6 +563,9 @@ export async function capture({
     throw new Error(`сэмплер не записал ни строки за ${SAMPLER_START_TIMEOUT_MS} мс — замер без телеметрии не замер`);
   }
 
+  // The CPU is sampled across exactly the same interval as the run, so the two numbers describe the
+  // same event (the owner asked for this instrument, 2026-08-10 20:2x).
+  const cpuBefore = cpuSnapshot();
   let run;
   try {
     run = await runTimedemo({ demo, runs, bounceRays, geometry, timeoutMs });
@@ -520,6 +574,7 @@ export async function capture({
     await sleep(300); // let the last line land before we read the file
   }
 
+  const cpu = cpuUsageBetween(cpuBefore, cpuSnapshot());
   const samples = summarizeSamples(readSamples(jsonl));
 
   // The fault window is the run's OWN interval, padded by nothing: a wider window borrows somebody
@@ -571,6 +626,8 @@ export async function capture({
     startTemperature: samples.startTemperature,
     startFanSpeed: samples.startFanSpeed,
     medians: { all: samples.all, loaded: samples.loaded, idle: samples.idle, loadPct: samples.loadPct },
+    // MAX-CORE first: a render-thread-bound game pegs one core and leaves the average near idle.
+    cpu,
     faultProviders: faults ? faults.providers : null,
     sampleFile: `${label}.jsonl`,
   };
@@ -732,6 +789,19 @@ export function selfTest() {
     decideGraphicsVerdict({ run: cleanRun, faultVerdict: { verdict: null, clean: false, reason: 'провайдер молчит' } }).faultFree,
     false);
 
+  // --- the CPU instrument, on injected snapshots (the owner's ask, 2026-08-10 20:2x)
+  const snapA = [{ busy: 100, total: 1000 }, { busy: 100, total: 1000 }];
+  const snapB = [{ busy: 1100, total: 2000 }, { busy: 150, total: 2000 }];
+  const cpu = cpuUsageBetween(snapA, snapB);
+  ok('загрузка ядра считается по приращению, а не по абсолютным тикам', cpu.cores, [100, 5]);
+  ok('МАКС ПО ЯДРУ — то число, которым ловится упор в одно ядро', cpu.maxCorePct, 100);
+  ok('среднее по ядрам сообщается рядом, но НЕ вместо максимума', cpu.totalPct, 52.5);
+  ok('несопоставимые снимки — отказ, а не нули',
+    cpuUsageBetween(snapA, [{ busy: 1, total: 2 }]).maxCorePct, null);
+  // A zero interval measured NOTHING, so the honest answer is null — not a fabricated 0 %, which
+  // would read as "the CPU was idle" and is exactly the invented number the three-doors rule bans.
+  ok('нулевой интервал даёт null, а не выдуманные 0 %', cpuUsageBetween(snapA, snapA).maxCorePct, null);
+
   // --- comparability
   const rec = (over = {}) => ({
     load: 'q2rtx-timedemo', demo: 'q2demo1.dm2', runsRequested: 5, bounceRays: 2, profile: null,
@@ -881,6 +951,8 @@ async function main(argv) {
         + ` · кадров ${rec.fps.frames.join(', ')}`);
     }
     console.log(`  ПРОБЫ:   всего ${rec.samples.total} · под нагрузкой ${rec.samples.loaded} · в простое ${rec.samples.idle}`);
+    console.log(`  ПРОЦЕССОР: МАКС ПО ЯДРУ ${rec.cpu?.maxCorePct ?? '—'} % · среднее ${rec.cpu?.totalPct ?? '—'} % `
+      + `(упор в CPU выглядит как одно ядро под 100 % при низком среднем)`);
     console.log(`  НА СТАРТЕ: ${rec.startTemperature ?? '—'} °C · вентилятор ${rec.startFanSpeed ?? '—'} %`);
     console.log('  МЕДИАНЫ ПОД НАГРУЗКОЙ:');
     printMedians(rec.medians);

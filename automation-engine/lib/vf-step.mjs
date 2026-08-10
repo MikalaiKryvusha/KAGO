@@ -599,6 +599,7 @@ export async function runShapeExperiment({
   seconds = 30,
   sustain = 30,
   gfxRuns = config.Q2RTX_TIMEDEMO_RUNS,
+  gfxBounceRays = config.Q2RTX_BOUNCE_RAYS,
   coolToC = 42,
   capAtMhz = null,
   dryRun = false,
@@ -732,7 +733,7 @@ export async function runShapeExperiment({
 
       const label = `shape_${load}_${side.applyVector ? deltaMhz : 0}`;
       const rec = load === 'graphics'
-        ? await gfx.capture({ label, runs: gfxRuns, profile: side.applyVector ? `curve+${deltaMhz}` : null })
+        ? await gfx.capture({ label: `${label}_b${gfxBounceRays}`, runs: gfxRuns, bounceRays: gfxBounceRays, profile: side.applyVector ? `curve+${deltaMhz}` : null })
         : await power.capture({ workload, seconds, sustain, label });
       watchdog.beat();
       const m = (f) => { const x = rec?.medians?.loaded?.[f]; return x && typeof x.median === 'number' ? x.median : null; };
@@ -906,6 +907,7 @@ async function mainShape() {
   const dryRun = process.argv.includes('--dry-run');
   const load = arg('load', 'compute');
   const gfxRuns = Number(arg('gfx-runs', config.Q2RTX_TIMEDEMO_RUNS));
+  const gfxBounceRays = Number(arg('gfx-bounce', config.Q2RTX_BOUNCE_RAYS));
 
   console.log('ФОРМА ПРОФИЛЯ — ТО, ЧТО ПОПРОСИЛ ВЛАДЕЛЕЦ, ПРОВЕРЕННОЕ ТРЕМЯ НАБЛЮДЕНИЯМИ');
   console.log('');
@@ -924,7 +926,7 @@ async function mainShape() {
   if (dryRun) console.log('  РЕЖИМ:     СУХОЙ ПРОГОН — записи не будет.');
   console.log('');
 
-  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun, load, gfxRuns });
+  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun, load, gfxRuns, gfxBounceRays });
 
   if (r.sides.length) {
     const isGfx = r.load === 'graphics';
