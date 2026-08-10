@@ -301,6 +301,7 @@ export async function stressTest({
   name,
   seconds = config.EXPRESS_TEST_SECONDS,
   transient = false,
+  sustain = 0,
   baselineDir = BASELINE_DIR,
   args = [],
   run = null,
@@ -317,6 +318,14 @@ export async function stressTest({
   let cycleStart = started;
   let loading = true;
 
+  // How long ONE burst is asked to hold the card. In the transient shape it is capped at the ON half
+  // of the duty cycle: `spawnSync` cannot be interrupted, so a burst longer than the ON window would
+  // run straight through the OFF half and destroy the very shape `researches/02` says exposes an
+  // unsafe profile — voltage noise dominates Vmin, and the transitions are the test.
+  const burstSeconds = transient
+    ? Math.min(sustain || 0, config.TRANSIENT_ON_SECONDS)
+    : (sustain || 0);
+
   while ((Date.now() - started) < seconds * 1000) {
     if (transient) {
       const elapsed = (Date.now() - cycleStart) / 1000;
@@ -324,7 +333,13 @@ export async function stressTest({
       if (elapsed >= limit) { loading = !loading; cycleStart = Date.now(); continue; }
       if (!loading) { await sleep(100); continue; }     // the OFF half of the duty cycle
     }
-    const b = runBurst({ name, args, run });
+    // A sustained burst must not overrun the window it was given: the loop check happens BEFORE the
+    // launch and spawnSync cannot be cut short, so a burst asked for more time than remains would
+    // hold the card past the end of the run.
+    const remainingS = (seconds * 1000 - (Date.now() - started)) / 1000;
+    const thisBurst = burstSeconds > 0 ? Math.max(1, Math.min(burstSeconds, Math.floor(remainingS))) : 0;
+    if (burstSeconds > 0 && remainingS < 1) break;
+    const b = runBurst({ name, args, sustainSeconds: thisBurst, run });
     bursts.push(b);
     if (onBurst) onBurst(b);
     if (b.died) break;                                   // a dead process ends the run; it IS the result
@@ -343,8 +358,44 @@ export async function stressTest({
     card, golden, stamp,
     bursts: bursts.length,
     checksums: [...new Set(bursts.map((b) => b.checksum))],
+    meters: summarizeMeters(bursts),
     faults,
     ...decision,
+  };
+}
+
+/**
+ * THE PRICE, summarised where the burst array still exists — the caller receives a count, not the
+ * array, and a consumer that had to re-derive this would be re-deriving it differently each time.
+ *
+ * `opsPerSecond` is the number carrying three jobs at once (researches/04 §2): the owner's «цена» in
+ * «снижаем потребление, пока цена ≤ N», the only detector of clock stretching (work drops while the
+ * reported clock does not), and the only detector of memory error replay. `faultRate` is the graded
+ * half — differing output slots over total slots, i.e. the per-thread fault rate, which is a
+ * GRADIENT where the verdict is a cliff.
+ *
+ * Returns null when no burst reported the meters, rather than zeros: a workload built before this
+ * existed has no throughput, and inventing 0 would read as "infinitely slow".
+ */
+export function summarizeMeters(bursts) {
+  const timed = bursts.filter((b) => b.fields && Number(b.fields.gpu_us) > 0 && Number(b.fields.launches) > 0);
+  if (!timed.length) return null;
+  const sum = (f) => timed.reduce((s, b) => s + Number(b.fields[f]), 0);
+  const work = timed.reduce((s, b) => s + Number(b.fields.work_per_launch) * Number(b.fields.launches), 0);
+  const gpuUs = sum('gpu_us');
+  const wallUs = sum('wall_us');
+  const elements = Number(timed[0].fields.elements) || 0;
+  const badElemsMax = Math.max(...timed.map((b) => Number(b.fields.bad_elems_max || 0)));
+  return {
+    launches: sum('launches'),
+    gpuUs,
+    wallUs,
+    dutyFactor: wallUs > 0 ? gpuUs / wallUs : null,
+    opsPerSecond: gpuUs > 0 ? work / (gpuUs / 1e6) : null,
+    elements,
+    badElemsMax,
+    faultRate: elements > 0 ? badElemsMax / elements : null,
+    bitDistMin: Math.max(...timed.map((b) => Number(b.fields.bit_dist_min || 0))),
   };
 }
 
@@ -530,6 +581,22 @@ export function selfTest() {
       golden: goldenOf('aaaa'), stamp: { ok: true, why: '' }, faults: noFaults,
     }).verdict, V.PASS);
 
+  // 3c. THE PRICE METER, on injected bursts. Two blocks because the interesting behaviour is at the
+  // edges: a workload built before the meters existed must yield NULL — inventing 0 ops/s would read
+  // as "infinitely slow" and would poison the very comparison the number exists for.
+  {
+    const withMeters = [
+      { ok: true, died: false, checksum: 'aaaa', fields: { elements: '100', launches: '10', work_per_launch: '1000', gpu_us: '1000000', wall_us: '2000000', bad_elems_max: '0', bit_dist_min: '0' } },
+      { ok: true, died: false, checksum: 'aaaa', fields: { elements: '100', launches: '10', work_per_launch: '1000', gpu_us: '1000000', wall_us: '2000000', bad_elems_max: '7', bit_dist_min: '1' } },
+    ];
+    const m = summarizeMeters(withMeters);
+    // 20 launches x 1000 work = 20000 work over 2 s of GPU time = 10000 ops/s; duty 2/4 = 50 %.
+    check('цена: операций/с и доля времени считаются по всем прогонам', `${m.opsPerSecond} ${m.dutyFactor} ${m.launches}`, '10000 0.5 20');
+    check('цена: частота отказов на поток — худший прогон, а не средний', `${m.badElemsMax} ${m.faultRate}`, '7 0.07');
+    check('цена: у нагрузки без счётчиков — null, а не нули',
+      summarizeMeters([{ ok: true, died: false, checksum: 'aaaa', fields: { checksum: 'aaaa' } }]), null);
+  }
+
   // 4. a dead process outranks everything
   check('процесс умер -> CRASH',
     decideVerdict({ bursts: [{ ok: false, died: true, checksum: null, reason: 'код 1' }], golden: goldenOf('aaaa'), stamp: { ok: true, why: '' }, faults: noFaults }).verdict, V.CRASH);
@@ -586,6 +653,7 @@ function parseArgs(argv) {
     else if (a === '--json') o.json = true;
     else if (a === '--workload') o.workload = argv[++i];
     else if (a === '--seconds') o.seconds = Number(argv[++i]);
+    else if (a === '--sustain') o.sustain = Number(argv[++i]);
     else if (a === '--arg') o.args.push(argv[++i]);
     else throw new Error(`неизвестный флаг: ${a}`);
   }
@@ -640,7 +708,7 @@ async function main(argv) {
 
   let worst = 0;
   for (const name of names) {
-    const r = await stressTest({ name, seconds: o.seconds, transient: o.transient, args: o.args });
+    const r = await stressTest({ name, seconds: o.seconds, transient: o.transient, sustain: o.sustain, args: o.args });
     console.log('');
     console.log(`НАГРУЗКА: ${name} · ${o.transient ? `переходная ${config.TRANSIENT_ON_SECONDS}/${config.TRANSIENT_OFF_SECONDS} с` : 'ровная'} · ${o.seconds} с`);
     console.log(`  прогонов: ${r.bursts} · суммы: ${r.checksums.join(', ') || '—'}`);
@@ -655,6 +723,21 @@ async function main(argv) {
       console.log(`  ВЕРДИКТ: ${r.verdict ?? 'НЕИЗВЕСТНО'}`);
     }
     console.log(`           ${r.reason}`);
+
+    // THE PRICE, printed next to the verdict rather than derived by hand later. It is one number
+    // doing three jobs (researches/04 §2): the owner's «цена» in «снижаем, пока цена ≤ N», the only
+    // detector of clock stretching, and the only detector of memory error replay. `bad_elems_max`
+    // is the graded half — the per-thread fault rate, printed even when the verdict is PASS, because
+    // a rate creeping off zero is exactly the early warning a binary verdict cannot give.
+    const m = r.meters;
+    if (m) {
+      console.log(`  ЦЕНА:    ${m.opsPerSecond.toExponential(3)} операций/с на GPU · ` +
+                  `${m.launches} запусков · доля времени на GPU ${(100 * m.dutyFactor).toFixed(1)} %`);
+      console.log(`           сбойных элементов: ${m.badElemsMax} из ${m.elements}` +
+                  (m.badElemsMax > 0
+                    ? ` = ${m.faultRate.toExponential(2)} — частота отказов на поток, ближайший переворот ${m.bitDistMin} бит`
+                    : ' (частота отказов на поток — ноль)'));
+    }
     if (o.json) console.log(JSON.stringify(r, null, 2));
     if (r.verdict !== config.VERDICT.PASS) worst = 1;
   }

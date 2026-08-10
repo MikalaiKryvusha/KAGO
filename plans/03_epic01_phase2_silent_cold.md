@@ -141,12 +141,36 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
 *Anchor: `plans/02_epic01_phase1` §3.6, the limitation recorded rather than smoothed over: «нагрузки
 идут процесс на прогон … Фазе 5 нужна нагрузка, крутящаяся внутри себя N секунд».*
 
-- [ ] The host loops the launch inside ONE process for N seconds instead of one process per burst.
+**MOSTLY DONE 2026-08-10 12:2x…13:0x +03:00.** Remaining: the low-load dwell and the idle→burst edge
+(last bullet). Everything above it is measured and committed.
+
+- [x] The host loops the launch inside ONE process for N seconds instead of one process per burst.
       The kernel and its arguments stay untouched, so the checksum stays the same deterministic
       function it is today and every existing baseline remains valid.
-- [ ] Report the utilization actually reached, as a number, next to the ~20–30 % the spawn-per-burst
+      **Verified, not assumed:** both `run_checksum` values unmoved after the rebuild
+      (67e95c85bb6299a2 · e27ec24a82d509d7), and `npm run stress` PASSes against the EXISTING
+      baselines — no re-capture was needed or performed. The duration is a FLAG, never a positional,
+      which is also what keeps it out of the golden's `args` stamp (the live run reports «аргументы
+      [по умолчанию]»), leaving EXP-0011's guard untouched. `npm run workloads:build` re-proves the
+      whole exemption every build: sustained checksum == default checksum, `distinct=1`.
+- [x] Report the utilization actually reached, as a number, next to the ~20–30 % the spawn-per-burst
       shape reached. If the new shape does not saturate either, that is a finding, not a detail.
-- [ ] **REPORT THROUGHPUT — work per second — and record `clocks.gr` alongside it.** Added
+      **Measured with a SEPARATE `npm run mon` process** (an in-process sampler records zero samples,
+      because `runBurst` uses `spawnSync` and blocks Node's event loop):
+
+      | форма | util | Вт | МГц | вент | запусков/с |
+      |---|---|---|---|---|---|
+      | процесс на прогон | 8 % (макс 9) | 61,7 | 2670 | 0 | 7,6 |
+      | устойчивый `sdc_fma` | 57 % | 137,9 | 2887 | 34 | 1286 |
+      | устойчивый `branchy` | **97 % (макс 99)** | **194,8** | 2887 | 31 | 39 |
+
+      The recorded "20–30 %" came from other arguments; at default arguments the old shape reaches 8 %.
+      **Cross-check that makes the numbers trustworthy:** the program's self-reported duty factor
+      (`gpu_us/wall_us` = 56,3 % · 98,5 %) and the card's independent utilization (57 % · 97 %) agree.
+      **A finding for this phase:** saturated, the card draws 194,8 W against a 300 W limit — a 250 W
+      power limit cannot bite on this workload, so Silent Cold's reduction must come from the clock
+      lock, not from `-pl`.
+- [x] **REPORT THROUGHPUT — work per second — and record `clocks.gr` alongside it.** Added
       2026-08-10 from `researches/04`; it is not scope creep but the closing of a blind spot the
       harness has carried since phase 1. **Clock stretching** (the card skips work while still
       reporting the locked clock) and **memory error replay** (GDDR7 carries internal ECC + CRC) both
@@ -154,7 +178,19 @@ rollback before the write** (`AGENT_GUIDE.md` → the owner's-machine rule).
       only observable is work-per-second against stock, WITH the clock recorded: a throughput drop at
       an unchanged clock is stretching, a throughput drop with a lower clock is merely a lower clock.
       One instrument, two jobs — it is also the price column P2-AC7 and the owner's N both need.
-- [ ] Method, from the benchmarking practice surveyed in `researches/04` §5: time with CUDA events
+- [x] **A GRADED oracle, not only a binary one** — added 2026-08-10 on the owner's question *«а как
+      мерить точность расчёта GPU по цифрам?»*. The checksum spends one bit of information on "did
+      anything change", so one bad element and sixty thousand read the same; a descent toward the edge
+      needs a gradient. Four keys: `bad_launches` · `bad_elems_max` · `bit_dist_min` ·
+      `first_bad_index`, and `npm run stress` prints the **per-thread fault rate** beside the verdict.
+      The COUNT is measured and the MAGNITUDE deliberately is not — both kernels are dependent chains
+      built to amplify, so |got − expected| carries no information.
+      **Proven by `npm run prove:gradient`:** a copy of `sdc_fma.cu` with one injected bit-flip
+      returned the exact tuple `distinct=2 · bad_launches=1 · bad_elems_max=1 · bit_dist_min=1 ·
+      first_bad_index=123` over 2519 launches — **while the burst checksum still MATCHED the golden**,
+      i.e. the old two-observation oracle would have said PASS. `researches/04` §2's blind spot,
+      reproduced on a real run instead of argued.
+- [x] Method, from the benchmarking practice surveyed in `researches/04` §5: time with CUDA events
       (GPU-side, host overhead excluded) · warm up before timing · keep each timed unit far above the
       ~10 µs floor where the timer's own overhead dominates · defeat the caches between timed calls ·
       and report the **run-to-run spread**, because a delta thinner than the spread is not an effect.
