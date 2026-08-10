@@ -331,7 +331,7 @@ may or may not reach. The ladder therefore yields the table directly:
       both stable for ≥ 60 s. A rung that never plateaus is reported as such rather than averaged.
 - [x] The card is RELEASED in a `finally` after every rung — including on a failed capture — which
       `ladder-descent.mjs` already does and must keep doing.
-- [ ] Output: the table, and from it `Silent Cold` reads directly as **the highest rung whose
+- [x] Output: the table, and from it `Silent Cold` reads directly as **the highest rung whose
       equilibrium fan is ≤ 40 %**. That is «maximum performance under the temperature ceiling» with no
       guesswork left in it.
 
@@ -383,6 +383,52 @@ the temperature's through the AUTO curve's 2.3 pp/°C, on the assumption that th
 because the temperature moves. This run refutes the assumption: the temperature's drift was exactly
 zero while the fan still fell 2 %/min. The fan has its own dynamics, so its gate needs its own
 measured number — a longer rung is running to supply it rather than to argue about it.
+
+#### 2026-08-10 23:5x — STEP CLOSED. THE TABLE, AND `Silent Cold` READ STRAIGHT OFF IT
+
+Four rungs, stock curve, hard clock pins, the RT game, every rung held to a detected plateau. The pin
+held in every sample of every rung; every release verified; the card finished at 202 MHz idle with two
+agreeing probes.
+
+| clock cap | delivered | equilibrium T | equilibrium fan | W | FPS | settled for |
+|---|---|---|---|---|---|---|
+| 2400 | 2392 | 65 °C | 54 % | 223 | 51.63 | 395 s |
+| **2100** | **2092** | **59 °C** | **40 %** | **171** | **45.67** | **483 s** |
+| 1800 | 1792 | 56 °C | 33 % | 144 | 40.24 | 630 s |
+| 1500 | 1492 | 55 °C | 30 % | 128 | 33.82 | 753 s |
+
+**`Silent Cold` = 2100 MHz** — the highest rung whose equilibrium fan is ≤ 40 %. Bounded from above by
+measurement: 2400 MHz gives 54 %. **T(40 %) = 59 °C**, and that is the number the mode was blocked on.
+
+**Four things the table settles that prose could not.**
+
+1. **The old `Silent Cold` candidate does not exist.** It was 36 % / 61 °C for −9.42 % of frames, all
+   taken on a transient. At equilibrium 61 °C is not 36 % of fan — the card sits at 40 % by 59 °C and
+   54 % by 65 °C. The candidate looked quiet because the fan had not finished spinning up.
+2. **The fan floor is reached at 1800 MHz, not below.** 1500 MHz costs six more frames and 16 W and
+   buys **zero** additional quiet — 30 % is the card's own floor (`currentMinLevel`). Descending past
+   1800 on this curve is spending performance on nothing.
+3. **The price is much larger than the retired 10 % budget: 2100 MHz costs ~19 % of stock frames**
+   (56.4 → 45.67). That is not a violation — the owner replaced the budget with an optimization
+   («максимально возможная производительность при температуре не выше T(40 %)») — but it is the number
+   he will want to see, and it is what the undervolt exists to improve.
+4. **This is a LOWER BOUND on the mode, not its optimum**, and the reason is mechanical: the ladder
+   measures the STOCK curve. A shipped `Silent Cold` carries the raised curve as well, so at the same
+   cap it draws less power, runs cooler and turns the fan slower — which means a HIGHER cap will fit
+   under 40 %. The ladder must therefore be re-run on top of the curve raise from §4.3-§4.6, and only
+   that run names the mode. The bracket is also wide: 2100 qualifies at exactly 40 % and 2400 fails at
+   54 %, so a rung between them is unmeasured.
+
+**The instrument corrected itself twice under live data, and both corrections are in the record**
+(EXP-0036, EXP-0037): the drift gate had to become a RATE, and the report had to stop coming from the
+same window as the proof — over an eight-minute settled stretch a median is dragged toward the
+stretch's beginning, which reported the 2100 MHz fan as 41 % where the card finished at 40. At that
+threshold the bias did not colour the answer, it decided it.
+
+**Re-derivable without the card:** `npm run thermal -- --analyze` re-runs the detector over every
+capture in `runs/graphics/` and prints the equilibrium row for each. Artifacts under `runs/thermal/`
+written before this correction carry the pre-correction fan medians; the telemetry they were derived
+from is untouched, so `--analyze` is the authority.
 
 **The `-lgc` boundary, restated so nobody widens it:** pinning is legal for a MEASUREMENT (a held clock
 is what makes a watt comparison legal, EXP-0018) and stays OUT of any shipped profile, where `min = max`
