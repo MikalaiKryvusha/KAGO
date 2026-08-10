@@ -541,6 +541,75 @@ export async function verifyDecode({ offsetMhz = -100 } = {}) {
   return out;
 }
 
+/**
+ * WHAT DOES THE MASK ACTUALLY DO? — a read-only discriminating experiment.
+ *
+ * Two writes were accepted and inert, and the dump then showed the driver never writes the mask region
+ * back. So "the mask is a 128-bit point selector at 0x04" is still only the source's claim, and if it
+ * is wrong our single bit has been landing in a field that means something else entirely — which would
+ * explain an OK that does nothing far better than any theory about the offset field, since the offset
+ * field itself is now measured.
+ *
+ * The lever gives us a state where all 127 entries carry a known value. Then ask GetControl for that
+ * state three ways and see which answers differ:
+ *
+ *   all bits → if the mask matters at all, everything comes back
+ *   no bits  → still everything? then the mask is IGNORED on read, and its position is unproven
+ *   one bit  → only that entry? then the mask is confirmed, and the no-op lives somewhere else
+ *
+ * Read-only apart from the lever, which rolls back in the `finally` as always.
+ */
+export async function probeMaskSemantics({ offsetMhz = -100, point = 64 } = {}) {
+  const nvapi = await import('./nvapi.mjs');
+  const expectedKhz = offsetMhz * 1000;
+  const nv = openNvml();
+  const out = { offsetMhz, point, cases: [], rolledBack: false };
+
+  if (nv.init() !== 0) return out;
+  const hb = Buffer.alloc(8);
+  if (nv.getHandleByIndex(0, hb) !== 0) { nv.shutdown(); return out; }
+  const nvmlHandle = hb.readBigUInt64LE(0);
+
+  const na = nvapi.openNvapi();
+  na.koffi.call(na.resolve(0x0150E828).ptr, na.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  na.koffi.call(na.resolve(0xE5AC921F).ptr, na.protos.EnumPhysicalGPUs, handles, count);
+  const nvapiHandle = handles.readBigUInt64LE(0);
+
+  let written = false;
+  try {
+    const w = writeClockOffset(nv, nvmlHandle, offsetMhz);
+    if (!w.ok) { out.leverFailed = w.why; return out; }
+    written = true;
+    readClockOffsetStable(nv, nvmlHandle);
+
+    for (const [label, mask] of [['все биты', 'all'], ['НИ ОДНОГО бита', 'none'], [`один бит (точка ${point})`, point]]) {
+      const r = nvapi.readVfOffsets(na, nvapiHandle, { mask });
+      out.cases.push({
+        label,
+        ok: r.ok,
+        status: r.ok ? 0 : r.status,
+        why: r.why,
+        carrying: r.ok ? r.offsets.filter((o) => o === expectedKhz).length : null,
+        atPoint: r.ok ? r.offsets[point] : null,
+        // WHICH slots carry it is the whole question: if asking for point 64 fills slot 0, the driver
+        // packs selected points DENSELY from the start, and the write must put its value in the same
+        // slot the mask's Nth bit maps to — not in slot N.
+        at: r.ok ? r.offsets.map((o, i) => (o === expectedKhz ? i : -1)).filter((i) => i >= 0) : [],
+      });
+    }
+  } finally {
+    if (written) {
+      writeClockOffset(nv, nvmlHandle, 0);
+      const back = readClockOffsetStable(nv, nvmlHandle);
+      out.rolledBack = back.ok && back.offsetMhz === 0;
+    }
+    na.koffi.call(na.resolve(0xD22BDD7E).ptr, na.protos.Unload);
+    nv.shutdown();
+  }
+  return out;
+}
+
 // =================================================================================================
 // 4. CLI
 // =================================================================================================
@@ -583,6 +652,19 @@ async function mainFindOffsetField(offsetMhz, type = NVML_CLOCK_GRAPHICS) {
   if (r.changes.length > 8) console.log(`  … ещё ${r.changes.length - 8} с тем же шагом …`);
   for (const c of r.changes.slice(-4)) {
     console.log(`  ${c.hex}  ${String(c.before).padStart(10)} → ${String(c.after).padStart(10)}  (Δ ${String(c.delta).padStart(9)})`);
+  }
+
+  if (process.argv.includes('--dump') && r.before?.ctl.ok && r.after?.ctl.ok) {
+    const nvapi = await import('./nvapi.mjs');
+    const b = nvapi.dumpControlRegions(r.before.ctl.raw);
+    const a = nvapi.dumpControlRegions(r.after.ctl.raw);
+    console.log('');
+    console.log('ДАМП: как выглядит структура ДО и ПОД приложенным сдвигом (только чтение)');
+    for (let i = 0; i < b.length; i++) {
+      console.log(`  ${b[i].label}`);
+      console.log(`    ДО:    ${b[i].hex}`);
+      console.log(`    ПОД:   ${a[i].hex}`);
+    }
   }
 
   console.log('');
@@ -638,6 +720,33 @@ function main() {
 
 // A module others import must not execute on import.
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  if (process.argv.includes('--probe-mask')) {
+    const r = await probeMaskSemantics({});
+    console.log('ЧТО НА САМОМ ДЕЛЕ ДЕЛАЕТ МАСКА (чтение под приложенным рычагом)');
+    console.log('');
+    if (r.leverFailed) { console.error(`рычаг не сработал: ${r.leverFailed}`); process.exit(1); }
+    for (const c of r.cases) {
+      const slots = c.ok ? (c.at.length > 6 ? `${c.at.slice(0, 6).join(',')}…` : (c.at.join(',') || '—')) : '';
+      console.log(`  маска: ${c.label.padEnd(24)} ${c.ok ? `записей со сдвигом ${String(c.carrying).padStart(3)} из 128 · в слоте ${r.point}: ${String(c.atPoint).padStart(8)} · заняты слоты: ${slots}` : `ОТКАЗ — ${c.why}`}`);
+    }
+    const [all, none, one] = r.cases;
+    console.log('');
+    if (all.ok && none.ok && all.carrying === none.carrying) {
+      console.log('ВЫВОД: маска на 0x04 при ЧТЕНИИ ИГНОРИРУЕТСЯ — ответ одинаков и с битами, и без них.');
+      console.log('       Значит её положение НЕ доказано, и «один бит» при записи мог уходить в чужое поле.');
+    } else if (one.ok && one.carrying === 1 && one.at[0] === 0 && r.point !== 0) {
+      console.log(`ВЫВОД: маска РАБОТАЕТ, но результаты УКЛАДЫВАЮТСЯ ПЛОТНО: спросили точку ${r.point} —`);
+      console.log('       ответ пришёл в СЛОТ 0. Значит слот массива это не номер точки, а порядковый');
+      console.log('       номер среди ВЫБРАННЫХ маской. Отсюда и тихий no-op записи: мы ставили бит');
+      console.log(`       точки ${r.point}, а значение клали в слот ${r.point}, откуда драйвер его не читал.`);
+    } else if (one.ok && one.carrying === 1 && one.at[0] === r.point) {
+      console.log('ВЫВОД: маска РАБОТАЕТ и слот совпадает с номером точки. Тихий no-op записи — не в ней.');
+    } else {
+      console.log('ВЫВОД: поведение не укладывается ни в одну заготовку — читать числа выше руками.');
+    }
+    console.log(`ОТКАТ: ${r.rolledBack ? 'выполнен, сдвиг 0' : 'НЕ ВЫПОЛНЕН — РАЗБИРАТЬСЯ'}`);
+    process.exit(0);
+  }
   if (process.argv.includes('--verify-decode')) {
     const r = await verifyDecode({ offsetMhz: -100 });
     console.log('ПРОВЕРКА ИЗМЕРЕННОЙ РАСКЛАДКИ (одни и те же байты — двумя раскладками)');

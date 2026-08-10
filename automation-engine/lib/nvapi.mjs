@@ -358,13 +358,30 @@ export function probeStruct(nv, handle, { id, proto, sizes, versions = [1, 2, 3,
  * ZERO bytes of this structure. So these entries are the GRAPHICS domain alone, and a stride mistake
  * cannot reach memory settings.
  *
- * WHAT IS NOT KNOWN, said plainly rather than smoothed over: entry 0's field did NOT move while
- * entries 1..127 all did. Whether point 0 is inactive, or is a point the driver deliberately never
- * shifts, is unmeasured — so no code may assume entry 0 behaves like the rest.
+ * ─── THE ARRAY STARTS AT 0x44, AND THAT COST TWO SILENT NO-OPS ────────────────────────────────────
+ *
+ * The first two addressed writes returned OK and changed nothing. The cause was found by asking the
+ * driver a READ-ONLY question instead of guessing a third time: request the control structure with a
+ * mask carrying a single bit for point 64, and see where the answer lands. It landed one entry LATER
+ * than assumed. The array does not begin right after the 0x20 header — the header is 0x44 bytes.
+ *
+ * Every earlier number re-derives correctly under this base, which is what makes it a measurement and
+ * not another guess:
+ *   - first changed word 0x58  = 0x44 + 0*0x24 + 0x14  -> point 0
+ *   - last changed word  0x1210 = 0x44 + 126*0x24 + 0x14 -> point 126
+ *   - the "mystery 1" at 0x1220 = 0x44 + 127*0x24        -> the FIRST dword of point 127's entry,
+ *     which is why it was never explained as a curve field
+ *
+ * And it explains the no-op exactly: the mask bit was right, the value was written 0x24 bytes before
+ * the address the driver reads. A malformed selection is not a malformed CALL, so the status stayed 0.
+ *
+ * WHAT IS NOT KNOWN, said plainly rather than smoothed over: the lever moves points 0..126 and leaves
+ * point 127 alone, and point 127 is also the one carrying that non-zero first dword. No code may treat
+ * it as an ordinary point until that is understood.
  */
 export const CLK_VF_CONTROL_SIZE = 0x2420;
 export const CLK_VF_CONTROL_STRIDE = 0x24;
-export const CLK_VF_CONTROL_DATA_OFFSET = 0x20;
+export const CLK_VF_CONTROL_DATA_OFFSET = 0x44;
 export const CLK_VF_CONTROL_FREQ_OFFSET_FIELD = 0x14;
 /** The entry array's end — 0x20 + 128 * 0x24. Everything at or beyond this is NOT a curve entry. */
 export const CLK_VF_CONTROL_DATA_END = CLK_VF_CONTROL_DATA_OFFSET + CLK_VF_CONTROL_STRIDE * CLK_VF_POINT_COUNT;
@@ -399,19 +416,23 @@ export function buildVfControl(pointIndex, offsetKhz, { version = 1 } = {}) {
 /**
  * Read every per-point offset currently applied (read-only).
  *
- * Returns the RAW buffer alongside the decoded offsets on purpose. The decode above rests on an
- * assumption we have not yet proven — that the offset lives at the START of each 72-byte entry — and
- * the first dword already turned out to be a FLAG rather than a frequency. So a caller that wants to
- * FIND the real field must be able to diff all 9 248 bytes, not the 128 numbers we guessed out of them
- * (see nvml.mjs → the offset-field experiment).
+ * Returns the RAW buffer alongside the decoded offsets on purpose: a caller checking a WRITE must be
+ * able to compare all 9 248 bytes, not only the 128 numbers we decode out of them — the byte-for-byte
+ * return to the pre-write snapshot is what makes a rollback an observation instead of a hope.
  */
-export function readVfOffsets(nv, handle, { version = 1 } = {}) {
+export function readVfOffsets(nv, handle, { version = 1, mask = 'all' } = {}) {
   const { koffi, protos, resolve } = nv;
   const entry = resolve(0x23F1B133);
+  if (!entry.ok) return { ok: false, why: 'ClkVfPointsGetControl не разрешился' };
   const buf = Buffer.alloc(CLK_VF_CONTROL_SIZE);
   buf.writeUInt32LE(nvapiVersion(CLK_VF_CONTROL_SIZE, version), 0);
-  buf.fill(0xFF, 0x04, 0x14);
-  const status = koffi.call(entry.ptr, protos.ClkVfPointsGetControl, buf === null ? 0 : handle, buf);
+  // The mask is an INPUT in both directions — the dump proved the driver never writes it back. Making
+  // it a parameter is what turns "the mask lives at 0x04" from the source's claim into something a
+  // read-only call can test: ask with no bits, or with one, and see what comes back.
+  if (mask === 'all') buf.fill(0xFF, 0x04, 0x14);
+  else if (Number.isInteger(mask)) buf[0x04 + (mask >> 3)] = 1 << (mask & 7);
+  // mask === 'none' leaves the region zeroed
+  const status = koffi.call(entry.ptr, protos.ClkVfPointsGetControl, handle, buf);
   if (status !== 0) return { ok: false, status, why: statusName(status) };
   const offsets = [];
   for (let i = 0; i < CLK_VF_POINT_COUNT; i++) {
@@ -427,13 +448,224 @@ export function readVfOffsets(nv, handle, { version = 1 } = {}) {
  * the physical backstop is that offsets live in volatile driver state — a reboot clears them with no
  * action from the owner (MASTER_PLAN.md → заводское состояние по умолчанию).
  */
-export function writeVfOffset(nv, handle, pointIndex, offsetKhz, { version = 1 } = {}) {
+export function writeVfOffset(nv, handle, pointIndex, offsetKhz, { version = 1, mode = 'rmw' } = {}) {
   const { koffi, protos, resolve } = nv;
   const entry = resolve(0x0733E009);
   if (!entry.ok) return { ok: false, why: 'ClkVfPointsSetControl не разрешился' };
-  const buf = buildVfControl(pointIndex, offsetKhz, { version });
+
+  let buf;
+  if (mode === 'zero-filled') {
+    // The shape the source implies, KEPT ONLY AS A NAMED COMPARISON — measured 2026-08-10 to be a
+    // SILENT NO-OP on this card: status 0, and not one byte of the structure changes. It is retained
+    // so the finding stays reproducible, never as a path anything ships on.
+    buf = buildVfControl(pointIndex, offsetKhz, { version });
+  } else {
+    // READ-MODIFY-WRITE — the API's ordinary shape. Ask the driver for the CURRENT control structure,
+    // change exactly one field in it, hand the whole thing back. A zero-filled buffer throws away every
+    // service field the driver put there (entry counts, domain ids, whatever sits past the entry array
+    // at 0x1220), and a driver handed a structure describing nothing does nothing — while still
+    // answering OK, because nothing about the call was malformed.
+    const current = readVfOffsets(nv, handle, { version });
+    if (!current.ok) return { ok: false, why: `не удалось прочитать текущее состояние: ${current.why}` };
+    buf = Buffer.from(current.raw);
+    buf.fill(0, 0x04, 0x14);                                   // clear the mask the READ requested
+    buf[0x04 + (pointIndex >> 3)] = 1 << (pointIndex & 7);      // exactly one bit — one point per call
+    buf.writeInt32LE(offsetKhz, vfControlFieldAt(pointIndex));
+  }
+
   const status = koffi.call(entry.ptr, protos.ClkVfPointsSetControl, handle, buf);
-  return { ok: status === 0, status, why: statusName(status) };
+  return { ok: status === 0, status, why: statusName(status), mode };
+}
+
+/**
+ * Read-only hex dump of the regions that decide whether a WRITE is well-formed.
+ *
+ * Written after two accepted-but-inert writes. The point is not the bytes themselves but WHOSE bytes
+ * they are: NVML can drive this structure into a state the driver considers real, so dumping it clean
+ * and again under an NVML offset shows what a POPULATED control structure looks like — the template a
+ * correct SetControl has to reproduce. Observation instead of a third guess (`PHILOSOPHY.md`).
+ */
+export function dumpControlRegions(raw) {
+  const hex = (at, len) => raw.subarray(at, at + len).toString('hex').replace(/(.{8})/g, '$1 ').trim();
+  const regions = [
+    { label: 'заголовок 0x00…0x20 (версия, маска, что-то ещё)', at: 0x00, len: 0x20 },
+    { label: 'запись 0   (0x20, 36 байт)', at: 0x20, len: CLK_VF_CONTROL_STRIDE },
+    { label: 'запись 1   (0x44, 36 байт)', at: 0x44, len: CLK_VF_CONTROL_STRIDE },
+    { label: `запись 64  (0x${(0x20 + 64 * CLK_VF_CONTROL_STRIDE).toString(16)}, 36 байт)`, at: 0x20 + 64 * CLK_VF_CONTROL_STRIDE, len: CLK_VF_CONTROL_STRIDE },
+    { label: `запись 127 (0x${(0x20 + 127 * CLK_VF_CONTROL_STRIDE).toString(16)}, 36 байт)`, at: 0x20 + 127 * CLK_VF_CONTROL_STRIDE, len: CLK_VF_CONTROL_STRIDE },
+    { label: 'СРАЗУ ЗА массивом 0x1220 (тут жила загадочная единица)', at: 0x1220, len: 0x40 },
+  ];
+  return regions.map((r) => ({ ...r, hex: hex(r.at, r.len) }));
+}
+
+// =================================================================================================
+// 3b. THE MASK PROOF — the first ADDRESSED write, and the only claim still resting on the source
+// =================================================================================================
+
+/**
+ * Read the offsets until TWO CONSECUTIVE SAMPLES AGREE (EXP-0014).
+ *
+ * A GPU write settles asynchronously and the first read after one can return the previous value —
+ * that is how a correct write gets reported to the owner as a failure. Compares the whole raw buffer,
+ * not just the decoded numbers, so a change ANYWHERE in the structure also has to settle.
+ */
+export function readVfOffsetsStable(nv, handle, { maxSamples = 12, gapMs = 250 } = {}) {
+  let previous = null;
+  for (let i = 0; i < maxSamples; i++) {
+    const r = readVfOffsets(nv, handle);
+    if (!r.ok) return { ...r, samples: i + 1 };
+    if (previous && Buffer.compare(previous, r.raw) === 0) return { ...r, stable: true, samples: i + 1 };
+    previous = r.raw;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, gapMs); // blocking sleep, no timer
+  }
+  return { ok: false, why: `структура не устоялась за ${maxSamples} проб` };
+}
+
+/**
+ * WRITE ONE POINT AND PROVE THE MASK.
+ *
+ * ─── WHY THIS RUN EXISTS ──────────────────────────────────────────────────────────────────────────
+ * Every measurement behind the layout in researches/05 §8 moved the NVML lever, and that lever shifts
+ * ALL points at once. So "the mask carries exactly one bit and therefore one point moves" is still the
+ * SOURCE's claim, not our observation — and it is the claim the whole safety story rests on, because
+ * "a bad write has a blast radius of one point" is only true if the mask does what §3.4 says.
+ *
+ * ─── THE OWNER'S-MACHINE RULE, WALKED ─────────────────────────────────────────────────────────────
+ *  1. LOOKED UP: researches/05 §3.4 (mask = exactly one bit; all 128 bits returns -1) and §5 (error
+ *     codes: -9 wrong layout, -1 generic). The struct version 1 at size 0x2420 is already PROVEN
+ *     accepted by the earlier `--write-zero` run.
+ *  2. ROLLBACK, NAMED BEFORE THE WRITE: the same call, same point, offset 0 — executed in a `finally`
+ *     on every path. It is SYMMETRIC with the write by construction, which matters more than it
+ *     sounds: if the mask turns out NOT to isolate one point and the offset lands on all 128, the
+ *     undo has exactly the same reach as the do. The physical backstop underneath: these offsets are
+ *     volatile driver state, so a reboot clears them with no action from the owner.
+ *  3. SMALLEST REVERSIBLE FORM, and the DIRECTION IS THE SAFETY: the offset is NEGATIVE. A negative
+ *     frequency offset means "this voltage point now runs SLOWER" — more voltage than the frequency
+ *     needs, i.e. the stable direction. The dangerous direction is POSITIVE (that is the undervolt),
+ *     and it is not attempted until the mask is proven. Worst case here, if the mask does nothing, is
+ *     a -15 MHz downclock across the curve — undone by the same call with 0.
+ *  4. RE-READ UNTIL STABLE: `readVfOffsetsStable`, two agreeing full-buffer samples.
+ *  5. REPORT NUMBERS: every block prints what it saw, and the rollback is verified byte-for-byte
+ *     against the pre-write snapshot.
+ *
+ * The verdict this run produces is binary and it is the point: EXACTLY ONE entry changed, and it is
+ * the one we addressed — or the mask does not isolate, which must be known before any real profile.
+ */
+export function proveMask(handle, nv, { point = 64, offsetMhz = -15, mode = 'rmw' } = {}) {
+  const offsetKhz = offsetMhz * 1000;
+  const out = { point, offsetMhz, mode, blocks: [], written: false, rolledBack: false };
+  const block = (name, ok, detail) => out.blocks.push({ name, ok, detail });
+
+  const before = readVfOffsets(nv, handle);
+  block('снимок ДО: структура прочитана, все сдвиги нулевые',
+    before.ok && before.nonZero === 0, before.ok ? `ненулевых ${before.nonZero} из 128` : before.why);
+  if (!before.ok) return out;
+
+  const curveBefore = readVfCurve(nv, handle);
+  const freqBefore = curveBefore.ok ? curveBefore.points[point].mhz : null;
+
+  try {
+    const w = writeVfOffset(nv, handle, point, offsetKhz, { mode });
+    block(`ЗАПИСЬ (${mode}): точка ${point}, сдвиг ${offsetMhz} МГц (${offsetKhz} кГц), один бит маски`, w.ok, w.why);
+    if (!w.ok) return out;
+    out.written = true;
+
+    const after = readVfOffsetsStable(nv, handle);
+    block('перечитывание до устойчивости (две совпавшие полные пробы)',
+      after.ok, after.ok ? `проб ${after.samples}` : after.why);
+    if (!after.ok) return out;
+
+    // --- THE VERDICT. Which entries moved, and is it exactly the one we addressed?
+    const moved = [];
+    for (let i = 0; i < CLK_VF_POINT_COUNT; i++) {
+      if (after.offsets[i] !== before.offsets[i]) moved.push(i);
+    }
+    out.moved = moved;
+    block(`МАСКА ИЗОЛИРУЕТ: сдвинулась РОВНО ОДНА запись, и это ${point}`,
+      moved.length === 1 && moved[0] === point,
+      moved.length === 0 ? 'не сдвинулась НИ ОДНА — запись принята, но ничего не изменила'
+        : `сдвинулись ${moved.length}: ${moved.slice(0, 12).join(', ')}${moved.length > 12 ? ' …' : ''}`);
+    block(`значение в точке ${point} равно записанному`,
+      after.offsets[point] === offsetKhz, `прочитано ${after.offsets[point]} кГц, писали ${offsetKhz}`);
+
+    // --- the second, independently-authored witness: did the CURVE itself move at that point?
+    const curveAfter = readVfCurve(nv, handle);
+    if (curveBefore.ok && curveAfter.ok) {
+      const freqAfter = curveAfter.points[point].mhz;
+      out.curve = { point, freqBefore, freqAfter, deltaMhz: Number((freqAfter - freqBefore).toFixed(3)) };
+      const others = [];
+      for (let i = 0; i < CLK_VF_POINT_COUNT; i++) {
+        if (i !== point && curveAfter.points[i].freqKhz !== curveBefore.points[i].freqKhz) others.push(i);
+      }
+      out.curveOthersMoved = others;
+
+      // THE FLOOR IS A NAMED CASE, NOT A LOOSENED PREDICATE (EXP-0020's second half). A large part of
+      // this curve's low end sits at the card's minimum clock — measured here, points 0..~20 all read
+      // 180 MHz at rising voltages — and a NEGATIVE offset there has nowhere to go. The control struct
+      // still records the value (the block above proves that); the curve simply clamps. Relaxing the
+      // check to "delta may be zero" would also accept a write that did nothing anywhere, so the floor
+      // is DETECTED and asserted separately instead.
+      const floorMhz = Math.min(...curveBefore.points.filter((p) => p.freqKhz > 0).map((p) => p.mhz));
+      out.curveFloorMhz = floorMhz;
+      out.atFloor = freqBefore <= floorMhz;
+
+      if (out.atFloor) {
+        block(`кривая: точка ${point} НА ПОЛУ (${floorMhz} МГц) — отрицательный сдвиг упирается, и это верно`,
+          out.curve.deltaMhz === 0 && others.length === 0,
+          `${freqBefore} → ${freqAfter} МГц (Δ ${out.curve.deltaMhz}); значение в структуре записано, `
+          + `двигаться некуда; других точек сдвинулось ${others.length}`);
+      } else {
+        block(`кривая: точка ${point} поехала, соседи стоят (второй свидетель)`,
+          out.curve.deltaMhz !== 0 && others.length === 0,
+          `${freqBefore} → ${freqAfter} МГц (Δ ${out.curve.deltaMhz}); других точек сдвинулось ${others.length}`);
+      }
+    }
+  } finally {
+    if (out.written) {
+      const r = writeVfOffset(nv, handle, point, 0, { mode });
+      const back = readVfOffsetsStable(nv, handle);
+      const identical = back.ok && Buffer.compare(before.raw, back.raw) === 0;
+      out.rolledBack = r.ok && identical;
+      block('ОТКАТ: тот же вызов со сдвигом 0, структура побайтово равна исходной',
+        out.rolledBack, `${r.why} · ${back.ok ? (identical ? '9 248 байт совпали' : 'БАЙТЫ РАСХОДЯТСЯ') : back.why}`);
+    }
+  }
+  return out;
+}
+
+function mainProveMask(point, offsetMhz, mode) {
+  const nv = openNvapi();
+  const { koffi, protos, resolve } = nv;
+  const st = koffi.call(resolve(0x0150E828).ptr, protos.Initialize);
+  if (st !== 0) { console.error(`NvAPI_Initialize: ${statusName(st)}`); return 1; }
+  try {
+    const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+    koffi.call(resolve(0xE5AC921F).ptr, protos.EnumPhysicalGPUs, handles, count);
+    if (count.readUInt32LE(0) < 1) { console.error('карт не найдено'); return 1; }
+    const handle = handles.readBigUInt64LE(0);
+
+    console.log('ПЕРВАЯ АДРЕСНАЯ ЗАПИСЬ ЧЕРЕЗ NvAPI — И ПРОВЕРКА МАСКИ');
+    console.log('');
+    console.log(`  ЧТО ДЕЛАЕМ: сдвиг ${offsetMhz} МГц в ОДНУ точку ${point}, один бит маски.`);
+    console.log('  ОТКАТ:      тот же вызов, та же точка, сдвиг 0 — в finally, на любом пути.');
+    console.log('              Он СИММЕТРИЧЕН записи: если маска не изолирует, откат достанет ровно');
+    console.log('              туда же, куда достала запись. Сдвиги энергозависимы — перезагрузка их снимает.');
+    console.log('  НАПРАВЛЕНИЕ: ОТРИЦАТЕЛЬНОЕ. Точка станет работать МЕДЛЕННЕЕ при своём напряжении —');
+    console.log('              это устойчивая сторона. Опасная сторона (андервольт) — положительная,');
+    console.log('              и до доказанной маски её не трогаем.');
+    console.log('');
+
+    const r = proveMask(handle, nv, { point, offsetMhz, mode });
+    for (const b of r.blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}\n            ${b.detail}`);
+
+    const failed = r.blocks.filter((b) => !b.ok).length;
+    console.log('');
+    console.log(`ИТОГ: блоков ${r.blocks.length}, провалов ${failed}. ПРОВЕРКА ЗАВЕРШЕНА.`);
+    console.log(`ОТКАТ ВЫПОЛНЕН: ${r.rolledBack ? 'да, структура вернулась побайтово' : 'НЕТ — РАЗБИРАТЬСЯ НЕМЕДЛЕННО'}`);
+    return failed === 0 ? 0 : 1;
+  } finally {
+    koffi.call(resolve(0xD22BDD7E).ptr, protos.Unload);
+  }
 }
 
 // =================================================================================================
@@ -569,6 +801,22 @@ function main() {
   if (process.argv.includes('--curve')) return mainCurve();
   if (process.argv.includes('--control')) return mainControl();
   if (process.argv.includes('--write-zero')) return mainWriteZero();
+  const pm = process.argv.indexOf('--prove-mask');
+  if (pm !== -1) {
+    // Point and magnitude are arguments, not literals: the mask must be provable at more than one
+    // point before "one bit isolates one entry" is a property rather than a single lucky address.
+    const point = Number(process.argv[pm + 1] ?? 64);
+    const mhz = Number(process.argv[pm + 2] ?? -15);
+    if (!Number.isInteger(point) || point < 0 || point >= CLK_VF_POINT_COUNT) {
+      console.error(`точка вне диапазона 0…${CLK_VF_POINT_COUNT - 1}: ${process.argv[pm + 1]}`);
+      return 1;
+    }
+    if (!Number.isFinite(mhz) || mhz > 0) {
+      console.error(`сдвиг должен быть отрицательным (устойчивая сторона), получено: ${process.argv[pm + 2]}`);
+      return 1;
+    }
+    return mainProveMask(point, mhz, process.argv.includes('--zero-filled') ? 'zero-filled' : 'rmw');
+  }
   let report;
   try {
     report = probe();

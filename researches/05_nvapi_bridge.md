@@ -227,10 +227,17 @@ The vendor's own header on this machine —
 | entry stride | 0x48 = 72 B | **0x24 = 36 B** — exactly half |
 | frequency-offset field | entry's start, +0x00 | **+0x14 within the entry** |
 | unit | kHz | **kHz — confirmed** |
-| entry array | implied 0x20 … 0x2420 | **0x20 … 0x1220** (128 × 0x24 = 0x1200) |
+| entry array START | implied 0x20 (right after the header) | **0x44** — the header is 0x44 bytes, not 0x20 |
+| entry array | implied 0x20 … 0x2420 | **0x44 … 0x1244** (128 × 0x24) |
 
-**The arithmetic closes on the old mystery.** 0x20 + 128 × 0x24 = **0x1220** — the address of that
-stray `1`. It was never a curve field: it is the first dword of whatever follows the entry array.
+**The base is 0x44 and getting it wrong cost two silent no-ops** — see §8.7, which is the run that
+measured it. Everything else in this table was already right; the base was the last error, and it is
+the one that mattered, because a mis-based write is accepted and inert.
+
+**The arithmetic closes on the old mystery.** Under the measured base, `0x44 + 127 × 0x24` = **0x1220**
+— the address of that stray `1`. It was never a field past the array and never a curve value: it is
+the **first dword of point 127's entry**, and point 127 is an outlier in every other way too (see the
+unknown at the end of this section).
 
 **Confirmed at two independent magnitudes**, because one magnitude cannot separate a unit from a
 coincidence (EXP-0018): −100 MHz moved every field by exactly **−100000**; −37 MHz, a deliberately
@@ -241,8 +248,11 @@ non-round value, by exactly **−37000**. Linear, kHz, same stride, same field b
 changed **zero bytes** of this structure. So these entries are the **graphics domain alone**, and a
 stride mistake cannot reach memory settings.
 
-**What is NOT known, and no code may assume otherwise:** entries **1…127** moved; **entry 0 did not**.
-Whether point 0 is inactive or is a point the driver deliberately never shifts is unmeasured.
+**What is NOT known, and no code may assume otherwise:** the lever moves points **0…126** and leaves
+**point 127** alone. Point 127 is the odd one throughout: it carries the only non-zero service dword in
+the structure, and on the curve it reads **515 mV / 405 MHz** while its neighbour 126 reads
+1240 mV / 3157 MHz — so it is out of the monotonic order the other 127 points follow. It is very
+probably not a graphics curve point at all. Until that is understood, no code treats it as ordinary.
 
 ### 8.4 The allowed offset range — the other unknown this retired
 
@@ -269,12 +279,59 @@ A second, independently-authored witness rode along: `ClkVfPointsGetStatus` show
 3172.0 → 3075.0 MHz under the −100 MHz offset (−97, the card snapping to its own 7/8 MHz clock grid) and
 return afterwards.
 
+### 8.7 The first ADDRESSED write — and the two silent no-ops that preceded it
+
+**Measured 2026-08-10.** Everything above was driven by NVML, which moves ALL points at once. So the
+claim the entire safety story rests on — *the mask carries one bit, therefore a bad write reaches one
+point* — was still the source's, not ours. Proving it required KAGO's own write.
+
+**Two writes were accepted and did nothing.** `ClkVfPointsSetControl` returned status 0 and not one
+byte of the structure changed. That is the dangerous failure shape, and it is worth naming as a class:
+**a malformed SELECTION is not a malformed CALL**, so the API has nothing to complain about. Any code
+that trusted the status code here would have reported a profile as applied while the card ran stock.
+
+**The cause was found by asking a read-only question instead of guessing a third time** (the
+three-attempts rule, `BUG_FIXING_FRAMEWORK.md`). The lever puts a known value in every entry; then ask
+`GetControl` for that state three ways and see what comes back:
+
+| mask sent | entries returned carrying the value | which slots |
+|---|---|---|
+| all 128 bits | 127 | 1 … 127 *(under the old base)* |
+| no bits | 0 | — |
+| **one bit, point 64** | **1** | **slot 65 — one LATER than asked** |
+
+The mask works exactly as documented; the ARRAY starts one entry later than assumed. Header = 0x44
+bytes. Every earlier number re-derives under the corrected base, which is what makes this a
+measurement rather than a fourth guess: first changed word `0x58` = point 0, last `0x1210` = point 126,
+and `0x1220` = point 127's entry start.
+
+**With the base corrected, the write works and the mask isolates.** Proved at three points — 20, 64
+and 110 — each time: exactly ONE entry changed and it was the one addressed, the value read back equal
+to what was written, the curve moved by exactly the offset at that point with **zero** other points
+moving, and the rollback returned all 9 248 bytes byte-for-byte.
+
+**Two things the run corrected about our own reasoning, recorded so neither gets re-invented:**
+
+1. **Read-modify-write was NOT the fix, and must not be credited with it.** Both changes were made at
+   once; the run that isolated them (`--prove-mask 20 -8 --zero-filled`) shows a zero-filled buffer
+   works identically to a read-modify-write once the base is right. RMW is kept as the default anyway —
+   it preserves service fields we do not understand for one extra read — but the cause was the address,
+   full stop.
+2. **A negative offset on a floor point cannot move the curve, and that is correct behaviour.** Points
+   0…~20 of this curve all sit at **180 MHz**, the card's minimum clock, at rising voltages. The
+   control struct records the offset; the frequency has nowhere to go. The check names this case
+   explicitly rather than relaxing its predicate — a loosened "the delta may be zero" would also pass a
+   write that did nothing anywhere (EXP-0020).
+
 ### 8.6 Commands
 
 ```
 npm run nvml                                    read-only: driver, card, offset + ALLOWED RANGE per domain
 npm run nvml -- --find-offset-field -100        the experiment; add --mem for the memory lever
 npm run nvml -- --verify-decode                 the guard: one buffer, both layouts, published must go red
+npm run nvml -- --probe-mask                    READ-ONLY under the lever: what the mask actually selects
+npm run nvapi -- --prove-mask <point> <-MHz>    KAGO's OWN addressed write + the mask proof; --zero-filled
+                                                repeats it without the read-modify-write
 ```
 
 **`nvml.mjs` is an INSTRUMENT, never a backend.** It is not called by `profile-manager.mjs` and never
