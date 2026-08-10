@@ -308,6 +308,41 @@ may not exceed. That is a claim about FRAMES, so it is measured here — and `--
 **Verification:** the selftest offline; then ONE real bracket at one cap, with the store showing a
 last-PASS / first-FAIL pair ≤ 15 MHz apart. **P5-AC1, AC2, AC5.**
 
+### 4.5a — THE THERMAL LADDER: pinned clocks, the RT game, and a plateau at every rung 🔲
+
+*Anchor: the owner's own design, 2026-08-10 22:xx — «нужно сделать лестницу с жёсткими максимальными
+частотами, и гонять на них игру с лучами - максимально грузить карту на заданном потолке частоты».*
+
+**The problem it solves, measured rather than argued.** `Silent Cold` is now defined as *maximum
+performance at a temperature no higher than the one at which the fans hold 40 %*, so the whole mode
+hinges on T(40 %) — and every number this project had for the fan↔temperature pair came from a
+TRANSIENT. Proof of how badly that misleads: on the way DOWN the fan crossed 40 % at **47 °C**; on the
+way UP the same 40 % sat at **62–63 °C**. **A 15–16 °C spread for one fan level.** The owner named the
+cause before the data arrived — thermal and mechanical inertia.
+
+**Why a pinned CLOCK beats sweeping the power limit.** A held clock fixes the WORK, so the dissipated
+power is constant and the temperature reaches a true equilibrium; `-pl` only caps a ceiling the card
+may or may not reach. The ladder therefore yields the table directly:
+**clock cap → equilibrium temperature → equilibrium fan.**
+
+- [ ] Rungs across the operating band (the ladder is measured — 389 points, 7/8 MHz apart), loaded by
+      **the RT game**, not by a compute shape: the thermal load of path tracing is what the owner runs.
+- [ ] **Hold each rung to a PLATEAU, defined and detected, not timed by hope:** temperature AND fan
+      both stable for ≥ 60 s. A rung that never plateaus is reported as such rather than averaged.
+- [ ] The card is RELEASED in a `finally` after every rung — including on a failed capture — which
+      `ladder-descent.mjs` already does and must keep doing.
+- [ ] Output: the table, and from it `Silent Cold` reads directly as **the highest rung whose
+      equilibrium fan is ≤ 40 %**. That is «maximum performance under the temperature ceiling» with no
+      guesswork left in it.
+
+**What already exists and what is missing:** `ladder-descent.mjs` pins a rung and releases it safely ·
+`graphics-load.mjs` runs the RT game · `hardware-mon` samples per second. **Missing: the plateau
+detector, and the join** — the ladder currently loads the card with a compute shape.
+
+**The `-lgc` boundary, restated so nobody widens it:** pinning is legal for a MEASUREMENT (a held clock
+is what makes a watt comparison legal, EXP-0018) and stays OUT of any shipped profile, where `min = max`
+would forbid the card from clocking down at idle.
+
 ### 4.5 — Is the safe offset uniform across the band? The measurement that sizes the artifact 🔲
 
 *Anchor: `plans/01_EPIC` §4 — «по каждой точке», read honestly: a curve point is only exercised when
