@@ -126,6 +126,41 @@ FPS_VALUE="${RESULT_LINE##*: }"
 
 `supertuxkart` also carries an `install_windows.sh`, so it is scriptable too — but it does not clear C4.
 
+### 4a.1 The FPS line, read out of the SOURCE rather than out of a forum post
+
+Phoronix greps for `frames` and takes everything after the last `": "`. That works, but a parser built on
+someone's shell one-liner is a parser built on a guess, so the format was taken from the engine itself —
+`src/client/demo.c`, verbatim:
+
+```c
+Com_Printf("%u frames, %3.2f seconds: %f fps\n", cls.demo.time_frames, sec, fps);
+```
+
+So the line is `<frames> frames, <SS.SS> seconds: <fps> fps`, and our parser is
+`/^(\d+) frames, ([\d.]+) seconds: ([\d.]+) fps/m` — three captures, all of them meaningful: the frame
+count proves the demo ran to the end rather than being cut short, the seconds are the wall time, and the
+fps is the result. A run whose frame count differs from the others is not a slower run, it is a
+DIFFERENT run, and only the frame count can tell those apart.
+
+### 4a.2 THE ENGINE REPEATS THE RUN ITSELF — and that matters more than it looks
+
+The same file shows the timedemo cvar is a COUNT, not a flag:
+
+```c
+if (com_timedemo->integer) {
+    if (cls.timedemo.runs_total == 0) {
+        cls.timedemo.runs_total = com_timedemo->integer;
+        ...
+    // then, at the end, one printed line PER RUN:
+    for (int i = 0; i < cls.timedemo.runs_total; i++) { ... Com_Printf("%u frames, ...") }
+```
+
+So `+timedemo 3` plays the demo three times and prints three FPS lines from one launch. That is exactly
+the repetition EXP-0018 demands, provided for free — and it also explains Phoronix's `TimesToRun 3`. The
+distinction still has to be respected: three runs inside ONE launch share a thermal state and a warm
+cache, so they are a WITHIN-series spread, and the pooled figure needs launches taken apart in time
+(EXP-0018's exact finding, on the power meter).
+
 ## 4b. WHY NOT FURMARK — and the first reason is that the owner already ruled on it
 
 He asked directly. Three answers, in the order that matters:
@@ -229,6 +264,41 @@ So the honest reading: a CLI-driven, open-source benchmark used **only** for cha
 violate the constraint — but it is the owner's constraint, so the reading is put to him rather than
 adopted. And the boundary that keeps it honest: **if the load ever becomes required for a profile to
 apply, it has crossed into the forbidden role.**
+
+## 7a. INSTALLED — the machine state, recorded because it IS a machine change
+
+**Authorized by the owner 2026-08-10, with the location in his own words:** *«D:\Games\Quake2RTX — сюда,
+игры тут»*, then *«ставь»*.
+
+| Fact | Value |
+|---|---|
+| source | `gh release download v1.8.1 --repo NVIDIA/Q2RTX --pattern "*windows.exe"` |
+| size | **1 047 923 972 bytes — matches the release manifest exactly** (the only integrity check available; NVIDIA publishes no checksum) |
+| SHA-256 of the installer | `9256910A85AE1352CD41842EF9C0D00F0DD915F251A01DE8E30E56B6A0605018` |
+| installer technology | **NSIS** (probed: `Nullsoft` / `NSIS` / `SFX` markers in the PE) |
+| install command | `q2rtx-1.8.1-windows.exe /S /D=D:\Games\Quake2RTX` — flags read from [NSIS's own documentation](https://nsis.sourceforge.io/Docs/Chapter3.html) BEFORE running, never learned by running (EXP-0005): *"/S runs the installer silently"*, *"/D sets the default installation directory ($INSTDIR), overriding InstallDir… It must be the last parameter and must not contain any quotes"* |
+| result | exit code 0, **1 071 004 920 bytes** installed, and it landed where asked |
+| **THE ROLLBACK EXISTS, verified rather than assumed** | `D:\Games\Quake2RTX\Uninstall.exe` (91 189 bytes) — NSIS's own uninstaller, which removes the files and the Programs-and-Features entry; it takes `/S` too |
+| game data | `pak0.pak` (47.6 MB — the free shareware pak), `q2rtx_media.pkz` (865 MB), `blue_noise.pkz`, `shaders.pkz`. **No retail purchase, and no loose `.dm2` on disk** — the demo lives inside `pak0.pak` and is addressed through the engine's virtual filesystem |
+| what was NOT touched | the driver, every GPU setting, the registry outside what NSIS's own uninstaller owns, and anything inside this repository |
+
+**Two details taken from the ENGINE'S SOURCE, each of which would otherwise have cost a debug cycle:**
+
+- `logfile` is registered as `Cvar_Get("logfile", "1", 0)` — **logging is ON by default**, written to
+  `<gamedir>/logs/console.log`, and with `logfile` = 1 the file is opened in WRITE mode, so **every launch
+  truncates it.** That is convenient: read the whole file after the run and it contains only that run.
+- `logfile_prefix` defaults to `[%Y-%m-%d %H:%M] `, so **every logged line carries a timestamp prefix.**
+  A parser anchored at the start of the line (`/^(\d+) frames/`) would therefore match nothing. Phoronix's
+  `grep "frames"` survives this by accident; ours must not rely on accident.
+- `timedemo` is registered `CVAR_CHEAT`, so it is settable during demo playback but is not a cvar to
+  assume works in every context.
+- `cl_maxfps` **defaults to 60**, and the docs say that with `cl_async` 0 it *"limits both rendering and
+  physics frame rates"*. Left alone, the benchmark would cap at 60 fps and **the card would never be
+  loaded at all** — the single most likely way to produce a confident, meaningless number here.
+
+**NOTHING HAS BEEN RUN YET.** The launch was attempted and the permission layer declined it, so the game
+has not been started even once. That boundary is real and stays recorded: the install is a fact, every
+performance claim about Q2RTX on this card is still absent.
 
 ## 8. What this document does NOT establish
 
