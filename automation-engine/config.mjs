@@ -47,6 +47,29 @@ export const GUARDBAND_MIN_GRID_STEPS = 4;
 export const GUARDBAND_MIN_MILLIVOLTS = 25;
 
 /**
+ * THE SHIPPED MARGIN, SETTLED BY THE OWNER 2026-08-10 21:xx — and it supersedes both numbers above as
+ * the DEFAULT. His words, verbatim:
+ *
+ *   *«тогда делаем так. Если нашли шагами по 5 мВ точку отказа, то от неё вверх поднимаемся на два
+ *   шага: на +10 мВ, это даст вероятностный запас стабильности.»*
+ *
+ * TWO measured grid steps above the observed failure. The arithmetic is not a preference: the grid
+ * step is 5 mV MEASURED on the live curve (`VOLTAGE_GRID_STEP_MV`), so "two steps" is 10 mV on this
+ * card and would be something else on another — which is why the constant is a STEP COUNT and the
+ * millivolts are derived.
+ *
+ * WHY TWO AND NOT ONE, in his own reasoning: the edge is PROBABILISTIC. Measured the same evening at
+ * 2842 MHz, the card both PASSED and CRASHED at the same 885 mV — so one step above a failure can sit
+ * inside the region where failure is merely unlikely rather than absent. The second step is bought
+ * deliberately to cover that.
+ *
+ * WHY NOT THE RESEARCH'S 25 mV: it buys protection against the same thing, three times more
+ * expensively, and by ASSUMPTION rather than by observation. The owner's loop covers the residue by
+ * observation instead — whole-curve retest, the ratchet, and his own play session as a second witness.
+ */
+export const MARGIN_STEPS_ABOVE_FAILURE = 2;
+
+/**
  * PROVISIONAL — the voltage grid step of the V/F curve.
  *
  * SOURCE: researches/02 §3 Step 3 — "widely held to be 6.25 mV on NVIDIA parts", explicitly
@@ -606,6 +629,22 @@ export function powerEnvelope(probed) {
  * Returns the margin AND whether it rests on a measured grid step, so a caller that reports a
  * millivolt figure to the owner can say honestly which half of it is an estimate.
  */
+/**
+ * THE MARGIN THE OWNER SET, as millivolts on THIS card — two measured grid steps above the failure.
+ *
+ * Returns the number AND whether the grid step under it was measured, so a caller reporting a
+ * millivolt figure can say honestly which half of it is an estimate. On this card the step is
+ * measured (5 mV), so the answer is a measurement: 10 mV.
+ */
+export function marginAboveFailureMv(gridStepMv = VOLTAGE_GRID_STEP_MV) {
+  return {
+    millivolts: MARGIN_STEPS_ABOVE_FAILURE * gridStepMv,
+    steps: MARGIN_STEPS_ABOVE_FAILURE,
+    gridStepMv,
+    gridStepIsMeasured: VOLTAGE_GRID_STEP_IS_MEASURED,
+  };
+}
+
 export function guardbandMillivolts(gridStepMv = VOLTAGE_GRID_STEP_MV) {
   const fromSteps = GUARDBAND_MIN_GRID_STEPS * gridStepMv;
   return {
@@ -619,6 +658,7 @@ export function guardbandMillivolts(gridStepMv = VOLTAGE_GRID_STEP_MV) {
 export default Object.freeze({
   GUARDBAND_MIN_GRID_STEPS,
   GUARDBAND_MIN_MILLIVOLTS,
+  MARGIN_STEPS_ABOVE_FAILURE,
   VOLTAGE_GRID_STEP_MV,
   VOLTAGE_GRID_STEP_IS_MEASURED,
   CLOCK_OFFSET_GRANULARITY_IS_MEASURED,

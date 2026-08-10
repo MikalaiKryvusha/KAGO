@@ -135,6 +135,14 @@ export function makeRecord(fields = {}) {
     tempReachedC: fields.tempReachedC ?? null,
     servingPoint: fields.servingPoint ?? null,
     servingMv: fields.servingMv ?? null,
+    // THE GRADED HALF OF THE ORACLE — how many computations came out wrong, not merely whether the
+    // run survived. A verdict answers "did it fail"; these answer "how close is it to failing",
+    // which is the question the owner asked and the one a 5 mV margin actually needs.
+    launches: fields.launches ?? null,
+    badElemsMax: fields.badElemsMax ?? null,
+    faultRate: fields.faultRate ?? null,
+    bitDistMin: fields.bitDistMin ?? null,
+    opsPerSecond: fields.opsPerSecond ?? null,
     capMhz: fields.capMhz ?? null,
     at: fields.at ?? stampNow(),
   };

@@ -167,10 +167,17 @@ export async function searchEdge({
     // cosmetic: without the voltage, a bracket in MHz cannot be checked for whether its two ends
     // are even different physically, and the first live search reported one that was not.
     const serving = result.undervolt?.after ?? null;
+    const m = result.meters ?? null;
     const attempt = {
       offsetMhz,
       servingPoint: serving?.pointIndex ?? null,
       servingMv: serving?.mv ?? null,
+      // The GRADED numbers ride with every attempt, so the search can watch corruption RISE rather
+      // than only meet the crash it ends at.
+      badElemsMax: m?.badElemsMax ?? null,
+      faultRate: m?.faultRate ?? null,
+      bitDistMin: m?.bitDistMin ?? null,
+      launches: m?.launches ?? null,
       verdict: result.verdict ?? null,
       reason: result.reason
         ?? ((result.blocks || []).filter((b) => !b.ok).map((b) => b.name).join('; ') || null),
@@ -187,6 +194,11 @@ export async function searchEdge({
         tempReachedC: result.tempReachedC ?? null,
         servingPoint: attempt.servingPoint,
         servingMv: attempt.servingMv,
+        launches: attempt.launches,
+        badElemsMax: attempt.badElemsMax,
+        faultRate: attempt.faultRate,
+        bitDistMin: attempt.bitDistMin,
+        opsPerSecond: m?.opsPerSecond ?? null,
       });
     }
     if (onAttempt) onAttempt(attempt);
@@ -380,6 +392,23 @@ export function selfTest() {
       });
       const saved = readAll(store).records;
       ok('каждая попытка ЛЕГЛА в хранилище, а не только в отчёт', saved.length, r4.attempts.length);
+      // THE GRADED HALF must survive the trip oracle -> atom -> engine -> store. It did NOT in the
+      // first live search: the atom kept the verdict and dropped result.meters, so the question
+      // «видно ли, как растёт число неверных расчётов» had no data behind it.
+      const graded = await searchEdge({
+        capMhz: 2842, point: 96, store,
+        card: { driver: '610.88', vbios: 'v1' },
+        runStepFn: async ({ offsetMhz }) => ({
+          verdict: offsetMhz < 200 ? P : config.VERDICT.SDC,
+          meters: { badElemsMax: offsetMhz / 75, faultRate: offsetMhz / 7.5e6, bitDistMin: 1, launches: 6000, opsPerSecond: 5e10 },
+        }),
+      });
+      const gradedSaved = readAll(store).records.filter((s) => s.point === 96);
+      ok('ГРАДИЕНТ ПОРЧИ доезжает до хранилища, а не теряется в атоме',
+        gradedSaved.every((s) => s.faultRate !== null && s.badElemsMax !== null), true);
+      ok('и по нему видно РОСТ, а не только финальный крах',
+        gradedSaved[gradedSaved.length - 1].badElemsMax > gradedSaved[0].badElemsMax, true);
+      ok('бит-дистанция тоже сохраняется — насколько ГЛУБОКО искажение', gradedSaved[0].bitDistMin, 1);
       ok('и записи несут вердикт, а не только сдвиг', saved.every((s) => 'verdict' in s), true);
       ok('храповик после поиска запрещает сбойнувший сдвиг',
         allowedOffset(saved, 95, { fineStepMhz: ASCENT_FINE_MHZ }).limitMhz, r4.firstFail - ASCENT_FINE_MHZ);
@@ -474,7 +503,14 @@ async function main(argv) {
     card,
     store,
     runStepFn: (a) => vf.runStep(a),
-    onAttempt: (a) => console.log(`  ПОПЫТКА +${a.offsetMhz} МГц → ${a.verdict ?? 'НЕИЗВЕСТНО'}${a.reason ? ` (${a.reason})` : ''}`),
+    onAttempt: (a) => {
+      // THE GRADED LINE — how many computations came out wrong, printed BESIDE the verdict so the
+      // approach to the edge is visible as a slope rather than only as the crash that ends it.
+      const grad = a.badElemsMax === null || a.badElemsMax === undefined
+        ? 'градиент не снят'
+        : `испорчено элементов ${a.badElemsMax} (доля ${a.faultRate === null ? '—' : a.faultRate.toExponential(2)}), бит-дистанция ${a.bitDistMin}, запусков ${a.launches}`;
+      console.log(`  ПОПЫТКА +${a.offsetMhz} МГц (${a.servingMv ?? '?'} мВ) → ${a.verdict ?? 'НЕИЗВЕСТНО'} · ${grad}`);
+    },
   });
 
   console.log('');

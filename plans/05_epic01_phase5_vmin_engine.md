@@ -348,10 +348,14 @@ SHIPPED OPERATING POINT — but that is the owner's call, not ours, and it goes 
 the arithmetic shown."* So both are implemented, neither is invented, and the default is the
 conservative one until he speaks.
 
-- [ ] `marginPolicy` with two named modes:
-      **`guardband`** — `config.guardbandMillivolts()` → max(4 × 5 mV, 25 mV) = **25 mV** above V_fail;
-      **`ratchet`** — one fine step (5 mV) above V_fail, then the whole-curve retest and the ratchet
-      carry the risk instead of the margin.
+- [x] **SETTLED BY THE OWNER, and it is neither of the two modes this step was written to offer:**
+      *«Если нашли шагами по 5 мВ точку отказа, то от неё вверх поднимаемся на два шага: на +10 мВ,
+      это даст вероятностный запас стабильности»* (2026-08-10 21:xx). **V_ship = V_fail + 2 grid steps
+      = 10 mV on this card**, implemented as `config.marginAboveFailureMv()` — a STEP COUNT with the
+      millivolts derived, so another card with another grid gets its own number rather than ours.
+      He moved from one step to two after the agent named the measured fact that the edge is
+      PROBABILISTIC (885 mV both passed and crashed): one step can sit inside the region where failure
+      is merely unlikely. `guardband` (25 mV) stays implemented as the conservative alternative.
 - [x] ~~Default `guardband`~~ — **SETTLED BY THE OWNER 2026-08-10 21:xx, and the default is now
       `ratchet`.** His words, verbatim: *«Моё слово о пинимальном шаге не 25 мВ. А 5 мВ. Если карта
       начала сбоить на условных 850 мВ, а на 855 мВ в этой точке частоты работала - точка фиксируется

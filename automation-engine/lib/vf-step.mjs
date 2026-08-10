@@ -249,10 +249,16 @@ export async function runStep({
       onBurst: () => { watchdog.beat(); },     // the lease is renewed by the load itself
     });
     out.verdict = result.verdict;
+    // THE GRADED NUMBERS ARE CARRIED, not dropped. The oracle counts how many elements went bad and
+    // how deep the corruption is; an earlier version of this function kept only the verdict, so the
+    // edge search could see a CRASH and could not see the errors that led to it. `prove:gradient`
+    // exists precisely because these counters catch a single flipped bit at a MATCHING checksum.
+    out.meters = result.meters ?? null;
     out.stress = {
       verdict: result.verdict,
       reason: result.reason ?? null,
       bursts: result.bursts?.length ?? null,
+      meters: result.meters ?? null,
     };
     block(`ВЕРДИКТ ОРАКУЛА под нагрузкой: ${result.verdict}`,
       result.verdict === config.VERDICT.PASS,
