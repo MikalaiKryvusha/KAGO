@@ -324,6 +324,17 @@ what keeps a context-losing session executing the RIGHT next step instead of re-
 
 ### Languages — routed by AUDIENCE, never by directory
 
+> **THE HIGHEST-FREQUENCY CASE FIRST, BECAUSE IT IS THE ONE THAT KEEPS BREAKING: EVERY CHAT MESSAGE
+> TO THE OWNER IS WRITTEN IN HIS LANGUAGE — here RUSSIAN.** No exception for a technical report, a
+> number-heavy summary, or a session that spent all day inside English documents. **The failure mode
+> is drift, not ignorance:** the agent reads the guide, the frameworks, the code comments and the
+> research docs — all correctly English — and answers in the register of what it has been READING
+> instead of the register of who it is ADDRESSING. This cannot be guarded mechanically: the text is
+> your reply, it never lands on disk, and no repository tool can see it. So the check is yours, at
+> the moment of sending: *who reads this?* Twice now the owner has had to point it out himself
+> (EXP-0006, EXP-0023) — that is the whole reason this paragraph sits at the top of the section
+> instead of inside the table below.
+
 **The rule is a question, not a list:** *does the OWNER read this document?* If yes, it is written in
 the owner's working language (`.kaif/kaif.json` → `language`, here **ru**). If it is read only by the
 agent, it is written in **English** — the language models read most reliably.
