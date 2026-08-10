@@ -301,6 +301,75 @@ export function priceRow(row, ref) {
 }
 
 // =================================================================================================
+// The KNEE — Max Optimal's objective, as a computation
+// =================================================================================================
+
+/**
+ * Find the knee of the gain-vs-price curve.
+ *
+ * THE OWNER'S DEFINITION, and it took him five restatements because the agent kept paraphrasing it
+ * into something else: *«Ищем перегиб, где перестаёт давать увеличивающуюся отдачу от продолжения
+ * снижения производительности»*, with *«можем заплатить до 5% производительности, если это даёт очень
+ * весомые выигрыши по холоду»*. So: the 5 % is a WALL, not a destination, and the destination is the
+ * knee.
+ *
+ * WHY THIS IS CODE AND NOT A JUDGEMENT CALL: the fourth restatement got written into the canon as
+ * "target = zero loss", because on the clock axis the knee happened to land at 0.1 % and the agent
+ * mistook where it LANDED for what it IS. A number that a session can re-derive cannot drift that way.
+ *
+ * The marginal return of a step is `Δgain / Δprice` — watts (or degrees) bought per percent of
+ * performance given up. Walking downward, the knee is the last point BEFORE that return collapses.
+ * "Collapses" is `collapseFactor` (default 3): the first step whose return is at least 3× worse than
+ * the best step seen so far ends the walk, and the point before it is the knee.
+ *
+ * Steps that cost nothing (price ≤ the meter's floor) are FREE and never end the walk — a division by
+ * a price indistinguishable from zero is not a rate, it is noise amplified.
+ *
+ * [NOT-TESTED] → selftest blocks 26–32.
+ */
+export function findKnee(rows, {
+  gain = (r) => r.wattsSaved,
+  priceCeilingPct = 5,
+  collapseFactor = 3,
+  floorPricePct = 0.18,
+} = {}) {
+  const pts = rows
+    .filter((r) => r && !r.error && Number.isFinite(r.pricePct) && Number.isFinite(gain(r)))
+    .sort((a, b) => b.mhz - a.mhz);
+  if (pts.length < 2) return { ok: false, why: `точек для расчёта: ${pts.length}` };
+
+  const steps = [];
+  let best = 0;
+  let knee = pts[0];
+  let collapsedAt = null;
+
+  for (let i = 1; i < pts.length; i++) {
+    const dPrice = pts[i].pricePct - pts[i - 1].pricePct;
+    const dGain = gain(pts[i]) - gain(pts[i - 1]);
+    const free = dPrice <= floorPricePct;
+    const rate = free ? Infinity : dGain / dPrice;
+    steps.push({ from: pts[i - 1].mhz, to: pts[i].mhz, dPrice, dGain, rate, free });
+
+    if (pts[i].pricePct > priceCeilingPct) { collapsedAt = collapsedAt ?? { why: 'потолок цены', at: pts[i].mhz }; break; }
+    if (Number.isFinite(rate) && best > 0 && rate * collapseFactor <= best) {
+      collapsedAt = { why: 'обвал отдачи', at: pts[i].mhz, rate, best };
+      break;
+    }
+    if (Number.isFinite(rate)) best = Math.max(best, rate);
+    knee = pts[i];
+  }
+
+  return {
+    ok: true,
+    knee,
+    steps,
+    collapsedAt,
+    bestRate: best,
+    withinCeiling: knee.pricePct <= priceCeilingPct,
+  };
+}
+
+// =================================================================================================
 // 3. Selftest — the logic on injected data, no GPU
 // =================================================================================================
 
@@ -393,6 +462,45 @@ export async function selfTest() {
       && /1260/.test(verifyLockUnderLoad(rec(1260, 1260, 1260), 2400).why), true);
   ok('нет проб частоты -> отказ, а не молчаливое согласие',
     verifyLockUnderLoad({ medians: { loaded: {} } }, 1200).ok, false);
+
+  // --- the knee: Max Optimal's objective, and the definition that took five restatements
+  const curve = [
+    { mhz: 2842, pricePct: 0, wattsSaved: 0 },
+    { mhz: 2790, pricePct: -0.3, wattsSaved: 7.1 },
+    { mhz: 2692, pricePct: -0.1, wattsSaved: 21.8 },
+    { mhz: 2595, pricePct: 3.2, wattsSaved: 41.8 },
+    { mhz: 2490, pricePct: 7.7, wattsSaved: 60.4 },
+    { mhz: 2392, pricePct: 11.7, wattsSaved: 70.8 },
+  ];
+  const k = findKnee(curve);
+  ok('перегиб найден по обвалу предельной отдачи, а не на глаз', k.knee.mhz, 2692);
+  ok('перегиб назвал причину остановки', k.collapsedAt?.why ?? null, 'обвал отдачи');
+  // A step whose price is thinner than the meter's floor is FREE, and free steps must never end the
+  // walk — dividing a gain by a price indistinguishable from zero is noise, not a rate.
+  ok('шаг ценою тоньше пола прибора помечен бесплатным и спуск не обрывает',
+    [k.steps[0].free, k.knee.mhz < 2790], [true, true]);
+  // A curve with NO collapse must walk to the ceiling instead of inventing a knee early.
+  const smooth = [
+    { mhz: 2800, pricePct: 0, wattsSaved: 0 },
+    { mhz: 2700, pricePct: 1, wattsSaved: 10 },
+    { mhz: 2600, pricePct: 2, wattsSaved: 20 },
+    { mhz: 2500, pricePct: 3, wattsSaved: 30 },
+  ];
+  ok('на ровной кривой перегиба нет — доходим до конца, а не выдумываем излом', findKnee(smooth).knee.mhz, 2500);
+  // The 5 % is a WALL: a curve that keeps paying well must still stop at it.
+  const generous = [
+    { mhz: 2800, pricePct: 0, wattsSaved: 0 },
+    { mhz: 2700, pricePct: 2, wattsSaved: 40 },
+    { mhz: 2600, pricePct: 4, wattsSaved: 80 },
+    { mhz: 2500, pricePct: 9, wattsSaved: 180 },
+  ];
+  const g = findKnee(generous);
+  ok('потолок 5 % — стена: точка за ним не берётся, даже если отдача отличная', g.knee.mhz, 2600);
+  // Null-safe for the same reason as the block above it: an assertion that THROWS reports nothing,
+  // and the suite dies instead of naming the broken guarantee. Found by the mutation run, twice.
+  ok('остановка по потолку названа именно так', g.collapsedAt?.why ?? null, 'потолок цены');
+  ok('перегиб на холоде считается той же функцией, другой мерой выигрыша',
+    findKnee(curve, { gain: (r) => r.wattsSaved * 0.1 }).knee.mhz, 2692);
 
   // --- THE SAFETY SHAPE, on a fake card. These three are the reason the module exists as a module.
   const fast = { intervalMs: 1, timeoutMs: 500 };

@@ -1173,8 +1173,24 @@ interpretation. Interviews are for vision-level forks that outlive the task.
 
   | Profile | Objective | Price |
   |---|---|---|
-  | 🚀 **Max Optimal** | maximize the win that is FREE | **zero loss** — the target, not a ceiling |
+  | 🚀 **Max Optimal** | **the KNEE** — the point after which giving up more performance stops paying | **≤ 5 %, a CEILING and not a target** |
   | ❄️ **Silent Cold** | **maximize COLD** | **~10 %**, DETERMINED in advance and spent deliberately |
+
+  **THE KNEE IS A COMPUTATION, NOT AN IMPRESSION — and getting this wrong is a documented failure of
+  this project's own agent.** The owner had to state it five times, and the fourth restatement wrote
+  "target = zero loss" into this file, because on the CLOCK axis the knee happened to land at 0.1 %.
+  Where the knee LANDS is a measurement; what we look for is the knee. His words:
+
+  > *«Ищем перегиб, где перестаёт давать увеличивающуюся отдачу от продолжения снижения
+  > производительности»* · *«мы можем заплатить до 5% производительности, если это даёт очень весомые
+  > выигрыши по холоду»*
+
+  The definition, executable: walk the candidates downward; for each step compute the MARGINAL RETURN
+  — watts (or degrees) gained per percent of performance given up. The knee is the point after which
+  that return COLLAPSES. Aim there; the 5 % is the wall you may not pass, not the place to stand.
+  Measured on the clock axis 2026-08-10: 73 W per percent down to 2692 MHz, then 6.1 — a twelvefold
+  collapse, so the knee is 2692 at a cumulative price of 0.1 %. **On the VOLTAGE axis the knee may sit
+  at 2–4 %, and that is exactly what the 5 % ceiling exists to permit.**
 
   **Two levers, and which profile may use which is the whole design:**
   - **Voltage** — lowers watts and degrees at FULL clocks, i.e. free. Max Optimal's ONLY lever: a

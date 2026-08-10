@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0021 · 2026-08-10 · ❌→✅ · #owner #criteria #requirements #paraphrase #executable
+**Context:** the owner's acceptance criterion for the `Max Optimal` profile — «найти перегиб кривой», the point where giving up more performance stops paying.
+**Tried / did:** restated it in my own words each time it came up, and moved on to the work.
+**Result:** ❌→✅ he had to say it **five times**, and my fourth restatement wrote *«целевая функция — ноль потерь»* into the project canon. That was wrong in a way that is easy to miss: on the axis I had measured, the knee HAPPENED to land at 0.1 %, so my paraphrase agreed with the data and disagreed with the criterion. On the next axis it would have sent the search to the wrong point. Fixed by making the criterion a FUNCTION — `findKnee()`: marginal return per percent given up, the knee is where that return collapses, the 5 % is a wall and not a destination. Seven blocks, three mutations, and the owner's own curve as a fixture.
+**Lesson:** **when the owner repeats a criterion, the repetition IS the defect report — stop paraphrasing it and make it executable.** A paraphrase drifts a little each time and there is no diff to catch it, whereas a function is one artifact both sides can point at, and a fixture built from the owner's own numbers is a criterion he can check without reading code. The tell is cheap to watch for: **the second restatement is the signal**, not the fifth. Generalize past acceptance criteria — any rule the owner keeps re-stating (a naming convention, a review step, a tone) is a rule the prose is failing to carry, and KAIF already says this about repeated LESSONS («two strikes → a mechanism, never a third reminder»); this entry extends it to repeated OWNER CRITERIA.   → link: `AGENT_GUIDE.md` → Notes from the human · `findKnee()` in ladder-descent.mjs
+**Repro:** `npm run descend -- --selftest` — the knee blocks run the owner's measured curve and assert 2692 MHz, plus a smooth curve with no knee and a generous one that must still stop at the 5 % wall.
+**Trigger:** the owner restates a criterion you have already recorded → do not re-record it in prose; write the function that computes it and a fixture from his own numbers, then show him the result.
+**Not for:** genuinely new information (that is a change, not a repetition), and taste criteria that cannot be computed — those go to a mock-up and his eyes/ears (`AGENT_GUIDE.md` → the taste class).
+
 ### EXP-0020 · 2026-08-10 · ❌→✅ · #observation #instruments #generalization #gpu #verification
 **Context:** descending the clock ladder to find the Silent Cold point. The plan carried a settled fact from EXP-0014: a clock lock is read back from `clocks.gr` **at idle**, needs no load, and a value that stops varying IS the proof.
 **Tried / did:** locked six ladder points and let the applier verify each at idle, exactly as the plan said.
