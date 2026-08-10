@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0016 · 2026-08-10 · ❌→✅ · #verification #guards #mutation #false-green #testing
+**Context:** writing `profile-manager.mjs` with a selftest whose whole job is to guard P2-AC2 — «a written value counts as read back only when TWO consecutive samples agree». The suite had a block for it: a fake card that returns the OLD value once, then the new one. 13 blocks, all green.
+**Tried / did:** before trusting the green, ran the suite against deliberately broken COPIES of the module — one mutation per load-bearing guarantee. One of them cut the rule from two agreeing samples down to one.
+**Result:** ❌→✅ **the single-sample mutation stayed GREEN.** The block I had written to guard the two-sample rule did not guard it: a stale value fails the "does it match the target?" expectation anyway, so the streak counter was never what saved us — the predicate was. The scenario that actually needs a second sample is the opposite one: a card that FLASHES the target value for one read and goes back (physically plausible — a released clock wanders 810…1065 and can brush past the point). Added that fixture; the mutation went red. Same run, second finding: my mutation harness printed «ЗЕЛЁНЫЙ» for a mutation that had CRASHED the process — 0 failures parsed out of a stack trace.
+**Lesson:** **a fixture that a NEIGHBOURING rule also catches does not test your rule.** Writing a guard for rule R, ask which single fixture ONLY R can catch, and build that one — otherwise the suite is green for reasons unrelated to R, and it will stay green when R is deleted. The mutation run is the only thing that tells them apart, because both stories agree with the code you just wrote. Corollary, second half: **a crashed verifier is not a green verifier** — parse for the suite's own completion line, never for the absence of failures (`BUG_FIXING_FRAMEWORK.md` → a finding is not a finding, point 3). Extends EXP-0008 from "prove the guard can go red" to "prove it goes red FOR ITS OWN REASON".   → link: `automation-engine/lib/profile-manager.mjs` · plans/03 §4.2
+**Repro:** copy the module to a scratch tree with its imports, replace ONE guarantee (`agreeing = READBACK_AGREEING_SAMPLES` → `agreeing = 1`), run the suite, and require both: the completion line PRESENT and at least one block failed. Green or missing completion line = the suite does not guard that line.
+**Trigger:** about to trust a new selftest → mutate each guarantee it claims to protect, one at a time, and demand a red that names the block belonging to that guarantee.
+**Not for:** suites over pure functions with one obvious assertion per rule — there the fixture cannot help but isolate.
+
 ### EXP-0015 · 2026-08-10 · ❌→✅ · #windows #processes #electron #owner-machine #measurement
 **Context:** the owner asked for the GPU's background load to be removed — stop NVIDIA Broadcast and LosslessScaling, which held the card awake.
 **Tried / did:** enumerated both process trees and stopped every PID, children before the root.
