@@ -33,7 +33,8 @@
     "vfstep": "node automation-engine/lib/vf-step.mjs",
     "gfx": "node automation-engine/lib/graphics-load.mjs",
     "vmin": "node automation-engine/lib/vmin-store.mjs",
-    "engine": "node automation-engine/engine.mjs"
+    "engine": "node automation-engine/engine.mjs",
+    "fanladder": "node tools/fan-ladder.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
