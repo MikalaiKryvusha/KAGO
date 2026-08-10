@@ -127,6 +127,23 @@ export const CLOCK_OFFSET_GRANULARITY_IS_MEASURED = false;
  * bound the hardware itself states replaces a self-imposed guess — and it stays a CEILING, never a
  * target: the search still climbs from small offsets, it simply now knows where the wall is.
  */
+/**
+ * THE METER'S OWN RUN-TO-RUN SPREAD, in watts. A delta thinner than this is NOT an effect.
+ *
+ * MEASURED 2026-08-10 (`npm run power -- --spread stock`): ten stock runs in TWO independent series
+ * of five — 1.28 W = 0.65 % on power, 0.18 % on price. Pooled across series deliberately: the spread
+ * INSIDE one series understated the floor (0.67 and 0.49 W) because runs in a series share a thermal
+ * state, and the two series' medians sat 0.9 W apart — further than either series' own width
+ * (EXP-0018).
+ *
+ * WHY IT LIVES IN CONFIG rather than at a call site (rule R3): it is the threshold that decides
+ * whether a measured difference may be REPORTED as a saving at all, which makes it a safety number in
+ * the same sense as a guardband — the owner's rule that "no loss" may only be claimed by an
+ * instrument finer than the effect it denies.
+ */
+export const POWER_METER_SPREAD_W = 1.28;
+export const POWER_METER_SPREAD_PCT = 0.65;
+
 export const CLOCK_OFFSET_MIN_MHZ = -1000;
 export const CLOCK_OFFSET_MAX_MHZ = 1000;
 export const CLOCK_OFFSET_RANGE_IS_MEASURED = true;
@@ -436,6 +453,8 @@ export default Object.freeze({
   VOLTAGE_GRID_STEP_MV,
   VOLTAGE_GRID_STEP_IS_MEASURED,
   CLOCK_OFFSET_GRANULARITY_IS_MEASURED,
+  POWER_METER_SPREAD_W,
+  POWER_METER_SPREAD_PCT,
   CLOCK_OFFSET_MIN_MHZ,
   CLOCK_OFFSET_MAX_MHZ,
   CLOCK_OFFSET_RANGE_IS_MEASURED,

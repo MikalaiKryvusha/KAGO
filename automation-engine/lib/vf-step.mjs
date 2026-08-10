@@ -394,6 +394,155 @@ export async function runAscent({
 }
 
 // =================================================================================================
+// THE PAYOFF — turn the millivolts into WATTS, at a HELD clock
+// =================================================================================================
+
+/**
+ * Measure the card at ONE clock, once at stock and once with the curve raised.
+ *
+ * ─── WHY THE CLOCK MUST BE HELD, AND WHY THAT IS THE WHOLE POINT ──────────────────────────────────
+ *
+ * `researches/02` §6.2: raising the curve without a ceiling buys SPEED, not watts — the card simply
+ * boosts to a higher point. Holding the clock is the industry's "flatten the tail", and it converts
+ * the same raise into the thing the owner's formula is written about: the SAME work for less power.
+ * It is also what makes the comparison legitimate — two power figures at different clocks are not a
+ * delta, they are two different experiments.
+ *
+ * ─── EVERY GUARD THIS PROJECT HAS PAID FOR APPLIES HERE AT ONCE ───────────────────────────────────
+ *
+ *  • the lock goes through `profile-manager` (rule R1) and is verified UNDER LOAD, never at idle
+ *    (EXP-0020 — a high lock is simply not observable on an idle card);
+ *  • power is sampled from a SEPARATE process by `power-baseline.capture` (an in-process sampler
+ *    records zero — `spawnSync` blocks the event loop);
+ *  • the meter's own scatter is 1.28 W / 0.65 % (EXP-0018), so a thinner delta is NOT an effect and
+ *    this function refuses to call it one;
+ *  • both sides carry their START TEMPERATURE, because power tracks the temperature a run REACHES
+ *    (~4 W per 5 °C, fact 10) — and now also because the CURVE itself derates with temperature
+ *    (fact 18), so a hot side is undervolted differently from a cold one.
+ */
+/** One median out of a power record — the shape is {n, median, min, max}, never a bare number. */
+function med(rec, field) {
+  const m = rec?.medians?.loaded?.[field];
+  return m && typeof m.median === 'number' ? m.median : null;
+}
+
+export async function measureUndervolt({
+  capMhz = 2842,
+  offsetMhz = 180,
+  workload = 'sdc_fma',
+  seconds = 30,
+  sustain = 30,
+} = {}) {
+  const nvapi = await import('./nvapi.mjs');
+  const wd = await import('./watchdog.mjs');
+  const power = await import('./power-baseline.mjs');
+  const pm = await import('./profile-manager.mjs');
+  const ladder = await import('./ladder-descent.mjs');
+  const store = await import('./profile-store.mjs');
+
+  const out = { capMhz, offsetMhz, workload, sides: [], blocks: [] };
+  const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
+
+  const stale = await wd.recover({});
+  if (stale.found && stale.ownerAlive) {
+    block('преполётная проверка', false, `карту держит живой процесс pid ${stale.record.ownerPid}`);
+    return out;
+  }
+
+  const nv = nvapi.openNvapi();
+  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+  const handle = handles.readBigUInt64LE(0);
+  const POINTS = nvapi.CLK_VF_POINT_COUNT - 1;
+
+  const backend = pm.nvidiaSmiBackend();
+  const card = store.probeCard();
+  // `card.ladder` is {ok, mhz, rung}, not an array — the list lives in `.mhz`. Shape read from the
+  // caller that already works (`ladder-descent` main), not guessed (EXP-0012).
+  if (!card.ladder?.ok) { block('лестница частот прочитана', false, card.ladder?.why ?? 'недоступна'); return out; }
+  const snapped = ladder.snapToLadder(capMhz, card.ladder.mhz);
+  const lockMhz = snapped?.mhz ?? capMhz;
+  if (snapped?.snapped) block('запрошенная частота притянута к лестнице', true, `${capMhz} → ${lockMhz} МГц`);
+
+  const watchdog = wd.arm({ what: `ЗАМЕР АНДЕРВОЛЬТА: ${lockMhz} МГц, кривая +${offsetMhz} МГц`, ttlMs: (seconds * 4 + 180) * 1000 });
+  let touched = false;
+  let locked = false;
+
+  const writeAll = (mhz) => {
+    let failed = 0;
+    for (let p = 0; p < POINTS; p++) if (!nvapi.writeVfOffset(nv, handle, p, mhz * 1000).ok) failed++;
+    return failed;
+  };
+
+  try {
+    for (const side of [{ tag: 'сток', mhz: 0 }, { tag: `кривая +${offsetMhz}`, mhz: offsetMhz }]) {
+      watchdog.beat();
+      if (side.mhz) { touched = true; if (writeAll(side.mhz)) { block(`${side.tag}: запись кривой`, false, 'были отказы'); break; } }
+
+      const curve = nvapi.readVfCurve(nv, handle);
+      const serving = curve.ok ? voltageForClock(curve.points, lockMhz) : null;
+
+      // The clock ceiling — the "flatten the tail" half, through the one sanctioned writer.
+      const profile = ladder.candidateProfile(lockMhz, card);
+      await pm.apply(backend, profile, { card, verifyLock: 'deferred' });
+      locked = true;
+      watchdog.beat();
+
+      const rec = await power.capture({ workload, seconds, sustain, label: `uv_${side.mhz}` });
+      out.sides.push({
+        tag: side.tag,
+        offsetMhz: side.mhz,
+        servingPoint: serving ? serving.pointIndex : null,
+        mv: serving ? serving.mv : null,
+        // The record's shape was READ, not assumed (EXP-0012): medians are {n, median, min, max}
+        // objects, the power field is 'power.draw.instant', and throughput lives in .
+        watts: med(rec, 'power.draw.instant'),
+        clockMhz: med(rec, 'clocks.gr'),
+        tempStart: rec?.startTemperature ?? null,
+        tempC: med(rec, 'temperature.gpu'),
+        fan: med(rec, 'fan.speed'),
+        opsPerSec: rec?.meters?.opsPerSecond ?? null,
+        dutyFactor: rec?.meters?.dutyFactor ?? null,
+        verdict: rec?.verdict ?? null,
+      });
+      block(`${side.tag}: замер снят на ${lockMhz} МГц`, Boolean(rec), serving ? `обслуживает точка ${serving.pointIndex} — ${serving.mv} мВ` : '');
+
+      await pm.resetToFactory(backend, { knownLockMhz: lockMhz });
+      locked = false;
+    }
+
+    // ---- the delta, judged against the meter's own floor
+    const [a, b] = out.sides;
+    if (a?.watts != null && b?.watts != null) {
+      const deltaW = Number((a.watts - b.watts).toFixed(2));
+      const floorW = config.POWER_METER_SPREAD_W ?? 1.28;
+      out.delta = { watts: deltaW, percent: Number(((deltaW / a.watts) * 100).toFixed(2)), floorW };
+      block(`ДЕЛЬТА ${deltaW} Вт толще собственного разброса прибора (${floorW} Вт)`,
+        Math.abs(deltaW) > floorW,
+        `${a.watts} → ${b.watts} Вт на ${lockMhz} МГц; тоньше пола — это НЕ эффект, а шум`);
+      const dTemp = (a.tempC != null && b.tempC != null) ? Number((b.tempC - a.tempC).toFixed(1)) : null;
+      block('температуры сторон сопоставимы (иначе сравнивается тепло, а не профиль)',
+        dTemp === null || Math.abs(dTemp) <= 3, `Δ ${dTemp} °C (${a.tempC} → ${b.tempC})`);
+    }
+  } finally {
+    watchdog.beat();
+    if (locked) { try { await pm.resetToFactory(backend, { knownLockMhz: lockMhz }); } catch { /* the curve rollback below still must run */ } }
+    if (touched) {
+      let failed = 0;
+      for (let p = 0; p < POINTS; p++) if (!nvapi.writeVfOffset(nv, handle, p, 0).ok) failed++;
+      const check = nvapi.readVfOffsets(nv, handle);
+      out.rolledBack = failed === 0 && check.ok && check.nonZero === 0;
+      block('ОТКАТ: кривая обнулена и замок снят', out.rolledBack, `отказов ${failed} · ненулевых ${check.ok ? check.nonZero : '—'}`);
+    } else { out.rolledBack = true; }
+    watchdog.disarm();
+    nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
+  }
+
+  return out;
+}
+
+// =================================================================================================
 // CLI
 // =================================================================================================
 
@@ -437,7 +586,40 @@ async function mainAscend() {
   return r.rolledBack ? 0 : 1;
 }
 
+async function mainMeasure() {
+  const capMhz = Number(arg('cap', 2842));
+  const offsetMhz = Number(arg('mhz', 180));
+  const seconds = Number(arg('seconds', 30));
+
+  console.log('ЗАМЕР АНДЕРВОЛЬТА В ВАТТАХ — обе стороны на ОДНОЙ закреплённой частоте');
+  console.log('');
+  console.log(`  ЧТО СРАВНИВАЕМ: сток против кривой +${offsetMhz} МГц, обе на ${capMhz} МГц.`);
+  console.log('  ЗАЧЕМ ЗАМОК:    без него подъём кривой покупает скорость, а не ватты, и два замера');
+  console.log('                  на разных частотах — не дельта, а два разных опыта.');
+  console.log('  ПОРОГ:          собственный разброс прибора 1,28 Вт. Тоньше — это НЕ эффект.');
+  console.log('  ОТКАТ:          кривая в ноль и замок снят, в finally, под сторожем.');
+  console.log('');
+
+  const r = await measureUndervolt({ capMhz, offsetMhz, seconds });
+
+  if (r.sides.length) {
+    console.log('  сторона        | обслуж. точка |    мВ |     Вт |  МГц |  °C | вент | вердикт');
+    for (const s of r.sides) {
+      console.log(`  ${String(s.tag).padEnd(14)} | ${String(s.servingPoint).padStart(13)} | ${String(s.mv).padStart(5)} | ${String(s.watts).padStart(6)} | ${String(s.clockMhz).padStart(4)} | ${String(s.tempC).padStart(3)} | ${String(s.fan).padStart(4)} | ${s.verdict}`);
+    }
+    console.log('');
+  }
+  for (const b of r.blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}${b.detail ? `\n            ${b.detail}` : ''}`);
+  if (r.delta) {
+    console.log('');
+    console.log(`ИТОГ: ${r.delta.watts} Вт (${r.delta.percent} %) на ${capMhz} МГц, пол прибора ${r.delta.floorW} Вт.`);
+  }
+  const failed = r.blocks.filter((b) => !b.ok).length;
+  return failed === 0 ? 0 : 1;
+}
+
 async function main() {
+  if (process.argv.includes('--measure')) return mainMeasure();
   if (process.argv.includes('--ascend')) return mainAscend();
   const point = Number(arg('point', DEFAULT_POINT));
   const offsetMhz = Number(arg('mhz', DEFAULT_STEP_MHZ));
