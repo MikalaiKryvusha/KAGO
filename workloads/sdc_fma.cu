@@ -18,25 +18,74 @@
 //     printed decimal (printing rounds, and rounding hides a wrong low bit, which is exactly the
 //     bit an undervolt flips first).
 //
-// Usage:  sdc_fma.exe [iterations] [blocks] [threads]
-// Output: one machine-readable line, plus a human line on stderr.
-//   KAGO-WORKLOAD name=sdc_fma checksum=<16 hex> elements=<n> iters=<n> ms=<n>
+// SUSTAINED MODE (`--sustain <seconds>`), added 2026-08-10 for plans/03 §4.3.
+//
+// WHY IT EXISTS. One run used to be one PROCESS, and the process dominated: measured on this card
+// at default arguments, 91 launches in 12 s = 132 ms per launch of which the kernel is 0–1 ms —
+// 99.2 % of the wall time was spent starting up, and the card reached 8 % utilization. You cannot
+// measure a power delta on a card that is idle, and you cannot measure a PRICE at all.
+//
+// AND THE PRICE IS NOT A CONVENIENCE — IT IS A DETECTOR (researches/04 §2). Clock stretching (the
+// card skips instructions while still reporting the locked clock) and memory error replay (GDDR7
+// carries internal ECC + CRC, so failed transfers are corrected or retried) BOTH produce a correct
+// checksum and no crash. Work-per-second is the only observable either one moves. So this file's
+// new numbers close a blind spot in the oracle, and happen to also be the "price" in the owner's
+// «снижаем потребление, пока цена ≤ N» formula. One instrument, two jobs.
+//
+// THE DURATION IS A FLAG, NEVER A POSITIONAL. Positionals 0..2 keep meaning iters/blocks/threads
+// exactly as they did before, so the default invocation runs the same code path that produced the
+// checksum recorded in workloads/MANIFEST.json. This is also what keeps the run ARGUMENTS out of
+// the golden's stamp: the harness passes the duration outside its `args` array, so the stamp
+// comparison stays `[] vs []` and EXP-0011's false-SDC guard is left untouched.
+//
+// Usage:  sdc_fma.exe [iterations] [blocks] [threads] [--sustain <seconds>]
+// Output: one machine-readable line, plus a human line on stderr. Durations are INTEGER
+//   MICROSECONDS — never a float: this machine's PowerShell culture is ru-RU and a locale decimal
+//   separator would corrupt every parsed number silently.
+//   KAGO-WORKLOAD name=sdc_fma checksum=<16 hex> elements=<n> iters=<n> ms=<n> launches=<n>
+//                 distinct=<n> gpu_us=<n> wall_us=<n> work_per_launch=<n>
 // Exit:   0 ran · 2 CUDA error (the CRASH half — the harness also reads the Windows event log)
 //
 // [TESTED: 2026-08-09 · built through toolchain.mjs and run 5x by `npm run workloads:build`:
 //  exactly ONE distinct checksum, e27ec24a82d509d7, on an RTX 5070 Ti at stock, driver 610.88.
 //  P1-AC1 satisfied. The checksum is recorded in workloads/MANIFEST.json next to the sha-256 of
 //  this source, so a later run that differs is either a changed source or a corrupting card.]
+// [TESTED: 2026-08-10 · `npm run workloads:build` rebuilt it and the five determinism runs still
+//  give e27ec24a82d509d7 — the edit is behaviour-preserving, which was the whole constraint.
+//  `--sustain 12` → 15341 launches, distinct=1, gpu_us=6759026 of wall_us=12000036. Sampled by a
+//  SEPARATE `npm run mon` process alongside: utilization 8 % → **57 %**, power 61.7 → 137.9 W,
+//  clock 2670 → 2887 MHz, fan 0 → 34.
+//  THE CROSS-CHECK THAT MAKES THE NUMBER TRUSTWORTHY: the program's self-reported duty factor
+//  (gpu_us/wall_us = 56.3 %) and the card's independently reported utilization (57 %) agree. Two
+//  instruments, one answer. The 43.7 % that is NOT kernel is the per-launch D2H + host hash — the
+//  measured price of not going blind between launches, and it is why branchy (98.5 % duty) is the
+//  saturation load while this one is the SDC sampler at 1286 launches/s against the old 7.6.]
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <chrono>
 #include <cuda_runtime.h>
+
+// Untimed launches before the timed window opens. Warming up is what makes a DIFFERENCE meaningful:
+// the first launches pay for context creation, allocation and clock ramp, none of which is the work
+// being measured.
+static const int WARMUP_LAUNCHES = 10;
+
+// How many distinct checksums we bother to remember. We only need to know whether the count is 1;
+// beyond a handful the run is already condemned.
+static const int MAX_DISTINCT = 8;
 
 // The FMA chain. Each thread walks its own dependent multiply-add chain, so the arithmetic units
 // stay saturated and the result depends on EVERY step: a single flipped bit anywhere in the chain
 // propagates to the output instead of being averaged away.
+//
+// IDEMPOTENT BY CONSTRUCTION, and the sustained loop depends on it: `acc` is seeded from the thread
+// index alone, nothing is read from `out`, and every slot is written by exactly one thread. So
+// running this kernel N times in a row leaves the same bytes as running it once — which is why
+// looping cannot change the checksum, and why a checksum that DOES change across launches inside
+// one process is a real finding rather than an artefact of looping.
 __global__ void fma_chain(float *out, int iters) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     // A per-thread starting value that is not a round number: round numbers hide mantissa errors.
@@ -60,10 +109,27 @@ static uint64_t fnv1a(const void *data, size_t bytes) {
     return hash;
 }
 
+// CUDA error strings contain spaces ("unspecified launch failure"), and the harness splits the
+// KAGO-WORKLOAD line on whitespace. A spaced value would silently become several bogus fields.
+static void no_spaces(char *dst, size_t cap, const char *src) {
+    size_t i = 0;
+    for (; src[i] && i + 1 < cap; ++i) dst[i] = (src[i] == ' ') ? '_' : src[i];
+    dst[i] = '\0';
+}
+
 int main(int argc, char **argv) {
-    const int iters   = (argc > 1) ? atoi(argv[1]) : 100000;
-    const int blocks  = (argc > 2) ? atoi(argv[2]) : 256;
-    const int threads = (argc > 3) ? atoi(argv[3]) : 256;
+    // Flags and positionals kept apart. An unknown token is treated as a positional exactly as
+    // before, so nothing that used to work stops working.
+    int sustain_s = 0;
+    int pos[3] = { 100000, 256, 256 };
+    int npos = 0;
+    for (int a = 1; a < argc; ++a) {
+        if (strcmp(argv[a], "--sustain") == 0 && a + 1 < argc) { sustain_s = atoi(argv[++a]); continue; }
+        if (npos < 3) pos[npos++] = atoi(argv[a]);
+    }
+    const int iters   = pos[0];
+    const int blocks  = pos[1];
+    const int threads = pos[2];
     const size_t n = (size_t)blocks * threads;
 
     float *d = nullptr;
@@ -71,31 +137,89 @@ int main(int argc, char **argv) {
         fprintf(stderr, "sdc_fma: cudaMalloc failed for %zu elements\n", n);
         return 2;
     }
-
-    const auto t0 = std::chrono::steady_clock::now();
-    fma_chain<<<blocks, threads>>>(d, iters);
-    const cudaError_t err = cudaDeviceSynchronize();
-    const auto t1 = std::chrono::steady_clock::now();
-
-    if (err != cudaSuccess) {
-        // A CUDA error here is the CRASH half of the three-way verdict. It is reported on stdout in
-        // the same machine-readable shape so the harness never has to parse two formats.
-        printf("KAGO-WORKLOAD name=sdc_fma error=%s\n", cudaGetErrorString(err));
-        cudaFree(d);
-        return 2;
-    }
-
     float *h = (float *)malloc(n * sizeof(float));
     if (!h) { cudaFree(d); return 2; }
-    cudaMemcpy(h, d, n * sizeof(float), cudaMemcpyDeviceToHost);
 
-    const uint64_t checksum = fnv1a(h, n * sizeof(float));
-    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    cudaEvent_t ev0, ev1;
+    cudaEventCreate(&ev0);
+    cudaEventCreate(&ev1);
 
-    printf("KAGO-WORKLOAD name=sdc_fma checksum=%016llx elements=%zu iters=%d ms=%lld\n",
-           (unsigned long long)checksum, n, iters, ms);
-    fprintf(stderr, "sdc_fma: %zu elements, %d iterations, %lld ms\n", n, iters, ms);
+    char errbuf[256];
 
+    // Warm-up runs only in sustained mode: the default path must stay the one-launch program whose
+    // checksum is recorded in the manifest, and a warm-up would make `npm run workloads:build`'s
+    // five determinism runs needlessly slow for no gain.
+    if (sustain_s > 0) {
+        for (int w = 0; w < WARMUP_LAUNCHES; ++w) fma_chain<<<blocks, threads>>>(d, iters);
+        const cudaError_t werr = cudaDeviceSynchronize();
+        if (werr != cudaSuccess) {
+            no_spaces(errbuf, sizeof(errbuf), cudaGetErrorString(werr));
+            printf("KAGO-WORKLOAD name=sdc_fma error=%s\n", errbuf);
+            free(h); cudaFree(d);
+            return 2;
+        }
+    }
+
+    long long launches = 0;
+    long long gpu_us = 0;
+    uint64_t first = 0;
+    uint64_t seen[MAX_DISTINCT];
+    int ndistinct = 0;
+
+    const auto t0 = std::chrono::steady_clock::now();
+    for (;;) {
+        cudaEventRecord(ev0);
+        fma_chain<<<blocks, threads>>>(d, iters);
+        cudaEventRecord(ev1);
+        const cudaError_t err = cudaDeviceSynchronize();
+
+        if (err != cudaSuccess) {
+            // A CUDA error here is the CRASH half of the three-way verdict. It is reported on stdout
+            // in the same machine-readable shape so the harness never has to parse two formats.
+            no_spaces(errbuf, sizeof(errbuf), cudaGetErrorString(err));
+            printf("KAGO-WORKLOAD name=sdc_fma error=%s launches=%lld\n", errbuf, launches);
+            free(h); cudaFree(d);
+            return 2;
+        }
+
+        float kernel_ms = 0.0f;
+        cudaEventElapsedTime(&kernel_ms, ev0, ev1);
+        gpu_us += (long long)(kernel_ms * 1000.0f + 0.5f);
+
+        // Hashed EVERY launch, not once at the end. Every launch overwrites the whole buffer, so a
+        // final-only hash would reflect the last launch alone and a corruption at launch #500 would
+        // be invisible — the spawn-per-run shape caught those, and the sustained shape must not be
+        // blinder than what it replaces.
+        cudaMemcpy(h, d, n * sizeof(float), cudaMemcpyDeviceToHost);
+        const uint64_t c = fnv1a(h, n * sizeof(float));
+        if (launches == 0) first = c;
+        bool known = false;
+        for (int k = 0; k < ndistinct; ++k) { if (seen[k] == c) { known = true; break; } }
+        if (!known && ndistinct < MAX_DISTINCT) seen[ndistinct++] = c;
+        launches++;
+
+        if (sustain_s <= 0) break;
+        const long long elapsed_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
+        if (elapsed_us >= (long long)sustain_s * 1000000LL) break;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+
+    const long long wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    const long long ms = wall_us / 1000;
+    const long long work_per_launch = (long long)n * (long long)iters;
+
+    // The checksum reported is the FIRST launch's, so the golden comparison keeps its meaning even
+    // when `distinct > 1` — and `distinct` is what tells the harness the run disagreed with itself.
+    printf("KAGO-WORKLOAD name=sdc_fma checksum=%016llx elements=%zu iters=%d ms=%lld "
+           "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld\n",
+           (unsigned long long)first, n, iters, ms,
+           launches, ndistinct, gpu_us, wall_us, work_per_launch);
+    fprintf(stderr, "sdc_fma: %zu elements, %d iterations, %lld launches, %lld us on the GPU of %lld us wall\n",
+            n, iters, launches, gpu_us, wall_us);
+
+    cudaEventDestroy(ev0);
+    cudaEventDestroy(ev1);
     free(h);
     cudaFree(d);
     return 0;

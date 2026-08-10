@@ -97,6 +97,45 @@ function proveDeterminism(exePath, repeats) {
   return { ok: seen.size === 1, seen };
 }
 
+/**
+ * THE ASSERTION THAT LICENSES KEEPING THE RUN DURATION OUT OF THE GOLDEN'S STAMP.
+ *
+ * `--sustain N` loops the SAME launch inside one process. That is only checksum-neutral because both
+ * kernels are idempotent with respect to their output buffer — seeded from the thread index, reading
+ * nothing back, one writer per slot. That is an argument, and arguments are not evidence
+ * (`TESTING_FRAMEWORK.md`), so it is re-proven by RUNNING it on every build:
+ *
+ *   - the sustained run's checksum must equal the default run's, and
+ *   - `distinct` must be 1 — the program's own count of how many different checksums it saw INSIDE
+ *     the process, which is the part an argument cannot cover.
+ *
+ * Why it must be a build gate rather than a comment: if a kernel ever accumulated across launches,
+ * the sustained shape would report a FALSE SDC on the owner's card mid-sweep — the exact class
+ * EXP-0011 paid for, where a healthy card was declared corrupt in every point. The stamp exemption
+ * rests on this observation, not on the reasoning above it.
+ *
+ * Two seconds, deliberately: long enough for hundreds of launches, short enough that nobody is
+ * tempted to skip the build.
+ */
+function proveSustainedMatches(exePath, defaultChecksum) {
+  const run = runWorkload(exePath, ['--sustain', '2']);
+  if (!run.ok) return { ok: false, reason: `устойчивый прогон не дал суммы (код ${run.status})` };
+  if (run.fields.checksum !== defaultChecksum) {
+    return {
+      ok: false,
+      reason: `устойчивый режим дал ДРУГУЮ сумму: ${run.fields.checksum} против ${defaultChecksum} — ` +
+              'значит ядро накапливает состояние между запусками, и цикл в хосте испортил бы каждый вердикт',
+    };
+  }
+  if (run.fields.distinct !== '1') {
+    return {
+      ok: false,
+      reason: `внутри одного процесса сумма менялась: distinct=${run.fields.distinct} за ${run.fields.launches} запусков`,
+    };
+  }
+  return { ok: true, launches: run.fields.launches, distinct: run.fields.distinct };
+}
+
 function listSources() {
   if (!existsSync(WORKLOADS)) return [];
   return readdirSync(WORKLOADS).filter((f) => f.endsWith('.cu')).sort();
@@ -180,7 +219,18 @@ function main(argv) {
       failed++;
       continue;
     }
-    console.log(`детерминирован · checksum=${checks[0]}`);
+    // The sustained mode must not move the checksum, and must not disagree with itself inside one
+    // process. Nothing about this run is RECORDED — the launch count varies with machine load and
+    // would churn the very manifest diff a reader is told to audit line by line.
+    const sustained = proveSustainedMatches(exe, checks[0]);
+    if (!sustained.ok) {
+      console.log('УСТОЙЧИВЫЙ РЕЖИМ РАСХОДИТСЯ');
+      console.log(`    ${sustained.reason}`);
+      console.log('    Пока это так, длительность прогона обязана входить в штамп эталона (EXP-0011).');
+      failed++;
+      continue;
+    }
+    console.log(`детерминирован · checksum=${checks[0]} · устойчивый режим сходится (${sustained.launches} запусков, distinct=${sustained.distinct})`);
     entries.push({
       name,
       source: src,
