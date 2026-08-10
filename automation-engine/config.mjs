@@ -78,8 +78,32 @@ export const GUARDBAND_MIN_MILLIVOLTS = 25;
  *   (2) the GRANULARITY of an offset that may be applied to a point (an Afterburner slider step).
  * Folklore attaches 6.25 mV to (2). The fine mode needs whichever one actually binds.
  */
-export const VOLTAGE_GRID_STEP_MV = 6.25;
-export const VOLTAGE_GRID_STEP_IS_MEASURED = false;
+/**
+ * ⚠️ MEASURED 2026-08-10 ON THE LIVE CURVE — AND THE INHERITED FIGURE WAS WRONG.
+ *
+ * Everything above this line is the history of an ASSUMPTION and is kept because it explains where the
+ * wrong number came from. The measurement: `node automation-engine/lib/nvapi.mjs --curve` read all 128
+ * V/F points through NvAPI `ClkVfPointsGetStatus` on this card, driver 610.88 — voltage 450…1240 mV,
+ * frequency 180…3157 MHz, and the spacing between adjacent points is **5 mV**, with some 10 mV gaps.
+ * Exactly two distinct step values, and the smallest is 5.
+ *
+ * So the folklore 6.25 mV is refuted here, and the owner's own figure was the correct one: he said
+ * *«точный режим - меняет напряжение на 5 мВ»* while the agent recorded that 5 mV might not be
+ * expressible. It is.
+ *
+ * WHAT THIS NUMBER IS, PRECISELY — the same distinction config already warned about, now that it
+ * matters: this is the SPACING BETWEEN ADJACENT CURVE POINTS. It is NOT the granularity of an applied
+ * offset; that is a different quantity, read from `ClkDomainsGetInfo`, and it is still UNMEASURED. A
+ * caller that needs the offset resolution must not use this constant for it.
+ */
+export const VOLTAGE_GRID_STEP_MV = 5;
+export const VOLTAGE_GRID_STEP_IS_MEASURED = true;
+
+/**
+ * The OFFSET granularity — a different quantity from the point spacing above, and still open.
+ * SETTLED BY: `ClkDomainsGetInfo` (id 0x64B43A6A), which also publishes the allowed offset range.
+ */
+export const VOLTAGE_OFFSET_GRANULARITY_IS_MEASURED = false;
 
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
@@ -385,6 +409,7 @@ export default Object.freeze({
   GUARDBAND_MIN_MILLIVOLTS,
   VOLTAGE_GRID_STEP_MV,
   VOLTAGE_GRID_STEP_IS_MEASURED,
+  VOLTAGE_OFFSET_GRANULARITY_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,
   TRANSIENT_OFF_SECONDS,

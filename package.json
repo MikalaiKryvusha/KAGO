@@ -27,5 +27,8 @@
     "workloads:build": "node tools/build-workloads.mjs",
     "prove:gradient": "node tools/prove-error-gradient.mjs",
     "workloads:verify": "node tools/build-workloads.mjs --verify"
+  },
+  "dependencies": {
+    "koffi": "^3.1.4"
   }
 }
