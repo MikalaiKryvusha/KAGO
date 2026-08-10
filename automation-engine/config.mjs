@@ -540,16 +540,26 @@ export const Q2RTX_BOUNCE_RAYS_CHEAP = 0;
 export const Q2RTX_CAP_PROOF_MIN_CHANGE_PCT = 5;
 
 /**
- * PROVISIONAL — this bench's own run-to-run scatter, WITHIN one launch.
+ * THIS BENCH'S OWN FLOOR — the run-to-run scatter ACROSS LAUNCHES, which is the only kind that may
+ * judge a delta (EXP-0018: a within-series figure understates the floor, and the power meter paid for
+ * that lesson first).
  *
- * SOURCE: 54.07…54.54 fps over five runs of one launch = 0.88 % (researches/06 §7b). It is recorded
- * so a delta thinner than it is never called an effect, and it is marked provisional because the
- * figure that actually governs is the ACROSS-LAUNCH one, which needs two independent series and does
- * not exist yet (EXP-0018 — the same trap the power meter paid for; EXP-0030 — and the same trap
- * ops/s fell into at 4.3 %).
+ * SOURCE: measured 2026-08-10 19:5x — two independent series of 5 runs each, both cooled to 42/40 °C
+ * before starting, at stock: **56.68 and 56.17 fps → 0.90 %**. The sides also agreed on everything
+ * else, which is what makes the figure believable rather than lucky: 299.8 vs 299.9 W (0.03 %),
+ * 76 vs 75 °C, 2775 vs 2782 MHz (0.25 %).
+ *
+ * WHY IT MATTERS MORE THAN ANY OTHER NUMBER HERE: the owner's `Optimised` criterion is «просадка FPS
+ * не более 5 %», and a budget can only be judged by an instrument whose own wobble is well inside it.
+ * 5 % is **5.5×** this floor, so the judgement is legitimate.
+ *
+ * THE HONEST CAVEAT, kept in the constant rather than in a report nobody re-reads: the figure rests on
+ * TWO series, and a min-max range over two points understates the true scatter. A third series
+ * sharpens it — `npm run gfx -- --capture --label stock_gfx_c` then `--spread stock_gfx`.
  */
-export const Q2RTX_FPS_SPREAD_PCT = 0.88;
-export const Q2RTX_FPS_SPREAD_IS_ACROSS_LAUNCHES = false;
+export const Q2RTX_FPS_SPREAD_PCT = 0.90;
+export const Q2RTX_FPS_SPREAD_IS_ACROSS_LAUNCHES = true;
+export const Q2RTX_FPS_SPREAD_SERIES = 2;
 
 /**
  * A runaway backstop, not an expectation. Five timedemo runs took ~58 s at 1280×720; a heavier
@@ -654,5 +664,6 @@ export default Object.freeze({
   Q2RTX_CAP_PROOF_MIN_CHANGE_PCT,
   Q2RTX_FPS_SPREAD_PCT,
   Q2RTX_FPS_SPREAD_IS_ACROSS_LAUNCHES,
+  Q2RTX_FPS_SPREAD_SERIES,
   Q2RTX_LAUNCH_TIMEOUT_MS,
 });

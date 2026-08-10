@@ -579,20 +579,37 @@ export async function measureUndervolt({
  * [NOT-TESTED] at birth — the offline half of this step is `nvapi --selftest-shape` (15 blocks,
  * mutation-proved with three mutations against named addressees); this function is its live half.
  */
+/**
+ * THE LOAD IS SWAPPABLE SINCE 2026-08-10 20:0x, and the seam is one line — the side measurement.
+ *
+ * WHY: every side this experiment ever measured was a COMPUTE load at ~137 W, i.e. half this card's
+ * envelope, while the owner plays at 300 W and 77 °C (STATUS fact 16). The graphics bench now exists
+ * and its record shape was written to MIRROR power-baseline's on purpose, so swapping the measurer
+ * needs no adapter and no second copy of the safety machinery: the watchdog, the cool-down, the
+ * vector, the read-back and the rollback are the same code for both loads. One writer, one undo.
+ *
+ * `load: 'compute'` — `sdc_fma`/`branchy` through power-baseline, price in ops/s.
+ * `load: 'graphics'` — Q2RTX's timedemo through graphics-load, price in **FPS**, which is the
+ * observable the owner's `Optimised` criterion is actually stated in.
+ */
 export async function runShapeExperiment({
   deltaMhz = 45,
   workload = 'sdc_fma',
+  load = 'compute',
   seconds = 30,
   sustain = 30,
+  gfxRuns = config.Q2RTX_TIMEDEMO_RUNS,
   coolToC = 42,
   capAtMhz = null,
   dryRun = false,
 } = {}) {
+  if (!['compute', 'graphics'].includes(load)) throw new Error(`--load принимает compute | graphics, дано ${load}`);
   const nvapi = await import('./nvapi.mjs');
   const wd = await import('./watchdog.mjs');
   const power = await import('./power-baseline.mjs');
+  const gfx = load === 'graphics' ? await import('./graphics-load.mjs') : null;
 
-  const out = { deltaMhz, workload, blocks: [], sides: [] };
+  const out = { deltaMhz, workload: load === 'graphics' ? 'q2rtx-timedemo' : workload, load, blocks: [], sides: [] };
   const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
 
   const stale = await wd.recover({});
@@ -713,7 +730,10 @@ export async function runShapeExperiment({
           `верх кривой ${topNow} → ${newTop} МГц при потолке ${cap} (обе пробы при ${tempAtBuild}…${cardTemperatureC()} °C)`);
       }
 
-      const rec = await power.capture({ workload, seconds, sustain, label: `shape_${side.applyVector ? deltaMhz : 0}` });
+      const label = `shape_${load}_${side.applyVector ? deltaMhz : 0}`;
+      const rec = load === 'graphics'
+        ? await gfx.capture({ label, runs: gfxRuns, profile: side.applyVector ? `curve+${deltaMhz}` : null })
+        : await power.capture({ workload, seconds, sustain, label });
       watchdog.beat();
       const m = (f) => { const x = rec?.medians?.loaded?.[f]; return x && typeof x.median === 'number' ? x.median : null; };
       out.sides.push({
@@ -723,11 +743,18 @@ export async function runShapeExperiment({
         tempC: m('temperature.gpu'),
         fan: m('fan.speed'),
         opsPerSec: rec?.meters?.opsPerSecond ?? null,
+        fps: rec?.meters?.fps ?? null,
         tempStart: rec?.startTemperature ?? null,
+        // The graphics load NEVER returns PASS (no golden on that path), so `faultFree` is carried
+        // beside the verdict rather than folded into it — collapsing them would manufacture the very
+        // PASS that module refuses to invent.
         verdict: rec?.verdict ?? null,
+        faultFree: rec?.faultFree ?? null,
       });
       block(`${side.tag}: замер снят БЕЗ фиксации частоты`, Boolean(rec),
-        `${m('clocks.gr')} МГц · ${m('power.draw.instant')} Вт · ${m('temperature.gpu')} °C · вердикт ${rec?.verdict}`);
+        `${m('clocks.gr')} МГц · ${m('power.draw.instant')} Вт · ${m('temperature.gpu')} °C · вентилятор ${m('fan.speed')} %`
+        + `${rec?.meters?.fps != null ? ` · ${rec.meters.fps.toFixed(3)} FPS` : ''}`
+        + ` · вердикт ${rec?.verdict ?? (rec?.faultFree ? 'БЕЗ СБОЕВ (не PASS)' : 'НЕИЗВЕСТНО')}`);
 
       // Observation 2: the card must still fall. Checked on the undervolted side, where a pin would show.
       if (side.applyVector) {
@@ -753,7 +780,29 @@ export async function runShapeExperiment({
         `${a.watts} → ${b.watts} Вт; тоньше пола — это шум, а не эффект`);
       block('ЧАСТОТА НЕ ПОТЕРЯНА: выданный клок сопоставим',
         a.clockMhz != null && b.clockMhz != null && b.clockMhz >= a.clockMhz - config.LOCK_DELIVERY_TOLERANCE_MHZ,
-        `${a.clockMhz} → ${b.clockMhz} МГц; цена ${a.opsPerSec} → ${b.opsPerSec} оп/с`);
+        `${a.clockMhz} → ${b.clockMhz} МГц; цена `
+        + (a.fps != null ? `${a.fps.toFixed(3)} → ${b.fps.toFixed(3)} FPS` : `${a.opsPerSec} → ${b.opsPerSec} оп/с`));
+
+      // THE PRICE IN THE UNIT THE OWNER STATED IT IN. Under a game the card is power-capped, so an
+      // undervolt shows up as FRAMES rather than as watts (STATUS fact 16) — and «просадка FPS не
+      // более 5 %» is a claim about frames, judged against the bench's OWN across-launch floor
+      // (0.90 %, measured over two stock series) and never against a within-launch figure.
+      if (a.fps != null && b.fps != null) {
+        const deltaFpsPct = Number((((b.fps - a.fps) / a.fps) * 100).toFixed(2));
+        const floorPct = config.Q2RTX_FPS_SPREAD_PCT;
+        out.deltaFps = { a: a.fps, b: b.fps, percent: deltaFpsPct, floorPct };
+        block(`FPS: ${a.fps.toFixed(3)} → ${b.fps.toFixed(3)} = ${deltaFpsPct > 0 ? '+' : ''}${deltaFpsPct} % `
+          + `против пола прибора ${floorPct} %`,
+          Math.abs(deltaFpsPct) > floorPct,
+          Math.abs(deltaFpsPct) > floorPct
+            ? 'сдвиг толще собственного разброса прибора — это эффект'
+            : 'тоньше пола прибора — это шум, а не эффект, и называть его выигрышем или потерей нельзя');
+        // The owner's budget, as a check rather than as prose. Only meaningful as a LOSS.
+        block('БЮДЖЕТ ВЛАДЕЛЬЦА: просадка FPS не более 5 %',
+          deltaFpsPct >= -5,
+          `просадка ${(-deltaFpsPct).toFixed(2)} % при потолке 5 % (бюджет шире пола прибора в `
+          + `${(5 / floorPct).toFixed(1)} раза, поэтому приговор законен)`);
+      }
       block('сравнение термически законно: старты сошлись',
         a.tempStart != null && b.tempStart != null && Math.abs(a.tempStart - b.tempStart) <= 3,
         `старт ${a.tempStart} → ${b.tempStart} °C, достигнуто ${a.tempC} → ${b.tempC} °C`);
@@ -855,6 +904,8 @@ async function mainShape() {
   const capArg = arg('cap-at', null);
   const capAtMhz = capArg === null ? null : Number(capArg);
   const dryRun = process.argv.includes('--dry-run');
+  const load = arg('load', 'compute');
+  const gfxRuns = Number(arg('gfx-runs', config.Q2RTX_TIMEDEMO_RUNS));
 
   console.log('ФОРМА ПРОФИЛЯ — ТО, ЧТО ПОПРОСИЛ ВЛАДЕЛЕЦ, ПРОВЕРЕННОЕ ТРЕМЯ НАБЛЮДЕНИЯМИ');
   console.log('');
@@ -873,12 +924,15 @@ async function mainShape() {
   if (dryRun) console.log('  РЕЖИМ:     СУХОЙ ПРОГОН — записи не будет.');
   console.log('');
 
-  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun });
+  const r = await runShapeExperiment({ deltaMhz, seconds, coolToC, capAtMhz, dryRun, load, gfxRuns });
 
   if (r.sides.length) {
-    console.log('  сторона        |  МГц |     Вт |  °C | старт °C | вент |      оп/с | вердикт');
+    const isGfx = r.load === 'graphics';
+    console.log(`  сторона        |  МГц |     Вт |  °C | старт °C | вент | ${isGfx ? '      FPS' : '     оп/с'} | вердикт`);
     for (const s of r.sides) {
-      console.log(`  ${String(s.tag).padEnd(14)} | ${String(s.clockMhz).padStart(4)} | ${String(s.watts).padStart(6)} | ${String(s.tempC).padStart(3)} | ${String(s.tempStart).padStart(8)} | ${String(s.fan).padStart(4)} | ${String(s.opsPerSec).padStart(9)} | ${s.verdict}`);
+      const price = isGfx ? (s.fps == null ? '—' : s.fps.toFixed(3)) : String(s.opsPerSec);
+      const verdict = s.verdict ?? (s.faultFree ? 'БЕЗ СБОЕВ' : 'НЕИЗВЕСТНО');
+      console.log(`  ${String(s.tag).padEnd(14)} | ${String(s.clockMhz).padStart(4)} | ${String(s.watts).padStart(6)} | ${String(s.tempC).padStart(3)} | ${String(s.tempStart).padStart(8)} | ${String(s.fan).padStart(4)} | ${price.padStart(9)} | ${verdict}`);
     }
     console.log('');
   }
@@ -887,6 +941,7 @@ async function mainShape() {
   const failed = r.blocks.filter((b) => !b.ok).length;
   console.log('');
   if (r.delta) console.log(`ИТОГ ПО ВАТТАМ: ${r.delta.watts} Вт (${r.delta.percent} %), пол прибора ${r.delta.floorW} Вт.`);
+  if (r.deltaFps) console.log(`ИТОГ ПО КАДРАМ: ${r.deltaFps.percent > 0 ? '+' : ''}${r.deltaFps.percent} % (${r.deltaFps.a.toFixed(3)} → ${r.deltaFps.b.toFixed(3)} FPS), пол прибора ${r.deltaFps.floorPct} %, бюджет владельца 5 %.`);
   console.log(`ИТОГ: блоков ${r.blocks.length}, провалов ${failed}.`);
   console.log('ЧТО ЭТО НЕ ЗНАЧИТ: форма профиля доказана, САМ ПРОФИЛЬ — нет. Ни запаса, ни разнородного');
   console.log('набора, ни длинного прожига (plans/05 §4.3, §4.6, §4.7).');
