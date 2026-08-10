@@ -60,6 +60,17 @@
 //  instruments, one answer. The 43.7 % that is NOT kernel is the per-launch D2H + host hash — the
 //  measured price of not going blind between launches, and it is why branchy (98.5 % duty) is the
 //  saturation load while this one is the SDC sampler at 1286 launches/s against the old 7.6.]
+// [TESTED: 2026-08-10 · the GRADED half, proven on a deliberately corrupted BUILD rather than by
+//  argument. A copy of this source with one injected line — flip the lowest mantissa bit of element
+//  123 on launch #5 — was compiled and run with `--sustain 2`. All five reported numbers came back
+//  exactly as predicted: distinct=2 · bad_launches=1 · bad_elems_max=1 · bit_dist_min=1 ·
+//  first_bad_index=123, over 2543 launches.
+//  AND THE PART THAT MATTERS MOST: the burst's reported checksum was still e27ec24a82d509d7 and
+//  still MATCHED the golden, so the old two-observation oracle would have returned PASS. The single
+//  flipped bit was seen only by `distinct` and by this gradient. That is the blind spot of
+//  researches/04 §2 reproduced on a real run, and the reason both exist.
+//  Harness: scratchpad/prove-gradient.mjs — it builds the corrupt copy, runs it, and compares the
+//  five numbers; the shipped binary carries no corruption hook of any kind.]
 
 #include <cstdio>
 #include <cstdlib>
@@ -117,6 +128,46 @@ static void no_spaces(char *dst, size_t cap, const char *src) {
     dst[i] = '\0';
 }
 
+/**
+ * HOW WRONG, not merely WHETHER wrong — the graded half of the oracle.
+ *
+ * The checksum answers "did anything change" in one bit of information: one corrupted element and
+ * sixty thousand corrupted elements produce the same verdict. For a search that walks DOWN toward
+ * the failure edge that is the wrong instrument — it tells you only that you already fell off. The
+ * count of differing elements is the gradient: each of the `elements` slots is one thread's own
+ * independent chain, so the count IS the per-thread fault rate, the same quantity Leng et al.
+ * measured going 3 % -> 90 % across two percent of voltage (researches/02 §2).
+ *
+ * The reference is the FIRST launch of THIS process, which is why no new file, no new stamp and no
+ * new baseline format are needed. Whether launch #1 was itself correct is a separate question, and
+ * the checksum-versus-golden comparison in the harness already answers it.
+ *
+ * WHAT IS DELIBERATELY NOT MEASURED: the numeric MAGNITUDE of the error. Both kernels are dependent
+ * chains built to amplify — a bit flipped early propagates chaotically to the end, by design — so
+ * |got - expected| carries no information about how large the fault was. The COUNT does; the SIZE
+ * does not. Measuring it anyway would be a number with no meaning, which is worse than no number.
+ *
+ * Also returned: the smallest Hamming distance among the differing slots (1 means a genuine
+ * single-bit flip; a large value means the value was destroyed rather than nudged), and the lowest
+ * differing index, so a clustered failure points at a region of the die rather than at the run.
+ */
+static long long diff32(const void *gotv, const void *refv, size_t elems,
+                        int *bitDistMin, long long *firstIdx) {
+    const uint32_t *g = (const uint32_t *)gotv;
+    const uint32_t *r = (const uint32_t *)refv;
+    long long bad = 0;
+    for (size_t i = 0; i < elems; ++i) {
+        if (g[i] == r[i]) continue;
+        uint32_t x = g[i] ^ r[i];
+        int pc = 0;
+        while (x) { pc += (int)(x & 1u); x >>= 1; }
+        if (bad == 0) { *bitDistMin = pc; *firstIdx = (long long)i; }
+        else if (pc < *bitDistMin) { *bitDistMin = pc; }
+        bad++;
+    }
+    return bad;
+}
+
 int main(int argc, char **argv) {
     // Flags and positionals kept apart. An unknown token is treated as a positional exactly as
     // before, so nothing that used to work stops working.
@@ -166,6 +217,17 @@ int main(int argc, char **argv) {
     uint64_t seen[MAX_DISTINCT];
     int ndistinct = 0;
 
+    // The graded half. `ref` holds the first launch's output; the element-wise diff runs ONLY when
+    // the cheap checksum says something changed — a free gradient, because a clean run never pays
+    // for it. bit_dist_min stays 0 while nothing has differed, which reads as "not applicable"
+    // rather than as a suspiciously perfect zero.
+    float *ref = (float *)malloc(n * sizeof(float));
+    if (!ref) { free(h); cudaFree(d); return 2; }
+    long long bad_launches = 0;
+    long long bad_elems_max = 0;
+    int bit_dist_min = 0;
+    long long first_bad_index = -1;
+
     const auto t0 = std::chrono::steady_clock::now();
     for (;;) {
         cudaEventRecord(ev0);
@@ -192,7 +254,19 @@ int main(int argc, char **argv) {
         // blinder than what it replaces.
         cudaMemcpy(h, d, n * sizeof(float), cudaMemcpyDeviceToHost);
         const uint64_t c = fnv1a(h, n * sizeof(float));
-        if (launches == 0) first = c;
+        if (launches == 0) {
+            first = c;
+            memcpy(ref, h, n * sizeof(float));
+        } else if (c != first) {
+            // Cheap detector said something moved — now pay for the diagnosis, and only now.
+            bad_launches++;
+            int bd = 0;
+            long long fi = -1;
+            const long long bad = diff32(h, ref, n, &bd, &fi);
+            if (bad > bad_elems_max) bad_elems_max = bad;
+            if (bit_dist_min == 0 || bd < bit_dist_min) bit_dist_min = bd;
+            if (first_bad_index < 0 || (fi >= 0 && fi < first_bad_index)) first_bad_index = fi;
+        }
         bool known = false;
         for (int k = 0; k < ndistinct; ++k) { if (seen[k] == c) { known = true; break; } }
         if (!known && ndistinct < MAX_DISTINCT) seen[ndistinct++] = c;
@@ -212,14 +286,17 @@ int main(int argc, char **argv) {
     // The checksum reported is the FIRST launch's, so the golden comparison keeps its meaning even
     // when `distinct > 1` — and `distinct` is what tells the harness the run disagreed with itself.
     printf("KAGO-WORKLOAD name=sdc_fma checksum=%016llx elements=%zu iters=%d ms=%lld "
-           "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld\n",
+           "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld "
+           "bad_launches=%lld bad_elems_max=%lld bit_dist_min=%d first_bad_index=%lld\n",
            (unsigned long long)first, n, iters, ms,
-           launches, ndistinct, gpu_us, wall_us, work_per_launch);
+           launches, ndistinct, gpu_us, wall_us, work_per_launch,
+           bad_launches, bad_elems_max, bit_dist_min, first_bad_index);
     fprintf(stderr, "sdc_fma: %zu elements, %d iterations, %lld launches, %lld us on the GPU of %lld us wall\n",
             n, iters, launches, gpu_us, wall_us);
 
     cudaEventDestroy(ev0);
     cudaEventDestroy(ev1);
+    free(ref);
     free(h);
     cudaFree(d);
     return 0;

@@ -48,6 +48,10 @@
 //  A FINDING FOR PHASE 2 THAT FALLS OUT OF THIS: saturated, the card draws 194.8 W against a 300 W
 //  limit — so a 250 W power limit cannot bite on this workload, and Silent Cold's power reduction
 //  will have to come from the clock lock rather than from `-pl`.]
+// [TESTED: 2026-08-10 · the graded half (`bad_launches`/`bad_elems_max`/`bit_dist_min`/
+//  `first_bad_index`) shares its code and its proof with sdc_fma.cu — see the marker there: an
+//  injected single-bit flip was reported as exactly 1 element at Hamming distance 1 while the
+//  burst checksum still matched the golden. Here the keys report 0 / -1 on every clean run.]
 
 #include <cstdio>
 #include <cstdlib>
@@ -68,6 +72,32 @@ static void no_spaces(char *dst, size_t cap, const char *src) {
     size_t i = 0;
     for (; src[i] && i + 1 < cap; ++i) dst[i] = (src[i] == ' ') ? '_' : src[i];
     dst[i] = '\0';
+}
+
+/**
+ * HOW WRONG, not merely WHETHER wrong. The full reasoning is in sdc_fma.cu beside its copy of this
+ * function; the short version: the checksum spends one bit of information on "did anything change",
+ * so one bad element and sixty thousand bad elements read the same. The COUNT of differing slots is
+ * the per-thread fault rate and therefore the gradient a descent toward the edge actually needs.
+ *
+ * Duplicated rather than shared, exactly as `fnv1a` already is in both workloads — these two files
+ * are edited together and a header for two copies of fifteen lines would be the heavier arrangement.
+ */
+static long long diff32(const void *gotv, const void *refv, size_t elems,
+                        int *bitDistMin, long long *firstIdx) {
+    const uint32_t *g = (const uint32_t *)gotv;
+    const uint32_t *r = (const uint32_t *)refv;
+    long long bad = 0;
+    for (size_t i = 0; i < elems; ++i) {
+        if (g[i] == r[i]) continue;
+        uint32_t x = g[i] ^ r[i];
+        int pc = 0;
+        while (x) { pc += (int)(x & 1u); x >>= 1; }
+        if (bad == 0) { *bitDistMin = pc; *firstIdx = (long long)i; }
+        else if (pc < *bitDistMin) { *bitDistMin = pc; }
+        bad++;
+    }
+    return bad;
 }
 
 __global__ void chase_and_branch(uint32_t *out, const uint32_t *table, int steps) {
@@ -165,6 +195,14 @@ int main(int argc, char **argv) {
     uint64_t seen[MAX_DISTINCT];
     int ndistinct = 0;
 
+    // The graded half — the element-wise diff runs ONLY when the cheap checksum says something moved.
+    uint32_t *ref = (uint32_t *)malloc(n * sizeof(uint32_t));
+    if (!ref) { free(hout); free(htable); cudaFree(dtable); cudaFree(dout); return 2; }
+    long long bad_launches = 0;
+    long long bad_elems_max = 0;
+    int bit_dist_min = 0;
+    long long first_bad_index = -1;
+
     const auto t0 = std::chrono::steady_clock::now();
     for (;;) {
         cudaEventRecord(ev0);
@@ -187,7 +225,18 @@ int main(int argc, char **argv) {
         // hide a corruption that happened earlier in the run.
         cudaMemcpy(hout, dout, n * sizeof(uint32_t), cudaMemcpyDeviceToHost);
         const uint64_t c = fnv1a(hout, n * sizeof(uint32_t));
-        if (launches == 0) first = c;
+        if (launches == 0) {
+            first = c;
+            memcpy(ref, hout, n * sizeof(uint32_t));
+        } else if (c != first) {
+            bad_launches++;
+            int bd = 0;
+            long long fi = -1;
+            const long long bad = diff32(hout, ref, n, &bd, &fi);
+            if (bad > bad_elems_max) bad_elems_max = bad;
+            if (bit_dist_min == 0 || bd < bit_dist_min) bit_dist_min = bd;
+            if (first_bad_index < 0 || (fi >= 0 && fi < first_bad_index)) first_bad_index = fi;
+        }
         bool known = false;
         for (int k = 0; k < ndistinct; ++k) { if (seen[k] == c) { known = true; break; } }
         if (!known && ndistinct < MAX_DISTINCT) seen[ndistinct++] = c;
@@ -205,14 +254,17 @@ int main(int argc, char **argv) {
     const long long work_per_launch = (long long)n * (long long)steps;
 
     printf("KAGO-WORKLOAD name=branchy checksum=%016llx elements=%zu steps=%d ms=%lld "
-           "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld\n",
+           "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld "
+           "bad_launches=%lld bad_elems_max=%lld bit_dist_min=%d first_bad_index=%lld\n",
            (unsigned long long)first, n, steps, ms,
-           launches, ndistinct, gpu_us, wall_us, work_per_launch);
+           launches, ndistinct, gpu_us, wall_us, work_per_launch,
+           bad_launches, bad_elems_max, bit_dist_min, first_bad_index);
     fprintf(stderr, "branchy: %zu threads, %d steps, %lld launches, %lld us on the GPU of %lld us wall\n",
             n, steps, launches, gpu_us, wall_us);
 
     cudaEventDestroy(ev0);
     cudaEventDestroy(ev1);
+    free(ref);
     free(hout); free(htable);
     cudaFree(dtable); cudaFree(dout);
     return 0;
