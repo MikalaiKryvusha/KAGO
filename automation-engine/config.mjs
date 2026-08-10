@@ -423,7 +423,144 @@ export const LOCK_DELIVERY_TOLERANCE_MHZ = 8;
 export const LOCK_IS_OBSERVABLE_AT_IDLE = false;
 
 // =============================================================================================
-// 8. Power limit — read from the card, never hard-coded
+// 8. The graphics load — Q2RTX on the test bench
+// =============================================================================================
+//
+// WHY THESE CONSTANTS EXIST AT ALL. Every stability verdict this project owns was taken at ~137 W
+// and 57 °C — HALF this card's power envelope — while a real path-traced game takes 299.97 W,
+// throttles on `sw_power_cap` and reaches 77 °C (researches/06 §7b). The region the oracle
+// certified turned out to be narrow, so the game-like shape is not a nicety: it is the load the
+// owner actually plays under, and plans/05 §4.3 puts it in the diverse set for exactly that reason.
+//
+// NOTHING HERE IS A DEPENDENCY. Q2RTX is a bench instrument, never a control path: it is not in
+// `package.json`, no shipped profile needs it, and a machine without it loses ONE workload shape and
+// nothing else (researches/06 §7 — the reconciliation with GOAL.md's no-third-party-GUI constraint,
+// which was aimed at MSI Afterburner in the APPLY path).
+
+/**
+ * SOURCE: the owner's word, chat 2026-08-10 — «D:\Games\Quake2RTX — сюда, игры тут», then «ставь».
+ * Installed the same day, v1.8.1, NSIS, rollback `D:\Games\Quake2RTX\Uninstall.exe` (researches/06 §7a).
+ *
+ * A PATH, not a number, and it lives here for the same reason the numbers do: one place to audit, one
+ * place to change. Nothing derives it — a module that cannot find the game says so and refuses.
+ */
+export const Q2RTX_ROOT = 'D:\\Games\\Quake2RTX';
+export const Q2RTX_EXE = 'q2rtx.exe';
+
+/**
+ * SOURCE: the engine's own source. `logfile` is `Cvar_Get("logfile", "1", 0)` — logging is ON by
+ * default and, at 1, the file is opened in WRITE mode, so EVERY LAUNCH TRUNCATES IT. That is what
+ * makes reading the whole file after a run legal: it contains that run and nothing else.
+ */
+export const Q2RTX_LOG_RELATIVE = 'baseq2/logs/console.log';
+
+/**
+ * SOURCE: `pak0.pak`'s directory, read rather than assumed — `demos/q2demo1.dm2`, 135 KiB, the only
+ * demo in the free shareware pak. The retail paks are not needed and not redistributable anyway.
+ */
+export const Q2RTX_DEMO = 'q2demo1.dm2';
+
+/**
+ * THE CVARS THAT MUST BE FORCED ON EVERY LAUNCH — each one is a measured trap, not a preference.
+ * They are passed on the COMMAND LINE every time so the game's saved `q2config.cfg` can never govern
+ * a measurement (it persists cvars on exit, and a bench whose settings drift between runs is not a
+ * bench).
+ *
+ *  · `vid_fullscreen 1` — WITHOUT IT THE NUMBER IS A LIE. Windowed, the desktop compositor paces the
+ *    app to the display's refresh rate even with the engine's own vsync off: nine of ten runs printed
+ *    143.998154 fps to six decimals, and a ~9× cheaper frame printed the SAME value. The owner named
+ *    it from the raw number — «144 кадра в секунду — это частота моего телевизора» (EXP-0032).
+ *  · `cl_maxfps 0` — its default is 60, and with `cl_async 0` it limits rendering as well as physics.
+ *    Left alone, the bench caps at 60 fps and the card is never loaded at all.
+ *  · `r_maxfps 0` — the renderer's own limiter, zeroed for the same reason.
+ *  · `vid_vsync 0` — the engine's vsync. Necessary and, as EXP-0032 proved, NOT sufficient.
+ *  · `drs_enable 0` — dynamic resolution scaling silently retargets the load to hit a frame-rate
+ *    goal, which makes two runs incomparable by changing the work rather than the speed.
+ *  · `flt_enable 1` — the denoiser, part of what makes this a game-shaped frame rather than a
+ *    synthetic one. Fixed so it is a condition of the measurement and not a drifting default.
+ *  · `nextserver quit` — the game ends ITSELF when the demo finishes. This is the one that makes an
+ *    automated loop possible at all (researches/06 §4a).
+ *
+ * RESOLUTION IS DELIBERATELY ABSENT. In fullscreen this engine renders at the DESKTOP's resolution
+ * and ignores `r_customwidth/height` — observed 2026-08-10, when a requested 1920×1080 window came
+ * out at the desktop's 1280×720. So the geometry is a CONDITION to be probed and recorded, never a
+ * setting to impose: imposing one would change the owner's display mode, which is the destructive
+ * class for a measurement that has no business touching his desktop.
+ */
+export const Q2RTX_FIXED_CVARS = Object.freeze([
+  ['vid_fullscreen', '1'],
+  ['vid_vsync', '0'],
+  ['cl_maxfps', '0'],
+  ['r_maxfps', '0'],
+  ['drs_enable', '0'],
+  ['flt_enable', '1'],
+  ['nextserver', 'quit'],
+]);
+
+/**
+ * SOURCE: the engine's `com_timedemo` is a COUNT, not a flag — `+timedemo 5` plays the demo five
+ * times from one launch and prints five FPS lines (researches/06 §4a.2). Five is what Phoronix's own
+ * profile approximates with `TimesToRun 3`, and it costs one launch instead of five.
+ *
+ * THE DISTINCTION THAT MUST SURVIVE THIS CONVENIENCE: runs inside ONE launch share a thermal state
+ * and a warm cache, so their agreement is a WITHIN-series spread. A pooled figure still needs
+ * launches taken apart in time (EXP-0018, and P5-AC8 asks for exactly two independent series).
+ */
+export const Q2RTX_TIMEDEMO_RUNS = 5;
+
+/**
+ * SOURCE: measured — the first pass of a launch reads ~1.7 % low (cold caches, shader warm-up).
+ * One run dropped, and the drop is RECORDED rather than silent: a discarded observation nobody can
+ * see is indistinguishable from a discarded observation nobody agrees with.
+ */
+export const Q2RTX_COLD_RUNS_DROPPED = 1;
+
+/**
+ * The per-frame cost knob, and the two settings the cap proof compares.
+ *
+ * SOURCE: `pt_num_bounce_rays` is the engine's own indirect-lighting depth. Measured on this card at
+ * 1280×720 fullscreen: 2 bounces → 54.07…54.54 fps at 299.97 W; 0 bounces → 79.08…79.98 fps. Two
+ * settings whose cost differs by ~46 % is what makes the proof below cheap and unambiguous.
+ */
+export const Q2RTX_BOUNCE_RAYS = 2;
+export const Q2RTX_BOUNCE_RAYS_CHEAP = 0;
+
+/**
+ * THE CAP PROOF'S THRESHOLD — how much the FPS must MOVE when the frame is made dramatically cheaper
+ * before this bench's numbers are allowed to mean anything (STATUS fact 17; EXP-0032).
+ *
+ * SOURCE: the two states are not close. Capped, a ninefold cost change moved the number by
+ * 0.000000 % (143.998154 both times). Uncapped, dropping the bounce rays moved it ~46 %. Any
+ * threshold between those separates them; 5 % is chosen as ~6× the 0.88 % within-launch spread this
+ * bench actually shows, so noise cannot fake a pass and a real cap cannot fake one either.
+ *
+ * WHAT IT IS NOT: a quality bar for the load. It is a proof that the instrument is measuring its
+ * input at all — a number that ignores a large change in its input is not measuring that input.
+ */
+export const Q2RTX_CAP_PROOF_MIN_CHANGE_PCT = 5;
+
+/**
+ * PROVISIONAL — this bench's own run-to-run scatter, WITHIN one launch.
+ *
+ * SOURCE: 54.07…54.54 fps over five runs of one launch = 0.88 % (researches/06 §7b). It is recorded
+ * so a delta thinner than it is never called an effect, and it is marked provisional because the
+ * figure that actually governs is the ACROSS-LAUNCH one, which needs two independent series and does
+ * not exist yet (EXP-0018 — the same trap the power meter paid for; EXP-0030 — and the same trap
+ * ops/s fell into at 4.3 %).
+ */
+export const Q2RTX_FPS_SPREAD_PCT = 0.88;
+export const Q2RTX_FPS_SPREAD_IS_ACROSS_LAUNCHES = false;
+
+/**
+ * A runaway backstop, not an expectation. Five timedemo runs took ~58 s at 1280×720; a heavier
+ * desktop resolution multiplies that, and a hung Vulkan device would otherwise hold the bench
+ * forever. Chosen an order of magnitude above the measured duration so it can only ever catch a
+ * failure, never a slow-but-working run.
+ */
+export const Q2RTX_LAUNCH_TIMEOUT_MS = 900_000;
+
+// =============================================================================================
+// 9. Power limit — read from the card, never hard-coded
 // =============================================================================================
 
 /**
@@ -505,4 +642,17 @@ export default Object.freeze({
   FAN_RAMP_IS_MEASURED,
   LOCK_DELIVERY_TOLERANCE_MHZ,
   LOCK_IS_OBSERVABLE_AT_IDLE,
+  Q2RTX_ROOT,
+  Q2RTX_EXE,
+  Q2RTX_LOG_RELATIVE,
+  Q2RTX_DEMO,
+  Q2RTX_FIXED_CVARS,
+  Q2RTX_TIMEDEMO_RUNS,
+  Q2RTX_COLD_RUNS_DROPPED,
+  Q2RTX_BOUNCE_RAYS,
+  Q2RTX_BOUNCE_RAYS_CHEAP,
+  Q2RTX_CAP_PROOF_MIN_CHANGE_PCT,
+  Q2RTX_FPS_SPREAD_PCT,
+  Q2RTX_FPS_SPREAD_IS_ACROSS_LAUNCHES,
+  Q2RTX_LAUNCH_TIMEOUT_MS,
 });
