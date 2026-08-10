@@ -1155,6 +1155,41 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   - **The three-doors rule applies without an exception here** (`PHILOSOPHY.md`): where the optimum is
     not yet measured, the honest answer is «не измерено», never a plausible inherited number.
 
+- **THE TWO PROFILES, DEFINED BY THE OWNER IN OPERATIONAL TERMS** (chat, 2026-08-10, after he caught
+  the agent describing CLOCK CLAMPING while he meant UNDERVOLTING). His words, verbatim:
+
+  > *«ты рубить хочешь, а я ТЮНИТЬ И ВЫЖИМАТЬ МАКСИМУМ СОКОВ из видеокарты»*
+  >
+  > *«НЕ СНИЖАЕМ ЧАСТОТУ, РАБОТАЕМ НА ВСЁМ ДИАПАЗОНЕ ЧАСТОТ — СНИЖАЕМ НАПРЯЖЕНИЯ НА ВСЁМ ДИАПАЗОНЕ
+  > ЧАСТОТ»*
+  >
+  > *«в ноль потерь нацелен только Max. Cold нацелен на снижение производительности примерно на 10%
+  > в обмен на максимальный холод какой только сможим получить от карты. Макс - максимум выигрыша
+  > производительности ценою минимума потери производительности. Холод - максимум выигрыша холода
+  > ценою детерминированной потери производительности»*
+
+  **This SUPERSEDES every earlier description of Silent Cold as "the profile that trades performance
+  away" with no number attached.** The two objective functions, stated so no session re-derives them:
+
+  | Profile | Objective | Price |
+  |---|---|---|
+  | 🚀 **Max Optimal** | maximize the win that is FREE | **zero loss** — the target, not a ceiling |
+  | ❄️ **Silent Cold** | **maximize COLD** | **~10 %**, DETERMINED in advance and spent deliberately |
+
+  **Two levers, and which profile may use which is the whole design:**
+  - **Voltage** — lowers watts and degrees at FULL clocks, i.e. free. Max Optimal's ONLY lever: a
+    profile whose price is zero may not touch anything that costs.
+  - **Clock** — lowers watts and degrees for money. Silent Cold's SECOND lever, and the reason its
+    10 % exists: the budget is what buys the extra cold.
+
+  So `Silent Cold` = a deep undervolt PLUS a clock cap sized to spend the 10 %; `Max Optimal` = the
+  undervolt alone. The clock axis was mapped on the live card 2026-08-10 (`plans/03` §4.5) — that
+  table is the second lever's map, not a profile.
+
+  **The tension to settle with the owner's ears, named rather than assumed:** "maximum cold" and
+  "quiet" pull opposite ways through the fan. The reading in force until he says otherwise: cold at
+  the STOCK fan curve, where fewer watts make the card colder and quieter at once.
+
 - *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
   dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
   records how it is satisfied.
