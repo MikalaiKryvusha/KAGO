@@ -162,7 +162,12 @@ states are not comparable either.
 - [ ] `/fable-judge` pass over everything claimed closed above (the epic requires it BEFORE the next
       phase's plan is written).
 - [ ] `MASTER_PLAN.md` phase 4 → closed, with the date and the evidence.
-- [ ] Write `plans/05_epic01_phase5_vmin_engine.md` — and only then continue phase-5 work.
+- [x] Write `plans/05_epic01_phase5_vmin_engine.md` — and only then continue phase-5 work.
+      **DONE 2026-08-10 17:04 +03:00, and OUT OF ORDER:** the owner opened the new session with
+      *«начнём с планирования»*, so the plan was written before the judge pass above. The waiver is
+      recorded where it can be audited — `plans/05` §0 — and that plan's own entry gate (§2) still
+      demands this judge pass before a single line of phase-5 code. A plan may precede its gate; code
+      may not.
 
 ## 5. DRIFT RECORD — phase-5 work executed inside phase 4
 
