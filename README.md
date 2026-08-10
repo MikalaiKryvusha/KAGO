@@ -11,7 +11,7 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-phase%202%20closing%2C%20phase%204%20bridge%20live-E67E22.svg?style=flat-square)](STATUS.md)
+[![Status](https://img.shields.io/badge/Status-phases%200%2C1%2C4%20closed%20%C2%B7%20undervolt%20measured%20%E2%88%927.71%20W-E67E22.svg?style=flat-square)](STATUS.md)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
@@ -55,9 +55,14 @@ else's numbers.
 
 ## 2. Where the project actually is
 
-Two phases of six are closed, and the card has been measured. The research base, the architecture and
-**the test bench** are done; KAGO now writes to the GPU and takes the write back; the search engine is
-not written yet.
+Three phases of six are closed, and the card has been measured. The research base, the architecture,
+**the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
+back on command; the search engine that turns that into a shipped profile is not written yet.
+
+**The undervolt is measured, not claimed.** With the whole voltage/frequency curve raised and nothing
+offered above the clock the card already delivered, it draws **7.71 W (5.6 %) less and runs 5 °C cooler at
+exactly the stock clock** — and no clock lock is used, so the card still boosts and still drops to idle
+speeds. One number from one pair of runs; two independent series are what will make it a result.
 
 The bench samples the card, loads it with KAGO's own CUDA workloads, watches the Windows event log,
 and returns a three-way verdict — PASS, SDC or CRASH — by comparing a run against a golden reference
@@ -76,9 +81,15 @@ API directly from Node, with no third-party GUI and no compiled binary, and read
 voltage/frequency curve.
 
 The measurement it produced first is the one that licenses every other number: the meter's **own**
-run-to-run spread, taken over ten stock runs in two independent series — **1.28 W (0.65 %)** on power
-and 0.18 % on throughput. A difference thinner than that is not an effect, and the tool prints that
-sentence beside every delta it computes.
+run-to-run spread, taken over ten stock runs in two independent series — **1.28 W (0.65 %)** on power.
+A difference thinner than that is not an effect, and the tool prints that sentence beside every delta it
+computes. The throughput half of that figure did not survive: measured across separate runs, the same
+stock workload varies **4.3 %**, so performance is judged on the delivered clock, which is exact.
+
+**And the load matters more than the meter.** A real path-traced game load drives this card to **300 W,
+99 % and 77 °C**; KAGO's own compute workloads reach 137 W at the same reported utilization. So every
+stability verdict so far was earned at half the card's power envelope, and that limit is stated here
+rather than left for a reader to discover.
 
 ```bash
 npm run gpu:info
@@ -217,7 +228,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Состояние](https://img.shields.io/badge/Состояние-фаза%201%3A%20стенд%20строится%2C%20движка%20нет-E67E22.svg?style=flat-square)](STATUS.md)
+[![Состояние](https://img.shields.io/badge/Состояние-фазы%200%2C1%2C4%20закрыты%20%C2%B7%20андервольт%20измерен%20%E2%88%927%2C71%20Вт-E67E22.svg?style=flat-square)](STATUS.md)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
@@ -260,8 +271,15 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 ## 2. Где проект находится на самом деле
 
-Закрыты две фазы из шести, и карта измерена. Разведка, архитектура и **испытательный стенд** готовы;
-KAGO пишет в карту и умеет забрать запись назад; движка поиска ещё нет.
+Закрыты три фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
+**собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по
+команде; движка, который превратит это в отгружаемый профиль, ещё нет.
+
+**Андервольт измерен, а не заявлен.** Когда вся кривая «напряжение — частота» поднята, а выше той частоты,
+которую карта и так выдавала, не предлагается ничего, она берёт **на 7,71 Вт (5,6 %) меньше и работает на
+5 °C холоднее при ровно стоковой частоте** — и никакой фиксации частоты при этом не применяется, так что
+карта по-прежнему разгоняется и по-прежнему сбрасывается на простое. Это одно число из одной пары
+прогонов; результатом его сделают две независимые серии.
 
 Стенд снимает телеметрию, грузит карту своими ядрами на CUDA, читает журнал Windows и выносит
 вердикт из трёх — PASS, SDC или CRASH, — сверяя прогон с эталоном, снятым на заводских настройках.
@@ -279,9 +297,16 @@ npm run phase1:accept
 «напряжение — частота» из 128 точек.
 
 Первым же замером он выдал число, которое даёт право на все остальные: **собственный разброс прибора**
-между прогонами — десять стоковых прогонов двумя независимыми сериями, **1,28 Вт (0,65 %)** по
-мощности и 0,18 % по производительности. Разница тоньше этой — не эффект, и инструмент печатает эту
-фразу рядом с каждой дельтой, которую считает.
+между прогонами — десять стоковых прогонов двумя независимыми сериями, **1,28 Вт (0,65 %)** по мощности.
+Разница тоньше этой — не эффект, и инструмент печатает эту фразу рядом с каждой дельтой, которую считает.
+А вот половина этой цифры про производительность не выжила: между отдельными прогонами одна и та же
+стоковая нагрузка расходится на **4,3 %**, поэтому производительность судится по выданной частоте — она
+точна.
+
+**И нагрузка важнее прибора.** Настоящая игровая нагрузка с путевой трассировкой загоняет эту карту в
+**300 Вт, 99 % и 77 °C**, а собственные вычислительные нагрузки KAGO дают 137 Вт при той же заявленной
+загрузке. Значит все вердикты о стабильности пока получены при половинном конверте карты — и этот предел
+назван здесь, а не оставлен читателю на самостоятельное открытие.
 
 ```bash
 npm run gpu:info
