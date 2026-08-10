@@ -593,6 +593,139 @@ export const Q2RTX_FPS_SPREAD_SERIES = 2;
 export const Q2RTX_LAUNCH_TIMEOUT_MS = 900_000;
 
 // =============================================================================================
+// 8a. THE PLATEAU — what "the card has settled" means, as numbers a machine can check
+// =============================================================================================
+//
+// WHY THIS SECTION EXISTS, and it is the most expensive lesson of phase 5 so far. Every fan↔temperature
+// pair this project owns was taken off a TRANSIENT, and the owner named the cause before the data
+// arrived: «эта телеметрия не учитывает огромную инерцию тепловую и механическую. Вентиляторы очень
+// медленно разгоняются». The measurement agreed with a margin: on the way DOWN the fan crossed 40 % at
+// 47 °C, on the way UP the same 40 % sat at 62-63 °C — a 15-16 °C spread for ONE fan level (STATUS
+// fact 33). `Silent Cold` is now defined as maximum performance at T ≤ T(40 %), so the whole mode
+// hangs off a number that only exists at equilibrium.
+//
+// AND EVERY RUN THIS PROJECT HAS EVER TAKEN WAS STILL CLIMBING WHEN IT ENDED — measured 2026-08-10
+// 22:0x by running the detector below over the four saturated game captures on disk. Over each run's
+// LAST 60 seconds the temperature still moved 10, 10, 17 and 24 °C. That is not a criticism of those
+// runs (they were built to compare watts at matched start temperatures, which they did); it is the
+// reason a plateau has to be DETECTED rather than assumed after a fixed wait.
+//
+// THE SHAPE OF THE TEST — two gates per quantity, because one is not enough and this project already
+// paid for knowing that. EXP-0028: «"read until two consecutive samples agree" proves a settled DIGITAL
+// state and does not transfer to a MECHANICAL one — a ramping quantity has plateaus, and a plateau
+// agrees with itself.» A RANGE gate alone is exactly that mistake at window scale: a run climbing
+// 2 °C/min sits inside a 3 °C band for ninety seconds at a time. So each quantity must pass BOTH:
+//   · RANGE — max minus min over the window, which catches wobble;
+//   · DRIFT — a RATE: the median of the window's second half minus the median of its first half,
+//     divided by the time between the two halves' centroids, which catches a slow climb that the range
+//     gate waves through.
+//
+// DRIFT IS A RATE AND NOT A DIFFERENCE, and the first draft of this section got it wrong in a way worth
+// recording. Written as a plain «difference of half medians ≤ 1 °C» the gate reads as "moves less than
+// a degree" and MEANS "moves less than a degree per HALF-WINDOW" — i.e. it silently permitted 2 °C per
+// minute, and the selftest fixture that climbs 1.5 °C/min sailed through it. Expressed per minute the
+// number means what a reader thinks it means, and it stops depending on the window length.
+
+/**
+ * SOURCE: the owner's own construction of this measurement, `plans/05` §4.5a, quoted: «нужно сделать
+ * лестницу с жёсткими максимальными частотами, и гонять на них игру с лучами», with the plan's
+ * requirement «temperature AND fan both stable for ≥ 60 s».
+ */
+export const PLATEAU_WINDOW_SECONDS = 60;
+
+/**
+ * SOURCE: measured, not chosen. The last 20 seconds of the four saturated game captures on disk — the
+ * slowest part of the thermal approach, i.e. the closest this project has come to equilibrium — carry a
+ * temperature band of **1, 2, 2 and 3 °C**. `nvidia-smi` reports whole degrees, so the quantity itself
+ * is quantized at 1 °C. Three is the observed worst case, and a band tighter than the noise would
+ * reject equilibrium itself.
+ */
+export const PLATEAU_TEMP_RANGE_C = 3;
+
+/**
+ * DEGREES PER MINUTE, and the unit is the whole point (see the section header).
+ *
+ * SOURCE — physics, then calibration. The card approaches equilibrium exponentially, so the residual
+ * RATE and the residual DISTANCE are the same fact: `dT/dt = (T∞ − T)/τ`. Measured on this card under
+ * the game, 53 → 76 °C in 56 s, τ is on the order of a minute — so a residual 1 °C/min means the card
+ * is roughly 1 °C from where it is going, which is inside the 3 °C band the sensor's own noise occupies
+ * anyway. Asking for less is asking for a number this instrument cannot resolve: medians of whole
+ * degrees quantize the drift to 0.5 °C steps, and over a 60 s window that IS 1 °C/min.
+ *
+ * CALIBRATED BY WHAT IT REFUSES, which is the only honest way to set a gate: run
+ * `npm run thermal -- --analyze` over the captures already on disk — every one of them is refused, and
+ * the printed rates say by how much. A gate that passes everything already measured would be decoration.
+ */
+export const PLATEAU_TEMP_DRIFT_C_PER_MIN = 1;
+
+/**
+ * SOURCE: measured in the same four windows as the temperature band — **2, 3, 3 and 4 pp**.
+ */
+export const PLATEAU_FAN_RANGE_PCT = 4;
+
+/**
+ * PERCENTAGE POINTS PER MINUTE — DERIVED, not chosen independently, and that is the point. This card's
+ * own AUTO curve, read off the twelve pairs measured under the game (GOAL.md): 61 °C/36 % … 72 °C/61 %,
+ * i.e. **≈ 2.3 pp of fan per °C**. So the temperature's 1 °C/min allowance is worth ≈ 2 pp/min of fan,
+ * and picking a third number here would let one quantity's gate quietly contradict the other's.
+ */
+export const PLATEAU_FAN_DRIFT_PCT_PER_MIN = 2;
+
+/**
+ * How long one rung may be held before the run gives up and REPORTS that it never settled.
+ *
+ * SOURCE: the measured approach. Under the game the card went 53 → 76 °C in 56 s, so the thermal
+ * constant is short; the fan is the slow part (≈ 8 s to ramp, plus the AUTO curve's own lag). Ten
+ * minutes is an order of magnitude above the observed approach — it can only catch a rung that never
+ * equilibrates, never a slow-but-working one. A rung that hits it is reported as «не вышла на плато»
+ * with how far it got, never averaged into the table (`PHILOSOPHY.md` → the three doors).
+ */
+export const PLATEAU_TIMEOUT_SECONDS = 600;
+
+/**
+ * WHAT COUNTS AS "UNDER LOAD" WHILE HUNTING A PLATEAU — and it is NOT the same threshold the burst
+ * runs use (`LOAD_PHASE_UTILIZATION_PCT` = 50), which is why it is a separate constant instead of a
+ * reused one.
+ *
+ * SOURCE: measured 2026-08-10 22:1x by running the detector over the thirteen captures on disk and
+ * then reading the samples it refused. The game's utilization falls into TWO clusters, and 50 % sits
+ * exactly in the gap of the wrong one:
+ *   · mid-run frame boundaries read **47-49 % at 100-160 W** — the card is working; a 0.5 s dip like
+ *     that cannot move a thermal equilibrium whose time constant is a minute;
+ *   · genuine non-load (game start-up, the reload between demo repetitions) reads **0-22 % at
+ *     29-58 W** — an order of magnitude less power.
+ * Thirty per cent sits between the clusters with roughly a factor of two of headroom on each side.
+ *
+ * WHY IT MATTERED: at 50 % those single frame-boundary samples chopped a continuous run into 22-second
+ * pieces, and a 60 s window could never form under the very load this ladder is built to use.
+ *
+ * WHY UTILIZATION AT ALL, given that this project measured `utilization.gpu` to be a poor instrument of
+ * load MAGNITUDE (STATUS fact 16: 99 % at 137 W and 99 % at 300 W): the question here is not how hard
+ * the card is working but WHETHER it is, and for that the two clusters above are unambiguous.
+ */
+export const PLATEAU_LOAD_UTILIZATION_PCT = 30;
+
+/**
+ * THE CEILING THAT DEFINES `Silent Cold`, and it is the owner's ear rather than a round number.
+ *
+ * SOURCE: his words, chat 2026-08-10, after listening to the fan ladder on the live card — *«Я слышу
+ * 40 - приемлимо, тихо. 50 уже слышно»* — and then the mode's definition itself: *«целится на то, чтобы
+ * Silent Cold давал максимально возможную производительность при температуре не выше, при которой
+ * вертушки вращаются на 40%»* (GOAL.md → «Поправка к Silent Cold»).
+ *
+ * WHAT CHANGED WHEN HE SAID IT: the earlier threshold was 45 %, which he had derived as the midpoint
+ * between «тихо» and «уже слышно». The mode is no longer a budget of losses («отдать до 10 %») but an
+ * OPTIMIZATION — the most performance obtainable under a temperature ceiling — so the ceiling moved to
+ * the level he actually called quiet.
+ *
+ * HOW IT IS USED: `readSilentCold()` in `thermal-ladder.mjs` reads the mode straight off the ladder —
+ * the HIGHEST rung whose EQUILIBRIUM fan is ≤ this. Equilibrium is the load-bearing word: the same
+ * fan level sat at 47 °C on a cooling card and 62-63 °C on a heating one (STATUS fact 33), so a
+ * transient reading of this number decides nothing.
+ */
+export const SILENT_COLD_FAN_CEILING_PCT = 40;
+
+// =============================================================================================
 // 9. Power limit — read from the card, never hard-coded
 // =============================================================================================
 
@@ -706,4 +839,12 @@ export default Object.freeze({
   Q2RTX_FPS_SPREAD_IS_ACROSS_LAUNCHES,
   Q2RTX_FPS_SPREAD_SERIES,
   Q2RTX_LAUNCH_TIMEOUT_MS,
+  PLATEAU_WINDOW_SECONDS,
+  PLATEAU_TEMP_RANGE_C,
+  PLATEAU_TEMP_DRIFT_C_PER_MIN,
+  PLATEAU_FAN_RANGE_PCT,
+  PLATEAU_FAN_DRIFT_PCT_PER_MIN,
+  PLATEAU_TIMEOUT_SECONDS,
+  PLATEAU_LOAD_UTILIZATION_PCT,
+  SILENT_COLD_FAN_CEILING_PCT,
 });

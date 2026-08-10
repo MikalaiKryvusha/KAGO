@@ -34,7 +34,8 @@
     "gfx": "node automation-engine/lib/graphics-load.mjs",
     "vmin": "node automation-engine/lib/vmin-store.mjs",
     "engine": "node automation-engine/engine.mjs",
-    "fanladder": "node tools/fan-ladder.mjs"
+    "fanladder": "node tools/fan-ladder.mjs",
+    "thermal": "node automation-engine/lib/thermal-ladder.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
