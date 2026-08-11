@@ -52,8 +52,15 @@
 //  point 95 at +15 MHz: the curve confirmed 2842 -> 2857 MHz at the same voltage, the oracle returned
 //  PASS with the checksum matching the golden and zero faults logged, and the rollback left 0 non-zero
 //  offsets of 128. `runAscent` and `measureUndervolt` also ran (+180 MHz, −14.67 W at a held clock).
-//  WHAT IS *NOT* TESTED, named so nobody reads the marker as more than it says: this module has NO
-//  OFFLINE SELFTEST — its logic has never been driven through an injected backend, unlike every other
+//  UPDATE 2026-08-11 07:0x — THE MODULE NOW HAS AN OFFLINE SELFTEST, and the line below is corrected
+//  rather than deleted, because the debt it named is what the incident collected on. `--selftest`:
+//  16 blocks over the UNDO SHAPE (a throwing step must not cancel the ones behind it) and the voltage
+//  ladder, mutation-proved with three mutations, each reddening the block named for it before the
+//  run — including one that restores the abort-on-throw the `finally` used to have. What is still
+//  untested offline: the write path itself, which needs an injected NVAPI seam.
+//
+//  WHAT WAS *NOT* TESTED, named so nobody reads the marker as more than it says: this module had NO
+//  OFFLINE SELFTEST — its logic had never been driven through an injected backend, unlike every other
 //  writer here (`watchdog` 21 blocks, `descend` 39, `profile-manager` 15). The watt figure is
 //  single-sourced against EXP-0018's two-series rule, one workload has been run out of the three the
 //  method requires, and no guardband was applied. `plans/05` treats all of that as work, not as done:
@@ -108,6 +115,47 @@ function cardTemperatureC() {
     const out = execFileSync('nvidia-smi', ['--query-gpu=temperature.gpu', '--format=csv,noheader'], { encoding: 'utf8' });
     return Number(out.trim());
   } catch { return null; }
+}
+
+/**
+ * RUN EVERY UNDO ACTION, INDEPENDENTLY — the primitive `bugs/03` proved this module needed.
+ *
+ * A `finally` that owns a rollback usually owns several things: a read that must happen while the
+ * state still exists, the release of one resource, the release of another. Written as straight-line
+ * code they share one fate — **the first thing that throws cancels everything after it.** That is not
+ * a hypothetical: on 2026-08-11 a ReferenceError on the FIRST line of this module's `finally` jumped
+ * over the clock release and the curve zeroing entirely. Nothing was left applied that time, by luck
+ * of where the run had reached, and luck is not a rollback.
+ *
+ * So the shape is inverted: the undo is a LIST, each entry runs in its own `try`, a throw becomes a
+ * red block rather than an exit, and no entry can prevent the ones behind it. The order is still
+ * meaningful — reads that need the state come before the releases that destroy it — but order is now
+ * a preference, not a dependency.
+ *
+ * Nothing is swallowed: a thrown error becomes `ok: false` with its message in the detail, so a
+ * failed undo is LOUD. Silence would be the worse defect (EXP-0029: a tool whose refusals are mute
+ * trains its reader to treat silence as success).
+ *
+ * @param {Array<{name:string, run:function}>} actions
+ * @returns {Promise<Array<{name:string, ok:boolean, detail:string}>>}
+ *
+ * [NOT-TESTED]
+ */
+export async function runUndo(actions) {
+  const blocks = [];
+  for (const a of actions) {
+    if (!a || typeof a.run !== 'function') {
+      blocks.push({ name: a?.name ?? 'без имени', ok: false, detail: 'шаг отката без исполняемой части — это дефект списка, а не карты' });
+      continue;
+    }
+    try {
+      const detail = await a.run();
+      blocks.push({ name: a.name, ok: true, detail: typeof detail === 'string' ? detail : (detail?.detail ?? '') });
+    } catch (e) {
+      blocks.push({ name: a.name, ok: false, detail: `шаг отката упал: ${e.message}` });
+    }
+  }
+  return blocks;
 }
 
 /**
@@ -466,69 +514,71 @@ export async function runStep({
       result.verdict === config.VERDICT.PASS,
       result.reason ?? 'сумма против эталона + журнал Windows + работа в секунду');
   } finally {
-    // ---- 4b. DID THE PIN ACTUALLY HOLD? Verified in the `finally`, and deliberately so: the set
-    // branch returns early on success, so a check placed after the oracle would be skipped on exactly
-    // the runs that produce a number (EXP-0029 — a summary after a try/finally is a summary the
-    // early paths skip). It is a READ, it happens before the release below, and an unproven pin makes
-    // the whole rung's verdict meaningless: the card may have been boosting at the top all along.
-    // THE WHOLE CHECK IS INSIDE THE CATCH, INCLUDING ITS CONDITION. Anything placed in a `finally`
-    // ahead of the rollback can prevent the rollback, and this very block already did it once: the
-    // `try` started one line too late, so a ReferenceError in the `if` condition escaped and the
-    // release below never ran. In a `finally` that owns an undo, "reporting" code is guest code — it
-    // gets no path to the exit.
-    try {
-      if (pinned && sampler) {
-        const { readSamples, summarizeSamples } = await import('./power-baseline.mjs');
-        const ld = await import('./ladder-descent.mjs');
-        sampler.kill();
-        const records = samplerFile ? readSamples(samplerFile) : [];
-        const stats = records.length ? summarizeSamples(records) : null;
-        const proof = stats ? ld.verifyLockUnderLoad({ medians: stats }, pinMhz) : { ok: false, why: 'сэмплер не оставил проб' };
-        out.pinProof = proof;
-        block(`ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц`, proof.ok,
-          `${proof.why}${proof.delivered ? ` · выдано ${proof.delivered} МГц` : ''}`);
-        // A rung whose pin did not hold has no verdict about the point it claimed to test.
-        if (!proof.ok && out.verdict === config.VERDICT.PASS) {
-          out.verdict = null;
-          out.pinRefused = true;
-        }
-      }
-    } catch (e) {
-      block(`ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц`, false, `проверка не состоялась: ${e.message}`);
-      out.verdict = null;
-      out.pinRefused = true;
-      try { sampler?.kill(); } catch { /* the sampler is a child; a dead one is fine */ }
-    }
-
-    // ---- 5. ROLLBACK, always
-    if (pinned) {
-      // THE CLOCK RELEASE, and it runs even when the curve write never happened. `resetToFactory` is
-      // total rather than differential — the same reasoning rule R9 uses for the watchdog: after
-      // something goes wrong nobody knows what was applied, so the only honest undo is factory.
-      try {
-        const pm = await import('./profile-manager.mjs');
-        const released = await pm.resetToFactory(pmBackend, { knownLockMhz: pinMhz });
-        block('ОТКАТ: частота ОТПУЩЕНА, карта снова свободна вверх и вниз', released.ok !== false,
-          released.why ?? 'сброс к заводскому применён и перечитан');
-      } catch (e) {
-        block('ОТКАТ: частота ОТПУЩЕНА, карта снова свободна вверх и вниз', false, `сброс упал: ${e.message}`);
-      }
-    }
-    if (written) {
-      // Zero EVERY point, not only the ones this run wrote. The rollback runs when things may have
-      // gone wrong, and "undo exactly what I did" needs a record that a crash may have taken with it —
-      // the watchdog's total-undo reasoning applies here too (rule R9). Zeroing a zero costs nothing.
-      let backFailed = 0;
-      for (let p = 0; p < nvapi.CLK_VF_POINT_COUNT - 1; p++) {
-        if (!nvapi.writeVfOffset(nv, handle, p, 0).ok) backFailed++;
-      }
-      const check = nvapi.readVfOffsets(nv, handle);
-      const clean = check.ok && check.nonZero === 0;
-      block('ОТКАТ: вся кривая обнулена, ненулевых сдвигов не осталось', backFailed === 0 && clean,
-        `отказов записи ${backFailed} · ненулевых ${check.ok ? check.nonZero : '—'} из 128`);
-    }
-    watchdog?.disarm();
-    nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
+    // ---- 5. THE UNDO — a LIST, not a chain (bugs/03, EXP-0040).
+    //
+    // Written straight-line, these five shared one fate: the first throw cancelled everything after
+    // it, and on 2026-08-11 a ReferenceError on the first line jumped over the clock release, the
+    // curve zeroing, the watchdog disarm AND the driver unload. `runUndo` gives each its own `try`,
+    // so a failure becomes a red block instead of an exit.
+    //
+    // The ORDER still says something — the pin's proof is a READ and must happen while the pin still
+    // holds — but order is now a preference, not a dependency.
+    out.blocks.push(...await runUndo([
+      {
+        name: `ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц`,
+        run: async () => {
+          if (!pinned || !sampler) return 'закрепления не было — проверять нечего';
+          const { readSamples, summarizeSamples } = await import('./power-baseline.mjs');
+          const ld = await import('./ladder-descent.mjs');
+          sampler.kill();
+          const records = samplerFile ? readSamples(samplerFile) : [];
+          const stats = records.length ? summarizeSamples(records) : null;
+          const proof = stats ? ld.verifyLockUnderLoad({ medians: stats }, pinMhz) : { ok: false, why: 'сэмплер не оставил проб' };
+          out.pinProof = proof;
+          // A rung whose pin did not hold has no verdict about the point it claimed to test.
+          if (!proof.ok && out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; }
+          if (!proof.ok) throw new Error(proof.why);
+          return `${proof.why}${proof.delivered ? ` · выдано ${proof.delivered} МГц` : ''}`;
+        },
+      },
+      {
+        name: 'ОТКАТ: частота ОТПУЩЕНА, карта снова свободна вверх и вниз',
+        run: async () => {
+          if (!pinned) return 'частота не закреплялась';
+          // `resetToFactory` is TOTAL rather than differential — rule R9's reasoning: after something
+          // goes wrong nobody knows what was applied, so the only honest undo is factory.
+          const pm = await import('./profile-manager.mjs');
+          const released = await pm.resetToFactory(pmBackend, { knownLockMhz: pinMhz });
+          if (released.ok === false) throw new Error(released.why ?? 'сброс отказал');
+          return released.why ?? 'сброс к заводскому применён и перечитан';
+        },
+      },
+      {
+        name: 'ОТКАТ: вся кривая обнулена, ненулевых сдвигов не осталось',
+        run: async () => {
+          if (!written) return 'в кривую не писали';
+          // Zero EVERY point, not only the ones this run wrote: "undo exactly what I did" needs a
+          // record a crash may have taken with it. Zeroing a zero costs nothing.
+          const z = nvapi.zeroCurve(nv, handle);
+          if (!z.ok) throw new Error(`отказов записи ${z.failed} · ненулевых осталось ${z.remainingNonZero}`);
+          return `отказов записи 0 · ненулевых ${z.remainingNonZero} из 128`;
+        },
+      },
+      {
+        name: 'ОТКАТ: сторож разоружён',
+        run: async () => {
+          // Previously this sat OUTSIDE every try, so a throw in the curve zeroing left the watchdog
+          // ARMED — a guard that would then fire on a card nobody was holding.
+          if (!watchdog) return 'сторож не взводился';
+          watchdog.disarm();
+          return 'аренда снята';
+        },
+      },
+      {
+        name: 'ОТКАТ: библиотека NVAPI выгружена',
+        run: async () => { nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload); return 'Unload вызван'; },
+      },
+    ]));
   }
 
   return out;
@@ -1273,7 +1323,100 @@ async function mainShape() {
   return failed === 0 ? 0 : 1;
 }
 
+// =================================================================================================
+// THE OFFLINE SELFTEST — this module had NONE until 2026-08-11, and its header said so
+// =================================================================================================
+
+/**
+ * The safety shape, driven on injected functions. No GPU, no card, no writes.
+ *
+ * What it guards is the class that cost the owner a night: **an undo written as a chain, where the
+ * first thing that throws cancels the rest.** Every block below is one arrangement of that failure.
+ *
+ * MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+ *   1. let a throwing step abort the list          → «падение ПЕРВОГО шага не отменяет остальные»
+ *   2. swallow a throw and report it green         → «упавший шаг отката КРАСНЫЙ, а не тихий»
+ *   3. skip a step with no runnable part           → «шаг без исполняемой части — красный блок, а не пропуск»
+ */
+export async function selfTest() {
+  const results = [];
+  const ok = (what, got, want) => results.push({ ok: JSON.stringify(got) === JSON.stringify(want), what, got, want });
+
+  const trail = [];
+  const step = (name, fn) => ({ name, run: async () => { trail.push(name); return fn ? fn() : 'ок'; } });
+
+  // 1. THE CORE GUARANTEE: the first step throws, and everything after it still runs.
+  trail.length = 0;
+  const b1 = await runUndo([
+    step('проверка', () => { throw new Error('проверка сорвалась'); }),
+    step('отпустить частоту'),
+    step('обнулить кривую'),
+    step('разоружить сторожа'),
+  ]);
+  ok('падение ПЕРВОГО шага не отменяет остальные', trail.length, 4);
+  ok('и все они доложены блоками, а не проглочены', b1.length, 4);
+  // NULL-SAFE, ALL OF THEM. A block that THROWS when its expectation is unmet reports nothing and
+  // takes the whole suite with it — three mutations did exactly that before this line was written,
+  // and a crashed verifier is not a red verifier (EXP-0016).
+  ok('упавший шаг отката КРАСНЫЙ, а не тихий', b1[0]?.ok ?? null, false);
+  ok('и его причина названа', /проверка сорвалась/.test(b1[0]?.detail ?? ''), true);
+  ok('а уцелевшие шаги зелёные', b1.length === 4 && b1.slice(1).every((x) => x.ok), true);
+
+  // 2. A throw in the MIDDLE must not take the tail with it — the arrangement where the curve is
+  // already written and only the watchdog disarm remains.
+  trail.length = 0;
+  const b2 = await runUndo([
+    step('отпустить частоту'),
+    step('обнулить кривую', () => { throw new Error('запись отказала'); }),
+    step('разоружить сторожа'),
+  ]);
+  ok('падение В СЕРЕДИНЕ не уносит хвост — сторож всё равно разоружается',
+    trail.includes('разоружить сторожа'), true);
+  ok('и провал именно на своём шаге', [b2[0]?.ok ?? null, b2[1]?.ok ?? null, b2[2]?.ok ?? null], [true, false, true]);
+
+  // 3. EVERY step throws — the worst case must still report five blocks, not one exception.
+  const b3 = await runUndo(['а', 'б', 'в'].map((n) => ({ name: n, run: async () => { throw new Error(`${n} упал`); } })));
+  ok('когда падает ВСЁ — доклад полный, а не одно исключение', b3.length, 3);
+  ok('и каждый блок красный со своей причиной',
+    b3.length === 3 && b3.every((x, i) => !x.ok && String(x.detail).includes(['а', 'б', 'в'][i])), true);
+
+  // 4. A malformed list entry is a defect of OUR list, and it is named as such rather than skipped.
+  const b4 = await runUndo([{ name: 'кривой шаг' }, step('живой шаг')]);
+  ok('шаг без исполняемой части — красный блок, а не пропуск', b4[0]?.ok ?? null, false);
+  ok('и он не мешает следующему', b4[1]?.ok ?? null, true);
+
+  // 5. Nothing to undo is a legal, GREEN outcome — the dry-run and refusal paths take it.
+  ok('пустой список отката — не ошибка', (await runUndo([])).length, 0);
+
+  // --- THE VOLTAGE LADDER, on a synthetic curve. Its job is to express the owner's step sizes in the
+  // unit he stated them in, and its trap is a curve region where several points share a frequency.
+  const pt = (i, mv, mhz) => ({ i, mv, mhz, microVolts: mv * 1000, freqKhz: mhz * 1000 });
+  // a well-graded region: 5 mV per point, 20 MHz apart
+  const graded = [0, 1, 2, 3, 4, 5, 6].map((k) => pt(k, 700 + k * 5, 1000 + k * 20));
+  const lad = ascentLadderByVoltage(graded, 1120, { stepMv: 5 });
+  ok('лестница по напряжению идёт ВНИЗ по напряжению, а не вверх',
+    lad.every((r, i, arr) => i === 0 || r.mv < arr[i - 1].mv), true);
+  ok('и каждая ступень несёт, сколько мВ она снимает', lad[0]?.savedMv > 0, true);
+  // the floor trap: three points share one frequency, so ONE offset reaches the cheapest of them
+  const floored = [pt(0, 450, 180), pt(1, 500, 180), pt(2, 550, 180), pt(3, 700, 1000)];
+  const flat = ascentLadderByVoltage(floored, 1000, { stepMv: 5 });
+  ok('на полу кривой одна ступень падает сразу к САМОМУ дешёвому напряжению, и это видно',
+    flat[0]?.mv, 450);
+  ok('и её глубина не выдумана, а посчитана по получившейся кривой', flat[0]?.savedMv, 250);
+
+  return { ok: results.every((r) => r.ok), results };
+}
+
 async function main() {
+  if (process.argv.includes('--selftest')) {
+    const r = await selfTest();
+    for (const x of r.results) {
+      console.log(`${x.ok ? 'OK  ' : 'ПЛОХО'} ${x.what}${x.ok ? '' : `  -> получено ${JSON.stringify(x.got)}, ждали ${JSON.stringify(x.want)}`}`);
+    }
+    console.log('');
+    console.log(r.ok ? `САМОПРОВЕРКА: ${r.results.length} блоков, все сходятся.` : 'САМОПРОВЕРКА: есть расхождения.');
+    return r.ok ? 0 : 1;
+  }
   if (process.argv.includes('--shape')) return mainShape();
   if (process.argv.includes('--measure')) return mainMeasure();
   if (process.argv.includes('--ascend')) return mainAscend();
