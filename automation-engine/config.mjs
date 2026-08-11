@@ -359,6 +359,25 @@ export const FAULT_PROVIDERS = Object.freeze([
  * two-way pass/crash oracle walks an unknown distance inside the corruption region without
  * noticing.
  */
+/**
+ * THE DEPTH GOVERNOR'S TWO CEILINGS — paid for by `bugs/03`, which hung the owner's machine.
+ *
+ * SOURCE for the first number: the owner's own coarse search mode, *«грубый меняет напряжение на
+ * 25 мВ»*. It is the deepest single move he ever described, so it is the deepest a FIRST move may be.
+ *
+ * SOURCE for the second: this card's measured curve. Its bottom holds ~20 points on the 180 MHz floor,
+ * so a whole-curve raise there steps −5 mV and then −230 mV with nothing in between. 35 mV is one
+ * coarse step plus one fine step — wide enough to walk any graded region, narrow enough that a cliff
+ * is refused instead of leapt.
+ *
+ * WHY THESE ARE SAFETY CONSTANTS AND NOT TUNING: at depth there is no rollback. A state that hangs the
+ * machine cannot be undone by anything running on the machine — the writer's `finally`, the detached
+ * watchdog and Windows TDR all need a scheduling OS, and none of them ran on 2026-08-11. Step size is
+ * the only protection that acts BEFORE the hang.
+ */
+export const ASCENT_FIRST_STEP_MAX_MV = 25;
+export const ASCENT_STEP_MAX_MV = 35;
+
 export const VERDICT = Object.freeze({
   PASS: 'PASS',    // output matches the golden reference and no fault was logged
   SDC: 'SDC',      // output differs, nothing crashed — the dangerous one
@@ -829,6 +848,8 @@ export default Object.freeze({
   TELEMETRY_FIELDS_UNAVAILABLE_HERE,
   TELEMETRY_SAMPLE_MS,
   FAULT_PROVIDERS,
+  ASCENT_FIRST_STEP_MAX_MV,
+  ASCENT_STEP_MAX_MV,
   VERDICT,
   READBACK_AGREEING_SAMPLES,
   READBACK_INTERVAL_MS,

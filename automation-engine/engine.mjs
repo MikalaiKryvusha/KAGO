@@ -107,6 +107,76 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
   return true;
 }
 
+/**
+ * THE DEPTH GOVERNOR — written after `bugs/03`, which hung the owner's machine for five hours.
+ *
+ * An ascent exists so the FIRST FAILURE is met at the shallowest depth that can produce it. The
+ * previous rung selection — «every fifth rung, plus the last» — put the FIFTH voltage step first and
+ * skipped four shallower ones, converting a graded approach into a single deep plunge. At 1100 MHz,
+ * where a whole-curve raise reaches −320 mV, that first plunge hung the machine hard enough that no
+ * rollback on it could ever run: the writer's `finally`, the detached watchdog and Windows TDR all
+ * need a scheduling OS. **At depth, step size IS the safety mechanism — there is no other.**
+ *
+ * Three rules, and each one alone would have prevented the incident:
+ *
+ *   1. **The first rung is the SHALLOWEST rung, always** — whatever the stride is.
+ *   2. **The first step may not exceed `firstStepMaxMv`** of undervolt (the owner's own coarse mode,
+ *      25 mV). A ladder that cannot offer a first step that shallow is REFUSED, not truncated: a
+ *      region where the smallest available move is a plunge is a region this lever must not enter
+ *      unattended.
+ *   3. **No step-to-step increase beyond `stepMaxMv`.** This card's bottom has a cliff in it (−5 mV,
+ *      then −230 mV), and a cliff walked in one stride is the same plunge wearing a later index.
+ *
+ * @returns {{rungs:Array, refused:boolean, why:string}}
+ *
+ * [NOT-TESTED]
+ */
+export function pickAscentRungs(fine, {
+  stride = 5,
+  firstStepMaxMv = config.ASCENT_FIRST_STEP_MAX_MV ?? 25,
+  stepMaxMv = config.ASCENT_STEP_MAX_MV ?? 35,
+} = {}) {
+  if (!Array.isArray(fine) || !fine.length) return { rungs: [], refused: false, why: 'лестница пуста' };
+  const graded = fine.every((r) => Number.isFinite(r.savedMv));
+  if (!graded) {
+    // A ladder with no voltage grading (the fixed-MHz path and every offline fixture) is walked as it
+    // was handed over; the governor judges DEPTH, and depth it cannot see it does not pretend to bound.
+    return { rungs: fine.slice(), refused: false, why: 'лестница без градуировки по напряжению — идём как есть' };
+  }
+
+  // RULE 1 — the shallowest rung is always first.
+  const picked = [fine[0]];
+  // RULE 3 — walk forward, taking the coarse stride but never letting the DEPTH jump too far.
+  for (let i = 1; i < fine.length; i++) {
+    const last = picked[picked.length - 1];
+    const byStride = (i - fine.indexOf(last)) >= stride;
+    const wouldJump = fine[i].savedMv - last.savedMv;
+    const nextJumpsTooFar = (i + 1 < fine.length) && (fine[i + 1].savedMv - last.savedMv > stepMaxMv);
+    if (byStride || nextJumpsTooFar || i === fine.length - 1) {
+      if (wouldJump > stepMaxMv && picked.length) {
+        return {
+          rungs: picked,
+          refused: true,
+          why: `ОТКАЗ: следующая ступень углубляет андервольт сразу на ${wouldJump} мВ (потолок шага ${stepMaxMv} мВ). `
+            + 'Это обрыв в лестнице, а не шаг; такой участок кривой этим рычагом без присмотра не проходят (bugs/03).',
+        };
+      }
+      picked.push(fine[i]);
+    }
+  }
+
+  // RULE 2 — the first step's own depth.
+  if (picked[0].savedMv > firstStepMaxMv) {
+    return {
+      rungs: [],
+      refused: true,
+      why: `ОТКАЗ: самая мелкая доступная ступень здесь снимает сразу ${picked[0].savedMv} мВ, `
+        + `а потолок первого шага ${firstStepMaxMv} мВ. Участок, где мельче нельзя, этим рычагом не тестируется (bugs/03).`,
+    };
+  }
+  return { rungs: picked, refused: false, why: `первая ступень −${picked[0].savedMv} мВ, всего ступеней ${picked.length}` };
+}
+
 // =================================================================================================
 // 1. The plan — computed before anything is written, so a dry run shows the real thing
 // =================================================================================================
@@ -180,6 +250,19 @@ export async function searchEdge({
   // a threshold found that way is the edge of ONE PROGRAM, and researches/02 §4 measured Vmin
   // spreading up to 100 mV between programs on the same card.
   shapes = null,
+  // RAISE THE WHOLE CURVE, not one point — the correction `bugs/02` demands. A single point cannot
+  // cheapen the clock being tested, because the clock is served by whichever point reaches it at the
+  // LOWEST voltage, and that is a neighbour we did not touch (`vf-step`'s own header said so while the
+  // search did the opposite).
+  wholeCurve = false,
+  // PIN THE CLOCK so the curve region under test is the region actually loaded.
+  pinMhz = null,
+  pinCard = null,
+  // THE LADDER IN VOLTS, computed from the card's own curve (`vf-step.ascentLadderByVoltage`). Each
+  // entry is one voltage grid step; `coarseStride` is how many of them the coarse mode skips — the
+  // owner's «грубый 25 мВ / точный 5 мВ» as five steps against one.
+  rungs = null,
+  coarseStride = 5,
   seconds = 30,
   sustain = 30,
   coarseMhz = ASCENT_COARSE_MHZ,
@@ -271,8 +354,30 @@ export async function searchEdge({
     return attempt;
   };
 
-  // ---- coarse ascent, bounded by the ratchet and the hardware
-  const ladder = coarseLadder({ limitMhz: ratchet.limitMhz, coarseMhz });
+  // ---- THE ASCENT LADDER.
+  //
+  // With `rungs` (computed from the card's own curve by `ascentLadderByVoltage`) the search walks in
+  // VOLTS — the unit the owner specified his two modes in — and the coarse mode is «every fifth grid
+  // step» rather than a fixed number of megahertz. The fixed-MHz ladder stays for the callers that
+  // have no curve in hand, and for every offline fixture.
+  //
+  // Why this is not cosmetic: measured on this card, one voltage grid step costs 4.1 MHz of offset at
+  // 2842 MHz and 22.2 MHz at 1700 MHz. A fixed 75 MHz coarse step is therefore 18 mV at the top and
+  // 3.4 mV in the middle — the same «coarse» mode walking the band seven times more finely in one
+  // place than in another.
+  const fine = (Array.isArray(rungs) && rungs.length)
+    ? rungs.filter((r) => r.offsetMhz <= ratchet.limitMhz)
+    : coarseLadder({ limitMhz: ratchet.limitMhz, coarseMhz }).map((o) => ({ offsetMhz: o, mv: null, savedMv: null }));
+  const stride = (Array.isArray(rungs) && rungs.length) ? coarseStride : 1;
+  const chosen = pickAscentRungs(fine, { stride });
+  const ladder = chosen.rungs.map((r) => r.offsetMhz);
+  out.rungs = fine.map((r) => ({ offsetMhz: r.offsetMhz, mv: r.mv, savedMv: r.savedMv }));
+  out.ascentRungs = chosen.rungs.map((r) => ({ offsetMhz: r.offsetMhz, savedMv: r.savedMv }));
+  if (chosen.refused) {
+    out.halted = true;
+    out.stopped = chosen.why;
+    return out;
+  }
   if (!ladder.length) {
     out.stopped = ratchet.bound
       ? `храповик не оставил места: разрешено ≤ ${ratchet.limitMhz} МГц, а грубый шаг ${coarseMhz}`
@@ -281,7 +386,7 @@ export async function searchEdge({
   }
 
   for (const offsetMhz of ladder) {
-    const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes });
+    const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, pinMhz, pinCard });
     const a = await record(offsetMhz, result);
     const noUndervolt = refuseWithoutUndervolt(out, result, offsetMhz);
     if (noUndervolt) return out;
@@ -311,13 +416,48 @@ export async function searchEdge({
     return out;
   }
 
-  // ---- bisect the bracket down to one fine step
+  // ---- bisect the bracket down to ONE GRID STEP
+  //
+  // With a voltage ladder the bracket is bisected over the RUNGS, so "one step" means one voltage
+  // grid step wherever on the band we are, instead of a fixed 15 MHz that is 3.6 mV at the top and
+  // 0.7 mV in the middle.
+  if (Array.isArray(rungs) && rungs.length) {
+    const inside = () => fine.filter((r) => r.offsetMhz > (out.lastPass ?? 0) && r.offsetMhz < out.firstFail);
+    for (let guard = 0; guard < fine.length; guard++) {
+      const between = inside();
+      if (!between.length) break;
+      const mid = between[Math.floor((between.length - 1) / 2)].offsetMhz;
+      const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, pinMhz, pinCard });
+      const a = await record(mid, result);
+      if (refuseWithoutUndervolt(out, result, mid)) return out;
+      if (isPass(a.verdict)) { out.lastPass = mid; continue; }
+      if (a.verdict === null) {
+        out.halted = true;
+        out.stopped = `НЕИЗВЕСТНО на +${mid} МГц во время бисекции — СТОП; вилка остаётся шире, но честной`;
+        out.bracketMhz = out.firstFail - (out.lastPass ?? 0);
+        return out;
+      }
+      out.firstFail = mid;
+    }
+    out.bracketMhz = out.firstFail - (out.lastPass ?? 0);
+    const mvOfRung = (offset) => fine.find((r) => r.offsetMhz === offset)?.mv ?? null;
+    const passMv = out.attempts.find((a) => a.offsetMhz === out.lastPass)?.servingMv ?? mvOfRung(out.lastPass);
+    const failMv = out.attempts.find((a) => a.offsetMhz === out.firstFail)?.servingMv ?? mvOfRung(out.firstFail);
+    out.servingMv = { atLastPass: passMv, atFirstFail: failMv };
+    out.bracketMv = (passMv !== null && failMv !== null) ? Number((passMv - failMv).toFixed(3)) : null;
+    out.stopped = out.bracketMv === 0
+      ? `край ВЕРОЯТНОСТНЫЙ: обе стороны вилки обслуживает одно напряжение ${passMv} мВ`
+      : `край взят в вилку ${out.bracketMv ?? '—'} мВ: ${passMv} мВ прошло, ${failMv} мВ отказало`;
+    if (out.bracketMv === 0) out.probabilisticEdge = true;
+    return out;
+  }
+
   let lo = out.lastPass ?? 0;
   let hi = out.firstFail;
   while (hi - lo > fineMhz) {
     const mid = lo + Math.floor((hi - lo) / 2 / fineMhz) * fineMhz;
     if (mid <= lo || mid >= hi) break;
-    const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes });
+    const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, pinMhz, pinCard });
     const a = await record(mid, result);
     if (refuseWithoutUndervolt(out, result, mid)) return out;
     if (isPass(a.verdict)) { lo = mid; out.lastPass = mid; continue; }
@@ -370,6 +510,9 @@ export async function searchEdge({
  *   8. drop `shapes` on the way to the atom          → «набор доезжает до атома, а не теряется в движке»
  *   9. keep searching when the cap was not cheapened → «поиск ОСТАНАВЛИВАЕТСЯ, если запись не удешевила потолок»
  *  10. treat a MISSING undervolt block as zero       → «отсутствие наблюдения — не наблюдение нуля»
+ *  11. start the ascent at the stride'th rung        → «ВОСХОЖДЕНИЕ НАЧИНАЕТСЯ С САМОЙ МЕЛКОЙ СТУПЕНИ»
+ *  12. allow a first step deeper than the ceiling    → «слишком глубокий первый шаг — ОТКАЗ, а не усечение»
+ *  13. leap a cliff in the ladder                    → «обрыв в лестнице не перешагивается»
  */
 export function selfTest() {
   const results = [];
@@ -448,6 +591,43 @@ export function selfTest() {
     const steep = await searchEdge({ capMhz: 2842, point: 95, runStepFn: withVolts((o) => 1040 - o / 5) });
     ok('разные напряжения — вилка докладывается в милливольтах', steep.bracketMv > 0, true);
     ok('и вероятностным краем это НЕ называется', Boolean(steep.probabilisticEdge), false);
+
+    // --- THE DEPTH GOVERNOR, and it is here because the previous rung selection HUNG THE OWNER'S
+    // MACHINE FOR FIVE HOURS (bugs/03). Every block below is one of the three rules that would each,
+    // alone, have prevented it.
+    {
+      const rung = (savedMv, offsetMhz) => ({ offsetMhz, mv: 1000 - savedMv, savedMv });
+      // seven graded rungs, 5 mV apart — the shape the 1100 MHz sweep actually had
+      const seven = [5, 10, 15, 20, 25, 30, 35].map((mv, i) => rung(mv, 100 + i * 100));
+
+      const p = pickAscentRungs(seven, { stride: 5 });
+      // NULL-SAFE ON PURPOSE: a block that THROWS when its expectation is unmet reports nothing at
+      // all, and the suite dies instead of naming the broken guarantee — mutation 11 did exactly that
+      // on the first attempt (EXP-0016, third strike of this class in this project).
+      ok('ВОСХОЖДЕНИЕ НАЧИНАЕТСЯ С САМОЙ МЕЛКОЙ СТУПЕНИ', p.rungs[0]?.savedMv ?? null, 5);
+      ok('и она — именно первая строка лестницы, а не пятая', p.rungs[0]?.offsetMhz ?? null, seven[0].offsetMhz);
+      ok('самая глубокая ступень всё равно достижима', p.rungs[p.rungs.length - 1]?.savedMv ?? null, 35);
+
+      // A ladder whose SHALLOWEST rung is already deeper than the first-step ceiling must be refused
+      // outright: a region where nothing shallower exists is a region this lever does not enter.
+      const cliffFirst = [rung(295, 320), rung(300, 400)];
+      const r2 = pickAscentRungs(cliffFirst, { stride: 5 });
+      ok('слишком глубокий первый шаг — ОТКАЗ, а не усечение', r2.refused, true);
+      ok('и ни одной ступени при этом не предлагается', r2.rungs.length, 0);
+      ok('и отказ назван так, что его нельзя принять за пустую лестницу', /первого шага/.test(r2.why), true);
+
+      // A cliff LATER in the ladder is the same plunge with a later index — this card's bottom is
+      // exactly this shape: −5 mV, then −230 mV.
+      const cliffLater = [rung(5, 20), rung(230, 95), rung(295, 320)];
+      const r3 = pickAscentRungs(cliffLater, { stride: 5 });
+      ok('обрыв в лестнице не перешагивается', r3.refused, true);
+      ok('но мелкая ступень до обрыва остаётся доступной', r3.rungs[0]?.savedMv ?? null, 5);
+
+      // The un-graded path (the fixed-MHz ladder, every offline fixture) is left exactly as handed in:
+      // the governor bounds DEPTH, and a depth it cannot see it must not pretend to bound.
+      const plain = [{ offsetMhz: 75 }, { offsetMhz: 150 }, { offsetMhz: 225 }];
+      ok('лестница без градуировки по напряжению проходит нетронутой', pickAscentRungs(plain).rungs.length, 3);
+    }
 
     // --- THE GUARD bugs/02 WAS BORN FROM. The search's whole premise is that the offset it walks
     // makes the CAPPED CLOCK cheaper. When the applied write cannot do that, a bracket in
@@ -570,6 +750,144 @@ export function selfTest() {
 // 4. CLI
 // =================================================================================================
 
+/**
+ * THE BAND SWEEP — the owner's question made executable.
+ *
+ * *«а для всех 128 точек кривой когда будешь тюнить? на частоте 500 МГц, на 1500?»* and
+ * *«нужно протестировать карту, прожечь НА ВСЕХ ЧАСТОТАХ»*.
+ *
+ * Two things have to be true at once for that to be a measurement rather than a phrase, and neither
+ * was true before `bugs/02`:
+ *
+ *   1. **The WHOLE curve is raised**, because a clock is served by whichever point reaches it at the
+ *      lowest voltage — raising one point leaves that neighbour, and the voltage, untouched.
+ *   2. **The clock is PINNED at the rung**, because a card left free boosts to the top under every
+ *      load. Without the pin, "testing 500 MHz" loads exactly the same handful of top points as
+ *      "testing 2842", and the low half of the curve is never exercised at all.
+ *
+ * What the sweep answers is the question §4.5 exists for: **is the safe offset the same at the bottom
+ * of the band as at the top?** A uniform answer means the profile is one number; a falling one means
+ * it is a VECTOR, and the shape of the fall says where. The prediction worth writing down before the
+ * run: the same +Δ MHz is a far deeper undervolt low down (500 → 800 MHz is +60 %, 2842 → 3142 is
+ * +10 %), so the bottom should break first.
+ *
+ * [NOT-TESTED]
+ */
+async function mainBand(argv, arg) {
+  const pins = String(arg('band', '')).split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
+  if (!pins.length) { console.error('ОШИБКА: --band требует список частот, например 500,1000,1500,2000,2400,2842'); return 2; }
+  // 10 s per shape, measured rather than chosen by feel: a rung costs 94 s at 30 s per shape and the
+  // overhead in it is 4 s, so the whole cost IS the load. At 10 s the transient shape still gets three
+  // 5/5 duty cycles and the load still gets ~400 launches — enough to bracket an edge. The LONG burn
+  // is a separate acceptance step (§4.7), which is exactly the split researches/02 §6 prescribes.
+  const seconds = Number(arg('seconds', 10));
+  const dryRun = argv.includes('--dry-run');
+
+  const vf = await import('./lib/vf-step.mjs');
+  const nvapi = await import('./lib/nvapi.mjs');
+  const stress = await import('./lib/stress-tester.mjs');
+  const card = stress.probeCard();
+  const store = openStore();
+
+  const nv = nvapi.openNvapi();
+  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+  const handle = handles.readBigUInt64LE(0);
+  let curve = null;
+  try {
+    const c = nvapi.readVfCurve(nv, handle);
+    if (!c.ok) { console.error(`ОШИБКА: кривая не прочиталась — ${c.why}`); return 1; }
+    curve = c.points;
+  } finally {
+    nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
+  }
+
+  console.log('РАЗВЁРТКА ПО ДИАПАЗОНУ — вся кривая вверх, частота закреплена на каждой ступени');
+  console.log('');
+  console.log(`  СТУПЕНИ:   ${pins.join(', ')} МГц`);
+  console.log(`  НАБОР:     ${DIVERSE_SET.length} формы по ${seconds} с — ступень ≈ ${DIVERSE_SET.length * seconds + 4} с`);
+  console.log('  ПОДЪЁМ:    ВСЯ кривая (127 точек), а не одна — иначе напряжение потолка не падает вовсе (bugs/02)');
+  console.log('  ЗАКРЕПЛЕНИЕ: -lgc на ступени, законно для ЗАМЕРА и запрещено в отгружаемом профиле');
+  console.log('  ОТКАТ:     частота отпущена и кривая обнулена в finally, под сторожем, на каждой ступени');
+  console.log('');
+
+  // THE CARD WITH ITS LADDER, probed ONCE. Re-probing inside every rung is what turned a healthy
+  // sixth rung into НЕИЗВЕСТНО on the first live sweep.
+  const ps = await import('./lib/profile-store.mjs');
+  const pinCard = ps.probeCard();
+  if (!pinCard.ladder?.ok) { console.error(`ОШИБКА: лестница частот недоступна — ${pinCard.ladder?.why}`); return 1; }
+
+  const plan = [];
+  for (const pin of pins) {
+    const serving = vf.voltageForClock(curve, pin);
+    // THE RUNGS IN VOLTS, per frequency, from the card's own curve. This is where the band's
+    // inhomogeneity becomes visible before a single watt is spent: the top offers ten grid steps of
+    // headroom, the middle offers two.
+    const rungs = serving ? vf.ascentLadderByVoltage(curve, pin, { stepMv: config.VOLTAGE_GRID_STEP_MV ?? 5 }) : [];
+    plan.push({ pin, serving, rungs });
+    // THE FIRST STEP'S DEPTH IS PRINTED FIRST, because it is the number that decides whether this
+    // rung is safe to start at all — and it is the number nobody could see on 2026-08-11 (bugs/03).
+    const chosen = rungs.length ? pickAscentRungs(rungs, { stride: 5 }) : { rungs: [], refused: false, why: 'нет ступеней' };
+    console.log(`  ${String(pin).padStart(5)} МГц → точка ${serving ? serving.pointIndex : '—'}`
+      + `${serving ? ` (${serving.mv} мВ)` : ' — вне кривой, ступень пропускается'}`
+      + `${serving ? ` · ступеней ${rungs.length}, глубже всего −${rungs.length ? rungs[rungs.length - 1].savedMv : 0} мВ` : ''}`
+      + `${serving ? ` · ПЕРВЫЙ ШАГ −${chosen.rungs[0]?.savedMv ?? '—'} мВ${chosen.refused ? ` · ${chosen.why.slice(0, 96)}` : ''}` : ''}`);
+  }
+  console.log('');
+  if (dryRun) { console.log('СУХОЙ ПРОГОН: ни одной записи в карту не сделано.'); return 0; }
+
+  const rows = [];
+  for (const { pin, serving, rungs } of plan) {
+    if (!serving) { rows.push({ pin, skipped: 'вне кривой' }); continue; }
+    if (!rungs.length) { rows.push({ pin, point: serving.pointIndex, stockMv: serving.mv, skipped: 'рычаг исчерпан: ни одной ступени по напряжению' }); continue; }
+    console.log(`── СТУПЕНЬ ${pin} МГц (точка ${serving.pointIndex}, ${serving.mv} мВ, ступеней ${rungs.length}) ──────`);
+    const r = await searchEdge({
+      capMhz: pin,
+      point: serving.pointIndex,
+      shapes: DIVERSE_SET,
+      wholeCurve: true,
+      pinMhz: pin,
+      pinCard,
+      rungs,
+      seconds,
+      card,
+      store,
+      runStepFn: (a) => vf.runStep(a),
+      onAttempt: (a) => {
+        const by = a.worstShape ? ` · решила ${a.worstShape}` : '';
+        const saved = a.servingMv !== null && a.servingMv !== undefined ? ` (−${(serving.mv - a.servingMv).toFixed(0)} мВ от стока)` : '';
+        console.log(`   +${a.offsetMhz} МГц → ${a.servingMv ?? '?'} мВ${saved} → ${a.verdict ?? 'НЕИЗВЕСТНО'}${by}`);
+      },
+    });
+    rows.push({ pin, point: serving.pointIndex, stockMv: serving.mv, ...r });
+    console.log(`   ИТОГ ступени: ${r.stopped}`);
+    console.log('');
+    // A rung that refused for a reason that will repeat on every rung is a reason to stop the sweep
+    // rather than to spend the owner's card proving it nine more times.
+    if (r.noUndervoltAtCap) {
+      console.log('РАЗВЁРТКА ОСТАНОВЛЕНА: подъём не удешевляет частоту — это повторится на каждой ступени.');
+      break;
+    }
+  }
+
+  console.log('');
+  console.log('  частота | точка | сток мВ | БЕЗОПАСНОЕ мВ | снято мВ | отказ мВ | вилка мВ');
+  for (const r of rows) {
+    if (r.skipped) { console.log(`  ${String(r.pin).padStart(7)} | ${r.skipped}`); continue; }
+    const safeMv = r.servingMv?.atLastPass ?? null;
+    const failMv = r.servingMv?.atFirstFail ?? null;
+    console.log(`  ${String(r.pin).padStart(7)} | ${String(r.point).padStart(5)} | ${String(r.stockMv).padStart(7)} | `
+      + `${String(safeMv ?? '—').padStart(13)} | ${String(safeMv === null ? '—' : r.stockMv - safeMv).padStart(8)} | `
+      + `${String(failMv ?? '—').padStart(8)} | ${r.bracketMv ?? '—'}`);
+  }
+  console.log('');
+  console.log('ЧТО ЭТА ТАБЛИЦА РЕШАЕТ: одинаков ли безопасный сдвиг внизу и наверху диапазона.');
+  console.log('  одинаков в пределах точного шага → профиль это ОДНО число плюс плоский хвост;');
+  console.log('  падает вниз по диапазону        → профиль это ВЕКТОР, и низ надо резать слабее.');
+  return 0;
+}
+
 async function main(argv) {
   if (argv.includes('--selftest')) {
     const r = await selfTest();
@@ -586,8 +904,10 @@ async function main(argv) {
     return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
   };
 
+  if (argv.includes('--band')) return mainBand(argv, arg);
+
   if (!argv.includes('--search')) {
-    console.error('ОШИБКА: нужен один из режимов — --search --cap <МГц> или --selftest');
+    console.error('ОШИБКА: нужен один из режимов — --band <частоты> · --search --cap <МГц> · --selftest');
     return 2;
   }
 

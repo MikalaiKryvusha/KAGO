@@ -110,6 +110,73 @@ function cardTemperatureC() {
   } catch { return null; }
 }
 
+/**
+ * THE ASCENT LADDER IN VOLTS — the owner's step sizes, finally expressed in the unit he stated them in.
+ *
+ * He specified the search in millivolts: *«грубый меняет напряжение на 25 мВ… точный — на 5 мВ»*. Our
+ * lever is a FREQUENCY offset, and the conversion was hard-coded once, at the top of the curve, where
+ * one voltage grid step happens to cost ~15 MHz. Measured on this card's own curve, that exchange rate
+ * varies **by a factor of seven across the band**:
+ *
+ *   2842 MHz →  4.1 MHz per mV      1700 MHz → 22.2 MHz per mV      500 MHz → 3.4 MHz per mV
+ *
+ * So a fixed 75 MHz coarse step is 18 mV at the top, **3.4 mV in the middle** and 22 mV at the bottom.
+ * The same three numbers say it the other way round: a sweep stepping in MHz walks the middle of the
+ * band seven times more finely than asked and the bottom three times more coarsely. That is EXP-0034's
+ * lesson — the unit you search in is not the unit the conclusion is about — applied to the STEP rather
+ * than to the result.
+ *
+ * The fix needs no new physics: the curve IS the conversion table. Walking the serving point DOWN by
+ * N curve points is walking it down N voltage grid steps, whatever the frequencies happen to be. So
+ * this returns the offsets that put the serving point of `clockMhz` on successively lower points —
+ * the ladder in volts, computed per rung from the card in front of us.
+ *
+ * @returns {Array<{offsetMhz:number, mv:number, pointIndex:number, savedMv:number}>}
+ *
+ * [NOT-TESTED]
+ */
+export function ascentLadderByVoltage(points, clockMhz, { stepMv = 25, maxOffsetMhz = config.CLOCK_OFFSET_MAX_MHZ } = {}) {
+  const stock = voltageForClock(points, clockMhz);
+  if (!stock) return [];
+
+  // EVERY rung's voltage is read off the RESULTING curve, never predicted from the point we aimed at.
+  // The naive version — "the offset that makes point P reach the clock, therefore the voltage is P's"
+  // — is wrong wherever several points share a frequency, and this card's bottom is exactly that: the
+  // lowest ~20 points all sit on the 180 MHz floor, so ONE offset drops the serving voltage all the
+  // way to the cheapest of them. Predicting it would have reported six rungs of 30 mV each where the
+  // card actually takes one step of 295 mV. That is tonight's own lesson (`bugs/02`): convert through
+  // the state, not through a model of it.
+  const candidates = [...new Set(points
+    .filter((p) => p.freqKhz > 0 && p.microVolts > 0 && p.mv < stock.mv)
+    .map((p) => Math.ceil(clockMhz - p.mhz))
+    .filter((o) => o > 0 && o <= maxOffsetMhz))]
+    .sort((a, b) => a - b);
+
+  const reached = [];
+  for (const offsetMhz of candidates) {
+    const raised = points.map((p) => (p.freqKhz > 0
+      ? { ...p, mhz: p.mhz + offsetMhz, freqKhz: p.freqKhz + offsetMhz * 1000 }
+      : p));
+    const v = voltageForClock(raised, clockMhz);
+    if (!v || v.mv >= stock.mv) continue;
+    // Keep the CHEAPEST offset that reaches each distinct voltage: a bigger offset that lands on the
+    // same voltage buys nothing and costs the card a bigger frequency excursion.
+    if (!reached.length || v.mv < reached[reached.length - 1].mv) {
+      reached.push({ offsetMhz, mv: v.mv, pointIndex: v.pointIndex, savedMv: Number((stock.mv - v.mv).toFixed(3)) });
+    }
+  }
+
+  // Thin the reachable list down to the requested voltage step — the owner's «grubo 25 mV / tochno
+  // 5 mV», expressed in the unit he said it in. A curve region too coarse to offer a 25 mV rung
+  // yields whatever it has, and a region that offers many yields every 25th millivolt.
+  const ladder = [];
+  let lastTaken = 0;
+  for (const r of reached) {
+    if (r.savedMv - lastTaken >= stepMv || !ladder.length) { ladder.push(r); lastTaken = r.savedMv; }
+  }
+  return ladder;
+}
+
 export function voltageForClock(points, clockMhz) {
   const usable = points
     .filter((p) => p.freqKhz > 0 && p.microVolts > 0 && p.mhz >= clockMhz)
@@ -137,12 +204,29 @@ export async function runStep({
   // armed watchdog, one rollback, several loads inside. Applying and rolling back per shape would
   // measure three different thermal states of three different writes and call it one point.
   shapes = null,
+  // PIN THE CLOCK WHILE THE SET RUNS — the owner's question, made executable: *«а для всех 128 точек
+  // кривой когда будешь тюнить? на частоте 500 МГц, на 1500?»*
+  //
+  // A curve point is exercised ONLY when the card actually runs a clock that point serves. Left free,
+  // the card boosts to the top under every load, so a run "at 500 MHz" tests the same handful of top
+  // points as a run at 2842 and the low half of the curve is never loaded at all. Pinning is what
+  // makes «tune the whole curve» a measurement instead of a phrase.
+  //
+  // `-lgc` is legal HERE and illegal in a shipped profile — `min = max` forbids the card from clocking
+  // down at idle (plans/05 §4.5a, and the owner's own requirement that the card stay free to move).
+  pinMhz = null,
+  // The card WITH ITS LADDER, probed once by the caller. Re-probing per rung spawns `nvidia-smi`
+  // queries inside every step of a long sweep, and on the sixth rung of the first live sweep one of
+  // them came back without a ladder and turned a healthy rung into НЕИЗВЕСТНО. `ladder-descent` had
+  // already written the rule this violates: «probeCard() already resolved the ladder — take it, do
+  // not re-derive it» (EXP-0013).
+  pinCard = null,
 } = {}) {
   const nvapi = await import('./nvapi.mjs');
   const wd = await import('./watchdog.mjs');
   const stress = await import('./stress-tester.mjs');
 
-  const out = { point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, capMhz, blocks: [], verdict: null };
+  const out = { point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, capMhz, pinMhz, blocks: [], verdict: null };
   const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
 
   if (offsetMhz <= 0) throw new RangeError(`шаг обязан быть ПОЛОЖИТЕЛЬНЫМ (это и есть андервольт): ${offsetMhz}`);
@@ -167,6 +251,16 @@ export async function runStep({
 
   let watchdog = null;
   let written = false;
+  // The clock pin and its release live outside the try so the `finally` can undo whatever was applied,
+  // including the case where the pin succeeded and the load then died.
+  let pinned = false;
+  let pmBackend = null;
+  // DECLARED OUT HERE, not inside the try, and the reason is a defect that happened: with these two
+  // living in the try's scope, the `finally` threw a ReferenceError on its FIRST line and jumped over
+  // the rollback entirely. Nothing was left applied that time, by luck of where the run had got to —
+  // and luck is not a rollback.
+  let sampler = null;
+  let samplerFile = null;
 
   try {
     const before = nvapi.readVfOffsets(nv, handle);
@@ -211,9 +305,14 @@ export async function runStep({
       ? Array.from({ length: nvapi.CLK_VF_POINT_COUNT - 1 }, (_, i) => i)
       : [point];
 
+    // ONE WRITER, and for the whole curve it is `nvapi.writeCurve` rather than a sixth open-coded
+    // copy of the same loop (plans/05 §4.1 item a). The single-point path stays a single call.
     let failed = 0;
-    for (const p of targets) {
-      const r = nvapi.writeVfOffset(nv, handle, p, offsetMhz * 1000);
+    if (allPoints) {
+      const w = nvapi.writeCurve(nv, handle, offsetMhz);
+      failed = w.failed;
+    } else {
+      const r = nvapi.writeVfOffset(nv, handle, point, offsetMhz * 1000);
       if (!r.ok) failed++;
     }
     written = failed < targets.length;
@@ -249,6 +348,57 @@ export async function runStep({
         vBefore && vAfter
           ? `обслуживала точка ${vBefore.pointIndex} (${vBefore.mv} мВ) → теперь точка ${vAfter.pointIndex} (${vAfter.mv} мВ), экономия ${out.undervolt.savedMv} мВ`
           : 'не вычислено — частота вне кривой');
+    }
+
+    // ---- 3c. THE CLOCK PIN — what makes "tune the whole curve" a measurement
+    //
+    // Without it the card boosts to the top under every load, so the low half of the curve is never
+    // exercised and a run "at 500 MHz" tests exactly the same points as a run at 2842. The pin is
+    // applied through `profile-manager` (rule R1: it is the only module that writes clocks), it is
+    // verified UNDER LOAD rather than at idle (EXP-0020 — at idle a high lock is invisible), and it is
+    // released in the `finally` below on every path.
+    if (pinMhz) {
+      const pm = await import('./profile-manager.mjs');
+      const ld = await import('./ladder-descent.mjs');
+      // THE CARD WITH ITS LADDER, and it is a DIFFERENT probe from the one the oracle uses. This
+      // project has two functions named `probeCard`: `stress-tester`'s answers driver/VBIOS for a
+      // golden's stamp, `profile-store`'s additionally resolves the measured clock ladder and the
+      // power envelope. The validator needs the second, and passing the first cost a live rung —
+      // it threw inside `validateProfile` AFTER the curve had been written (the `finally` cleaned up,
+      // which is the only reason that was a stumble rather than an incident).
+      const ps = await import('./profile-store.mjs');
+      const card = pinCard ?? ps.probeCard();
+      if (!card.ladder?.ok) {
+        block('ЧАСТОТА ЗАКРЕПЛЕНА', false, `лестница частот недоступна — ${card.ladder?.why ?? 'не прочитана'}`);
+        return out;
+      }
+      // A clock is taken from the card's OWN ladder, never from a round number a human liked
+      // (`ladder-descent` rule 3). 1500 is not on this card's ladder; 1492 is.
+      const snap = ld.snapToLadder(pinMhz, card.ladder.mhz);
+      out.pinRequestedMhz = pinMhz;
+      pinMhz = snap.mhz;
+      out.pinMhz = pinMhz;
+      pmBackend = pm.nvidiaSmiBackend();
+      const applied = await pm.apply(pmBackend, ld.candidateProfile(pinMhz, card), { card, verifyLock: 'deferred' });
+      pinned = true;                                   // set BEFORE judging success: a partial apply still needs undoing
+      block(`ЧАСТОТА ЗАКРЕПЛЕНА на ${pinMhz} МГц${snap.snapped ? ` (просили ${snap.from}, притянуто к лестнице карты)` : ''} — иначе низ кривой под нагрузкой не тестируется вовсе`,
+        applied.ok !== false, applied.why ?? 'проверка закрепления — под нагрузкой, не на простое');
+      if (applied.ok === false) return out;
+      watchdog.beat();
+
+      // The sampler runs in a SEPARATE process: an in-process one records nothing, because `spawnSync`
+      // inside the load blocks this event loop (measured, `power-baseline.mjs` header).
+      const { spawn } = require('node:child_process');
+      const { join, dirname } = require('node:path');
+      const { fileURLToPath } = require('node:url');
+      const here = dirname(fileURLToPath(import.meta.url));
+      const { mkdirSync } = require('node:fs');
+      const runsDir = join(here, '..', '..', 'runs', 'vmin');
+      mkdirSync(runsDir, { recursive: true });
+      samplerFile = join(runsDir, `pin-${pinMhz}-${offsetMhz}.jsonl`);
+      const samplerSeconds = seconds * ((Array.isArray(shapes) && shapes.length) || 1) + 30;
+      sampler = spawn(process.execPath, [join(here, 'hardware-mon.mjs'), '--seconds', String(samplerSeconds), '--out', samplerFile],
+        { windowsHide: true, stdio: 'ignore' });
     }
 
     // ---- 4. THE ORACLE — the full three-way verdict under real load
@@ -316,7 +466,54 @@ export async function runStep({
       result.verdict === config.VERDICT.PASS,
       result.reason ?? 'сумма против эталона + журнал Windows + работа в секунду');
   } finally {
+    // ---- 4b. DID THE PIN ACTUALLY HOLD? Verified in the `finally`, and deliberately so: the set
+    // branch returns early on success, so a check placed after the oracle would be skipped on exactly
+    // the runs that produce a number (EXP-0029 — a summary after a try/finally is a summary the
+    // early paths skip). It is a READ, it happens before the release below, and an unproven pin makes
+    // the whole rung's verdict meaningless: the card may have been boosting at the top all along.
+    // THE WHOLE CHECK IS INSIDE THE CATCH, INCLUDING ITS CONDITION. Anything placed in a `finally`
+    // ahead of the rollback can prevent the rollback, and this very block already did it once: the
+    // `try` started one line too late, so a ReferenceError in the `if` condition escaped and the
+    // release below never ran. In a `finally` that owns an undo, "reporting" code is guest code — it
+    // gets no path to the exit.
+    try {
+      if (pinned && sampler) {
+        const { readSamples, summarizeSamples } = await import('./power-baseline.mjs');
+        const ld = await import('./ladder-descent.mjs');
+        sampler.kill();
+        const records = samplerFile ? readSamples(samplerFile) : [];
+        const stats = records.length ? summarizeSamples(records) : null;
+        const proof = stats ? ld.verifyLockUnderLoad({ medians: stats }, pinMhz) : { ok: false, why: 'сэмплер не оставил проб' };
+        out.pinProof = proof;
+        block(`ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц`, proof.ok,
+          `${proof.why}${proof.delivered ? ` · выдано ${proof.delivered} МГц` : ''}`);
+        // A rung whose pin did not hold has no verdict about the point it claimed to test.
+        if (!proof.ok && out.verdict === config.VERDICT.PASS) {
+          out.verdict = null;
+          out.pinRefused = true;
+        }
+      }
+    } catch (e) {
+      block(`ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц`, false, `проверка не состоялась: ${e.message}`);
+      out.verdict = null;
+      out.pinRefused = true;
+      try { sampler?.kill(); } catch { /* the sampler is a child; a dead one is fine */ }
+    }
+
     // ---- 5. ROLLBACK, always
+    if (pinned) {
+      // THE CLOCK RELEASE, and it runs even when the curve write never happened. `resetToFactory` is
+      // total rather than differential — the same reasoning rule R9 uses for the watchdog: after
+      // something goes wrong nobody knows what was applied, so the only honest undo is factory.
+      try {
+        const pm = await import('./profile-manager.mjs');
+        const released = await pm.resetToFactory(pmBackend, { knownLockMhz: pinMhz });
+        block('ОТКАТ: частота ОТПУЩЕНА, карта снова свободна вверх и вниз', released.ok !== false,
+          released.why ?? 'сброс к заводскому применён и перечитан');
+      } catch (e) {
+        block('ОТКАТ: частота ОТПУЩЕНА, карта снова свободна вверх и вниз', false, `сброс упал: ${e.message}`);
+      }
+    }
     if (written) {
       // Zero EVERY point, not only the ones this run wrote. The rollback runs when things may have
       // gone wrong, and "undo exactly what I did" needs a record that a crash may have taken with it —
