@@ -121,17 +121,19 @@ reread-matching). Card left stock.
 *Anchor: `plans/01_EPIC` §9 Б3; internal map §4 (four shortcuts, the owner's names verbatim);
 `researches/03` §3.6 (elevation without UAC prompts).*
 
-- [ ] `desktop-shortcuts.mjs`: `.lnk` generation via `WScript.Shell` (the platform-idiomatic way,
-      code-style rule). Four shortcuts, the owner's names and emoji as recorded in canon.
-- [ ] A click routes through a pre-registered Task Scheduler task running the applier elevated with
-      the mode as a FIXED argument (`researches/03` §3.6 pattern) — no UAC prompt per click, and the
-      task can run ONLY our applier: no free-form command surface.
-- [ ] Offline selftest: `.lnk` files generated into a sandbox dir, read back and parsed (target,
-      args, icon); production Desktop not touched by the suite (EXP-0025 discipline).
-- [ ] Live, smallest reversible form: create on the real Desktop; apply the TEST profile via its
-      path, read back; apply Stock Default from that non-factory state (**P3-AC5**), read back.
-- [ ] Rollback named BEFORE creation (owner's-machine rule): delete the four `.lnk` by listed paths,
-      `schtasks /Delete /TN <name>` — one receipt lists everything created outside the repo.
+- [x] `desktop-shortcuts.mjs`: `.lnk` via `WScript.Shell` (PowerShell COM one-shots, argv only —
+      no shell in between). **Measured quirk:** WScript.Shell is ANSI — an emoji path fails with
+      «??»; cured structurally (author under an ASCII temp name, rename with Node; read via a temp
+      copy). Selftest: 5 blocks in a tmpdir sandbox, Desktop untouched, emoji round-trip proven.
+- [x] `setup-desktop.mjs`: 5 pre-registered elevated tasks (`\KAGO\apply-<name>`, fixed args,
+      Interactive, RunLevel Highest, no stored credentials — `researches/03` §3.6), 4 shortcuts
+      (owner's names verbatim), receipt written BEFORE creation with per-artifact delete commands;
+      `--uninstall` executes the receipt; `--status` read-only (run live: 0 of 5 present).
+- [ ] **Live install BLOCKED 2026-08-14 01:2x — the session's permission classifier denied creating
+      scheduler tasks / Desktop artifacts (correct class of caution; the owner is adding rights).**
+      Remaining live: `npm run setup -- --install` → apply TEST profile via its task path, read
+      back; apply Stock Default from that non-factory state (**P3-AC5**), read back; draft click
+      refuses with zero writes.
 
 **Verification:** P3-AC1 mechanism 2/2 · P3-AC5 taken · the created-artifacts receipt in the journal.
 

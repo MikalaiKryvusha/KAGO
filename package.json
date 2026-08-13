@@ -35,7 +35,9 @@
     "vmin": "node automation-engine/lib/vmin-store.mjs",
     "engine": "node automation-engine/engine.mjs",
     "fanladder": "node tools/fan-ladder.mjs",
-    "thermal": "node automation-engine/lib/thermal-ladder.mjs"
+    "thermal": "node automation-engine/lib/thermal-ladder.mjs",
+    "shortcuts": "node automation-engine/lib/desktop-shortcuts.mjs",
+    "setup": "node automation-engine/setup-desktop.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
