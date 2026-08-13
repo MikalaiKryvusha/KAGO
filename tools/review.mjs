@@ -67,8 +67,11 @@ const DEF6_STRIKES = 2;                        // two strikes against machine sl
 const DEF7_BEEP_DEADLINE_MS = 8000;
 const DEF7_VOICE_TIMEOUT_MS = 60000;
 const DEF8_WINDOW_SIZE = '--window-size=1100,900';
-const QUIET_FROM = '23:00';
-const QUIET_TO = '09:00';
+// No quiet hours on this project — the owner's word (interview 002, 2026-08-14): «окна тихих часов
+// в этом проекте не делаем. Можно звать меня 24 часа в сутки». A zero-width window is no window
+// (inQuietHours: a === b → false); --quiet-from/--quiet-to still take a per-run window if ever needed.
+const QUIET_FROM = '00:00';
+const QUIET_TO = '00:00';
 
 // ---------------------------------------------------------------------------------------------
 // 1. Small local helpers. NOTE: none of these duplicate the core — escaping an ATTRIBUTE value is
