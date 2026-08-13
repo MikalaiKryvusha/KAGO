@@ -2,8 +2,9 @@
 
 kaif-fp: `kaif-core.mjs cmdDiff --source` :: adapted-module-counted-as-upstream-delta + unnamed-delta :: v2.2
 
-**Delivered upstream:** folded into the KAGO 2.2 update field report issue (see
-`reports/KAIF_UPDATES/KAGO_KAIF_2.2_UPDATE_REPORT.md`); a separate issue is the owner's call.
+**Delivered upstream:** https://github.com/MikalaiKryvusha/KAIF/issues/10 — folded into the KAGO
+2.2 update field report, filed 2026-08-14 on the owner's direct order («напиши полевой отчёт
+разработчику KAIF в GitHub»); a separate dedicated issue remains the owner's call.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.2 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0
