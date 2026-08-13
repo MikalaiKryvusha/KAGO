@@ -1,0 +1,42 @@
+{
+  "_kaif_hooks": "Опциональный модуль KAIF refresh-hooks (.kaif/hooks/README.md). Подключён по прямому указанию владельца в чате 2026-08-14: «убедись что опциональный модуль хуков подключен». Отключение: удалить объект hooks — markdown-ритуал обновления контекста работает и без него.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/session-start-refresh.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/prompt-refresh-timer.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/stop-status-guard.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

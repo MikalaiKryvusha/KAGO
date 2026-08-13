@@ -83,7 +83,27 @@ The local portrait **is** core 1.1 at origin HEAD. (Its header still says «ве
 line 7 — that line records the *acceptance* event of round 4; the version ledger at the bottom
 carries 1.1. An observation for the voice repo, not for KAIF.)
 
-## 5. Judge verdict
+## 5. Same session: the optional refresh-hooks module wired in (owner's explicit order)
+
+Mid-session the owner ordered, verbatim: «убедись что опциональный модуль хуков подключен». The
+module (`.kaif/hooks/`, shipped with 2.2) was present but not wired — no `.claude/settings.json`
+existed. Wired per the module's own README: the `hooks` object from
+`.kaif/hooks/settings-fragment.json` merged into a new project-shared `.claude/settings.json`,
+consent recorded in the file's header comment and in `STATUS.md`. Smoke, all four probes green:
+
+| Probe | Expected | Observed |
+|---|---|---|
+| `prompt-refresh-timer.mjs`, no marker | JSON refresh order | order printed, `additionalContext` present |
+| same, fresh marker | silence | empty stdout, exit 0 |
+| `session-start-refresh.mjs`, `source: compact` | re-read order | order printed |
+| `stop-status-guard.mjs` | silent (STATUS touched today) | empty stdout, exit 0 |
+
+One field note for the module's README: the scripts read stdin with `readFileSync(0)`, which
+blocks until EOF — a bare smoke run without piped stdin (the README's step 3 suggests running the
+script with no input) hangs in shells that keep the descriptor open. Piping `{}` is the reliable
+smoke. Hooks load at session start, so the contour goes live from the next session.
+
+## 6. Judge verdict
 
 Every claim above was re-run fresh in one consolidated pass (C1–C7) after the investigation:
 version, update no-op, machinery sha, manifest check, portrait blob sha, clean tree. Verbatim:
