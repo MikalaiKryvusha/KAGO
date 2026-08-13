@@ -611,10 +611,12 @@ fitting of tests to new behavior is the most documented agent failure). After ch
 answer: could the old tests now pass for the WRONG reason? If yes — rebuild the fixtures so each test
 guards what it claims to guard, and say so in the commit.
 
-End every commit message with the co-author trailer:
+End every commit message with the co-author trailer naming the model that ACTUALLY did the work —
+attribution is truthful, never a template (sessions before 2026-08-14 ran Claude Opus 5; the trailer
+follows the resident model). Current:
 
 ```
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ```
 
 `<If you use a commit/version tool (e.g. tools/commit.mjs that bumps a build number, commits, pushes),
