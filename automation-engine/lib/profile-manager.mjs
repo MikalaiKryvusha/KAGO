@@ -37,6 +37,13 @@
 //  epsilon → 5 red. The flash block exists BECAUSE of that run: without it the single-sample
 //  mutation stayed green, i.e. the suite did not actually guard P2-AC2 (EXP-0008's own corollary —
 //  a test written after the fix is written against the code it cannot judge).]
+//
+// [TESTED: 2026-08-14 · phase 3 §4.2: THE QUALIFICATION GATE (P3-AC3) — a draft (qualified: false)
+//  is refused BEFORE the first write, naming the reason and the phase that lifts it; an all-null
+//  working-mode draft does NOT fall through to the factory path. `--selftest` → 17 blocks; the
+//  gate-removal mutation reddened exactly its two blocks. Live the same night: `--apply optimised`
+//  refused with zero writes (power.limit 300 W before and after), `--roundtrip test-pl250`
+//  converged — 300 → 250 W read back, reset to 300 W, all compared fields equal.]
 
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -54,6 +61,7 @@ import {
   validateProfile,
   checkStamp,
   isFactoryProfile,
+  requiresQualification,
   probeCard,
 } from './profile-store.mjs';
 
@@ -210,6 +218,18 @@ export async function apply(backend, profile, { card, timing = {}, verifyLock = 
   // R6 and the format, both before the first write (P2-AC5).
   const refusals = validateProfile(profile, { card });
   refusals.push(...checkStamp(profile, card ?? { driver: before.driver, vbios: before.vbios }));
+  // THE QUALIFICATION GATE (phase 3, P3-AC3): a draft is a VALID file the format accepts and the
+  // list shows — and a state this module never puts on the card. The refusal names the reason and
+  // the phase that lifts it, and it sits here, in the one writer (R1), not in the shortcut layer:
+  // whatever surface calls apply() — CLI, .lnk, the logon task — meets the same gate.
+  if (requiresQualification(profile) && profile.qualified !== true) {
+    refusals.push({
+      field: 'qualified',
+      why: 'профиль — ЧЕРНОВИК (qualified: false): его числа — кандидаты, не прошедшие приёмку. '
+        + 'Применение запрещено, на карту не записано ничего. Отказ снимает фаза 6 (приёмка режимов), '
+        + 'которая проставит qualified: true по результатам квалификации.',
+    });
+  }
   if (refusals.length) {
     const err = new Error(`профиль «${profile?.name}» отвергнут до записи:\n` + refusals.map((r) => `    ${r.field}: ${r.why}`).join('\n'));
     err.refusals = refusals;
@@ -461,6 +481,7 @@ const SELFTEST_CARD = Object.freeze({
 const silentColdFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
+  qualified: true,
   settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 } },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
@@ -627,6 +648,42 @@ async function cmdSelftest() {
       return 'применение не провалилось';
     } catch (e) {
       if (b._state.powerLimitW !== 300 || b._state.lockedTo !== null) return 'карта изменилась, хотя первая же запись отказала';
+      return null;
+    }
+  });
+
+  // Phase 3 §4.2 — the qualification gate (P3-AC3): a draft never reaches the card, the refusal
+  // names the reason and the phase that lifts it, and the gate does not catch the factory path.
+  block('ЧЕРНОВИК (qualified: false) -> отказ ДО первой записи, причина и фаза названы (P3-AC3)', async () => {
+    const b = fakeBackend();
+    const p = silentColdFixture();
+    p.qualified = false;
+    p.mode = 'silent-cold';
+    p.draft = { candidate: 'потолок 2400, кривая +180', source: 'STATUS факт 27' };
+    try {
+      await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
+      return 'черновик применён — гейт квалификации не сработал';
+    } catch (e) {
+      if (b.writes.length !== 0) return `до отказа успели записать: ${b.writes.join(', ')}`;
+      if (!/qualified/u.test(e.message)) return `отказ не назвал поле: ${e.message}`;
+      if (!/ЧЕРНОВИК/u.test(e.message)) return `отказ не назвал причину черновика: ${e.message}`;
+      if (!/фаза 6/u.test(e.message)) return `отказ не назвал фазу, которая его снимет: ${e.message}`;
+      return null;
+    }
+  });
+
+  block('режим-черновик с обеими настройками null -> НЕ применяется как тихий сброс, а отказывает', async () => {
+    const b = fakeBackend();
+    const p = {
+      name: 'max-performance', title: '🚀 Max Perfomance', mode: 'max-performance',
+      qualified: false, draft: { candidate: '+180, потолок 3172', source: 'STATUS факты 24, 27' },
+      settings: { powerLimitWatts: null, graphicsClockLockMhz: null },
+    };
+    try {
+      await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
+      return 'черновик режима с пустыми настройками применился как заводской — клик, который врёт';
+    } catch (e) {
+      if (b.writes.length !== 0) return `до отказа успели записать: ${b.writes.join(', ')}`;
       return null;
     }
   });

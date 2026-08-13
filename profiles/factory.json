@@ -1,6 +1,7 @@
 {
   "name": "factory",
-  "title": "⏹ Сброс к заводским",
+  "title": "⏹ Stock Default",
+  "mode": "stock-default",
   "settings": {
     "powerLimitWatts": null,
     "graphicsClockLockMhz": null

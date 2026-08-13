@@ -23,11 +23,12 @@
 // work. That exemption follows from the data (all settings null) instead of from a `factory: true`
 // flag somebody has to keep in sync.
 //
-// [TESTED: 2026-08-10 · `node automation-engine/lib/profile-store.mjs --selftest` → 17 blocks, all
-//  agreeing, on an injected card (no GPU touched); mutation-proved by breaking each of the three
-//  load-bearing guards in turn — the ladder check, the stamp-required derivation and the takenAt
-//  offset rule each turned its blocks red. `--list` loads profiles/factory.json against the live
-//  card and prints it.]
+// [TESTED: 2026-08-14 · `--selftest` → 25 blocks (17 of 2026-08-10 + 8 for phase-3 mode identity и
+//  the qualified gate), no GPU touched; mutation-proved twice — 2026-08-10 the ladder check, the
+//  stamp-required derivation and the takenAt offset rule; 2026-08-14 four more (unknown mode ·
+//  stock-default-that-sets · qualified type/requirement · qualified-forbidden-on-factory), each
+//  reddening exactly its own blocks. `--list` run against the live card the same night: 6 profiles,
+//  0 refusals, drafts labeled.]
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -45,6 +46,21 @@ const GPU_INFO = fileURLToPath(new URL('../../tools/gpu-info.mjs', import.meta.u
  *  silently ignored is a profile that does nothing while reading as if it does. */
 const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz']);
 const STAMP_KEYS = Object.freeze(['driver', 'vbios', 'takenAt']);
+
+/**
+ * The four modes the owner named (GOAL.md → «Четыре режима»; names ship verbatim in `title`, these
+ * ids are the machine identity phase 3's shortcuts and remembered state route by). Phase 3 step 4.2.
+ *
+ * DELIBERATELY NOT IN SETTINGS: the three working modes' real payload is the V/F-curve raise + cap
+ * (NVAPI backend), which this applier cannot write until phase 6 wires that backend in. Their
+ * candidate numbers therefore live in the `draft` documentation block, and `settings` carries ONLY
+ * what the applier can actually write today — a settings key the applier silently ignores would be
+ * a profile that reads as doing something it does not do (the defect this module's header names).
+ * [TESTED: 2026-08-14 · selftest blocks below — unknown mode refused, stock-default with non-null
+ *  settings refused, both mutation-proved]
+ */
+export const MODE_IDS = Object.freeze(['max-performance', 'optimised', 'silent-cold', 'stock-default']);
+const WORKING_MODES = Object.freeze(['max-performance', 'optimised', 'silent-cold']);
 
 /**
  * A machine receipt is a full LOCAL ISO 8601 moment WITH its offset (AGENT_GUIDE.md → «A stamp
@@ -78,6 +94,21 @@ export function isFactoryProfile(profile) {
   const s = profile?.settings;
   if (!s || typeof s !== 'object') return false;
   return SETTING_KEYS.every((k) => s[k] === null);
+}
+
+/**
+ * THE QUALIFICATION GATE'S DERIVATION (phase 3, P3-AC3). A profile must carry `qualified: true|false`
+ * — and the applier writes only `qualified: true` — when it could put an unproven state on the card:
+ * either it SETS something, or it IS one of the three working modes (whose real payload, the curve,
+ * is documentation until phase 6 — but whose shortcut exists on the owner's Desktop from phase 3 on,
+ * so an all-null draft applying as a quiet no-op reset would be a click that lies).
+ *
+ * Factory-by-construction — all settings null AND not a working mode — must NOT carry the field at
+ * all: same reasoning as the stamp exemption above, a reset that can be marked unqualified is a
+ * reset that can stop working, and that is the one path that always has to work.
+ */
+export function requiresQualification(profile) {
+  return !isFactoryProfile(profile) || WORKING_MODES.includes(profile?.mode);
 }
 
 /**
@@ -247,6 +278,37 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
     }
   }
 
+  // --- mode & qualification (phase 3 §4.2) ------------------------------------------------------
+  if (profile.mode !== undefined) {
+    if (!MODE_IDS.includes(profile.mode)) {
+      out.push(refuse('mode', `неизвестный режим ${JSON.stringify(profile.mode)}; известны: ${MODE_IDS.join(', ')}`));
+    } else if (profile.mode === 'stock-default' && !isFactoryProfile(profile)) {
+      out.push(refuse('mode', 'stock-default обязан ничего не задавать (обе настройки null) — сброс, который что-то настраивает, это не сброс'));
+    }
+  }
+
+  if (requiresQualification(profile)) {
+    if (typeof profile.qualified !== 'boolean') {
+      out.push(refuse('qualified', 'профиль задаёт состояние или является рабочим режимом — обязан нести qualified: true|false; true ставит только приёмка (фаза 6)'));
+    }
+    if (profile.draft !== undefined) {
+      if (profile.qualified === true) {
+        out.push(refuse('draft', 'квалифицированный профиль не может быть черновиком — противоречие; блок draft снимается приёмкой вместе с флагом'));
+      } else if (typeof profile.draft !== 'object' || profile.draft === null || Array.isArray(profile.draft)) {
+        out.push(refuse('draft', 'ожидался объект с кандидатскими числами и их источниками'));
+      }
+    }
+  } else {
+    // Factory-by-construction: the field is FORBIDDEN, not optional — a reset that can be marked
+    // unqualified is a reset that can stop working (same class as the stamp exemption below).
+    if (profile.qualified !== undefined) {
+      out.push(refuse('qualified', 'заводской профиль квалифицирован ПО ПОСТРОЕНИЮ и поля не несёт — иначе сброс может перестать работать'));
+    }
+    if (profile.draft !== undefined) {
+      out.push(refuse('draft', 'заводскому профилю нечего держать в черновике'));
+    }
+  }
+
   // --- stamp ----------------------------------------------------------------------------------
   // Required IFF the profile sets something (R6). Derived from the settings, not from a flag.
   const factory = isFactoryProfile(profile);
@@ -369,9 +431,15 @@ function cmdList(card) {
       const evidence = isFactoryProfile(profile)
         ? ''
         : (profile.evidence ? '' : '\n    ⚠ БЕЗ ДОКАЗАТЕЛЬСТВ — профиль задаёт настройки, но не несёт результатов приёмки');
+      const mode = profile.mode ? `\n    режим              ${profile.mode}` : '';
+      const qual = !requiresQualification(profile)
+        ? '\n    квалификация       заводской — квалифицирован по построению'
+        : profile.qualified === true
+          ? '\n    квалификация       ✅ квалифицирован — применение разрешено'
+          : '\n    квалификация       📝 ЧЕРНОВИК (qualified: false) — применение ОТКАЖЕТ до фазы 6';
       console.log(`OK   ${base}  «${profile.title}»`);
       console.log(renderSettings(profile.settings));
-      console.log(`    ${proven}${evidence}`);
+      console.log(`    ${proven}${mode}${qual}${evidence}`);
     } else {
       refused++;
       console.log(`ОТКАЗ ${base} — ${refusals.length} причин(ы):`);
@@ -409,6 +477,7 @@ const factoryFixture = () => ({
 const measuredFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
+  qualified: true,
   settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 } },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
@@ -503,6 +572,57 @@ function cmdSelftest() {
       profile: (() => { const p = measuredFixture(); p.name = 'silent.cold'; return p; })(),
       fileName: 'silent.cold.json',
       expect: ['name'],
+    },
+    // ---- phase 3 §4.2: mode identity + the qualification gate's format half -------------------
+    {
+      what: 'неизвестный режим -> отказ с перечислением четырёх известных',
+      profile: (() => { const p = measuredFixture(); p.mode = 'turbo'; return p; })(),
+      expect: ['mode'],
+      alsoMustSay: ['max-performance', 'stock-default'],
+    },
+    {
+      what: 'stock-default, который что-то задаёт -> отказ (сброс, который настраивает, это не сброс)',
+      profile: (() => { const p = measuredFixture(); p.mode = 'stock-default'; return p; })(),
+      expect: ['mode'],
+    },
+    {
+      what: 'профиль задаёт состояние, а qualified не несёт -> отказ',
+      profile: (() => { const p = measuredFixture(); delete p.qualified; return p; })(),
+      expect: ['qualified'],
+    },
+    {
+      what: 'рабочий режим с обеими настройками null (черновик кривой) -> qualified всё равно обязателен',
+      profile: (() => {
+        const p = factoryFixture();
+        p.name = 'max-performance'; p.title = '🚀 Max Perfomance'; p.mode = 'max-performance';
+        return p;
+      })(),
+      expect: ['qualified'],
+    },
+    {
+      what: 'черновик режима: qualified: false + блок draft -> формат ПРИНИМАЕТ (откажет применяющий, не формат)',
+      profile: (() => {
+        const p = factoryFixture();
+        p.name = 'max-performance'; p.title = '🚀 Max Perfomance'; p.mode = 'max-performance';
+        p.qualified = false; p.draft = { candidate: '+180 МГц, потолок 3172', source: 'STATUS факт 27' };
+        return p;
+      })(),
+      expect: [],
+    },
+    {
+      what: 'qualified: true при живом блоке draft -> отказ (противоречие)',
+      profile: (() => { const p = measuredFixture(); p.draft = { candidate: 'x' }; return p; })(),
+      expect: ['draft'],
+    },
+    {
+      what: 'qualified на заводском профиле -> отказ (сброс не должен уметь перестать работать)',
+      profile: (() => { const p = factoryFixture(); p.qualified = true; return p; })(),
+      expect: ['qualified'],
+    },
+    {
+      what: 'qualified строкой "true" -> отказ (булево, а не строка)',
+      profile: (() => { const p = measuredFixture(); p.qualified = 'true'; return p; })(),
+      expect: ['qualified'],
     },
   ];
 

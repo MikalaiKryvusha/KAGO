@@ -91,25 +91,30 @@ API surface) gets a recon doc BEFORE code.*
 
 **Verification:** the recon doc exists, decision + fallback named; no code yet.
 
-### 4.2 — Profile artifacts: four modes, a `qualified` gate, the R6 stamp 🔲
+### 4.2 — Profile artifacts: four modes, a `qualified` gate, the R6 stamp ✅ 2026-08-14 01:0x
 
 *Anchor: `plans/01_EPIC` §9 Б2; `MASTER_PLAN.md` → «Четыре режима»; AC7.*
 
-- [ ] Extend the existing `profiles/` format (already validated by `npm run profiles -- --selftest`)
-      with mode identity and **`qualified: true|false`**. Stock Default is qualified by construction
-      (it writes zeros/defaults through the full watchdog undo). The three working modes ship as
-      **DRAFT** files carrying today's best-measured candidate numbers *as documentation*, refused by
-      the applier until phase 6 flips them.
-- [ ] One TEST profile for mechanism proof: `-pl 250` — measured, reversible, inside the card's own
-      range (`researches/01`), no curve write. It exists to prove the apply→read-back→remember path
-      with a real state change, and it is not a mode: the file says so.
-- [ ] The applier (`profile-manager.mjs`, rule R1 — nothing else touches GPU tools) refuses:
-      unqualified profiles (P3-AC3), stale stamps (P3-AC7). One author for both refusals.
-- [ ] `--selftest` extended: hostile fixtures — `qualified: false`, doctored stamp, unknown mode id —
-      each refused with its own named reason; mutation-proved (each guard broken → its block reds).
+- [x] Format extended (`profile-store.mjs`): `mode` (four ids; unknown → refused; stock-default
+      that sets anything → refused), `qualified: true|false` required iff the profile sets state OR
+      is a working mode, FORBIDDEN on factory-by-construction (same class as the stamp exemption).
+      Draft numbers live in a `draft` documentation block (allowed only with `qualified: false`) —
+      NOT in settings: the curve is not appliable until phase 6, and a settings key the applier
+      ignores would be a profile that lies. Four mode files + factory shipped; the all-null
+      working-mode draft explicitly does NOT fall through to the factory path (its own block).
+- [x] `profiles/test-pl250.json` — `-pl 250`, `qualified: true` (both sides proven live in phase 2),
+      titled «НЕ режим», evidence names why this is the one measured reversible curve-free write.
+- [x] The applier gate sits in `apply()` (R1 — one gate for every calling surface), refuses BEFORE
+      the first write, names the reason and «фаза 6». Stale stamps already refused (P2-AC5 = AC7).
+- [x] Selftests: format 25 blocks, applier 17 — green; **five mutations, each reddening exactly its
+      own blocks** (unknown-mode · stock-default-sets · qualified-type · qualified-on-factory ·
+      gate-removed).
 
-**Verification:** selftest green offline; live: test profile applied and read back, then refused
-fixtures leave `gpu:info --json` byte-identical.
+**Verification (taken):** offline green as above · live 2026-08-14 01:0x: `npm run profiles` → 6
+profiles, 0 refusals, drafts labeled 📝 · `--apply optimised` refused with ZERO writes (power.limit
+300 W before and after, exit 1) · `--roundtrip test-pl250` converged: 300 → 250 W read back → reset
+300 W, compared fields equal. P3-AC1's mechanism: 2/2 (refuse-with-nothing-written · applied-and-
+reread-matching). Card left stock.
 
 ### 4.3 — Four shortcuts, applying through the elevated task 🔲
 
