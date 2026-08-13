@@ -74,18 +74,20 @@ Per `REQUIREMENTS_FRAMEWORK.md` — Scale · Meter · Target.
 
 Each step cites its anchor (the citing rule). Fresh code is born `[NOT-TESTED]`; flips on observation.
 
-### 4.1 — Recon: a tray icon with zero third-party GUI dependencies 🔲
+### 4.1 — Recon: a tray icon with zero third-party GUI dependencies ✅ 2026-08-14 00:5x
 
 *Anchor: `plans/01_EPIC` §9 track Б, step Б1; checklist step 9 — external truth (the Windows tray
 API surface) gets a recon doc BEFORE code.*
 
-- [ ] `researches/07_tray_without_third_party_gui.md`: candidate paths read from vendor docs, not
-      recall — expected candidates: PowerShell + `System.Windows.Forms.NotifyIcon` (built into
-      .NET/Windows, not a third-party GUI app), a minimal own native helper, or none.
-      For each: message-loop requirements, behaviour when the process dies, elevation interaction.
-- [ ] The verdict names ONE chosen path and the fallback: **ship phase 3 without the tray** — the
-      owner's wording makes it a nice-to-have (*«Будет хорошо, если…»*, `GOAL.md`), and only display
-      is lost. A fork goes to the owner ONLY if every candidate violates the no-third-party-GUI law.
+- [x] `researches/07_tray_without_third_party_gui.md`: three candidates read from vendor docs
+      (learn.microsoft.com notification-area page, dotnet/winforms source, PowerShell#3028) plus
+      three probes on this machine (powershell 5.1 is STA by default · WinForms 4.0 in the GAC ·
+      `wscript.exe` present). Message loop, death behaviour (ghost-until-hover) and elevation
+      (tray never elevates; only the applier's task does) covered per candidate.
+- [x] Verdict: **PowerShell 5.1 + `System.Windows.Forms.NotifyIcon`**, started hidden via a
+      `wscript` wrapper by the logon task; `TaskbarCreated` re-add comes from the framework.
+      Reserve: koffi → `Shell_NotifyIcon`. Fallback stands: **ship phase 3 without the tray**.
+      The fork to the owner is NOT raised — a GUI-free path exists.
 
 **Verification:** the recon doc exists, decision + fallback named; no code yet.
 
