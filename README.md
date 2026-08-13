@@ -57,7 +57,9 @@ else's numbers.
 
 Three phases of six are closed, and the card has been measured. The research base, the architecture,
 **the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
-back on command; the search engine that turns that into a shipped profile is not written yet.
+back on command. The search engine now exists and judges a candidate by three different load shapes at
+once, taking the worst verdict — but it has not yet measured this card's edge, and it refuses to report
+one until it can prove the write it made actually cheapened the clock it tested.
 
 **The undervolt is measured, not claimed.** With the whole voltage/frequency curve raised and nothing
 offered above the clock the card already delivered, it draws **7.71 W (5.6 %) less and runs 5 °C cooler at
@@ -273,7 +275,9 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 Закрыты три фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
 **собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по
-команде; движка, который превратит это в отгружаемый профиль, ещё нет.
+команде. Движок поиска написан и судит кандидата сразу тремя разными формами нагрузки, беря худший
+вердикт, — но края этой карты он ещё не измерил и отказывается называть его, пока не докажет, что
+сделанная запись действительно удешевила проверяемую частоту.
 
 **Андервольт измерен, а не заявлен.** Когда вся кривая «напряжение — частота» поднята, а выше той частоты,
 которую карта и так выдавала, не предлагается ничего, она берёт **на 7,71 Вт (5,6 %) меньше и работает на

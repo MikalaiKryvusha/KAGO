@@ -513,6 +513,7 @@ export async function searchEdge({
  *  11. start the ascent at the stride'th rung        → «ВОСХОЖДЕНИЕ НАЧИНАЕТСЯ С САМОЙ МЕЛКОЙ СТУПЕНИ»
  *  12. allow a first step deeper than the ceiling    → «слишком глубокий первый шаг — ОТКАЗ, а не усечение»
  *  13. leap a cliff in the ladder                    → «обрыв в лестнице не перешагивается»
+ *  14. refuse only AFTER the first write             → «ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ ЗАПИСИ»
  */
 export function selfTest() {
   const results = [];
@@ -627,6 +628,28 @@ export function selfTest() {
       // the governor bounds DEPTH, and a depth it cannot see it must not pretend to bound.
       const plain = [{ offsetMhz: 75 }, { offsetMhz: 150 }, { offsetMhz: 225 }];
       ok('лестница без градуировки по напряжению проходит нетронутой', pickAscentRungs(plain).rungs.length, 3);
+
+      // AND THE GUARANTEE THAT ACTUALLY PROTECTS THE MACHINE: a refused ladder must cost ZERO WRITES.
+      // A governor that refuses AFTER the first rung has already been applied protects nothing — the
+      // plunge has happened by then. This block is the difference between a rule and a rule that acts.
+      let writes = 0;
+      const counting = async () => { writes++; return { verdict: P }; };
+      const refused = await searchEdge({
+        capMhz: 1100, point: 51, runStepFn: counting,
+        rungs: [rung(5, 20), rung(230, 95), rung(295, 320)],
+      });
+      ok('ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ ЗАПИСИ, а не после неё', writes, 0);
+      ok('и поиск честно говорит, что он остановлен', refused.halted, true);
+      ok('и не выдаёт ни вилки, ни последнего PASS', [refused.bracketMhz, refused.lastPass], [null, null]);
+
+      // …while a ladder the governor accepts is walked normally, so the refusal is not a blanket stop.
+      let writes2 = 0;
+      const ok2 = await searchEdge({
+        capMhz: 2842, point: 95, runStepFn: async () => { writes2++; return { verdict: P }; },
+        rungs: [5, 10, 15, 20, 25, 30].map((mv, i) => rung(mv, 10 + i * 10)),
+      });
+      ok('принятая лестница проходится как обычно', writes2 > 0, true);
+      ok('и остановкой её не объявляют', Boolean(ok2.halted), false);
     }
 
     // --- THE GUARD bugs/02 WAS BORN FROM. The search's whole premise is that the offset it walks
