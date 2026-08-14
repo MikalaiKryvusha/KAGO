@@ -132,6 +132,93 @@ export function nvidiaSmiBackend() {
 // Reading — the module never consults its own memory of what it wrote
 // ===============================================================================================
 
+/**
+ * THE CURVE BACKEND — the second half of R2's «backends are swappable», and the one the internal map
+ * §4 already predicted: *«the applier composes the NVAPI backend (the curve) with the `nvidia-smi`
+ * backend (`-pl`) in one profile»*.
+ *
+ * R1 IS UNTOUCHED, and that is worth stating because it looks like a new writer. `profile-manager`
+ * stays the only module that DECIDES to write; this object is a thin seam over `nvapi`'s existing
+ * primitives (`buildRaiseAndCapVector` · `writeCurve` · `zeroCurve` · `readVfOffsets`), each already
+ * proved by its own suite. Nothing here computes the vector — the arithmetic has one author.
+ *
+ * WHY IT IS A FACTORY AND NOT A MODULE-LEVEL SINGLETON: the NVAPI handle has to be opened, used and
+ * unloaded around the apply, and a caller that forgets to close it leaves the library loaded in a
+ * process that may go on to do something else. `close()` is the whole reason this shape exists.
+ *
+ * UNITS ARE CONVERTED HERE, ONCE. The device speaks kHz (`writeVfOffset` takes `offsetMhz * 1000`,
+ * `readVfOffsets` returns the raw kHz field); everything above this line speaks MHz. A unit that gets
+ * converted in two places is a unit that will be converted twice somewhere (EXP-0034 — the search
+ * once reported a conclusion in the wrong unit entirely).
+ *
+ * POINT 127 IS EXCLUDED, and by the same constant the writer uses — it is measured to be an outlier
+ * (515 mV / 405 MHz beside a neighbour at 1240 mV / 3157 MHz) and no whole-curve operation touches it.
+ * The read is therefore truncated to the SAME count, so a comparison is between like and like.
+ *
+ * [NOT-TESTED] live — the injected twin in the selftest proves the SHAPE; this proves nothing until it
+ * runs on the card, and the profile it applies is a draft until the owner's acceptance says otherwise.
+ */
+export function nvapiCurveBackend({ nvapi = null } = {}) {
+  let nv = null;
+  let handle = null;
+  let mod = null;
+
+  const open = async () => {
+    if (nv) return;
+    mod = nvapi ?? await import('./nvapi.mjs');
+    nv = mod.openNvapi();
+    nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+    const handles = Buffer.alloc(64 * 8);
+    const count = Buffer.alloc(4);
+    nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+    handle = handles.readBigUInt64LE(0);
+  };
+
+  const COUNT = () => (mod.CLK_VF_POINT_COUNT ?? 128) - 1;
+
+  return {
+    async writeRaiseAndCap(deltaMhz, capMhz) {
+      await open();
+      const curve = mod.readVfCurve(nv, handle);
+      if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
+      const vec = mod.buildRaiseAndCapVector(curve.points, deltaMhz, { capMhz });
+      if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
+      // THE HOLDER CHECK, HERE TOO — the format already refuses a cap below the curve's floor, and this
+      // is the same rule at the moment of writing, where the CARD's own top is in hand rather than the
+      // ladder's. Two checks of one fact is not duplication when one of them is the last line before a
+      // device write (R11, `bugs/02`).
+      if (vec.capIsBelowTop && vec.capEnforced === false) {
+        return { ok: false, why: `потолок ${capMhz} МГц кривой не удержать: утечка ${vec.capLeakMhz} МГц, `
+          + `пол ${vec.lowestEnforceableCapMhz} МГц (R11)` };
+      }
+      const w = mod.writeCurve(nv, handle, vec.offsets, { count: COUNT() });
+      if (!w.ok) return { ok: false, why: `запись кривой: ${w.failed} точек из ${COUNT()} не записались` };
+      return { ok: true, vector: vec.offsets.slice(0, COUNT()) };
+    },
+
+    async readCurveOffsets() {
+      await open();
+      const r = mod.readVfOffsets(nv, handle);
+      if (!r.ok) return { ok: false, why: r.why ?? `статус ${r.status}` };
+      // kHz -> MHz, and truncated to the written count so the comparison is like for like.
+      return { ok: true, offsets: r.offsets.slice(0, COUNT()).map((khz) => Math.round(khz / 1000)) };
+    },
+
+    async zeroCurve() {
+      await open();
+      const z = mod.zeroCurve(nv, handle, { count: COUNT() });
+      if (!z.ok) return { ok: false, why: `обнуление: осталось ненулевых ${z.remainingNonZero}, не записалось ${z.failed}` };
+      return { ok: true };
+    },
+
+    close() {
+      if (!nv) return;
+      try { nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload); } catch { /* закрытие не должно ронять вызывающего */ }
+      nv = null; handle = null;
+    },
+  };
+}
+
 const STATE_FIELDS = Object.freeze([
   'driver_version', 'vbios_version',
   'power.limit', 'power.default_limit', 'power.min_limit', 'power.max_limit',
@@ -1314,12 +1401,52 @@ async function main(argv) {
   const ap = argOf('--apply');
   if (ap) {
     const profile = mustLoad(ap, card);
+    // THE WITNESS PATH (`plans/11` §4.4, P6-AC4). An acceptance run needs the mode ON the card, and the
+    // mode is a DRAFT until that run judges it — a circle the qualification gate cannot break by
+    // itself. This flag is the one way out, and every property of it is chosen so it stays one:
+    //
+    //   · it is typed by a human, per run, and never lives in a shortcut or a scheduled task;
+    //   · it says out loud that the profile is unqualified and what that means;
+    //   · it does NOT write the remembered boot state — an unqualified mode must not survive a reboot,
+    //     and that is exactly the difference between «applied for a measurement» and «shipped».
+    //
+    // What it does NOT do is lower the gate: `qualified` is still flipped only by acceptance, and the
+    // shortcut path still meets the refusal (its own selftest block proves that).
+    const witness = argv.includes('--witness');
+    const isDraft = profile.qualified !== true && profile.mode !== undefined;
+    // The curve backend is opened only when the profile actually asks for a curve — a profile that
+    // sets no curve must not load nvapi64.dll for nothing.
+    const needsCurve = (profile.settings?.curveRaiseAndCapMhz ?? null) !== null;
+    const curveBackend = needsCurve ? nvapiCurveBackend() : null;
+
     console.log(`ПРИМЕНЕНИЕ «${profile.name}» — «${profile.title}»`);
+    if (witness && isDraft) {
+      console.log('⚠️  ПРИЁМОЧНЫЙ ПРОГОН ЧЕРНОВИКА (--witness): числа этого профиля НЕ прошли приёмку.');
+      console.log('    Он применяется, чтобы вы его СУДИЛИ, и НЕ запоминается для автозагрузки.');
+      console.log('    Ярлык на столе этот профиль по-прежнему отвергает.');
+    }
+    if (needsCurve) {
+      const c = profile.settings.curveRaiseAndCapMhz;
+      console.log(`    кривая V/F: подъём +${c.deltaMhz} МГц, потолок ${c.capMhz} МГц (пишется через NVAPI)`);
+    }
     console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (то же, что третий ярлык владельца).');
-    const r = await apply(backend, profile, { card });
+
+    let r;
+    try {
+      r = await apply(backend, witness && isDraft ? { ...profile, qualified: true } : profile,
+        { card, curveBackend });
+    } finally {
+      if (curveBackend) curveBackend.close();
+    }
     printState(r.before, 'ДО      ');
     for (const s of r.steps) console.log(`  ${s}`);
     printState(r.after, 'ПОСЛЕ   ');
+    if (witness && isDraft) {
+      console.log('');
+      console.log('ЧЕРНОВИК НА КАРТЕ. Запомненное состояние НЕ тронуто — перезагрузка вернёт заводское.');
+      console.log('Когда закончите судить: npm run profile -- --reset');
+      return 0;
+    }
     // The remembered state (§4.4) — written HERE, in the owner-facing CLI, never inside apply():
     // measurement tools drive the library and must not move the boot state. Only after the verified
     // apply above — a throw has already exited.
@@ -1329,8 +1456,17 @@ async function main(argv) {
   }
 
   if (argv.includes('--reset')) {
-    console.log('СБРОС К ЗАВОДСКИМ — -rgc плюс заводской потолок мощности карты.');
-    const r = await resetToFactory(backend);
+    console.log('СБРОС К ЗАВОДСКИМ — обнуление кривой V/F, -rgc и заводской потолок мощности карты.');
+    // The reset always opens the curve backend, unconditionally: it is the one path that must return
+    // EVERY kind of state this project can write, and it cannot know what the previous run applied
+    // (R9a — the undo is total, never differential).
+    const curveBackend = nvapiCurveBackend();
+    let r;
+    try {
+      r = await resetToFactory(backend, { curveBackend });
+    } finally {
+      curveBackend.close();
+    }
     printState(r.before, 'ДО      ');
     for (const s of r.steps) console.log(`  ${s}`);
     printState(r.after, 'ПОСЛЕ   ');

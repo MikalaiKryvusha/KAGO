@@ -533,6 +533,11 @@ function renderSettings(s) {
   lines.push(`    потолок мощности   ${s.powerLimitWatts === null ? 'заводской (power.default_limit)' : `${s.powerLimitWatts} Вт`}`);
   const l = s.graphicsClockLockMhz;
   lines.push(`    фиксация частоты   ${l === null ? 'снята (-rgc)' : `${l.min}…${l.max} МГц`}`);
+  // The curve is the MAIN lever of every working mode, so it is printed like the others rather than
+  // hidden in `draft`: a listing that shows the power limit and stays silent about a 592 MHz curve
+  // raise describes a different profile than the one on disk.
+  const c = s.curveRaiseAndCapMhz;
+  lines.push(`    кривая V/F         ${c === null || c === undefined ? 'заводская (все смещения 0)' : `подъём +${c.deltaMhz} МГц, потолок ${c.capMhz} МГц`}`);
   return lines.join('\n');
 }
 
