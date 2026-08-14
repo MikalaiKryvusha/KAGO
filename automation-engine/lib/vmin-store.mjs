@@ -396,6 +396,79 @@ export function bestPassing(records, point) {
 }
 
 /**
+ * =================================================================================================
+ * THE RATCHET, KEYED BY THE ONE AXIS THAT DOES NOT MOVE (`bugs/10`)
+ * =================================================================================================
+ *
+ * MEASURED 2026-08-14 23:4x, read-only, twelve curve dumps across 41…63 °C on a card with zero
+ * offsets applied: **the V/F curve slides along the FREQUENCY axis with temperature while the
+ * VOLTAGE axis stays fixed.** The voltage column was byte-identical in every dump (…1040, 1045,
+ * 1050, 1060…); only the clocks moved, ≈ −1.7 MHz per °C:
+ *
+ *   | temperature | serves 2842 MHz | its voltage |
+ *   |-------------|-----------------|-------------|
+ *   | 41…42 °C    | point 94        | 1040 mV     |
+ *   | 43…50 °C    | point 95        | 1045 mV     |
+ *   | 60 °C       | point 96        | 1050 mV     |
+ *   | 61…63 °C    | point 97        | 1060 mV     |
+ *
+ * Three consequences, and each one kills a key this store used to trust:
+ *
+ *   • **`point` is not an identity.** Four different indices served one clock inside 22 °C. Evidence
+ *     keyed by point index is evidence keyed by "whatever slot happened to serve this clock at the
+ *     temperature nobody recorded". This is why a sweep that PROVED −30 mV was invisible to the very
+ *     next dry run: it had been filed under point 96 and the next read resolved to point 94.
+ *   • **`offsetMhz` is not an identity either.** The same +60 MHz buys a different voltage depending
+ *     on where the curve is sitting when it is applied.
+ *   • **Absolute millivolts ARE an identity** — they are the rail the stability is actually about,
+ *     and they do not slide.
+ *
+ * So the ratchet keys on `(capMhz, servingMv)`. It accumulates across sessions no matter what the
+ * card's temperature was, which is the property the whole session-by-session convergence plan of
+ * `bugs/07` rests on and did not have.
+ *
+ * **THE HONEST CAVEAT, stated rather than hidden:** hotter silicon needs more voltage, so a PASS at
+ * 1020 mV taken warm does not PROVE 1020 mV when the card is hotter still. This is conservative in
+ * the direction that matters — a FAILURE at some voltage forbids that voltage and everything below
+ * it forever, at any temperature — and the optimistic direction is bounded by three things already
+ * in place: every verdict is taken under sustained load (i.e. hot by construction), the session may
+ * only descend `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` past proven ground, and beyond proven ground the
+ * step is fine. Records carry `tempStartC` / `tempReachedC` so the caveat stays auditable.
+ *
+ * [NOT-TESTED]
+ */
+export function allowedVoltageMv(records, capMhz, { gridStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5 } = {}) {
+  const failures = resolveAttempts(records)
+    .filter((r) => r.capMhz === capMhz && r.verdict !== config.VERDICT.PASS)
+    // A write-ahead mark that never came back carries its PLANNED voltage (`plannedMv`) — the run
+    // died before it could observe one. Forbidding the planned rung is the whole point of the mark.
+    .map((r) => (Number.isFinite(r.servingMv) ? r.servingMv : r.plannedMv))
+    .filter((v) => Number.isFinite(v));
+  if (!failures.length) return { floorMv: -Infinity, bound: false, lowestFailureMv: null, failures: 0 };
+  const lowestFailureMv = Math.min(...failures);
+  return {
+    // Allowed strictly ABOVE the lowest failure, by one grid step — the mirror of `allowedOffset`'s
+    // «never at or above the lowest offset that ever failed», said in the unit that does not slide.
+    floorMv: lowestFailureMv + gridStepMv,
+    bound: true,
+    lowestFailureMv,
+    failures: failures.length,
+  };
+}
+
+/**
+ * The LOWEST voltage ever PASSED at this cap — the proven ground a new session inherits.
+ * Lower is deeper, which is why this is a `min` where `bestPassing` is a `max`. [NOT-TESTED]
+ */
+export function bestPassingMv(records, capMhz) {
+  const passes = resolveAttempts(records)
+    .filter((r) => r.capMhz === capMhz && r.verdict === config.VERDICT.PASS)
+    .map((r) => r.servingMv)
+    .filter((v) => Number.isFinite(v));
+  return passes.length ? Math.min(...passes) : null;
+}
+
+/**
  * A point's whole story in one object — what the search needs to decide its next move.
  *
  * `worstShape` answers the question §4.3 asks: a point's threshold is the WORST verdict across the

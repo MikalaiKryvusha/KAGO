@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import config from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ } from './lib/vf-step.mjs';
 import { DIVERSE_SET } from './lib/stress-tester.mjs';
-import { VMIN_DIR, allowedOffset, append, assertSandbox, bestPassing, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
+import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -209,21 +209,39 @@ export function composeAscentLadder({
   fine = [],
   history = [],
   point,
+  // THE CAP AND THE CURRENT STOCK VOLTAGE — the evidence key (`bugs/10`). `capMhz` is what the
+  // records are filed under; `stockMv` only renders the answer as a depth for the reader.
+  capMhz = null,
+  stockMv = null,
   stride = 5,
   sessionMaxDepthMv = config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30,
   firstStepMaxMv = config.ASCENT_FIRST_STEP_MAX_MV ?? 25,
   stepMaxMv = config.ASCENT_STEP_MAX_MV ?? 35,
 } = {}) {
-  // THE DEEPEST GROUND ANYONE HAS ACTUALLY PROVEN, in millivolts. An empty store answers 0 — which is
-  // stock, and is the honest answer after `bugs/08` destroyed 74 records: the card is «without history»
-  // again, so this session may walk exactly one coarse step and no further.
-  const knownDeepest = bestPassing(history, point);
-  const knownDepthMv = knownDeepest === null
+  const graded = fine.every((r) => Number.isFinite(r.savedMv) && Number.isFinite(r.mv));
+
+  // THE DEEPEST GROUND ANYONE HAS ACTUALLY PROVEN — read in ABSOLUTE millivolts (`bugs/10`).
+  //
+  // Keyed by (capMhz, servingMv), never by point index: measured 2026-08-14, the curve slides
+  // ≈1.7 MHz/°C along the FREQUENCY axis while the voltage axis stands still, so four different point
+  // indices served 2842 MHz inside 22 °C. Evidence filed under a point index is evidence a differently
+  // warmed session cannot find — which is literally what happened: a sweep proved −30 mV and the next
+  // dry run one minute later printed «истории НЕТ».
+  //
+  // `stockMv` is only used to express the ANSWER as a depth for the reader. Every decision below is
+  // made on absolute volts, so a warmer or colder session inherits the same ground.
+  const provenMv = graded && Number.isFinite(capMhz) ? bestPassingMv(history, capMhz) : null;
+  const ratchetFloor = graded && Number.isFinite(capMhz)
+    ? allowedVoltageMv(history, capMhz)
+    : { floorMv: -Infinity, bound: false, lowestFailureMv: null, failures: 0 };
+  const referenceMv = Number.isFinite(stockMv) ? stockMv : (fine.length ? fine[0].mv + fine[0].savedMv : null);
+  const knownDepthMv = provenMv === null || !Number.isFinite(referenceMv)
     ? 0
-    : (fine.find((r) => r.offsetMhz === knownDeepest)?.savedMv
-       ?? Math.max(0, ...fine.filter((r) => r.offsetMhz <= knownDeepest).map((r) => r.savedMv ?? 0)));
+    : Math.max(0, referenceMv - provenMv);
   const depthCeilingMv = knownDepthMv + sessionMaxDepthMv;
-  const graded = fine.every((r) => Number.isFinite(r.savedMv));
+  // The session's floor as an ABSOLUTE voltage: one bounded excursion below proven ground — or below
+  // stock when there is no proven ground at all.
+  const sessionFloorMv = (provenMv !== null ? provenMv : referenceMv) - sessionMaxDepthMv;
 
   const chosen = pickAscentRungs(fine, { stride, firstStepMaxMv, stepMaxMv });
 
@@ -231,10 +249,14 @@ export function composeAscentLadder({
   //   1. never deeper than `sessionMaxDepthMv` past the deepest inherited PASS;
   //   2. beyond that inherited depth the step becomes FINE — the owner's own proposal, so the graded
   //      oracle can land INSIDE the avalanche (~20 mV wide) instead of striding over it.
-  const withinCeiling = (r) => !graded || r.savedMv <= depthCeilingMv;
+  // BOTH BOUNDS IN ABSOLUTE VOLTS: the session's own excursion floor, and the ratchet's floor from
+  // every voltage that ever failed at this cap (that one is FOREVER — a failure is never re-entered).
+  const withinCeiling = (r) => !graded
+    || (r.mv >= sessionFloorMv && r.mv >= ratchetFloor.floorMv);
   const coarseAllowed = chosen.rungs.filter(withinCeiling);
   const frontierFine = graded
-    ? fine.filter((r) => r.savedMv > knownDepthMv && r.savedMv <= depthCeilingMv
+    ? fine.filter((r) => (provenMv === null ? r.mv < referenceMv : r.mv < provenMv)
+        && withinCeiling(r)
         && !coarseAllowed.some((c) => c.offsetMhz === r.offsetMhz))
     : [];
   const ladderRungs = [...coarseAllowed, ...frontierFine].sort((a, b) => a.offsetMhz - b.offsetMhz);
@@ -244,12 +266,18 @@ export function composeAscentLadder({
     ladderRungs,
     sessionDepth: {
       knownDepthMv,
+      // THE SAME FACTS IN THE UNIT THAT DOES NOT SLIDE — what a later session actually inherits.
+      provenMv,
+      sessionFloorMv,
+      ratchetFloorMv: ratchetFloor.bound ? ratchetFloor.floorMv : null,
+      stockMv: referenceMv,
       ceilingMv: depthCeilingMv,
       droppedByCeiling: chosen.rungs.length - coarseAllowed.length,
       fineRungsAtFrontier: frontierFine.length,
       // WHAT THIS SESSION WILL ACTUALLY REACH — the number the dry run has to print, because it is the
       // one an operator compares against «глубже всего» before deciding to start.
       deepestPlannedMv: ladderRungs.length ? ladderRungs[ladderRungs.length - 1].savedMv : null,
+      deepestPlannedAbsMv: ladderRungs.length ? ladderRungs[ladderRungs.length - 1].mv : null,
       rungsPlanned: ladderRungs.length,
     },
   };
@@ -263,13 +291,19 @@ export function composeAscentLadder({
  */
 export function sessionDepthLine(sd) {
   if (!sd) return 'ГЛУБИНА СЕССИИ: не вычислена';
-  const known = sd.knownDepthMv > 0
-    ? `доказанная глубина −${sd.knownDepthMv} мВ`
-    : 'истории НЕТ (карта «без истории»), отсчёт от стока';
+  // EVERY NUMBER IS PRINTED IN ABSOLUTE MILLIVOLTS ALONGSIDE ITS DEPTH (`bugs/10`). The depth is
+  // relative to a stock voltage that SLIDES with temperature; the absolute volt is what the next
+  // session inherits, so it is the one that must be readable without doing arithmetic.
+  const known = sd.provenMv !== null && sd.provenMv !== undefined
+    ? `доказано до ${sd.provenMv} мВ (−${sd.knownDepthMv} от стока ${sd.stockMv})`
+    : `истории НЕТ, отсчёт от стока ${sd.stockMv ?? '—'} мВ`;
   const reach = sd.deepestPlannedMv === null
     ? 'ни одной ступени не остаётся'
-    : `эта сессия дойдёт до −${sd.deepestPlannedMv} мВ и остановится САМА`;
-  return `ГЛУБИНА СЕССИИ: ${known} · потолок −${sd.ceilingMv} мВ · ${reach}`
+    : `эта сессия дойдёт до ${sd.deepestPlannedAbsMv ?? '?'} мВ (−${sd.deepestPlannedMv} от стока) и остановится САМА`;
+  const ratchet = sd.ratchetFloorMv === null || sd.ratchetFloorMv === undefined
+    ? ''
+    : ` · ХРАПОВИК не пускает ниже ${sd.ratchetFloorMv} мВ`;
+  return `ГЛУБИНА СЕССИИ: ${known} · пол сессии ${sd.sessionFloorMv} мВ${ratchet} · ${reach}`
     + ` · ступеней в прогоне ${sd.rungsPlanned} (отброшено потолком ${sd.droppedByCeiling}, точных на фронтире ${sd.fineRungsAtFrontier})`;
 }
 
@@ -535,7 +569,11 @@ export async function searchEdge({
   // (`composeAscentLadder`). Inlined here until 2026-08-14 22:xx, which is how `--dry-run` came to
   // print a ladder four times deeper than the one this loop would walk — the plan could not see the
   // bound that the incident of `bugs/07` bought. One computation, two readers.
-  const composed = composeAscentLadder({ fine, history, point, stride });
+  const composed = composeAscentLadder({
+    fine, history, point, stride,
+    capMhz,
+    stockMv: fine.length ? fine[0].mv + fine[0].savedMv : null,
+  });
   const chosen = composed.chosen;
   const ladderRungs = composed.ladderRungs;
   const ladder = ladderRungs.map((r) => r.offsetMhz);
@@ -562,8 +600,15 @@ export async function searchEdge({
   // already treats as «not a pass».
   const markAhead = (offsetMhz) => {
     if (!store) return;
+    // THE VOLTAGE THIS RUNG IS AIMED AT, written into the mark (`bugs/10`). The run may die before it
+    // can OBSERVE a voltage, and the ratchet is now keyed by volts — so a mark with no voltage would
+    // forbid nothing, which is exactly the hole the mark exists to close. `plannedMv` is the ladder's
+    // own number, and it is named `planned`, not `serving`, because it is an intention: the observed
+    // one lands in `servingMv` when the attempt comes back (EXP-0025 — never file a plan as a fact).
+    const plannedMv = fine.find((r) => r.offsetMhz === offsetMhz)?.mv ?? null;
     append(store, {
       point, offsetMhz, workload: 'НАБОР', shape: 'попытка', seconds,
+      plannedMv,
       verdict: null,
       reason: 'ступень НАЧАТА, вердикт ещё не дописан. Если запись осталась такой — прогон НЕ ПЕРЕЖИЛ эту ступень '
         + '(машина повисла или процесс убит), и храповик обязан считать её отказом',
@@ -713,6 +758,7 @@ export async function searchEdge({
  *  18. keep striding coarsely past proven ground      → «ЗА известным PASS шаг становится ТОЧНЫМ»
  *  19. stop writing the mark before the attempt       → «каждая попытка записана НАПЕРЁД»
  *  20. let the PLAN compose a ladder of its own       → «ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН»
+ *  21. key the inherited evidence by POINT INDEX again → «УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ»
  */
 export function selfTest() {
   const results = [];
@@ -1026,22 +1072,55 @@ export function selfTest() {
       // Сухой прогон — единственный артефакт, который читают ПЕРЕД записью в карту владельца (S1, S2),
       // и он показывал прогон вчетверо глубже настоящего. Пара «план ↔ прогон» проверяется здесь
       // ЧИСЛОМ, а не чтением двух мест: сравнивается то, что план обещает, с тем, что прогон прошёл.
-      const planned = composeAscentLadder({ fine: gradedRungs, history: [], point: 99 });
+      const planned = composeAscentLadder({
+        fine: gradedRungs, history: [], point: 99, capMhz: 2842, stockMv: 1045,
+      });
       ok('ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН — иначе сухой прогон врёт перед записью в карту',
         planned.sessionDepth.deepestPlannedMv, deepestWalkedMv);
       ok('и план обещает столько же ступеней, сколько прогон сделал',
         planned.sessionDepth.rungsPlanned, walked.length);
-      ok('строка плана НАЗЫВАЕТ эту глубину вслух и говорит, что истории нет',
-        sessionDepthLine(planned.sessionDepth).includes(`−${deepestWalkedMv} мВ`)
+      // The line must name the ABSOLUTE voltage, not only the depth — the depth is relative to a stock
+      // that slides with temperature (`bugs/10`), so it is the volt that the next session inherits.
+      ok('строка плана НАЗЫВАЕТ АБСОЛЮТНОЕ напряжение, а не только глубину от стока',
+        sessionDepthLine(planned.sessionDepth).includes(`${planned.sessionDepth.deepestPlannedAbsMv} мВ`)
         && sessionDepthLine(planned.sessionDepth).includes('истории НЕТ'), true);
+
+      // --- УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ (`bugs/10`) — и это тот самый блок, ради которого ключ
+      // храповика переехал с индекса точки на абсолютное напряжение.
+      //
+      // Фикстура — ровно вечер 2026-08-14: доказано на ГОРЯЧЕЙ карте, где 2842 МГц обслуживала точка
+      // 96; читает это сессия на ХОЛОДНОЙ, где ту же частоту обслуживает точка 94. Индексы разные,
+      // напряжение одно. Старый ключ здесь находил НОЛЬ, и прогон начинал от стока заново — то есть
+      // план «по сессии за раз» не сходился в принципе.
+      const hotEvidence = [{
+        point: 96, offsetMhz: 45, capMhz: 2842, servingMv: 1020,
+        verdict: P, writeShape: 'raise-and-cap', driver: '610.88', vbios: 'v1',
+      }];
+      const coldRungs = [5, 10, 15, 20, 25, 30, 35, 40].map((mv, i) => ({
+        offsetMhz: 7 + i * 15, mv: 1040 - mv, savedMv: mv,
+      }));
+      const inherited = composeAscentLadder({
+        fine: coldRungs, history: hotEvidence, point: 94, capMhz: 2842, stockMv: 1040,
+      });
+      ok('УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ: доказанное под точкой 96 видит сессия, резолвящая точку 94',
+        inherited.sessionDepth.provenMv, 1020);
+      ok('и сессия наследует ЗЕМЛЮ, а не начинает от стока заново',
+        inherited.sessionDepth.sessionFloorMv, 990);
+      ok('СТАРЫЙ ключ этой улики не нашёл бы — вот цена индекса точки',
+        bestPassing(hotEvidence, 94), null);
 
       // Рядом — вторая половина правила: ЗА доказанной глубиной шаг обязан стать точным, иначе
       // градуированный оракул перешагивает лавину (~20 мВ) вместо того, чтобы в неё попасть.
       const storeDeep = openStore({ dir: mkdtempSync(join(tmpdir(), 'kago-vmin-deep-')) });
       try {
-        for (const mv of [5, 35]) {
+        // THE INHERITED EVIDENCE, WRITTEN THE WAY REAL RECORDS ARE WRITTEN (`bugs/10`): with the cap
+        // it was taken at and the ABSOLUTE voltage the point served. Until 2026-08-15 this fixture
+        // carried neither, because the ratchet keyed on the point index — and that key is exactly what
+        // made a proven −30 mV invisible to the next session once the curve slid by one step.
+        for (const savedMv of [5, 35]) {
           append(storeDeep, {
-            point: 99, offsetMhz: 7 + [5, 35].indexOf(mv) * 100, workload: 'sdc_fma', shape: 'sustained',
+            point: 99, offsetMhz: 7 + [5, 35].indexOf(savedMv) * 100, workload: 'sdc_fma', shape: 'sustained',
+            capMhz: 2842, servingMv: 1045 - savedMv,
             verdict: P, driver: '610.88', vbios: 'v1', writeShape: 'raise-and-cap',
           });
         }
@@ -1176,6 +1255,8 @@ async function mainBand(argv, arg) {
         fine: rungs.filter((r) => r.offsetMhz <= planRatchet.limitMhz),
         history: planHistory,
         point: serving.pointIndex,
+        capMhz: pin,
+        stockMv: serving.mv,
         stride: 5,
       })
       : { chosen: { rungs: [], refused: false, why: 'нет ступеней' }, ladderRungs: [], sessionDepth: null };
@@ -1375,6 +1456,8 @@ async function main(argv) {
       fine: rungs.filter((r) => r.offsetMhz <= summary.ratchet.limitMhz),
       history,
       point: serving.pointIndex,
+      capMhz,
+      stockMv: serving.mv,
       stride: 5,
     })
     : { chosen: { rungs: [], refused: false, why: 'лестница по напряжению не построена' }, ladderRungs: [], sessionDepth: null };

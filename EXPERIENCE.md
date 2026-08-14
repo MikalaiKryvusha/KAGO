@@ -41,6 +41,16 @@
 
 ## Entries
 
+### EXP-0053 · 2026-08-14 · ❌→✅ · #gpu #curve #temperature #evidence #keys #ratchet #repeat-offender
+**Context:** the search could not accumulate proven depth across sessions — a sweep proved −30 mV and the dry run one minute later printed «истории НЕТ».
+**Tried / did:** twelve read-only curve dumps across 41…63 °C, then re-keyed the evidence store.
+**Result:** ❌→✅ **the V/F curve slides along the FREQUENCY axis with temperature (≈ −1.7 MHz/°C) while the VOLTAGE axis stands still.** Four different point indices served 2842 MHz inside 22 °C (94 @ 1040 mV cold → 97 @ 1060 mV hot). Evidence was keyed by point index, so every session filed its results under a name the next session could not resolve. Re-keyed to `(capMhz, servingMv)` — absolute volts — and the same command now inherits: «доказано до 1020 мВ · пол сессии 990 мВ».
+**Lesson:** **key evidence by the axis that does not move, and prove which axis that is before choosing.** A hardware "index" is a name, not an identity — this one was a slot in a table whose frequency axis slides with temperature. The general form: before keying a store by field F, ask what F is a function of; if the answer includes a condition you are not also keying on (here: temperature), F is not an identity and the store silently forgets. **mechanized:** the block «УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ» in `engine --selftest` (mutation 21 restores the point key and reddens it).
+**Why this entry exists at all, said plainly:** the project already KNEW the curve moves — `STATUS.md` fact 37 and `GOAL.md` both say so — but it was written as a CAVEAT, and a caveat is a note, not a mechanism. The owner had to point out that we were re-learning it: *«кривая ползает, мы это уже 1000 раз узнавали!»* He was right. Per the journal's own rule (two strikes → a mechanism, never a third reminder), this stops being prose here and becomes the key and the block.   → link: bugs/10 · STATUS fact 37
+**Repro:** `node "scratchpad/probe-curve-drift.mjs" 12 6000` while the card heats — the voltage column is identical in every dump and only the clocks move. Offline: `node automation-engine/engine.mjs --selftest`, block «УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ».
+**Trigger:** about to key, cache, dedupe or compare hardware measurements by an INDEX (point, slot, bin, lane, sensor id) → dump that table twice under different conditions and diff it before trusting the index as a name.
+**Not for:** indices into structures the vendor documents as fixed (a PCI id, a domain enum) — those are identities and re-proving them is waste.
+
 ### EXP-0052 · 2026-08-14 · ❌→✅ · #safety #dry-run #plan-vs-run #drift #pairs #preflight
 **Context:** first act of a new session — the free `--dry-run` that `STATUS.md` and `GPU_TUNING_RAILS.md` S2 both make mandatory BEFORE any live write to the owner's card.
 **Tried / did:** ran it and compared the printed plan against what the code would actually do, instead of accepting the plan as the answer.
