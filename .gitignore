@@ -64,5 +64,4 @@ interviews/decisions/.review-lock-*.json
 interviews/decisions/*.preview.html
 _probe.html
 *.review.html
-assets/logo/base512.png
 assets/logo/preview128.png

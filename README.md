@@ -1,8 +1,17 @@
 <a id="english"></a>
 
+<p align="center">
+  <img src="assets/logo/kago-logo.png" width="360" alt="KAGO — a graphite chip carrying a snowflake and a flame">
+</p>
+
 # KAGO — Krinik Automated GPU Orchestrator
 
-<h3 align="center"><em>Finds the quietest voltage your GPU can actually hold — and proves it before you trust it.</em></h3>
+<h3 align="center">An automated GPU optimisation tool.</h3>
+
+<p align="center">
+  Gets the most out of your graphics card — extending its life and bringing quiet to the room.<br>
+  Raises performance, lowers heat output.
+</p>
 
 <p align="center">
   <a href="#english"><img src="https://img.shields.io/badge/English-2C7BE5?style=for-the-badge" alt="English"></a>
@@ -234,9 +243,18 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 <a id="russian"></a>
 
+<p align="center">
+  <img src="assets/logo/kago-logo.png" width="360" alt="KAGO — графитовый чип со снежинкой и пламенем">
+</p>
+
 # KAGO — Криника Автоматизированный ГПУ Оркестратор
 
-<h3 align="center"><em>Находит самое тихое напряжение, которое карта действительно держит, — и доказывает это прежде, чем вы ему поверите.</em></h3>
+<h3 align="center">Автоматизированный инструмент оптимизации GPU.</h3>
+
+<p align="center">
+  Выжимает максимум из вашей видеокарты — продлевая ей жизнь, даруя тишину в комнате.<br>
+  Повышает производительность, снижает тепловыделение.
+</p>
 
 <p align="center">
   <a href="#english"><img src="https://img.shields.io/badge/English-2C7BE5?style=for-the-badge" alt="English"></a>

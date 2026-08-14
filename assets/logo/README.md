@@ -15,16 +15,53 @@ C «Лёд и пламя» → *«строгий графитовый чип с 
 **Правило качества, слово владельца:** *«ниже 128 не делаем»* — в `.ico` едут только кадры
 **256 и 128**; малые размеры система масштабирует из высокого разрешения сама.
 
+**Мастер — `kago-logo.png`, 1024×1024, фон ПРОЗРАЧНЫЙ** (слово владельца 2026-08-14 вечером:
+логотип в GitHub «в большом размере в высоком разрешении, с прозрачным фоном»). Всё остальное —
+кадры `.ico` и превью — считается ИЗ него, ничего не рисуется дважды.
+
 **Перегенерация** (ImageMagick; из корня `assets/logo/`):
 
 ```
-magick chip-base.svg -resize 512x512 PNG32:base512.png
-magick base512.png ( parts/snowflake_3d.png -resize 172x172 ) -geometry +90+90 -composite ( parts/fire_3d.png -resize 172x172 ) -geometry +250+250 -composite kago-logo.png
+magick -background none -density 384 chip-base.svg ( parts/snowflake_3d.png -resize 344x344 ) -geometry +180+180 -composite ( parts/fire_3d.png -resize 344x344 ) -geometry +500+500 -composite PNG32:kago-logo.png
 magick kago-logo.png -define icon:auto-resize=256,128 kago-folder.ico
+magick kago-logo.png -resize 128x128 PNG32:preview128.png
 ```
 
-(в PowerShell скобки берутся в кавычки: `'('` и `')'`; `base512.png` — промежуточный, в git не
-едет). `candidates/` — четыре исходных варианта показа владельцу, история выбора.
+(в PowerShell скобки берутся в кавычки: `'('` и `')'`; в bash экранируются: `\(` и `\)`.
+`preview128.png` — промежуточный, в git не едет.) `candidates/` — четыре исходных варианта показа
+владельцу, история выбора.
+
+**Приёмка рендера — ДВЕ команды, обе обязательны** (первый выпуск логотипа провалил обе, см. ниже):
+
+```
+magick kago-logo.png -format "size=%wx%h opaque=%[opaque]\n" info:   # ждём: 1024x1024 opaque=False
+magick kago-logo.png -crop 18x1+128+512 +repage txt:                # ждём: слева ЧИСТЫЕ none, без полупрозрачной каймы
+```
+
+`preview_compose.png` — двухпанельная проба того же мастера на белом и на тёмном фоне GitHub
+(`#0d1117`); ею глаз проверяет, что прозрачный логотип читается в ОБЕИХ темах витрины:
+
+```
+magick kago-logo.png -resize 360x360 -background "#ffffff" -gravity center -extent 440x440 -alpha remove PNG24:_l.png
+magick kago-logo.png -resize 360x360 -background "#0d1117" -gravity center -extent 440x440 -alpha remove PNG24:_d.png
+magick _l.png _d.png +append PNG24:preview_compose.png
+```
+
+### Три улова рендера, каждый оплачен нашей же ошибкой
+
+1. **Фон ImageMagick по умолчанию БЕЛЫЙ, и SVG садится на непрозрачный белый квадрат.** Первый
+   выпуск логотипа (2026-08-14 16:5x) уехал в репозиторий белоквадратным целиком — и `kago-logo.png`,
+   и `kago-folder.ico` для папки на столе. Лечится `-background none` ПЕРЕД чтением svg;
+   доказывается `%[opaque]` = `False`, а не глазом: на белой странице белый фон не видно.
+2. **`-resize` на SVG растит УЖЕ РАСТРИРОВАННОЕ.** Делегат рисует по `viewBox` (256), и `-resize
+   1024x1024` даёт четырёхкратный апскейл: кромка ножки размазана на 6 пикселей вместо одного.
+   Размер задаётся ПЛОТНОСТЬЮ: `-density 384` = 96 dpi × 4 = 1024 px, кромка в один пиксель.
+3. **Штрих по центру контура вылезает НАРУЖУ силуэта.** `stroke-width=2` по границе тела оставлял
+   4 device-px 40 %-чёрного за пределами чипа — под белым квадратом невидимо, на прозрачном фоне
+   серая кайма. Штрих вписан ВНУТРЬ (`35/186/rx 29`), комментарий стоит в `chip-base.svg`.
+
+Ещё три улова того же делегата, найденные при отрисовке: 8-значный hex врёт · `<use href>`
+игнорируется · градиент вдоль штриха работает только в `userSpaceOnUse`.
 
 Потребители: `setup-desktop.mjs` (иконка папки `Desktop\KAGO` через `desktop.ini`) · README
-(шапка витрины) · трей — по плану 10.
+(шапка витрины, ОБЕ языковые копии, `width="360"`) · трей — по плану 10.

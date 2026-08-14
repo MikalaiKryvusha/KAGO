@@ -1,5 +1,33 @@
 {
   "_kaif_hooks": "Опциональный модуль KAIF refresh-hooks (.kaif/hooks/README.md). Подключён по прямому указанию владельца в чате 2026-08-14: «убедись что опциональный модуль хуков подключен». Отключение: удалить объект hooks — markdown-ритуал обновления контекста работает и без него.",
+  "_kaif_permissions": "Право на деплой в GitHub. Слово владельца в чате 2026-08-14, дословно: «Исправляй свои права, чтобы ты мог в гитхаб деплоить без моего разрешения, сам, хватало бы просто от меня просьбы в чате». Поэтому push, тэги и gh разрешены БЕЗ отдельного вопроса на каждый раз — но просьба в чате остаётся условием: агент не пушит по своей инициативе. Разрушающее НЕ разрешено и стоит в deny: force-push, удаление веток и релизов, удаление репозитория. Файл общий (в git) — правило переживает переустановку и новый клон; личные разрешения владельца живут в .claude/settings.local.json.",
+  "permissions": {
+    "allow": [
+      "Bash(git push)",
+      "Bash(git push *)",
+      "PowerShell(git push)",
+      "PowerShell(git push *)",
+      "Bash(git remote *)",
+      "PowerShell(git remote *)",
+      "Bash(gh *)",
+      "PowerShell(gh *)"
+    ],
+    "ask": [],
+    "deny": [
+      "Bash(git push --force*)",
+      "PowerShell(git push --force*)",
+      "Bash(git push -f *)",
+      "PowerShell(git push -f *)",
+      "Bash(git push * --delete *)",
+      "PowerShell(git push * --delete *)",
+      "Bash(git push * :*)",
+      "PowerShell(git push * :*)",
+      "Bash(gh repo delete *)",
+      "PowerShell(gh repo delete *)",
+      "Bash(gh release delete *)",
+      "PowerShell(gh release delete *)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

@@ -385,7 +385,9 @@ successes). Living reference — never DONE-tagged.
 
 `KAGO` is the canonical brand and the only spelling that ships. It expands to **Krinik Automated GPU
 Orchestrator** — write the expansion once, at first use in a document meant for a stranger, and use
-`KAGO` everywhere after.
+`KAGO` everywhere after. **In Russian the expansion is «Криника Автоматизированный ГПУ
+Оркестратор»** — «Криника», not «Криник»: the owner fixed this himself in the storefront
+(commit `34de49b`, 2026-08-14) and said it again in chat. Do not re-derive it.
 
 > Keep one canonical spelling for names/paths/URLs and use it everywhere. If you find an old/renamed
 > identifier in historical docs, normalize it to the canonical value above.

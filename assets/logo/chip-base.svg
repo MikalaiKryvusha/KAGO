@@ -41,7 +41,11 @@
   </g>
 
   <rect x="34" y="34" width="188" height="188" rx="30" fill="url(#body)"/>
-  <rect x="34" y="34" width="188" height="188" rx="30" fill="none" stroke="#000000" stroke-opacity="0.4" stroke-width="2"/>
+  <!-- The edge line is INSET by half its width (35/186/rx 29 instead of 34/188/rx 30) so the whole
+       stroke lies INSIDE the body. A centred stroke leaks its outer half onto the transparent
+       background — 40 %-black fringe around the silhouette, invisible while the render carried a
+       baked white square, a grey halo the moment it did not (measured, assets/logo/README.md). -->
+  <rect x="35" y="35" width="186" height="186" rx="29" fill="none" stroke="#000000" stroke-opacity="0.4" stroke-width="2"/>
 
   <!-- the glint: a barely-there gray diagonal between the snowflake (top-left) and the fire
        (bottom-right) — fades in from nothing and out into nothing, like light across the chip

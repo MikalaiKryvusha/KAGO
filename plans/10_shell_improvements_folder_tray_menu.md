@@ -7,8 +7,12 @@
 > 2026-08-14 ~17:1x, verbatim: «Суппер!»** (the path, each step his word: pick C «Лед и пламя…
 > строгий графитовый чип» → «иконки снежинки и пламени как в емодзиках делают» → diagonal +
 > «легкую едва ощутимую черту серую… из фейда появляется и в фейд уходит» → «снежинку и огонек…
-> больше по размерам» — applied, re-shown, accepted). Final assets built: `kago-logo.png` (512),
-> `kago-folder.ico` (**frames 256+128 only** — his «ниже 128 не делаем»). **Weak executor enters
+> больше по размерам» — applied, re-shown, accepted). Final assets built: **`kago-logo.png`
+> (1024×1024, ALPHA — rebuilt 2026-08-14 evening on his «в большом размере в высоком разрешении,
+> с прозрачным фоном»; the first cut of every logo file had shipped with a white square baked in,
+> EXP-0046)**, `kago-folder.ico` (**frames 256+128 only** — his «ниже 128 не делаем»).
+> **AC7 is DONE** — the logo stands in both README copies (`width="360"`), and the storefront
+> slogan is now his own plain text, not the agent's pathos line. **Weak executor enters
 > at §4.2; the ONE open input is Q1.** No redrawing/recomposing by a weak session, ever —
 > re-running `assets/logo/README.md` commands is the ceiling
 > **Outbound:** the logo pick + Q1 (tray face policy) → owner's word in chat, quoted into this
@@ -58,7 +62,7 @@ names. After a reboot the card is factory by physics, so a remembered non-factor
 | AC4 | Any `--apply`/`--reset` re-enables `\KAGO\tray` and starts it | task read back Enabled + live pid |
 | AC5 | Re-apply of the active mode: zero write commands, exit 0, AC4 still runs | applier transcript: no write-step lines, says «уже активен» |
 | AC6 | Offline proofs green, new blocks mutation-proved (targets named BEFORE the run, EXP-0016) | `npm run check` · selftests listed in §5 |
-| AC7 | Picked logo in GitHub README header, both language copies | README diff + rendered check |
+| AC7 | Picked logo in GitHub README header, both language copies | README diff + rendered check · ✅ **DONE 2026-08-14 17:1x** — `width="360"` above both H1s; asset measured, not eyeballed: 1024×1024, `%[opaque]`=False, clean silhouette edge |
 
 ## §3 Evidence base (read, not re-derived)
 
@@ -86,7 +90,7 @@ STRONG-model work — a weak executor only re-runs the render commands above, ne
 
 ### 4.1 The pick → final logo assets (owner's pick MADE and composed; Q1 still open)
 
-The logo IS BUILT by the strong session: `assets/logo/kago-logo.png` (512 px) = own graphite
+The logo IS BUILT by the strong session: `assets/logo/kago-logo.png` (1024 px, transparent) = own graphite
 chip (`chip-base.svg`) + Fluent Emoji 3D snowflake & fire composited (`assets/logo/README.md`
 has the exact commands and the owner's verbatim words). **Owner's icon-quality rule, verbatim:
 «ниже 128 не делаем» — ICO frames are 256 and 128 ONLY.** Remaining mechanics:
@@ -195,8 +199,10 @@ Expect: `-SelfTest` = 15 blocks green.
    order, quoting each observation (numbers, tray.log lines, task read-backs) in the report.
    AC5 live path: `--apply test-pl250` twice in a row (test profile, ±0 risk, already proven on
    this card) — first applies, second must no-op; then `--reset`.
-4. AC7: README header logo (image at top, both RU/EN copies — storefront rules, draw on the
-   current README's own handwriting).
+4. ~~AC7: README header logo~~ — ✅ DONE 2026-08-14 17:1x by the strong session (both copies).
+   **Note for anyone re-rendering the logo: the `.ico` on the owner's desktop changed too** (it
+   was white-square-backed until now), so the folder icon needs an explorer cache refresh to show
+   the fix — his eye confirms, the agent does not restart explorer (§5 risk (a)).
 5. Canon: STATUS (session block + «Решено владельцем» tray line), internal map §4 (tray anatomy
    + folder), `GOAL.md` untouched (already carries the words). Commit per git hygiene
    (`git diff --stat` first; test-file changes carry the justification block).
