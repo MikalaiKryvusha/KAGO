@@ -1,8 +1,8 @@
 # Bug 07 — the search walked seven rungs into unproven depth in one run and hung the owner's machine
 
-**Status:** 🟡 PARTIAL — cause proved from the machine's own log, **three bounds applied and
-mutation-proved offline** (commit `dfd10d6`); what remains is the live re-run under the new bounds,
-which is owner-gated (S1)
+**Status:** ✅ DONE — cause proved from the machine's own log, three bounds applied and
+mutation-proved offline (commit `dfd10d6`), **and the live re-run under those bounds passed with the
+owner present, 2026-08-14 23:2x** (see the closing section)
 **Version/build:** driver 610.88 · VBIOS 98.03.58.40.8b · `engine.mjs` at commit `a582052`
 **When/context:** 2026-08-14 21:14:42 +03:00, the second live band sweep at 2842 MHz in the shipped
 shape, minutes after the write-shape quarantine of `bugs/06` was applied
@@ -135,3 +135,35 @@ the store as if measured:
 - `automation-engine/lib/vmin-store.mjs` → `resolveAttempts`
 - `bugs/03` (the first hang, and rule R10) · `bugs/06` (the quarantine whose removal uncovered this)
 - `bugs/08` (the evidence store lost the same evening) · `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` → R10
+- `bugs/09` (the plan could not SHOW this bound — found by the very dry run this re-run required)
+- `bugs/10` (found BY this re-run: the proven depth is already invisible to the next session)
+
+## ✅ STATUS: DONE (2026-08-14 23:3x +03:00) — the bounds were proved ON THE CARD, not only by mutation
+
+`npm run engine -- --band 2842 --seconds 10`, owner present and warned (S1), after the dry run had
+printed what would happen (`bugs/09` made that line exist at all).
+
+**Observed, in order:** five rungs, every one PASS by the three-shape set, `branchy/sustained` the
+deciding shape on each · the engine STOPPED ITSELF at −30 mV — *«край НЕ встречен: лестница
+кончилась на 60 МГц (это НАШ предел, а не карты)»* — which is the session bound doing exactly its
+job · the machine stayed alive.
+
+| rung | serving mV | from stock | delivered under load |
+|---|---|---|---|
+| +7 | 1045 | −5 | 2827 (max 2835) |
+| +22 | 1035 | −15 | 2835 (max 2850) |
+| +30 | 1035 | −15 | 2827 (max 2835) |
+| +45 | 1020 | −30 | 2827 (max 2835) |
+| +60 | 1020 | −30 | 2827 (max 2835) |
+
+Taken at **point 96** (stock 1050 mV) — the point is named because it turned out to matter
+(`bugs/10`). The ceiling held under load on every rung.
+
+**Rollback proved by READING, not by exit code** (the owner's-machine rule, step 4): **0 non-zero
+offsets of 128**, watchdog not armed, power limit 300 W factory, card 41 °C. The store carries 20
+records = 5 rungs × (one write-ahead mark + three shapes), and every mark was resolved by a verdict —
+i.e. the run survived every rung it started, which is the write-ahead mark's whole purpose.
+
+What this does NOT claim: the edge. It was not met, by design — this session was allowed one bounded
+excursion and used it. The edge at 2842 MHz still lies somewhere near the reconstructed −185…−215 mV,
+and reaching it now depends on `bugs/10` first.
