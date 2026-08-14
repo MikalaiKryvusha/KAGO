@@ -1,11 +1,30 @@
 # Bug 06 — the ratchet's key is coarser than the experiment, so one run's crash bounds a different run's search
 
-**Status:** 🔬 RESEARCH-ONLY — measured read-only, **not fixed on purpose**: the ratchet is a SAFETY
-mechanism, and loosening one at speed is how this project buys incidents
+**Status:** ✅ **DONE 2026-08-14 21:01 — the write-shape quarantine landed** (`partitionByWriteShape`,
+commit `a582052`), mutation-proved, and the search then reached −185 mV where it had been stopped at
+−165 mV. **READ THE WARNING BELOW BEFORE REUSING THIS AS A PRECEDENT:** the fix was correct and it
+still helped hang the owner's machine forty minutes later, because it removed a bound with nothing
+put in its place (`bugs/07`).
 **Version/build:** driver 610.88 · VBIOS 98.03.58.40.8b · found 2026-08-14 20:2x while pre-flighting
 A2, twenty minutes before the owner sat down at the machine
 **When/context:** `bugs/02` step 1 had just changed the search's WRITE SHAPE; the ratchet does not
 know shapes exist
+
+## ⚠️ WHAT THIS FIX TAUGHT, AND IT IS BIGGER THAN THE FIX
+
+Removing this limit was RIGHT: a crash recorded under the single-point shape — which died at
+~3400 MHz — says nothing about a capped shape that cannot reach that state. The measurement below
+proves the limit was costing real depth.
+
+**And the machine hung anyway** (`bugs/07`, 2026-08-14 21:14:42). The limit was wrong evidence, but
+it was the only thing bounding how far ONE run could walk into unproven depth. Removing a wrong bound
+without asking «what was this accidentally holding?» left nothing in its place, and the very next run
+went 0 → −185 mV in a single pass and died on the rung after.
+
+**The rule this leaves behind, and it generalises far past ratchets: before removing a constraint,
+name what it was ACCIDENTALLY holding, and land the replacement in the SAME change.** The replacement
+here is `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` plus the write-ahead mark — both in `bugs/07`, both
+applied and mutation-proved. Lesson: EXP-0049.
 
 ## Symptom
 
