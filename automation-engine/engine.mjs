@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import config from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ } from './lib/vf-step.mjs';
 import { DIVERSE_SET } from './lib/stress-tester.mjs';
-import { VMIN_DIR, allowedOffset, append, openStore, readAll, partitionByStamp, summarizePoint } from './lib/vmin-store.mjs';
+import { VMIN_DIR, allowedOffset, append, assertSandbox, bestPassing, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -288,12 +288,28 @@ export async function searchEdge({
   if (typeof runStepFn !== 'function') throw new Error('searchEdge требует runStepFn — движок сам в карту не пишет');
   if (!Number.isFinite(capMhz)) throw new Error(`нужен потолок частоты (--cap), дано ${capMhz}`);
 
-  const history = store ? partitionByStamp(readAll(store).records, card).current : [];
+  // THE RATCHET'S EVIDENCE, FILTERED BY BOTH QUARANTINE AXES (`bugs/06`).
+  //
+  // R6 first — a driver or VBIOS change invalidates every measurement. Then the WRITE SHAPE: a record
+  // only bounds this search if it came from a run that wrote the same thing. Measured live: a crash
+  // recorded under the single-point shape (which died at ~3400 MHz, a state the shipped shape cannot
+  // reach) was stopping the shipped-shape search six rungs in, at OUR limit rather than the card's.
+  const byStamp = store ? partitionByStamp(resolveAttempts(readAll(store).records), card) : { current: [], quarantined: [] };
+  const shapeNow = writeShape ?? (wholeCurve ? 'uniform' : 'point');
+  const byShape = partitionByWriteShape(byStamp.current, shapeNow);
+  const history = byShape.current;
   const ratchet = allowedOffset(history, point, { fineStepMhz: fineMhz });
 
   const out = {
     capMhz, point, workload, shape,
     ratchetLimitMhz: ratchet.limitMhz,
+    // WHAT WAS SET ASIDE AND WHY — a quarantine nobody can see is a deletion with extra steps.
+    ratchetEvidence: {
+      writeShape: shapeNow,
+      usable: history.filter((r) => r.point === point).length,
+      quarantinedByStamp: byStamp.quarantined.filter((r) => r.point === point).length,
+      quarantinedByShape: byShape.quarantined.filter((r) => r.point === point).length,
+    },
     attempts: [],
     lastPass: null,
     firstFail: null,
@@ -392,8 +408,57 @@ export async function searchEdge({
     ? rungs.filter((r) => r.offsetMhz <= ratchet.limitMhz)
     : coarseLadder({ limitMhz: ratchet.limitMhz, coarseMhz }).map((o) => ({ offsetMhz: o, mv: null, savedMv: null }));
   const stride = (Array.isArray(rungs) && rungs.length) ? coarseStride : 1;
+
+  // ---- THE DEPTH THIS SESSION MAY EXPLORE, and it is the bound bought on 2026-08-14 21:14.
+  //
+  // That night this loop walked SEVEN rungs — 0 → −185 mV — on a shape whose history was empty, and
+  // hung the owner's machine on the eighth. Every individual step was small and legal; what was
+  // unbounded was the TOTAL distance travelled beyond anything ever proven. So two rules now bound it,
+  // and they are the owner's own proposal made executable:
+  //
+  //   1. **Beyond the deepest PROVEN depth, the step becomes FINE.** His words: search the edge by
+  //      corruption rising, not by the machine dying. The graded oracle can only see the avalanche if
+  //      we land INSIDE it — `researches/02` measures it 3 % → 90 % across ~20 mV, and a 30 mV coarse
+  //      stride steps clean over the whole thing. Measured that night: zero corruption counted at
+  //      every one of seven rungs, then a hang. The detector was not silent; we never landed on it.
+  //   2. **A session may go only `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` deeper than the deepest PASS it
+  //      inherited.** A hang costs a reboot; this makes it cost at most one bounded excursion, and it
+  //      makes the search converge over sessions instead of gambling in one.
+  const knownDeepest = bestPassing(history, point);
+  const knownDepthMv = knownDeepest === null
+    ? 0
+    : (fine.find((r) => r.offsetMhz === knownDeepest)?.savedMv
+       ?? Math.max(0, ...fine.filter((r) => r.offsetMhz <= knownDeepest).map((r) => r.savedMv ?? 0)));
+  const depthCeilingMv = knownDepthMv + (config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30);
+  const graded = fine.every((r) => Number.isFinite(r.savedMv));
+
+  // THE DEPTH GOVERNOR RUNS FIRST, ON THE WHOLE LADDER, EXACTLY AS BEFORE.
+  //
+  // Order is the safety property here, and the first draft of this edit got it wrong: it composed a
+  // ladder and then governed only part of it, which let the frontier rungs bypass `pickAscentRungs`
+  // entirely — the `bugs/03` block «ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ ЗАПИСИ» caught it, red, before
+  // any of this ran on a card. A region the governor refuses stays refused; the session bounds below
+  // may only ever REMOVE rungs from what it allowed, never add one it did not see.
   const chosen = pickAscentRungs(fine, { stride });
-  const ladder = chosen.rungs.map((r) => r.offsetMhz);
+
+  // Then the two session bounds, applied to what the governor already blessed (`bugs/07`):
+  //   1. never deeper than `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` past the deepest inherited PASS;
+  //   2. beyond that inherited depth the step becomes FINE — the owner's own proposal, so the graded
+  //      oracle can land INSIDE the avalanche (~20 mV wide) instead of striding over it.
+  const withinCeiling = (r) => !graded || r.savedMv <= depthCeilingMv;
+  const coarseAllowed = chosen.rungs.filter(withinCeiling);
+  const frontierFine = graded
+    ? fine.filter((r) => r.savedMv > knownDepthMv && r.savedMv <= depthCeilingMv
+        && !coarseAllowed.some((c) => c.offsetMhz === r.offsetMhz))
+    : [];
+  const ladderRungs = [...coarseAllowed, ...frontierFine].sort((a, b) => a.offsetMhz - b.offsetMhz);
+  const ladder = ladderRungs.map((r) => r.offsetMhz);
+  out.sessionDepth = {
+    knownDepthMv,
+    ceilingMv: depthCeilingMv,
+    droppedByCeiling: chosen.rungs.length - coarseAllowed.length,
+    fineRungsAtFrontier: frontierFine.length,
+  };
   out.rungs = fine.map((r) => ({ offsetMhz: r.offsetMhz, mv: r.mv, savedMv: r.savedMv }));
   out.ascentRungs = chosen.rungs.map((r) => ({ offsetMhz: r.offsetMhz, savedMv: r.savedMv }));
   if (chosen.refused) {
@@ -408,7 +473,29 @@ export async function searchEdge({
     return out;
   }
 
+  // THE WRITE-AHEAD MARK — `bugs/07`, and it is the difference between a catastrophe that teaches and
+  // one that repeats. A rung that hangs the machine kills the process with it, so nothing survives to
+  // write a verdict: on 2026-08-14 the store's last word was the PASS of the rung BEFORE the fatal
+  // one, and the next session would have walked right back onto it. Recording the rung BEFORE trying
+  // it turns silence into evidence — an unresolved mark carries `verdict: null`, which the ratchet
+  // already treats as «not a pass».
+  const markAhead = (offsetMhz) => {
+    if (!store) return;
+    append(store, {
+      point, offsetMhz, workload: 'НАБОР', shape: 'попытка', seconds,
+      verdict: null,
+      reason: 'ступень НАЧАТА, вердикт ещё не дописан. Если запись осталась такой — прогон НЕ ПЕРЕЖИЛ эту ступень '
+        + '(машина повисла или процесс убит), и храповик обязан считать её отказом',
+      driver: card.driver, vbios: card.vbios, capMhz,
+      writeShape: writeShape ?? null, capHeldBy: null,
+      pending: true,
+      tempStartC: null, tempReachedC: null, servingPoint: null, servingMv: null,
+      launches: null, badElemsMax: null, faultRate: null, bitDistMin: null, opsPerSecond: null,
+    });
+  };
+
   for (const offsetMhz of ladder) {
+    markAhead(offsetMhz);
     const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, writeShape, pinMhz, pinCard });
     const a = await record(offsetMhz, result);
     const noUndervolt = refuseWithoutUndervolt(out, result, offsetMhz);
@@ -450,6 +537,7 @@ export async function searchEdge({
       const between = inside();
       if (!between.length) break;
       const mid = between[Math.floor((between.length - 1) / 2)].offsetMhz;
+      markAhead(mid);
       const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, writeShape, pinMhz, pinCard });
       const a = await record(mid, result);
       if (refuseWithoutUndervolt(out, result, mid)) return out;
@@ -480,6 +568,7 @@ export async function searchEdge({
   while (hi - lo > fineMhz) {
     const mid = lo + Math.floor((hi - lo) / 2 / fineMhz) * fineMhz;
     if (mid <= lo || mid >= hi) break;
+    markAhead(mid);
     const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, writeShape, pinMhz, pinCard });
     const a = await record(mid, result);
     if (refuseWithoutUndervolt(out, result, mid)) return out;
@@ -539,6 +628,9 @@ export async function searchEdge({
  *  14. refuse only AFTER the first write             → «ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ ЗАПИСИ»
  *  15. drop `writeShape` on the way to the atom      → «форма записи доезжает до атома НА КАЖДОЙ ступени»
  *  16. record the shape the engine ASKED for         → «в хранилище ложится форма, которую вернул АТОМ, а не заказ движка»
+ *  17. walk past the session depth ceiling            → «ГЛУБИНА СЕССИИ ограничена: дальше известного PASS не более чем на потолок»
+ *  18. keep striding coarsely past proven ground      → «ЗА известным PASS шаг становится ТОЧНЫМ»
+ *  19. stop writing the mark before the attempt       → «каждая попытка записана НАПЕРЁД»
  */
 export function selfTest() {
   const results = [];
@@ -721,8 +813,16 @@ export function selfTest() {
         card: { driver: '610.88', vbios: 'v1' },
         runStepFn: scripted((o) => (o < 200 ? P : config.VERDICT.SDC)),
       });
-      const saved = readAll(store).records;
+      // VERDICT ROWS, not the write-ahead marks — the marks record INTENT before the attempt and are
+      // resolved by these rows the moment it comes back (`bugs/07`). Counting both would assert that
+      // the store holds twice what the search learned, which is not what this block is about.
+      const saved = readAll(store).records.filter((r) => !r.pending);
       ok('каждая попытка ЛЕГЛА в хранилище, а не только в отчёт', saved.length, r4.attempts.length);
+      // AND THE MARKS THEMSELVES ARE THERE AND ANSWERED — the half that makes a hang recoverable.
+      const marks = readAll(store).records.filter((r) => r.pending);
+      ok('каждая попытка записана НАПЕРЁД, ещё до самой попытки (bugs/07)', marks.length, r4.attempts.length);
+      ok('и все метки РАЗРЕШЕНЫ вердиктами — прогон пережил каждую ступень',
+        resolveAttempts(readAll(store).records).filter((r) => r.pending).length, 0);
       // THE GRADED HALF must survive the trip oracle -> atom -> engine -> store. It did NOT in the
       // first live search: the atom kept the verdict and dropped result.meters, so the question
       // «видно ли, как растёт число неверных расчётов» had no data behind it.
@@ -734,7 +834,7 @@ export function selfTest() {
           meters: { badElemsMax: offsetMhz / 75, faultRate: offsetMhz / 7.5e6, bitDistMin: 1, launches: 6000, opsPerSecond: 5e10 },
         }),
       });
-      const gradedSaved = readAll(store).records.filter((s) => s.point === 96);
+      const gradedSaved = readAll(store).records.filter((s) => s.point === 96 && !s.pending);
       ok('ГРАДИЕНТ ПОРЧИ доезжает до хранилища, а не теряется в атоме',
         gradedSaved.every((s) => s.faultRate !== null && s.badElemsMax !== null), true);
       ok('и по нему видно РОСТ, а не только финальный крах',
@@ -776,7 +876,7 @@ export function selfTest() {
       });
       ok('набор доезжает до атома, а не теряется в движке',
         handed.every((g) => Array.isArray(g) && g.length === 3), true);
-      const setRows = readAll(store).records.filter((s) => s.point === 97);
+      const setRows = readAll(store).records.filter((s) => s.point === 97 && !s.pending);
       ok('в хранилище ложится запись НА КАЖДУЮ ФОРМУ, а не одна на попытку',
         setRows.length, r5.attempts.length * 3);
       ok('и по хранилищу видно, СКОЛЬКИМИ формами судилась точка (это и есть мера P5-AC3)',
@@ -809,12 +909,61 @@ export function selfTest() {
       });
       ok('форма записи доезжает до атома НА КАЖДОЙ ступени, а не только на первой',
         shapesSeen.length > 1 && shapesSeen.every((s) => s === 'raise-and-cap'), true);
-      const shapeRows = readAll(store).records.filter((s) => s.point === 98);
+      const shapeRows = readAll(store).records.filter((s) => s.point === 98 && !s.pending);
       ok('в хранилище ложится форма, которую вернул АТОМ, а не заказ движка',
         [...new Set(shapeRows.map((s) => s.writeShape))], ['uniform']);
       ok('и держатель потолка записан рядом с ней — иначе вердикт не с чем сравнивать',
         [...new Set(shapeRows.map((s) => s.capHeldBy))], ['закрепление частоты']);
       ok('поиск при этом отработал как обычно', r6.attempts.length > 1, true);
+
+      // --- ГЛУБИНА СЕССИИ (bugs/07). Куплено зависанием машины 2026-08-14 21:14: поиск прошёл СЕМЬ
+      // ступеней, 0 → −185 мВ, на форме без истории — и повесил машину на восьмой. Каждый отдельный
+      // шаг был мелким и законным; неограниченным было ОБЩЕЕ расстояние, пройденное за пределы
+      // доказанного. Мутация показала, что этот предел не сторожил никто, и вот блоки.
+      const gradedRungs = [5, 35, 65, 100, 130, 160, 190, 225].map((mv, i) => ({
+        offsetMhz: 7 + i * 100, mv: 1045 - mv, savedMv: mv,
+      }));
+      const walked = [];
+      const deepRunner = async ({ offsetMhz }) => {
+        walked.push(offsetMhz);
+        return { verdict: P, undervolt: { capMhz: 2842, after: { pointIndex: 90, mv: 900 }, savedMv: 40 } };
+      };
+      walked.length = 0;
+      await searchEdge({
+        capMhz: 2842, point: 99, rungs: gradedRungs, writeShape: 'raise-and-cap',
+        card: { driver: '610.88', vbios: 'v1' }, runStepFn: deepRunner,
+      });
+      const deepestWalkedMv = Math.max(...walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).savedMv));
+      ok('ГЛУБИНА СЕССИИ ограничена: без истории дальше стока не более чем на потолок',
+        deepestWalkedMv <= (config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30), true);
+      ok('и это НЕ отказ, а честная остановка — то, что влезло, пройдено',
+        walked.length > 0, true);
+
+      // Рядом — вторая половина правила: ЗА доказанной глубиной шаг обязан стать точным, иначе
+      // градуированный оракул перешагивает лавину (~20 мВ) вместо того, чтобы в неё попасть.
+      const storeDeep = openStore({ dir: mkdtempSync(join(tmpdir(), 'kago-vmin-deep-')) });
+      try {
+        for (const mv of [5, 35]) {
+          append(storeDeep, {
+            point: 99, offsetMhz: 7 + [5, 35].indexOf(mv) * 100, workload: 'sdc_fma', shape: 'sustained',
+            verdict: P, driver: '610.88', vbios: 'v1', writeShape: 'raise-and-cap',
+          });
+        }
+        walked.length = 0;
+        await searchEdge({
+          capMhz: 2842, point: 99, rungs: gradedRungs, writeShape: 'raise-and-cap', store: storeDeep,
+          card: { driver: '610.88', vbios: 'v1' }, runStepFn: deepRunner,
+        });
+        const beyondKnown = walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).savedMv).filter((mv) => mv > 35);
+        // 35 mV known + 30 mV of session ceiling = 65 mV, so exactly ONE graded rung lies beyond the
+        // proven depth in this fixture. The first draft of this line expected two — an arithmetic
+        // slip of mine, not a behaviour: the ceiling is doing exactly what it says.
+        ok('ЗА известным PASS идут ступени ВНУТРИ потолка сессии, и берутся они ВСЕ, а не каждая пятая',
+          [beyondKnown.length, beyondKnown[0]], [1, 65]);
+      } finally {
+        // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
+        rmSync(assertSandbox(storeDeep), { recursive: true, force: true });
+      }
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }

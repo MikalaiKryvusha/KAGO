@@ -160,6 +160,11 @@ export function makeRecord(fields = {}) {
     // proved a verdict is meaningless without.
     writeShape: fields.writeShape ?? null,
     capHeldBy: fields.capHeldBy ?? null,
+    // THE WRITE-AHEAD MARK (`bugs/07`). A rung is recorded BEFORE it is attempted, so a rung that
+    // kills the machine leaves a record even though nothing survived to write its verdict. An
+    // unresolved one carries `verdict: null`, which the ratchet already reads as «not a pass» — so
+    // the rung that hung the machine bounds every future search for free, and by construction.
+    pending: fields.pending === true ? true : undefined,
     at: fields.at ?? stampNow(),
   };
 }
@@ -178,10 +183,46 @@ export function makeRecord(fields = {}) {
  *
  * [NOT-TESTED]
  */
-export function openStore({ dir = VMIN_DIR } = {}) {
+export function openStore(opts = {}) {
+  // THE ARGUMENT IS AN OPTIONS OBJECT, AND PASSING A BARE PATH IS NOW A LOUD ERROR.
+  //
+  // Paid for 2026-08-14 22:xx, and it cost the project's entire evidence store. A selftest called
+  // `openStore(mkdtempSync(...))` — a STRING. Destructuring a string finds no `dir`, so the default
+  // took over and the "sandbox" store WAS the production directory; the test's own `rmSync` cleanup
+  // then deleted `runs/vmin/` with all 74 records in it. `runs/` is git-ignored, so there was no copy.
+  //
+  // The silent part is what makes it a class rather than a slip: a wrong-typed argument produced a
+  // VALID store object pointing at exactly the place the parameter exists to avoid. So the type is
+  // checked, and the refusal names the fix.
+  if (typeof opts === 'string') {
+    throw new TypeError('openStore принимает ОБЪЕКТ: openStore({ dir }). Строкой передан путь — '
+      + 'это молча дало бы ПРОДАКШЕН-хранилище вместо песочницы (так был потерян весь храповик 2026-08-14)');
+  }
+  const { dir = VMIN_DIR } = opts;
   mkdirSync(dir, { recursive: true });
   const path = join(dir, RECORDS_FILE);
   return { dir, path };
+}
+
+/**
+ * REFUSE TO DESTROY THE PRODUCTION STORE — the second half of the same incident.
+ *
+ * A selftest's teardown is the one place that deliberately deletes a directory, and it is therefore
+ * the one place that must be unable to delete the wrong one. Every sandboxed suite calls this before
+ * removing anything: it throws if the store it is about to delete is production.
+ *
+ * Why both guards and not just the first: the type check stops the KNOWN way of getting here, and
+ * this stops the whole CATEGORY — any future path that hands a teardown the production directory,
+ * whatever the reason, meets a refusal instead of a deletion.
+ */
+export function assertSandbox(store) {
+  const dir = typeof store === 'string' ? store : store?.dir;
+  if (!dir) throw new TypeError('нечего проверять: хранилище без каталога');
+  if (resolve(dir) === resolve(VMIN_DIR)) {
+    throw new Error(`ОТКАЗ: это ПРОДАКШЕН-хранилище (${dir}), его не удаляют. `
+      + 'Песочница создаётся через mkdtempSync и передаётся как openStore({ dir })');
+  }
+  return dir;
 }
 
 /** Append one record. Appends, never rewrites — a killed search keeps everything it had learned.
@@ -230,6 +271,69 @@ export function partitionByStamp(records, { driver, vbios }) {
   return { current, quarantined };
 }
 
+/**
+ * THE SECOND QUARANTINE AXIS — the WRITE SHAPE (`bugs/06`), and it is the same rule as R6's.
+ *
+ * A ratchet record answers *«this offset, at this point, produced this verdict»*. That answer only
+ * transfers to a later run if the later run WRITES THE SAME THING — and until 2026-08-14 the store
+ * had no way to know, because the shape was not recorded (`bugs/02` step 1 added the field).
+ *
+ * **Why this is not a loosening of a safety mechanism, which is the thing to be suspicious of.**
+ * Measured live, 2026-08-14 21:xx: the ratchet was bounding the search at ≤ 540 MHz because of a
+ * CRASH at +555 recorded on 2026-08-11. That crash came from a run that raised **one curve point**,
+ * and its own forensics say what actually failed: the lone raised point made the curve non-monotone,
+ * the card boosted toward it and died **at ~3400 MHz**. The shipped shape caps the curve at the clock
+ * under test, so it cannot reach that state at all. The old record is not weak evidence about the new
+ * experiment — it is evidence about a state the new experiment forbids by construction. Applying it
+ * anyway stopped a healthy search six rungs in, at OUR limit rather than the card's.
+ *
+ * Quarantined, never deleted — same reasoning as R6: the history is what explains how the project
+ * came to believe things, and a session that cannot see it will believe them again.
+ *
+ * A record with `writeShape: null` (every record written before the field existed) is quarantined
+ * against any named shape. That is deliberate and it is the conservative reading in the direction
+ * that matters: an unlabelled record is not claimed to be about the shape you are running.
+ *
+ * [NOT-TESTED] at birth — the offline blocks and their mutations are what flip this.
+ */
+export function partitionByWriteShape(records, writeShape) {
+  const current = [];
+  const quarantined = [];
+  for (const r of records) {
+    if (r.writeShape === writeShape) current.push(r);
+    else quarantined.push(r);
+  }
+  return { current, quarantined };
+}
+
+/**
+ * DROP THE WRITE-AHEAD MARKS THAT WERE ANSWERED — and keep the ones that were not.
+ *
+ * `bugs/07`, 2026-08-14 21:14: a search walked onto a rung that hung the machine hard. The process
+ * died with the OS, so no verdict was ever written, and the store's last word on that point was the
+ * PASS of the rung BEFORE it. A later session reading that store would have seen a clean history and
+ * walked straight back into the same rung.
+ *
+ * So a rung is now recorded BEFORE it is attempted. Afterwards there are two possibilities and this
+ * function is what tells them apart:
+ *   • the attempt finished and wrote its verdicts → the mark is SUPERSEDED and dropped here;
+ *   • the attempt never came back → the mark SURVIVES, carrying `verdict: null`, and the ratchet
+ *     reads it as «not a pass» exactly as it reads any UNKNOWN. No new rule was needed for it.
+ *
+ * Keyed by (point, offsetMhz, writeShape) — the same three things that decide whether one run's
+ * result is about the same experiment as another's (`bugs/06`).
+ *
+ * [NOT-TESTED] at birth.
+ */
+export function resolveAttempts(records) {
+  const answered = new Set();
+  for (const r of records) {
+    if (r.pending === true) continue;
+    answered.add(`${r.point}|${r.offsetMhz}|${r.writeShape ?? ''}`);
+  }
+  return records.filter((r) => r.pending !== true || !answered.has(`${r.point}|${r.offsetMhz}|${r.writeShape ?? ''}`));
+}
+
 // =================================================================================================
 // 4. THE RATCHET — the rule that cannot be forgotten because it is a function
 // =================================================================================================
@@ -253,7 +357,10 @@ export function partitionByStamp(records, { driver, vbios }) {
  * [NOT-TESTED]
  */
 export function allowedOffset(records, point, { fineStepMhz = FINE_STEP_MHZ } = {}) {
-  const failures = records
+  // RESOLVED HERE, NOT BY THE CALLER. A write-ahead mark that was answered is not evidence of
+  // anything (`bugs/07`), and requiring every caller to remember that is a footgun: the ratchet is
+  // the one function nobody may get subtly wrong, so it owns the resolution itself.
+  const failures = resolveAttempts(records)
     .filter((r) => r.point === point && r.verdict !== config.VERDICT.PASS)
     .map((r) => r.offsetMhz)
     .filter((v) => Number.isFinite(v));
@@ -328,6 +435,12 @@ export function summarizePoint(records, point, opts = {}) {
  *   6. return 0 instead of Infinity when never failed   → «точка без отказов ничем не ограничена»
  *   7. silently skip a truncated line                   → «оборванная строка сосчитана, а не проглочена»
  *   8. drop `writeShape` from the presence list         → «запись БЕЗ формы записи — отказ (bugs/02)»
+ *   9. quarantine by shape in the WRONG direction   → «отказ ПРИ ТОЙ ЖЕ форме по-прежнему ограничивает»
+ *  10. treat an unlabelled record as any shape      → «запись без формы в карантине, а не «подходит любой»»
+ *  11. drop an UNANSWERED write-ahead mark        → «ступень, которую прогон НЕ ПЕРЕЖИЛ, остаётся запретом»
+ *  12. keep an ANSWERED one                       → «отвеченная метка снимается — она уже не улика»
+ *  13. accept a bare string as the store path      → «openStore СТРОКОЙ — отказ, а не молча продакшен»
+ *  14. let a teardown delete production            → «удалить ПРОДАКШЕН-хранилище — отказ»
  */
 export function selfTest() {
   const results = [];
@@ -366,6 +479,60 @@ export function selfTest() {
     [rec(95, 15, 'PASS', { writeShape: 'raise-and-cap', capHeldBy: 'кривая' }).writeShape,
       rec(95, 15, 'PASS', { writeShape: 'raise-and-cap', capHeldBy: 'кривая' }).capHeldBy],
     ['raise-and-cap', 'кривая']);
+
+  // --- THE WRITE-SHAPE QUARANTINE (bugs/06). The dangerous direction is LOOSENING, so the block that
+  // matters most here is the FIRST one: a same-shape failure must still bound the search. If only the
+  // second block existed, this edit would have widened the ratchet instead of narrowing its subject.
+  const shaped = (writeShape, over = {}) => makeRecord({ ...base, writeShape, point: 95, offsetMhz: 555, verdict: config.VERDICT.CRASH, ...over });
+  const sameShape = partitionByWriteShape([shaped('raise-and-cap')], 'raise-and-cap');
+  ok('отказ ПРИ ТОЙ ЖЕ форме по-прежнему ограничивает — храповик сузил предмет, а не ослаб',
+    [sameShape.current.length, allowedOffset(sameShape.current, 95).limitMhz], [1, 540]);
+  const otherShape = partitionByWriteShape([shaped('point')], 'raise-and-cap');
+  ok('отказ ПРИ ДРУГОЙ форме уходит в карантин и поиск не ограничивает',
+    [otherShape.current.length, otherShape.quarantined.length, allowedOffset(otherShape.current, 95).limitMhz],
+    [0, 1, Infinity]);
+  const unlabelled = partitionByWriteShape([shaped(null)], 'raise-and-cap');
+  ok('запись БЕЗ формы — в карантине, а не «подходит любой»: неподписанная улика не про твой опыт',
+    [unlabelled.current.length, unlabelled.quarantined.length], [0, 1]);
+  ok('карантин по форме НИЧЕГО не удаляет — обе половины на месте',
+    partitionByWriteShape([shaped('point'), shaped('raise-and-cap')], 'raise-and-cap')
+      .current.length + partitionByWriteShape([shaped('point'), shaped('raise-and-cap')], 'raise-and-cap').quarantined.length, 2);
+
+  // --- ДВА СТОРОЖА, КУПЛЕННЫЕ ПОТЕРЕЙ ВСЕГО ХРАНИЛИЩА 2026-08-14: строка вместо объекта молча давала
+  // продакшен-каталог, а уборка песочницы его удаляла.
+  let threwString = false;
+  try { openStore('D:/somewhere/temp'); } catch (e) { threwString = /ОБЪЕКТ/u.test(e.message); }
+  ok('openStore СТРОКОЙ — отказ, а не молча продакшен', threwString, true);
+  let threwProd = false;
+  try { assertSandbox({ dir: VMIN_DIR }); } catch (e) { threwProd = /ПРОДАКШЕН/u.test(e.message); }
+  ok('удалить ПРОДАКШЕН-хранилище — отказ', threwProd, true);
+  ok('а песочницу проверка пропускает', typeof assertSandbox({ dir: mkdtempSync(join(tmpdir(), 'kago-sb-')) }), 'string');
+
+  // --- ЗАПИСЬ НАПЕРЁД (bugs/07). Ради чего она есть: ступень, повесившая машину, убивает процесс
+  // вместе с собой и вердикта не оставляет. Метка, поставленная ДО попытки, переживает смерть — и
+  // несёт verdict: null, который храповик уже читает как «не PASS». Новых правил не понадобилось.
+  const mark = (offsetMhz, over = {}) => makeRecord({
+    ...base, point: 95, offsetMhz, workload: 'НАБОР', shape: 'попытка',
+    verdict: null, pending: true, writeShape: 'raise-and-cap', ...over,
+  });
+  const verdictRow = (offsetMhz, verdict) => makeRecord({
+    ...base, point: 95, offsetMhz, verdict, writeShape: 'raise-and-cap',
+  });
+
+  const survived = resolveAttempts([mark(540), verdictRow(540, config.VERDICT.PASS)]);
+  ok('отвеченная метка снимается — она уже не улика, а шум',
+    [survived.length, survived.filter((r) => r.pending).length], [1, 0]);
+  ok('и пройденная ступень остаётся РАЗРЕШЁННОЙ, метка её не запирает',
+    allowedOffset(survived, 95).limitMhz, Infinity);
+
+  const died = resolveAttempts([mark(540), verdictRow(540, config.VERDICT.PASS), mark(790)]);
+  ok('ступень, которую прогон НЕ ПЕРЕЖИЛ, остаётся запретом — иначе следующий прогон пойдёт туда же',
+    [died.filter((r) => r.pending).length, allowedOffset(died, 95).limitMhz], [1, 775]);
+  ok('и запрет держится ИМЕННО на непережитой ступени, а не на пройденной',
+    allowedOffset(died, 95).lowestFailure, 790);
+  ok('метка ЧУЖОЙ формы не запирает наш поиск — карантин по форме работает и здесь',
+    allowedOffset(partitionByWriteShape(resolveAttempts([mark(790, { writeShape: 'point' })]), 'raise-and-cap').current, 95).limitMhz,
+    Infinity);
 
   // --- the ratchet
   const hist = [

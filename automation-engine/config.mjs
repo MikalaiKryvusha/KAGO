@@ -185,6 +185,33 @@ export const CLOCK_OFFSET_RANGE_IS_MEASURED = true;
  */
 export const CLOCK_LADDER_STEP_TOLERANCE_MHZ = 8;
 
+/**
+ * HOW FAR BELOW THE DEEPEST **PROVEN** DEPTH ONE SESSION MAY EXPLORE — the bound bought on
+ * 2026-08-14 21:14, when a search walked SEVEN rungs into unexplored depth in a single run and hung
+ * the owner's machine on the eighth.
+ *
+ * WHY A BOUND IS NEEDED AT ALL, and it is not the same thing as the step governor. The step governor
+ * (`ASCENT_STEP_MAX_MV`) bounds how COARSELY we descend; every step that night was small and legal.
+ * What was unbounded was the TOTAL distance travelled beyond anything ever proven: 0 → −185 mV in one
+ * run, on a shape with no history. At depth the failure is not graded corruption the oracle can catch
+ * — it is an instant hang, and R10 says every rollback layer except volatility needs a live OS. So the
+ * only thing that can be bounded is how far a single run is allowed to walk into the dark.
+ *
+ * WHY 30 mV. Two conditions meet here:
+ *   • it must be at least one AVALANCHE WIDTH, or the search can never land inside the region where
+ *     corruption becomes observable — `researches/02` §2 measures the error rate going 3 % → 90 %
+ *     across 2 % of voltage, which is ≈ 20 mV at this card's ~1000 mV operating point;
+ *   • it must be at most one COARSE STEP (the owner's own 25 mV mode, 30 mV as this card's ladder
+ *     rounds it), so a session that finds nothing still makes exactly one step of progress.
+ * The two bracket 20…30 mV and the upper end is taken: a smaller bound would make the search need
+ * more sessions without making the hang cheaper — the hang costs one reboot either way.
+ *
+ * MEASURED CONTEXT, so the number is not read as generic: at 2842 MHz in the shipped shape this card
+ * PASSED every load down to **860 mV** (−185 mV from a 1045 mV stock) with ZERO corruption counted at
+ * every rung, and hung on the next one. The edge here is a cliff, not a slope.
+ */
+export const SESSION_MAX_DEPTH_BEYOND_KNOWN_MV = 30;
+
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
 // =============================================================================================
@@ -858,6 +885,7 @@ export default Object.freeze({
   CLOCK_OFFSET_MIN_MHZ,
   CLOCK_OFFSET_MAX_MHZ,
   CLOCK_LADDER_STEP_TOLERANCE_MHZ,
+  SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
   CLOCK_OFFSET_RANGE_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,
