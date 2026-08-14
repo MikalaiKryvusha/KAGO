@@ -40,6 +40,15 @@ workloads/*.lib.exp
 # (card-to-card Vmin varies by up to 70 mV — researches/02). Never share them as if portable.
 profiles/*.local.json
 
+# Third-party TOOLS the harness drives — downloaded, never authored here, never shipped.
+# PresentMon (Intel GameTechDev, MIT) is the frame meter: it reads Windows' own ETW present events,
+# so it is vendor-neutral (NVIDIA's FrameView uses it internally). The console build is ONE 956 KB
+# exe — no installer, no service, no registry — and deleting the file IS the complete uninstall.
+# It does not ship for three reasons: it is not ours to redistribute, its version must match what a
+# machine actually downloaded, and a binary in history is a binary nobody re-verifies.
+# Provenance and the install recipe: researches/08.
+tools/bin/
+
 # Secrets and machine-local overrides.
 .env
 .env.*

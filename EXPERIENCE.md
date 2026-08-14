@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0060 · 2026-08-15 · ❌ · #tools #state #cleanup #exit-code #false-success #owner-time
+**Context:** first use of PresentMon as the frame meter. A proof capture on Q2RTX succeeded (3 196 frames), and I stopped it by killing the process. Minutes later the owner launched Palworld — the exact window we needed.
+**Tried / did:** started a capture. It printed a warning and exited **with code 0**, writing no CSV. Started another; same. Only on the third look did the real message surface: *«a trace session named "PresentMon" is already running»* — the killed process had left its ETW session alive in the system.
+**Result:** ❌ by the time `logman stop <name> -ets` cleared it, the game's render window was over (telemetry: loaded 02:05:00 → 02:05:54; the targeted capture went up at 02:44). Zero frames from the owner's session. The tool was correct throughout; the operator lost the window.
+**Lesson:** **a tool whose state OUTLIVES its process needs its teardown built before its first use — and the tell that it has such state is a clean exit code on a run that produced nothing.** Exit 0 plus an empty output directory is the signature of external state blocking the work, and any caller that judges success by status code is blind to it exactly when it matters. Two rules fall out: judge a capture by **its artifact having rows**, never by exit code; and give every run a unique session/lock/handle name plus an unconditional teardown in `finally`, because «the process died» is not «the state is gone». This is the internal map's R9a (a new kind of state extends the undo BEFORE its first write) applied to a third-party tool rather than to our own writes.   → link: `researches/08` §4b · `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` R9a
+**Repro:** `logman query -ets` lists live trace sessions; kill a PresentMon capture and it is still there. Clear with `logman stop <name> -ets`. Launch options that prevent it: `--session_name kago-<label> --stop_existing_session`.
+**Trigger:** adopting any external tool that opens a system-scoped resource (an ETW session, a named pipe, a mutex, a port, a lock file) → before the first real run, kill it mid-flight ON PURPOSE and check what survives. Whatever survives gets a named teardown.
+**Not for:** tools that are pure filters (stdin → stdout, no system registration) — inventing teardown there is ceremony.
+
 ### EXP-0059 · 2026-08-15 · ❌→✅ · #measurement #load #acceptance #games #plateau #confounding
 **Context:** the owner played Palworld at stock while telemetry sampled, to finally get the thermal PLATEAU that the previous night's mode-vs-stock pair lacked (88 s and 155 s runs, equilibrium arrives at minute 3–5 — STATUS fact 35).
 **Tried / did:** sampled 329 s, found a 152 s contiguous loaded segment — twice the previous longest — and looked for equilibrium inside it.
