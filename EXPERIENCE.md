@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0043 · 2026-08-14 · ❌→✅ · #shell #bash #msys #argv #windows #environment
+**Context:** driving the freshly-installed tray task live — `schtasks /Run /TN "\KAGO\tray"` typed into the Bash tool, because the surrounding pipeline (cat, tail, node) was already bash.
+**Tried / did:** ran a native Windows CLI with slash-flags from Git Bash.
+**Result:** ❌→✅ MSYS2's argument conversion rewrote `/Run` into `C:/Program Files/Git/Run` before schtasks ever saw it — exit 1, error in cp866 mojibake. Re-ran the same command from PowerShell: clean. The owner caught the error line in the chat and named the class: the environment dossier is supposed to make this impossible, and it had rows for `tar`/`find`/`/tmp` but NOT for slash-flag conversion.
+**Lesson:** **Git Bash is not a neutral pipe to Windows CLIs — MSYS2 rewrites arguments that LOOK like POSIX paths, and Windows flag syntax (`/Run`, `/TN`, `/F`) looks exactly like that.** The shell is chosen per COMMAND, not per session mood: anything whose flags start with `/` (schtasks, taskkill, reg, sc, net, icacls) goes through PowerShell or a Node `spawnSync` argv array; bash keeps the POSIX toolchain. Second half, the process one: a quirk that costs an incident goes into the DOSSIER the same hour — the dossier's whole contract is that the next session reads instead of rediscovering, and a recovered-but-unrecorded rake is a rake still lying on the path.   → link: `AGENT_GUIDE.md` → Environment dossier (new row) · EXP-0035 (same family: the layer between you and the target rewrites your text)
+**Repro:** `bash -c "schtasks /Query /TN whatever"` → error naming `C:/Program Files/Git/Query`. The same call from PowerShell answers about the task.
+**Trigger:** about to run a Windows CLI whose flags start with `/` → use the PowerShell tool (or spawn with an argv array); if fingers already typed it into bash, stop and switch.
+**Not for:** POSIX tools inside Git Bash (their `-flags` are untouched), and Node `spawnSync` calls — an argv array bypasses every shell rewrite.
+
 ### EXP-0042 · 2026-08-14 · ✅ · #cli #dispatch #retry #control-flow #resilience
 **Context:** adding `--boot-apply` to the applier CLI — the logon re-apply whose whole point is a bounded retry around a driver that may not answer yet. The CLI's `main()` opens with an unconditional `probeCard()` shared by every command.
 **Tried / did:** before the first run, walked the path from process start to the new branch — and found the retry was dead on arrival: the shared preamble probes the card FIRST, so at logon `main()` would throw before the subcommand's retry loop ever existed.
