@@ -10,7 +10,15 @@
       "Bash(git remote *)",
       "PowerShell(git remote *)",
       "Bash(gh *)",
-      "PowerShell(gh *)"
+      "PowerShell(gh *)",
+      "Bash(cd *)",
+      "Bash(base64 *)",
+      "Bash(wc *)",
+      "Bash(md5sum *)",
+      "Bash(magick *)",
+      "PowerShell(magick *)",
+      "Bash(magick identify *)",
+      "Bash(sed *)"
     ],
     "ask": [],
     "deny": [
