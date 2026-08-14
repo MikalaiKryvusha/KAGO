@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- KAGO chip logo, candidate D «Изумрудный контур»: dark chip, neon-green circuit K, minimal -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2230"/>
+      <stop offset="1" stop-color="#0a0c12"/>
+    </linearGradient>
+    <linearGradient id="pinV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9aa3b2"/>
+      <stop offset="1" stop-color="#59606e"/>
+    </linearGradient>
+    <linearGradient id="pinH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9aa3b2"/>
+      <stop offset="1" stop-color="#59606e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g fill="url(#pinV)">
+    <rect x="60"  y="12" width="16" height="30" rx="6"/>
+    <rect x="100" y="12" width="16" height="30" rx="6"/>
+    <rect x="140" y="12" width="16" height="30" rx="6"/>
+    <rect x="180" y="12" width="16" height="30" rx="6"/>
+    <rect x="60"  y="214" width="16" height="30" rx="6"/>
+    <rect x="100" y="214" width="16" height="30" rx="6"/>
+    <rect x="140" y="214" width="16" height="30" rx="6"/>
+    <rect x="180" y="214" width="16" height="30" rx="6"/>
+  </g>
+  <g fill="url(#pinH)">
+    <rect x="12" y="60"  width="30" height="16" rx="6"/>
+    <rect x="12" y="100" width="30" height="16" rx="6"/>
+    <rect x="12" y="140" width="30" height="16" rx="6"/>
+    <rect x="12" y="180" width="30" height="16" rx="6"/>
+    <rect x="214" y="60"  width="30" height="16" rx="6"/>
+    <rect x="214" y="100" width="30" height="16" rx="6"/>
+    <rect x="214" y="140" width="30" height="16" rx="6"/>
+    <rect x="214" y="180" width="30" height="16" rx="6"/>
+  </g>
+
+  <rect x="34" y="34" width="188" height="188" rx="30" fill="url(#body)"/>
+  <rect x="34" y="34" width="188" height="188" rx="30" fill="none" stroke="#34d399" stroke-opacity="0.2" stroke-width="3"/>
+
+  <circle cx="128" cy="128" r="80" fill="url(#glow)"/>
+
+  <!-- circuit-trace K: vertical bus + two branches ending in vias -->
+  <g stroke="#34d399" stroke-width="14" stroke-linecap="round" fill="none">
+    <path d="M96 76 V180"/>
+    <path d="M96 128 L156 76"/>
+    <path d="M96 128 L156 180"/>
+  </g>
+  <g fill="#d1fae5">
+    <circle cx="96"  cy="76"  r="11"/>
+    <circle cx="96"  cy="180" r="11"/>
+    <circle cx="156" cy="76"  r="11"/>
+    <circle cx="156" cy="180" r="11"/>
+  </g>
+</svg>

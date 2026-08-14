@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- KAGO chip logo, candidate B «Ядро»: dark chip, molten radial core, circuit traces to the pins -->
+  <defs>
+    <linearGradient id="pinV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9dee9"/>
+      <stop offset="1" stop-color="#7c8494"/>
+    </linearGradient>
+    <linearGradient id="pinH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d9dee9"/>
+      <stop offset="1" stop-color="#7c8494"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262b38"/>
+      <stop offset="1" stop-color="#0d0f16"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.5" r="0.55">
+      <stop offset="0" stop-color="#fff3b0"/>
+      <stop offset="0.35" stop-color="#ffb347"/>
+      <stop offset="0.7" stop-color="#ff5e3a"/>
+      <stop offset="1" stop-color="#b81f2d"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff8a3d" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g fill="url(#pinV)">
+    <rect x="60"  y="12" width="16" height="30" rx="6"/>
+    <rect x="100" y="12" width="16" height="30" rx="6"/>
+    <rect x="140" y="12" width="16" height="30" rx="6"/>
+    <rect x="180" y="12" width="16" height="30" rx="6"/>
+    <rect x="60"  y="214" width="16" height="30" rx="6"/>
+    <rect x="100" y="214" width="16" height="30" rx="6"/>
+    <rect x="140" y="214" width="16" height="30" rx="6"/>
+    <rect x="180" y="214" width="16" height="30" rx="6"/>
+  </g>
+  <g fill="url(#pinH)">
+    <rect x="12" y="60"  width="30" height="16" rx="6"/>
+    <rect x="12" y="100" width="30" height="16" rx="6"/>
+    <rect x="12" y="140" width="30" height="16" rx="6"/>
+    <rect x="12" y="180" width="30" height="16" rx="6"/>
+    <rect x="214" y="60"  width="30" height="16" rx="6"/>
+    <rect x="214" y="100" width="30" height="16" rx="6"/>
+    <rect x="214" y="140" width="30" height="16" rx="6"/>
+    <rect x="214" y="180" width="30" height="16" rx="6"/>
+  </g>
+
+  <rect x="34" y="34" width="188" height="188" rx="30" fill="url(#body)"/>
+  <rect x="34" y="34" width="188" height="188" rx="30" fill="none" stroke="#000000" stroke-opacity="0.33" stroke-width="2"/>
+
+  <!-- circuit traces from core to edges -->
+  <g stroke="#4d5871" stroke-width="6" stroke-linecap="round" fill="none">
+    <path d="M128 92 V56"/>
+    <path d="M92 128 H56"/>
+    <path d="M164 128 H200"/>
+    <path d="M128 164 V200"/>
+    <path d="M103 103 L76 76"/>
+    <path d="M153 103 L180 76"/>
+    <path d="M103 153 L76 180"/>
+    <path d="M153 153 L180 180"/>
+  </g>
+  <g fill="#67e8f9">
+    <circle cx="128" cy="56" r="7"/>
+    <circle cx="56" cy="128" r="7"/>
+    <circle cx="200" cy="128" r="7"/>
+    <circle cx="128" cy="200" r="7"/>
+    <circle cx="76" cy="76" r="7"/>
+    <circle cx="180" cy="76" r="7"/>
+    <circle cx="76" cy="180" r="7"/>
+    <circle cx="180" cy="180" r="7"/>
+  </g>
+
+  <!-- molten core -->
+  <circle cx="128" cy="128" r="62" fill="url(#halo)"/>
+  <circle cx="128" cy="128" r="44" fill="url(#core)"/>
+  <circle cx="128" cy="128" r="44" fill="none" stroke="#ffffff" stroke-opacity="0.27" stroke-width="3"/>
+</svg>

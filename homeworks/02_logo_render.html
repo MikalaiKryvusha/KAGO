@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>KAGO — выбор чип-логотипа</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; margin: 24px; background: #1b1e27; color: #e8eaf0; }
+  h1 { font-size: 22px; } h2 { font-size: 16px; margin: 6px 0 12px; color: #9aa3b2; font-weight: normal; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; max-width: 1200px; }
+  .card { border: 1px solid #333a4a; border-radius: 12px; padding: 16px; text-align: center; }
+  .card h3 { font-size: 15px; margin: 4px 0 12px; }
+  .big { width: 100%; max-width: 220px; image-rendering: auto; }
+  .row { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin-top: 12px; padding: 10px; border-radius: 8px; }
+  .dark { background: #10121a; } .light { background: #f2f3f7; }
+  .row img { display: block; }
+  .cap { font-size: 12px; color: #9aa3b2; margin-top: 8px; }
+  p.note { max-width: 900px; color: #c8cdd8; }
+</style>
+</head>
+<body>
+<h1>Свой чип KAGO — четыре отрисованных варианта</h1>
+<h2>Логотип проекта: GitHub (README) · папка на рабочем столе · трей. Уникальная отрисовка, не скачанная иконка. Ряды снизу — как выглядит в 48 и 16 px на тёмном и светлом.</h2>
+
+<div class="grid">
+  <div class="card">
+    <h3>A — «Аврора»</h3>
+    <img class="big" src="../assets/logo/candidates/a_aurora.png" alt="A">
+    <div class="row dark">
+      <img src="../assets/logo/candidates/a_aurora_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/a_aurora_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="row light">
+      <img src="../assets/logo/candidates/a_aurora_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/a_aurora_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="cap">Графитовый чип, кристалл в градиенте бирюза→фиолет, монограмма K, золотые ножки</div>
+  </div>
+
+  <div class="card">
+    <h3>B — «Ядро»</h3>
+    <img class="big" src="../assets/logo/candidates/b_core.png" alt="B">
+    <div class="row dark">
+      <img src="../assets/logo/candidates/b_core_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/b_core_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="row light">
+      <img src="../assets/logo/candidates/b_core_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/b_core_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="cap">Тёмный чип, раскалённое ядро, дорожки к контактам — «мощность под контролем»</div>
+  </div>
+
+  <div class="card">
+    <h3>C — «Лёд и пламя»</h3>
+    <img class="big" src="../assets/logo/candidates/c_ice_flame.png" alt="C">
+    <div class="row dark">
+      <img src="../assets/logo/candidates/c_ice_flame_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/c_ice_flame_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="row light">
+      <img src="../assets/logo/candidates/c_ice_flame_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/c_ice_flame_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="cap">Кристалл разделён по диагонали: холод (Silent Cold) и жар (Max Perfomance) — два полюса KAGO</div>
+  </div>
+
+  <div class="card">
+    <h3>D — «Изумрудный контур»</h3>
+    <img class="big" src="../assets/logo/candidates/d_emerald.png" alt="D">
+    <div class="row dark">
+      <img src="../assets/logo/candidates/d_emerald_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/d_emerald_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="row light">
+      <img src="../assets/logo/candidates/d_emerald_48.png" width="48" height="48" alt="">
+      <img src="../assets/logo/candidates/d_emerald_16.png" width="16" height="16" alt="">
+    </div>
+    <div class="cap">Минимализм: тёмный чип, K из неоновых дорожек с переходными отверстиями</div>
+  </div>
+</div>
+
+<p class="note">Любой вариант можно докрутить (цвета, монограмма, число ножек) — исходники SVG в
+<code>assets/logo/candidates/</code>, правка и перегонка в PNG/ICO описаны в
+<code>plans/10</code> §4.1. Слово за вами: буква варианта — или что поправить.</p>
+</body>
+</html>
