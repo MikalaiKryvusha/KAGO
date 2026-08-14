@@ -314,3 +314,10 @@ epic §6в) · the owner renames modes later (names ship verbatim; a rename is h
   what is closable, name the series as the one open meter») and the series' design (natural logons,
   none forced) make waiting idle-time, not diligence. The epic's AC2 line stays open in `plans/01`
   §9 (Б4) until the fifth verified record; nothing downstream is blocked by it.
+
+## ✅ STATUS: DONE (2026-08-14 12:4x +03:00)
+
+Judge verdict VERIFIED WITH CAVEATS (§4.6, evidence inline). Canon updated: `MASTER_PLAN.md`
+phase 3 closed · `STATUS.md` debt retired · internal map §4 design → built · epic §9 track Б
+marked (Б4 stays 🟡 until the P3-AC2 series' fifth verified record — tracked by
+`plans/07_weak_opus_p3ac2_series_close.md`).

@@ -1,0 +1,125 @@
+# GPU_TUNING_RAILS — the rails a weak executor session rides
+
+> **What this is.** The ONE routing document for operating KAGO's bench and search machinery
+> (`ideas/01`, the owner's word: rails «которыми даже слабая модель типа Opus может потом
+> пользоваться, для тюнинга GPU и поиска края»). It does not teach the method — it routes you to
+> the paid-for answer: *want X → run Y, expect Z; verdict V → do W; Z is forbidden, and here is
+> the STOP line.* Sources of truth stay where they live (`researches/`, `bugs/`, `EXPERIENCE.md`,
+> the code's own guards); this file only points. **v1** — command rails over the existing bench.
+> v2 (after phase 5) becomes a `/fable-domain` skill bundle for the edge search proper.
+>
+> **Audience:** the agent (any strength). English by the language rule. The owner reads the digest
+> in `STATUS.md`.
+>
+> **How to use it as a weak session:** read `STATUS.md` + this file. If the operation you want has
+> no rail here — that IS a stop: report, do not invent (I1-AC2: every rule below carries either a
+> MACHINE gate that physically refuses, or a STOP line you obey yourself).
+
+---
+
+## 0. The three iron invariants (each one bought with an incident)
+
+| # | Invariant | Gate |
+|---|---|---|
+| S1 | **Live writes to the V/F curve or a sweep happen ONLY with the owner at the machine.** The machine hung 5 h 40 min on an unattended sweep; three of four rollback layers need a live OS (`bugs/03`, R10). | **STOP line** — no machine gate can enforce presence. Before any `engine --band` / `vfstep --set` live run: the owner has said, in this chat, that he is at the machine. No quote → do not run. |
+| S2 | **The first step is the shallowest step.** At depth, step size is the ONLY protection (R10). | **MACHINE** — `engine.pickAscentRungs()` refuses a first step > 25 mV or a rung gap > 35 mV, BEFORE the first write (mutation-proved). Your duty: run `--dry-run` first and READ the printed first-step depth. |
+| S3 | **Every write runs under an armed watchdog, and rollback is a list, not a chain** (R9, R10a). | **MACHINE** — `vfstep`/`engine`/`fanladder`/`thermal` arm it themselves; the detached guard restores the card on writer death (drilled: 2.5 s). Your duty: never write through any path that is not one of the rails in §2 — a direct `nvapi` write bypasses the whole net. **STOP line:** if `watchdog -- --status` says a record is held at rest, run `--recover` before anything else. |
+
+Above all three sits **THE OWNER'S-MACHINE RULE** (`AGENT_GUIDE.md`): look the flag up first ·
+name the rollback BEFORE the write · smallest reversible form · re-read state until stable ·
+report numbers. A permission entry in settings is not a reason to act.
+
+## 1. Session start — always, in this order
+
+```
+npm install                    # koffi dependency
+npm run check                  # expect: 31 .mjs files, 0 failed
+npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
+npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
+npm run questions              # expect: «ЧИСТО»
+```
+
+**STOP lines:** driver ≠ 610.88 → every golden, checksum and NVAPI id is invalid until re-proved
+(R6); report, do not proceed. Fresh clone → `runs/` is empty, every stress verdict is UNKNOWN
+until `npm run stress -- --capture-baseline` (which needs a stock card). Background GPU load
+(Chrome, Docker, overlays — idle clock ~825 MHz instead of ~180) → measurements are invalid;
+stopping owner apps is allowed by his word, restore them after (`STATUS.md` → машина).
+
+## 2. Command rails — want X → run Y
+
+**Read-only (safe at any moment):**
+
+| Want | Run | Expect |
+|---|---|---|
+| card telemetry, one probe | `npm run mon -- --once` | all config fields populated |
+| the V/F curve, fans, ids | `npm run nvapi` · `-- --curve` · `-- --fans` | 17/17 ids · 128 points · floor 30 % |
+| driver/offset ranges | `npm run nvml` | read-only; NVML is an instrument, never a backend |
+| what the ratchet knows | `npm run vmin -- --show` | per-point verdicts; ratchet never lowers |
+| profiles on disk vs live card | `npm run profiles` | 6 profiles, 0 refusals; drafts labeled 📝 |
+| shell health (tasks, tray) | `npm run setup -- --status` | 7/7 tasks, tray alive |
+| boot-series meter (P3-AC2) | read `runs/shell/boot-apply.jsonl` | one JSON line per logon; series closes at 5 natural verified records |
+| re-analyze recorded telemetry | `npm run thermal -- --analyze` | plateau verdict per run, no card touched |
+
+**Loads & verdicts (load the card, write nothing):**
+
+| Want | Run | Expect |
+|---|---|---|
+| stability verdict, one shape | `npm run stress -- --workload sdc_fma --sustain 30` | PASS / SDC / CRASH / UNKNOWN |
+| the shape that exposes bad profiles | `... --transient` | transitions, not steady load (`researches/02`) |
+| goldens still valid | `npm run stress -- --verify-baseline` | every stamp matches the card |
+| FPS bench gate (FIRST, always) | `npm run gfx -- --prove-not-capped` | FPS moves ≥ 5 % (took +46 %); a number that ignores its input is capped, not precise |
+| game run with telemetry | `npm run gfx -- --capture --label <l>` | `faultFree`, never PASS (no checksum half) |
+| instrument floor between runs | `npm run gfx -- --spread <prefix>` | floor 0.90 % on this card; a delta below the floor is NOISE, not an effect |
+
+**Writes (owner-gated by S1 where marked; all under the watchdog):**
+
+| Want | Run | Gate |
+|---|---|---|
+| plan a curve step, no write | `npm run vfstep -- --set ... --dry-run` · `npm run engine -- --band N --dry-run` | free; READ the first-step depth line |
+| one candidate, judged by the 3-shape set | `npm run vfstep -- --set --point N --mhz M --cap C` | **S1 — owner present** |
+| edge search on one frequency band | `npm run engine -- --band N --seconds 10` | **S1 — owner present.** Currently STOPS by design until `bugs/02` form fix (search must search in the shipped shape) |
+| apply / reset a profile | `npm run profile -- --apply <id>` · `-- --reset` | drafts REFUSE until phase 6 (machine gate); reset is always legal |
+| fan level (upward only) | `npm run nvapi -- --fan-write 80 [--cool-to 42]` | state change → owner aware; AUTO restored in `finally` |
+| acoustic / thermal ladders | `npm run fanladder -- --period 15` · `npm run thermal -- --points ...` | owner present (fanladder needs his EAR) |
+
+## 3. Verdict dictionary — verdict V → do W
+
+| Verdict | Meaning | Do |
+|---|---|---|
+| **PASS** | checksum matched golden AND no fault events AND throughput sane | proceed; one PASS never qualifies a point — qualification is phase 6's |
+| **SDC** | silent data corruption — output wrong, no crash | the point failed; ratchet records it; NEVER retry hoping |
+| **CRASH** | process/driver/TDR death in the window | as SDC, plus check `watchdog -- --status` recovered |
+| **UNKNOWN / НЕИЗВЕСТНО** | comparison could not happen (stale stamp, no baseline, wrong args) | **STOP.** Never coerce into PASS/SDC; fix the reason first |
+| boot-apply verdicts (8) | `applied · factory-by-physics · factory-restored · degraded-to-factory · no-remembered-state · remembered-unreadable · driver-gave-up · apply-failed-rolled-back` | all are TERMINAL journal states; anything else in the journal is a bug to file |
+
+**Reading rules bought with measurements:** a point is judged by the WORST shape of the set, and
+the deciding shape is named (fact 37) · price under a game is FPS; ops/s is a clock-stretching
+detector, not a price (R4a, EXP-0030) · a delta below the instrument's measured floor is noise
+(EXP-0032) · the edge is PROBABILISTIC — same voltage can PASS and CRASH (`researches/02` §6.4);
+the shipping margin is failure + 2 grid steps = +10 mV (owner's final word) · convert the search
+unit into the physical unit THROUGH AN OBSERVED READ-BACK, never through a model of the state
+(EXP-0034, `bugs/02`) · fan/temperature pairs are valid only at a DETECTED plateau — transients
+under-read fans by 10–18 pp (facts 35–36).
+
+## 4. Standing STOP lines (the full list)
+
+1. **3 failed fix attempts → STOP → `/bug-research`** (`BUG_FIXING_FRAMEWORK.md`). Never a fourth
+   blind poke.
+2. **UNKNOWN verdict → STOP** (§3).
+3. **No rail for the operation → STOP and report** — inventing method is the exact failure these
+   rails exist to prevent (I1-AC1).
+4. **Any owner-level fork (vision, UX, budget) → interview** (`npm run ask`), never a chat guess —
+   but METHOD questions are yours, not his (EXP-0026).
+5. **Anything that writes outside the repo** (registry, scheduler, installs) → the owner's-machine
+   rule, five steps, rollback named first.
+6. **A guard that fired and got explained away is a guard that did not fire** (EXP-0034 second
+   strike) — a red block stops the run until understood.
+7. **Windows CLIs with `/`-flags and PowerShell payloads run through PowerShell, never Git Bash**
+   (EXP-0043) · **prose is edited with file tools, never through shell arguments** (EXP-0035).
+
+## 5. Maintenance
+
+A new instrument, verdict or paid-for rule lands here the same session it is born (one row/line,
+pointing at its source). This file is a ROUTER: if a section starts explaining instead of
+pointing, it is drifting into a second canon — cut it back. v2 (the `/fable-domain` bundle with
+flowchart, trap and smoke eval) is gated on phase 5 closing the search's true form.
