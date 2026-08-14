@@ -8,9 +8,11 @@
 > `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4 (four shortcuts, passive tray — the owner's design) ·
 > `researches/01` (what the `nvidia-smi` backend can write)
 > **Status:** 🟢 in flight — §4.1 closed 2026-08-14 00:5x · §4.2 closed 2026-08-14 01:0x ·
-> §4.3 closed 2026-08-14 09:2x (live install + task-path proofs) · **§4.4 mechanism proven live
-> 2026-08-14 09:4x; P3-AC2 series (5 natural logons) collecting in the journal** · next §4.5
-> (the passive tray). Plan written BEFORE the first line of phase-3 code (EXP-0027 honoured)
+> §4.3 closed 2026-08-14 09:2x (live install + task-path proofs) · §4.4 mechanism proven live
+> 2026-08-14 09:4x; **P3-AC2 series (5 natural logons) collecting in the journal** ·
+> **§4.5 closed 2026-08-14 11:1x (tray live: P3-AC4 taken, mode track both ways)** · next §4.6
+> (the phase judge; P3-AC2 may still be collecting — judge what is closable, name the series
+> as the one open meter). Plan written BEFORE the first line of phase-3 code (EXP-0027 honoured)
 > **Outbound:** a tray-implementation fork goes to the owner ONLY if §4.1's recon finds no
 > third-party-GUI-free path · closure → `MASTER_PLAN.md` phase 3, epic AC1/AC2/AC6/AC7, internal map §4
 
@@ -171,19 +173,40 @@ card 250 W · card returned to factory + state restored (simulated post-logon), 
 `factory-by-physics`, zero writes, 300.00 W. Offline: 10 boot blocks in the applier selftest
 (27 total), 3 mutations each reddening exactly their named blocks. Card left factory.
 
-### 4.5 — The passive tray 🔲
+### 4.5 — The passive tray ✅ 2026-08-14 11:1x
 
 *Anchor: `plans/01_EPIC` §9 Б5; internal map §4 — «displays the active profile and nothing else».*
 
-- [ ] Implemented per §4.1's verdict. Reads the remembered-state file; polls nothing on the card.
-      **Boundary named:** the tray shows the ORCHESTRATOR's state (last verified apply), not live
-      telemetry — a truth↔mirror pair with the state file, refreshed on file change, and that is the
-      whole contract.
-- [ ] Kill-safety: the tray process holds no GPU handles, arms nothing, applies nothing — killing it
-      is proven side-effect-free (**P3-AC4**, `gpu:info --json` diff = 0).
-- [ ] Started by the same logon task after the re-apply; its absence degrades display only.
+- [x] Implemented per §4.1's verdict: `tray.ps1` (PowerShell 5.1 + `NotifyIcon`, UTF-8 **with BOM**
+      — PS 5.1 reads BOM-less files as cp1251; the BOM is guarded by selftest block 1 and its loss
+      is a loud parse failure, proven by mutation) + `tray-launcher.js` (wscript `//B //E:JScript`,
+      hidden powershell — PowerShell#3028). Reads the remembered-state file on a 2 s mtime timer;
+      polls nothing on the card. **Boundary named:** the tray shows the ORCHESTRATOR's state (last
+      verified apply), not live telemetry — a truth↔mirror pair with the state file, refreshed on
+      file change, and that is the whole contract. 7 faces (4 modes + test profile + unknown +
+      problem), tooltip = the owner's title from the file, truncated below NotifyIcon's 63-unit
+      ceiling. Selftest: 9 blocks in a tmpdir sandbox, no GPU; 3 mutations each reddening exactly
+      their named blocks (truncation → block 7 · problem-face swap → blocks 4+5 · BOM strip →
+      parse failure exit 1, louder than a red block).
+- [x] Kill-safety proven live (**P3-AC4**): `gpu:info --json` before/after `Stop-Process` —
+      **29 fields, the only diff `clocks.current.graphics` 975 → 922 MHz** (the idle clock
+      breathing, volatile, not settable). Zero settable changes. Single instance proven: a second
+      start exits on the `KAGO.Tray` mutex, pid file untouched.
+- [x] Started at logon by its OWN task `\KAGO\tray` — **deliberately NOT the boot-apply task**
+      (deviation from this plan's draft wording, recorded in §8): researches/07 §2 forbids an
+      elevated tray, boot-apply runs Highest, and an elevated parent cannot cleanly spawn a
+      de-elevated child. RunLevel **Limited**, logon trigger, NO execution time limit (the default
+      5-minute cap would kill a tray that lives the whole session), in the receipt with its delete
+      command BEFORE creation. Its absence degrades display only. Live mode-change track through
+      the task path: apply-test-pl250 → card 250.00 W twice, log `state -> test-pl250` within one
+      tick · apply-factory → 300.00 W twice, `state -> factory`. Card left factory.
 
-**Verification:** P3-AC4 diff 0 · the icon visibly tracks a shortcut-driven mode change.
+**Verification (taken):** P3-AC4 diff = 0 settable · the tray log tracks a task-driven mode change
+both ways · mutex · selftest 9/9 + 3 mutations. **Deferred, named:** the explorer-restart re-add
+(`taskkill /f /im explorer.exe; start explorer` — disruptive on the owner's live desktop; the
+re-add is the framework's own `TaskbarCreated` handler, read in the dotnet/winforms source) and
+the no-console-flash-at-logon check (visible only at a real logon; the wrapper is the documented
+cure). Both are display-only risks — neither can touch the card.
 
 ### 4.6 — Phase closure 🔲
 
@@ -233,7 +256,7 @@ epic §6в) · the owner renames modes later (names ship verbatim; a rename is h
 | 4.2 | profiles selftest green incl. hostile fixtures; live refusals leave the card byte-identical |
 | 4.3 | apply test profile → read-back match; reset from non-factory → factory match; receipt present |
 | 4.4 | manual task run end-to-end; then 5 natural logons journaled, all verified states |
-| 4.5 | tray kill diff = 0; icon tracks a mode change |
+| 4.5 | ✅ taken 2026-08-14 11:1x: kill diff = 0 settable (29 fields, only the idle clock moved); tray.log tracked test-pl250 ↔ factory both ways |
 | 4.6 | `/fable-judge` verdict; canon updated; §8 filled |
 
 ## 8. Decisions made without the owner
@@ -249,3 +272,15 @@ epic §6в) · the owner renames modes later (names ship verbatim; a rename is h
 - **Shortcuts route through a pre-registered elevated task** (`researches/03` §3.6) — the recorded
   no-UAC path, and it removes the free-command surface a direct elevated `.lnk` would carry.
 - **The owner's mode names and emoji ship verbatim** — identity is his; the agent never renames.
+- **§4.5: the tray got its OWN unelevated logon task instead of riding boot-apply.** The plan's
+  draft said «started by the same logon task after the re-apply»; researches/07 §2 (written later
+  the same night) says the tray must never hold elevation, and boot-apply runs RunLevel Highest.
+  An elevated parent cannot cleanly spawn a de-elevated child on Windows; a second task with
+  RunLevel Limited is the smallest honest form. The recon outranks the plan's guess — both are
+  agent artifacts, and the researched one is the observed one.
+- **§4.5: tray.ps1 is UTF-8 WITH BOM, and the BOM is guarded.** PS 5.1 reads BOM-less files as
+  ANSI (cp1251), which would mojibake the Russian tooltips. The dossier's «no BOM» rule is for
+  JSON that Node parses; a .ps1 is read only by PowerShell, which wants the BOM. Selftest block 1
+  reddens on its loss; the mutation proved the loss is loud (a parse failure, exit 1).
+- **§4.5: the tray keeps its own tiny log (`runs/shell/tray.log`, capped at 512 KB)** — the only
+  way a headless session can OBSERVE an icon change without eyes; the live acceptance read it.

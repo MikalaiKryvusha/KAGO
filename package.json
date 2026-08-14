@@ -37,7 +37,8 @@
     "fanladder": "node tools/fan-ladder.mjs",
     "thermal": "node automation-engine/lib/thermal-ladder.mjs",
     "shortcuts": "node automation-engine/lib/desktop-shortcuts.mjs",
-    "setup": "node automation-engine/setup-desktop.mjs"
+    "setup": "node automation-engine/setup-desktop.mjs",
+    "tray:selftest": "powershell -NoProfile -ExecutionPolicy Bypass -File automation-engine/tray.ps1 -SelfTest"
   },
   "dependencies": {
     "koffi": "^3.1.4"

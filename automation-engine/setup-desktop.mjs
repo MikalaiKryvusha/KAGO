@@ -63,6 +63,18 @@ const fullTaskName = (profileName) => `${TASK_FOLDER}${taskName(profileName)}`;
 const BOOT_TASK = 'boot-apply';
 const BOOT_TASK_ARGS = `"${PROFILE_MANAGER}" --boot-apply`;
 
+/** §4.5: the tray task — UNELEVATED on purpose (researches/07 §2: the tray reads one JSON file and
+ *  must never hold elevation; an elevated parent cannot cleanly spawn a de-elevated child, so the
+ *  tray gets its OWN logon task with RunLevel Limited instead of riding boot-apply). wscript runs
+ *  the launcher, the launcher starts powershell HIDDEN (PowerShell#3028 — the console flash cure). */
+const TRAY_TASK = 'tray';
+const WSCRIPT = 'C:\\Windows\\System32\\wscript.exe';
+const TRAY_LAUNCHER = fileURLToPath(new URL('./tray-launcher.js', import.meta.url));
+// //E:JScript pins the engine so the machine's .js association (which a dev tool can rewrite)
+// never decides what wscript does with our file; //B suppresses script-error dialogs.
+const TRAY_TASK_ARGS = `//B //E:JScript "${TRAY_LAUNCHER}"`;
+const TRAY_PID_PATH = path.join(REPO_ROOT, 'runs', 'shell', 'tray.pid');
+
 function psq(s) { return `'${String(s).replace(/'/gu, "''")}'`; }
 
 function ps(script) {
@@ -106,6 +118,11 @@ function buildReceipt(surface, desktop) {
         name: `${TASK_FOLDER}${BOOT_TASK}`,
         delete: `schtasks /Delete /TN "${TASK_FOLDER}${BOOT_TASK}" /F`,
       },
+      {
+        kind: 'scheduled-task',
+        name: `${TASK_FOLDER}${TRAY_TASK}`,
+        delete: `schtasks /Delete /TN "${TASK_FOLDER}${TRAY_TASK}" /F`,
+      },
       ...surface.filter((s) => s.shortcut).map((s) => ({
         kind: 'desktop-shortcut',
         path: path.join(desktop, `${s.title}.lnk`),
@@ -125,16 +142,20 @@ function writeReceipt(receipt) {
 // ===============================================================================================
 
 /**
- * Register (or overwrite) one elevated task by its RAW name. Interactive-only, current user, fixed
- * args, never stores credentials; RunLevel Highest is the whole point (researches/03 §3.6). With
- * `logonTrigger` the task additionally fires at THIS user's logon — §4.4's boot re-apply.
+ * Register (or overwrite) one task by its RAW name. Interactive-only, current user, fixed args,
+ * never stores credentials. The apply/boot tasks run `RunLevel Highest` — that elevation is the
+ * whole point (researches/03 §3.6); the tray runs `Limited` (researches/07 §2). With `logonTrigger`
+ * the task additionally fires at THIS user's logon. `timeLimitMinutes: 0` = no execution time
+ * limit — the tray lives the whole session, and the default 5-minute cap would kill it.
  */
-function registerTask(rawName, args, { logonTrigger = false } = {}) {
+function registerTask(rawName, args, {
+  logonTrigger = false, execute = process.execPath, runLevel = 'Highest', timeLimitMinutes = 5,
+} = {}) {
   const script = [
     '$ErrorActionPreference = "Stop"',
-    `$action = New-ScheduledTaskAction -Execute ${psq(process.execPath)} -Argument ${psq(args)} -WorkingDirectory ${psq(REPO_ROOT)}`,
-    `$principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest`,
-    `$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)`,
+    `$action = New-ScheduledTaskAction -Execute ${psq(execute)} -Argument ${psq(args)} -WorkingDirectory ${psq(REPO_ROOT)}`,
+    `$principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel ${runLevel}`,
+    `$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes ${Number(timeLimitMinutes)})`,
     ...(logonTrigger
       ? [`$trigger = New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)`]
       : []),
@@ -142,6 +163,26 @@ function registerTask(rawName, args, { logonTrigger = false } = {}) {
   ].join('; ');
   const r = ps(script);
   if (!r.ok) throw new Error(`задача ${TASK_FOLDER}${rawName} не зарегистрирована: ${r.stderr || r.stdout}`);
+}
+
+/** The tray process, if it is actually alive: pid file + a live powershell process behind it.
+ *  A stale pid file (hard kill never removes it) is reported as absent, not as a ghost. */
+function trayProcess() {
+  if (!existsSync(TRAY_PID_PATH)) return null;
+  const pid = Number(readFileSync(TRAY_PID_PATH, 'utf8').trim());
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const r = ps(`(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName`);
+  return r.ok && r.stdout === 'powershell' ? pid : null;
+}
+
+/** Stop the tray for uninstall: by pid, verified gone. Best-effort — a tray that is not running
+ *  is already the goal state. */
+function stopTray() {
+  const pid = trayProcess();
+  if (!pid) return { stopped: false, why: 'трей не запущен (pid-файла нет или процесс мёртв)' };
+  const r = ps(`Stop-Process -Id ${pid} -Force -ErrorAction Stop`);
+  if (!r.ok) return { stopped: false, why: `Stop-Process: ${r.stderr || r.stdout}` };
+  return { stopped: true, pid };
 }
 
 /** Read a task back by its RAW name: exists, what it runs, and its trigger class (if any). The
@@ -167,7 +208,7 @@ function deleteTask(rawName) {
 // Commands
 // ===============================================================================================
 
-function cmdInstall() {
+async function cmdInstall() {
   const surface = loadSurfaceProfiles();
   const desktop = desktopDir();
 
@@ -199,6 +240,22 @@ function cmdInstall() {
     console.log(`OK   задача ${TASK_FOLDER}${BOOT_TASK} → ${path.basename(bt.execute)} ${bt.args.includes('--boot-apply') ? '--boot-apply' : '⚠ ЧУЖИЕ АРГУМЕНТЫ'} · RunLevel ${bt.runLevel} · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
   }
 
+  // §4.5 — the tray. Its own logon task, UNELEVATED (Limited), no execution time limit: the tray
+  // lives the whole session. Read back including all three of those facts — the registration is
+  // not the evidence.
+  registerTask(TRAY_TASK, TRAY_TASK_ARGS, {
+    logonTrigger: true, execute: WSCRIPT, runLevel: 'Limited', timeLimitMinutes: 0,
+  });
+  const tt = readTask(TRAY_TASK);
+  const ttOk = tt && tt.runLevel === 'Limited' && tt.trigger === 'MSFT_TaskLogonTrigger'
+    && tt.execute.toLowerCase().includes('wscript') && tt.args.includes('tray-launcher.js');
+  if (!ttOk) {
+    bad++;
+    console.log(`ПРОВАЛ задача ${TASK_FOLDER}${TRAY_TASK} — перечитана как ${JSON.stringify(tt)}`);
+  } else {
+    console.log(`OK   задача ${TASK_FOLDER}${TRAY_TASK} → wscript //B tray-launcher.js · RunLevel ${tt.runLevel} (БЕЗ элевации — так задумано) · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
+  }
+
   console.log('');
   for (const s of surface.filter((x) => x.shortcut)) {
     const lnkPath = path.join(desktop, `${s.title}.lnk`);
@@ -214,9 +271,21 @@ function cmdInstall() {
     console.log(`${okTarget ? 'OK  ' : 'ПРОВАЛ'} ярлык «${path.basename(lnkPath)}» → ${got.target} ${got.args}`);
   }
 
+  // Start the tray NOW — the logon trigger only covers future sessions, and the owner should not
+  // have to re-logon to see the icon. The mutex in tray.ps1 makes a double start a silent no-op.
+  console.log('');
+  spawnSync(SCHTASKS, ['/Run', '/TN', `${TASK_FOLDER}${TRAY_TASK}`], { encoding: 'utf8' });
+  let trayPid = null;
+  for (let i = 0; i < 20 && !trayPid; i++) {
+    await new Promise((res) => setTimeout(res, 500));
+    trayPid = trayProcess();
+  }
+  if (trayPid) console.log(`OK   трей запущен: pid ${trayPid}, журнал runs/shell/tray.log`);
+  else { bad++; console.log('ПРОВАЛ трей не поднялся за 10 с — pid-файла нет или процесс не powershell'); }
+
   console.log('');
   console.log(bad === 0
-    ? `ИТОГ: задач ${surface.length + 1} (включая логон-задачу), ярлыков ${surface.filter((x) => x.shortcut).length}, всё перечитано. Расписка: ${RECEIPT_PATH}`
+    ? `ИТОГ: задач ${surface.length + 2} (логон-задача + трей), ярлыков ${surface.filter((x) => x.shortcut).length}, всё перечитано. Расписка: ${RECEIPT_PATH}`
     : `ИТОГ: ПРОВАЛОВ ${bad} — см. выше.`);
   return bad === 0 ? 0 : 1;
 }
@@ -228,9 +297,13 @@ function cmdUninstall() {
   const receipt = existsSync(RECEIPT_PATH) ? JSON.parse(readFileSync(RECEIPT_PATH, 'utf8')) : null;
   let bad = 0;
 
+  // The tray process outlives its task's deletion — stop it first, by pid, verified.
+  const st = stopTray();
+  console.log(st.stopped ? `OK   трей остановлен (pid ${st.pid})` : `—    трей: ${st.why}`);
+
   const tasks = receipt
     ? receipt.artifacts.filter((a) => a.kind === 'scheduled-task').map((a) => a.name.replace(TASK_FOLDER, ''))
-    : [...SURFACE.map((s) => taskName(s.profile)), BOOT_TASK];
+    : [...SURFACE.map((s) => taskName(s.profile)), BOOT_TASK, TRAY_TASK];
   for (const t of tasks) {
     const ok = deleteTask(t);
     const still = readTask(t);
@@ -284,7 +357,14 @@ function cmdStatus() {
     ? `OK   задача ${TASK_FOLDER}${BOOT_TASK} · RunLevel ${bt.runLevel} · триггер ${bt.trigger === 'MSFT_TaskLogonTrigger' ? 'вход пользователя' : `⚠ ${bt.trigger}`}`
     : `—    задачи ${TASK_FOLDER}${BOOT_TASK} нет`);
   if (bt) n++;
-  console.log(`ИТОГ: задач на месте ${n} из ${SURFACE.length + 1}. Расписка: ${existsSync(RECEIPT_PATH) ? RECEIPT_PATH : 'нет'}`);
+  const tt = readTask(TRAY_TASK);
+  console.log(tt
+    ? `OK   задача ${TASK_FOLDER}${TRAY_TASK} · RunLevel ${tt.runLevel} · триггер ${tt.trigger === 'MSFT_TaskLogonTrigger' ? 'вход пользователя' : `⚠ ${tt.trigger}`}`
+    : `—    задачи ${TASK_FOLDER}${TRAY_TASK} нет`);
+  if (tt) n++;
+  const tp = trayProcess();
+  console.log(tp ? `     трей ЖИВ: pid ${tp}` : '     трей не запущен');
+  console.log(`ИТОГ: задач на месте ${n} из ${SURFACE.length + 2}. Расписка: ${existsSync(RECEIPT_PATH) ? RECEIPT_PATH : 'нет'}`);
   return 0;
 }
 
