@@ -11,7 +11,7 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-phases%200%2C1%2C4%20closed%20%C2%B7%20undervolt%20measured%20%E2%88%927.71%20W-E67E22.svg?style=flat-square)](STATUS.md)
+[![Status](https://img.shields.io/badge/Status-phases%200%2C1%2C3%2C4%20closed%20%C2%B7%20undervolt%20measured%20%E2%88%927.71%20W-E67E22.svg?style=flat-square)](STATUS.md)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
@@ -56,7 +56,7 @@ else's numbers.
 
 ## 2. Where the project actually is
 
-Three phases of six are closed, and the card has been measured. The research base, the architecture,
+Four phases of six are closed, and the card has been measured. The research base, the architecture,
 **the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
 back on command. **The owner-facing shell is on the desktop too:** four shortcuts apply through
 pre-registered elevated tasks, the last verified apply is remembered and re-applied at logon through
@@ -245,7 +245,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Состояние](https://img.shields.io/badge/Состояние-фазы%200%2C1%2C4%20закрыты%20%C2%B7%20андервольт%20измерен%20%E2%88%927%2C71%20Вт-E67E22.svg?style=flat-square)](STATUS.md)
+[![Состояние](https://img.shields.io/badge/Состояние-фазы%200%2C1%2C3%2C4%20закрыты%20%C2%B7%20андервольт%20измерен%20%E2%88%927%2C71%20Вт-E67E22.svg?style=flat-square)](STATUS.md)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
@@ -288,7 +288,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 ## 2. Где проект находится на самом деле
 
-Закрыты три фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
+Закрыты четыре фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
 **собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по
 команде. **Оболочка для владельца тоже стоит:** четыре ярлыка применяют режим через заранее
 зарегистрированные повышенные задачи, последнее проверенное применение запоминается и
