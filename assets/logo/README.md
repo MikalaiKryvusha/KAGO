@@ -19,7 +19,7 @@ C «Лёд и пламя» → *«строгий графитовый чип с 
 
 ```
 magick chip-base.svg -resize 512x512 PNG32:base512.png
-magick base512.png ( parts/snowflake_3d.png -resize 150x150 ) -geometry +95+95 -composite ( parts/fire_3d.png -resize 150x150 ) -geometry +267+267 -composite kago-logo.png
+magick base512.png ( parts/snowflake_3d.png -resize 172x172 ) -geometry +90+90 -composite ( parts/fire_3d.png -resize 172x172 ) -geometry +250+250 -composite kago-logo.png
 magick kago-logo.png -define icon:auto-resize=256,128 kago-folder.ico
 ```
 

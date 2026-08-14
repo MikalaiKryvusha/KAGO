@@ -3,13 +3,14 @@
 > **Created:** 2026-08-14 (owner's drive-by improvements, verbatim in `GOAL.md` →
 > «Импрувменты оболочки (2026-08-14)»; sliced for a weak executor when the strong session ran out)
 > **Parent:** `GOAL.md` improvements section; extends the closed phase-3 shell (`plans/06`, DONE)
-> **Status:** 🟢 open — §4.0 done; **PICK MADE 2026-08-14 ~17:0x, owner verbatim: «Лед и пламя,
-> только снежинку и огонек нарисовать более аккуратно, роввно, и убрать для них отдельный
-> контейнер, а прямо поверх графитового чипа рисовать. Делаем строгий графитовый чип с льдом и
-> пламенем»** — correction APPLIED by the strong session (c_ice_flame.svg v2: real 6-arm flake,
-> symmetric teardrop flame, no die container; rendered and shown). Awaiting the owner's «да» on
-> v2 + the Q1 answer; then §4.1–§4.6 for the weak executor. §4.1 copies the CURRENT
-> `c_ice_flame.*` — no redrawing by a weak session, ever
+> **Status:** 🟢 open — §4.0–§4.1 DONE by the strong session, **logo ACCEPTED by the owner
+> 2026-08-14 ~17:1x, verbatim: «Суппер!»** (the path, each step his word: pick C «Лед и пламя…
+> строгий графитовый чип» → «иконки снежинки и пламени как в емодзиках делают» → diagonal +
+> «легкую едва ощутимую черту серую… из фейда появляется и в фейд уходит» → «снежинку и огонек…
+> больше по размерам» — applied, re-shown, accepted). Final assets built: `kago-logo.png` (512),
+> `kago-folder.ico` (**frames 256+128 only** — his «ниже 128 не делаем»). **Weak executor enters
+> at §4.2; the ONE open input is Q1.** No redrawing/recomposing by a weak session, ever —
+> re-running `assets/logo/README.md` commands is the ceiling
 > **Outbound:** the logo pick + Q1 (tray face policy) → owner's word in chat, quoted into this
 > plan · picked logo → GitHub README (both language copies)
 
