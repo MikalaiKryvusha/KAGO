@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0044 · 2026-08-14 · ❌→✅ · #taste #owner #mockup #render #preview #homework
+**Context:** the owner asked to be OFFERED icon sets to choose from. The agent built an interview with a comparison table whose «previews» were emoji characters used as LINK anchors to the sets' image files.
+**Tried / did:** shipped links instead of pixels — in chat and on the rendered interview page alike.
+**Result:** ❌→✅ the owner rejected the whole form: *«у меня в винде все наборы эмодзи отображаются одинаково. Не вижу разницы, ибо нужно рендерить и показывать мне картинки»*. Of course: an emoji CHARACTER renders in HIS system font identically in every row — the anchors looked like five copies of the same thing, and the actual differences sat one click away each, twenty clicks total. Rebuilt as a self-contained HTML with every candidate rendered IN the file (data URIs), on one material, at the real sizes (72/32 px desktop, 20 px tray), blind labels, key at the bottom — the exact shape `homeworks/README` had prescribed all along.
+**Lesson:** **for a taste-class choice, the deliverable is RENDERED PIXELS on one material — a link to a picture is homework outsourced to the owner, and a symbolic stand-in (an emoji char, a font glyph) is worse: it silently renders in the VIEWER'S environment and erases the very differences being judged.** The canon already said it («отдаёт АРТЕФАКТ для восприятия — никогда не ссылку», homeworks/README) — the miss was routing: the choice went through an interview table, and the taste-class rule lives in the homework lane. A choice whose criterion is perception IS a homework, whatever document carries the question. Second half: render at the REAL consumption sizes — an icon judged at 256 px lies about a 20 px tray.   → link: `homeworks/01_icon_sets_taste.md` · `interviews/interview_005_desktop_icons.md` · `PHILOSOPHY.md` → the Occam boundary (no economy on what the human perceives)
+**Repro:** before handing the owner any visual choice, open your own artifact and ask: are the pixels of every candidate VISIBLE side by side right here, at the sizes they will live at? If seeing a difference requires a click, it is not a mockup yet.
+**Trigger:** about to offer the owner a choice with a perception criterion (looks/sounds/feels) → build the render-artifact first (one file, all candidates, real sizes, blind labels), and only then the question.
+**Not for:** choices judged by facts (license, format, availability) — tables and links are the right form there, and this session's fact-table part was fine.
+
 ### EXP-0043 · 2026-08-14 · ❌→✅ · #shell #bash #msys #argv #windows #environment
 **Context:** driving the freshly-installed tray task live — `schtasks /Run /TN "\KAGO\tray"` typed into the Bash tool, because the surrounding pipeline (cat, tail, node) was already bash.
 **Tried / did:** ran a native Windows CLI with slash-flags from Git Bash.
@@ -49,6 +58,7 @@
 **Repro:** `bash -c "schtasks /Query /TN whatever"` → error naming `C:/Program Files/Git/Query`. The same call from PowerShell answers about the task.
 **Trigger:** about to run a Windows CLI whose flags start with `/` → use the PowerShell tool (or spawn with an argv array); if fingers already typed it into bash, stop and switch.
 **Not for:** POSIX tools inside Git Bash (their `-flags` are untouched), and Node `spawnSync` calls — an argv array bypasses every shell rewrite.
+**SECOND STRIKE — same session, 11:3x, other face of the same layer:** a PowerShell one-liner with `$_.Id` passed through the Bash tool — bash expanded `$_` as ITS OWN variable before powershell saw the script, and the kill-loop silently did nothing (`.Id: No such file or directory` in the noise). Two strikes → the rule is now mechanical, not stylistic: **PowerShell payloads travel ONLY via the PowerShell tool or a `.ps1` script file — never inline through bash**, exactly as Windows slash-flag CLIs do. The two rules are one rule: bash is a POSIX interpreter, and everything that is not POSIX syntax gets rewritten by it before reaching the target.
 
 ### EXP-0042 · 2026-08-14 · ✅ · #cli #dispatch #retry #control-flow #resilience
 **Context:** adding `--boot-apply` to the applier CLI — the logon re-apply whose whole point is a bounded retry around a driver that may not answer yet. The CLI's `main()` opens with an unconditional `probeCard()` shared by every command.
