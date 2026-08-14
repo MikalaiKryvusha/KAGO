@@ -83,14 +83,20 @@ Four unique SVGs drawn and rendered: `assets/logo/candidates/{a_aurora,b_core,c_
 Visual check done: all four legible at 48 and 16 px. SVG tweaks after the owner's feedback are
 STRONG-model work — a weak executor only re-runs the render commands above, never redraws paths.
 
-### 4.1 The pick → final logo assets (after §0 answered)
+### 4.1 The pick → final logo assets (owner's pick MADE and composed; Q1 still open)
 
-1. Copy the picked SVG to `assets/logo/kago-logo.svg`, its 256-px PNG to `assets/logo/kago-logo.png`.
-2. `magick assets/logo/kago-logo.png -define icon:auto-resize=256,64,48,32,24,16 assets/logo/kago-folder.ico`
-3. Write `assets/logo/README.md`: what this is, which candidate won (owner's word, quoted, with
-   date), the regeneration commands. Note the artwork is original to this repo (MIT with it).
-4. Quote the owner's pick + Q1 answer into this plan's Status line.
-Expect: 3 files exist; `magick identify assets/logo/kago-folder.ico` lists 6 frames.
+The logo IS BUILT by the strong session: `assets/logo/kago-logo.png` (512 px) = own graphite
+chip (`chip-base.svg`) + Fluent Emoji 3D snowflake & fire composited (`assets/logo/README.md`
+has the exact commands and the owner's verbatim words). **Owner's icon-quality rule, verbatim:
+«ниже 128 не делаем» — ICO frames are 256 and 128 ONLY.** Remaining mechanics:
+
+1. After the owner's «да» on the composed logo:
+   `magick assets/logo/kago-logo.png -define icon:auto-resize=256,128 assets/logo/kago-folder.ico`
+   Expect: `magick identify` lists exactly 2 frames (256, 128).
+2. Quote the Q1 answer into this plan's Status line; if Q1 = «логотип в трее» — §4.5 additionally
+   sets the NotifyIcon icon from `kago-folder.ico` (Resolve-FaceIcon already degrades gracefully;
+   the mode faces then live only in the menu checkmarks and the tooltip).
+Weak session NEVER redraws or recomposes — re-running the documented commands is the ceiling.
 
 ### 4.2 Desktop folder in `setup-desktop.mjs`
 
