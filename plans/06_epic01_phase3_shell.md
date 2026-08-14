@@ -7,12 +7,13 @@
 > phase 3. Evidence base: `researches/03` §3.6 (autostart + elevation via a scheduler task) ·
 > `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4 (four shortcuts, passive tray — the owner's design) ·
 > `researches/01` (what the `nvidia-smi` backend can write)
-> **Status:** 🟢 in flight — §4.1 closed 2026-08-14 00:5x · §4.2 closed 2026-08-14 01:0x ·
-> §4.3 closed 2026-08-14 09:2x (live install + task-path proofs) · §4.4 mechanism proven live
-> 2026-08-14 09:4x; **P3-AC2 series (5 natural logons) collecting in the journal** ·
-> **§4.5 closed 2026-08-14 11:1x (tray live: P3-AC4 taken, mode track both ways)** · next §4.6
-> (the phase judge; P3-AC2 may still be collecting — judge what is closable, name the series
-> as the one open meter). Plan written BEFORE the first line of phase-3 code (EXP-0027 honoured)
+> **Status:** ✅ **PHASE CLOSED 2026-08-14 12:4x — judge verdict: VERIFIED WITH CAVEATS** (§4.6).
+> §4.1 closed 00:5x · §4.2 closed 01:0x · §4.3 closed 09:2x (live install + task-path proofs) ·
+> §4.4 mechanism proven live 09:4x · §4.5 closed 11:1x (tray live: P3-AC4 taken, mode track both
+> ways). **The one open meter, named at closure: P3-AC2 series (5 natural logons) — journal holds
+> 2 records, both from manual mechanism runs; natural logons 0. It collects itself; the fifth
+> verified record closes the epic's AC2, no reboot is forced.** Plan written BEFORE the first
+> line of phase-3 code (EXP-0027 honoured)
 > **Outbound:** a tray-implementation fork goes to the owner ONLY if §4.1's recon finds no
 > third-party-GUI-free path · closure → `MASTER_PLAN.md` phase 3, epic AC1/AC2/AC6/AC7, internal map §4
 
@@ -185,9 +186,10 @@ card 250 W · card returned to factory + state restored (simulated post-logon), 
       verified apply), not live telemetry — a truth↔mirror pair with the state file, refreshed on
       file change, and that is the whole contract. 7 faces (4 modes + test profile + unknown +
       problem), tooltip = the owner's title from the file, truncated below NotifyIcon's 63-unit
-      ceiling. Selftest: 9 blocks in a tmpdir sandbox, no GPU; 3 mutations each reddening exactly
-      their named blocks (truncation → block 7 · problem-face swap → blocks 4+5 · BOM strip →
-      parse failure exit 1, louder than a red block).
+      ceiling. Selftest: 11 blocks in a tmpdir sandbox, no GPU (9 at closure; +2 icon blocks with
+      verdict 005 — .ico faces load 4 of 4, missing .ico degrades to the drawn face); 4 mutations
+      each reddening exactly their named blocks (truncation → block 7 · problem-face swap →
+      blocks 4+5 · BOM strip → parse failure exit 1, louder than a red block · icon-fallback).
 - [x] Kill-safety proven live (**P3-AC4**): `gpu:info --json` before/after `Stop-Process` —
       **29 fields, the only diff `clocks.current.graphics` 975 → 922 MHz** (the idle clock
       breathing, volatile, not settable). Zero settable changes. Single instance proven: a second
@@ -208,12 +210,36 @@ re-add is the framework's own `TaskbarCreated` handler, read in the dotnet/winfo
 the no-console-flash-at-logon check (visible only at a real logon; the wrapper is the documented
 cure). Both are display-only risks — neither can touch the card.
 
-### 4.6 — Phase closure 🔲
+### 4.6 — Phase closure ✅ 2026-08-14 12:4x
 
-- [ ] `/fable-judge` over everything this plan claims closed (mandatory before «done»).
-- [ ] `MASTER_PLAN.md` phase 3 → closed with date + evidence; `STATUS.md` rewritten (debt line
+- [x] `/fable-judge` over everything this plan claims closed — **verdict: VERIFIED WITH CAVEATS.**
+      Re-run by the judge, same session (all offline / read-only, zero GPU writes): `npm run check`
+      **31/0** · format selftest **25/0** · applier selftest **27/0** · shortcuts selftest **5/0**
+      (sandbox, Desktop untouched) · tray selftest **11/11** · `setup -- --status` **7 tasks of 7,
+      tray alive (pid 30708)** · questions guard **clean** · watchdog **not armed** · `npm run
+      profiles` live: **6 profiles, 0 refusals** · P3-AC6 re-read: `package.json` dependencies =
+      `koffi` only · `researches/07` exists with verdict + fallback · receipt on disk, 11 artifacts,
+      per-artifact delete commands + `rollbackAll` · boot journal parses as UTF-8: 2 records
+      (`applied` 250 W · `factory-by-physics` zero writes) · tray.log tracks test-pl250 ↔ factory
+      both ways within one tick, mutex blocks a second instance · `tray.ps1` BOM byte-probed present ·
+      4 `.lnk` on the live Desktop, owner's names verbatim. **Caveats, all named, none blocking:**
+      (1) P3-AC2 series open — 0 natural logons of 5 (the meter the plan itself ordered named);
+      (2) the live GPU-write proofs (§4.3/§4.4/§4.5 apply/reset/kill runs) were NOT re-run — judging
+      changes nothing, and they would write to the card; accepted on their artifact trail (journal +
+      tray.log + read-back numbers recorded at the time), which is consistent and mutually dated;
+      (3) mutation proofs are one-off scripts, not re-runnable — addressivity satisfied on paper
+      (addressees named per mutation in §4.2/§4.4/§4.5 before the runs); (4) §4.5's bullet said
+      «9 blocks, 3 mutations» while the suite now runs 11/11 — the icon work (verdict 005) added
+      2 blocks + 1 mutation after closure; count corrected in place, drift noted here; (5) the two
+      deferred display-only checks (explorer-restart re-add, logon console flash) stay deferred —
+      neither can touch the card. Frauds hunted, none found: tree clean at judge start, no weakened
+      checks (selftest counts grew, never shrank), no unauthorized outward action (setup rights
+      granted by the owner 09:2x, icons fixed by the owner's word 12:2x), no invented literals
+      (every number above re-observed this session or carried in a journal).
+- [x] `MASTER_PLAN.md` phase 3 → closed with date + evidence; `STATUS.md` rewritten (debt line
       retired); internal map §4 updated from «design» to «built»; epic §9 track Б marked.
-- [ ] «Decisions made without the owner» (§8) filled — every solo call listed, PENDING lines settled.
+- [x] «Decisions made without the owner» (§8) filled — every solo call listed; closure decision
+      appended (close with P3-AC2 named open, per this plan's own Status order).
 
 ## 5. Boundaries — what phase 3 does NOT do
 
@@ -257,7 +283,7 @@ epic §6в) · the owner renames modes later (names ship verbatim; a rename is h
 | 4.3 | apply test profile → read-back match; reset from non-factory → factory match; receipt present |
 | 4.4 | manual task run end-to-end; then 5 natural logons journaled, all verified states |
 | 4.5 | ✅ taken 2026-08-14 11:1x: kill diff = 0 settable (29 fields, only the idle clock moved); tray.log tracked test-pl250 ↔ factory both ways |
-| 4.6 | `/fable-judge` verdict; canon updated; §8 filled |
+| 4.6 | ✅ taken 2026-08-14 12:4x: VERIFIED WITH CAVEATS (P3-AC2 the one open meter); canon updated; §8 filled |
 
 ## 8. Decisions made without the owner
 
@@ -284,3 +310,7 @@ epic §6в) · the owner renames modes later (names ship verbatim; a rename is h
   reddens on its loss; the mutation proved the loss is loud (a parse failure, exit 1).
 - **§4.5: the tray keeps its own tiny log (`runs/shell/tray.log`, capped at 512 KB)** — the only
   way a headless session can OBSERVE an icon change without eyes; the live acceptance read it.
+- **§4.6: the phase is closed with P3-AC2 still collecting** — the plan's own Status order («judge
+  what is closable, name the series as the one open meter») and the series' design (natural logons,
+  none forced) make waiting idle-time, not diligence. The epic's AC2 line stays open in `plans/01`
+  §9 (Б4) until the fifth verified record; nothing downstream is blocked by it.

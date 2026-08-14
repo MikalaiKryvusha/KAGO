@@ -60,6 +60,14 @@ profiles and build the owner-facing surface. They never search and never test.
 
 ## 4. The joint that was open, and how the owner closed it
 
+> **BUILT — phase 3 closed 2026-08-14 12:4x (judge: VERIFIED WITH CAVEATS, `plans/06` §4.6).**
+> The design below is now standing machinery: 4 desktop `.lnk` (owner's names verbatim, Fluent
+> Emoji 3D icons — his verdict after the render), 5 elevated apply tasks + `\KAGO\boot-apply`
+> (logon re-apply through the same gates) + `\KAGO\tray` (unelevated, passive NotifyIcon reading
+> the remembered-state file on a 2 s mtime timer). Kill-safety proven live: P3-AC4 = 0 settable
+> diffs of 29 fields. Draft modes REFUSE until phase 6 qualifies them. The one open meter:
+> P3-AC2's five natural logons, collecting in `runs/shell/boot-apply.jsonl`.
+
 **Settled by the owner, 2026-08-09 (chat):** *"в трее делаем без кнопок, а просто показ статуса, а
 сброс до заводских настроек — по третьему ярлыку с записью в автозагрузку"*.
 
