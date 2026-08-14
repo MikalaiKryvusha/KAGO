@@ -213,6 +213,41 @@ always going to be one manual run by him.
 figures are single-sourced. §4.3 (the diverse set), §4.6 (the margin) and §4.7 (the long burn and the two
 series) are what turn this shape into one.
 
+#### 2026-08-14 — THE SHAPE BECAME THE SEARCH'S SHAPE TOO, and it brought a ceiling of its own
+
+`bugs/02` step 1, executed offline with **zero GPU writes**. `runStep` now takes
+`writeShape: 'point' | 'uniform' | 'raise-and-cap'`, `searchEdge` carries it to every rung, and both
+`--search` and `--band` request it. Suites: `nvapi --selftest-shape` **31 blocks** (was 22, four
+mutations) · `vf-step --selftest` **25** (was 16, four mutations) · `vmin-store --selftest` **26** ·
+`engine --selftest` **62** (was 58, two mutations). Every mutation reddened the addressee named for it
+in the suite's header BEFORE the run (EXP-0016).
+
+**🔴 THE FINDING THAT CHANGES A MODE, not just the code: a ceiling has a FLOOR.** The ceiling is
+enforced by pushing the points above it DOWN, and that push is an offset bounded by the hardware's
+−1000…+1000 MHz. So **no cap below `topMhz − 1000` can be held by the curve at all** — measured on the
+live card 2026-08-14: top **3157 MHz** → floor **2157 MHz**. Consequences, in order of who they hit:
+
+| cap | who can hold it | note |
+|---|---|---|
+| 2842 (`Max Perfomance` / the search's top rung) | the curve | shipped shape available |
+| 2400 | the curve | shipped shape available |
+| **2100 — `Silent Cold` off the thermal ladder (fact 34+36)** | **NOT the curve — leaks 57 MHz** | the shipped profile alone lets the card reach 2157 |
+| 1700 · 2000 (§4.5's low rungs) | only the clock pin | measurement legal, but it is NOT the shipped shape, and the run says so per rung |
+
+The leak does not depend on the raise (identical across Δ = 0 / 45 / 180 / 300 / 540): it is the
+push-down that runs out of range. What does NOT change with the ceiling, and it was computed rather
+than assumed: **the point serving any clock ≤ cap, and therefore its voltage, is identical under a
+uniform raise and under the shipped vector** (9 of 9 across caps 2842 / 2400 / 2172 × Δ 45 / 180 /
+300). So this switch moves no number already measured — it removes the raised tail the card could
+boost into.
+
+**The candidate remedy, documented and NOT yet observed here:** `nvidia-smi -h` states
+`-lgc <minGpuClock,maxGpuClock>` — a **RANGE**, with `1500,1500` as its own example of the degenerate
+pin. This project retired `-lgc` because `candidateProfile()` uses `{min: mhz, max: mhz}`, which is
+the pin; a range (`min` at the idle floor, `max` at the cap) is a CEILING and leaves the card free to
+clock down, which is the owner's actual requirement. **Vendor help text, not a measurement** — it
+needs one live run with the owner before `Silent Cold` may rely on it. This goes to phase 6, not here.
+
 ### 4.2 — The ratchet store: a point's history IS the state of the search ✅
 
 *Anchor: `researches/02` §6.5 point 3 — «A point carries the history of every verdict it ever

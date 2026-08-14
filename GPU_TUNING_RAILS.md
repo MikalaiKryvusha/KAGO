@@ -77,7 +77,9 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 |---|---|---|
 | plan a curve step, no write | `npm run vfstep -- --set ... --dry-run` · `npm run engine -- --band N --dry-run` | free; READ the first-step depth line |
 | one candidate, judged by the 3-shape set | `npm run vfstep -- --set --point N --mhz M --cap C` | **S1 — owner present** |
-| edge search on one frequency band | `npm run engine -- --band N --seconds 10` | **S1 — owner present.** Currently STOPS by design until `bugs/02` form fix (search must search in the shipped shape) |
+| the SHIPPED shape by hand (whole curve + ceiling) | `npm run vfstep -- --shipped-shape --mhz M --cap C` | **S1 — owner present.** Refuses without `--cap`: no ceiling, no shipped shape |
+| edge search at one clock | `npm run engine -- --search --cap C` | **S1 — owner present.** Writes the SHIPPED shape and walks the VOLTAGE ladder. **REFUSES outright when `C` is below the curve's floor** (`top − 1000 MHz`, = 2157 on this card): with no pin, nothing would hold the ceiling |
+| edge search on one frequency band | `npm run engine -- --band N --seconds 10` | **S1 — owner present.** Per rung it prints WHICH shape it writes and WHO holds the ceiling — the curve where it can, the clock pin below the floor. `bugs/02` step 1 landed 2026-08-14; the search no longer halts by design |
 | apply / reset a profile | `npm run profile -- --apply <id>` · `-- --reset` | drafts REFUSE until phase 6 (machine gate); reset is always legal |
 | fan level (upward only) | `npm run nvapi -- --fan-write 80 [--cool-to 42]` | state change → owner aware; AUTO restored in `finally` |
 | acoustic / thermal ladders | `npm run fanladder -- --period 15` · `npm run thermal -- --points ...` | owner present (fanladder needs his EAR) |
@@ -99,7 +101,9 @@ detector, not a price (R4a, EXP-0030) · a delta below the instrument's measured
 the shipping margin is failure + 2 grid steps = +10 mV (owner's final word) · convert the search
 unit into the physical unit THROUGH AN OBSERVED READ-BACK, never through a model of the state
 (EXP-0034, `bugs/02`) · fan/temperature pairs are valid only at a DETECTED plateau — transients
-under-read fans by 10–18 pp (facts 35–36).
+under-read fans by 10–18 pp (facts 35–36) · **a CEILING must be held by something and the run names
+by what** — the curve can only hold a cap down to `top − 1000 MHz` (2157 here), below that the clock
+pin holds it and the shape is no longer the shipped one (`bugs/02` step 1).
 
 ## 4. Standing STOP lines (the full list)
 

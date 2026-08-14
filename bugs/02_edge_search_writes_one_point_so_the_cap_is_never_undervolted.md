@@ -1,7 +1,8 @@
 # Bug 02 — the edge search writes ONE curve point, so the clock it claims to undervolt is never undervolted
 
-**Status:** 🟡 PARTIAL — cause proved, **the GUARD is applied and has fired on the live card**; the
-search's write shape is not corrected yet (step 1 of the fix plan)
+**Status:** 🟡 PARTIAL — cause proved · the GUARD is applied and has fired on the live card ·
+**step 1 (the write shape) LANDED 2026-08-14, offline, zero GPU writes** · what remains is step 3:
+re-measure the edge on the card, which needs the owner present (`GPU_TUNING_RAILS.md` S1)
 **Version/build:** driver 610.88 · VBIOS 98.03.58.40.8b · `engine.mjs` as of commit `90b07dc`
 **When/context:** 2026-08-11 00:0x, during `plans/05` §4.5 — the first edge search judged by the
 diverse load set (§4.3, closed the same evening)
@@ -104,10 +105,49 @@ one the card was actually carrying. A conversion is only honest when its input i
 **Not applied tonight, on purpose:** the correction is a design decision inside §4.4/§4.5, not a
 one-line patch, and it is the kind of choice this project has already paid for making at speed.
 
-1. **The search must write the PROFILE'S OWN SHAPE.** `buildRaiseAndCapVector(points, delta)`
-   already exists, is proved offline, and is what the shipped profile applies. Searching in the same
-   shape the profile ships makes the searched quantity and the shipped quantity the same thing —
-   which is the whole reason the bracket may be converted to volts at all.
+1. ✅ **DONE 2026-08-14 18:0x — the search writes the PROFILE'S OWN SHAPE, and zero GPU writes were
+   made to get there.** `vf-step.runStep` gained `writeShape: 'point' | 'uniform' | 'raise-and-cap'`;
+   `engine.searchEdge` carries it to every rung; both CLI paths (`--search` and `--band`) now request
+   it. `null` keeps the legacy mapping from `allPoints`, so no existing caller changed behaviour
+   silently. Read-back became POINT-BY-POINT against the requested vector: the old check counted how
+   many points carried ONE scalar, which is the only question a uniform raise can be asked, and it
+   would have passed while the curve held something else entirely.
+
+   **Three things the work found, each computed rather than assumed:**
+
+   **(a) Switching shapes moves NO number this project has already measured.** A point serves clock C
+   iff `F_i + Δ ≥ C`, and the ceiling does not touch that condition — so the serving point and its
+   millivolts are IDENTICAL under a uniform raise and under the shipped vector, for every clock ≤ cap.
+   Checked at caps 2842 / 2400 / 2172 against Δ = 45 / 180 / 300: same point index, same voltage, nine
+   of nine. What the shape changes is what the card may do ABOVE the tested clock — the uniform raise
+   leaves the tail offering `F_top + Δ`, which is a state no shipped profile has, and it is exactly
+   the mechanism that made this bug's own run fail at ~3400 MHz while reporting a number about 2842.
+
+   **(b) 🔴 THE CEILING HAS A FLOOR, AND `Silent Cold` IS BELOW IT.** A ceiling is enforced by pushing
+   the points above it DOWN, and that push is an offset like any other — bounded by the hardware's
+   published −1000…+1000 MHz. So no cap below `topMhz − 1000` can be held by the curve at all. On the
+   live card, 2026-08-14: **top 3157 MHz → floor 2157 MHz.** `Silent Cold` was read off the thermal
+   ladder at **2100 MHz** (STATUS fact 34+36), which is **57 MHz below that floor** — the shipped
+   curve alone leaves the card able to reach 2157. The leak is independent of the raise (identical at
+   Δ = 0 / 45 / 180 / 300 / 540): it is the push-DOWN that runs out of range, not the raise.
+   `buildRaiseAndCapVector` now returns `capEnforced` / `capLeakMhz` / `lowestEnforceableCapMhz`, and
+   `vf-step.chooseWriteShape` turns them into the rule **a ceiling must be HELD BY SOMETHING** — the
+   curve where it can, the measurement's clock pin where it cannot, and a REFUSAL where neither does.
+   Proved live read-only: `--search --cap 2842` plans the shipped shape; `--search --cap 2100`
+   refuses, naming the floor and the leak.
+
+   **(c) The remedy for (b) is documented but NOT YET OBSERVED on this card.** `nvidia-smi -h` states
+   `-lgc  --lock-gpu-clocks=<minGpuClock,maxGpuClock>` — **a RANGE**, and `1500,1500` is its example
+   of the degenerate case. This project retired `-lgc` as a profile mechanism because
+   `ladder.candidateProfile()` uses `{min: mhz, max: mhz}`, which is a PIN — the card can move neither
+   up nor down, so it would hold the locked clock at idle. A range with `min` at the idle floor and
+   `max` at the cap is a CEILING, not a pin, and would satisfy the owner's requirement that the card
+   stay free to clock down. **This is read from the vendor's help text, not measured here** — it is a
+   candidate for phase 6, and it needs one live run with the owner present before anyone relies on it.
+
+   **What this step does NOT deliver:** a number. No live write was made, so the edge of this card is
+   still unmeasured — that is step 3.
+
 2. ✅ **DONE 2026-08-11 00:2x — the engine REFUSES.** `refuseWithoutUndervolt()` reads the atom's own
    `undervolt.savedMv` (the voltage serving the cap before the write minus after, both from the
    card's curve) and, when it is not positive, **halts the search on that rung**, reports no bracket
@@ -117,16 +157,54 @@ one-line patch, and it is the kind of choice this project has already paid for m
    **Then fired for real** against the very search that produced this bug: it now stops at +75 MHz
    with «эта запись НЕ удешевляет потолок … экономия 0 мВ» instead of walking seven rungs.
 
-   **Consequence, stated plainly: `npm run engine -- --search` cannot produce a result until step 1
-   lands.** That is the intended state — a search that cannot support its own claim should refuse,
-   not produce a number somebody will quote.
+   ~~**Consequence, stated plainly: `npm run engine -- --search` cannot produce a result until step 1
+   lands.**~~ **LIFTED 2026-08-14 with step 1.** The guard stays exactly as it was — what changed is
+   that the write it judges now cheapens the cap by construction, so the guard should pass instead of
+   halting. It remains the thing that would catch the shape regressing.
 3. **Re-run the edge search at 2842 MHz in the corrected shape**, and replace fact 28's number with
-   what that run measures.
+   what that run measures. **Owner-gated (S1): live curve writes happen only with him at the machine.**
+   The first command is `npm run engine -- --search --cap 2842 --dry-run` (already run, read-only:
+   shipped shape, first step −5 mV, 9 rungs), then the same without `--dry-run`.
 4. **Correct the canon rather than delete it:** fact 28 and EXP-0034 get a correction block; the
    original text stays, because how the project came to believe a number is part of what protects
    the next session from believing it again.
 
+## TWINS — every other place the curve is written (searched 2026-08-14)
+
+`TWINS: searched writeCurve( · writeVfOffset( · zeroCurve( across automation-engine/ and tools/ —
+found 4 other sites that raise the whole curve with NO ceiling:`
+
+| Site | What it writes | Same defect? |
+|---|---|---|
+| `vf-step.mjs` → `runAscent`, its own `writeAll` (~line 851) | uniform raise, no cap, no pin | **NOT this bug** (it raises the whole curve, so the cap's voltage does fall) but it is the OTHER half of the family: with no ceiling the raise is taken as SPEED, not watts (`researches/02` §6.2, EXP-0031). `--ascend` is a legacy probe; **listed, not fixed** |
+| `vf-step.mjs` → `measureUndervolt`, its own `writeAll` (~line 986) | uniform raise under a clock LOCK | legal as a measurement — the lock holds the ceiling and the run says so. **Listed** |
+| `vf-step.mjs` → `runShapeExperiment` (~line 1231) | `buildRaiseAndCapVector` | already the shipped shape — this is where the shape was born |
+| `watchdog.mjs` (~line 290) | zeroes every point | a rollback, and total by design (R9) |
+
+Two of these are the duplication `plans/05` §4.1(a) named: **four open-coded 127-point loops still
+exist** where one writer should be. That debt is unchanged by this fix and stays open in §4.1(a).
+
 ## Decisions made without the owner
+
+- **`writeShape` is a NAMED parameter, not a silent upgrade of `allPoints`.** A boolean cannot carry
+  three shapes, and quietly redefining what `allPoints: true` writes would change the behaviour of a
+  module that writes to the owner's card without anyone asking for it. `null` keeps every existing
+  caller exactly as it was.
+- **The chooser DECIDES and the vector COMPUTES — deliberately two functions.** `chooseWriteShape`
+  takes the already-built vector rather than the curve, so the arithmetic has one author and the two
+  offline suites cannot end up testing each other's job.
+- **The engine does not pick its own shape.** It carries what the caller chose, and the caller prints
+  the choice per rung. A search that picked silently would hide which of the two holders produced its
+  number — the very class this bug is named for.
+- **`writeShape` became a REQUIRED-PRESENT field of the ratchet record** (`vmin-store`), nullable but
+  not omittable. Every record of the search that produced this bug was well-formed and useless for
+  catching it, because none said what had been written.
+- **`--search` also gained the VOLTAGE ladder, which was not asked for and is not optional.**
+  Switching that path to a whole-curve write while it still walked a fixed-MHz ladder would have put
+  a real undervolt under a depth governor that cannot see millivolts — `pickAscentRungs` says so
+  itself on an ungraded ladder — and that is precisely the arrangement of `bugs/03`.
+- **Listed the four twin sites instead of rewriting them.** They are live-write paths; changing them
+  today would ship edits no offline suite can judge, on the day the search itself changed shape.
 
 - **Filed as research-only rather than fixed immediately.** The symptom is not a hazard: every run
   rolled back cleanly, the card is at factory state, and no profile was ever shipped from these

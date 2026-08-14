@@ -110,7 +110,19 @@ export const REQUIRED_FIELDS = Object.freeze([
  *
  * [NOT-TESTED]
  */
-export const REQUIRED_PRESENT_MAY_BE_NULL = Object.freeze(['verdict']);
+/**
+ * `writeShape` JOINS IT 2026-08-14, for the same reason and from a defect that already happened.
+ *
+ * `bugs/02`: the search wrote one curve point while every conclusion drawn from its records was
+ * phrased about the voltage serving a clock. The records themselves were fine — and USELESS for
+ * catching it, because none of them said what had been written. A record that does not name its
+ * write shape cannot be compared with one that used another (EXP-0011: a value is true only under
+ * the conditions it was taken, and the shape is one of those conditions).
+ *
+ * Present-but-may-be-null rather than required: a caller that genuinely does not know the shape says
+ * so with `null`, and that honest gap is visible. What is no longer possible is not mentioning it.
+ */
+export const REQUIRED_PRESENT_MAY_BE_NULL = Object.freeze(['verdict', 'writeShape']);
 
 /** Build a record, refusing to invent anything that was not supplied. [NOT-TESTED] */
 export function makeRecord(fields = {}) {
@@ -144,6 +156,10 @@ export function makeRecord(fields = {}) {
     bitDistMin: fields.bitDistMin ?? null,
     opsPerSecond: fields.opsPerSecond ?? null,
     capMhz: fields.capMhz ?? null,
+    // WHAT WENT INTO THE CURVE, and WHO held the ceiling while it did — the two conditions `bugs/02`
+    // proved a verdict is meaningless without.
+    writeShape: fields.writeShape ?? null,
+    capHeldBy: fields.capHeldBy ?? null,
     at: fields.at ?? stampNow(),
   };
 }
@@ -311,12 +327,17 @@ export function summarizePoint(records, point, opts = {}) {
  *   5. drop the stamp partition (R6)                    → «чужой драйвер уходит в карантин, а не в доказательства»
  *   6. return 0 instead of Infinity when never failed   → «точка без отказов ничем не ограничена»
  *   7. silently skip a truncated line                   → «оборванная строка сосчитана, а не проглочена»
+ *   8. drop `writeShape` from the presence list         → «запись БЕЗ формы записи — отказ (bugs/02)»
  */
 export function selfTest() {
   const results = [];
   const ok = (what, got, want) => results.push({ ok: JSON.stringify(got) === JSON.stringify(want), what, got, want });
 
-  const base = { workload: 'sdc_fma', shape: 'sustained', driver: '610.88', vbios: 'v1', at: '2026-08-10T20:00:00+03:00' };
+  const base = {
+    workload: 'sdc_fma', shape: 'sustained', driver: '610.88', vbios: 'v1', at: '2026-08-10T20:00:00+03:00',
+    // The write shape is part of every fixture from the day it became a condition of the record.
+    writeShape: 'uniform',
+  };
   const rec = (point, offsetMhz, verdict, over = {}) => makeRecord({ ...base, point, offsetMhz, verdict, ...over });
 
   // --- the record refuses to invent
@@ -327,6 +348,24 @@ export function selfTest() {
   try { makeRecord({ ...base, point: -1, offsetMhz: 15, verdict: 'PASS' }); } catch { threwPoint = true; }
   ok('отрицательная точка — отказ', threwPoint, true);
   ok('условия замера попадают в запись', Object.keys(rec(95, 15, 'PASS')).includes('tempStartC'), true);
+
+  // --- THE WRITE SHAPE IS A CONDITION OF THE RECORD (bugs/02).
+  //
+  // The records of the search that produced `bugs/02` were all well-formed and all useless for
+  // catching it: not one of them said what had been written into the curve. Presence is tested by the
+  // KEY, so an honest «I do not know» is `null` and passes — what no longer passes is silence.
+  let threwNoShape = false;
+  try {
+    const { writeShape, ...withoutShape } = base;
+    makeRecord({ ...withoutShape, point: 95, offsetMhz: 15, verdict: config.VERDICT.PASS });
+  } catch (e) { threwNoShape = /writeShape/.test(e.message); }
+  ok('запись БЕЗ формы записи — отказ, и в причине названо именно это поле (bugs/02)', threwNoShape, true);
+  ok('а ЧЕСТНОЕ «не знаю» — это null, и оно проходит',
+    makeRecord({ ...base, writeShape: null, point: 95, offsetMhz: 15, verdict: config.VERDICT.PASS }).writeShape, null);
+  ok('форма записи и держатель потолка доезжают до записи как есть',
+    [rec(95, 15, 'PASS', { writeShape: 'raise-and-cap', capHeldBy: 'кривая' }).writeShape,
+      rec(95, 15, 'PASS', { writeShape: 'raise-and-cap', capHeldBy: 'кривая' }).capHeldBy],
+    ['raise-and-cap', 'кривая']);
 
   // --- the ratchet
   const hist = [

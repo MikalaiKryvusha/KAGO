@@ -487,6 +487,35 @@ export function readFanCoolers(nv, handle, { versions = [1, 2, 3, 4] } = {}) {
  * Point 127 is excluded by the caller (it is not a graphics point — 515 mV / 405 MHz against its
  * neighbour's 1240 mV / 3172 MHz), and `F_top` is taken over the points we actually write.
  *
+ * ─── THE CAP HAS A FLOOR, AND IT IS THE HARDWARE'S, NOT OURS ──────────────────────────────────────
+ *
+ * A cap is enforced by pushing the points ABOVE it down onto it, and that push is an offset like any
+ * other — bounded by the range the hardware published, −1000…+1000 MHz (`researches/05` §8). So a
+ * point sitting at `F_top` cannot be moved below `F_top − 1000`, and **no cap below
+ * `topMhz + CLOCK_OFFSET_MIN_MHZ` can be held by the curve at all.** On this card's curve that floor
+ * is **3172 − 1000 = 2172 MHz**, computed 2026-08-14 across Δ = 0, 45, 180, 300 and 540: the leak is
+ * identical at every raise, because the raise is not what runs out — the push-down is.
+ *
+ * Two consequences this function refuses to hide, which is why it now returns a verdict rather than
+ * only a vector:
+ *
+ *   • **`Silent Cold` at 2100 MHz (STATUS fact 34+36) is BELOW that floor** — the shipped curve alone
+ *     leaves the card able to reach 2172, i.e. 72 MHz above the ceiling the mode was read off the
+ *     thermal ladder at. Whoever ships that mode has to hold the ceiling with something else, or say
+ *     out loud that it is 2172.
+ *   • A search that wants the shipped shape at a low band rung CANNOT have it. There the ceiling is
+ *     held by the measurement's clock pin instead, and the caller is the one that must say which of
+ *     the two is holding it (`vf-step.chooseWriteShape`).
+ *
+ * What does NOT change with the cap, and it was computed rather than assumed: **the point serving any
+ * clock ≤ cap, and therefore its voltage, is IDENTICAL under a uniform raise and under this vector**
+ * (checked at caps 2842 / 2400 / 2172 against Δ = 45 / 180 / 300 — the same point index and the same
+ * millivolts in all nine). A point reaches C iff `F_i + Δ ≥ C`, and the cap does not touch that
+ * condition; all the cap changes is what the card may do ABOVE the tested clock. So switching the
+ * search onto this shape does not move the measured Vmin — it removes the raised tail the card could
+ * otherwise boost into, which is exactly the mechanism that made `bugs/02`'s run fail at ~3400 MHz
+ * while reporting a number about 2842.
+ *
  * [NOT-TESTED] at birth — offline blocks in `--selftest-shape` are what flip this.
  */
 export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_COUNT - 1, capMhz = null } = {}) {
@@ -510,6 +539,20 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     // graphics domain (`researches/05` §8), and config carries it with `..._IS_MEASURED = true`.
     offsets.push(Math.max(config.CLOCK_OFFSET_MIN_MHZ, Math.min(config.CLOCK_OFFSET_MAX_MHZ, wanted)));
   }
+  // WHAT THE CURVE ACTUALLY OFFERS AFTER THE WRITE — computed, never assumed. The cap is a WISH until
+  // this number confirms it, and on this card the wish does not always come true: see below.
+  let highestOfferedMhz = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const p = points[i];
+    if (!p || p.freqKhz <= 0) continue;
+    highestOfferedMhz = Math.max(highestOfferedMhz, p.mhz + offsets[i]);
+  }
+  if (!Number.isFinite(highestOfferedMhz)) highestOfferedMhz = topMhz;
+  // The floor is arithmetic, not a measurement of this run: a point at F_top can be pushed down by at
+  // most |CLOCK_OFFSET_MIN_MHZ|, so no cap below `topMhz + CLOCK_OFFSET_MIN_MHZ` can ever be held by
+  // the curve alone. On this card that is 3172 − 1000 = 2172 MHz.
+  const lowestEnforceableCapMhz = topMhz + config.CLOCK_OFFSET_MIN_MHZ;
+
   return {
     ok: true,
     topMhz,
@@ -523,6 +566,10 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     zero: offsets.filter((o) => o === 0).length,
     maxOffset: Math.max(...offsets),
     minOffset: Math.min(...offsets),
+    highestOfferedMhz,
+    lowestEnforceableCapMhz,
+    capEnforced: highestOfferedMhz <= cap,
+    capLeakMhz: Math.max(0, highestOfferedMhz - cap),
   };
 }
 
@@ -1141,6 +1188,13 @@ async function mainProveMask(point, offsetMhz, mode) {
  *
  * What each block guards is stated in its own name, because a suite whose blocks are green for
  * neighbouring reasons guards nothing (EXP-0016).
+ *
+ * MUTATION ADDRESSEES FOR THE CAP-ENFORCEABILITY BLOCKS, NAMED BEFORE THE RUN (EXP-0016) — added
+ * 2026-08-14 with the verdict itself:
+ *   1. report `capEnforced: true` unconditionally      → «потолок НИЖЕ пола железа: capEnforced ЧЕСТНО false»
+ *   2. compute the leak as `cap − highest` (sign flip) → «и утечка названа числом: 72 МГц над потолком 2100»
+ *   3. derive the floor from the cap instead of the top→ «пол потолка = верх кривой минус диапазон железа, а не что-то ещё»
+ *   4. take `highestOffered` from the STOCK curve      → «выдаваемый максимум считается по кривой ПОСЛЕ сдвигов»
  */
 export function selftestShape() {
   let failed = 0;
@@ -1237,6 +1291,46 @@ export function selftestShape() {
     `диапазон железа ${config.CLOCK_OFFSET_MIN_MHZ}…${config.CLOCK_OFFSET_MAX_MHZ}, наш ${c.minOffset}…${c.maxOffset}`);
   check('флаг capIsBelowTop честно различает два режима',
     c.capIsBelowTop === true && v.capIsBelowTop === false);
+
+  // --- THE CAP'S OWN FLOOR: below `top − 1000` the curve cannot hold a ceiling at all, and the
+  // function says so instead of returning a vector that quietly does not do what its name says.
+  //
+  // This is not a hypothetical: `Silent Cold` was read off the thermal ladder at 2100 MHz, which sits
+  // BELOW this curve's floor of 2172. A vector that reported nothing here would have shipped a mode
+  // whose ceiling leaks by 72 MHz, and nobody would have had a number to notice it by.
+  const FLOOR = TOP + config.CLOCK_OFFSET_MIN_MHZ;                    // 3172 − 1000 = 2172
+  const held = buildRaiseAndCapVector(points, DELTA, { capMhz: 2400 });
+  check('потолок ВЫШЕ пола железа: он реально удержан кривой',
+    held.capEnforced === true && held.capLeakMhz === 0,
+    `выдаётся максимум ${held.highestOfferedMhz} при потолке ${held.capMhz}`);
+  const leaky = buildRaiseAndCapVector(points, DELTA, { capMhz: 2100 });
+  check('потолок НИЖЕ пола железа: capEnforced ЧЕСТНО false, а не молчание',
+    leaky.capEnforced === false,
+    `выдаётся максимум ${leaky.highestOfferedMhz} при потолке ${leaky.capMhz}`);
+  check('и утечка названа ЧИСЛОМ, а не признаком: 72 МГц над потолком 2100',
+    leaky.capLeakMhz === 72, `утечка ${leaky.capLeakMhz} МГц`);
+  check('пол потолка = верх кривой ПЛЮС отрицательный предел железа, а не что-то ещё',
+    leaky.lowestEnforceableCapMhz === FLOOR,
+    `${leaky.lowestEnforceableCapMhz} МГц при верхе ${TOP} и пределе ${config.CLOCK_OFFSET_MIN_MHZ}`);
+  check('РОВНО НА ПОЛУ потолок ещё держится — граница включительная, а не «около»',
+    buildRaiseAndCapVector(points, DELTA, { capMhz: FLOOR }).capEnforced === true,
+    `потолок ${FLOOR} МГц`);
+  check('на ОДИН МЕГАГЕРЦ ниже пола — уже не держится, и это доказывает, что граница именно там',
+    buildRaiseAndCapVector(points, DELTA, { capMhz: FLOOR - 1 }).capEnforced === false,
+    `потолок ${FLOOR - 1} МГц`);
+  // The leak does not depend on the raise: it is the push-DOWN that runs out of range, not the raise.
+  // Measured across five deltas 2026-08-14 — this block is what would catch that stopping being true.
+  check('утечка НЕ зависит от величины подъёма — кончается придавливание, а не подъём',
+    [0, 45, 180, 300, 540].every((d) => buildRaiseAndCapVector(points, d, { capMhz: 2100 }).capLeakMhz === 72),
+    'проверено на подъёмах 0 / 45 / 180 / 300 / 540 МГц');
+  // `highestOffered` must be read off the curve AFTER the offsets: taken off the stock curve it would
+  // report 3172 everywhere and every cap would look broken, which is the opposite failure.
+  check('выдаваемый максимум считается по кривой ПОСЛЕ сдвигов, а не по стоковой',
+    held.highestOfferedMhz === 2400 && held.highestOfferedMhz !== TOP,
+    `${held.highestOfferedMhz} МГц против стокового верха ${TOP}`);
+  check('БЕЗ потолка вопрос не возникает вовсе: потолок = верх, держится сам собой',
+    v.capEnforced === true && v.capLeakMhz === 0,
+    `максимум ${v.highestOfferedMhz} при потолке ${v.capMhz}`);
 
   // --- points with no frequency are not invented into the profile
   const holed = points.map((p, i) => (i === 50 ? { ...p, freqKhz: 0, mhz: 0 } : p));

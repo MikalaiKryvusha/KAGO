@@ -233,6 +233,75 @@ export function voltageForClock(points, clockMhz) {
 }
 
 /**
+ * THE THREE WRITE SHAPES, NAMED — and which one a run is allowed to use.
+ *
+ * `bugs/02` step 1: *«The search must write the PROFILE'S OWN SHAPE… searching in the same shape the
+ * profile ships makes the searched quantity and the shipped quantity the same thing.»* The shipped
+ * shape is `buildRaiseAndCapVector` — the whole curve raised, with a CEILING. What the search wrote
+ * instead was a UNIFORM raise of all 127 points, held down by a clock pin.
+ *
+ * The two differ in one thing that matters and one that does not, and both were computed on the curve
+ * before a single watt was spent (2026-08-14):
+ *
+ *   • **They do NOT differ in the measured voltage.** A point serves clock C iff `F_i + Δ ≥ C`, and
+ *     the ceiling does not touch that condition, so the serving point and its millivolts are identical
+ *     under both shapes for every clock ≤ cap (checked at 2842 / 2400 / 2172 against Δ = 45 / 180 /
+ *     300 — same point index, same voltage, nine of nine). Switching shapes therefore moves no number
+ *     this project has already measured.
+ *   • **They differ in what the card may do ABOVE the tested clock.** A uniform raise leaves the tail
+ *     offering `F_top + Δ` — a state the shipped profile never has, and the very mechanism that made
+ *     `bugs/02`'s run fail at ~3400 MHz while reporting a number about 2842. The shipped shape pushes
+ *     that tail down onto the ceiling, so a failure belongs to the clock under test.
+ *
+ * **THE RULE THIS FUNCTION ENFORCES: a ceiling must be HELD BY SOMETHING, and the run says by what.**
+ * The curve holds it when it can; below `topMhz − 1000` it cannot (the hardware's offset range runs
+ * out — `nvapi.buildRaiseAndCapVector`, floor 2172 MHz on this card), and there the measurement's
+ * clock pin is the holder. If neither holds it, this refuses — a run whose ceiling nothing enforces
+ * measures a state nobody can name.
+ *
+ * Pure, and it takes the already-built vector rather than the curve, so the arithmetic has ONE author
+ * (`buildRaiseAndCapVector`) and this function only decides.
+ *
+ * @param {object} vector  the result of `nvapi.buildRaiseAndCapVector`
+ * @param {{pinned:boolean}} opts
+ * @returns {{ok:boolean, shape:string|null, heldBy:string|null, why:string}}
+ *
+ * [NOT-TESTED] at birth — the offline blocks in `--selftest` are what flip this.
+ */
+export function chooseWriteShape(vector, { pinned = false } = {}) {
+  if (!vector || vector.ok !== true) {
+    return { ok: false, shape: null, heldBy: null, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
+  }
+  if (vector.capEnforced) {
+    return {
+      ok: true,
+      shape: 'raise-and-cap',
+      heldBy: 'кривая',
+      why: `потолок ${vector.capMhz} МГц держит САМА КРИВАЯ (выше пола железа ${vector.lowestEnforceableCapMhz} МГц) — `
+        + 'это ровно та форма, которая отгружается в профиле',
+    };
+  }
+  if (pinned) {
+    return {
+      ok: true,
+      shape: 'uniform',
+      heldBy: 'закрепление частоты',
+      why: `потолок ${vector.capMhz} МГц кривой НЕ удержать (пол железа ${vector.lowestEnforceableCapMhz} МГц, утечка `
+        + `${vector.capLeakMhz} МГц), поэтому его держит ЗАКРЕПЛЕНИЕ, а кривая поднимается равномерно. `
+        + 'Замер законен, но это НЕ отгружаемая форма — на этой ступени они расходятся, и расхождение названо',
+    };
+  }
+  return {
+    ok: false,
+    shape: null,
+    heldBy: null,
+    why: `ОТКАЗ: потолок ${vector.capMhz} МГц не держит НИЧТО — кривой его не удержать (пол железа `
+      + `${vector.lowestEnforceableCapMhz} МГц, утечка ${vector.capLeakMhz} МГц), а частота не закреплена. `
+      + 'Карта ушла бы выше испытуемой частоты, и вердикт был бы о состоянии, которое никто не назвал',
+  };
+}
+
+/**
  * Run one step and judge it.
  *
  * Returns a report rather than printing, so the engine that will loop over this can decide without
@@ -246,6 +315,20 @@ export async function runStep({
   sustain = 10,
   dryRun = false,
   allPoints = false,
+  // WHICH SHAPE GOES INTO THE CURVE — `bugs/02` step 1, and the reason this parameter exists at all.
+  //
+  //   'point'         one point moves. The historical atom. It CANNOT cheapen the clock it claims to
+  //                   test (the clock is served by a neighbour we did not touch) — this is the defect
+  //                   `bugs/02` is named for, kept only because an operator sometimes wants one point.
+  //   'uniform'       every point up by the same Δ. Legal for a MEASUREMENT under a clock pin, and not
+  //                   a shape any profile ships: the tail then offers `F_top + Δ`.
+  //   'raise-and-cap' THE SHIPPED SHAPE — `offset_i = min(Δ, cap − F_i)`. The whole curve up, the tail
+  //                   pushed down onto the ceiling, maximum boost provably unchanged.
+  //
+  // `null` keeps the legacy mapping from `allPoints`, so every existing caller behaves exactly as it
+  // did — a silent behaviour change in a module that writes to the owner's card would be its own
+  // defect. `chooseWriteShape` is what a caller uses to pick honestly.
+  writeShape = null,
   capMhz = null,
   // THE DIVERSE SET (plans/05 §4.3). `null` keeps the historical single-shape atom, which is what an
   // operator asks for by hand; an ARRAY judges this one offset by the whole set — one write, one
@@ -274,7 +357,15 @@ export async function runStep({
   const wd = await import('./watchdog.mjs');
   const stress = await import('./stress-tester.mjs');
 
-  const out = { point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, capMhz, pinMhz, blocks: [], verdict: null };
+  // THE SHAPE IS RESOLVED ONCE, HERE, and it rides in the report — a record that does not say which
+  // shape produced it cannot be compared with one that does (EXP-0011: a value is true only under the
+  // conditions it was taken, and the write shape is one of them).
+  const shape = writeShape ?? (allPoints ? 'uniform' : 'point');
+  if (!['point', 'uniform', 'raise-and-cap'].includes(shape)) {
+    throw new RangeError(`неизвестная форма записи «${shape}» — только point | uniform | raise-and-cap`);
+  }
+
+  const out = { point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, writeShape: shape, capMhz, pinMhz, blocks: [], verdict: null };
   const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
 
   if (offsetMhz <= 0) throw new RangeError(`шаг обязан быть ПОЛОЖИТЕЛЬНЫМ (это и есть андервольт): ${offsetMhz}`);
@@ -327,6 +418,50 @@ export async function runStep({
       `${mvAtPoint} мВ / ${freqBefore} МГц при ${tempBefore} °C; после шага ожидаем ${freqBefore + offsetMhz} МГц при том же напряжении. ` +
       `ВНИМАНИЕ: кривая проседает с температурой (замер: −15…−22 МГц за 12 °C), поэтому сравнение честно только при совпавшей температуре`);
 
+    // ---- 1b. THE VECTOR AND ITS CEILING — computed BEFORE the watchdog is armed, so a refusal costs
+    // the card no time at all. The vector is built from the curve read moments ago, at THIS
+    // temperature: a vector built from an older reading would be capped against a curve the card no
+    // longer has (fact 18 — the curve derates 15–22 MHz over 12 °C).
+    let vector = null;
+    if (shape === 'raise-and-cap') {
+      if (!Number.isFinite(capMhz)) {
+        block('ФОРМА ЗАПИСИ: отгружаемая (подъём с потолком)', false,
+          'этой форме нужен ПОТОЛОК (--cap): без него нечего держать, и она перестаёт быть отгружаемой формой');
+        return out;
+      }
+      if (!curveBefore.ok) {
+        block('ФОРМА ЗАПИСИ: отгружаемая (подъём с потолком)', false, `кривая не прочитана — ${curveBefore.why}`);
+        return out;
+      }
+      vector = nvapi.buildRaiseAndCapVector(curveBefore.points, offsetMhz, { capMhz });
+      const held = chooseWriteShape(vector, { pinned: Boolean(pinMhz) });
+      out.capHeldBy = held.heldBy;
+      out.vector = vector.ok
+        ? { capMhz: vector.capMhz, topMhz: vector.topMhz, highestOfferedMhz: vector.highestOfferedMhz,
+          capEnforced: vector.capEnforced, capLeakMhz: vector.capLeakMhz,
+          atFullDelta: vector.atFullDelta, raisedButCapped: vector.raisedButCapped,
+          pushedDown: vector.pushedDown, zero: vector.zero,
+          minOffset: vector.minOffset, maxOffset: vector.maxOffset }
+        : null;
+      // THE CEILING MUST BE HELD BY SOMETHING, and this block names by what. A ceiling nothing enforces
+      // lets the card leave the clock under test, and then the verdict is about an unnamed state.
+      block(`ПОТОЛОК ${capMhz} МГц ДЕРЖИТ: ${held.heldBy ?? 'НИЧТО'}`, held.ok, held.why);
+      if (!held.ok) return out;
+      if (held.shape !== 'raise-and-cap') {
+        // The caller asked for the shipped shape and this rung cannot have it. Refusing here rather
+        // than silently downgrading: which shape was written is exactly what `bugs/02` proved a run
+        // must not leave to inference. The caller picks again with `chooseWriteShape` in hand.
+        block('ФОРМА ЗАПИСИ: заказана отгружаемая, а на этой ступени она невозможна', false,
+          `${held.why}. Вызывающему следует запросить форму «${held.shape}» ЯВНО — подмена формы молча ` +
+          'это ровно тот класс, из-за которого поиск докладывал о напряжении, которого карта не видела (bugs/02)');
+        return out;
+      }
+      block(`ВЕКТОР: подъём +${offsetMhz} МГц, потолок ${vector.capMhz} МГц (верх кривой ${vector.topMhz})`, true,
+        `полный шаг у ${vector.atFullDelta} точек, придавлено ${vector.raisedButCapped}, толкнуто вниз ${vector.pushedDown}, `
+        + `нулевых ${vector.zero}; сдвиги ${vector.minOffset}…${vector.maxOffset} МГц; после записи кривая предложит `
+        + `максимум ${vector.highestOfferedMhz} МГц`);
+    }
+
     if (dryRun) {
       block('СУХОЙ ПРОГОН: запись НЕ делалась', true, 'план показан, карта не тронута');
       return out;
@@ -341,7 +476,14 @@ export async function runStep({
     // mid-set and reset a card nothing was wrong with.
     const shapeCount = Array.isArray(shapes) && shapes.length ? shapes.length : 1;
     const ttlMs = (seconds * shapeCount + 60) * 1000;
-    watchdog = wd.arm({ what: `АНДЕРВОЛЬТ: точка ${point} (+${offsetMhz} МГц), нагрузка ${Array.isArray(shapes) ? `набор из ${shapeCount} форм` : workload}`, ttlMs });
+    // The lease NAMES THE WRITE SHAPE, because the record is what a stranger reads after a crash: «one
+    // point» and «the whole curve with a ceiling» are different amounts of card to be holding.
+    const armWhat = {
+      'raise-and-cap': `АНДЕРВОЛЬТ, ОТГРУЖАЕМАЯ ФОРМА: вся кривая +${offsetMhz} МГц с потолком ${capMhz} МГц`,
+      uniform: `АНДЕРВОЛЬТ: вся кривая равномерно +${offsetMhz} МГц`,
+      point: `АНДЕРВОЛЬТ: точка ${point} (+${offsetMhz} МГц)`,
+    }[shape];
+    watchdog = wd.arm({ what: `${armWhat}, нагрузка ${Array.isArray(shapes) ? `набор из ${shapeCount} форм` : workload}`, ttlMs });
     block('сторож взведён ДО записи', Boolean(watchdog.guardPid),
       `pid ${watchdog.guardPid}, аренда ${ttlMs / 1000} с, откат — полный возврат к заводскому`);
 
@@ -349,14 +491,24 @@ export async function runStep({
     // Point 127 is excluded by measurement, not by caution: the NVML lever never moves it, it carries
     // the structure's only non-zero service dword, and on the curve it reads 515 mV / 405 MHz against
     // its neighbour's 1240 mV / 3157 MHz — it is not part of the monotone graphics curve.
-    const targets = allPoints
-      ? Array.from({ length: nvapi.CLK_VF_POINT_COUNT - 1 }, (_, i) => i)
-      : [point];
+    const curvePoints = nvapi.CLK_VF_POINT_COUNT - 1;
+    // WHAT WE ASKED FOR, POINT BY POINT — one array for all three shapes, so the read-back has exactly
+    // one thing to compare against instead of a rule per shape. `null` means "this point was not
+    // addressed by this run" and is therefore expected to stay at zero.
+    const requested = Array.from({ length: curvePoints }, (_, i) => {
+      if (shape === 'raise-and-cap') return vector.offsets[i];
+      if (shape === 'uniform') return offsetMhz;
+      return i === point ? offsetMhz : null;
+    });
+    const targets = requested.map((o, i) => (o === null ? null : i)).filter((i) => i !== null);
 
     // ONE WRITER, and for the whole curve it is `nvapi.writeCurve` rather than a sixth open-coded
     // copy of the same loop (plans/05 §4.1 item a). The single-point path stays a single call.
     let failed = 0;
-    if (allPoints) {
+    if (shape === 'raise-and-cap') {
+      const w = nvapi.writeCurve(nv, handle, vector.offsets);
+      failed = w.failed;
+    } else if (shape === 'uniform') {
       const w = nvapi.writeCurve(nv, handle, offsetMhz);
       failed = w.failed;
     } else {
@@ -364,23 +516,71 @@ export async function runStep({
       if (!r.ok) failed++;
     }
     written = failed < targets.length;
-    block(`ЗАПИСЬ: ${allPoints ? `ВСЯ КРИВАЯ (${targets.length} точек)` : `точка ${point}`}, сдвиг +${offsetMhz} МГц`,
+    const shapeName = {
+      'raise-and-cap': `ОТГРУЖАЕМАЯ ФОРМА — вся кривая с потолком ${capMhz} МГц (${targets.length} точек)`,
+      uniform: `ВСЯ КРИВАЯ равномерно (${targets.length} точек)`,
+      point: `точка ${point}`,
+    }[shape];
+    block(`ЗАПИСЬ: ${shapeName}, подъём +${offsetMhz} МГц`,
       failed === 0, failed === 0 ? 'все вызовы приняты' : `отказов ${failed} из ${targets.length}`);
     if (failed === targets.length) return out;
     watchdog.beat();
 
+    // ---- READ BACK POINT BY POINT, against the vector we asked for.
+    //
+    // The old check counted how many points carried ONE scalar offset, which is the only question a
+    // uniform raise can be asked. The shipped shape asks a different one — every point carries ITS OWN
+    // number, several of them zero and several negative — and a count would have passed while the
+    // curve held something else entirely. Status 0 is not verification; the read-back is (EXP-0024).
     const after = nvapi.readVfOffsets(nv, handle);
-    const carrying = after.ok ? after.offsets.filter((o) => o === offsetMhz * 1000).length : 0;
-    block('перечитано: сдвиг лёг ровно туда, куда просили',
-      after.ok && carrying === targets.length && after.nonZero === targets.length,
-      after.ok ? `несут сдвиг ${carrying} из ${targets.length} запрошенных, ненулевых всего ${after.nonZero}` : after.why);
+    let matched = 0;
+    let strayNonZero = 0;
+    const mismatches = [];
+    if (after.ok) {
+      for (let i = 0; i < curvePoints; i++) {
+        const want = requested[i] === null ? 0 : Math.round(requested[i] * 1000);
+        const got = after.offsets[i];
+        if (got === want) { matched++; continue; }
+        if (requested[i] === null && got !== 0) strayNonZero++;
+        if (mismatches.length < 5) mismatches.push({ point: i, want, got });
+      }
+    }
+    block('перечитано ПОТОЧЕЧНО: каждая точка несёт РОВНО свой сдвиг, а не «сколько-то штук»',
+      after.ok && matched === curvePoints,
+      after.ok
+        ? `сошлось ${matched} из ${curvePoints}${strayNonZero ? `, чужих ненулевых ${strayNonZero}` : ''}`
+          + `${mismatches.length ? ` — расхождения ${JSON.stringify(mismatches)}` : ''}`
+        : after.why);
 
     const curveAfter = nvapi.readVfCurve(nv, handle);
     const freqAfter = curveAfter.ok ? curveAfter.points[point].mhz : null;
     out.freqAfter = freqAfter;
-    block('кривая подтверждает: точка поехала ВВЕРХ при том же напряжении',
-      freqAfter !== null && freqAfter > freqBefore,
-      `${freqBefore} → ${freqAfter} МГц при ${mvAtPoint} мВ (Δ ${(freqAfter - freqBefore).toFixed(1)})`);
+    if (shape === 'raise-and-cap') {
+      // THE POINT UNDER TEST MOVES WHERE THE VECTOR SAID, WHICH IS NOT ALWAYS UP.
+      //
+      // The point serving the cap at stock is by definition at or above the cap, so the shipped vector
+      // pushes it DOWN onto the ceiling. Demanding "it went up" here would redden a correct write —
+      // and the undervolt is not this point rising anyway, it is a CHEAPER point rising to serve the
+      // cap, which the `АНДЕРВОЛЬТ` block below measures. So this block asserts what the shape
+      // actually promises: the point ended where its own offset put it.
+      const wantMhz = freqBefore === null ? null : freqBefore + vector.offsets[point];
+      block('кривая подтверждает: испытуемая точка встала ТУДА, КУДА ЕЁ ПОСЛАЛ ВЕКТОР',
+        freqAfter !== null && wantMhz !== null && Math.abs(freqAfter - wantMhz) <= 1,
+        `${freqBefore} → ${freqAfter} МГц при ${mvAtPoint} мВ (её сдвиг по вектору ${vector.offsets[point]} МГц, ждали ${wantMhz})`);
+      const offeredNow = curveAfter.ok
+        ? Math.max(...curveAfter.points.slice(0, curvePoints).filter((p) => p.freqKhz > 0).map((p) => p.mhz))
+        : null;
+      out.highestOfferedMhz = offeredNow;
+      // THE CEILING, VERIFIED ON THE CARD rather than trusted from the arithmetic that planned it.
+      block(`ПОТОЛОК СТОИТ: кривая больше не предлагает ничего выше ${capMhz} МГц`,
+        offeredNow !== null && offeredNow <= capMhz,
+        offeredNow === null ? 'кривая не перечитана'
+          : `максимум кривой ${offeredNow} МГц при потолке ${capMhz} (план обещал ${vector.highestOfferedMhz})`);
+    } else {
+      block('кривая подтверждает: точка поехала ВВЕРХ при том же напряжении',
+        freqAfter !== null && freqAfter > freqBefore,
+        `${freqBefore} → ${freqAfter} МГц при ${mvAtPoint} мВ (Δ ${(freqAfter - freqBefore).toFixed(1)})`);
+    }
 
     // ---- 3b. THE PROOF THAT AN UNDERVOLT ACTUALLY HAPPENED
     // Raising the curve only buys watts if the card is then HELD at a clock (researches/02 §6.2).
@@ -1337,6 +1537,12 @@ async function mainShape() {
  *   1. let a throwing step abort the list          → «падение ПЕРВОГО шага не отменяет остальные»
  *   2. swallow a throw and report it green         → «упавший шаг отката КРАСНЫЙ, а не тихий»
  *   3. skip a step with no runnable part           → «шаг без исполняемой части — красный блок, а не пропуск»
+ *
+ * AND FOR `chooseWriteShape`, added 2026-08-14 with the shape itself (`bugs/02` step 1):
+ *   4. never recognise an enforceable cap          → «потолок держит КРИВАЯ → форма ОТГРУЖАЕМАЯ»
+ *   5. drop the pinned branch                      → «потолок держит ЗАКРЕПЛЕНИЕ → форма равномерная, и расхождение названо»
+ *   6. let the last case agree instead of refusing → «потолок не держит НИЧТО → ОТКАЗ»
+ *   7. accept a vector that failed to build        → «вектора нет → отказ, а не молчаливое согласие»
  */
 export async function selfTest() {
   const results = [];
@@ -1404,6 +1610,46 @@ export async function selfTest() {
     flat[0]?.mv, 450);
   ok('и её глубина не выдумана, а посчитана по получившейся кривой', flat[0]?.savedMv, 250);
 
+  // --- WHICH SHAPE MAY BE WRITTEN, and WHO holds the ceiling. `bugs/02` step 1.
+  //
+  // The vectors are handed in as fixtures rather than built from a curve: this function DECIDES, it
+  // does not compute — the arithmetic has one author (`nvapi.buildRaiseAndCapVector`) and its own
+  // blocks over there. Feeding fixtures is what keeps the two suites from testing each other's job.
+  const vec = (over) => ({ ok: true, capMhz: 2400, lowestEnforceableCapMhz: 2172, capEnforced: true, capLeakMhz: 0, ...over });
+  // NULL-SAFE BY CONSTRUCTION: a mutation's whole job is to produce the shape the assertion did not
+  // expect, and an assertion that THROWS reports nothing — a crashed suite reads exactly like «no
+  // findings» (EXP-0040). So the call itself is caught, and an exception becomes a red block.
+  const choose = (v, o) => { try { return chooseWriteShape(v, o); } catch (e) { return { ok: `ИСКЛЮЧЕНИЕ: ${e.message}`, shape: null, heldBy: null, why: '' }; } };
+
+  const byCurve = choose(vec({}), { pinned: false });
+  ok('потолок держит КРИВАЯ → форма ОТГРУЖАЕМАЯ, и закрепление для этого не нужно',
+    [byCurve.ok, byCurve.shape, byCurve.heldBy], [true, 'raise-and-cap', 'кривая']);
+  ok('и когда кривая держит сама, закрепление НИЧЕГО не меняет в выборе формы',
+    choose(vec({}), { pinned: true }).shape, 'raise-and-cap');
+
+  const low = vec({ capMhz: 2100, capEnforced: false, capLeakMhz: 72 });
+  const byPin = choose(low, { pinned: true });
+  ok('потолок держит ЗАКРЕПЛЕНИЕ → форма равномерная, и расхождение с отгружаемой НАЗВАНО',
+    [byPin.ok, byPin.shape, byPin.heldBy], [true, 'uniform', 'закрепление частоты']);
+  ok('и причина несёт ЧИСЛО утечки, а не только признак', /72 МГц/.test(byPin.why ?? ''), true);
+
+  const nobody = choose(low, { pinned: false });
+  ok('потолок не держит НИЧТО → ОТКАЗ, и формы не назначается вовсе',
+    [nobody.ok, nobody.shape], [false, null]);
+
+  const broken = choose({ ok: false, why: 'ни одной точки с частотой' }, { pinned: true });
+  ok('вектора нет → отказ, а не молчаливое согласие (даже при закреплении)',
+    [broken.ok, broken.shape], [false, null]);
+  ok('и отказ несёт причину, по которой вектор не построился',
+    /ни одной точки с частотой/.test(broken.why ?? ''), true);
+  ok('вектор вообще не передан → тоже отказ, а не исключение',
+    choose(undefined, { pinned: true }).ok, false);
+
+  // The boundary case decides which side the FLOOR belongs to — and this block guards that the
+  // decision READS the vector's verdict instead of re-deriving it from the numbers on its own.
+  ok('РОВНО на полу железа решение берётся из вердикта вектора, а не пересчитывается заново',
+    choose(vec({ capMhz: 2172, capEnforced: true }), { pinned: false }).shape, 'raise-and-cap');
+
   return { ok: results.every((r) => r.ok), results };
 }
 
@@ -1427,8 +1673,15 @@ async function main() {
   const sustain = Number(arg('sustain', 10));
   const dryRun = process.argv.includes('--dry-run');
   const allPoints = process.argv.includes('--all-points');
+  // THE SHIPPED SHAPE AS AN OPERATOR FLAG (`bugs/02` step 1): the whole curve up WITH the ceiling,
+  // which is what a profile actually applies. `--all-points` stays the uniform raise it always was.
+  const shippedShape = process.argv.includes('--shipped-shape');
   const capArg = arg('cap', null);
   const capMhz = capArg === null ? null : Number(capArg);
+  if (shippedShape && capMhz === null) {
+    console.error('ОШИБКА: --shipped-shape требует --cap <МГц> — без потолка это не отгружаемая форма, а равномерный подъём.');
+    return 2;
+  }
   // THE DIVERSE SET as an operator command (plans/05 §4.3). One write, one watchdog, three loads:
   // the shape that decides the point is named in the block list.
   const useSet = process.argv.includes('--set');
@@ -1437,11 +1690,19 @@ async function main() {
 
   console.log('ПЕРВЫЙ ПОЛОЖИТЕЛЬНЫЙ СДВИГ — ЭТО И ЕСТЬ АНДЕРВОЛЬТ');
   console.log('');
-  console.log(`  ЧТО ДЕЛАЕМ: ${allPoints ? `ВСЯ КРИВАЯ вверх на +${offsetMhz} МГц` : `точка ${point}, сдвиг +${offsetMhz} МГц`}`);
+  const whatWeDo = shippedShape
+    ? `ОТГРУЖАЕМАЯ ФОРМА: вся кривая вверх на +${offsetMhz} МГц С ПОТОЛКОМ ${capMhz} МГц`
+    : (allPoints ? `ВСЯ КРИВАЯ вверх на +${offsetMhz} МГц (равномерно)` : `точка ${point}, сдвиг +${offsetMhz} МГц`);
+  console.log(`  ЧТО ДЕЛАЕМ: ${whatWeDo}`);
   console.log('              — «эта частота теперь берётся при МЕНЬШЕМ напряжении».');
-  if (allPoints) {
+  if (allPoints || shippedShape) {
     console.log('              Вся кривая, а не одна точка: закреплённую частоту обслуживает БЛИЖАЙШАЯ');
     console.log('              подходящая точка, поэтому подъём одной ничего не удешевляет (researches/02 §6.2).');
+  }
+  if (shippedShape) {
+    console.log('              С ПОТОЛКОМ: точки выше него придавливаются вниз, поэтому максимум разгона');
+    console.log('              не растёт и экономия не уходит в скорость. Это ровно та форма, что уедет');
+    console.log('              в профиль — искать в ней и значит искать то, что отгружаем (bugs/02).');
   }
   if (capMhz) console.log(`  ПОТОЛОК:    ${capMhz} МГц — на этой частоте и меряется удешевление (пока ВЫЧИСЛЯЕТСЯ по кривой, замок не ставится).`);
   if (shapes) {
@@ -1460,7 +1721,8 @@ async function main() {
   if (dryRun) console.log('  РЕЖИМ:      СУХОЙ ПРОГОН — записи не будет.');
   console.log('');
 
-  const r = await runStep({ point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, capMhz, shapes });
+  const r = await runStep({ point, offsetMhz, workload, seconds, sustain, dryRun, allPoints,
+    writeShape: shippedShape ? 'raise-and-cap' : null, capMhz, shapes });
   for (const b of r.blocks) console.log(`  ${b.ok ? 'ЗЕЛЁНЫЙ' : 'КРАСНЫЙ'}  ${b.name}${b.detail ? `\n            ${b.detail}` : ''}`);
 
   const failed = r.blocks.filter((b) => !b.ok).length;

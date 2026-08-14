@@ -255,6 +255,19 @@ export async function searchEdge({
   // LOWEST voltage, and that is a neighbour we did not touch (`vf-step`'s own header said so while the
   // search did the opposite).
   wholeCurve = false,
+  // THE WRITE SHAPE, chosen by the CALLER and carried through every rung of this search unchanged.
+  //
+  // `bugs/02` step 1 asks the search to write the shape the profile ships (`raise-and-cap`), so that
+  // the searched quantity and the shipped quantity are the same thing. It is the caller's choice and
+  // not this function's, for one measured reason: below `topMhz − 1000` the curve CANNOT hold a
+  // ceiling at all (`nvapi.buildRaiseAndCapVector` — 2172 MHz on this card), so on a low rung the
+  // shipped shape does not exist and the clock pin is what holds the ceiling instead. A search that
+  // silently picked for itself would hide exactly which of the two produced its number, and that is
+  // the class `bugs/02` is named for. `vf-step.chooseWriteShape` is what the caller decides with, and
+  // the choice is PRINTED per rung.
+  //
+  // `null` keeps the legacy mapping from `wholeCurve`, so every offline fixture behaves as it did.
+  writeShape = null,
   // PIN THE CLOCK so the curve region under test is the region actually loaded.
   pinMhz = null,
   pinCard = null,
@@ -338,6 +351,11 @@ export async function searchEdge({
           verdict: row.verdict, reason: row.reason,
           driver: card.driver, vbios: card.vbios,
           capMhz,
+          // THE SHAPE THE ATOM ACTUALLY RESOLVED, not the one this engine asked for — an intention is
+          // not an observation, and the whole point of recording it is to be able to tell later what
+          // the card was carrying (bugs/02). `null` when the runner does not report one at all.
+          writeShape: result.writeShape ?? null,
+          capHeldBy: result.capHeldBy ?? null,
           tempStartC: result.tempStartC ?? null,
           tempReachedC: result.tempReachedC ?? null,
           servingPoint: attempt.servingPoint,
@@ -386,7 +404,7 @@ export async function searchEdge({
   }
 
   for (const offsetMhz of ladder) {
-    const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, pinMhz, pinCard });
+    const result = await runStepFn({ point, offsetMhz, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, writeShape, pinMhz, pinCard });
     const a = await record(offsetMhz, result);
     const noUndervolt = refuseWithoutUndervolt(out, result, offsetMhz);
     if (noUndervolt) return out;
@@ -427,7 +445,7 @@ export async function searchEdge({
       const between = inside();
       if (!between.length) break;
       const mid = between[Math.floor((between.length - 1) / 2)].offsetMhz;
-      const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, pinMhz, pinCard });
+      const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, writeShape, pinMhz, pinCard });
       const a = await record(mid, result);
       if (refuseWithoutUndervolt(out, result, mid)) return out;
       if (isPass(a.verdict)) { out.lastPass = mid; continue; }
@@ -457,7 +475,7 @@ export async function searchEdge({
   while (hi - lo > fineMhz) {
     const mid = lo + Math.floor((hi - lo) / 2 / fineMhz) * fineMhz;
     if (mid <= lo || mid >= hi) break;
-    const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, pinMhz, pinCard });
+    const result = await runStepFn({ point, offsetMhz: mid, workload, seconds, sustain, capMhz, shapes, allPoints: wholeCurve, writeShape, pinMhz, pinCard });
     const a = await record(mid, result);
     if (refuseWithoutUndervolt(out, result, mid)) return out;
     if (isPass(a.verdict)) { lo = mid; out.lastPass = mid; continue; }
@@ -514,6 +532,8 @@ export async function searchEdge({
  *  12. allow a first step deeper than the ceiling    → «слишком глубокий первый шаг — ОТКАЗ, а не усечение»
  *  13. leap a cliff in the ladder                    → «обрыв в лестнице не перешагивается»
  *  14. refuse only AFTER the first write             → «ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ ЗАПИСИ»
+ *  15. drop `writeShape` on the way to the atom      → «форма записи доезжает до атома НА КАЖДОЙ ступени»
+ *  16. record the shape the engine ASKED for         → «в хранилище ложится форма, которую вернул АТОМ, а не заказ движка»
  */
 export function selfTest() {
   const results = [];
@@ -759,6 +779,37 @@ export function selfTest() {
       ok('и форма, решившая исход, названа в попытке', r5.attempts.at(-1).worstShape, 'branchy/sustained');
       ok('вердикт набора ведёт поиск так же, как вердикт одиночной формы',
         r5.lastPass < 200 && r5.firstFail >= 200, true);
+
+      // --- THE WRITE SHAPE REACHES THE ATOM, AND THE STORE RECORDS WHAT THE ATOM ANSWERED.
+      //
+      // `bugs/02` step 1. Two different facts, and the second is the one that would have caught the
+      // bug: the engine's REQUEST is an intention, the atom's report is an observation, and only the
+      // observation belongs in the evidence.
+      const shapesSeen = [];
+      const shapeRunner = async ({ offsetMhz, writeShape: got }) => {
+        shapesSeen.push(got ?? null);
+        return {
+          verdict: offsetMhz < 200 ? P : config.VERDICT.SDC,
+          undervolt: { capMhz: 2842, after: { pointIndex: 90, mv: 1000 }, savedMv: 40 },
+          // The atom answers with the shape it RESOLVED — here deliberately different from the one
+          // asked for, which is exactly the low-rung case where the curve cannot hold the ceiling.
+          writeShape: 'uniform',
+          capHeldBy: 'закрепление частоты',
+        };
+      };
+      const r6 = await searchEdge({
+        capMhz: 2842, point: 98, store, writeShape: 'raise-and-cap',
+        card: { driver: '610.88', vbios: 'v1' },
+        runStepFn: shapeRunner,
+      });
+      ok('форма записи доезжает до атома НА КАЖДОЙ ступени, а не только на первой',
+        shapesSeen.length > 1 && shapesSeen.every((s) => s === 'raise-and-cap'), true);
+      const shapeRows = readAll(store).records.filter((s) => s.point === 98);
+      ok('в хранилище ложится форма, которую вернул АТОМ, а не заказ движка',
+        [...new Set(shapeRows.map((s) => s.writeShape))], ['uniform']);
+      ok('и держатель потолка записан рядом с ней — иначе вердикт не с чем сравнивать',
+        [...new Set(shapeRows.map((s) => s.capHeldBy))], ['закрепление частоты']);
+      ok('поиск при этом отработал как обычно', r6.attempts.length > 1, true);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
@@ -831,6 +882,10 @@ async function mainBand(argv, arg) {
   console.log(`  СТУПЕНИ:   ${pins.join(', ')} МГц`);
   console.log(`  НАБОР:     ${DIVERSE_SET.length} формы по ${seconds} с — ступень ≈ ${DIVERSE_SET.length * seconds + 4} с`);
   console.log('  ПОДЪЁМ:    ВСЯ кривая (127 точек), а не одна — иначе напряжение потолка не падает вовсе (bugs/02)');
+  console.log('  ФОРМА:     где кривая способна удержать потолок — пишем ОТГРУЖАЕМУЮ форму (подъём с потолком),');
+  console.log('             то есть ровно то, что уедет в профиль. Ниже пола железа (верх кривой минус 1000 МГц)');
+  console.log('             потолка кривой не удержать вовсе — там подъём равномерный, а потолок держит');
+  console.log('             ЗАКРЕПЛЕНИЕ, и это печатается по каждой ступени отдельно.');
   console.log('  ЗАКРЕПЛЕНИЕ: -lgc на ступени, законно для ЗАМЕРА и запрещено в отгружаемом профиле');
   console.log('  ОТКАТ:     частота отпущена и кривая обнулена в finally, под сторожем, на каждой ступени');
   console.log('');
@@ -848,7 +903,15 @@ async function mainBand(argv, arg) {
     // inhomogeneity becomes visible before a single watt is spent: the top offers ten grid steps of
     // headroom, the middle offers two.
     const rungs = serving ? vf.ascentLadderByVoltage(curve, pin, { stepMv: config.VOLTAGE_GRID_STEP_MV ?? 5 }) : [];
-    plan.push({ pin, serving, rungs });
+    // WHICH SHAPE THIS RUNG MAY BE SEARCHED IN, decided BEFORE the sweep starts and printed with the
+    // plan (`bugs/02` step 1). The question is asked at Δ = 0 on purpose: whether the curve can hold a
+    // ceiling depends only on how far the TAIL can be pushed down, and that is independent of the
+    // raise — computed across Δ = 0…540, the leak is identical at every one of them.
+    const vec = nvapi.buildRaiseAndCapVector(curve, 0, { capMhz: pin });
+    // `pinned: true` because this sweep always pins: on a rung the curve cannot cap, the pin is the
+    // holder, and the run says so instead of pretending it searched the shipped shape.
+    const shapeChoice = vf.chooseWriteShape(vec, { pinned: true });
+    plan.push({ pin, serving, rungs, shapeChoice });
     // THE FIRST STEP'S DEPTH IS PRINTED FIRST, because it is the number that decides whether this
     // rung is safe to start at all — and it is the number nobody could see on 2026-08-11 (bugs/03).
     const chosen = rungs.length ? pickAscentRungs(rungs, { stride: 5 }) : { rungs: [], refused: false, why: 'нет ступеней' };
@@ -856,20 +919,29 @@ async function mainBand(argv, arg) {
       + `${serving ? ` (${serving.mv} мВ)` : ' — вне кривой, ступень пропускается'}`
       + `${serving ? ` · ступеней ${rungs.length}, глубже всего −${rungs.length ? rungs[rungs.length - 1].savedMv : 0} мВ` : ''}`
       + `${serving ? ` · ПЕРВЫЙ ШАГ −${chosen.rungs[0]?.savedMv ?? '—'} мВ${chosen.refused ? ` · ${chosen.why.slice(0, 96)}` : ''}` : ''}`);
+    // THE SHAPE AND ITS HOLDER, on their own line — a number whose shape a reader has to infer is the
+    // ambiguity `bugs/02` was made of.
+    if (serving) {
+      console.log(`          ФОРМА: ${shapeChoice.shape === 'raise-and-cap' ? 'ОТГРУЖАЕМАЯ (подъём с потолком)' : 'равномерный подъём'}`
+        + ` · потолок держит ${shapeChoice.heldBy}`
+        + `${shapeChoice.shape === 'raise-and-cap' ? '' : ` · утечка потолка ${vec.capLeakMhz} МГц, пол железа ${vec.lowestEnforceableCapMhz} МГц`}`);
+    }
   }
   console.log('');
   if (dryRun) { console.log('СУХОЙ ПРОГОН: ни одной записи в карту не сделано.'); return 0; }
 
   const rows = [];
-  for (const { pin, serving, rungs } of plan) {
+  for (const { pin, serving, rungs, shapeChoice } of plan) {
     if (!serving) { rows.push({ pin, skipped: 'вне кривой' }); continue; }
     if (!rungs.length) { rows.push({ pin, point: serving.pointIndex, stockMv: serving.mv, skipped: 'рычаг исчерпан: ни одной ступени по напряжению' }); continue; }
-    console.log(`── СТУПЕНЬ ${pin} МГц (точка ${serving.pointIndex}, ${serving.mv} мВ, ступеней ${rungs.length}) ──────`);
+    if (!shapeChoice.ok) { rows.push({ pin, point: serving.pointIndex, stockMv: serving.mv, skipped: shapeChoice.why }); continue; }
+    console.log(`── СТУПЕНЬ ${pin} МГц (точка ${serving.pointIndex}, ${serving.mv} мВ, ступеней ${rungs.length}, форма ${shapeChoice.shape}) ──────`);
     const r = await searchEdge({
       capMhz: pin,
       point: serving.pointIndex,
       shapes: DIVERSE_SET,
       wholeCurve: true,
+      writeShape: shapeChoice.shape,
       pinMhz: pin,
       pinCard,
       rungs,
@@ -967,14 +1039,34 @@ async function main(argv) {
   nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
   const handle = handles.readBigUInt64LE(0);
   let serving = null;
+  let rungs = [];
+  let shapeChoice = null;
   try {
     const curve = nvapi.readVfCurve(nv, handle);
     if (!curve.ok) { console.error(`ОШИБКА: кривая не прочиталась — ${curve.why}`); return 1; }
     serving = vf.voltageForClock(curve.points, capMhz);
+    // THE LADDER IN VOLTS, and it is not a refinement — it is what makes the depth governor able to
+    // SEE. `pickAscentRungs` bounds the first step in MILLIVOLTS, and on an ungraded (fixed-MHz)
+    // ladder it says so and walks the ladder as handed over. That was harmless while this path wrote
+    // ONE point (a single point buys no undervolt at all — `bugs/02`); the moment it writes the whole
+    // curve, an ungraded ladder means a real undervolt taken under a blind governor, which is the
+    // exact arrangement that hung the owner's machine for 5 h 40 min (`bugs/03`, R10).
+    if (serving) rungs = vf.ascentLadderByVoltage(curve.points, capMhz, { stepMv: config.VOLTAGE_GRID_STEP_MV ?? 5 });
+    // THE SHIPPED SHAPE, or a refusal. No clock is pinned on this path, so the ONLY thing that can
+    // hold the ceiling here is the curve itself — and below `top − 1000 MHz` it cannot.
+    const vec = nvapi.buildRaiseAndCapVector(curve.points, 0, { capMhz });
+    shapeChoice = vf.chooseWriteShape(vec, { pinned: false });
   } finally {
     nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
   }
   if (!serving) { console.error(`ОШИБКА: ни одна точка кривой не обслуживает ${capMhz} МГц`); return 1; }
+  if (!shapeChoice.ok) {
+    // The reason already opens with «ОТКАЗ» where it is one — printing our own prefix on top stutters.
+    console.error(shapeChoice.why.startsWith('ОТКАЗ') ? shapeChoice.why : `ОТКАЗ: ${shapeChoice.why}`);
+    console.error('       На этой частоте потолок способно удержать только ЗАКРЕПЛЕНИЕ, а закрепления');
+    console.error('       у этого режима нет. Развёртка с закреплением — `npm run engine -- --band <МГц>`.');
+    return 1;
+  }
 
   const history = partitionByStamp(readAll(store).records, card).current;
   const summary = summarizePoint(history, serving.pointIndex, { fineStepMhz: ASCENT_FINE_MHZ });
@@ -992,8 +1084,17 @@ async function main(argv) {
   }
   console.log('             оракул трёхзначный, «не упало» вердиктом не является');
   console.log(`  ШАГИ:      грубый ${ASCENT_COARSE_MHZ} МГц (≈25 мВ) · точный ${ASCENT_FINE_MHZ} МГц (≈5 мВ, один ИЗМЕРЕННЫЙ шаг сетки)`);
+  console.log('  ФОРМА:     ОТГРУЖАЕМАЯ — вся кривая вверх с потолком, то есть ровно то, что уедет в профиль');
+  console.log(`             (${shapeChoice.heldBy} держит потолок; одиночная точка потолок не удешевляет вовсе — bugs/02)`);
   console.log(`  ХРАПОВИК:  ${summary.ratchet.limitMhz === Infinity ? 'ограничений нет — точка ни разу не сбоила' : `≤ ${summary.ratchet.limitMhz} МГц (самый низкий отказ ${summary.ratchet.lowestFailure})`}`);
-  console.log(`  ЛЕСТНИЦА:  ${coarseLadder({ limitMhz: summary.ratchet.limitMhz }).join(', ') || '—'} МГц`);
+  // THE LADDER IN VOLTS, WITH THE FIRST STEP'S DEPTH PRINTED FIRST — the number whose absence cost the
+  // owner a night (`bugs/03`). A refusal by the depth governor is printed here, before anything runs.
+  const governed = rungs.length
+    ? pickAscentRungs(rungs.filter((r) => r.offsetMhz <= summary.ratchet.limitMhz), { stride: 5 })
+    : { rungs: [], refused: false, why: 'лестница по напряжению не построена' };
+  console.log(`  ЛЕСТНИЦА:  ступеней по напряжению ${rungs.length}, глубже всего −${rungs.length ? rungs[rungs.length - 1].savedMv : 0} мВ`);
+  console.log(`             ПЕРВЫЙ ШАГ −${governed.rungs[0]?.savedMv ?? '—'} мВ · ступеней в восхождении ${governed.rungs.length}`);
+  if (governed.refused) console.log(`             ${governed.why}`);
   console.log(`  КАРТА:     драйвер ${card.driver} · VBIOS ${card.vbios}`);
   console.log('');
 
@@ -1007,6 +1108,11 @@ async function main(argv) {
     point: serving.pointIndex,
     workload,
     shapes,
+    // THE SHIPPED SHAPE AND THE VOLTAGE LADDER, together — neither is optional now. The shape is what
+    // `bugs/02` step 1 asks for; the ladder is what lets the depth governor bound a step it can
+    // finally see in millivolts (`bugs/03`).
+    writeShape: shapeChoice.shape,
+    rungs,
     seconds,
     card,
     store,

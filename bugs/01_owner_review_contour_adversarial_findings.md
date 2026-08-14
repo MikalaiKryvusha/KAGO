@@ -323,6 +323,20 @@ Open by severity: **0 blocker · 15 major · 15 minor.**
 - **`queue.json` was reverted, not committed**, after a `--no-serve` render stamped a `lastShownAt`
   for a page nobody was shown — the I15 defect producing a false record while being fixed.
 
+## Noticed later — NOT taken into work (the contour stays parked)
+
+- **2026-08-14 · `npm run questions` is PERMANENTLY RED, and all three of its hits are false.** Its
+  own debt file does not exist (`ДОЛГ: 0 (файл долга не заведён)` · `interviews/decisions/guard-baseline.json`),
+  so every hit counts as NEW on every run. The three: two are the SECTION HEADERS of a queue whose
+  body says «Открытых вопросов владельцу — НОЛЬ» (`STATUS.md`, and the chronicle's copy of the same
+  heading in `PROJECT_HISTORY.md` — i.e. history), and one is the words «Владелец, …» inside
+  `assets/logo/README.md`. Verified pre-existing: `git grep -n "Ждёт решения владельца" HEAD` finds
+  all of them at `HEAD`. **Why this is worth a line rather than a fix:** a gate that is red on a
+  clean tree teaches its reader that red means nothing, which is the one failure a guard cannot
+  survive (`GPU_TUNING_RAILS.md` STOP-line 6). The cheap remedy is to WRITE the baseline once so the
+  ratchet has something to ratchet from — it is the contour's own design, and the contour is parked
+  by the owner, so it waits with the other 30.
+
 ## Links
 
 - Built by the workflow `wf_37fb46cf-7ad` (12 agents, 3 builders x 3 verification lenses).
