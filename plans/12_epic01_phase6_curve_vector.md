@@ -7,7 +7,7 @@
 > available-undervolt table · `GOAL.md` → the owner's convergence loop · EXP-0056 (the instrument's
 > constraint is not the product's shape)
 > **Status:** ✅ **closed 2026-08-15 01:3x +03:00 — all five steps, zero GPU writes.** Written BEFORE
-> the first line of its code (EXP-0027). Measured: `--selftest-shape` 31 → 41 blocks (6 mutations,
+> the first line of its code (EXP-0027). Measured: `--selftest-shape` 31 → **42** blocks (6 mutations,
 > each reddening its own) · `profiles --selftest` 30 → 45 (7 mutations) · `profile-manager --selftest`
 > 36 → 40 (3 mutations) · eight neighbouring suites re-run, 0 failures · all 6 profiles load against
 > the live card, 0 refusals, watchdog not armed
