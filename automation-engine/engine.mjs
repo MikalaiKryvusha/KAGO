@@ -322,6 +322,11 @@ export async function searchEdge({
       // WHICH SHAPE DECIDED IT. A threshold without the load that produced it is not a threshold —
       // Vmin spreads ~100 mV between programs (researches/02 §4).
       worstShape: result.worstShape ?? null,
+      // WHAT THE CARD ACTUALLY DELIVERED under load, and it is the observation that replaced the
+      // clock-lock proof on a capped run: the ceiling is proved by what the card DID, not by what the
+      // curve was asked to offer.
+      deliveredMhz: result.deliveredMhz ?? null,
+      deliveredMaxMhz: result.deliveredMaxMhz ?? null,
       shapesRun: Array.isArray(result.shapes) ? result.shapes.map((e) => e.id) : null,
       reason: result.reason
         ?? result.stress?.reason
@@ -942,7 +947,11 @@ async function mainBand(argv, arg) {
       shapes: DIVERSE_SET,
       wholeCurve: true,
       writeShape: shapeChoice.shape,
-      pinMhz: pin,
+      // ONE HOLDER, NEVER TWO. Paid for live 2026-08-14: this sweep capped the curve at 2842 AND
+      // pinned the clock at 2842, the card sat at 2775…2827 as a capped card does, the lock proof
+      // correctly refused, and a rung whose three load shapes had all PASSED came out НЕИЗВЕСТНО.
+      // `chooseWriteShape` already decides who holds the ceiling; this is that decision obeyed.
+      pinMhz: shapeChoice.pinRequired ? pin : null,
       pinCard,
       rungs,
       seconds,
@@ -953,6 +962,14 @@ async function mainBand(argv, arg) {
         const by = a.worstShape ? ` · решила ${a.worstShape}` : '';
         const saved = a.servingMv !== null && a.servingMv !== undefined ? ` (−${(serving.mv - a.servingMv).toFixed(0)} мВ от стока)` : '';
         console.log(`   +${a.offsetMhz} МГц → ${a.servingMv ?? '?'} мВ${saved} → ${a.verdict ?? 'НЕИЗВЕСТНО'}${by}`);
+        // THE REASON, ALWAYS, WHEN IT IS NOT A PASS — the owner's instruction after this very sweep:
+        // «запускать движок и ЧИТАТЬ ЕГО ЛОГИ И ОТЧЁТЫ». On 2026-08-14 the sweep printed НЕИЗВЕСТНО
+        // and nothing else, so reading its report was NOT enough: the cause (a refused lock proof)
+        // had to be reconstructed from the store and a sampler file. A verdict without its reason
+        // sends its reader digging, which is the same defect as a question that sends the owner
+        // digging through documents.
+        if (a.verdict !== config.VERDICT.PASS && a.reason) console.log(`      ПРИЧИНА: ${a.reason}`);
+        if (a.deliveredMhz) console.log(`      выдано под нагрузкой: ${a.deliveredMhz} МГц (максимум ${a.deliveredMaxMhz})`);
       },
     });
     rows.push({ pin, point: serving.pointIndex, stockMv: serving.mv, ...r });

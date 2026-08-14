@@ -270,15 +270,26 @@ export function voltageForClock(points, clockMhz) {
  */
 export function chooseWriteShape(vector, { pinned = false } = {}) {
   if (!vector || vector.ok !== true) {
-    return { ok: false, shape: null, heldBy: null, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
+    return { ok: false, shape: null, heldBy: null, pinRequired: false, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
   }
   if (vector.capEnforced) {
     return {
       ok: true,
       shape: 'raise-and-cap',
       heldBy: 'кривая',
+      // ONE HOLDER, NEVER TWO — and this field is what stops a caller from adding a second one.
+      //
+      // Paid for live on 2026-08-14, first band run in the shipped shape: the sweep capped the curve
+      // at 2842 AND pinned the clock at 2842. A capped card sits a little BELOW its ceiling (measured
+      // three times now: cap 2887 → 2857, cap 2917 → 2887, cap 2842 → 2812 median), so the pin
+      // demanded a frequency the curve had just forbidden. The card delivered 2775…2827, the lock
+      // proof correctly refused, and a rung whose three load shapes had all PASSED was reported as
+      // НЕИЗВЕСТНО. Nothing was wrong with the card — the run had asked two mechanisms to hold one
+      // ceiling at one frequency, and they fought.
+      pinRequired: false,
       why: `потолок ${vector.capMhz} МГц держит САМА КРИВАЯ (выше пола железа ${vector.lowestEnforceableCapMhz} МГц) — `
-        + 'это ровно та форма, которая отгружается в профиле',
+        + 'это ровно та форма, которая отгружается в профиле. ЗАКРЕПЛЕНИЕ ЗДЕСЬ ЛИШНЕЕ И ВРЕДНОЕ: '
+        + 'карта под потолком садится чуть ниже него, а замок требует ровно потолок — они дерутся',
     };
   }
   if (pinned) {
@@ -286,6 +297,7 @@ export function chooseWriteShape(vector, { pinned = false } = {}) {
       ok: true,
       shape: 'uniform',
       heldBy: 'закрепление частоты',
+      pinRequired: true,
       why: `потолок ${vector.capMhz} МГц кривой НЕ удержать (пол железа ${vector.lowestEnforceableCapMhz} МГц, утечка `
         + `${vector.capLeakMhz} МГц), поэтому его держит ЗАКРЕПЛЕНИЕ, а кривая поднимается равномерно. `
         + 'Замер законен, но это НЕ отгружаемая форма — на этой ступени они расходятся, и расхождение названо',
@@ -295,6 +307,7 @@ export function chooseWriteShape(vector, { pinned = false } = {}) {
     ok: false,
     shape: null,
     heldBy: null,
+    pinRequired: false,
     why: `ОТКАЗ: потолок ${vector.capMhz} МГц не держит НИЧТО — кривой его не удержать (пол железа `
       + `${vector.lowestEnforceableCapMhz} МГц, утечка ${vector.capLeakMhz} МГц), а частота не закреплена. `
       + 'Карта ушла бы выше испытуемой частоты, и вердикт был бы о состоянии, которое никто не назвал',
@@ -633,9 +646,19 @@ export async function runStep({
         applied.ok !== false, applied.why ?? 'проверка закрепления — под нагрузкой, не на простое');
       if (applied.ok === false) return out;
       watchdog.beat();
+    }
 
-      // The sampler runs in a SEPARATE process: an in-process one records nothing, because `spawnSync`
-      // inside the load blocks this event loop (measured, `power-baseline.mjs` header).
+    // ---- 3d. THE SAMPLER — and it no longer rides on the PIN.
+    //
+    // It used to be spawned inside the pin branch, so removing the pin (which the shipped shape makes
+    // both unnecessary and harmful — `chooseWriteShape.pinRequired`) would have removed the run's
+    // ONLY telemetry with it, and with it every proof that the load exercised the region under test.
+    // What a capped run needs proving is not «the lock held» but «the CEILING held», and that needs
+    // the same samples. So the sampler now runs whenever there is a ceiling to watch at all.
+    //
+    // It runs in a SEPARATE process: an in-process one records nothing, because `spawnSync` inside the
+    // load blocks this event loop (measured, `power-baseline.mjs` header).
+    if (pinMhz || capMhz) {
       const { spawn } = require('node:child_process');
       const { join, dirname } = require('node:path');
       const { fileURLToPath } = require('node:url');
@@ -643,7 +666,9 @@ export async function runStep({
       const { mkdirSync } = require('node:fs');
       const runsDir = join(here, '..', '..', 'runs', 'vmin');
       mkdirSync(runsDir, { recursive: true });
-      samplerFile = join(runsDir, `pin-${pinMhz}-${offsetMhz}.jsonl`);
+      // The name says which mechanism was holding the ceiling, so two runs at one clock cannot be
+      // mistaken for each other after the fact.
+      samplerFile = join(runsDir, `${pinMhz ? `pin-${pinMhz}` : `cap-${capMhz}`}-${offsetMhz}.jsonl`);
       const samplerSeconds = seconds * ((Array.isArray(shapes) && shapes.length) || 1) + 30;
       sampler = spawn(process.execPath, [join(here, 'hardware-mon.mjs'), '--seconds', String(samplerSeconds), '--out', samplerFile],
         { windowsHide: true, stdio: 'ignore' });
@@ -725,20 +750,66 @@ export async function runStep({
     // holds — but order is now a preference, not a dependency.
     out.blocks.push(...await runUndo([
       {
-        name: `ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц`,
+        // THE CEILING'S PROOF, and WHICH mechanism is being proved depends on who holds it.
+        //
+        // Pinned (the low band, where the curve cannot cap at all): the old proof stands — the clock
+        // must be CONSTANT at the pinned value, because that is what a pin promises.
+        //
+        // Capped by the curve (the shipped shape): the promise is different and so is the proof. A
+        // capped card is FREE below the ceiling and deliberately sits a little under it — demanding a
+        // constant clock here is demanding the thing the cap was chosen to avoid, and on 2026-08-14 it
+        // reported a rung whose three load shapes had all PASSED as НЕИЗВЕСТНО. What must be proved is
+        // the property the shipped profile actually has: **the card never went ABOVE the ceiling**.
+        name: pinMhz ? `ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц` : `ПОТОЛОК ${capMhz} МГц УСТОЯЛ ПОД НАГРУЗКОЙ`,
         run: async () => {
-          if (!pinned || !sampler) return 'закрепления не было — проверять нечего';
+          if (!sampler) return 'телеметрии не снималось — проверять нечего';
           const { readSamples, summarizeSamples } = await import('./power-baseline.mjs');
-          const ld = await import('./ladder-descent.mjs');
           sampler.kill();
           const records = samplerFile ? readSamples(samplerFile) : [];
-          const stats = records.length ? summarizeSamples(records) : null;
-          const proof = stats ? ld.verifyLockUnderLoad({ medians: stats }, pinMhz) : { ok: false, why: 'сэмплер не оставил проб' };
-          out.pinProof = proof;
-          // A rung whose pin did not hold has no verdict about the point it claimed to test.
-          if (!proof.ok && out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; }
-          if (!proof.ok) throw new Error(proof.why);
-          return `${proof.why}${proof.delivered ? ` · выдано ${proof.delivered} МГц` : ''}`;
+          if (!records.length) {
+            out.ceilingProof = { ok: false, why: 'сэмплер не оставил проб' };
+            if (out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; out.reason = 'сэмплер не оставил проб'; }
+            throw new Error('сэмплер не оставил проб');
+          }
+
+          if (pinned) {
+            const ld = await import('./ladder-descent.mjs');
+            const stats = summarizeSamples(records);
+            const proof = stats ? ld.verifyLockUnderLoad({ medians: stats }, pinMhz) : { ok: false, why: 'сводка по пробам не собралась' };
+            out.pinProof = proof;
+            if (!proof.ok && out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; out.reason = proof.why; }
+            if (!proof.ok) throw new Error(proof.why);
+            return `${proof.why}${proof.delivered ? ` · выдано ${proof.delivered} МГц` : ''}`;
+          }
+
+          // THE CEILING CHECK. Only the loaded samples count: at idle the card drops to 180 MHz, which
+          // says nothing about a ceiling, and including those samples would flatter every median.
+          const loaded = records
+            .map((r) => r.sample ?? r)
+            .filter((s) => Number(s['utilization.gpu']) > config.PLATEAU_LOAD_UTILIZATION_PCT);
+          if (!loaded.length) {
+            out.ceilingProof = { ok: false, why: 'ни одной пробы ПОД НАГРУЗКОЙ — нагрузка карту не заняла' };
+            if (out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; out.reason = out.ceilingProof.why; }
+            throw new Error(out.ceilingProof.why);
+          }
+          const clocks = loaded.map((s) => Number(s['clocks.gr'])).filter(Number.isFinite);
+          const sorted = [...clocks].sort((a, b) => a - b);
+          const median = sorted[Math.floor(sorted.length / 2)];
+          const max = Math.max(...clocks);
+          out.deliveredMhz = median;
+          out.deliveredMaxMhz = max;
+          // ONE LADDER STEP of tolerance and not a millihertz more: the card's own grid is 7–8 MHz,
+          // and `clocks.gr` is reported on that grid, so a reading one step above the cap is rounding
+          // rather than a breach. Anything beyond it means the ceiling did not hold.
+          const breached = max > capMhz + config.CLOCK_LADDER_STEP_TOLERANCE_MHZ;
+          out.ceilingProof = { ok: !breached, capMhz, median, max };
+          if (breached && out.verdict === config.VERDICT.PASS) {
+            out.verdict = null;
+            out.pinRefused = true;
+            out.reason = `карта ушла ВЫШЕ потолка: максимум ${max} МГц при потолке ${capMhz}`;
+          }
+          if (breached) throw new Error(`максимум под нагрузкой ${max} МГц ВЫШЕ потолка ${capMhz}`);
+          return `выдано ${median} МГц (максимум ${max}) при потолке ${capMhz} — карта под потолком и свободна вниз, ${loaded.length} проб под нагрузкой`;
         },
       },
       {
@@ -1543,6 +1614,10 @@ async function mainShape() {
  *   5. drop the pinned branch                      → «потолок держит ЗАКРЕПЛЕНИЕ → форма равномерная, и расхождение названо»
  *   6. let the last case agree instead of refusing → «потолок не держит НИЧТО → ОТКАЗ»
  *   7. accept a vector that failed to build        → «вектора нет → отказ, а не молчаливое согласие»
+ *
+ * AND FOR `pinRequired`, added 2026-08-14 after the conflict it exists to prevent BIT LIVE:
+ *   8. demand a pin even when the curve holds     → «кривая держит → ЗАКРЕПЛЕНИЕ НЕ ТРЕБУЕТСЯ»
+ *   9. never demand a pin                         → «кривой не удержать → закрепление ОБЯЗАТЕЛЬНО»
  */
 export async function selfTest() {
   const results = [];
@@ -1649,6 +1724,19 @@ export async function selfTest() {
   // decision READS the vector's verdict instead of re-deriving it from the numbers on its own.
   ok('РОВНО на полу железа решение берётся из вердикта вектора, а не пересчитывается заново',
     choose(vec({ capMhz: 2172, capEnforced: true }), { pinned: false }).shape, 'raise-and-cap');
+
+  // --- ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА. Куплено живым прогоном 2026-08-14: развёртка поставила потолок
+  // кривой на 2842 И закрепила частоту на 2842; карта под потолком села на 2775…2827, доказательство
+  // замка честно отказало, и ступень, где ВСЕ ТРИ формы дали PASS, вышла как НЕИЗВЕСТНО.
+  ok('кривая держит → ЗАКРЕПЛЕНИЕ НЕ ТРЕБУЕТСЯ (иначе потолок и замок дерутся за одну частоту)',
+    choose(vec({}), { pinned: true }).pinRequired, false);
+  ok('кривой не удержать → закрепление ОБЯЗАТЕЛЬНО, оно там единственный держатель',
+    choose(low, { pinned: true }).pinRequired, true);
+  ok('и держатель ровно один: форма и требование замка никогда не утверждают оба сразу',
+    [choose(vec({}), { pinned: true }), choose(low, { pinned: true })].map((r) => `${r.shape}/${r.pinRequired}`),
+    ['raise-and-cap/false', 'uniform/true']);
+  ok('отказ замка не требует — требовать нечего, когда прогона не будет',
+    choose(low, { pinned: false }).pinRequired, false);
 
   return { ok: results.every((r) => r.ok), results };
 }

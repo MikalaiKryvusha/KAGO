@@ -171,6 +171,20 @@ export const CLOCK_OFFSET_MIN_MHZ = -1000;
 export const CLOCK_OFFSET_MAX_MHZ = 1000;
 export const CLOCK_OFFSET_RANGE_IS_MEASURED = true;
 
+/**
+ * ONE STEP OF THE CARD'S OWN CLOCK GRID — the only tolerance a ceiling check is allowed.
+ *
+ * MEASURED, not chosen: this card's supported-clock ladder runs 180…3090 MHz in 389 points whose
+ * spacing alternates **7 MHz (×194) and 8 MHz (×194)** (`npm run gpu:info`, dossier row "GPU"). Since
+ * `clocks.gr` reports on that grid, a reading ONE step above a ceiling is the grid's rounding rather
+ * than a breach; anything beyond it is the card genuinely exceeding the ceiling, and that voids the
+ * verdict of the rung (`vf-step` → the ceiling proof).
+ *
+ * The larger of the two spacings is taken on purpose: a tolerance that admits the 7 MHz case but not
+ * the 8 MHz one would redden on which half of the ladder the card happened to land.
+ */
+export const CLOCK_LADDER_STEP_TOLERANCE_MHZ = 8;
+
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
 // =============================================================================================
@@ -843,6 +857,7 @@ export default Object.freeze({
   POWER_METER_SPREAD_PCT,
   CLOCK_OFFSET_MIN_MHZ,
   CLOCK_OFFSET_MAX_MHZ,
+  CLOCK_LADDER_STEP_TOLERANCE_MHZ,
   CLOCK_OFFSET_RANGE_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,
