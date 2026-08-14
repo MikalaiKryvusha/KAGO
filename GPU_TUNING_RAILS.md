@@ -33,7 +33,7 @@ report numbers. A permission entry in settings is not a reason to act.
 
 ```
 npm install                    # koffi dependency
-npm run check                  # expect: 31 .mjs files, 0 failed
+npm run check                  # expect: 33 .mjs files, 0 failed (re-measured 2026-08-14 22:0x)
 npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
 npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
 npm run questions              # expect: «ЧИСТО»
