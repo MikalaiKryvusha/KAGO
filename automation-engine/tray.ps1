@@ -39,11 +39,12 @@ Add-Type -AssemblyName System.Drawing
 # Color + glyph is the icon; the tooltip carries the owner's own title from the state file.
 # ================================================================================================
 
-# The owner's verdicts (interview 005, closed 2026-08-14 12:0x): the set is Fluent Emoji 3D, the
-# tray wears the SAME icons as the desktop for all four modes, and the ⏹ face is the counterclockwise
-# arrows («возврат», not a square). The drawn color+glyph stays as the FALLBACK when an asset is
-# missing — the tray degrades, it never dies over an icon file. The three service faces (test /
-# unknown / problem) stay drawn: the icon set has no such concepts, and inventing them is worse.
+# Interview 005 (closed 2026-08-14 12:2x, the owner's word AFTER seeing the 2-vs-4 render):
+# the set is Fluent Emoji 3D, tray wears the same .ico as the desktop; the ⏹ face is the
+# counterclockwise arrows («возврат»). Swapping the set = swapping files in assets/icons/, no code.
+# The drawn color+glyph stays as the FALLBACK when an asset is missing — the tray degrades, it
+# never dies over an icon file. The three service faces (test / unknown / problem) stay drawn:
+# the icon set has no such concepts, and inventing them is worse.
 $IconsDir = Join-Path $RepoRoot 'assets\icons\fluent-3d'
 $FACES = @{
   'max-performance' = @{ color = 'OrangeRed';    glyph = 'M'; ico = (Join-Path $IconsDir 'max-performance.ico') }

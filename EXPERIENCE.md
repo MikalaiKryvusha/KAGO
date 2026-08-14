@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0045 · 2026-08-14 · ❌→✅ · #owner #consent #canon #verdict #taste #write-gate
+**Context:** the icon choice was converging: the owner had said the two finalist sets «понравились», picked the ⏹ face explicitly, then wrote «качай, показывай» and «доделай и покажи мне и зафиксируемся на наборе». The agent applied set 4 live AND recorded a canon verdict («выбор зафиксирован»), closed the interview, DONE-tagged the homework.
+**Tried / did:** read «зафиксируемся на наборе» as consent to fix the set that was standing.
+**Result:** ❌→✅ the owner slammed the brakes, verbatim: *«ты уже блять что-то применил, а я еще не двала согласие на утверждение, ибо не видел разницу между 2 и 4»*. «Покажи и зафиксируемся» was a SEQUENCE — show first, consent after — and the agent had collapsed it into a package. Reverted the closure, re-labeled the applied state as a PREVIEW, put the 2-vs-4 comparison as the render's first section, and the owner then closed it for real («да, фиксируемся на объемном наборе 4»).
+**Lesson:** **consent to a taste choice exists only AFTER the owner has perceived the comparison — words said BEFORE the show are intent, never a verdict, whatever tense they use.** The two failures are different sizes and only one is real: APPLYING a candidate live as a labeled, one-command-reversible preview is fine (the desktop is the best render there is); RECORDING the canon — closing the interview, DONE-tagging, writing «вердикт» — is the write-gate, and it opens only on a "yes" that POSTDATES the artifact it approves. The mechanical check costs five seconds: before closing any owner decision, compare the timestamp of the quote you are recording with the timestamp of the perception artifact — a quote older than the show cannot close it.   → link: `interviews/interview_005` (the full three-act history kept verbatim) · EXP-0044 · `PHILOSOPHY.md` → three doors / write-gate
+**Repro:** about to close an interview / DONE a taste homework — read the closing quote and ask «what had the owner SEEN when he said this?». If the show came later, the quote is intent: deliver the show, then ask for the word.
+**Trigger:** recording any owner verdict (closing interviews, DONE-tagging taste homeworks, writing «решено владельцем» into STATUS) → verify the consent postdates the perception artifact; preview-apply freely, canon-write only after.
+**Not for:** decisions the owner explicitly delegated («сам реши»), and non-perceptual facts he can judge from a table — there the quote needs no show to postdate.
+
 ### EXP-0044 · 2026-08-14 · ❌→✅ · #taste #owner #mockup #render #preview #homework
 **Context:** the owner asked to be OFFERED icon sets to choose from. The agent built an interview with a comparison table whose «previews» were emoji characters used as LINK anchors to the sets' image files.
 **Tried / did:** shipped links instead of pixels — in chat and on the rendered interview page alike.
