@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0047 · 2026-08-14 · ❌→✅ · #owner #brand #assets #naming #half-executed-verdict
+**Context:** interview 005 closed with the owner's verdict «лицо ⏹ Stock Default = две стрелки, не квадрат». The agent downloaded the counterclockwise-arrows emoji, built `stock-default.ico` from it, wired it into the shortcut and the tray, and closed the homework DONE.
+**Tried / did:** treated «лицо» as the icon file, because that is what the verdict literally named.
+**Result:** ❌→✅ three days of work later the owner wrote: *«Остался квадрат, который мне не нравился ⏹ Stock Default, я говорил, что хочу тот синий с двемя стрелочками»*. The `.ico` was checked and it was RIGHT — blue button, two white arrows, exactly his pick. The square that survived was the **character ⏹** in the mode's NAME: the desktop shortcut was literally called `⏹ Stock Default.lnk`, the profile title carried it, and every document repeated it. He was reading the label under the correct picture.
+**Lesson:** **a brand decision has two carriers — the artifact and the name that points at it — and executing only the artifact leaves the rejected thing standing in the place the owner actually looks.** The icon lives at 32 px under a text label; the label is the bigger surface. So when an owner rejects a VISUAL element, grep for its textual twin before calling it done: an emoji used as a mode's name, a colour word in a heading, an old product name in a filename. Second half, about where this bit: the shortcut filename is built FROM the profile title, so the fix was one JSON field plus a re-install — cheap once found, invisible for three days because nobody grepped.   → link: `interviews/interview_005_desktop_icons.md` · `assets/icons/README.md` · EXP-0044 (pixels, not links)
+**Repro:** after swapping any owner-facing asset, run `grep -rn "<the old symbol/word>" --include="*.md" --include="*.json" --include="*.mjs" .` and check the artifact's own consumers (`profiles/*.json` titles → `.lnk` names → tray labels). Zero hits outside history docs, or it is not done.
+**Trigger:** owner rejects a visual element and names a replacement → fix the asset AND every textual occurrence of the rejected one; historical records (interviews, homeworks, PROJECT_HISTORY) are the ONE exception — there the old symbol is the evidence and must stay.
+**Not for:** internal identifiers the owner never sees (profile `name`, task names, file keys) — those are keyed by id on purpose and renaming them buys nothing but breakage.
+
 ### EXP-0046 · 2026-08-14 · ❌→✅ · #render #imagemagick #svg #assets #logo #verification #invisible-defect
 **Context:** the accepted chip logo (`assets/logo/kago-logo.png`) had shipped, the owner had said «Суппер!», the judge had passed the session. Next task: put it on GitHub «в большом размере в высоком разрешении, с прозрачным фоном».
 **Tried / did:** measured the shipped file before rebuilding it: `magick kago-logo.png -format "%[opaque]" info:` and one pixel row across the body edge.
