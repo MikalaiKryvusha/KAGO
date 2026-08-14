@@ -106,6 +106,10 @@ export function candidateProfile(mhz, card) {
     settings: {
       powerLimitWatts: null,
       graphicsClockLockMhz: { min: mhz, max: mhz },
+      // `null` = the card's factory curve. An instrument pins a CLOCK and must never also move the
+      // voltage curve: the whole point of the pin is that the region under test is the region the
+      // load actually reaches, and a raised curve would change what that region costs.
+      curveRaiseAndCapMhz: null,
     },
     stamp: {
       driver: card.driver,

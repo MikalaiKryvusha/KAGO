@@ -230,7 +230,7 @@ export function resolveTarget(profile, state) {
  *
  * @returns {Promise<{applied:boolean, steps:Array, before:object, after:object, lockedTo:number|null}>}
  */
-export async function apply(backend, profile, { card, timing = {}, verifyLock = 'idle' } = {}) {
+export async function apply(backend, profile, { card, timing = {}, verifyLock = 'idle', curveBackend = null } = {}) {
   const before = readState(backend);
 
   // R6 and the format, both before the first write (P2-AC5).
@@ -261,6 +261,81 @@ export async function apply(backend, profile, { card, timing = {}, verifyLock = 
   // The ordered steps. `undo` exists only where an undo is POSSIBLE; see note 3 in the header for
   // why the step without one is deliberately last.
   const steps = [];
+
+  // --- THE CURVE, FIRST (`plans/11` §4.2) -------------------------------------------------------
+  //
+  // First in the order for the same reason it is zeroed first in the reset: it is the step whose undo
+  // is cheapest and most total. If a later step fails, the rollback walks back over a curve-zero that
+  // always works; if the curve itself fails, nothing else has been written yet.
+  //
+  // A profile that asks for a curve and gets NO curve backend is REFUSED, not applied without it. This
+  // is the whole reason the format kept the key out until today: a profile that reads as raising the
+  // curve while the applier quietly ignores it is the defect `profiles/README.md` is written against.
+  const wantCurve = profile.settings.curveRaiseAndCapMhz ?? null;
+  if (wantCurve) {
+    if (!curveBackend) {
+      const err = new Error(`профиль «${profile.name}» задаёт кривую V/F, а бэкенд кривой не передан — `
+        + 'применять его частично запрещено: это профиль, который читается как поднимающий кривую, а на деле её не трогает');
+      err.refusals = [{ field: 'settings.curveRaiseAndCapMhz', why: 'нет бэкенда кривой' }];
+      throw err;
+    }
+    steps.push({
+      what: `кривая V/F: подъём +${wantCurve.deltaMhz} МГц с потолком ${wantCurve.capMhz} МГц`,
+      run: async () => {
+        const w = await curveBackend.writeRaiseAndCap(wantCurve.deltaMhz, wantCurve.capMhz);
+        if (!w.ok) throw new Error(`запись кривой не удалась: ${w.why ?? 'причина не названа'}`);
+        // P6-AC3 — PROVED BY READ-BACK, never by a status code. `nvidia-smi` already taught this
+        // project that a tool's own success text is not evidence (`researches/01` §5), and the curve
+        // is written through an UNDOCUMENTED struct, where the standard of proof has to be higher.
+        const back = await curveBackend.readCurveOffsets();
+        if (!back.ok) throw new Error(`кривая записана, но перечитать не смогли: ${back.why ?? 'причина не названа'}`);
+        const want = w.vector;
+        const mismatch = back.offsets.findIndex((v, i) => v !== want[i]);
+        if (mismatch !== -1) {
+          // A STEP THAT KNOWS IT WROTE CLEANS UP AFTER ITSELF. The outer rollback only walks steps that
+          // COMPLETED, so a verify failure here would otherwise leave the curve on the card while the
+          // apply reports a refusal — an undervolt applied under a message saying nothing was applied.
+          // Found by the block «расхождение при перечитывании», which is why it exists.
+          let cleanup = '';
+          try {
+            const z = await curveBackend.zeroCurve();
+            cleanup = z.ok ? ' Кривая обнулена.' : ` ОБНУЛИТЬ КРИВУЮ НЕ УДАЛОСЬ: ${z.why ?? 'причина не названа'}.`;
+          } catch (e) {
+            cleanup = ` ОБНУЛИТЬ КРИВУЮ НЕ УДАЛОСЬ: ${e.message}.`;
+          }
+          throw new Error(`перечитанная кривая не совпала с записанной: точка ${mismatch} — записывали ${want[mismatch]}, прочитали ${back.offsets[mismatch]}.${cleanup}`);
+        }
+        return { value: sampleWritable(backend), samples: [], proof: 'curve-read-back' };
+      },
+      undo: async () => {
+        const z = await curveBackend.zeroCurve();
+        if (!z.ok) throw new Error(`ОТКАТ кривой не удался: ${z.why ?? 'причина не названа'}`);
+        const back = await curveBackend.readCurveOffsets();
+        if (!back.ok) throw new Error(`кривую откатили, но перечитать не смогли: ${back.why ?? 'причина не названа'}`);
+        const nonZero = back.offsets.filter((v) => v !== 0).length;
+        if (nonZero !== 0) throw new Error(`ОТКАТ кривой неполон: ненулевых смещений ${nonZero}`);
+        return { value: sampleWritable(backend), samples: [], proof: 'curve-zeroed' };
+      },
+    });
+  } else if (curveBackend && profile.settings.curveRaiseAndCapMhz === null) {
+    // `null` means the card's factory value — the same convention every other setting obeys. For the
+    // curve that is «zero every offset», and it is what makes `factory.json` a reset of ALL state
+    // rather than of the two settings that existed before today.
+    steps.push({
+      what: 'кривая V/F: возврат к заводской (все смещения 0)',
+      run: async () => {
+        const z = await curveBackend.zeroCurve();
+        if (!z.ok) throw new Error(`обнуление кривой не удалось: ${z.why ?? 'причина не названа'}`);
+        const back = await curveBackend.readCurveOffsets();
+        if (!back.ok) throw new Error(`кривую обнулили, но перечитать не смогли: ${back.why ?? 'причина не названа'}`);
+        const nonZero = back.offsets.filter((v) => v !== 0).length;
+        if (nonZero !== 0) throw new Error(`кривая обнулена не полностью: ненулевых смещений ${nonZero}`);
+        return { value: sampleWritable(backend), samples: [], proof: 'curve-zeroed' };
+      },
+      // No undo, and it is the safe direction: re-applying a curve we did not read is not restoring,
+      // it is inventing. Going TOWARD factory needs no way back (the same reasoning as `-rgc` below).
+    });
+  }
 
   if (Math.abs(before.powerLimitW - target.powerLimitW) >= WATT_EPSILON) {
     steps.push({
@@ -385,9 +460,30 @@ export async function apply(backend, profile, { card, timing = {}, verifyLock = 
  * left the point); without it, the state is reported honestly. R5's rollback for this direction is
  * `apply()` itself — going toward factory is the safe direction and needs no undo.
  */
-export async function resetToFactory(backend, { knownLockMhz = null, timing = {} } = {}) {
+export async function resetToFactory(backend, { knownLockMhz = null, timing = {}, curveBackend = null } = {}) {
   const before = readState(backend);
   const log = [];
+
+  // THE CURVE IS ZEROED FIRST, AND THE UNDO LEARNED IT BEFORE THE APPLIER COULD WRITE IT (R9a, and
+  // `plans/11` §4.2 states the order as a rule rather than a preference). Fans cost this project the
+  // lesson: a writer that died holding MANUAL left the owner's idle machine audibly changed with no
+  // path back, because the undo had never been taught that kind of state. The curve is the fourth
+  // kind, and it is the most dangerous one — an undervolt nobody is holding is a card that can hang.
+  //
+  // It runs FIRST because it is the state whose absence is safest: a zeroed curve is stock behaviour
+  // regardless of what the power limit does next. And a curve backend that is absent is REPORTED, not
+  // silently skipped — «reset did nothing about the curve» must never look like «there was no curve».
+  if (curveBackend) {
+    const z = await curveBackend.zeroCurve();
+    if (!z.ok) throw new Error(`обнуление кривой не удалось: ${z.why ?? 'причина не названа'}`);
+    const back = await curveBackend.readCurveOffsets();
+    const nonZero = back.ok ? back.offsets.filter((v) => v !== 0).length : null;
+    if (!back.ok) throw new Error(`кривую обнулили, но перечитать не смогли: ${back.why ?? 'причина не названа'}`);
+    if (nonZero !== 0) throw new Error(`кривая обнулена не полностью: ненулевых смещений ${nonZero} из ${back.offsets.length}`);
+    log.push(`кривая V/F обнулена — перечитано: 0 ненулевых смещений из ${back.offsets.length}`);
+  } else {
+    log.push('кривая V/F НЕ трогалась: бэкенд кривой не передан (если профиль её задавал, она осталась на карте)');
+  }
 
   const r = backend.resetGraphicsClocks();
   if (!r.ok) throw new Error(`-rgc не удался (код ${r.status}): ${r.stderr || r.stdout}`);
@@ -589,14 +685,14 @@ const silentColdFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 } },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null },
 });
 
 /**
@@ -821,7 +917,7 @@ async function cmdSelftest() {
     const p = {
       name: 'max-performance', title: '🚀 Max Perfomance', mode: 'max-performance',
       qualified: false, draft: { candidate: '+180, потолок 3172', source: 'STATUS факты 24, 27' },
-      settings: { powerLimitWatts: null, graphicsClockLockMhz: null },
+      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null },
     };
     try {
       await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
@@ -1041,6 +1137,109 @@ async function cmdSelftest() {
     await bootApply(bootOpts(b, sb));
     const after = fsReadFileSync(sb.rem, 'utf8');
     if (before !== after) return 'файл состояния изменился после boot-apply';
+    return null;
+  });
+
+  // ===============================================================================================
+  // THE CURVE IN THE PROFILE (`plans/11` §4.2, P6-AC2 / P6-AC3) — on an INJECTED curve backend, so the
+  // undo's shape is provable without a card. Mutation addressees, named before the run:
+  //   24. skip the read-back after writing the curve   → «КРИВАЯ: расхождение при перечитывании -> отказ»
+  //   25. drop the curve from the undo                 → «КРИВАЯ: падение ПОЗЖЕ откатывает кривую ПО ИМЕНИ»
+  //   26. apply a curve profile without a backend      → «КРИВАЯ: профиль просит кривую, бэкенда нет -> ОТКАЗ»
+  // ===============================================================================================
+  const fakeCurve = ({ writeOk = true, readsBack = 'same', zeroOk = true } = {}) => {
+    const state = { offsets: new Array(128).fill(0), calls: [] };
+    return {
+      state,
+      writeRaiseAndCap: async (deltaMhz, capMhz) => {
+        state.calls.push(`write:${deltaMhz}:${capMhz}`);
+        if (!writeOk) return { ok: false, why: 'подставной отказ записи' };
+        const vector = new Array(128).fill(deltaMhz);
+        state.offsets = readsBack === 'wrong' ? vector.map((v, i) => (i === 7 ? v - 1 : v)) : [...vector];
+        return { ok: true, vector };
+      },
+      readCurveOffsets: async () => ({ ok: true, offsets: [...state.offsets] }),
+      zeroCurve: async () => {
+        state.calls.push('zero');
+        if (!zeroOk) return { ok: false, why: 'подставной отказ обнуления' };
+        state.offsets = new Array(128).fill(0);
+        return { ok: true };
+      },
+    };
+  };
+  const curveProfile = () => ({
+    name: 'optimised',
+    title: '⚖️ Optimised',
+    mode: 'optimised',
+    qualified: true,
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
+    stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-15T00:30:00+03:00' },
+  });
+
+  block('КРИВАЯ: применяется и ДОКАЗЫВАЕТСЯ перечитыванием, а не кодом возврата', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    const r = await apply(b, curveProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+    if (!r.applied) return 'профиль не применился';
+    if (!cb.state.offsets.every((v) => v === 592)) return 'кривая на карте не та, что заказана';
+    if (!r.steps.some((s) => s.includes('кривая V/F'))) return 'шаг кривой не попал в журнал применения';
+    return null;
+  });
+
+  block('КРИВАЯ: расхождение при перечитывании -> ОТКАЗ и откат, а не предупреждение', async () => {
+    const b = fakeBackend(); const cb = fakeCurve({ readsBack: 'wrong' });
+    try {
+      await apply(b, curveProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+      return 'применение прошло, хотя перечитанная кривая не совпала с записанной';
+    } catch (e) {
+      if (!/не совпал/u.test(e.message)) return `упало не на сверке перечитывания: ${e.message}`;
+      if (cb.state.offsets.some((v) => v !== 0)) return 'после отказа кривая осталась на карте';
+      return null;
+    }
+  });
+
+  block('КРИВАЯ: падение ПОЗЖЕ откатывает кривую, и откат назван ПО ИМЕНИ (R9a: никогда по счётчику)', async () => {
+    // The power-limit step is made to fail AFTER the curve has been written, so the rollback has to
+    // walk back over the curve. Asserted by the step's NAME: a count stays green when one step is
+    // deleted and another duplicated, which is exactly what R9a forbids.
+    const b = fakeBackend({ failOn: 'power' }); const cb = fakeCurve();
+    try {
+      await apply(b, curveProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+      return 'применение прошло, хотя шаг потолка мощности должен был упасть';
+    } catch (e) {
+      const undone = (e.rollback ?? []).join(' | ');
+      if (!/кривая V\/F/u.test(undone)) return `в откате нет шага кривой ПО ИМЕНИ: ${undone || '(пусто)'}`;
+      if (cb.state.offsets.some((v) => v !== 0)) return 'кривая не обнулена откатом';
+      return null;
+    }
+  });
+
+  block('КРИВАЯ: профиль просит кривую, а бэкенда нет -> ОТКАЗ до единой записи', async () => {
+    const b = fakeBackend();
+    const before = readState(b);
+    try {
+      await apply(b, curveProfile(), { card: SELFTEST_CARD, timing: FAST });
+      return 'профиль применился БЕЗ кривой — ровно тот дефект, ради которого ключ держали вне settings';
+    } catch (e) {
+      if (!/бэкенд кривой не передан/u.test(e.message)) return `отказ не про бэкенд кривой: ${e.message}`;
+      const after = readState(b);
+      if (after.powerLimitW !== before.powerLimitW) return 'потолок мощности успел измениться до отказа';
+      return null;
+    }
+  });
+
+  block('СБРОС обнуляет кривую и доказывает это перечитыванием', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    cb.state.offsets = new Array(128).fill(592);
+    const r = await resetToFactory(b, { timing: FAST, curveBackend: cb });
+    if (cb.state.offsets.some((v) => v !== 0)) return 'после сброса кривая осталась на карте';
+    if (!r.steps.some((s) => s.includes('кривая V/F обнулена'))) return 'сброс не сказал вслух, что обнулил кривую';
+    return null;
+  });
+
+  block('СБРОС без бэкенда кривой ГОВОРИТ об этом, а не молчит', async () => {
+    const b = fakeBackend();
+    const r = await resetToFactory(b, { timing: FAST });
+    if (!r.steps.some((s) => s.includes('НЕ трогалась'))) return 'сброс промолчал о том, что кривую не трогал';
     return null;
   });
 

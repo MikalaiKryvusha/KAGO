@@ -35,7 +35,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { powerEnvelope } from '../config.mjs';
+import { powerEnvelope, CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ } from '../config.mjs';
 
 // The directory is resolved from THIS file, never from the caller's cwd: a shortcut launched from
 // the owner's Desktop (phase 3) runs with a cwd nobody chose.
@@ -44,18 +44,17 @@ const GPU_INFO = fileURLToPath(new URL('../../tools/gpu-info.mjs', import.meta.u
 
 /** The settings a profile may carry. An unknown key is REFUSED, never ignored — `powerLimitWats`
  *  silently ignored is a profile that does nothing while reading as if it does. */
-const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz']);
+const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz']);
 const STAMP_KEYS = Object.freeze(['driver', 'vbios', 'takenAt']);
 
 /**
  * The four modes the owner named (GOAL.md → «Четыре режима»; names ship verbatim in `title`, these
  * ids are the machine identity phase 3's shortcuts and remembered state route by). Phase 3 step 4.2.
  *
- * DELIBERATELY NOT IN SETTINGS: the three working modes' real payload is the V/F-curve raise + cap
- * (NVAPI backend), which this applier cannot write until phase 6 wires that backend in. Their
- * candidate numbers therefore live in the `draft` documentation block, and `settings` carries ONLY
- * what the applier can actually write today — a settings key the applier silently ignores would be
- * a profile that reads as doing something it does not do (the defect this module's header names).
+ * THE CURVE ENTERED SETTINGS 2026-08-15 (`plans/11` §4.1), and the rule that kept it out until then is
+ * the reason it may enter now: `settings` carries ONLY what the applier can actually write, because a
+ * key the applier silently ignores is a profile that reads as doing something it does not do. The
+ * applier learned the curve in the same change (`plans/11` §4.2) — the two land together or not at all.
  * [TESTED: 2026-08-14 · selftest blocks below — unknown mode refused, stock-default with non-null
  *  settings refused, both mutation-proved]
  */
@@ -311,6 +310,73 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
     }
   }
 
+  // --- curveRaiseAndCapMhz (plans/11 §4.1) ------------------------------------------------------
+  //
+  // THE MAIN LEVER OF ALL THREE WORKING MODES, and the one the applier could not write until now. Its
+  // shape is `{ deltaMhz, capMhz }`: raise the WHOLE curve by `deltaMhz`, then push every point above
+  // `capMhz` back down onto it (`nvapi.buildRaiseAndCapVector`). Three refusals, and each is a fact
+  // this project paid to learn:
+  //
+  //   · `deltaMhz` outside the hardware's ±1000 MHz offset range — the range is MEASURED, not assumed;
+  //   · `capMhz` off the card's measured ladder — the same rule the clock lock already obeys, and the
+  //     refusal names the two nearest points, because a round number a human liked is usually absent;
+  //   · **`capMhz` below the curve's own floor `top − 1000` (R11, `bugs/02` step 1)** — the ceiling is
+  //     held by pushing points DOWN, that push is an offset, and it runs out of range. A profile with a
+  //     cap under the floor applies cleanly, reads back correctly, and lets the card reach a clock the
+  //     mode forbade: 2100 MHz for `Silent Cold` leaked 57 MHz and nothing in the stack said so. This
+  //     refusal is that silence closed.
+  const curve = s.curveRaiseAndCapMhz;
+  if (curve !== null && curve !== undefined) {
+    if (typeof curve !== 'object' || Array.isArray(curve)) {
+      out.push(refuse('settings.curveRaiseAndCapMhz', `ожидался объект {deltaMhz, capMhz} или null, получено ${JSON.stringify(curve)}`));
+    } else {
+      const bad = [];
+      for (const k of Object.keys(curve)) {
+        if (k !== 'deltaMhz' && k !== 'capMhz') {
+          out.push(refuse(`settings.curveRaiseAndCapMhz.${k}`, 'неизвестное поле; известны: deltaMhz, capMhz'));
+          bad.push(k);
+        }
+      }
+      for (const k of ['deltaMhz', 'capMhz']) {
+        if (!Number.isInteger(curve[k])) {
+          out.push(refuse(`settings.curveRaiseAndCapMhz.${k}`, `ожидалось целое число МГц, получено ${JSON.stringify(curve[k])}`));
+          bad.push(k);
+        }
+      }
+      if (!bad.includes('deltaMhz')) {
+        const lo = CLOCK_OFFSET_MIN_MHZ ?? -1000;
+        const hi = CLOCK_OFFSET_MAX_MHZ ?? 1000;
+        if (curve.deltaMhz < lo || curve.deltaMhz > hi) {
+          out.push(refuse('settings.curveRaiseAndCapMhz.deltaMhz',
+            `${curve.deltaMhz} МГц вне аппаратного диапазона смещений ${lo}…${hi} МГц`));
+        }
+      }
+      if (!bad.includes('capMhz') && card) {
+        if (!card.ladder.ok) {
+          out.push(refuse('settings.curveRaiseAndCapMhz.capMhz', `частоту не с чем сверить: ${card.ladder.why}`));
+        } else {
+          if (!card.ladder.mhz.includes(curve.capMhz)) {
+            const { below, above } = nearestOnLadder(curve.capMhz, card.ladder.mhz);
+            const near = [below, above].filter((x) => x !== null).join(' и ');
+            out.push(refuse('settings.curveRaiseAndCapMhz.capMhz',
+              `${curve.capMhz} МГц нет на измеренной лестнице карты (${card.ladder.mhz.length} точек ${card.ladder.mhz[0]}…${card.ladder.mhz[card.ladder.mhz.length - 1]} МГц); ближайшие: ${near || '—'}`));
+          }
+          // THE FLOOR THE CURVE CAN HOLD (R11). Derived from the card's own top clock, never a literal:
+          // another card has another top, and a hard-coded 2157 would be this card's number wearing a
+          // constant's clothes.
+          const topMhz = card.ladder.mhz[card.ladder.mhz.length - 1];
+          const floorMhz = topMhz + (CLOCK_OFFSET_MIN_MHZ ?? -1000);
+          if (curve.capMhz < floorMhz) {
+            out.push(refuse('settings.curveRaiseAndCapMhz.capMhz',
+              `${curve.capMhz} МГц ниже пола, который кривая способна удержать (${floorMhz} МГц = верх ${topMhz} − 1000): `
+              + 'потолок держится придавливанием точек вниз, а придавливание упирается в аппаратный диапазон. '
+              + 'Такой профиль применится чисто и всё равно пустит карту выше своего потолка (R11, bugs/02)'));
+          }
+        }
+      }
+    }
+  }
+
   // --- kind (bugs/05) ---------------------------------------------------------------------------
   //
   // Declared BEFORE the mode and qualification checks, because it is what decides whether they apply.
@@ -335,7 +401,7 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
     if (!MODE_IDS.includes(profile.mode)) {
       out.push(refuse('mode', `неизвестный режим ${JSON.stringify(profile.mode)}; известны: ${MODE_IDS.join(', ')}`));
     } else if (profile.mode === 'stock-default' && !isFactoryProfile(profile)) {
-      out.push(refuse('mode', 'stock-default обязан ничего не задавать (обе настройки null) — сброс, который что-то настраивает, это не сброс'));
+      out.push(refuse('mode', `stock-default обязан ничего не задавать (все ${SETTING_KEYS.length} настройки null) — сброс, который что-то настраивает, это не сброс`));
     }
   }
 
@@ -533,14 +599,14 @@ const FAKE_CARD = Object.freeze({
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null },
 });
 
 const measuredFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 } },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
@@ -553,6 +619,45 @@ function cmdSelftest() {
     {
       what: 'измеренный профиль со штампом и частотой с лестницы -> принят',
       profile: measuredFixture(), expect: [],
+    },
+    // --- КРИВАЯ В ПРОФИЛЕ (`plans/11` §4.1, P6-AC1). Пять враждебных фикстур, каждая несёт РОВНО
+    // один дефект и называет поле, на которое обязан показать валидатор.
+    {
+      what: 'КРИВАЯ: измеренный подъём с потолком на лестнице -> принят',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 592, capMhz: 2130 }; return p; })(),
+      expect: [],
+    },
+    {
+      what: 'КРИВАЯ: потолок НИЖЕ пола кривой (верх 3090 − 1000 = 2090) -> отказ на capMhz',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: 1200 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz.capMhz'],
+      alsoMustSay: ['2090'],
+    },
+    {
+      what: 'КРИВАЯ: потолок не с измеренной лестницы -> отказ с ближайшими двумя',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: 2500 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz.capMhz'],
+      alsoMustSay: ['2130', '3090'],
+    },
+    {
+      what: 'КРИВАЯ: подъём за аппаратным диапазоном ±1000 -> отказ на deltaMhz',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 1500, capMhz: 2130 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz.deltaMhz'],
+    },
+    {
+      what: 'КРИВАЯ: лишнее поле внутри -> отказ именно на нём',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: 2130, pointIndex: 95 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz.pointIndex'],
+    },
+    {
+      what: 'КРИВАЯ: сброс к заводским, который задаёт кривую -> отказ (сброс, который настраивает, не сброс)',
+      profile: (() => {
+        const p = factoryFixture();
+        p.mode = 'stock-default';
+        p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: 2130 };
+        return p;
+      })(),
+      expect: ['mode'],
     },
     {
       what: 'круглая частота 1000 МГц не с лестницы -> отказ с ближайшими двумя',

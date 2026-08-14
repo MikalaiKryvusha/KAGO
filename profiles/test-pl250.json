@@ -4,7 +4,8 @@
   "qualified": true,
   "settings": {
     "powerLimitWatts": 250,
-    "graphicsClockLockMhz": null
+    "graphicsClockLockMhz": null,
+    "curveRaiseAndCapMhz": null
   },
   "stamp": {
     "driver": "610.88",

@@ -4,6 +4,7 @@
   "mode": "stock-default",
   "settings": {
     "powerLimitWatts": null,
-    "graphicsClockLockMhz": null
+    "graphicsClockLockMhz": null,
+    "curveRaiseAndCapMhz": null
   }
 }
