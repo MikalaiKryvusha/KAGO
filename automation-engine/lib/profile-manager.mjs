@@ -193,6 +193,23 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
         return { ok: false, why: `потолок ${capMhz} МГц кривой не удержать: утечка ${vec.capLeakMhz} МГц, `
           + `пол ${vec.lowestEnforceableCapMhz} МГц (R11)` };
       }
+      // THE INVERSION CHECK, and it lives here because this is the last line before the device write
+      // (`plans/12` §4.4, P6-AC10). A uniform raise cannot invert the curve — that is a proof about
+      // `min(F_i + Δ, F_top)`. A VECTOR can: raise point i more than point i+1 and a lower-VOLTAGE
+      // point ends up offering a HIGHER frequency than its neighbour. This project has never written
+      // such a curve and has never observed what the card does with one, so it refuses instead of
+      // finding out on the owner's machine — «look it up FIRST, never learn a state-changing flag's
+      // semantics by running it» (the owner's-machine rule).
+      //
+      // It refuses on `introducesInversion`, NOT on `monotone`: an inversion the CARD's own factory
+      // curve already has is not ours to blame the write for, and refusing on it would block writes
+      // that work today — a guard causing the regression it exists to prevent.
+      if (vec.introducesInversion) {
+        const f = vec.firstInversionAt;
+        return { ok: false, why: `вектор ЛОМАЕТ ПОРЯДОК кривой: точка ${f.at} даёт ${f.mhz} МГц после ${f.previousMhz} МГц `
+          + `у точки ${f.previous} — то есть меньшее напряжение предлагает БОЛЬШУЮ частоту. Такой формы карта от нас `
+          + 'ещё не получала, и что она с ней делает — не измерено. Поднимите точку ' + `${f.at} или опустите ${f.previous}` };
+      }
       const w = mod.writeCurve(nv, handle, vec.offsets, { count: COUNT() });
       if (!w.ok) return { ok: false, why: `запись кривой: ${w.failed} точек из ${COUNT()} не записались` };
       return { ok: true, vector: vec.offsets.slice(0, COUNT()) };
@@ -378,10 +395,19 @@ export async function apply(backend, profile, {
       err.refusals = [{ field: 'settings.curveRaiseAndCapMhz', why: 'нет бэкенда кривой' }];
       throw err;
     }
+    // ONE NUMBER OR ONE PER POINT (`plans/12` §4.4). The format has already refused every shape that is
+    // neither, so here the choice is a read, not a decision. The `what:` line NAMES which shape is
+    // being applied, because that line is what an operator reads in the seconds before a write to the
+    // owner's card — «подъём +592» and «вектор на 127 точек» are different writes and must not print
+    // the same.
+    const raise = Array.isArray(wantCurve.deltaByPointMhz) ? wantCurve.deltaByPointMhz : wantCurve.deltaMhz;
+    const raiseSaid = Array.isArray(raise)
+      ? `ВЕКТОР на ${raise.length} точек (подъём ${Math.min(...raise)}…${Math.max(...raise)} МГц)`
+      : `подъём +${raise} МГц на всю кривую`;
     steps.push({
-      what: `кривая V/F: подъём +${wantCurve.deltaMhz} МГц с потолком ${wantCurve.capMhz} МГц`,
+      what: `кривая V/F: ${raiseSaid}, ${wantCurve.capMhz === null ? 'без потолка' : `потолок ${wantCurve.capMhz} МГц`}`,
       run: async () => {
-        const w = await curveBackend.writeRaiseAndCap(wantCurve.deltaMhz, wantCurve.capMhz);
+        const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz);
         if (!w.ok) throw new Error(`запись кривой не удалась: ${w.why ?? 'причина не названа'}`);
         // P6-AC3 — PROVED BY READ-BACK, never by a status code. `nvidia-smi` already taught this
         // project that a tool's own success text is not evidence (`researches/01` §5), and the curve
@@ -1251,9 +1277,14 @@ async function cmdSelftest() {
     return {
       state,
       writeRaiseAndCap: async (deltaMhz, capMhz) => {
-        state.calls.push(`write:${deltaMhz}:${capMhz}`);
+        state.calls.push(`write:${Array.isArray(deltaMhz) ? `вектор[${deltaMhz.length}]` : deltaMhz}:${capMhz}`);
         if (!writeOk) return { ok: false, why: 'подставной отказ записи' };
-        const vector = new Array(128).fill(deltaMhz);
+        // The twin mirrors the real backend's contract: a per-point raise lands per point, a scalar
+        // fills. A stand-in that flattened a vector would make the vector blocks green by not testing
+        // the vector at all.
+        const vector = Array.isArray(deltaMhz)
+          ? Array.from({ length: 128 }, (_, i) => deltaMhz[i] ?? 0)
+          : new Array(128).fill(deltaMhz);
         state.offsets = readsBack === 'wrong' ? vector.map((v, i) => (i === 7 ? v - 1 : v)) : [...vector];
         return { ok: true, vector };
       },
@@ -1344,6 +1375,88 @@ async function cmdSelftest() {
       if (after.powerLimitW !== before.powerLimitW) return 'потолок мощности успел измениться до отказа';
       return null;
     }
+  });
+
+  // --- ВЕКТОР (`plans/12` §4.4). МУТАЦИОННЫЕ АДРЕСАТЫ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+  //   H. `raise` всегда берёт `deltaMhz`      → «ВЕКТОР: своё смещение на каждую точку доезжает до карты»
+  //   I. строка шага всегда «подъём +N»       → «ВЕКТОР: шаг НАЗЫВАЕТ форму записи»
+  //   J. снят отказ по introducesInversion    → «ВЕКТОР: инверсия ОТВЕРГНУТА последней строкой перед записью»
+  const vectorProfile = () => {
+    const p = curveProfile();
+    // Bottom of the curve raised little, top raised much — the shape the band sweep will produce,
+    // because the lever yields 45 mV at 1700 MHz and 245 mV at 2842 (`STATUS.md`).
+    p.settings.curveRaiseAndCapMhz = {
+      deltaMhz: null,
+      deltaByPointMhz: Array.from({ length: 127 }, (_, i) => (i < 60 ? 40 : 300)),
+      capMhz: 2130,
+    };
+    return p;
+  };
+
+  block('ВЕКТОР: своё смещение на каждую точку доезжает до карты, а не схлопывается в одно число', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    const r = await apply(b, vectorProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+    if (!r.applied) return 'профиль с вектором не применился';
+    if (cb.state.offsets[0] !== 40 || cb.state.offsets[59] !== 40) return `низ кривой не 40: ${cb.state.offsets[0]}/${cb.state.offsets[59]}`;
+    if (cb.state.offsets[60] !== 300 || cb.state.offsets[126] !== 300) return `верх кривой не 300: ${cb.state.offsets[60]}/${cb.state.offsets[126]}`;
+    return null;
+  });
+
+  block('ВЕКТОР: шаг НАЗЫВАЕТ форму записи — оператор читает эту строку перед записью в карту владельца', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    const r = await apply(b, vectorProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+    const said = r.steps.find((s) => s.includes('кривая V/F')) ?? '';
+    if (!/ВЕКТОР на 127 точек/u.test(said)) return `шаг не назвал форму: ${said || '(шага кривой нет)'}`;
+    if (/подъём \+/u.test(said)) return `шаг вектора напечатался как скалярный подъём: ${said}`;
+    return null;
+  });
+
+  block('ВЕКТОР: падение позже откатывает кривую ПО ИМЕНИ — откат не зависит от формы записи (R9a)', async () => {
+    const b = fakeBackend({ failOn: 'power' }); const cb = fakeCurve();
+    try {
+      await apply(b, vectorProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+      return 'применение прошло, хотя шаг потолка мощности должен был упасть';
+    } catch (e) {
+      const undone = (e.rollback ?? []).join(' | ');
+      if (!/кривая V\/F/u.test(undone)) return `в откате нет шага кривой ПО ИМЕНИ: ${undone || '(пусто)'}`;
+      if (cb.state.offsets.some((v) => v !== 0)) return 'кривая не обнулена откатом';
+      return null;
+    }
+  });
+
+  block('ВЕКТОР: инверсия ОТВЕРГНУТА последней строкой перед записью, и ни одна точка не записана', async () => {
+    // This one drives the REAL `nvapiCurveBackend` with an injected nvapi module, because the refusal
+    // lives there — in the last line before the device write (P6-AC10). A block that checked it on the
+    // fake backend would prove nothing about the path that actually writes.
+    const nvapiReal = await import('./nvapi.mjs');
+    const points = Array.from({ length: 128 }, (_, i) => {
+      if (i === 127) return { i, mhz: 405, mv: 515, freqKhz: 405_000 };
+      const mhz = i <= 20 ? 180 : Math.round(180 + ((3172 - 180) * (i - 20)) / (126 - 20));
+      return { i, mhz, mv: 450 + i * 5, freqKhz: mhz * 1000 };
+    });
+    let writes = 0;
+    const injected = {
+      CLK_VF_POINT_COUNT: nvapiReal.CLK_VF_POINT_COUNT,
+      buildRaiseAndCapVector: nvapiReal.buildRaiseAndCapVector,      // the REAL arithmetic
+      readVfCurve: () => ({ ok: true, points }),
+      writeCurve: () => { writes++; return { ok: true }; },
+      zeroCurve: () => ({ ok: true }),
+      readVfOffsets: () => ({ ok: true, offsets: new Array(128).fill(0) }),
+      openNvapi: () => ({ koffi: { call: () => {} }, resolve: () => ({ ptr: 0 }), protos: {} }),
+    };
+    const cb = nvapiCurveBackend({ nvapi: injected });
+    // Point 61 dragged 900 MHz above its neighbours: a LOWER-voltage point offering a HIGHER clock.
+    const inverting = Array.from({ length: 127 }, (_, i) => (i === 61 ? 900 : 0));
+    const bad = await cb.writeRaiseAndCap(inverting, null);
+    if (bad.ok !== false) return 'инвертирующий вектор ПРОШЁЛ в карту';
+    if (!/ЛОМАЕТ ПОРЯДОК/u.test(bad.why ?? '')) return `отказ не про порядок кривой: ${bad.why}`;
+    if (!/точка 62/u.test(bad.why ?? '') || !/точки 61/u.test(bad.why ?? '')) return `отказ не назвал пару точек: ${bad.why}`;
+    if (writes !== 0) return `отказ произошёл ПОСЛЕ записи: записей ${writes}`;
+    // …and the same backend accepts a well-ordered vector, or the block above is green because
+    // nothing ever passes.
+    const good = await cb.writeRaiseAndCap(Array.from({ length: 127 }, (_, i) => (i < 60 ? 40 : 300)), null);
+    if (good.ok !== true) return `нормальный вектор тоже отвергнут: ${good.why}`;
+    return null;
   });
 
   block('СБРОС обнуляет кривую и доказывает это перечитыванием', async () => {

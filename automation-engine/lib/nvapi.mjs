@@ -264,7 +264,11 @@ export function nvapiVersion(structSize, versionNumber) {
 export const CLK_VF_POINTS_GET_STATUS_SIZE = 0x1C28;
 export const CLK_VF_POINT_STRIDE = 0x1C;
 export const CLK_VF_POINTS_DATA_OFFSET = 0x48;
-export const CLK_VF_POINT_COUNT = 128;
+// RE-EXPORTED, NOT DEFINED HERE (`plans/12` §4.1). The number moved to `config.mjs` so the profile
+// VALIDATOR can check a per-point vector's length without importing this module and, with it, koffi
+// and the card. One definition, one truth — this line is a view of it, not a copy, so the twelve call
+// sites below and the validator can never disagree about how many points a curve has.
+export const CLK_VF_POINT_COUNT = config.CLK_VF_POINT_COUNT;
 
 // -------------------------------------------------------------------------------------------------
 // The FAN client structs. Derived arithmetically from the field lists of TWO independently-authored
@@ -470,6 +474,12 @@ export function readFanCoolers(nv, handle, { versions = [1, 2, 3, 4] } = {}) {
  *
  *     offset_i = clamp(F_top − F_i , 0 , Δ)          F_top = the stock curve's highest frequency
  *
+ * **Δ MAY BE ONE NUMBER OR ONE PER POINT** (`plans/12` §4.2, 2026-08-15). The scalar is the special
+ * case Δ_i = Δ and stays because it is what every live sweep so far measured; the vector exists
+ * because the lever's yield varies along the curve by a factor of five (45 mV at 1700 MHz, 245 mV at
+ * 2842 — `STATUS.md`), so no single Δ can be the optimum. What a vector costs is stated where it is
+ * paid: it removes the monotonicity PROOF below, which is why this function now measures that.
+ *
  * WHY THE CAP AT ALL, since a cap sounds like the pin he rejected: it is not the same thing. A pin
  * forbids movement in BOTH directions; this cap only says no point may offer MORE than the card already
  * offered at stock. Without it the card takes the freed headroom as SPEED — it boosts past stock at the
@@ -524,17 +534,42 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
   const topMhz = Math.max(...usable.map((p) => p.mhz));
   const cap = capMhz === null ? topMhz : capMhz;
 
+  // ─── THE RAISE MAY BE ONE NUMBER OR ONE NUMBER PER POINT (`plans/12` §4.2) ──────────────────────
+  //
+  // A scalar Δ is the special case Δ_i = Δ, and it is kept because it is what three live sweeps and
+  // the one witnessed profile were measured with. The VECTOR exists because a single Δ cannot be the
+  // optimum on this curve, and that is arithmetic rather than an opinion: the lever yields **45 mV at
+  // 1700 MHz and 245 mV at 2842** (`STATUS.md`, computed on the live curve with zero writes). The
+  // owner said the same thing in his own terms — *«движок должен ТЮНИТЬ ВСЕ ТОЧКИ КРИВОЙ»* — and his
+  // convergence loop in `GOAL.md` keeps one value PER POINT, which a scalar cannot hold.
+  //
+  // A malformed vector is REFUSED here rather than defaulted to 0: a missing element is not «no raise
+  // for that point», it is a caller that does not know what it is writing to the owner's card.
+  const deltaIsVector = Array.isArray(deltaMhz);
+  if (deltaIsVector) {
+    if (deltaMhz.length < count) {
+      return { ok: false, why: `вектор подъёма короче кривой: ${deltaMhz.length} элементов против ${count} точек` };
+    }
+    const badAt = deltaMhz.slice(0, count).findIndex((d) => !Number.isFinite(d));
+    if (badAt !== -1) {
+      return { ok: false, why: `элемент ${badAt} вектора подъёма не число: ${JSON.stringify(deltaMhz[badAt])}` };
+    }
+  } else if (!Number.isFinite(deltaMhz)) {
+    return { ok: false, why: `подъём не число: ${JSON.stringify(deltaMhz)}` };
+  }
+  const deltaAt = (i) => (deltaIsVector ? deltaMhz[i] : deltaMhz);
+
   const offsets = [];
   for (let i = 0; i < count; i++) {
     const p = points[i];
     // A point with no frequency gets no offset: there is nothing to raise and nothing to cap.
     if (!p || p.freqKhz <= 0) { offsets.push(0); continue; }
-    // min(Δ, cap − F_i), and NOTHING clamps it up to 0: a point already ABOVE the cap must be pushed
+    // min(Δ_i, cap − F_i), and NOTHING clamps it up to 0: a point already ABOVE the cap must be pushed
     // DOWN to it, or the card can still boost past the cap and the whole point of the cap is lost.
     // MEASURED 2026-08-10, and this is why the lower clamp was removed: with the cap at the curve's TOP
     // the card never reached it under load (it sat at 2887 of a 3172 top), so the cap bound nothing and
     // the raise was taken as SPEED — 2887 → 2932 MHz at 137.3 → 137.1 W, i.e. no saving at all.
-    const wanted = Math.min(deltaMhz, cap - p.mhz);
+    const wanted = Math.min(deltaAt(i), cap - p.mhz);
     // The wall is named by the HARDWARE, not by our caution: NVML published −1000…+1000 MHz for the
     // graphics domain (`researches/05` §8), and config carries it with `..._IS_MEASURED = true`.
     offsets.push(Math.max(config.CLOCK_OFFSET_MIN_MHZ, Math.min(config.CLOCK_OFFSET_MAX_MHZ, wanted)));
@@ -553,15 +588,44 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
   // the curve alone. On this card that is 3172 − 1000 = 2172 MHz.
   const lowestEnforceableCapMhz = topMhz + config.CLOCK_OFFSET_MIN_MHZ;
 
+  // ─── MONOTONICITY: A PROOF FOR A SCALAR, A MEASUREMENT FOR A VECTOR (`plans/12` §4.2) ───────────
+  //
+  // Under a uniform raise the resulting curve `min(F_i + Δ, F_top)` cannot be made non-monotone — that
+  // is a proof about the formula, and it is why the old shape never needed to look. A VECTOR removes
+  // the proof: raising point i more than point i+1 can put a LOWER-voltage point above a higher-voltage
+  // one, and this project has never written such a curve nor observed what the card does with it. An
+  // unproved property is measured or refused, never inherited from the shape it used to hold for.
+  //
+  // The verdict compares against the STOCK curve's OWN order on purpose. What matters is whether OUR
+  // vector introduced an inversion — if the card's factory curve were already non-monotone, refusing
+  // on `monotone === false` would block writes that work today, i.e. a guard causing the regression it
+  // exists to prevent. So the fact is reported in three parts and the caller refuses on the third.
+  const orderOf = (get) => {
+    let prev = -Infinity;
+    let prevIdx = -1;
+    for (let i = 0; i < count; i++) {
+      const p = points[i];
+      if (!p || p.freqKhz <= 0) continue;      // a hole is not part of the curve
+      const now = get(p, i);
+      if (now < prev) return { monotone: false, at: i, previous: prevIdx, mhz: now, previousMhz: prev };
+      prev = now;
+      prevIdx = i;
+    }
+    return { monotone: true, at: null, previous: null, mhz: null, previousMhz: null };
+  };
+  const stockOrder = orderOf((p) => p.mhz);
+  const resultOrder = orderOf((p, i) => p.mhz + offsets[i]);
+
   return {
     ok: true,
     topMhz,
     capMhz: cap,
     capIsBelowTop: cap < topMhz,
     deltaMhz,
+    deltaIsVector,
     offsets,
-    atFullDelta: offsets.filter((o) => o === deltaMhz).length,
-    raisedButCapped: offsets.filter((o) => o > 0 && o < deltaMhz).length,
+    atFullDelta: offsets.filter((o, i) => o === deltaAt(i)).length,
+    raisedButCapped: offsets.filter((o, i) => o > 0 && o < deltaAt(i)).length,
     pushedDown: offsets.filter((o) => o < 0).length,
     zero: offsets.filter((o) => o === 0).length,
     maxOffset: Math.max(...offsets),
@@ -570,6 +634,11 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     lowestEnforceableCapMhz,
     capEnforced: highestOfferedMhz <= cap,
     capLeakMhz: Math.max(0, highestOfferedMhz - cap),
+    stockMonotone: stockOrder.monotone,
+    monotone: resultOrder.monotone,
+    // The only one a caller may refuse on: WE broke an order the card had.
+    introducesInversion: stockOrder.monotone && !resultOrder.monotone,
+    firstInversionAt: resultOrder.monotone ? null : resultOrder,
   };
 }
 
@@ -1331,6 +1400,73 @@ export function selftestShape() {
   check('БЕЗ потолка вопрос не возникает вовсе: потолок = верх, держится сам собой',
     v.capEnforced === true && v.capLeakMhz === 0,
     `максимум ${v.highestOfferedMhz} при потолке ${v.capMhz}`);
+
+  // --- THE VECTOR (`plans/12` §4.2) --------------------------------------------------------------
+  //
+  // MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+  //   5. make `deltaAt` ignore the array and use element 0     → «вектор из ОДИНАКОВЫХ Δ даёт ТОТ ЖЕ вектор…»
+  //      (it stays green on a uniform vector by construction — so the addressee is the block below it,
+  //      «вектор из РАЗНЫХ Δ реально различает точки», which is why that block exists separately)
+  //   6. compute `atFullDelta` against `deltaMhz` instead of `deltaAt(i)` → «статистика считается по СВОЕМУ Δ каждой точки»
+  //   7. return `monotone: true` unconditionally               → «инверсия НАЙДЕНА и названа парой точек»
+  //   8. drop the `stockMonotone` guard from `introducesInversion` → «инверсия, УЖЕ БЫВШАЯ у стока, нам не приписывается»
+  //   9. accept a short vector (remove the length refusal)     → «короткий вектор ОТВЕРГНУТ, а не дополнен нулями»
+
+  // P6-AC7 — the equality that protects the one witnessed profile. A uniform VECTOR must produce
+  // byte-identical offsets to the SCALAR, over the deltas and caps this project has actually used.
+  // Eyeballing «the numbers look the same» is what this block exists instead of (guards, byte-exact).
+  let equalityDiffs = 0;
+  const combos = [];
+  for (const d of [0, 45, 180, 592]) {
+    for (const capOpt of [null, 2887, 2400]) {
+      const scal = buildRaiseAndCapVector(points, d, { capMhz: capOpt });
+      const vect = buildRaiseAndCapVector(points, Array.from({ length: 127 }, () => d), { capMhz: capOpt });
+      const diff = scal.offsets.filter((o, i) => o !== vect.offsets[i]).length;
+      equalityDiffs += diff;
+      combos.push(`Δ${d}/потолок ${capOpt ?? '—'}`);
+    }
+  }
+  check('вектор из ОДИНАКОВЫХ Δ даёт ТОТ ЖЕ вектор сдвигов, что и скаляр — поэлементно, а не на глаз',
+    equalityDiffs === 0, `расхождений ${equalityDiffs} на ${combos.length} сочетаниях (${combos.join(', ')})`);
+
+  // …and the converse: a vector that DIFFERS per point must actually differ, or the block above is
+  // green because the vector path is not being taken at all.
+  const perPoint = Array.from({ length: 127 }, (_, i) => (i < 60 ? 10 : 300));
+  const pv = buildRaiseAndCapVector(points, perPoint);
+  check('вектор из РАЗНЫХ Δ реально различает точки — низ поднят на 10, середина на 300',
+    pv.ok && pv.offsets[0] === 10 && pv.offsets[59] === 10 && pv.offsets[60] === 300,
+    `точки 0/59/60: ${pv.offsets[0]}/${pv.offsets[59]}/${pv.offsets[60]}`);
+  check('статистика считается по СВОЕМУ Δ каждой точки, а не по одному числу',
+    pv.atFullDelta > 0 && pv.atFullDelta <= 127 && pv.deltaIsVector === true,
+    `точек с полным своим шагом ${pv.atFullDelta}, deltaIsVector ${pv.deltaIsVector}`);
+
+  // P6-AC9/AC10 — the property a vector can break and a scalar cannot. Point 61 is dragged far above
+  // its neighbour's raise, which puts a LOWER-voltage point above a higher-voltage one.
+  const inverting = Array.from({ length: 127 }, (_, i) => (i === 61 ? 900 : 0));
+  const iv = buildRaiseAndCapVector(points, inverting);
+  check('ИНВЕРСИЯ НАЙДЕНА и названа парой точек — монотонность у вектора уже не доказательство, а замер',
+    iv.ok && iv.monotone === false && iv.firstInversionAt?.at === 62 && iv.firstInversionAt?.previous === 61,
+    `монотонна ${iv.monotone}, первая инверсия: точка ${iv.firstInversionAt?.at} (${iv.firstInversionAt?.mhz} МГц) `
+    + `после точки ${iv.firstInversionAt?.previous} (${iv.firstInversionAt?.previousMhz} МГц)`);
+  check('и она отмечена как ВНЕСЁННАЯ НАМИ: сток был монотонен, стал нет',
+    iv.stockMonotone === true && iv.introducesInversion === true);
+  check('равномерный подъём инверсий не вносит — старое доказательство продолжает держаться',
+    v.monotone === true && v.introducesInversion === false && c.monotone === true && c.introducesInversion === false);
+  // The stock-curve guard: an inversion the CARD already had must not be blamed on our vector, or the
+  // guard would refuse writes that work today. Built by inverting the fixture itself.
+  const bentStock = points.map((p, i) => (i === 61 ? { ...p, mhz: 100, freqKhz: 100_000 } : p));
+  const bv = buildRaiseAndCapVector(bentStock, 0);
+  check('инверсия, УЖЕ БЫВШАЯ у стоковой кривой, нам не приписывается — иначе сторож запретил бы то, что работает',
+    bv.stockMonotone === false && bv.monotone === false && bv.introducesInversion === false);
+
+  // A malformed vector is refused rather than quietly padded — a missing element is a caller that does
+  // not know what it is about to write to the owner's card.
+  const short = buildRaiseAndCapVector(points, [1, 2, 3]);
+  check('короткий вектор ОТВЕРГНУТ, а не дополнен нулями', short.ok === false, short.why);
+  const nanv = buildRaiseAndCapVector(points, Array.from({ length: 127 }, (_, i) => (i === 40 ? null : 45)));
+  check('вектор с не-числом ОТВЕРГНУТ, и элемент назван по номеру', nanv.ok === false, nanv.why);
+  const nanScalar = buildRaiseAndCapVector(points, undefined);
+  check('и скаляр-не-число тоже отвергнут, а не превращён в NaN-сдвиги', nanScalar.ok === false, nanScalar.why);
 
   // --- points with no frequency are not invented into the profile
   const holed = points.map((p, i) => (i === 50 ? { ...p, freqKhz: 0, mhz: 0 } : p));

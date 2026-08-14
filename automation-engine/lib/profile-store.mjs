@@ -35,7 +35,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { powerEnvelope, CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ } from '../config.mjs';
+import { powerEnvelope, CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ, CURVE_GRAPHICS_POINT_COUNT } from '../config.mjs';
 
 // The directory is resolved from THIS file, never from the caller's cwd: a shortcut launched from
 // the owner's Desktop (phase 3) runs with a cwd nobody chose.
@@ -325,22 +325,83 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
   //     cap under the floor applies cleanly, reads back correctly, and lets the card reach a clock the
   //     mode forbade: 2100 MHz for `Silent Cold` leaked 57 MHz and nothing in the stack said so. This
   //     refusal is that silence closed.
+  //
+  // ─── AND THE RAISE MAY BE A VECTOR (`plans/12` §4.3, 2026-08-15) ──────────────────────────────
+  //
+  // `deltaMhz` is ONE number for the whole curve; `deltaByPointMhz` is one per point. Exactly one of
+  // them is non-null, and the exclusivity is a refusal rather than a precedence rule: «both set» has
+  // no honest reading, and a precedence would silently ignore half of what the file says.
+  //
+  // WHY THE VECTOR EXISTS, in one line, because a future session will ask: the lever's yield varies by
+  // a factor of five along this curve (45 mV at 1700 MHz, 245 mV at 2842 — `STATUS.md`, arithmetic on
+  // the live curve), so a single Δ cannot be the optimum, and the owner's convergence loop in
+  // `GOAL.md` keeps one value PER POINT. EXP-0056 records the week that was lost shipping the scalar.
   const curve = s.curveRaiseAndCapMhz;
   if (curve !== null && curve !== undefined) {
     if (typeof curve !== 'object' || Array.isArray(curve)) {
-      out.push(refuse('settings.curveRaiseAndCapMhz', `ожидался объект {deltaMhz, capMhz} или null, получено ${JSON.stringify(curve)}`));
+      out.push(refuse('settings.curveRaiseAndCapMhz', `ожидался объект {deltaMhz|deltaByPointMhz, capMhz} или null, получено ${JSON.stringify(curve)}`));
     } else {
       const bad = [];
       for (const k of Object.keys(curve)) {
-        if (k !== 'deltaMhz' && k !== 'capMhz') {
-          out.push(refuse(`settings.curveRaiseAndCapMhz.${k}`, 'неизвестное поле; известны: deltaMhz, capMhz'));
+        if (k !== 'deltaMhz' && k !== 'capMhz' && k !== 'deltaByPointMhz') {
+          out.push(refuse(`settings.curveRaiseAndCapMhz.${k}`, 'неизвестное поле; известны: deltaMhz, deltaByPointMhz, capMhz'));
           bad.push(k);
         }
       }
-      if (!Number.isInteger(curve.deltaMhz)) {
+
+      // The two ways of naming a raise, and the rule that exactly one is used.
+      const hasScalar = curve.deltaMhz !== null && curve.deltaMhz !== undefined;
+      const hasVector = curve.deltaByPointMhz !== null && curve.deltaByPointMhz !== undefined;
+      if (hasScalar && hasVector) {
+        out.push(refuse('settings.curveRaiseAndCapMhz', 'подъём задан ДВАЖДЫ — и одним числом (deltaMhz), и вектором '
+          + '(deltaByPointMhz). У этого нет честного прочтения: правило старшинства молча выбросило бы половину '
+          + 'написанного в файле. Оставьте ровно одно'));
+        bad.push('deltaMhz', 'deltaByPointMhz');
+      } else if (!hasScalar && !hasVector) {
+        out.push(refuse('settings.curveRaiseAndCapMhz', 'кривая задана, а подъёма нет: нужен либо deltaMhz (одно число '
+          + 'на всю кривую), либо deltaByPointMhz (своё число на каждую точку). Настройка кривой, которая ничего не '
+          + 'поднимает, — это null, а не пустой объект'));
+        bad.push('deltaMhz', 'deltaByPointMhz');
+      }
+
+      if (hasVector && !bad.includes('deltaByPointMhz')) {
+        if (!Array.isArray(curve.deltaByPointMhz)) {
+          out.push(refuse('settings.curveRaiseAndCapMhz.deltaByPointMhz',
+            `ожидался массив из ${CURVE_GRAPHICS_POINT_COUNT} целых чисел МГц (по одному на точку кривой), получено ${JSON.stringify(curve.deltaByPointMhz)}`));
+          bad.push('deltaByPointMhz');
+        } else if (curve.deltaByPointMhz.length !== CURVE_GRAPHICS_POINT_COUNT) {
+          // The length is the card's own geometry, not a preference: 128 records in the driver's struct
+          // minus the last, which is not a graphics point (515 мВ / 405 МГц против соседних 1240 / 3157).
+          out.push(refuse('settings.curveRaiseAndCapMhz.deltaByPointMhz',
+            `в векторе ${curve.deltaByPointMhz.length} элементов, а графических точек у кривой ${CURVE_GRAPHICS_POINT_COUNT} `
+            + '(128 записей структуры драйвера минус последняя — она не графическая). Вектор другой длины относится '
+            + 'к другой кривой'));
+          bad.push('deltaByPointMhz');
+        } else {
+          // Element checks name the INDEX, because «вектор неверен» is not something anyone can fix.
+          const lo = CLOCK_OFFSET_MIN_MHZ ?? -1000;
+          const hi = CLOCK_OFFSET_MAX_MHZ ?? 1000;
+          const notInt = curve.deltaByPointMhz.findIndex((d) => !Number.isInteger(d));
+          if (notInt !== -1) {
+            out.push(refuse('settings.curveRaiseAndCapMhz.deltaByPointMhz',
+              `элемент ${notInt} не целое число МГц: ${JSON.stringify(curve.deltaByPointMhz[notInt])}`));
+            bad.push('deltaByPointMhz');
+          } else {
+            const outOfRange = curve.deltaByPointMhz.findIndex((d) => d < lo || d > hi);
+            if (outOfRange !== -1) {
+              out.push(refuse('settings.curveRaiseAndCapMhz.deltaByPointMhz',
+                `элемент ${outOfRange} = ${curve.deltaByPointMhz[outOfRange]} МГц вне аппаратного диапазона смещений ${lo}…${hi} МГц`));
+              bad.push('deltaByPointMhz');
+            }
+          }
+        }
+      }
+
+      if (hasScalar && !bad.includes('deltaMhz') && !Number.isInteger(curve.deltaMhz)) {
         out.push(refuse('settings.curveRaiseAndCapMhz.deltaMhz', `ожидалось целое число МГц, получено ${JSON.stringify(curve.deltaMhz)}`));
         bad.push('deltaMhz');
       }
+      if (!hasScalar) bad.push('deltaMhz');   // нечего сверять с аппаратным диапазоном
       // `capMhz: null` — ПОТОЛКА НЕТ ВОВСЕ: равномерный подъём всей кривой, весь выигрыш уходит в
       // частоту. Владелец, 2026-08-15: «давай в нашем оптимайзд уберём потолок частоты». Записано
       // явным null, а не верхом лестницы: «потолок на верху кривой — не потолок» (plans/05 §4.1,
@@ -549,9 +610,21 @@ function renderSettings(s) {
   // hidden in `draft`: a listing that shows the power limit and stays silent about a 592 MHz curve
   // raise describes a different profile than the one on disk.
   const c = s.curveRaiseAndCapMhz;
-  lines.push(`    кривая V/F         ${c === null || c === undefined
+  // A VECTOR is summarized rather than printed: 127 numbers on a listing line hide the profile instead
+  // of showing it. The summary carries what a reader decides on — how many points move and the span of
+  // the raise — and the file carries the numbers.
+  const raise = (() => {
+    if (c === null || c === undefined) return null;
+    if (Array.isArray(c.deltaByPointMhz)) {
+      const v = c.deltaByPointMhz;
+      const moving = v.filter((d) => d !== 0).length;
+      return `ВЕКТОР на ${v.length} точек: своё смещение у каждой, подъём ${Math.min(...v)}…${Math.max(...v)} МГц, двигаются ${moving}`;
+    }
+    return `подъём +${c.deltaMhz} МГц на всю кривую`;
+  })();
+  lines.push(`    кривая V/F         ${raise === null
     ? 'заводская (все смещения 0)'
-    : `подъём +${c.deltaMhz} МГц, ${c.capMhz === null ? 'ПОТОЛКА НЕТ — выигрыш уходит в частоту' : `потолок ${c.capMhz} МГц`}`}`);
+    : `${raise}, ${c.capMhz === null ? 'ПОТОЛКА НЕТ — выигрыш уходит в частоту' : `потолок ${c.capMhz} МГц`}`}`);
   return lines.join('\n');
 }
 
@@ -629,6 +702,14 @@ const measuredFixture = () => ({
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
+/**
+ * A well-formed per-point vector, shaped like what the band sweep will actually produce: a small raise
+ * at the bottom of the curve where the lever yields 45 mV, a large one at the top where it yields 245.
+ * The numbers are a SHAPE for the validator to chew on, not a measurement — a fixture that looked like
+ * measured data would be an invented number wearing evidence's clothes (`PHILOSOPHY.md` → three doors).
+ */
+const vectorFixture = () => Array.from({ length: CURVE_GRAPHICS_POINT_COUNT }, (_, i) => (i < 60 ? 40 : 300));
+
 function cmdSelftest() {
   const blocks = [
     {
@@ -679,6 +760,73 @@ function cmdSelftest() {
         const p = factoryFixture();
         p.mode = 'stock-default';
         p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: 2130 };
+        return p;
+      })(),
+      expect: ['mode'],
+    },
+    // --- ВЕКТОР В ПРОФИЛЕ (`plans/12` §4.3, P6-AC6). Семь фикстур, каждая с РОВНО одним дефектом и
+    // со своим полем. Адресаты мутаций названы ДО прогона — в шапке `cmdSelftest` ниже.
+    {
+      what: 'ВЕКТОР: своё смещение на каждую из 127 точек -> принят',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: vectorFixture(), capMhz: 2130 }; return p; })(),
+      expect: [],
+    },
+    {
+      what: 'ВЕКТОР: подъём задан ДВАЖДЫ — и числом, и вектором -> отказ на самой кривой',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 592, deltaByPointMhz: vectorFixture(), capMhz: 2130 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz'],
+      alsoMustSay: ['ДВАЖДЫ'],
+    },
+    {
+      what: 'ВЕКТОР: подъёма нет вовсе (оба null) -> отказ: настройка кривой, которая ничего не поднимает, это null',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: null, capMhz: 2130 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz'],
+    },
+    {
+      what: 'ВЕКТОР: длина не равна числу графических точек -> отказ с обоими числами',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: vectorFixture().slice(0, 100), capMhz: 2130 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz.deltaByPointMhz'],
+      alsoMustSay: ['100', String(CURVE_GRAPHICS_POINT_COUNT)],
+    },
+    {
+      what: 'ВЕКТОР: элемент не целое число -> отказ с НОМЕРОМ элемента',
+      profile: (() => {
+        const p = measuredFixture();
+        const v = vectorFixture(); v[42] = 12.5;
+        p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: v, capMhz: 2130 };
+        return p;
+      })(),
+      expect: ['settings.curveRaiseAndCapMhz.deltaByPointMhz'],
+      alsoMustSay: ['42'],
+    },
+    {
+      what: 'ВЕКТОР: элемент за аппаратным диапазоном ±1000 -> отказ с НОМЕРОМ элемента',
+      profile: (() => {
+        const p = measuredFixture();
+        const v = vectorFixture(); v[7] = 1500;
+        p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: v, capMhz: 2130 };
+        return p;
+      })(),
+      expect: ['settings.curveRaiseAndCapMhz.deltaByPointMhz'],
+      alsoMustSay: ['7', '1500'],
+    },
+    {
+      // `alsoMustSay` IS the block, not decoration. Written first as a field-only check, it stayed
+      // GREEN when the `Array.isArray` guard was deleted by mutation F: an object has `length ===
+      // undefined`, so the LENGTH refusal fires on the SAME field and the fixture passes for its
+      // neighbour's reason (EXP-0016 — «a fixture that a neighbouring rule also catches does not test
+      // your rule»). Demanding the words of THIS refusal is what separates them.
+      what: 'ВЕКТОР: не массив вовсе -> отказ ИМЕННО за «не массив», а не за длину соседним правилом',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: { '0': 45 }, capMhz: 2130 }; return p; })(),
+      expect: ['settings.curveRaiseAndCapMhz.deltaByPointMhz'],
+      alsoMustSay: ['ожидался массив'],
+    },
+    {
+      what: 'ВЕКТОР: сброс к заводским с вектором -> отказ (сброс, который настраивает, не сброс)',
+      profile: (() => {
+        const p = factoryFixture();
+        p.mode = 'stock-default';
+        p.settings.curveRaiseAndCapMhz = { deltaMhz: null, deltaByPointMhz: vectorFixture(), capMhz: null };
         return p;
       })(),
       expect: ['mode'],

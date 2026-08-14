@@ -172,6 +172,24 @@ export const CLOCK_OFFSET_MAX_MHZ = 1000;
 export const CLOCK_OFFSET_RANGE_IS_MEASURED = true;
 
 /**
+ * HOW MANY POINTS THE V/F CURVE HAS, and how many of them are GRAPHICS points.
+ *
+ * MEASURED 2026-08-10 on this card (`npm run nvapi -- --curve`): the driver's
+ * `ClockClientClkVfPointsGetStatus` struct is 0x1C28 bytes = a 0x48 header plus **128 records** of
+ * 0x1C. The LAST record is not a graphics point — it reads 515 mV / 405 MHz beside its neighbour's
+ * 1240 mV / 3157 MHz — so every whole-curve operation this project performs covers **127** points and
+ * excludes the outlier.
+ *
+ * WHY IT LIVES HERE rather than in `nvapi.mjs` where the struct geometry does (rule R3, moved
+ * 2026-08-15 by `plans/12` §4.1): the profile VALIDATOR needs this number to check the length of a
+ * per-point vector, and `profile-store.mjs` must stay offline and koffi-free — a validator that has to
+ * load the FFI layer to learn a constant cannot run without the card. `nvapi.mjs` re-exports it, so
+ * there is ONE definition and no mirror to drift (the pair registry would otherwise gain a row).
+ */
+export const CLK_VF_POINT_COUNT = 128;
+export const CURVE_GRAPHICS_POINT_COUNT = CLK_VF_POINT_COUNT - 1;
+
+/**
  * ONE STEP OF THE CARD'S OWN CLOCK GRID — the only tolerance a ceiling check is allowed.
  *
  * MEASURED, not chosen: this card's supported-clock ladder runs 180…3090 MHz in 389 points whose
@@ -915,6 +933,8 @@ export default Object.freeze({
   POWER_METER_SPREAD_PCT,
   CLOCK_OFFSET_MIN_MHZ,
   CLOCK_OFFSET_MAX_MHZ,
+  CLK_VF_POINT_COUNT,
+  CURVE_GRAPHICS_POINT_COUNT,
   CLOCK_LADDER_STEP_TOLERANCE_MHZ,
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
   FAST_DESCENT_FLOOR_MV,
