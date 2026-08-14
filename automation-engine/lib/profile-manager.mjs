@@ -317,7 +317,17 @@ export function resolveTarget(profile, state) {
  *
  * @returns {Promise<{applied:boolean, steps:Array, before:object, after:object, lockedTo:number|null}>}
  */
-export async function apply(backend, profile, { card, timing = {}, verifyLock = 'idle', curveBackend = null } = {}) {
+export async function apply(backend, profile, {
+  card, timing = {}, verifyLock = 'idle', curveBackend = null,
+  // THE ONE NAMED WAY PAST THE QUALIFICATION GATE (`plans/11` §4.4, P6-AC4), and it is a PARAMETER
+  // rather than a doctored profile object. The first draft of the witness path passed
+  // `{ ...profile, qualified: true }` — and the format refused it, correctly, because a qualified
+  // profile may not carry a `draft` block. That refusal was a gift: a caller that edits the artifact
+  // to get past a check makes the artifact lie, and the next reader cannot tell a spoof from an
+  // acceptance. An explicit flag says «I am knowingly applying a draft» in the one place that can
+  // audit it, and leaves the file untouched.
+  witness = false,
+} = {}) {
   const before = readState(backend);
 
   // R6 and the format, both before the first write (P2-AC5).
@@ -327,7 +337,7 @@ export async function apply(backend, profile, { card, timing = {}, verifyLock = 
   // list shows — and a state this module never puts on the card. The refusal names the reason and
   // the phase that lifts it, and it sits here, in the one writer (R1), not in the shortcut layer:
   // whatever surface calls apply() — CLI, .lnk, the logon task — meets the same gate.
-  if (requiresQualification(profile) && profile.qualified !== true) {
+  if (requiresQualification(profile) && profile.qualified !== true && !witness) {
     refusals.push({
       field: 'qualified',
       why: 'профиль — ЧЕРНОВИК (qualified: false): его числа — кандидаты, не прошедшие приёмку. '
@@ -1263,6 +1273,26 @@ async function cmdSelftest() {
     stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-15T00:30:00+03:00' },
   });
 
+  block('ЧЕРНОВИК: без witness гейт отвергает; с witness — применяется, и ФАЙЛ НЕ ПОДМЕНЯЕТСЯ', async () => {
+    // The gate's both directions in one block, plus the property the first draft got wrong: the
+    // profile object must come out of `apply` exactly as it went in. A witness path that doctors
+    // `qualified` makes the artifact lie to the next reader (and the format caught it doing so).
+    const draft = { ...curveProfile(), qualified: false, draft: { 'что это': 'ЧЕРНОВИК' } };
+    const frozen = JSON.stringify(draft);
+    try {
+      await apply(fakeBackend(), draft, { card: SELFTEST_CARD, timing: FAST, curveBackend: fakeCurve() });
+      return 'черновик применился БЕЗ witness — гейт не держит';
+    } catch (e) {
+      if (!/ЧЕРНОВИК/u.test(e.message)) return `отказ не про квалификацию: ${e.message}`;
+    }
+    const cb = fakeCurve();
+    const r = await apply(fakeBackend(), draft, { card: SELFTEST_CARD, timing: FAST, curveBackend: cb, witness: true });
+    if (!r.applied) return 'с witness черновик всё равно не применился';
+    if (JSON.stringify(draft) !== frozen) return 'apply ИЗМЕНИЛ профиль — артефакт начал врать читателю';
+    if (draft.qualified !== false) return 'qualified подменён — это подделка приёмки';
+    return null;
+  });
+
   block('КРИВАЯ: применяется и ДОКАЗЫВАЕТСЯ перечитыванием, а не кодом возврата', async () => {
     const b = fakeBackend(); const cb = fakeCurve();
     const r = await apply(b, curveProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
@@ -1433,8 +1463,7 @@ async function main(argv) {
 
     let r;
     try {
-      r = await apply(backend, witness && isDraft ? { ...profile, qualified: true } : profile,
-        { card, curveBackend });
+      r = await apply(backend, profile, { card, curveBackend, witness: witness && isDraft });
     } finally {
       if (curveBackend) curveBackend.close();
     }
