@@ -59,7 +59,7 @@ const taskName = (profileName) => `apply-${profileName}`;
 const fullTaskName = (profileName) => `${TASK_FOLDER}${taskName(profileName)}`;
 
 /** Icon set chosen by the owner (interview 005 / homework 01): Fluent Emoji 3D, MIT, shipped in
- *  assets/. The ⏹ icon is the COUNTERCLOCKWISE ARROWS, not the stop button — his verdict named
+ *  assets/. The 🔄 icon is the COUNTERCLOCKWISE ARROWS, not the stop button — his verdict named
  *  the concept «возврат». A missing file degrades to «no icon» (the pre-005 look), never an error. */
 const ICONS_DIR = path.join(REPO_ROOT, 'assets', 'icons', 'fluent-3d');
 const ICON_BY_PROFILE = Object.freeze({

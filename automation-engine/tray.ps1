@@ -16,7 +16,7 @@
 #  (BOM strip = loud parse failure, exit 1 · ico-loader nulled = block 10 alone) · live: icon
 #  appears from the \KAGO\tray task, tracks apply-test-pl250 → apply-factory within one 2 s tick
 #  (tray.log), kill → gpu:info --json shows 0 settable diffs of 29 fields (P3-AC4; only the idle
-#  clock breathed), second start exits on the mutex, ⏹ face loads from the shipped .ico after the
+#  clock breathed), second start exits on the mutex, 🔄 face loads from the shipped .ico after the
 #  11:5x restart. Deferred, display-only: explorer-restart re-add · no-flash at a real logon.]
 
 param(
@@ -40,8 +40,11 @@ Add-Type -AssemblyName System.Drawing
 # ================================================================================================
 
 # Interview 005 (closed 2026-08-14 12:2x, the owner's word AFTER seeing the 2-vs-4 render):
-# the set is Fluent Emoji 3D, tray wears the same .ico as the desktop; the ⏹ face is the
-# counterclockwise arrows («возврат»). Swapping the set = swapping files in assets/icons/, no code.
+# the set is Fluent Emoji 3D, tray wears the same .ico as the desktop; the Stock Default face is
+# the counterclockwise arrows («возврат») — and since 2026-08-14 evening the mode's own emoji is
+# 🔄, not ⏹: the owner's word «остался квадрат, который мне не нравился … я говорил, что хочу тот
+# синий с двумя стрелочками» — the icon was right, the LABEL still carried the square.
+# Swapping the set = swapping files in assets/icons/, no code.
 # The drawn color+glyph stays as the FALLBACK when an asset is missing — the tray degrades, it
 # never dies over an icon file. The three service faces (test / unknown / problem) stay drawn:
 # the icon set has no such concepts, and inventing them is worse.

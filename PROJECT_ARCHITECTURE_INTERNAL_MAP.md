@@ -93,7 +93,7 @@ totality rule R9a states for the watchdog. Range, measured: `-pl` moves 300 → 
 | 🚀 **Max Perfomance** | curve raised, ceiling at the curve's TOP — the gain goes into clock | yes |
 | ⚖️ **Optimised** | curve raised, ceiling at the stock operating clock, **AND a power limit through `-pl`** — the only mode that uses two backends' levers at once | yes |
 | ❄️ **Silent Cold** | curve raised, ceiling well below stock — the cold mode, ~10 % paid deliberately | yes |
-| ⏹ **Stock Default** | factory — every offset to 0, `-rgc`, power limit back to default | yes |
+| 🔄 **Stock Default** | factory — every offset to 0, `-rgc`, power limit back to default | yes |
 
 **The tray icon displays the active profile and nothing else.** No menu, no buttons, no click
 actions. It reads state; it never writes it.

@@ -470,7 +470,7 @@ const FAKE_CARD = Object.freeze({
 
 const factoryFixture = () => ({
   name: 'factory',
-  title: '⏹ Сброс к заводским',
+  title: '🔄 Сброс к заводским',
   settings: { powerLimitWatts: null, graphicsClockLockMhz: null },
 });
 

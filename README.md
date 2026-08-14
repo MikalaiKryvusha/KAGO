@@ -46,7 +46,7 @@
 3. **No third-party GUI is required, and none will be added.** The card is driven through the
    driver's own command-line interface first, and through an in-house NVAPI bridge after that. MSI
    Afterburner is not a dependency of this project.
-4. Four modes ship — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold, ⏹ Stock Default — each with
+4. Four modes ship — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold, 🔄 Stock Default — each with
    its own definition of optimal. Each is a desktop shortcut, and a tray icon shows which one is
    live.
 5. **Factory state is the default.** Profiles live in the GPU's volatile memory. Crash the machine
@@ -182,7 +182,7 @@ to idle speeds.
 | 🚀 **Max Perfomance** | everything into speed; temperature is not a goal | none | — |
 | ⚖️ **Optimised** | a strong cut in watts, heat and noise | fans ≤ 60 % | FPS within 5 % of Max Perfomance |
 | ❄️ **Silent Cold** | maximum cold | fans ≤ 40 % | up to 10 % of stock performance |
-| ⏹ **Stock Default** | factory state, always one click away | factory curve | — |
+| 🔄 **Stock Default** | factory state, always one click away | factory curve | — |
 
 The prices are the owner's budgets, not inherited promises: the numbers this table will finally
 carry are measured on this die, and they are reported next to the meter's own run-to-run spread,
@@ -287,7 +287,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
    правки. KAGO проходит этот цикл вместо вас и записывает, что нашёл.
 3. **Сторонний GUI не нужен, и его тут не появится.** Картой управляет сначала штатная утилита
    драйвера, а затем собственный мост к NVAPI. MSI Afterburner в зависимостях проекта нет.
-4. Режима четыре — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold и ⏹ Stock Default, — и у каждого
+4. Режима четыре — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold и 🔄 Stock Default, — и у каждого
    свой критерий оптимальности. Каждый лежит ярлыком на рабочем столе, а иконка в трее показывает,
    какой сейчас включён.
 5. **Заводское состояние — состояние по умолчанию.** Профиль живёт в энергозависимой памяти GPU.
@@ -423,7 +423,7 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 | 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе | нет | — |
 | ⚖️ **Optimised** | сильно меньше ватт, градусов и шума | вентиляторы ≤ 60 % | FPS не ниже 95 % от Max Perfomance |
 | ❄️ **Silent Cold** | максимум холода | вентиляторы ≤ 40 % | до 10 % производительности |
-| ⏹ **Stock Default** | заводское состояние, всегда в одном клике | заводская кривая | — |
+| 🔄 **Stock Default** | заводское состояние, всегда в одном клике | заводская кривая | — |
 
 Цены в таблице — бюджеты владельца, а не унаследованные обещания: числа, которые она в итоге понесёт,
 измеряются на этом кристалле и приводятся рядом с собственным разбросом прибора, потому что «потери

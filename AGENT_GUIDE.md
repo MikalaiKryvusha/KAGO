@@ -1214,7 +1214,7 @@ interpretation. Interviews are for vision-level forks that outlive the task.
   | 🚀 **Max Perfomance** | performance across the FULL clock range | nothing in performance; temperature is not optimized at all | the curve's TOP |
   | ⚖️ **Optimised** | **watts, degrees and NOISE brought down hard** | **≤ 5 % of FPS, measured against Max Perfomance** | at the stock operating clock, **plus a power ceiling** |
   | ❄️ **Silent Cold** | COLD, and only cold | **up to 10 %** | well below the stock operating clock |
-  | ⏹ **Stock Default** | — | — | none; every offset to 0 |
+  | 🔄 **Stock Default** | — | — | none; every offset to 0 |
 
   **`Optimised` WAS SHARPENED BY THE OWNER THE SAME EVENING (chat, 2026-08-10 19:1x +03:00), and the
   change is structural rather than cosmetic** — he wrote it after the agent reported that every

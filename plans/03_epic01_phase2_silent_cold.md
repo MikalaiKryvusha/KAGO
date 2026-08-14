@@ -426,7 +426,7 @@ that had to be assumed.
   different instructions; an omitted key would let the applier pick one.
 - **The stamp is required iff the profile sets something** — derived from the settings, not from a
   flag. Its point is the factory profile's exemption, which must hold across driver updates.
-- **`title` is part of the format**, carrying the owner's own shortcut names (🚀 / ❄️ / ⏹) so phase 3
+- **`title` is part of the format**, carrying the owner's own shortcut names (🚀 / ❄️ / 🔄) so phase 3
   reads them from the profile instead of re-deciding them. Quoting his words, not naming anything.
 - **`evidence` is optional in the format and flagged in the listing.** Enforcing it would block
   §4.2's round trip, which necessarily runs before any profile is proven. *Confirmed at §4.6:* the
