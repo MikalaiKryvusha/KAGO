@@ -41,6 +41,24 @@
 
 ## Entries
 
+### EXP-0055 · 2026-08-15 · ❌→✅ · #guards #tautology #mutation #constants #testing
+**Context:** guarding a new safety limit the owner had just named in chat — «ниже 900 не спускаться быстро» — implemented as `config.FAST_DESCENT_FLOOR_MV = 900`.
+**Tried / did:** wrote the block as `ok('не ниже пола владельца', deepestWalked >= config.FAST_DESCENT_FLOOR_MV, true)` — reading the constant, which felt DRY and correct.
+**Result:** ❌→✅ the mutation «set the floor to 0» left the block GREEN while the run walked 120 mV past the owner's limit: the expectation moved together with the behaviour, because both read the same constant. Rewriting the expectation as the literal `900` made the same mutation redden it immediately.
+**Lesson:** **a guard must not read the constant it guards — that is a tautology, and it passes every mutation by construction.** The rule of thumb that separates the two cases: a value the owner NAMED is a CONTRACT and is written out literally in the check (changing it must break the test — that is the alarm working); a value that is merely a tuning default may be read from config. DRY applies to production code; a test that shares its source of truth with the code has no independent opinion left to offer.   → link: bugs/07 · BUG_FIXING_FRAMEWORK.md → Guards
+**Repro:** for any guard over a named limit, mutate the CONSTANT (not the logic) and require the block to redden. Here: set `FAST_DESCENT_FLOOR_MV = 0` in `config.mjs` → «БЕЗ ИСТОРИИ спуск быстрый, но НЕ НИЖЕ пола владельца (900 мВ, его слово)» must go red.
+**Trigger:** about to write an expected value in a test by referencing a constant → ask "if someone edits that constant wrongly, does this test still fail?" If no, inline the number and name its source in the comment.
+**Not for:** derived or platform-dependent values with no contract behind them (a path separator, a page size, a version string) — inlining those makes brittle tests that fail for the wrong reason.
+
+### EXP-0054 · 2026-08-15 · ✅ · #cli #arguments #hardcode #operator #config
+**Context:** the owner, after two live runs: *«у нас хардкод шагов? Какого хуя мы не можем передавать их как аргумент, как переменную?»*
+**Tried / did:** checked honestly — `--seconds`, `--cap`, `--band` were arguments; the grid step, the coarse stride, the session depth and the descent floor were baked into `config.mjs` and a literal `stride: 5` at the call sites.
+**Result:** ✅ he was right. Added `--grid-step --stride --session-depth --fast-floor`, defaulting to the config values, read ONCE and passed to both the plan and the run so a dry run cannot describe a different policy than executes. The safety governors were deliberately NOT made overridable and still refuse a reckless value before any write.
+**Lesson:** **"constants live in config" answers WHERE a default lives, not WHETHER an operator can change it for one run.** The two are different questions and a project that has answered the first often believes it has answered the second. The test: name the knobs a human turns between runs; every one of them that requires editing a file is a defect in the tool, not a safety feature. Keep the split explicit — POLICY is an argument, GUARDS are not.   → link: bugs/09 · EXP-0026
+**Repro:** `npm run engine -- --band 2842 --dry-run --fast-floor 950 --session-depth 15 --stride 3` — the printed ПОЛИТИКА line and the resulting depth must both change; with defaults the same command plans to 915 mV, with these flags to 965 mV.
+**Trigger:** about to add a tuning number to a config file → ask whether an operator would ever want it different for ONE run; if yes, it ships as a flag with the config value as its default, in the same change.
+**Not for:** safety limits whose whole purpose is to be non-negotiable at runtime (first-step depth, rung-gap ceiling) — those stay in config, and a flag for them would be the hole they exist to close.
+
 ### EXP-0053 · 2026-08-14 · ❌→✅ · #gpu #curve #temperature #evidence #keys #ratchet #repeat-offender
 **Context:** the search could not accumulate proven depth across sessions — a sweep proved −30 mV and the dry run one minute later printed «истории НЕТ».
 **Tried / did:** twelve read-only curve dumps across 41…63 °C, then re-keyed the evidence store.

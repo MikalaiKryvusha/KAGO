@@ -213,8 +213,19 @@ export function composeAscentLadder({
   // records are filed under; `stockMv` only renders the answer as a depth for the reader.
   capMhz = null,
   stockMv = null,
+  // EVERY POLICY NUMBER IS A PARAMETER WITH A CONFIG DEFAULT, never a literal in the body.
+  //
+  // The owner, 2026-08-15: *«у нас хардкод шагов? Какого хуя мы не можем передавать их как аргумент,
+  // как переменную?»* — and he was right: `--seconds` was an argument while the step, the floor and
+  // the session depth were baked in, which are exactly the knobs an operator turns between runs.
+  // `config.mjs` keeps its job as the place the DEFAULTS live (rule R3); these let a run override
+  // them without editing code. **The guards do not move with them:** `pickAscentRungs` still refuses
+  // a first step deeper than `firstStepMaxMv` and a rung gap beyond `stepMaxMv` (`bugs/03`), and the
+  // ratchet still forbids every voltage that ever failed (`bugs/10`) — so a reckless argument is
+  // REFUSED before the first write rather than obeyed.
   stride = 5,
   sessionMaxDepthMv = config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30,
+  fastFloorMv = config.FAST_DESCENT_FLOOR_MV ?? 900,
   firstStepMaxMv = config.ASCENT_FIRST_STEP_MAX_MV ?? 25,
   stepMaxMv = config.ASCENT_STEP_MAX_MV ?? 35,
 } = {}) {
@@ -249,13 +260,19 @@ export function composeAscentLadder({
   //   1. never deeper than `sessionMaxDepthMv` past the deepest inherited PASS;
   //   2. beyond that inherited depth the step becomes FINE — the owner's own proposal, so the graded
   //      oracle can land INSIDE the avalanche (~20 mV wide) instead of striding over it.
-  // BOTH BOUNDS IN ABSOLUTE VOLTS: the session's own excursion floor, and the ratchet's floor from
-  // every voltage that ever failed at this cap (that one is FOREVER — a failure is never re-entered).
+  // THE OWNER'S DESCENT POLICY, and it is the outer bound (`config.FAST_DESCENT_FLOOR_MV`). His word:
+  // *«до 900 можем опускаться быстрыми шагами. ниже 900 - опускаемся по 5 мВ»*. Above the floor the
+  // session bound does not truncate; at and below it, `bugs/07`'s 30 mV per session applies again and
+  // every grid step is taken.
   const withinCeiling = (r) => !graded
-    || (r.mv >= sessionFloorMv && r.mv >= ratchetFloor.floorMv);
+    || (r.mv >= ratchetFloor.floorMv
+        && (r.mv >= fastFloorMv || r.mv >= sessionFloorMv));
   const coarseAllowed = chosen.rungs.filter(withinCeiling);
+  // FINE ONLY BELOW HIS FLOOR — above it he asked for speed, and the physics agrees: the avalanche
+  // (~20 mV, `researches/02` §2) sits near the edge at ~845…860 mV, i.e. under the floor. Fine steps
+  // are what lets the graded oracle land INSIDE it instead of striding over it.
   const frontierFine = graded
-    ? fine.filter((r) => (provenMv === null ? r.mv < referenceMv : r.mv < provenMv)
+    ? fine.filter((r) => r.mv < fastFloorMv
         && withinCeiling(r)
         && !coarseAllowed.some((c) => c.offsetMhz === r.offsetMhz))
     : [];
@@ -269,6 +286,7 @@ export function composeAscentLadder({
       // THE SAME FACTS IN THE UNIT THAT DOES NOT SLIDE — what a later session actually inherits.
       provenMv,
       sessionFloorMv,
+      fastFloorMv,
       ratchetFloorMv: ratchetFloor.bound ? ratchetFloor.floorMv : null,
       stockMv: referenceMv,
       ceilingMv: depthCeilingMv,
@@ -303,7 +321,13 @@ export function sessionDepthLine(sd) {
   const ratchet = sd.ratchetFloorMv === null || sd.ratchetFloorMv === undefined
     ? ''
     : ` · ХРАПОВИК не пускает ниже ${sd.ratchetFloorMv} мВ`;
-  return `ГЛУБИНА СЕССИИ: ${known} · пол сессии ${sd.sessionFloorMv} мВ${ratchet} · ${reach}`
+  // WHICH RULE IS BINDING RIGHT NOW, said out loud — above the owner's floor it is his «быстрые шаги»,
+  // below it the session bound. A reader deciding go/no-go should not have to infer which.
+  const mode = sd.deepestPlannedAbsMv !== null && sd.deepestPlannedAbsMv !== undefined
+      && sd.deepestPlannedAbsMv >= (sd.fastFloorMv ?? 900)
+    ? `БЫСТРЫЙ СПУСК до пола владельца ${sd.fastFloorMv} мВ (грубый шаг)`
+    : `ТОЧНЫЙ СПУСК под полом владельца ${sd.fastFloorMv} мВ (шаг 5 мВ, сессия ≤ 30 мВ от доказанного)`;
+  return `ГЛУБИНА СЕССИИ: ${known} · ${mode} · пол сессии ${sd.sessionFloorMv} мВ${ratchet} · ${reach}`
     + ` · ступеней в прогоне ${sd.rungsPlanned} (отброшено потолком ${sd.droppedByCeiling}, точных на фронтире ${sd.fineRungsAtFrontier})`;
 }
 
@@ -419,6 +443,10 @@ export async function searchEdge({
   // owner's «грубый 25 мВ / точный 5 мВ» as five steps against one.
   rungs = null,
   coarseStride = 5,
+  // THE POLICY KNOBS, passed through to `composeAscentLadder` rather than read from config there —
+  // so a CLI flag reaches the decision instead of stopping at the edge of this function.
+  sessionMaxDepthMv = config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30,
+  fastFloorMv = config.FAST_DESCENT_FLOOR_MV ?? 900,
   seconds = 30,
   sustain = 30,
   coarseMhz = ASCENT_COARSE_MHZ,
@@ -573,6 +601,8 @@ export async function searchEdge({
     fine, history, point, stride,
     capMhz,
     stockMv: fine.length ? fine[0].mv + fine[0].savedMv : null,
+    sessionMaxDepthMv,
+    fastFloorMv,
   });
   const chosen = composed.chosen;
   const ladderRungs = composed.ladderRungs;
@@ -759,6 +789,8 @@ export async function searchEdge({
  *  19. stop writing the mark before the attempt       → «каждая попытка записана НАПЕРЁД»
  *  20. let the PLAN compose a ladder of its own       → «ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН»
  *  21. key the inherited evidence by POINT INDEX again → «УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ»
+ *  22. drop the owner's floor for the fast descent      → «БЕЗ ИСТОРИИ спуск быстрый, но НЕ НИЖЕ пола владельца»
+ *  23. keep stepping coarsely BELOW that floor          → «НИЖЕ ПОЛА ВЛАДЕЛЬЦА шаг ровно 5 мВ, а не грубый»
  */
 export function selfTest() {
   const results = [];
@@ -1062,8 +1094,22 @@ export function selfTest() {
         card: { driver: '610.88', vbios: 'v1' }, runStepFn: deepRunner,
       });
       const deepestWalkedMv = Math.max(...walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).savedMv));
-      ok('ГЛУБИНА СЕССИИ ограничена: без истории дальше стока не более чем на потолок',
-        deepestWalkedMv <= (config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30), true);
+      const deepestWalkedAbsMv = Math.min(...walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).mv));
+      // THE OWNER'S FLOOR IS THE BOUND ABOVE IT, not the 30 mV session step (his word, 2026-08-15:
+      // «до 900 можем опускаться быстрыми шагами»). So a run with NO history descends FAST — and the
+      // thing that must hold is that it stops AT his floor and never steps under it.
+      // ⚠️ 900 IS WRITTEN OUT, NOT READ FROM `config`, AND THAT IS THE POINT. The first draft of these
+      // two blocks asserted against `config.FAST_DESCENT_FLOOR_MV` — the very constant they guard — so
+      // the mutation «set the floor to 0» moved the expectation along with the behaviour and the
+      // blocks stayed GREEN on a card walking 120 mV past the owner's limit. A check that reads the
+      // thing it checks is a tautology (`BUG_FIXING_FRAMEWORK.md` → Guards: a guard that has never
+      // gone red proves nothing). The literal here is the OWNER'S QUOTED NUMBER — «ниже 900» — which
+      // is a contract, not a tunable: changing the constant must redden these, and now it does.
+      ok('БЕЗ ИСТОРИИ спуск быстрый, но НЕ НИЖЕ пола владельца (900 мВ, его слово)',
+        deepestWalkedAbsMv >= 900, true);
+      ok('и под пол владельца без доказанной земли не заходит ни одна ступень',
+        walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).mv)
+          .filter((mv) => mv < 900).length, 0);
       ok('и это НЕ отказ, а честная остановка — то, что влезло, пройдено',
         walked.length > 0, true);
 
@@ -1129,12 +1175,33 @@ export function selfTest() {
           capMhz: 2842, point: 99, rungs: gradedRungs, writeShape: 'raise-and-cap', store: storeDeep,
           card: { driver: '610.88', vbios: 'v1' }, runStepFn: deepRunner,
         });
-        const beyondKnown = walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).savedMv).filter((mv) => mv > 35);
-        // 35 mV known + 30 mV of session ceiling = 65 mV, so exactly ONE graded rung lies beyond the
-        // proven depth in this fixture. The first draft of this line expected two — an arithmetic
-        // slip of mine, not a behaviour: the ceiling is doing exactly what it says.
-        ok('ЗА известным PASS идут ступени ВНУТРИ потолка сессии, и берутся они ВСЕ, а не каждая пятая',
-          [beyondKnown.length, beyondKnown[0]], [1, 65]);
+        // Proven 1010 mV, the owner's floor 900: everything down to the floor is fast territory, so
+        // the run takes the coarse rungs above it and stops there. Before his policy this expected a
+        // single 30 mV excursion — the change is HIS, and it is quoted in `config`.
+        const walkedAbs = walked.map((o) => gradedRungs.find((r) => r.offsetMhz === o).mv);
+        ok('ДО ПОЛА ВЛАДЕЛЬЦА сессионная граница в 30 мВ НЕ режет — идём быстро',
+          [Math.min(...walkedAbs) >= 900, Math.min(...walkedAbs) < 1010 - 30], [true, true]);
+
+        // --- НИЖЕ ПОЛА ВЛАДЕЛЬЦА ШАГ СТАНОВИТСЯ ТОЧНЫМ (5 мВ), и вот фикстура, которой раньше не
+        // было: лестница с настоящим шагом сетки, и доказанная земля РОВНО на полу.
+        const fineRungs = Array.from({ length: 40 }, (_, i) => ({
+          offsetMhz: 7 + i * 15, mv: 1040 - i * 5, savedMv: 5 + i * 5,
+        }));
+        const atFloor = [{
+          point: 99, offsetMhz: 0, capMhz: 2842, servingMv: 900,
+          verdict: P, writeShape: 'raise-and-cap', driver: '610.88', vbios: 'v1',
+        }];
+        const below = composeAscentLadder({
+          fine: fineRungs, history: atFloor, point: 99, capMhz: 2842, stockMv: 1045,
+        });
+        const belowFloor = below.ladderRungs.map((r) => r.mv).filter((mv) => mv < 900);
+        const gaps = belowFloor.slice(1).map((mv, i) => belowFloor[i] - mv);
+        ok('НИЖЕ ПОЛА ВЛАДЕЛЬЦА шаг ровно 5 мВ, а не грубый',
+          [...new Set(gaps)], [5]);
+        // Literals for the same reason as above: the contract is «30 mV past proven ground, below the
+        // owner's 900 mV floor», and a block that reads both constants could not fail when either moves.
+        ok('и глубже 30 мВ от доказанного под полом не уходит',
+          Math.min(...belowFloor), 870);
       } finally {
         // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
         rmSync(assertSandbox(storeDeep), { recursive: true, force: true });
@@ -1186,6 +1253,19 @@ async function mainBand(argv, arg) {
   const seconds = Number(arg('seconds', 10));
   const dryRun = argv.includes('--dry-run');
 
+  // THE DESCENT POLICY AS ARGUMENTS (the owner, 2026-08-15). Defaults come from `config.mjs`, which
+  // stays the one place the numbers LIVE; these let a run change them without an edit. They are read
+  // once here and passed to BOTH the plan and the run, so the dry run cannot describe a different
+  // policy from the one that executes (`bugs/09`).
+  const gridStepMv = Number(arg('grid-step', config.VOLTAGE_GRID_STEP_MV ?? 5));
+  const stride = Number(arg('stride', 5));
+  const sessionMaxDepthMv = Number(arg('session-depth', config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30));
+  const fastFloorMv = Number(arg('fast-floor', config.FAST_DESCENT_FLOOR_MV ?? 900));
+  for (const [name, v] of [['--grid-step', gridStepMv], ['--stride', stride],
+    ['--session-depth', sessionMaxDepthMv], ['--fast-floor', fastFloorMv]]) {
+    if (!Number.isFinite(v) || v <= 0) { console.error(`ОШИБКА: ${name} должен быть положительным числом, дано ${v}`); return 2; }
+  }
+
   const vf = await import('./lib/vf-step.mjs');
   const nvapi = await import('./lib/nvapi.mjs');
   const stress = await import('./lib/stress-tester.mjs');
@@ -1215,6 +1295,12 @@ async function mainBand(argv, arg) {
   console.log('             то есть ровно то, что уедет в профиль. Ниже пола железа (верх кривой минус 1000 МГц)');
   console.log('             потолка кривой не удержать вовсе — там подъём равномерный, а потолок держит');
   console.log('             ЗАКРЕПЛЕНИЕ, и это печатается по каждой ступени отдельно.');
+  // THE POLICY IN FORCE FOR THIS RUN, printed with the plan — an argument nobody can read before the
+  // write is the defect `bugs/09` was about, and it applies to the knobs as much as to the bound.
+  console.log(`  ПОЛИТИКА:  шаг сетки ${gridStepMv} мВ · грубый шаг = каждая ${stride}-я ступень`
+    + ` · пол быстрого спуска ${fastFloorMv} мВ · за сессию не глубже ${sessionMaxDepthMv} мВ от доказанного`);
+  console.log('             (умолчания из config.mjs; меняются флагами --grid-step --stride --fast-floor --session-depth,');
+  console.log(`             и сторож всё равно откажет при первом шаге глубже ${config.ASCENT_FIRST_STEP_MAX_MV ?? 25} мВ или разрыве больше ${config.ASCENT_STEP_MAX_MV ?? 35} мВ)`);
   console.log('  ЗАКРЕПЛЕНИЕ: -lgc на ступени, законно для ЗАМЕРА и запрещено в отгружаемом профиле');
   console.log('  ОТКАТ:     частота отпущена и кривая обнулена в finally, под сторожем, на каждой ступени');
   console.log('');
@@ -1231,7 +1317,7 @@ async function mainBand(argv, arg) {
     // THE RUNGS IN VOLTS, per frequency, from the card's own curve. This is where the band's
     // inhomogeneity becomes visible before a single watt is spent: the top offers ten grid steps of
     // headroom, the middle offers two.
-    const rungs = serving ? vf.ascentLadderByVoltage(curve, pin, { stepMv: config.VOLTAGE_GRID_STEP_MV ?? 5 }) : [];
+    const rungs = serving ? vf.ascentLadderByVoltage(curve, pin, { stepMv: gridStepMv }) : [];
     // WHICH SHAPE THIS RUNG MAY BE SEARCHED IN, decided BEFORE the sweep starts and printed with the
     // plan (`bugs/02` step 1). The question is asked at Δ = 0 on purpose: whether the curve can hold a
     // ceiling depends only on how far the TAIL can be pushed down, and that is independent of the
@@ -1257,7 +1343,9 @@ async function mainBand(argv, arg) {
         point: serving.pointIndex,
         capMhz: pin,
         stockMv: serving.mv,
-        stride: 5,
+        stride,
+        sessionMaxDepthMv,
+        fastFloorMv,
       })
       : { chosen: { rungs: [], refused: false, why: 'нет ступеней' }, ladderRungs: [], sessionDepth: null };
     const chosen = composed.chosen;
@@ -1296,6 +1384,9 @@ async function mainBand(argv, arg) {
       pinMhz: shapeChoice.pinRequired ? pin : null,
       pinCard,
       rungs,
+      coarseStride: stride,
+      sessionMaxDepthMv,
+      fastFloorMv,
       seconds,
       card,
       store,

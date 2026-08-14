@@ -212,6 +212,37 @@ export const CLOCK_LADDER_STEP_TOLERANCE_MHZ = 8;
  */
 export const SESSION_MAX_DEPTH_BEYOND_KNOWN_MV = 30;
 
+/**
+ * THE OWNER'S OWN FLOOR FOR FAST DESCENT — his word, chat, 2026-08-15, verbatim:
+ *
+ *   > *«до 900 можем опускаться быстрыми шагами. ниже 900 - опускаемся по 5 мВ»*
+ *
+ * This is a RISK decision, and risk on his machine is his to make — it outranks the bound above,
+ * which the agent derived. What it changes, precisely:
+ *
+ *   • **At or above 900 mV** the ladder walks in COARSE steps and `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV`
+ *     does NOT truncate it — one session may go from stock all the way down to this floor.
+ *   • **Below 900 mV** the step is one voltage grid step (5 mV), and the session bound applies again
+ *     exactly as `bugs/07` wrote it: at most 30 mV past proven ground, per session.
+ *
+ * WHAT DOES NOT CHANGE, because he spoke about descent speed and not about the guards: the depth
+ * governor still refuses a first step deeper than `ASCENT_FIRST_STEP_MAX_MV` and a rung-to-rung jump
+ * beyond `ASCENT_STEP_MAX_MV` (`bugs/03`), and the ratchet still forbids every voltage that ever
+ * failed, forever (`bugs/10`).
+ *
+ * HIS POLICY AGREES WITH THE PHYSICS WE MEASURED, which is worth recording because it means the two
+ * bounds are not in tension: the avalanche `researches/02` §2 sizes at ~20 mV sits near the edge, and
+ * the edge on this card is around 845…860 mV — i.e. BELOW his floor. Fine steps are what the graded
+ * oracle needs to land INSIDE that avalanche, and fine steps are exactly what he asks for there.
+ *
+ * ⚠️ THE ONE PLACE THIS BITES, named rather than discovered later: a run with NO history descends to
+ * this floor in a single session. On THIS card that is territory already walked (990 mV proven live,
+ * and `bugs/07` reconstructs a PASS at 860 mV — **reconstructed from chat, never re-measured**). After
+ * a DRIVER CHANGE, R6 invalidates every record, history goes empty, and the next run would take that
+ * whole descent again in one go. If that matters, re-prove a shallow rung first.
+ */
+export const FAST_DESCENT_FLOOR_MV = 900;
+
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
 // =============================================================================================
@@ -886,6 +917,7 @@ export default Object.freeze({
   CLOCK_OFFSET_MAX_MHZ,
   CLOCK_LADDER_STEP_TOLERANCE_MHZ,
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
+  FAST_DESCENT_FLOOR_MV,
   CLOCK_OFFSET_RANGE_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,
