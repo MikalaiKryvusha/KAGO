@@ -58,6 +58,23 @@ const SURFACE = Object.freeze([
 const taskName = (profileName) => `apply-${profileName}`;
 const fullTaskName = (profileName) => `${TASK_FOLDER}${taskName(profileName)}`;
 
+/** Icon set chosen by the owner (interview 005 / homework 01): Fluent Emoji 3D, MIT, shipped in
+ *  assets/. The ⏹ icon is the COUNTERCLOCKWISE ARROWS, not the stop button — his verdict named
+ *  the concept «возврат». A missing file degrades to «no icon» (the pre-005 look), never an error. */
+const ICONS_DIR = path.join(REPO_ROOT, 'assets', 'icons', 'fluent-3d');
+const ICON_BY_PROFILE = Object.freeze({
+  'max-performance': 'max-performance.ico',
+  'optimised': 'optimised.ico',
+  'silent-cold': 'silent-cold.ico',
+  'factory': 'stock-default.ico',
+});
+function iconLocationFor(profileName) {
+  const file = ICON_BY_PROFILE[profileName];
+  if (!file) return '';
+  const p = path.join(ICONS_DIR, file);
+  return existsSync(p) ? `${p},0` : '';
+}
+
 /** §4.4: the logon task — re-applies the remembered state through the SAME applier and its gates.
  *  A stale or draft remembered state degrades to factory plus a journal line, never a blind write. */
 const BOOT_TASK = 'boot-apply';
@@ -259,16 +276,19 @@ async function cmdInstall() {
   console.log('');
   for (const s of surface.filter((x) => x.shortcut)) {
     const lnkPath = path.join(desktop, `${s.title}.lnk`);
+    const wantIcon = iconLocationFor(s.profile);
     const got = createShortcut({
       lnkPath,
       target: SCHTASKS,
       args: `/run /tn "${fullTaskName(s.profile)}"`,
       workingDir: REPO_ROOT,
       description: `KAGO: применить профиль ${s.profile} через повышенную задачу (${fullTaskName(s.profile)})`,
+      iconLocation: wantIcon,
     });
     const okTarget = got.target.toLowerCase() === SCHTASKS.toLowerCase() && got.args.includes(fullTaskName(s.profile));
-    if (!okTarget) bad++;
-    console.log(`${okTarget ? 'OK  ' : 'ПРОВАЛ'} ярлык «${path.basename(lnkPath)}» → ${got.target} ${got.args}`);
+    const okIcon = !wantIcon || (got.icon ?? '').toLowerCase() === wantIcon.toLowerCase();
+    if (!okTarget || !okIcon) bad++;
+    console.log(`${okTarget && okIcon ? 'OK  ' : 'ПРОВАЛ'} ярлык «${path.basename(lnkPath)}» → ${path.basename(got.target)} ${got.args}${wantIcon ? (okIcon ? ` · иконка ${path.basename(wantIcon.split(',')[0])}` : ` · ⚠ иконка перечитана как «${got.icon}»`) : ' · без иконки'}`);
   }
 
   // Start the tray NOW — the logon trigger only covers future sessions, and the owner should not

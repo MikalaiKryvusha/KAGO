@@ -12,11 +12,12 @@
 # ANSI (cp1251 on this machine — the dossier row), which would mojibake every Russian tooltip
 # below. Self-test block 1 guards the BOM; if it reddens after an edit, re-add the BOM.
 #
-# [TESTED: 2026-08-14 11:1x · -SelfTest: 9 blocks green; 3 mutations reddened their named blocks
-#  (BOM strip = loud parse failure, exit 1) · live: icon appears from the \KAGO\tray task, tracks
-#  apply-test-pl250 → apply-factory within one 2 s tick (tray.log), kill → gpu:info --json shows
-#  0 settable diffs of 29 fields (P3-AC4; only the idle clock breathed), second start exits on
-#  the mutex. Deferred, display-only: explorer-restart re-add · no-flash at a real logon.]
+# [TESTED: 2026-08-14 11:5x · -SelfTest: 11 blocks green; 4 mutations reddened their named blocks
+#  (BOM strip = loud parse failure, exit 1 · ico-loader nulled = block 10 alone) · live: icon
+#  appears from the \KAGO\tray task, tracks apply-test-pl250 → apply-factory within one 2 s tick
+#  (tray.log), kill → gpu:info --json shows 0 settable diffs of 29 fields (P3-AC4; only the idle
+#  clock breathed), second start exits on the mutex, ⏹ face loads from the shipped .ico after the
+#  11:5x restart. Deferred, display-only: explorer-restart re-add · no-flash at a real logon.]
 
 param(
   [switch]$SelfTest
@@ -42,10 +43,28 @@ $FACES = @{
   'max-performance' = @{ color = 'OrangeRed';    glyph = 'M' }
   'optimised'       = @{ color = 'SeaGreen';     glyph = 'O' }
   'silent-cold'     = @{ color = 'DeepSkyBlue';  glyph = 'C' }
-  'factory'         = @{ color = 'Gray';         glyph = 'STOP' }   # white square, echoes the owner's ⏹
+  # The owner's verdict (interview 005, 2026-08-14): the ⏹ face is the Fluent 3D counterclockwise
+  # arrows .ico — «возврат», not a square. The drawn glyph below is the FALLBACK when the asset
+  # is missing: the tray degrades, it never dies over an icon file.
+  'factory'         = @{ color = 'Gray';         glyph = 'STOP'
+                         ico = (Join-Path $RepoRoot 'assets\icons\fluent-3d\stock-default.ico') }
   'test-pl250'      = @{ color = 'MediumPurple'; glyph = 'T' }
   'unknown'         = @{ color = 'DimGray';      glyph = '?' }      # a profile id this tray has no face for
   'problem'         = @{ color = 'Goldenrod';    glyph = '!' }      # the state file exists and cannot be trusted
+}
+
+# Load a face from a shipped .ico (best frame for 32 px). $null on ANY problem — the caller falls
+# back to the drawn face; a missing asset costs looks, never the tray.
+function Get-IcoIcon([string]$path) {
+  if (-not $path -or -not (Test-Path -LiteralPath $path)) { return $null }
+  try { return New-Object System.Drawing.Icon($path, 32, 32) } catch { return $null }
+}
+
+# One face → one Icon object: the shipped .ico when the face names one and it loads, else drawn.
+function Resolve-FaceIcon($face) {
+  $fromFile = Get-IcoIcon $face.ico
+  if ($fromFile) { return $fromFile }
+  return New-TrayIcon $face.color $face.glyph
 }
 
 # NotifyIcon.Text throws above 63 UTF-16 units on .NET Framework — truncate, never crash the tray
@@ -197,6 +216,16 @@ function Invoke-SelfTest {
     Remove-Item -LiteralPath $pidPath
     $ok = ($readBack -eq "$PID" -and -not (Test-Path -LiteralPath $pidPath))
     $blocks += @{ name = 'pid-файл: записан и удалён'; ok = $ok }
+
+    # 10 — the owner's ⏹ verdict: the factory face loads from the SHIPPED .ico, not the drawn square
+    $ico = Get-IcoIcon $FACES['factory'].ico
+    $ok = ($ico -is [System.Drawing.Icon])
+    $blocks += @{ name = 'лицо ⏹ грузится из поставленного .ico (вердикт 005)'; ok = $ok }
+
+    # 11 — a missing .ico degrades to the drawn face instead of killing the tray
+    $fallback = Resolve-FaceIcon @{ color = 'Gray'; glyph = 'STOP'; ico = (Join-Path $sandbox 'no-such.ico') }
+    $ok = ($fallback -is [System.Drawing.Icon])
+    $blocks += @{ name = 'нет .ico — откат на рисованное лицо, трей жив'; ok = $ok }
   } finally {
     Remove-Item -Recurse -Force -LiteralPath $sandbox -ErrorAction SilentlyContinue
   }
@@ -246,7 +275,7 @@ function Get-FileStamp([string]$path) {
 }
 
 $script:icons = @{}
-foreach ($k in $FACES.Keys) { $script:icons[$k] = New-TrayIcon $FACES[$k].color $FACES[$k].glyph }
+foreach ($k in $FACES.Keys) { $script:icons[$k] = Resolve-FaceIcon $FACES[$k] }
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $script:shownKey = $null
