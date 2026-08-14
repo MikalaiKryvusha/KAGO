@@ -44,16 +44,34 @@
 //  gate-removal mutation reddened exactly its two blocks. Live the same night: `--apply optimised`
 //  refused with zero writes (power.limit 300 W before and after), `--roundtrip test-pl250`
 //  converged — 300 → 250 W read back, reset to 300 W, all compared fields equal.]
+//
+// [TESTED: 2026-08-14 09:4x · phase 3 §4.4 live, through the TASK PATH: apply-test-pl250 wrote the
+//  remembered state («test-pl250») · with the card returned to factory and that state restored (the
+//  simulated post-logon condition), `schtasks /run \KAGO\boot-apply` re-applied it — 250.00 W read
+//  back twice, Last Result 0, journal verdict `applied` · a second run with remembered=factory gave
+//  `factory-by-physics`, zero writes, card stayed 300.00 W. Offline: the 10 boot blocks of
+//  `--selftest`, three mutations each reddening exactly their named blocks.]
 
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 import {
   READBACK_AGREEING_SAMPLES,
   READBACK_INTERVAL_MS,
   READBACK_TIMEOUT_MS,
+  BOOT_PROBE_RETRIES,
+  BOOT_PROBE_RETRY_INTERVAL_MS,
 } from '../config.mjs';
+import {
+  REMEMBERED_STATE_PATH,
+  BOOT_JOURNAL_PATH,
+  writeRememberedState,
+  readRememberedState,
+  appendBootJournal,
+} from './remembered-state.mjs';
 import {
   PROFILES_DIR,
   loadProfileFile,
@@ -427,12 +445,101 @@ export async function roundTrip(backend, profile, { card, timing = {} } = {}) {
 }
 
 // ===============================================================================================
-// CLI
+// The boot re-apply — phase 3 §4.4. Runs at logon through the SAME apply() gates as every click.
 // ===============================================================================================
 
 function profilePath(name) {
   return path.join(PROFILES_DIR, `${name}.json`);
 }
+
+/**
+ * Re-apply the remembered state at logon (plans/06 §4.4). The card boots FACTORY by physics
+ * (volatile GPU state), so every refusing or failing path here ends in «nothing happened» — the
+ * designed-in safety. The verdict vocabulary, exhaustively:
+ *
+ *   no-remembered-state    nothing was ever remembered → zero writes, code 0
+ *   remembered-unreadable  the state file exists and cannot be trusted → zero writes, code 1 (loud)
+ *   driver-gave-up         the probe never answered within the bounded retries → zero writes, code 1
+ *   factory-by-physics     remembered factory, card already factory → zero writes, code 0
+ *   factory-restored       remembered factory, card was NOT factory (manual runs only) → reset, code 0
+ *   applied                remembered profile applied and read back through apply()'s gates, code 0
+ *   degraded-to-factory    the SAME gates refused (draft / stale stamp / missing file) → zero
+ *                          writes, factory stands, code 1 — a stale remembered state degrades to
+ *                          factory plus a journal line, never to a blind write
+ *   apply-failed-rolled-back  a write failed mid-apply; apply() already rolled back, code 1
+ *
+ * Every run appends exactly ONE journal line (P3-AC2's meter). The remembered state itself is NOT
+ * rewritten here: restoration is not a new owner decision.
+ */
+export async function bootApply({
+  backend = null,
+  probe = probeCard,
+  loadProfileByName = (name, card) => loadProfileFile(profilePath(name), card),
+  rememberedPath = REMEMBERED_STATE_PATH,
+  journalPath = BOOT_JOURNAL_PATH,
+  retries = BOOT_PROBE_RETRIES,
+  retryIntervalMs = BOOT_PROBE_RETRY_INTERVAL_MS,
+  timing = {},
+} = {}) {
+  const journal = (record) => { appendBootJournal(record, journalPath); return record; };
+
+  const { state, problem } = readRememberedState(rememberedPath);
+  if (problem) {
+    return { code: 1, record: journal({ verdict: 'remembered-unreadable', remembered: null, detail: `${problem} — на карту не записано ничего, заводское состояние стоит по физике` }) };
+  }
+  if (!state) {
+    return { code: 0, record: journal({ verdict: 'no-remembered-state', remembered: null, detail: 'запомненного состояния нет — заводское по физике, записей ноль' }) };
+  }
+
+  // The logon race (config.BOOT_PROBE_*): the driver may not answer yet. Bounded retries, then a
+  // loud give-up with zero writes — factory stands, the journal says why.
+  let card = null;
+  let probeAttempts = 0;
+  let probeError = null;
+  for (let i = 0; i < retries; i++) {
+    probeAttempts++;
+    try { card = probe(); probeError = null; break; } catch (e) { probeError = e; }
+    if (i < retries - 1) await sleep(retryIntervalMs);
+  }
+  if (!card) {
+    return { code: 1, record: journal({ verdict: 'driver-gave-up', remembered: state.profile, probeAttempts, detail: `драйвер не ответил за ${probeAttempts} попыток: ${probeError?.message} — записей ноль, заводское состояние стоит по физике` }) };
+  }
+
+  const b = backend ?? nvidiaSmiBackend();
+  const { profile, refusals } = loadProfileByName(state.profile, card);
+  if (refusals.length) {
+    return {
+      code: 1,
+      record: journal({
+        verdict: 'degraded-to-factory', remembered: state.profile, probeAttempts,
+        detail: `запомненный профиль отвергнут теми же воротами, записей ноль, заводское стоит: ${refusals.map((r) => `${r.field} — ${r.why}`).join('; ')}`,
+      }),
+    };
+  }
+
+  if (isFactoryProfile(profile) && !requiresQualification(profile)) {
+    const s = readState(b);
+    if (Math.abs(s.powerLimitW - s.powerDefaultW) < WATT_EPSILON) {
+      return { code: 0, record: journal({ verdict: 'factory-by-physics', remembered: state.profile, probeAttempts, powerLimitW: s.powerLimitW, detail: 'запомнено заводское, карта заводская — записей ноль' }) };
+    }
+    const r = await resetToFactory(b, { timing });
+    return { code: 0, record: journal({ verdict: 'factory-restored', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, detail: `запомнено заводское, карта была ${r.before.powerLimitW} Вт — сброшена и перечитана: ${r.after.powerLimitW} Вт` }) };
+  }
+
+  try {
+    const r = await apply(b, profile, { card, timing });
+    return { code: 0, record: journal({ verdict: 'applied', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, detail: `применено и перечитано: ${r.after.powerLimitW} Вт / ${r.after.clockMhz} МГц` }) };
+  } catch (e) {
+    if (e.refusals) {
+      return { code: 1, record: journal({ verdict: 'degraded-to-factory', remembered: state.profile, probeAttempts, detail: `применитель отказал ДО записи, заводское стоит: ${e.message.split('\n').join(' · ')}` }) };
+    }
+    return { code: 1, record: journal({ verdict: 'apply-failed-rolled-back', remembered: state.profile, probeAttempts, detail: `применение провалилось, откат внутри применителя отработал: ${e.message.split('\n').join(' · ')}` }) };
+  }
+}
+
+// ===============================================================================================
+// CLI
+// ===============================================================================================
 
 function mustLoad(name, card) {
   const { profile, refusals } = loadProfileFile(profilePath(name), card);
@@ -765,6 +872,141 @@ async function cmdSelftest() {
     }
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Phase 3 §4.4 — the boot re-apply. Sandboxed tmpdir per block (EXP-0025: a test that writes into
+  // the production directory fabricates forensics); injected probe and loader; fakeBackend as card.
+  // ---------------------------------------------------------------------------------------------
+
+  const bootSandbox = () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'kago-boot-'));
+    return { rem: path.join(dir, 'remembered-state.json'), jr: path.join(dir, 'boot-apply.jsonl') };
+  };
+  const journalLines = (jr) => {
+    try { return fsReadFileSync(jr, 'utf8').trim().split('\n').filter(Boolean); } catch { return []; }
+  };
+  const bootOpts = (b, sb, extra = {}) => ({
+    backend: b, probe: () => SELFTEST_CARD, rememberedPath: sb.rem, journalPath: sb.jr,
+    retries: 3, retryIntervalMs: 1, timing: FAST,
+    loadProfileByName: () => ({ profile: silentColdFixture(), refusals: [] }),
+    ...extra,
+  });
+
+  block('загрузка: запомненного состояния НЕТ -> ноль записей, вердикт назван, журнал получил строку', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    const r = await bootApply(bootOpts(b, sb));
+    if (r.record.verdict !== 'no-remembered-state') return `вердикт ${r.record.verdict}`;
+    if (r.code !== 0) return `код ${r.code} вместо 0 — «ничего не запомнено» не ошибка`;
+    if (b.writes.length !== 0) return `на карту писали: ${b.writes.join(', ')}`;
+    if (journalLines(sb.jr).length !== 1) return `в журнале ${journalLines(sb.jr).length} строк вместо 1`;
+    return null;
+  });
+
+  block('загрузка: запомнено заводское, карта заводская -> заводское ПО ФИЗИКЕ, ноль записей', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'factory' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: factoryFixture(), refusals: [] }) }));
+    if (r.record.verdict !== 'factory-by-physics') return `вердикт ${r.record.verdict}`;
+    if (b.writes.length !== 0) return `на карту писали: ${b.writes.join(', ')}`;
+    return null;
+  });
+
+  block('загрузка: запомнено заводское, а карта НЕ заводская -> восстановлена и перечитана', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    await apply(b, silentColdFixture(), { card: SELFTEST_CARD, timing: FAST });   // карта: 250 Вт + фиксация
+    writeRememberedState({ profile: 'factory' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: factoryFixture(), refusals: [] }) }));
+    if (r.record.verdict !== 'factory-restored') return `вердикт ${r.record.verdict}`;
+    if (b._state.powerLimitW !== 300 || b._state.lockedTo !== null) return `карта не заводская: ${b._state.powerLimitW} Вт, фиксация ${b._state.lockedTo}`;
+    return null;
+  });
+
+  block('загрузка: запомнен профиль -> применён через ТЕ ЖЕ ворота и перечитан', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict}: ${r.record.detail}`;
+    if (b._state.powerLimitW !== 250 || b._state.lockedTo !== 1200) return `карта не в профиле: ${b._state.powerLimitW} Вт, фиксация ${b._state.lockedTo}`;
+    return null;
+  });
+
+  block('загрузка: запомнен ЧЕРНОВИК -> деградация к заводскому, НОЛЬ записей, причина в журнале', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'optimised' }, sb.rem);
+    const draft = () => {
+      const p = silentColdFixture();
+      p.name = 'optimised'; p.mode = 'optimised'; p.qualified = false;
+      p.draft = { candidate: 'кривая +180, -pl 250', source: 'STATUS факт 27' };
+      return p;
+    };
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: draft(), refusals: [] }) }));
+    if (r.record.verdict !== 'degraded-to-factory') return `вердикт ${r.record.verdict}`;
+    if (r.code !== 1) return `код ${r.code} вместо 1 — деградация обязана быть громкой`;
+    if (b.writes.length !== 0) return `до отказа успели записать: ${b.writes.join(', ')}`;
+    if (!/qualified|ЧЕРНОВИК/u.test(r.record.detail)) return `журнал не назвал причину: ${r.record.detail}`;
+    return null;
+  });
+
+  block('загрузка: драйвер не готов две пробы -> повторы ДОЖАЛИ, применение прошло', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    let calls = 0;
+    const probe = () => { calls++; if (calls < 3) throw new Error('NVIDIA-SMI has failed'); return SELFTEST_CARD; };
+    const r = await bootApply(bootOpts(b, sb, { probe, retries: 5 }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict}`;
+    if (r.record.probeAttempts !== 3) return `попыток ${r.record.probeAttempts} вместо 3`;
+    return null;
+  });
+
+  block('загрузка: драйвер так и НЕ ответил -> громкий отказ в журнал, ноль записей, заводское по физике', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb, { probe: () => { throw new Error('NVIDIA-SMI has failed'); }, retries: 2 }));
+    if (r.record.verdict !== 'driver-gave-up') return `вердикт ${r.record.verdict}`;
+    if (r.code !== 1) return `код ${r.code} вместо 1`;
+    if (r.record.probeAttempts !== 2) return `попыток ${r.record.probeAttempts} вместо 2`;
+    if (b.writes.length !== 0) return `на карту писали: ${b.writes.join(', ')}`;
+    return null;
+  });
+
+  block('загрузка: файл состояния ПОВРЕЖДЁН -> не падение и не догадка, а названная деградация', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    fsWriteFileSync(sb.rem, '{{{ это не JSON');
+    const r = await bootApply(bootOpts(b, sb));
+    if (r.record.verdict !== 'remembered-unreadable') return `вердикт ${r.record.verdict}`;
+    if (b.writes.length !== 0) return `на карту писали: ${b.writes.join(', ')}`;
+    if (!/JSON/u.test(r.record.detail)) return `журнал не назвал проблему: ${r.record.detail}`;
+    return null;
+  });
+
+  block('журнал загрузки ДОПИСЫВАЕТСЯ, а не перезаписывается: два прогона -> две строки (мера P3-AC2)', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    await bootApply(bootOpts(b, sb));
+    await bootApply(bootOpts(b, sb));
+    const lines = journalLines(sb.jr);
+    if (lines.length !== 2) return `строк ${lines.length} вместо 2 — серия из пяти логонов несчитаема`;
+    return null;
+  });
+
+  block('загрузка НЕ переписывает запомненное состояние: восстановление — не новое решение владельца', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const before = fsReadFileSync(sb.rem, 'utf8');
+    await bootApply(bootOpts(b, sb));
+    const after = fsReadFileSync(sb.rem, 'utf8');
+    if (before !== after) return 'файл состояния изменился после boot-apply';
+    return null;
+  });
+
   let failed = 0;
   for (const b of blocks) {
     let problem;
@@ -790,6 +1032,17 @@ async function cmdSelftest() {
 
 async function main(argv) {
   if (argv.includes('--selftest')) return cmdSelftest();
+
+  // BEFORE the unconditional probe below: at logon the driver may not answer yet, and the bounded
+  // retry lives INSIDE bootApply — a probe thrown here would defeat it (§4.4, the logon race).
+  if (argv.includes('--boot-apply')) {
+    console.log('ВОССТАНОВЛЕНИЕ ПРИ ВХОДЕ — запомненное состояние через те же ворота применителя.');
+    const { code, record } = await bootApply({});
+    console.log(`  ВЕРДИКТ  ${record.verdict}${record.remembered ? ` («${record.remembered}»)` : ''}`);
+    console.log(`  ${record.detail}`);
+    console.log(`  ЖУРНАЛ   ${BOOT_JOURNAL_PATH}`);
+    return code;
+  }
 
   const backend = nvidiaSmiBackend();
   const card = probeCard();
@@ -831,6 +1084,11 @@ async function main(argv) {
     printState(r.before, 'ДО      ');
     for (const s of r.steps) console.log(`  ${s}`);
     printState(r.after, 'ПОСЛЕ   ');
+    // The remembered state (§4.4) — written HERE, in the owner-facing CLI, never inside apply():
+    // measurement tools drive the library and must not move the boot state. Only after the verified
+    // apply above — a throw has already exited.
+    const rec = writeRememberedState({ profile: profile.name, title: profile.title ?? null, stamp: profile.stamp ?? null });
+    console.log(`ЗАПОМНЕНО для автозагрузки: «${rec.profile}» (${REMEMBERED_STATE_PATH})`);
     return 0;
   }
 
@@ -840,10 +1098,14 @@ async function main(argv) {
     printState(r.before, 'ДО      ');
     for (const s of r.steps) console.log(`  ${s}`);
     printState(r.after, 'ПОСЛЕ   ');
+    // Reset is a mode like the others (internal map §4): it writes the same remembered state.
+    const factory = loadProfileFile(profilePath('factory')).profile;
+    const rec = writeRememberedState({ profile: 'factory', title: factory?.title ?? 'заводское состояние', stamp: null });
+    console.log(`ЗАПОМНЕНО для автозагрузки: «${rec.profile}» (${REMEMBERED_STATE_PATH})`);
     return 0;
   }
 
-  console.error('Команды: --state · --apply <имя> · --reset · --roundtrip <имя> · --verify-stamps · --selftest');
+  console.error('Команды: --state · --apply <имя> · --reset · --boot-apply · --roundtrip <имя> · --verify-stamps · --selftest');
   return 2;
 }
 

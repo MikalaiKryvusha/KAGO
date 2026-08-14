@@ -8,8 +8,9 @@
 > `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4 (four shortcuts, passive tray — the owner's design) ·
 > `researches/01` (what the `nvidia-smi` backend can write)
 > **Status:** 🟢 in flight — §4.1 closed 2026-08-14 00:5x · §4.2 closed 2026-08-14 01:0x ·
-> **§4.3 closed 2026-08-14 09:2x (live install + task-path proofs)** · next §4.4 (remembered
-> state + logon re-apply). Plan written BEFORE the first line of phase-3 code (EXP-0027 honoured)
+> §4.3 closed 2026-08-14 09:2x (live install + task-path proofs) · **§4.4 mechanism proven live
+> 2026-08-14 09:4x; P3-AC2 series (5 natural logons) collecting in the journal** · next §4.5
+> (the passive tray). Plan written BEFORE the first line of phase-3 code (EXP-0027 honoured)
 > **Outbound:** a tray-implementation fork goes to the owner ONLY if §4.1's recon finds no
 > third-party-GUI-free path · closure → `MASTER_PLAN.md` phase 3, epic AC1/AC2/AC6/AC7, internal map §4
 
@@ -142,24 +143,33 @@ reread-matching). Card left stock.
 **Verification (taken):** P3-AC1 mechanism 2/2 via the task path · P3-AC5 taken · P3-AC3 on the
 task path (exit 1, zero writes) · the created-artifacts receipt on disk with per-artifact deletes.
 
-### 4.4 — Remembered state and the logon re-apply 🔲
+### 4.4 — Remembered state and the logon re-apply 🟡 mechanism proven 2026-08-14 09:4x; P3-AC2 series collecting
 
 *Anchor: `plans/01_EPIC` §9 Б4; epic AC2; `MASTER_PLAN.md` phase 3 «запись запомненного состояния и
 его восстановление задачей при старте ПК».*
 
-- [ ] The remembered state is a small JSON (mode id + stamp + written-at), written by the applier on
-      every successful apply — reset included (internal map §4: every shortcut writes the same
-      remembered state; the tray owns nothing).
-- [ ] A logon-trigger scheduler task re-applies the remembered mode through the SAME applier — same
-      qualified/stamp gates, so a stale or draft remembered state degrades to factory + a journal
-      line, never to a blind write. **The card boots factory by physics (volatile state), so the
-      failure mode of this whole step is «nothing happened» — that is the designed-in safety.**
-- [ ] Driver-not-ready at logon: bounded retry, then give up loudly into the journal; factory state
-      stands (rule R2 — factory is the default, no action from the owner).
-- [ ] Boot-apply journal: one record per logon with the verdict — this is P3-AC2's meter, collected
-      from the owner's NATURAL reboots; no reboot is forced for the series.
+- [x] The remembered state (`lib/remembered-state.mjs`, `runs/shell/remembered-state.json`: profile
+      id + title + stamp + written-at), written by the applier's CLI on every successful apply —
+      reset included. Deliberately NOT inside the library `apply()`: measurement tools (engine,
+      vfstep, descend) drive profiles through the library and must never move the boot state.
+- [x] `\KAGO\boot-apply` — logon-trigger task (read back as `MSFT_TaskLogonTrigger`, RunLevel
+      Highest) running `--boot-apply` through the SAME applier gates. Verdict vocabulary is
+      exhaustive and journaled: applied · factory-by-physics · factory-restored ·
+      degraded-to-factory (draft/stale → zero writes, factory stands) · no-remembered-state ·
+      remembered-unreadable · driver-gave-up · apply-failed-rolled-back.
+- [x] Driver-not-ready: bounded retry (`config.BOOT_PROBE_RETRIES` 6 × 5 s), then a loud give-up
+      into the journal with zero writes. The retry sits BEFORE the CLI's unconditional card probe —
+      the branch order in `main()` is load-bearing.
+- [x] Boot journal `runs/shell/boot-apply.jsonl` — one appended record per run (append
+      mutation-proved: overwrite reddens the two-lines block).
+- [ ] **P3-AC2 series: 5 natural logons, collecting itself in the journal.** No reboot is forced;
+      close on the fifth verified record.
 
-**Verification:** manual `schtasks /run` proves the path end-to-end; then 5 natural logons = P3-AC2.
+**Verification (taken 2026-08-14 09:4x, task path):** apply-test-pl250 → remembered=«test-pl250»,
+card 250 W · card returned to factory + state restored (simulated post-logon), `schtasks /run
+\KAGO\boot-apply` → 250.00 W twice, Last Result 0, journal `applied` · remembered=factory run →
+`factory-by-physics`, zero writes, 300.00 W. Offline: 10 boot blocks in the applier selftest
+(27 total), 3 mutations each reddening exactly their named blocks. Card left factory.
 
 ### 4.5 — The passive tray 🔲
 

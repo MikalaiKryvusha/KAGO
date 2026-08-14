@@ -20,6 +20,11 @@
 //  card read back 250.00 W twice · apply-factory FROM that non-factory state → 300.00 W twice
 //  (P3-AC5) · apply-optimised (draft) → task exit 1, gpu-info --json diff shows zero settable
 //  changes (only volatile clock/pstate moved). Card left factory.]
+//
+// [TESTED: 2026-08-14 09:4x · §4.4 live: \KAGO\boot-apply registered with the logon trigger and
+//  read back as MSFT_TaskLogonTrigger · manual `schtasks /run` proved the boot path end-to-end
+//  (remembered test-pl250 re-applied → 250.00 W; remembered factory → zero writes). The real logon
+//  series (P3-AC2, 5 natural logons) collects itself from the owner's reboots via the journal.]
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -28,6 +33,7 @@ import path from 'node:path';
 
 import { PROFILES_DIR, loadProfileFile, requiresQualification } from './lib/profile-store.mjs';
 import { createShortcut, readShortcut, removeShortcut, desktopDir } from './lib/desktop-shortcuts.mjs';
+import { localIso } from './lib/remembered-state.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const PROFILE_MANAGER = fileURLToPath(new URL('./lib/profile-manager.mjs', import.meta.url));
@@ -51,6 +57,11 @@ const SURFACE = Object.freeze([
 
 const taskName = (profileName) => `apply-${profileName}`;
 const fullTaskName = (profileName) => `${TASK_FOLDER}${taskName(profileName)}`;
+
+/** §4.4: the logon task — re-applies the remembered state through the SAME applier and its gates.
+ *  A stale or draft remembered state degrades to factory plus a journal line, never a blind write. */
+const BOOT_TASK = 'boot-apply';
+const BOOT_TASK_ARGS = `"${PROFILE_MANAGER}" --boot-apply`;
 
 function psq(s) { return `'${String(s).replace(/'/gu, "''")}'`; }
 
@@ -79,14 +90,6 @@ function loadSurfaceProfiles() {
 // Receipt — written BEFORE creation, executed by --uninstall
 // ===============================================================================================
 
-/** Local ISO 8601 with the machine's offset — a receipt stamped in UTC already lied once (EXP-0012). */
-function localIso() {
-  const d = new Date();
-  const pad = (n) => String(Math.abs(n)).padStart(2, '0');
-  const off = -d.getTimezoneOffset();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${off >= 0 ? '+' : '-'}${pad(Math.trunc(off / 60))}:${pad(off % 60)}`;
-}
-
 function buildReceipt(surface, desktop) {
   return {
     what: 'Всё, что setup-desktop создаёт ВНЕ репозитория, и команда удаления каждого артефакта.',
@@ -98,6 +101,11 @@ function buildReceipt(surface, desktop) {
         name: fullTaskName(s.profile),
         delete: `schtasks /Delete /TN "${fullTaskName(s.profile)}" /F`,
       })),
+      {
+        kind: 'scheduled-task',
+        name: `${TASK_FOLDER}${BOOT_TASK}`,
+        delete: `schtasks /Delete /TN "${TASK_FOLDER}${BOOT_TASK}" /F`,
+      },
       ...surface.filter((s) => s.shortcut).map((s) => ({
         kind: 'desktop-shortcut',
         path: path.join(desktop, `${s.title}.lnk`),
@@ -116,37 +124,42 @@ function writeReceipt(receipt) {
 // Tasks
 // ===============================================================================================
 
-/** Register (or overwrite) one elevated apply task. Interactive-only, current user, fixed args. */
-function registerTask(profileName) {
-  const action = `New-ScheduledTaskAction -Execute ${psq(process.execPath)} -Argument ${psq(`"${PROFILE_MANAGER}" --apply ${profileName}`)} -WorkingDirectory ${psq(REPO_ROOT)}`;
+/**
+ * Register (or overwrite) one elevated task by its RAW name. Interactive-only, current user, fixed
+ * args, never stores credentials; RunLevel Highest is the whole point (researches/03 §3.6). With
+ * `logonTrigger` the task additionally fires at THIS user's logon — §4.4's boot re-apply.
+ */
+function registerTask(rawName, args, { logonTrigger = false } = {}) {
   const script = [
     '$ErrorActionPreference = "Stop"',
-    `$action = ${action}`,
-    // Interactive logon type: runs in the logged-on user's session (the apply's console is visible),
-    // and NEVER stores credentials. RunLevel Highest is the whole point (researches/03 §3.6).
+    `$action = New-ScheduledTaskAction -Execute ${psq(process.execPath)} -Argument ${psq(args)} -WorkingDirectory ${psq(REPO_ROOT)}`,
     `$principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest`,
     `$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)`,
-    `Register-ScheduledTask -TaskName ${psq(taskName(profileName))} -TaskPath ${psq(TASK_FOLDER)} -Action $action -Principal $principal -Settings $settings -Force | Out-Null`,
+    ...(logonTrigger
+      ? [`$trigger = New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)`]
+      : []),
+    `Register-ScheduledTask -TaskName ${psq(rawName)} -TaskPath ${psq(TASK_FOLDER)} -Action $action -Principal $principal -Settings $settings${logonTrigger ? ' -Trigger $trigger' : ''} -Force | Out-Null`,
   ].join('; ');
   const r = ps(script);
-  if (!r.ok) throw new Error(`задача ${fullTaskName(profileName)} не зарегистрирована: ${r.stderr || r.stdout}`);
+  if (!r.ok) throw new Error(`задача ${TASK_FOLDER}${rawName} не зарегистрирована: ${r.stderr || r.stdout}`);
 }
 
-/** Read a task back: does it exist, what does it run. The registration is not the evidence. */
-function readTask(profileName) {
+/** Read a task back by its RAW name: exists, what it runs, and its trigger class (if any). The
+ *  registration is not the evidence. */
+function readTask(rawName) {
   const script = [
     '$ErrorActionPreference = "Stop"',
     '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-    `$t = Get-ScheduledTask -TaskName ${psq(taskName(profileName))} -TaskPath ${psq(TASK_FOLDER)}`,
-    `@{ execute = $t.Actions[0].Execute; args = $t.Actions[0].Arguments; runLevel = [string]$t.Principal.RunLevel } | ConvertTo-Json -Compress`,
+    `$t = Get-ScheduledTask -TaskName ${psq(rawName)} -TaskPath ${psq(TASK_FOLDER)}`,
+    `@{ execute = $t.Actions[0].Execute; args = $t.Actions[0].Arguments; runLevel = [string]$t.Principal.RunLevel; trigger = if ($t.Triggers) { $t.Triggers[0].CimClass.CimClassName } else { $null } } | ConvertTo-Json -Compress`,
   ].join('; ');
   const r = ps(script);
   if (!r.ok) return null;
   try { return JSON.parse(r.stdout); } catch { return null; }
 }
 
-function deleteTask(profileName) {
-  const r = spawnSync(SCHTASKS, ['/Delete', '/TN', fullTaskName(profileName), '/F'], { encoding: 'utf8' });
+function deleteTask(rawName) {
+  const r = spawnSync(SCHTASKS, ['/Delete', '/TN', `${TASK_FOLDER}${rawName}`, '/F'], { encoding: 'utf8' });
   return !r.error && r.status === 0;
 }
 
@@ -166,14 +179,24 @@ function cmdInstall() {
 
   let bad = 0;
   for (const s of surface) {
-    registerTask(s.profile);
-    const t = readTask(s.profile);
+    registerTask(taskName(s.profile), `"${PROFILE_MANAGER}" --apply ${s.profile}`);
+    const t = readTask(taskName(s.profile));
     if (!t || t.runLevel !== 'Highest') {
       bad++;
       console.log(`ПРОВАЛ задача ${fullTaskName(s.profile)} — перечитана как ${JSON.stringify(t)}`);
       continue;
     }
     console.log(`OK   задача ${fullTaskName(s.profile)} → ${path.basename(t.execute)} ${t.args.includes(`--apply ${s.profile}`) ? `--apply ${s.profile}` : '⚠ ЧУЖИЕ АРГУМЕНТЫ'} · RunLevel ${t.runLevel}${s.draft ? ' · профиль-ЧЕРНОВИК: клик будет честно отказывать' : ''}`);
+  }
+
+  // §4.4 — the logon re-apply. Registered like the rest, plus the trigger; read back including it.
+  registerTask(BOOT_TASK, BOOT_TASK_ARGS, { logonTrigger: true });
+  const bt = readTask(BOOT_TASK);
+  if (!bt || bt.runLevel !== 'Highest' || bt.trigger !== 'MSFT_TaskLogonTrigger') {
+    bad++;
+    console.log(`ПРОВАЛ задача ${TASK_FOLDER}${BOOT_TASK} — перечитана как ${JSON.stringify(bt)}`);
+  } else {
+    console.log(`OK   задача ${TASK_FOLDER}${BOOT_TASK} → ${path.basename(bt.execute)} ${bt.args.includes('--boot-apply') ? '--boot-apply' : '⚠ ЧУЖИЕ АРГУМЕНТЫ'} · RunLevel ${bt.runLevel} · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
   }
 
   console.log('');
@@ -193,7 +216,7 @@ function cmdInstall() {
 
   console.log('');
   console.log(bad === 0
-    ? `ИТОГ: задач ${surface.length}, ярлыков ${surface.filter((x) => x.shortcut).length}, всё перечитано. Расписка: ${RECEIPT_PATH}`
+    ? `ИТОГ: задач ${surface.length + 1} (включая логон-задачу), ярлыков ${surface.filter((x) => x.shortcut).length}, всё перечитано. Расписка: ${RECEIPT_PATH}`
     : `ИТОГ: ПРОВАЛОВ ${bad} — см. выше.`);
   return bad === 0 ? 0 : 1;
 }
@@ -207,11 +230,10 @@ function cmdUninstall() {
 
   const tasks = receipt
     ? receipt.artifacts.filter((a) => a.kind === 'scheduled-task').map((a) => a.name.replace(TASK_FOLDER, ''))
-    : SURFACE.map((s) => taskName(s.profile));
+    : [...SURFACE.map((s) => taskName(s.profile)), BOOT_TASK];
   for (const t of tasks) {
-    const name = t.replace(/^apply-/u, '');
-    const ok = deleteTask(name);
-    const still = readTask(name);
+    const ok = deleteTask(t);
+    const still = readTask(t);
     if (still) { bad++; console.log(`ПРОВАЛ задача ${TASK_FOLDER}${t} всё ещё существует`); }
     else console.log(`OK   задача ${TASK_FOLDER}${t} удалена${ok ? '' : ' (или её и не было)'}`);
   }
@@ -240,7 +262,7 @@ function cmdStatus() {
   const desktop = desktopDir();
   let n = 0;
   for (const s of SURFACE) {
-    const t = readTask(s.profile);
+    const t = readTask(taskName(s.profile));
     console.log(t
       ? `OK   задача ${fullTaskName(s.profile)} · RunLevel ${t.runLevel}`
       : `—    задачи ${fullTaskName(s.profile)} нет`);
@@ -257,7 +279,12 @@ function cmdStatus() {
       }
     }
   }
-  console.log(`ИТОГ: задач на месте ${n} из ${SURFACE.length}. Расписка: ${existsSync(RECEIPT_PATH) ? RECEIPT_PATH : 'нет'}`);
+  const bt = readTask(BOOT_TASK);
+  console.log(bt
+    ? `OK   задача ${TASK_FOLDER}${BOOT_TASK} · RunLevel ${bt.runLevel} · триггер ${bt.trigger === 'MSFT_TaskLogonTrigger' ? 'вход пользователя' : `⚠ ${bt.trigger}`}`
+    : `—    задачи ${TASK_FOLDER}${BOOT_TASK} нет`);
+  if (bt) n++;
+  console.log(`ИТОГ: задач на месте ${n} из ${SURFACE.length + 1}. Расписка: ${existsSync(RECEIPT_PATH) ? RECEIPT_PATH : 'нет'}`);
   return 0;
 }
 

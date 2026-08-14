@@ -407,6 +407,18 @@ export const READBACK_INTERVAL_MS = 250;
 export const READBACK_TIMEOUT_MS = 10_000;
 
 /**
+ * THE LOGON RACE (phase 3 §4.4, plans/06). The boot-apply task fires at logon and may start before
+ * the NVIDIA driver answers queries. The probe is retried a bounded number of times and then gives
+ * up LOUDLY into the boot journal — with zero writes, so factory state stands by physics (map rule
+ * "factory state is the default"): the failure mode of the whole boot path is «nothing happened»,
+ * which is the designed-in safety. 6 × 5 s is a 30 s window — margin over any driver init this
+ * machine has shown; the numbers are a budget, not a measurement, and a give-up costs one journal
+ * line, never a write. [NOT-TESTED against a real logon race — the race needs a reboot to exist.]
+ */
+export const BOOT_PROBE_RETRIES = 6;
+export const BOOT_PROBE_RETRY_INTERVAL_MS = 5_000;
+
+/**
  * THE SAME RULE DOES NOT TRANSFER TO A MECHANICAL ACTUATOR, and this card measured the difference.
  *
  * MEASURED 2026-08-10 17:3x on this card, two runs of the identical command (manual fan level 60 %):
@@ -854,6 +866,8 @@ export default Object.freeze({
   READBACK_AGREEING_SAMPLES,
   READBACK_INTERVAL_MS,
   READBACK_TIMEOUT_MS,
+  BOOT_PROBE_RETRIES,
+  BOOT_PROBE_RETRY_INTERVAL_MS,
   FAN_LEVEL_TOLERANCE_PCT,
   FAN_RAMP_TIMEOUT_MS,
   FAN_RAMP_IS_MEASURED,
