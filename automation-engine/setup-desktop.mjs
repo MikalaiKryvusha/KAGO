@@ -14,12 +14,12 @@
 // (runs/shell/created-artifacts.json): each artifact with the exact command that deletes it.
 // `--uninstall` executes that receipt; a receipt nobody can execute is a hope, not a rollback.
 //
-// [NOT-TESTED live: the install itself. 2026-08-14 the agent's session was DENIED permission to
-//  create scheduler tasks / Desktop shortcuts (correctly — machine state outside the repo), so
-//  `--install` has never run. What IS proven offline: `--status` walks the surface read-only
-//  against the live machine (run, 0 of 5 present), the `.lnk` author underneath is selftested
-//  (desktop-shortcuts.mjs, 5 blocks), and `npm run check` parses everything. First live run —
-//  with the owner: `npm run setup -- --install`, then the §4.3 proofs from plans/06.]
+// [TESTED: 2026-08-14 09:2x · live install after the owner granted `npm run setup*`. `--install`
+//  created 5 tasks + 4 shortcuts, receipt written BEFORE creation, everything re-read. The §4.3
+//  proofs ran through the TASK PATH (the same path the owner's clicks take): apply-test-pl250 →
+//  card read back 250.00 W twice · apply-factory FROM that non-factory state → 300.00 W twice
+//  (P3-AC5) · apply-optimised (draft) → task exit 1, gpu-info --json diff shows zero settable
+//  changes (only volatile clock/pstate moved). Card left factory.]
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';

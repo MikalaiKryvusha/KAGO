@@ -7,7 +7,9 @@
 > phase 3. Evidence base: `researches/03` §3.6 (autostart + elevation via a scheduler task) ·
 > `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4 (four shortcuts, passive tray — the owner's design) ·
 > `researches/01` (what the `nvidia-smi` backend can write)
-> **Status:** 🔲 open — written BEFORE the first line of phase-3 code (EXP-0027 honoured this time)
+> **Status:** 🟢 in flight — §4.1 closed 2026-08-14 00:5x · §4.2 closed 2026-08-14 01:0x ·
+> **§4.3 closed 2026-08-14 09:2x (live install + task-path proofs)** · next §4.4 (remembered
+> state + logon re-apply). Plan written BEFORE the first line of phase-3 code (EXP-0027 honoured)
 > **Outbound:** a tray-implementation fork goes to the owner ONLY if §4.1's recon finds no
 > third-party-GUI-free path · closure → `MASTER_PLAN.md` phase 3, epic AC1/AC2/AC6/AC7, internal map §4
 
@@ -116,7 +118,7 @@ profiles, 0 refusals, drafts labeled 📝 · `--apply optimised` refused with ZE
 300 W, compared fields equal. P3-AC1's mechanism: 2/2 (refuse-with-nothing-written · applied-and-
 reread-matching). Card left stock.
 
-### 4.3 — Four shortcuts, applying through the elevated task 🔲
+### 4.3 — Four shortcuts, applying through the elevated task ✅ 2026-08-14 09:2x
 
 *Anchor: `plans/01_EPIC` §9 Б3; internal map §4 (four shortcuts, the owner's names verbatim);
 `researches/03` §3.6 (elevation without UAC prompts).*
@@ -129,13 +131,16 @@ reread-matching). Card left stock.
       Interactive, RunLevel Highest, no stored credentials — `researches/03` §3.6), 4 shortcuts
       (owner's names verbatim), receipt written BEFORE creation with per-artifact delete commands;
       `--uninstall` executes the receipt; `--status` read-only (run live: 0 of 5 present).
-- [ ] **Live install BLOCKED 2026-08-14 01:2x — the session's permission classifier denied creating
-      scheduler tasks / Desktop artifacts (correct class of caution; the owner is adding rights).**
-      Remaining live: `npm run setup -- --install` → apply TEST profile via its task path, read
-      back; apply Stock Default from that non-factory state (**P3-AC5**), read back; draft click
-      refuses with zero writes.
+- [x] **Live install run 2026-08-14 09:2x** (the owner granted `npm run setup*` rights after the
+      01:2x block): 5 tasks + 4 shortcuts created, receipt written BEFORE creation, all re-read.
+      The proofs went through the TASK PATH — the same path the owner's clicks take:
+      `schtasks /run apply-test-pl250` → power.limit read back **250.00 W** twice · `apply-factory`
+      FROM that non-factory state → **300.00 W** twice (**P3-AC5**) · `apply-optimised` (draft) →
+      task Last Result **1**, `gpu-info --json` before/after diff: zero settable changes (only
+      volatile clock/pstate moved). Card left factory.
 
-**Verification:** P3-AC1 mechanism 2/2 · P3-AC5 taken · the created-artifacts receipt in the journal.
+**Verification (taken):** P3-AC1 mechanism 2/2 via the task path · P3-AC5 taken · P3-AC3 on the
+task path (exit 1, zero writes) · the created-artifacts receipt on disk with per-artifact deletes.
 
 ### 4.4 — Remembered state and the logon re-apply 🔲
 
