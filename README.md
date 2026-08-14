@@ -17,7 +17,7 @@
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
 <p align="center">
-  <a href="#1-general">General</a> · <a href="#2-where-the-project-actually-is">Status</a> · <a href="#3-the-method">The method</a> · <a href="#4-the-two-profiles">Profiles</a> · <a href="#5-requirements">Requirements</a> · <a href="#6-built-with-kaif">KAIF</a>
+  <a href="#1-general">General</a> · <a href="#2-where-the-project-actually-is">Status</a> · <a href="#3-the-method">The method</a> · <a href="#4-the-four-modes">Modes</a> · <a href="#5-requirements">Requirements</a> · <a href="#6-built-with-kaif">KAIF</a>
 </p>
 
 **KAGO is a Node.js orchestrator that undervolts an NVIDIA GPU on Windows — automatically, with a measured safety margin, and without installing a single third-party GUI.**
@@ -37,8 +37,9 @@
 3. **No third-party GUI is required, and none will be added.** The card is driven through the
    driver's own command-line interface first, and through an in-house NVAPI bridge after that. MSI
    Afterburner is not a dependency of this project.
-4. Two profiles ship: one for quiet performance, one for the coldest and quietest the card can go.
-   Each is a desktop shortcut, and a tray icon shows which one is live.
+4. Four modes ship — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold, ⏹ Stock Default — each with
+   its own definition of optimal. Each is a desktop shortcut, and a tray icon shows which one is
+   live.
 5. **Factory state is the default.** Profiles live in the GPU's volatile memory. Kill the tray icon,
    crash the machine, or simply reboot — the card comes back stock, and you do nothing.
 
@@ -57,9 +58,13 @@ else's numbers.
 
 Three phases of six are closed, and the card has been measured. The research base, the architecture,
 **the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
-back on command. The search engine now exists and judges a candidate by three different load shapes at
-once, taking the worst verdict — but it has not yet measured this card's edge, and it refuses to report
-one until it can prove the write it made actually cheapened the clock it tested.
+back on command. **The owner-facing shell is on the desktop too:** four shortcuts apply through
+pre-registered elevated tasks, the last verified apply is remembered and re-applied at logon through
+the same gates, and the three working modes refuse honestly until phase 6 qualifies their numbers —
+an unproven undervolt cannot be applied by a double-click. The search engine exists and judges a
+candidate by three different load shapes at once, taking the worst verdict — but it has not yet
+measured this card's edge, and it refuses to report one until it can prove the write it made
+actually cheapened the clock it tested.
 
 **The undervolt is measured, not claimed.** With the whole voltage/frequency curve raised and nothing
 offered above the clock the card already delivered, it draws **7.71 W (5.6 %) less and runs 5 °C cooler at
@@ -153,34 +158,42 @@ The measurements behind each of these are cited in
 
 ---
 
-<a id="4-the-two-profiles"></a>
+<a id="4-the-four-modes"></a>
 
-## 4. The two profiles
+## 4. The four modes
 
-| | 🚀 **Max Optimal** | ❄️ **Silent Cold** |
-|---|---|---|
-| For | Everyday gaming, quiet but fast | Night sessions and light games |
-| How its point is chosen | **The knee of the curve** — the point after which giving up more performance stops paying. The owner's ceiling is 5 %, and it is a ceiling, not a destination | **The coldest the card can go** for a price fixed in advance: **~10 %** of performance, spent deliberately |
-| Performance · temperature · power saved | Measured, not inherited — **not measured yet** | Measured, not inherited — **not measured yet** |
-| Applied | At boot, plus a shortcut | By shortcut, when you want it |
+The owner split the original two profiles into four modes, each with its own objective. One
+mechanism serves them all — the whole voltage/frequency curve is raised, and only the placement of
+the clock ceiling differs — and none of them locks the clock: the card still boosts and still drops
+to idle speeds.
 
-The source plan quoted figures — ≥ 97 % of stock, 60–120 W saved, 65 / 58 °C. KAGO does not carry
-them as targets: they float from one card to the next, and on some cards there is no performance cost
-at all for a substantial power reduction. So the numbers this table will carry are the ones measured
-on this die — reported next to the meter's own run-to-run spread, because "no loss" measured with a
-blunt instrument is not a finding.
+| | Objective | Noise ceiling | Price |
+|---|---|---|---|
+| 🚀 **Max Perfomance** | everything into speed; temperature is not a goal | none | — |
+| ⚖️ **Optimised** | a strong cut in watts, heat and noise | fans ≤ 60 % | FPS within 5 % of Max Perfomance |
+| ❄️ **Silent Cold** | maximum cold | fans ≤ 40 % | up to 10 % of stock performance |
+| ⏹ **Stock Default** | factory state, always one click away | factory curve | — |
 
-A **third shortcut resets the card to factory settings**, and all three write the state that gets
-re-applied at boot — so whichever you clicked last is what you come back to. The tray icon shows
-which profile is live and does nothing else: no menu, no buttons.
+The prices are the owner's budgets, not inherited promises: the numbers this table will finally
+carry are measured on this die, and they are reported next to the meter's own run-to-run spread,
+because "no loss" measured with a blunt instrument is not a finding.
 
-These are **acceptance targets, not shipped profiles.** No profile has been fixed yet — that is
-phase 6, and it waits on the owner's own listening test. What *has* been proven on this hardware is
-worth stating exactly, because it is more than it was: the driver accepts power-limit and clock-lock
-writes and gives them back (300 → 290 W and a core pinned to 1200 MHz, each re-read to stability and
-rolled back); the card's power↔performance curve has been measured across ten points; the meter's own
-spread is 1.28 W; and KAGO's own NVAPI bridge reads the 128-point voltage/frequency curve, whose
-voltage grid turned out to be 5 mV rather than the 6.25 mV folklore assumes.
+The **fourth shortcut resets the card to factory settings**, and all four write the remembered
+state that is re-applied at logon — whichever you clicked last is what you come back to. The tray
+icon — the one piece of the shell still being built — will show which mode is live and nothing
+else: no menu, no buttons.
+
+The shortcuts already sit on the desktop, and the shell around them is proven: every click ends in
+a verified state — applied and re-read to agreement, or refused with nothing written. **The three
+working modes ship as refusing drafts**: their measured candidate numbers (Optimised: −50 W, −9 °C
+and fans at 69 → 50 % for −1.24 % of frames; Silent Cold read straight off a thermal ladder at a
+2100 MHz ceiling — 59 °C at 40 % fans) stay documentation until phase 6 qualifies them, and until
+then a double-click refuses out loud rather than apply an unproven undervolt. Beyond the shell,
+what has been proven on this hardware: the driver gives writes back (power limit and clock lock,
+each re-read to stability and rolled back); the card's power↔performance curve is measured across
+ten points; the meter's own spread is 1.28 W; and KAGO's own NVAPI bridge reads the 128-point
+voltage/frequency curve, whose voltage grid turned out to be 5 mV rather than the 6.25 mV folklore
+assumes.
 
 ---
 
@@ -236,7 +249,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
 <p align="center">
-  <a href="#1-общие-сведения">Общие сведения</a> · <a href="#2-где-проект-находится-на-самом-деле">Состояние</a> · <a href="#3-методика">Методика</a> · <a href="#4-два-профиля">Профили</a> · <a href="#5-что-нужно">Что нужно</a> · <a href="#6-собран-на-kaif">KAIF</a>
+  <a href="#1-общие-сведения">Общие сведения</a> · <a href="#2-где-проект-находится-на-самом-деле">Состояние</a> · <a href="#3-методика">Методика</a> · <a href="#4-четыре-режима">Режимы</a> · <a href="#5-что-нужно">Что нужно</a> · <a href="#6-собран-на-kaif">KAIF</a>
 </p>
 
 **KAGO — оркестратор на Node.js, который сам подбирает андервольтинг для видеокарты NVIDIA под Windows: с измеренным запасом надёжности и без единого стороннего GUI в зависимостях.**
@@ -254,9 +267,9 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
    правки. KAGO проходит этот цикл вместо вас и записывает, что нашёл.
 3. **Сторонний GUI не нужен, и его тут не появится.** Картой управляет сначала штатная утилита
    драйвера, а затем собственный мост к NVAPI. MSI Afterburner в зависимостях проекта нет.
-4. Профилей два: один для тихой производительности, второй — на самый холод и тишину, какие карта
-   может дать. Каждый лежит ярлыком на рабочем столе, а иконка в трее показывает, какой сейчас
-   включён.
+4. Режима четыре — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold и ⏹ Stock Default, — и у каждого
+   свой критерий оптимальности. Каждый лежит ярлыком на рабочем столе, а иконка в трее показывает,
+   какой сейчас включён.
 5. **Заводское состояние — состояние по умолчанию.** Профиль живёт в энергозависимой памяти GPU.
    Убили иконку в трее, упала система, просто перезагрузились — карта вернулась стоковой, и делать
    для этого ничего не надо.
@@ -275,9 +288,13 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 Закрыты три фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
 **собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по
-команде. Движок поиска написан и судит кандидата сразу тремя разными формами нагрузки, беря худший
-вердикт, — но края этой карты он ещё не измерил и отказывается называть его, пока не докажет, что
-сделанная запись действительно удешевила проверяемую частоту.
+команде. **Оболочка для владельца тоже стоит:** четыре ярлыка применяют режим через заранее
+зарегистрированные повышенные задачи, последнее проверенное применение запоминается и
+восстанавливается при входе в систему через те же ворота, а три рабочих режима честно отказывают,
+пока фаза 6 не примет их числа, — недоказанный андервольт двойным кликом не применяется. Движок
+поиска написан и судит кандидата сразу тремя разными формами нагрузки, беря худший вердикт, — но
+края этой карты он ещё не измерил и отказывается называть его, пока не докажет, что сделанная
+запись действительно удешевила проверяемую частоту.
 
 **Андервольт измерен, а не заявлен.** Когда вся кривая «напряжение — частота» поднята, а выше той частоты,
 которую карта и так выдавала, не предлагается ничего, она берёт **на 7,71 Вт (5,6 %) меньше и работает на
@@ -371,34 +388,41 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 ---
 
-<a id="4-два-профиля"></a>
+<a id="4-четыре-режима"></a>
 
-## 4. Два профиля
+## 4. Четыре режима
 
-| | 🚀 **Max Optimal** | ❄️ **Silent Cold** |
-|---|---|---|
-| Для чего | Повседневная игра, тихо и быстро | Ночные сессии и лёгкие игры |
-| Как выбирается точка | **Перегиб кривой** — точка, после которой дальнейшая отдача производительности перестаёт окупаться. Потолок владельца — 5 %, и это именно потолок, а не цель | **Максимальный холод**, какой карта может дать, за назначенную заранее плату: **~10 %** производительности |
-| Производительность · температура · экономия | Измеряется, а не наследуется — **ещё не измерено** | Измеряется, а не наследуется — **ещё не измерено** |
-| Как применяется | При старте ПК и ярлыком | Ярлыком, когда захочется |
+Владелец расщепил прежние два профиля на четыре режима, у каждого — свой критерий оптимальности.
+Механизм при этом один: поднимается вся кривая «напряжение — частота», а различает режимы только
+место потолка частоты. И ни один из них не фиксирует частоту — карта по-прежнему разгоняется и
+по-прежнему сбрасывается на простое.
 
-Исходный план приводил числа — ≥ 97 % от стока, 60–120 Вт экономии, 65 / 58 °C. KAGO не несёт их как
-цели: они плавают от экземпляра к экземпляру, а на части карт существенное снижение потребления вообще
-не стоит производительности. Поэтому в этой таблице появятся числа, измеренные на этом кристалле, — и
-рядом с ними разброс самого прибора, потому что «потери нет», снятое тупым инструментом, находкой не
-является.
+| | Цель | Потолок шума | Цена |
+|---|---|---|---|
+| 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе | нет | — |
+| ⚖️ **Optimised** | сильно меньше ватт, градусов и шума | вентиляторы ≤ 60 % | FPS не ниже 95 % от Max Perfomance |
+| ❄️ **Silent Cold** | максимум холода | вентиляторы ≤ 40 % | до 10 % производительности |
+| ⏹ **Stock Default** | заводское состояние, всегда в одном клике | заводская кривая | — |
 
-**Третий ярлык возвращает карту к заводским настройкам**, и все три записывают состояние, которое
-применится при следующем старте ПК, — куда кликнули последним, туда и вернётесь. Иконка в трее
-показывает активный профиль и больше ничего не делает: ни меню, ни кнопок.
+Цены в таблице — бюджеты владельца, а не унаследованные обещания: числа, которые она в итоге понесёт,
+измеряются на этом кристалле и приводятся рядом с собственным разбросом прибора, потому что «потери
+нет», снятое тупым инструментом, находкой не является.
 
-Это **цели приёмки, а не отгруженные профили.** Ни один профиль ещё не зафиксирован — это фаза 6, и
-она ждёт, пока владелец послушает кандидатов ушами. А вот что на этом железе уже проверено, и сказать
-это стоит точно, потому что список вырос: драйвер принимает запись потолка мощности и фиксацию частоты
-и отдаёт их назад (300 → 290 Вт и ядро на 1200 МГц, каждая перечитана до устойчивости и откачена);
-кривая мощность↔производительность этой карты снята по десяти точкам; собственный разброс прибора —
-1,28 Вт; а свой мост к NVAPI читает кривую «напряжение — частота» из 128 точек, и шаг её сетки
-оказался **5 мВ**, а не 6,25 мВ, как гласит фольклор.
+**Четвёртый ярлык возвращает карту к заводским настройкам**, и все четыре записывают запомненное
+состояние, которое восстанавливается при входе в систему, — куда кликнули последним, туда и
+вернётесь. Иконка в трее — единственный ещё не построенный кусок оболочки — будет показывать
+активный режим и больше ничего: ни меню, ни кнопок.
+
+Ярлыки уже лежат на рабочем столе, и оболочка вокруг них доказана: каждый клик заканчивается
+проверенным состоянием — применено и перечитано до совпадения, либо отказано, не записав ничего.
+**Три рабочих режима отгружены честными черновиками**: их измеренные кандидатские числа (Optimised —
+−50 Вт, −9 °C и вентиляторы 69 → 50 % ценой −1,24 % кадров; Silent Cold прочитан прямо с тепловой
+лестницы на потолке 2100 МГц — 59 °C при 40 % оборотов) остаются документацией до приёмки фазы 6, а
+до неё двойной клик отказывает вслух, вместо того чтобы применить недоказанный андервольт. Что на
+этом железе доказано помимо оболочки: драйвер отдаёт записи назад (потолок мощности и фиксация
+частоты, каждая перечитана до устойчивости и откачена); кривая мощность↔производительность снята по
+десяти точкам; собственный разброс прибора — 1,28 Вт; а свой мост к NVAPI читает кривую из 128
+точек, и шаг её сетки оказался **5 мВ**, а не 6,25 мВ, как гласит фольклор.
 
 ---
 

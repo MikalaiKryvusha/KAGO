@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0042 · 2026-08-14 · ✅ · #cli #dispatch #retry #control-flow #resilience
+**Context:** adding `--boot-apply` to the applier CLI — the logon re-apply whose whole point is a bounded retry around a driver that may not answer yet. The CLI's `main()` opens with an unconditional `probeCard()` shared by every command.
+**Tried / did:** before the first run, walked the path from process start to the new branch — and found the retry was dead on arrival: the shared preamble probes the card FIRST, so at logon `main()` would throw before the subcommand's retry loop ever existed.
+**Result:** ✅ caught by reading dispatch order, not by a failed logon: the `--boot-apply` branch moved ABOVE the shared probe, with a comment naming the order as load-bearing.
+**Lesson:** **a resilience feature inside a subcommand is dead code when the entry point's shared preamble performs the same fragile operation unguarded — and nothing red tells you, because the feature's own tests inject past the preamble.** The selftest drove `bootApply()` directly with an injected probe, so all ten blocks were green while the real CLI path defeated the retries. The general form: when adding a retry/fallback/degradation to ONE branch of a multi-command tool, walk the path FROM PROCESS START to that branch and list every operation that can throw for the same reason the branch guards against; each one either moves below the dispatch or inherits the guard. The tell is structural and greppable: shared setup in `main()` + a branch that promises to survive what the setup does not.   → link: `automation-engine/lib/profile-manager.mjs` → `main()` · plans/06 §4.4
+**Repro:** `node automation-engine/lib/profile-manager.mjs --boot-apply` with no remembered state must print `ВЕРДИКТ no-remembered-state` — its own verdict line, never a raw probe stack trace. Audit the class: grep the entry point for operations above the dispatch that can fail the way the guarded branch expects to survive.
+**Trigger:** adding fault tolerance to one branch of an existing CLI/entry point → trace from process start to the branch before the first run, and move the branch above any unguarded twin of the failure it handles.
+**Not for:** preambles that cannot fail for the guarded reason (pure argument parsing, constant setup) — there the dispatch order buys nothing.
+
 ### EXP-0041 · 2026-08-14 · ❌→✅ · #windows #com #ansi #unicode #shell #encoding #structural-fix
 **Context:** phase 3's `.lnk` author — `WScript.Shell.CreateShortcut` driven from Node through PowerShell one-shots. The owner's shortcut names carry emoji by canon («🚀 Max Perfomance.lnk»), and the selftest round-tripped an emoji filename on purpose before any Desktop write.
 **Tried / did:** handed the final emoji path straight to `CreateShortcut`. PowerShell strings are UTF-16 and spawnSync argv travels via CreateProcessW (also UTF-16), so every layer I could see was Unicode-clean.
