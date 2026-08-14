@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0052 · 2026-08-14 · ❌→✅ · #safety #dry-run #plan-vs-run #drift #pairs #preflight
+**Context:** first act of a new session — the free `--dry-run` that `STATUS.md` and `GPU_TUNING_RAILS.md` S2 both make mandatory BEFORE any live write to the owner's card.
+**Tried / did:** ran it and compared the printed plan against what the code would actually do, instead of accepting the plan as the answer.
+**Result:** ❌→✅ the plan advertised «ступеней 40, глубже всего −250 мВ» while the run would stop at −30 mV: the session-depth bound bought by a machine hang (`bugs/07`) lived inside `searchEdge` and the CLI plan composed its own, older view. The bound was never broken — only INVISIBLE in the one artifact anyone reads before writing. Fixed by extraction into one function two readers share; mutation reddens the three new blocks and leaves the run's blocks green.
+**Lesson:** **a safety bound added to the RUN is not added until the PLAN prints it.** A dry run exists to be the basis of a go/no-go decision, so plan↔run is a truth↔mirror PAIR and drifts exactly like every other pair — silently, in the direction of the side nobody edited. Never satisfy a new bound by adding a second computation to the printer; extract one and let both call it, or the next edit re-opens the gap.   → link: bugs/09 · bugs/07 · EXP-0039
+**Repro:** `npm run engine -- --band 2842 --dry-run` — the line «ГЛУБИНА СЕССИИ» must name a depth, and it must be ≤ «глубже всего» on the line above. Offline: `node automation-engine/engine.mjs --selftest`, block «ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН» compares the plan's promise against the rungs a scripted run actually walked.
+**Trigger:** about to add or change a bound/guard on a risky operation → find every artifact that DESCRIBES that operation before it happens (dry run, plan print, status line) and make it read the bound from the same code, in the same commit. Adding the bound and the print in two commits is how they part.
+**Not for:** printers that deliberately show the UNGOVERNED space as context (a capability report, a hardware range) — there the raw number is the point, and the governed one is what must sit beside it.
+
 ### EXP-0051 · 2026-08-14 · ❌ · #permissions #harness #environment #classifier #owner-time
 **Context:** the owner, five times and increasingly angry, ordered the agent to fix its own permission rules so the harness would stop asking him to approve routine commands.
 **Tried / did:** ran the project's grant script (`Bash(*)`, `PowerShell(*)`, `Edit(**)`… — 5 of 5 already present, 87 allows), then wrote and had him run a second script adding EIGHT specific file-op rules (`mv`, `cp`, `mkdir`, `touch` + PowerShell twins), then attempted to edit `.claude/settings.json` directly.

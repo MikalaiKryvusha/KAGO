@@ -177,6 +177,115 @@ export function pickAscentRungs(fine, {
   return { rungs: picked, refused: false, why: `первая ступень −${picked[0].savedMv} мВ, всего ступеней ${picked.length}` };
 }
 
+/**
+ * THE SESSION'S DEPTH BOUND, COMPOSED ONCE AND READ BY BOTH THE PLAN AND THE RUN.
+ *
+ * This function exists because the two of them had DRIFTED, and the drift was invisible in exactly the
+ * place it mattered. `bugs/07` bought the bound «a session goes at most
+ * `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` past the deepest PASS it inherited» with a hung machine — and it
+ * lived inside `searchEdge`, where only the LIVE run could see it. `--dry-run` printed the ungoverned
+ * ladder («ступеней 40, глубже всего −250 мВ»), so the pre-flight read that S1/S2 make the operator
+ * perform showed a sweep four times deeper than the one that would actually happen. The bound worked;
+ * the ONLY artifact anyone reads before writing to the owner's card did not know about it.
+ *
+ * That is the same defect class as `bugs/02`: a number whose shape the reader has to infer. The cure is
+ * not a second copy of the arithmetic in the CLI — it is ONE computation with two readers (DRY,
+ * `PHILOSOPHY.md`), so a future edit to the bound cannot silently leave the plan behind.
+ *
+ * ORDER IS THE SAFETY PROPERTY, and it is preserved verbatim from the code this replaces: the depth
+ * governor (`pickAscentRungs`) runs FIRST on the WHOLE ladder; the session bounds may only ever REMOVE
+ * rungs it blessed, never add one it never saw (`bugs/03`'s block «ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ
+ * ЗАПИСИ» caught that inversion once already).
+ *
+ * @param {object}  a
+ * @param {Array}   a.fine     the graded ladder, already filtered by the ratchet's limit
+ * @param {Array}   a.history  the ratchet's usable records (post-quarantine); `[]` = no history at all
+ * @param {number}  a.point    the curve point this ladder serves — the ratchet's key (`bugs/06`)
+ * @returns {{chosen:object, ladderRungs:Array, sessionDepth:object}}
+ *
+ * [NOT-TESTED]
+ */
+export function composeAscentLadder({
+  fine = [],
+  history = [],
+  point,
+  stride = 5,
+  sessionMaxDepthMv = config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30,
+  firstStepMaxMv = config.ASCENT_FIRST_STEP_MAX_MV ?? 25,
+  stepMaxMv = config.ASCENT_STEP_MAX_MV ?? 35,
+} = {}) {
+  // THE DEEPEST GROUND ANYONE HAS ACTUALLY PROVEN, in millivolts. An empty store answers 0 — which is
+  // stock, and is the honest answer after `bugs/08` destroyed 74 records: the card is «without history»
+  // again, so this session may walk exactly one coarse step and no further.
+  const knownDeepest = bestPassing(history, point);
+  const knownDepthMv = knownDeepest === null
+    ? 0
+    : (fine.find((r) => r.offsetMhz === knownDeepest)?.savedMv
+       ?? Math.max(0, ...fine.filter((r) => r.offsetMhz <= knownDeepest).map((r) => r.savedMv ?? 0)));
+  const depthCeilingMv = knownDepthMv + sessionMaxDepthMv;
+  const graded = fine.every((r) => Number.isFinite(r.savedMv));
+
+  const chosen = pickAscentRungs(fine, { stride, firstStepMaxMv, stepMaxMv });
+
+  // Then the two session bounds, applied to what the governor already blessed (`bugs/07`):
+  //   1. never deeper than `sessionMaxDepthMv` past the deepest inherited PASS;
+  //   2. beyond that inherited depth the step becomes FINE — the owner's own proposal, so the graded
+  //      oracle can land INSIDE the avalanche (~20 mV wide) instead of striding over it.
+  const withinCeiling = (r) => !graded || r.savedMv <= depthCeilingMv;
+  const coarseAllowed = chosen.rungs.filter(withinCeiling);
+  const frontierFine = graded
+    ? fine.filter((r) => r.savedMv > knownDepthMv && r.savedMv <= depthCeilingMv
+        && !coarseAllowed.some((c) => c.offsetMhz === r.offsetMhz))
+    : [];
+  const ladderRungs = [...coarseAllowed, ...frontierFine].sort((a, b) => a.offsetMhz - b.offsetMhz);
+
+  return {
+    chosen,
+    ladderRungs,
+    sessionDepth: {
+      knownDepthMv,
+      ceilingMv: depthCeilingMv,
+      droppedByCeiling: chosen.rungs.length - coarseAllowed.length,
+      fineRungsAtFrontier: frontierFine.length,
+      // WHAT THIS SESSION WILL ACTUALLY REACH — the number the dry run has to print, because it is the
+      // one an operator compares against «глубже всего» before deciding to start.
+      deepestPlannedMv: ladderRungs.length ? ladderRungs[ladderRungs.length - 1].savedMv : null,
+      rungsPlanned: ladderRungs.length,
+    },
+  };
+}
+
+/**
+ * THE SESSION-DEPTH LINE, worded once so the plan and the run cannot describe the same bound
+ * differently. Read by `--band --dry-run` and `--search --dry-run` alike.
+ *
+ * [NOT-TESTED]
+ */
+export function sessionDepthLine(sd) {
+  if (!sd) return 'ГЛУБИНА СЕССИИ: не вычислена';
+  const known = sd.knownDepthMv > 0
+    ? `доказанная глубина −${sd.knownDepthMv} мВ`
+    : 'истории НЕТ (карта «без истории»), отсчёт от стока';
+  const reach = sd.deepestPlannedMv === null
+    ? 'ни одной ступени не остаётся'
+    : `эта сессия дойдёт до −${sd.deepestPlannedMv} мВ и остановится САМА`;
+  return `ГЛУБИНА СЕССИИ: ${known} · потолок −${sd.ceilingMv} мВ · ${reach}`
+    + ` · ступеней в прогоне ${sd.rungsPlanned} (отброшено потолком ${sd.droppedByCeiling}, точных на фронтире ${sd.fineRungsAtFrontier})`;
+}
+
+/**
+ * THE RATCHET'S USABLE EVIDENCE — the same two quarantine axes the search applies, exported so the
+ * PLAN sees the ratchet the RUN will see. Split out with `composeAscentLadder` and for the same
+ * reason: a plan computing its own history is a second truth that drifts.
+ *
+ * [NOT-TESTED]
+ */
+export function ratchetView({ store = null, card = {}, writeShape = 'raise-and-cap' } = {}) {
+  const byStamp = store ? partitionByStamp(resolveAttempts(readAll(store).records), card) : { current: [], quarantined: [] };
+  const byShape = partitionByWriteShape(byStamp.current, writeShape);
+  return { history: byShape.current, byStamp, byShape };
+}
+
 // =================================================================================================
 // 1. The plan — computed before anything is written, so a dry run shows the real thing
 // =================================================================================================
@@ -294,10 +403,8 @@ export async function searchEdge({
   // only bounds this search if it came from a run that wrote the same thing. Measured live: a crash
   // recorded under the single-point shape (which died at ~3400 MHz, a state the shipped shape cannot
   // reach) was stopping the shipped-shape search six rungs in, at OUR limit rather than the card's.
-  const byStamp = store ? partitionByStamp(resolveAttempts(readAll(store).records), card) : { current: [], quarantined: [] };
   const shapeNow = writeShape ?? (wholeCurve ? 'uniform' : 'point');
-  const byShape = partitionByWriteShape(byStamp.current, shapeNow);
-  const history = byShape.current;
+  const { history, byStamp, byShape } = ratchetView({ store, card, writeShape: shapeNow });
   const ratchet = allowedOffset(history, point, { fineStepMhz: fineMhz });
 
   const out = {
@@ -424,41 +531,15 @@ export async function searchEdge({
   //   2. **A session may go only `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` deeper than the deepest PASS it
   //      inherited.** A hang costs a reboot; this makes it cost at most one bounded excursion, and it
   //      makes the search converge over sessions instead of gambling in one.
-  const knownDeepest = bestPassing(history, point);
-  const knownDepthMv = knownDeepest === null
-    ? 0
-    : (fine.find((r) => r.offsetMhz === knownDeepest)?.savedMv
-       ?? Math.max(0, ...fine.filter((r) => r.offsetMhz <= knownDeepest).map((r) => r.savedMv ?? 0)));
-  const depthCeilingMv = knownDepthMv + (config.SESSION_MAX_DEPTH_BEYOND_KNOWN_MV ?? 30);
-  const graded = fine.every((r) => Number.isFinite(r.savedMv));
-
-  // THE DEPTH GOVERNOR RUNS FIRST, ON THE WHOLE LADDER, EXACTLY AS BEFORE.
-  //
-  // Order is the safety property here, and the first draft of this edit got it wrong: it composed a
-  // ladder and then governed only part of it, which let the frontier rungs bypass `pickAscentRungs`
-  // entirely — the `bugs/03` block «ОТКАЗ СТОРОЖА СЛУЧАЕТСЯ ДО ПЕРВОЙ ЗАПИСИ» caught it, red, before
-  // any of this ran on a card. A region the governor refuses stays refused; the session bounds below
-  // may only ever REMOVE rungs from what it allowed, never add one it did not see.
-  const chosen = pickAscentRungs(fine, { stride });
-
-  // Then the two session bounds, applied to what the governor already blessed (`bugs/07`):
-  //   1. never deeper than `SESSION_MAX_DEPTH_BEYOND_KNOWN_MV` past the deepest inherited PASS;
-  //   2. beyond that inherited depth the step becomes FINE — the owner's own proposal, so the graded
-  //      oracle can land INSIDE the avalanche (~20 mV wide) instead of striding over it.
-  const withinCeiling = (r) => !graded || r.savedMv <= depthCeilingMv;
-  const coarseAllowed = chosen.rungs.filter(withinCeiling);
-  const frontierFine = graded
-    ? fine.filter((r) => r.savedMv > knownDepthMv && r.savedMv <= depthCeilingMv
-        && !coarseAllowed.some((c) => c.offsetMhz === r.offsetMhz))
-    : [];
-  const ladderRungs = [...coarseAllowed, ...frontierFine].sort((a, b) => a.offsetMhz - b.offsetMhz);
+  // THE GOVERNOR AND THE SESSION BOUNDS, composed by the ONE function the dry run also calls
+  // (`composeAscentLadder`). Inlined here until 2026-08-14 22:xx, which is how `--dry-run` came to
+  // print a ladder four times deeper than the one this loop would walk — the plan could not see the
+  // bound that the incident of `bugs/07` bought. One computation, two readers.
+  const composed = composeAscentLadder({ fine, history, point, stride });
+  const chosen = composed.chosen;
+  const ladderRungs = composed.ladderRungs;
   const ladder = ladderRungs.map((r) => r.offsetMhz);
-  out.sessionDepth = {
-    knownDepthMv,
-    ceilingMv: depthCeilingMv,
-    droppedByCeiling: chosen.rungs.length - coarseAllowed.length,
-    fineRungsAtFrontier: frontierFine.length,
-  };
+  out.sessionDepth = composed.sessionDepth;
   out.rungs = fine.map((r) => ({ offsetMhz: r.offsetMhz, mv: r.mv, savedMv: r.savedMv }));
   out.ascentRungs = chosen.rungs.map((r) => ({ offsetMhz: r.offsetMhz, savedMv: r.savedMv }));
   if (chosen.refused) {
@@ -631,6 +712,7 @@ export async function searchEdge({
  *  17. walk past the session depth ceiling            → «ГЛУБИНА СЕССИИ ограничена: дальше известного PASS не более чем на потолок»
  *  18. keep striding coarsely past proven ground      → «ЗА известным PASS шаг становится ТОЧНЫМ»
  *  19. stop writing the mark before the attempt       → «каждая попытка записана НАПЕРЁД»
+ *  20. let the PLAN compose a ladder of its own       → «ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН»
  */
 export function selfTest() {
   const results = [];
@@ -939,6 +1021,20 @@ export function selfTest() {
       ok('и это НЕ отказ, а честная остановка — то, что влезло, пройдено',
         walked.length > 0, true);
 
+      // --- ПЛАН И ПРОГОН СЧИТАЮТ ОДНУ ГЛУБИНУ (`bugs/09`). Граница выше работала, а `--dry-run`
+      // печатал лестницу БЕЗ неё: «ступеней 40, глубже всего −250 мВ» при потолке сессии в 30 мВ.
+      // Сухой прогон — единственный артефакт, который читают ПЕРЕД записью в карту владельца (S1, S2),
+      // и он показывал прогон вчетверо глубже настоящего. Пара «план ↔ прогон» проверяется здесь
+      // ЧИСЛОМ, а не чтением двух мест: сравнивается то, что план обещает, с тем, что прогон прошёл.
+      const planned = composeAscentLadder({ fine: gradedRungs, history: [], point: 99 });
+      ok('ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН — иначе сухой прогон врёт перед записью в карту',
+        planned.sessionDepth.deepestPlannedMv, deepestWalkedMv);
+      ok('и план обещает столько же ступеней, сколько прогон сделал',
+        planned.sessionDepth.rungsPlanned, walked.length);
+      ok('строка плана НАЗЫВАЕТ эту глубину вслух и говорит, что истории нет',
+        sessionDepthLine(planned.sessionDepth).includes(`−${deepestWalkedMv} мВ`)
+        && sessionDepthLine(planned.sessionDepth).includes('истории НЕТ'), true);
+
       // Рядом — вторая половина правила: ЗА доказанной глубиной шаг обязан стать точным, иначе
       // градуированный оракул перешагивает лавину (~20 мВ) вместо того, чтобы в неё попасть.
       const storeDeep = openStore({ dir: mkdtempSync(join(tmpdir(), 'kago-vmin-deep-')) });
@@ -1068,7 +1164,22 @@ async function mainBand(argv, arg) {
     plan.push({ pin, serving, rungs, shapeChoice });
     // THE FIRST STEP'S DEPTH IS PRINTED FIRST, because it is the number that decides whether this
     // rung is safe to start at all — and it is the number nobody could see on 2026-08-11 (bugs/03).
-    const chosen = rungs.length ? pickAscentRungs(rungs, { stride: 5 }) : { rungs: [], refused: false, why: 'нет ступеней' };
+    //
+    // AND THE SESSION'S DEPTH BOUND ON THE SAME PLAN, through the same function the run uses. The
+    // ratchet is read with the SHAPE this rung will be written in and the POINT that serves it — both
+    // are quarantine keys (`bugs/06`), so a plan that guessed either would show a bound the run does
+    // not have.
+    const planHistory = serving ? ratchetView({ store, card, writeShape: shapeChoice.shape }).history : [];
+    const planRatchet = serving ? allowedOffset(planHistory, serving.pointIndex, { fineStepMhz: ASCENT_FINE_MHZ }) : null;
+    const composed = rungs.length
+      ? composeAscentLadder({
+        fine: rungs.filter((r) => r.offsetMhz <= planRatchet.limitMhz),
+        history: planHistory,
+        point: serving.pointIndex,
+        stride: 5,
+      })
+      : { chosen: { rungs: [], refused: false, why: 'нет ступеней' }, ladderRungs: [], sessionDepth: null };
+    const chosen = composed.chosen;
     console.log(`  ${String(pin).padStart(5)} МГц → точка ${serving ? serving.pointIndex : '—'}`
       + `${serving ? ` (${serving.mv} мВ)` : ' — вне кривой, ступень пропускается'}`
       + `${serving ? ` · ступеней ${rungs.length}, глубже всего −${rungs.length ? rungs[rungs.length - 1].savedMv : 0} мВ` : ''}`
@@ -1076,6 +1187,7 @@ async function mainBand(argv, arg) {
     // THE SHAPE AND ITS HOLDER, on their own line — a number whose shape a reader has to infer is the
     // ambiguity `bugs/02` was made of.
     if (serving) {
+      console.log(`          ${sessionDepthLine(composed.sessionDepth)}`);
       console.log(`          ФОРМА: ${shapeChoice.shape === 'raise-and-cap' ? 'ОТГРУЖАЕМАЯ (подъём с потолком)' : 'равномерный подъём'}`
         + ` · потолок держит ${shapeChoice.heldBy}`
         + `${shapeChoice.shape === 'raise-and-cap' ? '' : ` · утечка потолка ${vec.capLeakMhz} МГц, пол железа ${vec.lowestEnforceableCapMhz} МГц`}`);
@@ -1234,7 +1346,10 @@ async function main(argv) {
     return 1;
   }
 
-  const history = partitionByStamp(readAll(store).records, card).current;
+  // THE RATCHET AS THE RUN WILL SEE IT — through `ratchetView`, i.e. attempts RESOLVED and both
+  // quarantine axes applied (`bugs/06`). Until 2026-08-14 22:xx this line partitioned by stamp only,
+  // so the plan could print a limit the search does not use.
+  const history = ratchetView({ store, card, writeShape: shapeChoice.shape }).history;
   const summary = summarizePoint(history, serving.pointIndex, { fineStepMhz: ASCENT_FINE_MHZ });
 
   console.log('ПОИСК КРАЯ — то, чего этот проект ещё ни разу не делал');
@@ -1255,12 +1370,19 @@ async function main(argv) {
   console.log(`  ХРАПОВИК:  ${summary.ratchet.limitMhz === Infinity ? 'ограничений нет — точка ни разу не сбоила' : `≤ ${summary.ratchet.limitMhz} МГц (самый низкий отказ ${summary.ratchet.lowestFailure})`}`);
   // THE LADDER IN VOLTS, WITH THE FIRST STEP'S DEPTH PRINTED FIRST — the number whose absence cost the
   // owner a night (`bugs/03`). A refusal by the depth governor is printed here, before anything runs.
-  const governed = rungs.length
-    ? pickAscentRungs(rungs.filter((r) => r.offsetMhz <= summary.ratchet.limitMhz), { stride: 5 })
-    : { rungs: [], refused: false, why: 'лестница по напряжению не построена' };
+  const composed = rungs.length
+    ? composeAscentLadder({
+      fine: rungs.filter((r) => r.offsetMhz <= summary.ratchet.limitMhz),
+      history,
+      point: serving.pointIndex,
+      stride: 5,
+    })
+    : { chosen: { rungs: [], refused: false, why: 'лестница по напряжению не построена' }, ladderRungs: [], sessionDepth: null };
+  const governed = composed.chosen;
   console.log(`  ЛЕСТНИЦА:  ступеней по напряжению ${rungs.length}, глубже всего −${rungs.length ? rungs[rungs.length - 1].savedMv : 0} мВ`);
   console.log(`             ПЕРВЫЙ ШАГ −${governed.rungs[0]?.savedMv ?? '—'} мВ · ступеней в восхождении ${governed.rungs.length}`);
   if (governed.refused) console.log(`             ${governed.why}`);
+  console.log(`  ${sessionDepthLine(composed.sessionDepth)}`);
   console.log(`  КАРТА:     драйвер ${card.driver} · VBIOS ${card.vbios}`);
   console.log('');
 
