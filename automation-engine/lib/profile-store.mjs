@@ -63,6 +63,32 @@ export const MODE_IDS = Object.freeze(['max-performance', 'optimised', 'silent-c
 const WORKING_MODES = Object.freeze(['max-performance', 'optimised', 'silent-cold']);
 
 /**
+ * THE KIND OF STATE A PROFILE DESCRIBES — the distinction `bugs/05` was born from.
+ *
+ * This project writes TWO kinds of non-factory state to the card, and only one of them is what
+ * acceptance is about:
+ *
+ *   • a MODE — shipped, clicked from the Desktop, remembered as the boot state, and therefore
+ *     forbidden to reach the card until phase 6 says it is proven (the qualification gate);
+ *   • a MEASUREMENT — a clock pin an instrument holds for seconds so the region under test is the
+ *     region actually loaded, released in a `finally`, never shipped, never remembered.
+ *
+ * The gate was keyed on «is this factory?», which sweeps the second kind in with the first: a pin
+ * sets a clock, so it is not factory, so it was asked to be «qualified» — a word that has no meaning
+ * for it, since no acceptance will ever be run on a state nobody ships. The result was that the pin
+ * could not be applied at all, and with it the whole band sweep (`bugs/05`).
+ *
+ * **The module already relied on this distinction without naming it** — `profile-manager`'s CLI
+ * writes the remembered boot state itself, with the comment *«measurement tools drive the library and
+ * must not move the boot state»*. This constant is that sentence, moved into the format where the
+ * validator can see it.
+ *
+ * Absent means MODE/shipped: the default is the strict side, so a profile that forgets to declare
+ * itself meets the gate rather than slipping past it.
+ */
+const PROFILE_KINDS = Object.freeze(['measurement']);
+
+/**
  * A machine receipt is a full LOCAL ISO 8601 moment WITH its offset (AGENT_GUIDE.md → «A stamp
  * carries the date and the time»). `Z` is deliberately refused: EXP-0012 caught a baseline stamped
  * `2026-08-09T21:52Z` while the owner's clock read `2026-08-10 00:52` — a receipt dated the previous
@@ -106,8 +132,15 @@ export function isFactoryProfile(profile) {
  * Factory-by-construction — all settings null AND not a working mode — must NOT carry the field at
  * all: same reasoning as the stamp exemption above, a reset that can be marked unqualified is a
  * reset that can stop working, and that is the one path that always has to work.
+ *
+ * **A MEASUREMENT is exempt for a third reason, and it is not leniency** (`bugs/05`, 2026-08-14):
+ * qualification is the record of an ACCEPTANCE, and nothing will ever be accepted about a state that
+ * is held for seconds and released in a `finally`. The gate's subject is narrowed here, never
+ * widened — an unqualified MODE is refused exactly as before, and the suite carries a block that
+ * fails if this edit ever turned into the other thing.
  */
 export function requiresQualification(profile) {
+  if (profile?.kind === 'measurement') return false;
   return !isFactoryProfile(profile) || WORKING_MODES.includes(profile?.mode);
 }
 
@@ -278,6 +311,25 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
     }
   }
 
+  // --- kind (bugs/05) ---------------------------------------------------------------------------
+  //
+  // Declared BEFORE the mode and qualification checks, because it is what decides whether they apply.
+  // Three refusals, and each one closes a way this exemption could be abused into a hole:
+  //   · an unknown kind is not a free pass — a typo must not silently become «shipped»;
+  //   · a measurement that also claims a MODE is a contradiction: a mode is the thing that ships;
+  //   · a measurement carrying `qualified` is forging an acceptance that никто не проводил, which is
+  //     the false-`[TESTED]` class (the `else` branch below already refuses it — this is why the
+  //     kind lands in that branch rather than getting a bypass of its own).
+  if (profile.kind !== undefined) {
+    if (!PROFILE_KINDS.includes(profile.kind)) {
+      out.push(refuse('kind', `неизвестный вид ${JSON.stringify(profile.kind)}; известны: ${PROFILE_KINDS.join(', ')}. `
+        + 'Отсутствие поля означает ОТГРУЖАЕМЫЙ профиль — умолчание строгое'));
+    } else if (profile.mode !== undefined) {
+      out.push(refuse('kind', 'приборный профиль не может быть РЕЖИМОМ: режим — это то, что отгружается, '
+        + 'кликается ярлыком и запоминается для автозагрузки, а прибор держится секунды и отпускается в finally'));
+    }
+  }
+
   // --- mode & qualification (phase 3 §4.2) ------------------------------------------------------
   if (profile.mode !== undefined) {
     if (!MODE_IDS.includes(profile.mode)) {
@@ -301,11 +353,21 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
   } else {
     // Factory-by-construction: the field is FORBIDDEN, not optional — a reset that can be marked
     // unqualified is a reset that can stop working (same class as the stamp exemption below).
+    // A MEASUREMENT lands in this branch too, and the field is forbidden there for its own reason:
+    // `qualified: true` on a state nobody will ever accept is a forged acceptance. The message names
+    // WHICH of the two exemptions is speaking — a refusal that explains the wrong case teaches the
+    // reader something false (EXP-0012).
+    const measurement = profile.kind === 'measurement';
     if (profile.qualified !== undefined) {
-      out.push(refuse('qualified', 'заводской профиль квалифицирован ПО ПОСТРОЕНИЮ и поля не несёт — иначе сброс может перестать работать'));
+      out.push(refuse('qualified', measurement
+        ? 'приборный профиль поля не несёт: квалификация — это запись о ПРИЁМКЕ, а состояние, которое держат '
+          + 'секунды и отпускают в finally, приёмку не проходит никогда. qualified: true здесь — подделка приёмки'
+        : 'заводской профиль квалифицирован ПО ПОСТРОЕНИЮ и поля не несёт — иначе сброс может перестать работать'));
     }
     if (profile.draft !== undefined) {
-      out.push(refuse('draft', 'заводскому профилю нечего держать в черновике'));
+      out.push(refuse('draft', measurement
+        ? 'приборному профилю нечего держать в черновике — он ничего не отгружает'
+        : 'заводскому профилю нечего держать в черновике'));
     }
   }
 
@@ -589,6 +651,53 @@ function cmdSelftest() {
       what: 'профиль задаёт состояние, а qualified не несёт -> отказ',
       profile: (() => { const p = measuredFixture(); delete p.qualified; return p; })(),
       expect: ['qualified'],
+    },
+    // --- ВИД ПРОФИЛЯ (bugs/05). Гейт квалификации СУЖАЕТ свой предмет, а не ослабевает: первый блок
+    // ниже — это то, ради чего вид заведён, а второй — доказательство, что режим по-прежнему ловится.
+    {
+      what: 'ПРИБОРНЫЙ профиль (закрепление частоты) без qualified -> ПРИНЯТ: приёмка не про него',
+      profile: (() => {
+        const p = measuredFixture(); delete p.qualified; delete p.mode;
+        p.kind = 'measurement'; p.name = 'candidate-2400'; p.title = 'Кандидат 2400 МГц';
+        return p;
+      })(),
+      expect: [],
+    },
+    {
+      what: 'а РАБОЧИЙ РЕЖИМ без qualified по-прежнему ОТКАЗ — гейт сузился, а не ослаб',
+      profile: (() => {
+        const p = measuredFixture(); delete p.qualified;
+        p.name = 'optimised'; p.title = '⚖️ Optimised'; p.mode = 'optimised';
+        return p;
+      })(),
+      expect: ['qualified'],
+    },
+    {
+      what: 'приборный профиль с qualified: true -> отказ (подделка приёмки, которой не было)',
+      profile: (() => {
+        const p = measuredFixture(); delete p.mode;
+        p.kind = 'measurement'; p.qualified = true; p.name = 'candidate-2400'; p.title = 'Кандидат 2400 МГц';
+        return p;
+      })(),
+      expect: ['qualified'],
+    },
+    {
+      what: 'приборный профиль, объявленный ещё и РЕЖИМОМ -> отказ (режим отгружается, прибор нет)',
+      profile: (() => {
+        const p = measuredFixture(); delete p.qualified;
+        p.kind = 'measurement'; p.mode = 'optimised'; p.name = 'optimised'; p.title = '⚖️ Optimised';
+        return p;
+      })(),
+      expect: ['kind'],
+    },
+    {
+      what: 'неизвестный вид (опечатка) -> отказ, а не тихий пропуск в отгружаемые',
+      profile: (() => {
+        const p = measuredFixture(); delete p.qualified; delete p.mode;
+        p.kind = 'mesurement'; p.name = 'candidate-2400'; p.title = 'Кандидат 2400 МГц';
+        return p;
+      })(),
+      expect: ['kind', 'qualified'],
     },
     {
       what: 'рабочий режим с обеими настройками null (черновик кривой) -> qualified всё равно обязателен',

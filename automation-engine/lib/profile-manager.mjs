@@ -779,6 +779,43 @@ async function cmdSelftest() {
     }
   });
 
+  // `bugs/05` — the gate keyed on «is this factory?» swept in the MEASUREMENT pin, which sets a clock
+  // and is therefore not factory, and the whole band sweep died on its first rung. These two blocks
+  // are the pair that has to hold FOREVER: the pin goes through, the unqualified MODE does not. One
+  // of them alone would let a later edit widen the gate instead of narrowing its subject.
+  block('ПРИБОРНЫЙ пин (kind: measurement) ПРОХОДИТ гейт и реально пишется (bugs/05)', async () => {
+    const b = fakeBackend();
+    const ld = await import('./ladder-descent.mjs');
+    // 2130 is ON this fixture card's ladder — the first draft used 2400 and the block went red for a
+    // DIFFERENT reason (the ladder check), which is exactly what a block asserting its own subject
+    // should do rather than pass by accident.
+    const p = ld.candidateProfile(2130, { driver: SELFTEST_CARD.driver, vbios: SELFTEST_CARD.vbios });
+    try {
+      const r = await apply(b, p, { card: SELFTEST_CARD, timing: FAST, verifyLock: 'deferred' });
+      if (r.ok === false) return `прибор отвергнут: ${r.why}`;
+      if (!b.writes.length) return 'гейт пропустил, но записи не случилось — пин не встал бы и на карте';
+      return null;
+    } catch (e) {
+      return `прибор не прошёл гейт: ${e.message}`;
+    }
+  });
+
+  block('а РЕЖИМ-черновик, объявивший себя прибором, гейт НЕ обманывает — формат его отвергает', async () => {
+    const b = fakeBackend();
+    const p = silentColdFixture();
+    p.mode = 'silent-cold';
+    p.qualified = false;
+    p.kind = 'measurement';                       // ровно та подмена, которой боимся
+    try {
+      await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
+      return 'режим проехал под видом прибора — гейт расширился вместо того, чтобы сузиться';
+    } catch (e) {
+      if (b.writes.length !== 0) return `до отказа успели записать: ${b.writes.join(', ')}`;
+      if (!/kind/u.test(e.message)) return `отказ не назвал поле вида: ${e.message}`;
+      return null;
+    }
+  });
+
   block('режим-черновик с обеими настройками null -> НЕ применяется как тихий сброс, а отказывает', async () => {
     const b = fakeBackend();
     const p = {

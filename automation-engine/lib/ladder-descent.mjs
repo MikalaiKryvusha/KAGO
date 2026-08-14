@@ -98,6 +98,11 @@ export function candidateProfile(mhz, card) {
   return {
     name: `candidate-${mhz}`,
     title: `Кандидат ${mhz} МГц`,
+    // THE KIND, and without it this profile cannot be applied at all (`bugs/05`). A pin is held for
+    // seconds, released in a `finally`, never shipped and never remembered as boot state — so the
+    // qualification gate, whose subject is what the owner clicks, does not apply to it. Declaring
+    // the kind is what says that in the format instead of in a comment somewhere else.
+    kind: 'measurement',
     settings: {
       powerLimitWatts: null,
       graphicsClockLockMhz: { min: mhz, max: mhz },
