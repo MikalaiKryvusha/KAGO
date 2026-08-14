@@ -42,4 +42,14 @@
 
   <rect x="34" y="34" width="188" height="188" rx="30" fill="url(#body)"/>
   <rect x="34" y="34" width="188" height="188" rx="30" fill="none" stroke="#000000" stroke-opacity="0.4" stroke-width="2"/>
+
+  <!-- the glint: a barely-there gray diagonal between the snowflake (top-left) and the fire
+       (bottom-right) — fades in from nothing and out into nothing, like light across the chip
+       (owner's word). Gradient runs ALONG the stroke (bbox corners of the diagonal path). -->
+  <linearGradient id="glint" gradientUnits="userSpaceOnUse" x1="60" y1="196" x2="196" y2="60">
+    <stop offset="0"    stop-color="#cfd6e4" stop-opacity="0"/>
+    <stop offset="0.5"  stop-color="#cfd6e4" stop-opacity="0.3"/>
+    <stop offset="1"    stop-color="#cfd6e4" stop-opacity="0"/>
+  </linearGradient>
+  <path d="M60 196 L196 60" stroke="url(#glint)" stroke-width="5" stroke-linecap="round" fill="none"/>
 </svg>
