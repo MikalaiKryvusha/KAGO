@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0059 · 2026-08-15 · ❌→✅ · #measurement #load #acceptance #games #plateau #confounding
+**Context:** the owner played Palworld at stock while telemetry sampled, to finally get the thermal PLATEAU that the previous night's mode-vs-stock pair lacked (88 s and 155 s runs, equilibrium arrives at minute 3–5 — STATUS fact 35).
+**Tried / did:** sampled 329 s, found a 152 s contiguous loaded segment — twice the previous longest — and looked for equilibrium inside it.
+**Result:** ❌→✅ no plateau, and the reason was not duration. Across the segment's thirds the card went 272.8 → 260.7 → **253.4 W** and 72 → 69 → **67 °C** at a steady 97–98 % utilization. **A card settling gets HOTTER; this one was cooling** — so what changed was the SCENE, not the thermal state. Temperature spread in the final 60 s window was 63…71 °C against the detector's 3 °C tolerance. ✅ what the run did prove: two independent stock sessions agree — 264.1 vs 269.5 W, 2782 vs 2790 MHz — so the instrument is sound and the LOAD is what wanders.
+**Lesson:** **free gameplay is a WITNESS, never a METER.** It answers «are there artifacts, is it quiet, does it feel right» — questions only a human can answer — and it cannot answer «how many watts / frames does this profile cost», because the independent variable (the scene) changes between runs and is not under anyone's control. The tell that separates the two: utilization stays pinned while POWER drifts by 8 % — the card is working flat out on different work. A criterion phrased in frames therefore needs a REPEATABLE load (here: the Q2RTX timedemo, whose not-capped gate is already proven), and a comparison of two free-play sessions is confounded by construction no matter how long each one runs.   → link: plans/11 §4.5 · STATUS fact 35 · `runs/graphics/palworld-stock-plateau.jsonl`
+**Repro:** `npm run thermal -- --analyze palworld` → all three Palworld runs report НЕТ. The discriminator is in the thirds: if median power falls while utilization holds, the load changed and the comparison is void.
+**Trigger:** about to compare two profiles on a load a human drives (a game session, a manual workflow, a browsing run) → stop and ask what guarantees the two runs did the same WORK. No answer → the run is a witness, and the number must come from a scripted load.
+**Not for:** the witness role itself — the owner's «багов и артефактов не было, карточка работала тихо» is exactly what a real session is for, and no timedemo can replace it.
+
 ### EXP-0058 · 2026-08-15 · ❌→✅ · #testing #fixtures #mutation #neighbouring-rule #false-green
 **Context:** seven hostile fixtures for a new per-point vector in the profile format, each asserting the FIELD the validator must point at — the convention this suite already used for thirty blocks.
 **Tried / did:** ran the mutation harness. Six fixtures reddened on cue. The seventh — «не массив вовсе», feeding `{ '0': 45 }` — stayed GREEN when its own `Array.isArray` guard was deleted.
