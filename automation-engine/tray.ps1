@@ -39,15 +39,17 @@ Add-Type -AssemblyName System.Drawing
 # Color + glyph is the icon; the tooltip carries the owner's own title from the state file.
 # ================================================================================================
 
+# The owner's verdicts (interview 005, closed 2026-08-14 12:0x): the set is Fluent Emoji 3D, the
+# tray wears the SAME icons as the desktop for all four modes, and the ⏹ face is the counterclockwise
+# arrows («возврат», not a square). The drawn color+glyph stays as the FALLBACK when an asset is
+# missing — the tray degrades, it never dies over an icon file. The three service faces (test /
+# unknown / problem) stay drawn: the icon set has no such concepts, and inventing them is worse.
+$IconsDir = Join-Path $RepoRoot 'assets\icons\fluent-3d'
 $FACES = @{
-  'max-performance' = @{ color = 'OrangeRed';    glyph = 'M' }
-  'optimised'       = @{ color = 'SeaGreen';     glyph = 'O' }
-  'silent-cold'     = @{ color = 'DeepSkyBlue';  glyph = 'C' }
-  # The owner's verdict (interview 005, 2026-08-14): the ⏹ face is the Fluent 3D counterclockwise
-  # arrows .ico — «возврат», not a square. The drawn glyph below is the FALLBACK when the asset
-  # is missing: the tray degrades, it never dies over an icon file.
-  'factory'         = @{ color = 'Gray';         glyph = 'STOP'
-                         ico = (Join-Path $RepoRoot 'assets\icons\fluent-3d\stock-default.ico') }
+  'max-performance' = @{ color = 'OrangeRed';    glyph = 'M'; ico = (Join-Path $IconsDir 'max-performance.ico') }
+  'optimised'       = @{ color = 'SeaGreen';     glyph = 'O'; ico = (Join-Path $IconsDir 'optimised.ico') }
+  'silent-cold'     = @{ color = 'DeepSkyBlue';  glyph = 'C'; ico = (Join-Path $IconsDir 'silent-cold.ico') }
+  'factory'         = @{ color = 'Gray';         glyph = 'STOP'; ico = (Join-Path $IconsDir 'stock-default.ico') }
   'test-pl250'      = @{ color = 'MediumPurple'; glyph = 'T' }
   'unknown'         = @{ color = 'DimGray';      glyph = '?' }      # a profile id this tray has no face for
   'problem'         = @{ color = 'Goldenrod';    glyph = '!' }      # the state file exists and cannot be trusted
@@ -217,10 +219,13 @@ function Invoke-SelfTest {
     $ok = ($readBack -eq "$PID" -and -not (Test-Path -LiteralPath $pidPath))
     $blocks += @{ name = 'pid-файл: записан и удалён'; ok = $ok }
 
-    # 10 — the owner's ⏹ verdict: the factory face loads from the SHIPPED .ico, not the drawn square
-    $ico = Get-IcoIcon $FACES['factory'].ico
-    $ok = ($ico -is [System.Drawing.Icon])
-    $blocks += @{ name = 'лицо ⏹ грузится из поставленного .ico (вердикт 005)'; ok = $ok }
+    # 10 — the owner's verdict: ALL FOUR mode faces load from the SHIPPED .ico set (tray = desktop)
+    $loaded = 0
+    foreach ($k in @('max-performance', 'optimised', 'silent-cold', 'factory')) {
+      if ((Get-IcoIcon $FACES[$k].ico) -is [System.Drawing.Icon]) { $loaded++ }
+    }
+    $ok = ($loaded -eq 4)
+    $blocks += @{ name = "лица четырёх режимов грузятся из поставленных .ico ($loaded из 4, вердикт 005)"; ok = $ok }
 
     # 11 — a missing .ico degrades to the drawn face instead of killing the tray
     $fallback = Resolve-FaceIcon @{ color = 'Gray'; glyph = 'STOP'; ico = (Join-Path $sandbox 'no-such.ico') }
