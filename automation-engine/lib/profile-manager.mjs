@@ -181,6 +181,8 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       await open();
       const curve = mod.readVfCurve(nv, handle);
       if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
+      // `capMhz: null` reaches `buildRaiseAndCapVector` as `null`, which is its own documented way of
+      // saying «cap at the curve's top», i.e. a UNIFORM raise with nothing pushed down.
       const vec = mod.buildRaiseAndCapVector(curve.points, deltaMhz, { capMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE HOLDER CHECK, HERE TOO — the format already refuses a cap below the curve's floor, and this
@@ -1457,7 +1459,11 @@ async function main(argv) {
     }
     if (needsCurve) {
       const c = profile.settings.curveRaiseAndCapMhz;
-      console.log(`    кривая V/F: подъём +${c.deltaMhz} МГц, потолок ${c.capMhz} МГц (пишется через NVAPI)`);
+      console.log(`    кривая V/F: подъём +${c.deltaMhz} МГц, ${c.capMhz === null ? 'ПОТОЛКА НЕТ' : `потолок ${c.capMhz} МГц`} (пишется через NVAPI)`);
+      if (c.capMhz === null) {
+        console.log('    ⚠️  БЕЗ ПОТОЛКА карта уйдёт на частоты ВЫШЕ измеренных: андервольт проверялся');
+        console.log('        на точке, обслуживавшей потолок, а выше её обслуживают другие точки.');
+      }
     }
     console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (то же, что третий ярлык владельца).');
 

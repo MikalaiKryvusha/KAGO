@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0056 · 2026-08-15 · ❌ · #scope #instrument #product #owner #direction #week-lost
+**Context:** phase 5's search. To measure a safe voltage you must PIN the clock, because only then does the load exercise the curve point you are measuring. That pin was built, proved, and made safe.
+**Tried / did:** then shipped the pin's OUTPUT as the product — the frequency ceiling migrated from «the instrument that holds the region under test» into the DEFINITION of the owner's modes, and a week of work went into finding one safe voltage at one ceiling.
+**Result:** ❌ the owner, after a week of saying it: *«движок должен ТЮНИТЬ ВСЕ ТОЧКИ КРИВОЙ»*, *«карта сама туда сюда по ней гуляет, а ты дрочишь целую неделю одну точку»*. He was right, and the project's own canon agreed with him the whole time — `GOAL.md` carries his convergence loop (whole curve tested, failing point ratcheted up, never lowered) and `STATUS.md` carries the conclusion «профиль обязан быть ВЕКТОРОМ». The agent read both and built a scalar anyway.
+**Lesson:** **an instrument's constraint is not the product's shape, and the moment it starts appearing in the product's DEFINITION you have stopped building the product.** The pin exists so a measurement is legitimate; the artifact the owner runs has the card roaming the whole curve freely. The check that catches this: for every constraint in the shipped artifact, ask «is this here because the USER needs it, or because my measurement needed it?» — a constraint that came from the instrument has to earn its place in the product separately, and usually cannot.   → link: plans/05 §4.5 · plans/11 · GOAL.md → Четыре режима
+**Repro:** read the shipped artifact's fields aloud and name the origin of each. `optimised.json` carried `capMhz: 2842` — origin: the clock the SEARCH pinned. Nothing in the owner's words required a ceiling there; his own text says «возможно, максимальную частоту ограничить — не уверен, нужно тестировать».
+**Trigger:** about to put a measurement parameter (a pin, a fixed seed, a frozen input, a disabled feature) into a shipped artifact or a product definition → stop and find who needs it. If the answer is «my measurement», it does not ship until measured to be worth shipping on its own.
+**Not for:** parameters the product genuinely has (a power limit the owner asked for, a documented user setting) — those come from the requirement, not from the harness.
+
 ### EXP-0055 · 2026-08-15 · ❌→✅ · #guards #tautology #mutation #constants #testing
 **Context:** guarding a new safety limit the owner had just named in chat — «ниже 900 не спускаться быстро» — implemented as `config.FAST_DESCENT_FLOOR_MV = 900`.
 **Tried / did:** wrote the block as `ok('не ниже пола владельца', deepestWalked >= config.FAST_DESCENT_FLOOR_MV, true)` — reading the constant, which felt DRY and correct.

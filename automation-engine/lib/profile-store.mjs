@@ -337,12 +337,24 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
           bad.push(k);
         }
       }
-      for (const k of ['deltaMhz', 'capMhz']) {
-        if (!Number.isInteger(curve[k])) {
-          out.push(refuse(`settings.curveRaiseAndCapMhz.${k}`, `ожидалось целое число МГц, получено ${JSON.stringify(curve[k])}`));
-          bad.push(k);
-        }
+      if (!Number.isInteger(curve.deltaMhz)) {
+        out.push(refuse('settings.curveRaiseAndCapMhz.deltaMhz', `ожидалось целое число МГц, получено ${JSON.stringify(curve.deltaMhz)}`));
+        bad.push('deltaMhz');
       }
+      // `capMhz: null` — ПОТОЛКА НЕТ ВОВСЕ: равномерный подъём всей кривой, весь выигрыш уходит в
+      // частоту. Владелец, 2026-08-15: «давай в нашем оптимайзд уберём потолок частоты». Записано
+      // явным null, а не верхом лестницы: «потолок на верху кривой — не потолок» (plans/05 §4.1,
+      // измерено 2026-08-10), и профиль не должен изображать ограничение, которого не ставит.
+      //
+      // ⚠️ ЧТО ЭТО СТОИТ, названо здесь, а не в чате: измерения ведутся ПОД потолком — точка,
+      // обслуживающая потолок, и есть та, которую грузит нагрузка. Без потолка карта уходит на
+      // частоты выше, их обслуживают ДРУГИЕ точки, и эти рабочие точки не проверялись. Такой профиль
+      // требует собственного приёмочного прогона; чужие улики на него не переносятся.
+      if (curve.capMhz !== null && !Number.isInteger(curve.capMhz)) {
+        out.push(refuse('settings.curveRaiseAndCapMhz.capMhz', `ожидалось целое число МГц или null (потолка нет), получено ${JSON.stringify(curve.capMhz)}`));
+        bad.push('capMhz');
+      }
+      if (curve.capMhz === null) bad.push('capMhz');   // нечего сверять с лестницей и полом
       if (!bad.includes('deltaMhz')) {
         const lo = CLOCK_OFFSET_MIN_MHZ ?? -1000;
         const hi = CLOCK_OFFSET_MAX_MHZ ?? 1000;
@@ -537,7 +549,9 @@ function renderSettings(s) {
   // hidden in `draft`: a listing that shows the power limit and stays silent about a 592 MHz curve
   // raise describes a different profile than the one on disk.
   const c = s.curveRaiseAndCapMhz;
-  lines.push(`    кривая V/F         ${c === null || c === undefined ? 'заводская (все смещения 0)' : `подъём +${c.deltaMhz} МГц, потолок ${c.capMhz} МГц`}`);
+  lines.push(`    кривая V/F         ${c === null || c === undefined
+    ? 'заводская (все смещения 0)'
+    : `подъём +${c.deltaMhz} МГц, ${c.capMhz === null ? 'ПОТОЛКА НЕТ — выигрыш уходит в частоту' : `потолок ${c.capMhz} МГц`}`}`);
   return lines.join('\n');
 }
 
@@ -630,6 +644,11 @@ function cmdSelftest() {
     {
       what: 'КРИВАЯ: измеренный подъём с потолком на лестнице -> принят',
       profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 592, capMhz: 2130 }; return p; })(),
+      expect: [],
+    },
+    {
+      what: 'КРИВАЯ: потолка НЕТ (capMhz null) -> принят, равномерный подъём',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRaiseAndCapMhz = { deltaMhz: 592, capMhz: null }; return p; })(),
       expect: [],
     },
     {
