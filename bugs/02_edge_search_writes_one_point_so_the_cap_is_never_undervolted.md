@@ -105,7 +105,7 @@ one the card was actually carrying. A conversion is only honest when its input i
 **Not applied tonight, on purpose:** the correction is a design decision inside §4.4/§4.5, not a
 one-line patch, and it is the kind of choice this project has already paid for making at speed.
 
-1. ✅ **DONE 2026-08-14 18:0x — the search writes the PROFILE'S OWN SHAPE, and zero GPU writes were
+1. ✅ **DONE 2026-08-14 18:15 — the search writes the PROFILE'S OWN SHAPE, and zero GPU writes were
    made to get there.** `vf-step.runStep` gained `writeShape: 'point' | 'uniform' | 'raise-and-cap'`;
    `engine.searchEdge` carries it to every rung; both CLI paths (`--search` and `--band`) now request
    it. `null` keeps the legacy mapping from `allPoints`, so no existing caller changed behaviour
