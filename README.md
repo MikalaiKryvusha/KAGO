@@ -40,8 +40,8 @@
 4. Four modes ship — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold, ⏹ Stock Default — each with
    its own definition of optimal. Each is a desktop shortcut, and a tray icon shows which one is
    live.
-5. **Factory state is the default.** Profiles live in the GPU's volatile memory. Kill the tray icon,
-   crash the machine, or simply reboot — the card comes back stock, and you do nothing.
+5. **Factory state is the default.** Profiles live in the GPU's volatile memory. Crash the machine
+   or simply reboot — the card comes back stock, and you do nothing.
 
 ### 1.1. Why this exists as a project rather than a forum post
 
@@ -60,7 +60,8 @@ Three phases of six are closed, and the card has been measured. The research bas
 **the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
 back on command. **The owner-facing shell is on the desktop too:** four shortcuts apply through
 pre-registered elevated tasks, the last verified apply is remembered and re-applied at logon through
-the same gates, and the three working modes refuse honestly until phase 6 qualifies their numbers —
+the same gates, a passive tray icon shows the live mode (kill it — nothing happens to the card),
+and the three working modes refuse honestly until phase 6 qualifies their numbers —
 an unproven undervolt cannot be applied by a double-click. The search engine exists and judges a
 candidate by three different load shapes at once, taking the worst verdict — but it has not yet
 measured this card's edge, and it refuses to report one until it can prove the write it made
@@ -179,9 +180,10 @@ carry are measured on this die, and they are reported next to the meter's own ru
 because "no loss" measured with a blunt instrument is not a finding.
 
 The **fourth shortcut resets the card to factory settings**, and all four write the remembered
-state that is re-applied at logon — whichever you clicked last is what you come back to. The tray
-icon — the one piece of the shell still being built — will show which mode is live and nothing
-else: no menu, no buttons.
+state that is re-applied at logon — whichever you clicked last is what you come back to. The
+passive tray icon shows which mode is live and nothing else — no menu, no buttons, and killing it
+changes nothing on the card. The shortcuts and the tray wear one icon set, picked by the owner
+from a rendered comparison: Microsoft's Fluent Emoji 3D (MIT), shipped in `assets/icons/`.
 
 The shortcuts already sit on the desktop, and the shell around them is proven: every click ends in
 a verified state — applied and re-read to agreement, or refused with nothing written. **The three
@@ -271,8 +273,8 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
    свой критерий оптимальности. Каждый лежит ярлыком на рабочем столе, а иконка в трее показывает,
    какой сейчас включён.
 5. **Заводское состояние — состояние по умолчанию.** Профиль живёт в энергозависимой памяти GPU.
-   Убили иконку в трее, упала система, просто перезагрузились — карта вернулась стоковой, и делать
-   для этого ничего не надо.
+   Упала система, просто перезагрузились — карта вернулась стоковой, и делать для этого ничего
+   не надо.
 
 ### 1.1. Почему это проект, а не пост на форуме
 
@@ -290,7 +292,8 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 **собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по
 команде. **Оболочка для владельца тоже стоит:** четыре ярлыка применяют режим через заранее
 зарегистрированные повышенные задачи, последнее проверенное применение запоминается и
-восстанавливается при входе в систему через те же ворота, а три рабочих режима честно отказывают,
+восстанавливается при входе в систему через те же ворота, пассивная иконка в трее показывает
+активный режим (убьёте её — с картой не случится ничего), а три рабочих режима честно отказывают,
 пока фаза 6 не примет их числа, — недоказанный андервольт двойным кликом не применяется. Движок
 поиска написан и судит кандидата сразу тремя разными формами нагрузки, беря худший вердикт, — но
 края этой карты он ещё не измерил и отказывается называть его, пока не докажет, что сделанная
@@ -410,8 +413,9 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 **Четвёртый ярлык возвращает карту к заводским настройкам**, и все четыре записывают запомненное
 состояние, которое восстанавливается при входе в систему, — куда кликнули последним, туда и
-вернётесь. Иконка в трее — единственный ещё не построенный кусок оболочки — будет показывать
-активный режим и больше ничего: ни меню, ни кнопок.
+вернётесь. Пассивная иконка в трее показывает активный режим и больше ничего — ни меню, ни кнопок,
+а её гибель карту не трогает. Ярлыки и трей носят один набор иконок, выбранный владельцем по
+отрендеренному сравнению: Fluent Emoji 3D от Microsoft (MIT), едет в репозитории в `assets/icons/`.
 
 Ярлыки уже лежат на рабочем столе, и оболочка вокруг них доказана: каждый клик заканчивается
 проверенным состоянием — применено и перечитано до совпадения, либо отказано, не записав ничего.
