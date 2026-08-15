@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>KAGO — макеты анимации прогона развёртки</title>
+<style>
+  :root{
+    --bg:#14161a; --panel:#1b1f25; --line:#2a3038; --ink:#e8edf3; --dim:#8b98a8;
+    --ice:#5fd3ff; --fire:#ff7a3c; --ok:#4ade80; --alarm:#ff4d4d; --graphite:#3a4048;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.5 "Segoe UI",system-ui,sans-serif;padding:24px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--dim);margin:0 0 20px;max-width:900px}
+  .bar{display:flex;gap:12px;align-items:center;margin-bottom:22px;flex-wrap:wrap}
+  button{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+         border-radius:8px;padding:10px 16px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--ice)}
+  button.hang{border-color:var(--alarm);color:#ffb3b3}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h2{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
+  .card .note{color:var(--dim);font-size:13px;margin:0 0 14px;min-height:34px}
+  .stage{background:#0f1216;border:1px solid var(--line);border-radius:10px;
+         display:flex;align-items:center;justify-content:center;padding:10px}
+  svg{display:block;width:100%;height:auto}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+  .m{background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .m b{display:block;font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums}
+  .m span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  .state{margin-top:12px;font-weight:600;letter-spacing:.02em}
+  .alive{color:var(--ok)} .dead{color:var(--alarm)}
+  body.hung .spin,body.hung .bob{animation-play-state:paused!important}
+  body.hung .alive{display:none}
+  .dead{display:none} body.hung .dead{display:block}
+  footer{margin-top:26px;color:var(--dim);font-size:13px;max-width:900px}
+  code{background:#0f1216;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  /* три кулера крутятся, отвёртка ходит вниз-вверх и на дне подкручивает */
+  .spin{transform-box:fill-box;transform-origin:center;animation:spin 1.1s linear infinite}
+  .spin.s2{animation-duration:1.35s} .spin.s3{animation-duration:.95s}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .bob{animation:bob 2.4s ease-in-out infinite}
+  @keyframes bob{
+    0%,100%{transform:translateY(0)}
+    28%{transform:translateY(26px)}
+    62%{transform:translateY(26px)}
+    90%{transform:translateY(0)}
+  }
+  .twist{transform-box:fill-box;transform-origin:center;animation:twist 2.4s linear infinite}
+  @keyframes twist{
+    0%,27%{transform:rotate(0)}
+    62%{transform:rotate(540deg)}
+    100%{transform:rotate(540deg)}
+  }
+</style>
+</head>
+<body>
+
+<h1>Макеты анимации прогона — сцена ваша, исполнение разное</h1>
+<p class="sub">Во всех четырёх одно и то же: нарисованная видеокарта, три вращающихся кулера, и
+отвёртка, которая опускается, подкручивает и поднимается — монотонным циклом. Различается только
+манера исполнения. <b>Нажмите «Симулировать зависание» — увидите ровно то, что увидит оператор:
+всё замирает, и последняя ступень остаётся на экране как точка отказа.</b></p>
+
+<div class="bar">
+  <button id="toggle" class="hang">⏸ Симулировать зависание</button>
+  <span class="sub" style="margin:0">В макете движение идёт от таймера браузера. В рабочем виде
+  каждый кадр приходит от пульса — нет пульса, нет движения.</span>
+</div>
+
+<div class="grid">
+
+  <!-- 1 — ГРАФИТОВЫЙ, в языке логотипа KAGO -->
+  <div class="card">
+    <h2>1 · Графитовый — язык логотипа KAGO</h2>
+    <p class="note">Тот же строгий графит, что у чипа на витрине; лёд и пламя как акценты.
+    Узнаваемо «своё», не похоже на чужой виджет.</p>
+    <div class="stage">
+      <svg viewBox="0 0 320 190" role="img" aria-label="Графитовая видеокарта с тремя кулерами и отвёрткой">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#454c56"/><stop offset="1" stop-color="#2b3138"/>
+          </linearGradient>
+        </defs>
+        <!-- плата -->
+        <rect x="18" y="70" width="284" height="86" rx="10" fill="url(#g1)" stroke="#565f6b"/>
+        <rect x="18" y="70" width="284" height="10" rx="5" fill="#5b6672"/>
+        <rect x="26" y="146" width="268" height="6" rx="3" fill="#20252b"/>
+        <!-- три кулера -->
+        <g fill="none" stroke="#7d8794" stroke-width="2">
+          <circle cx="72" cy="113" r="27"/><circle cx="160" cy="113" r="27"/><circle cx="248" cy="113" r="27"/>
+        </g>
+        <g class="spin"><g transform="translate(72,113)">
+          <path d="M0,-21 A21,21 0 0 1 18,10 L0,0 Z" fill="var(--ice)" opacity=".85"/>
+          <path d="M18,10 A21,21 0 0 1-18,10 L0,0 Z" fill="#6f7b8a" opacity=".9"/>
+          <path d="M-18,10 A21,21 0 0 1 0,-21 L0,0 Z" fill="#59636f"/>
+          <circle r="5" fill="#2b3138" stroke="#7d8794"/>
+        </g></g>
+        <g class="spin s2"><g transform="translate(160,113)">
+          <path d="M0,-21 A21,21 0 0 1 18,10 L0,0 Z" fill="#6f7b8a" opacity=".9"/>
+          <path d="M18,10 A21,21 0 0 1-18,10 L0,0 Z" fill="var(--ice)" opacity=".85"/>
+          <path d="M-18,10 A21,21 0 0 1 0,-21 L0,0 Z" fill="#59636f"/>
+          <circle r="5" fill="#2b3138" stroke="#7d8794"/>
+        </g></g>
+        <g class="spin s3"><g transform="translate(248,113)">
+          <path d="M0,-21 A21,21 0 0 1 18,10 L0,0 Z" fill="#59636f"/>
+          <path d="M18,10 A21,21 0 0 1-18,10 L0,0 Z" fill="#6f7b8a" opacity=".9"/>
+          <path d="M-18,10 A21,21 0 0 1 0,-21 L0,0 Z" fill="var(--fire)" opacity=".8"/>
+          <circle r="5" fill="#2b3138" stroke="#7d8794"/>
+        </g></g>
+        <!-- отвёртка -->
+        <g class="bob">
+          <g transform="translate(160,8)">
+            <g class="twist">
+              <rect x="-9" y="0" width="18" height="34" rx="5" fill="var(--fire)"/>
+              <rect x="-9" y="6" width="18" height="3" fill="#c85a24"/>
+              <rect x="-9" y="14" width="18" height="3" fill="#c85a24"/>
+              <rect x="-2.5" y="34" width="5" height="34" fill="#aeb8c4"/>
+              <path d="M-5,68 L5,68 L2.5,76 L-2.5,76 Z" fill="#dfe6ee"/>
+            </g>
+          </g>
+        </g>
+      </svg>
+    </div>
+    <div class="metrics">
+      <div class="m"><span>частота</span><b>2842</b></div>
+      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
+    </div>
+    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
+    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
+  </div>
+
+  <!-- 2 — ЧЕРТЁЖ -->
+  <div class="card">
+    <h2>2 · Технический чертёж</h2>
+    <p class="note">Только линии и один акцент. Регистр измерительного прибора: ничего лишнего,
+    любое движение читается мгновенно.</p>
+    <div class="stage">
+      <svg viewBox="0 0 320 190" role="img" aria-label="Чертёж видеокарты с кулерами и отвёрткой">
+        <g fill="none" stroke="var(--ice)" stroke-width="1.6">
+          <rect x="18" y="70" width="284" height="86" rx="6"/>
+          <line x1="18" y1="84" x2="302" y2="84" stroke-dasharray="4 4" opacity=".5"/>
+          <circle cx="72" cy="118" r="26"/><circle cx="160" cy="118" r="26"/><circle cx="248" cy="118" r="26"/>
+        </g>
+        <g stroke="var(--ice)" stroke-width="1.6" fill="none">
+          <g class="spin"><g transform="translate(72,118)">
+            <path d="M0,-20 L7,-6 M17,10 L2,7 M-17,10 L-2,7"/><circle r="4"/>
+            <path d="M0,-20 A20,20 0 0 1 17,10" opacity=".35"/>
+          </g></g>
+          <g class="spin s2"><g transform="translate(160,118)">
+            <path d="M0,-20 L7,-6 M17,10 L2,7 M-17,10 L-2,7"/><circle r="4"/>
+            <path d="M0,-20 A20,20 0 0 1 17,10" opacity=".35"/>
+          </g></g>
+          <g class="spin s3"><g transform="translate(248,118)">
+            <path d="M0,-20 L7,-6 M17,10 L2,7 M-17,10 L-2,7"/><circle r="4"/>
+            <path d="M0,-20 A20,20 0 0 1 17,10" opacity=".35"/>
+          </g></g>
+        </g>
+        <g class="bob"><g transform="translate(160,6)"><g class="twist">
+          <g fill="none" stroke="var(--fire)" stroke-width="1.8">
+            <rect x="-8" y="0" width="16" height="32" rx="4"/>
+            <line x1="0" y1="32" x2="0" y2="70"/>
+            <path d="M-4,70 L4,70 L0,78 Z"/>
+          </g>
+        </g></g></g>
+      </svg>
+    </div>
+    <div class="metrics">
+      <div class="m"><span>частота</span><b>2842</b></div>
+      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
+    </div>
+    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
+    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
+  </div>
+
+  <!-- 3 — ПЛОСКИЙ КОНТРАСТНЫЙ -->
+  <div class="card">
+    <h2>3 · Плоский, максимально контрастный</h2>
+    <p class="note">Крупные заливки, силуэт вместо деталей. Замирание видно боковым зрением с
+    другого конца комнаты — а оператор именно что не смотрит в экран.</p>
+    <div class="stage">
+      <svg viewBox="0 0 320 190" role="img" aria-label="Плоская видеокарта с кулерами и отвёрткой">
+        <rect x="14" y="66" width="292" height="96" rx="8" fill="#222932"/>
+        <rect x="14" y="66" width="292" height="96" rx="8" fill="none" stroke="var(--ice)" stroke-width="3"/>
+        <g class="spin"><g transform="translate(70,116)">
+          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="var(--ice)"/>
+          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#2f6f8a"/>
+          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#17495e"/>
+        </g></g>
+        <g class="spin s2"><g transform="translate(160,116)">
+          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#2f6f8a"/>
+          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="var(--ice)"/>
+          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#17495e"/>
+        </g></g>
+        <g class="spin s3"><g transform="translate(250,116)">
+          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#17495e"/>
+          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#2f6f8a"/>
+          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="var(--ice)"/>
+        </g></g>
+        <g class="bob"><g transform="translate(160,0)"><g class="twist">
+          <rect x="-13" y="0" width="26" height="40" rx="6" fill="var(--fire)"/>
+          <rect x="-4" y="40" width="8" height="38" fill="#cfd8e3"/>
+          <path d="M-8,78 L8,78 L4,88 L-4,88 Z" fill="#fff"/>
+        </g></g></g>
+      </svg>
+    </div>
+    <div class="metrics">
+      <div class="m"><span>частота</span><b>2842</b></div>
+      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
+    </div>
+    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
+    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
+  </div>
+
+  <!-- 4 — ИЗОМЕТРИЯ -->
+  <div class="card">
+    <h2>4 · Изометрия, «объёмная»</h2>
+    <p class="note">Карта под углом, отвёртка входит в неё по-настоящему сверху. Живее остальных,
+    но и деталей больше — а лишние детали на измерительном приборе спорны.</p>
+    <div class="stage">
+      <svg viewBox="0 0 320 190" role="img" aria-label="Изометрическая видеокарта с кулерами и отвёрткой">
+        <g>
+          <path d="M40,132 L168,74 L296,132 L168,190 Z" fill="#2b323b" stroke="#5c6674"/>
+          <path d="M40,132 L40,142 L168,190 L168,190 Z" fill="#1d232a"/>
+          <path d="M296,132 L296,142 L168,190 L168,190 Z" fill="#161b21"/>
+        </g>
+        <g>
+          <ellipse cx="106" cy="126" rx="30" ry="15" fill="#191e24" stroke="#5c6674"/>
+          <ellipse cx="168" cy="99" rx="30" ry="15" fill="#191e24" stroke="#5c6674"/>
+          <ellipse cx="230" cy="126" rx="30" ry="15" fill="#191e24" stroke="#5c6674"/>
+        </g>
+        <g class="spin"><g transform="translate(106,126) scale(1,.5)">
+          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="var(--ice)" opacity=".9"/>
+          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#63707f"/>
+          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#48525d"/>
+        </g></g>
+        <g class="spin s2"><g transform="translate(168,99) scale(1,.5)">
+          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#63707f"/>
+          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="var(--ice)" opacity=".9"/>
+          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#48525d"/>
+        </g></g>
+        <g class="spin s3"><g transform="translate(230,126) scale(1,.5)">
+          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#48525d"/>
+          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#63707f"/>
+          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="var(--fire)" opacity=".85"/>
+        </g></g>
+        <g class="bob"><g transform="translate(168,2)"><g class="twist">
+          <rect x="-10" y="0" width="20" height="34" rx="5" fill="var(--fire)"/>
+          <rect x="-3" y="34" width="6" height="42" fill="#b9c3cf"/>
+          <path d="M-6,76 L6,76 L3,84 L-3,84 Z" fill="#e9f0f7"/>
+        </g></g></g>
+      </svg>
+    </div>
+    <div class="metrics">
+      <div class="m"><span>частота</span><b>2842</b></div>
+      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
+    </div>
+    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
+    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
+  </div>
+
+</div>
+
+<footer>
+  <p><b>Что в макете НЕ настоящее и будет иначе.</b> Здесь всё крутится от таймера браузера —
+  в рабочем виде фаза каждого элемента считается от последнего пришедшего пульса, иначе анимация
+  продолжит махать над мёртвым прогоном. Обороты кулеров возьмутся из живой телеметрии, а не будут
+  назначены; цифры — из событий движка (<code>onEvent</code>) и журнала
+  <code>runs/sweep/journal.jsonl</code>.</p>
+  <p><b>Скажите номер</b> — или «первый, но отвёртку как в третьем». Смешивать можно.</p>
+</footer>
+
+<script>
+  const b = document.getElementById('toggle');
+  b.addEventListener('click', () => {
+    document.body.classList.toggle('hung');
+    b.textContent = document.body.classList.contains('hung')
+      ? '▶ Вернуть движение' : '⏸ Симулировать зависание';
+  });
+</script>
+</body>
+</html>
