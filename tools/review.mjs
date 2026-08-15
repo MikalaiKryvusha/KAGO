@@ -66,6 +66,28 @@ const DEF6_BEACON_GRACE_MS = 3000;             // a reload is not a close (T3)
 const DEF6_STRIKES = 2;                        // two strikes against machine sleep (T5)
 const DEF7_BEEP_DEADLINE_MS = 8000;
 const DEF7_VOICE_TIMEOUT_MS = 60000;
+// ── ГОЛОС: ВЫНЕСЕННЫЙ ВЕРДИКТ ВЛАДЕЛЬЦА, НЕ ПЕРЕСПРАШИВАЕТСЯ ──────────────────────────────────────
+//
+// Silero v5 ru, голос `eugene` — «звучит по-человечески, а не роботом». Вердикт вынесен в соседних
+// проектах владельца (NDim, Unliminium, KAIF) ЗАДОЛГО до этого проекта, и его слово здесь,
+// 2026-08-15: *«не тот движок голоса, не тот голос… найди в соседних проектах, KAIF, NDIM,
+// Unliminium - всё давно уже проработано»*. Это ровно тот случай, когда изобретать — дефект: решение
+// оплачено и лежит рядом.
+//
+// Движок — общий «рот» МАШИНЫ, а не этого проекта (I36 навыка `/owner-reviews`: тяжёлый TTS с его
+// venv принадлежит машине, проект зовёт готовую команду и честно откатывается, если её нет). Тракт
+// живёт в KLAS: `voice-say.mjs` + Python-сайдкар `silero_say.py` в `F:\KLAS\voice\venv`. Проверено
+// на этой машине 2026-08-15: и venv, и сайдкар на месте.
+//
+// Фраза уходит АРГУМЕНТОМ node-процесса (argv-массив, БЕЗ оболочки), поэтому правило «текст ездит
+// файлами» здесь не нарушено: оно про аргументы, которые разбирает ОБОЛОЧКА, а её тут нет. Фолбэк
+// SAPI по-прежнему возит текст файлом — там в цепочке powershell.
+const VOICE_TOOL = process.env.KAGO_VOICE_TOOL || 'F:\\KLAS\\tools\\voice-say.mjs';
+const VOICE_NAME = process.env.KAGO_VOICE || 'eugene';
+// Фолбэк-голос называется ЯВНО, а не берётся системным умолчанием: умолчание — это настройка хоста,
+// и на машине с английским умолчанием русская фраза читалась бы английским голосом при всех зелёных
+// проверках. Это и есть дефект, заведённый наверх тикетом `bugs/KAIF/05`.
+const SAPI_VOICE = process.env.KAGO_SAPI_VOICE || 'Microsoft Irina Desktop';
 const DEF8_WINDOW_SIZE = '--window-size=1100,900';
 // No quiet hours on this project — the owner's word (interview 002, 2026-08-14): «окна тихих часов
 // в этом проекте не делаем. Можно звать меня 24 часа в сутки». A zero-width window is no window
@@ -1098,8 +1120,10 @@ function fireSignal(model, opts) {
   console.log('ЗОВ: ' + phrase);
   console.log('     маршрут — ' + route.reason);
 
-  const speak = () => {
-    if (!route.voice) return;
+  // ФОЛБЭК: системный SAPI. Голос выбирается ПО ИМЕНИ, а не берётся умолчанием хоста — иначе на
+  // машине с английским умолчанием русская фраза читается английским голосом, и ни одна проверка
+  // этого не видит (`bugs/KAIF/05`). `SelectVoice` в try: отсутствие голоса не должно ронять зов.
+  const speakSapi = () => {
     // The phrase travels through a FILE and its path through an ENV VAR, so the powershell command
     // line stays pure ASCII no matter what the text or the user profile name contains.
     let phraseFile;
@@ -1115,6 +1139,8 @@ function fireSignal(model, opts) {
       '$t=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8);',
       'Add-Type -AssemblyName System.Speech;',
       '$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;',
+      '$v=$env:KAGO_REVIEW_SAPI_VOICE;',
+      'try { $s.SelectVoice($v) } catch { };',
       '$s.Speak($t);',
       '$s.Dispose()',
     ].join(' ');
@@ -1122,10 +1148,36 @@ function fireSignal(model, opts) {
     spawnWithDeadline(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
-      { env: Object.assign({}, process.env, { KAGO_REVIEW_PHRASE: phraseFile }) },
+      { env: Object.assign({}, process.env, { KAGO_REVIEW_PHRASE: phraseFile, KAGO_REVIEW_SAPI_VOICE: SAPI_VOICE }) },
       DEF7_VOICE_TIMEOUT_MS,
       () => { try { unlinkSync(phraseFile); } catch { /* best effort */ } },
     );
+  };
+
+  // ГОЛОС: сперва «рот» машины (Silero v5 ru, вердикт владельца), при недоступности — честный откат
+  // на системный SAPI (I35). Недоступность — это НЕ только отсутствие файла: сайдкар возвращает
+  // ненулевой код и когда нет venv, и когда произносить нечего, поэтому решает КОД ВОЗВРАТА, а не
+  // проверка пути. Контур из-за голоса не ломается ни в одной ветке.
+  const speak = () => {
+    if (!route.voice) return;
+    let silero;
+    try {
+      silero = spawnWithDeadline(
+        process.execPath,
+        [VOICE_TOOL, phrase, '--play', '--voice', VOICE_NAME],
+        {},
+        DEF7_VOICE_TIMEOUT_MS,
+        null,
+      );
+    } catch {
+      speakSapi();
+      return;
+    }
+    if (!silero) { speakSapi(); return; }
+    let fellBack = false;
+    const fallbackOnce = () => { if (!fellBack) { fellBack = true; speakSapi(); } };
+    silero.on('exit', (code) => { if (code !== 0) fallbackOnce(); });
+    silero.on('error', fallbackOnce);
   };
 
   if (route.beeps) {
