@@ -147,9 +147,26 @@ export function validateCard(c) {
     if (!f.edgeDefinition) return bad('fiction.edgeDefinition', 'у вероятностного края обязано быть определение — иначе это порог');
     for (const row of f.edge) {
       if (!freqSet.has(row.mhz)) return bad('fiction.edge', `частоты ${row.mhz} МГц нет в сетке частот`);
-      // The edge must be a voltage the CARD CAN BE SET TO. An edge between grid rungs is an edge no
-      // descent can ever stand on, and the search would chase a number that does not exist.
-      if (!voltSet.has(row.edgeMv)) return bad('fiction.edge', `край ${row.edgeMv} мВ на ${row.mhz} МГц не лежит на сетке напряжений`);
+      // THE EDGE MUST BE INSIDE THE GRID'S RANGE — and it must NOT be required to sit on a rung. The
+      // grid is what we can COMMAND; the edge is what the silicon IS, and it lands between rungs as a
+      // matter of course. An earlier version demanded the opposite and made every edge a multiple of
+      // 5 mV, which is a property of the ladder masquerading as a property of the card.
+      const lo = c.voltageGridMv[0];
+      const hi = c.voltageGridMv[c.voltageGridMv.length - 1];
+      if (!(row.edgeMv >= lo && row.edgeMv <= hi)) {
+        return bad('fiction.edge', `край ${row.edgeMv} мВ на ${row.mhz} МГц вне диапазона напряжений карты ${lo}…${hi} мВ`);
+      }
+      if (row.edgeMv > row.stockMv) {
+        return bad('fiction.edge', `край ${row.edgeMv} мВ выше стокового ${row.stockMv} мВ на ${row.mhz} МГц — `
+          + 'это значит, что карта не работает на заводских настройках');
+      }
+    }
+    // A fiction whose every edge lands on a rung is a fiction that was SNAPPED, and snapping hides the
+    // hardest part of the search: the lowest rung that still holds is never the edge itself.
+    const onGrid = f.edge.filter((r) => voltSet.has(r.edgeMv)).length;
+    if (onGrid / f.edge.length > 0.2) {
+      return bad('fiction.edge', `${((onGrid / f.edge.length) * 100).toFixed(0)} % краёв лежат ровно на ступенях сетки — `
+        + 'край привязан к сетке, а он свойство кремния, а не интерфейса');
     }
     // THE TREND, NOT THE SMOOTHNESS, is what the physics gives (`researches/09` §2.3), and the
     // owner's own words are «редко», not «никогда». So a jittering edge is legal and a DRIFTING one
@@ -381,7 +398,7 @@ function headroomAt(mhz) {
 export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8, driftMaxMv = 20 } = {}) {
   const stockFor = new Map(card.stockCurve.map((r) => [r.mhz, r.voltageMv]));
   const grid = card.voltageGridMv;
-  const snap = (mv) => grid.reduce((best, g) => (Math.abs(g - mv) < Math.abs(best - mv) ? g : best), grid[0]);
+  const floorMv = grid[0];
 
   // ─── THE JITTER, AND IT IS NOT DECORATION ───────────────────────────────────────────────────────
   //
@@ -408,9 +425,21 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
   // the character shows over tens of megahertz. So there are two components — a slow bounded DRIFT
   // and a small point-to-point TREMBLE of about one grid step.
   //
-  // WHAT STAYS EXACT: the edge lands ON the card's own voltage grid. The owner's «шумок» is a
-  // property of the silicon; the ladder is a property of the hardware interface, and a card cannot be
-  // set between its rungs. An edge at 947.3 mV would be an edge no descent could ever stand on.
+  // ⚠️ THE EDGE IS **NOT** SNAPPED TO THE VOLTAGE GRID, and the first version of this code snapped it
+  // — a modelling error the owner caught by reading the file: *«и где шум, что-то я не вижу. как были
+  // красивые круглые edgeMv, так и остались»*. Every edge was a multiple of 5 mV, so the «noise» was
+  // an artefact of the ladder rather than a property of the silicon.
+  //
+  // THE DISTINCTION THAT WAS COLLAPSED, and it matters beyond aesthetics: the grid is what we can
+  // COMMAND, the edge is what the silicon IS. Real Vmin at a frequency is a continuous physical
+  // quantity and lands between rungs as a matter of course. My original justification — «an edge at
+  // 947.3 mV is an edge no descent could ever stand on» — was simply wrong: the descent does not stand
+  // ON the edge, it finds the LOWEST RUNG THAT STILL HOLDS. The edge sitting between two rungs is not
+  // an obstacle to the search, it is the ordinary condition of it.
+  //
+  // And the snapped version quietly made the bench easier: with the edge exactly on a rung, the 50 %
+  // point of the failure probability coincided with a settable voltage — a coincidence that never
+  // happens on silicon and that the engine would have been able to lean on.
   const noise = mulberry32(noiseSeed);
   const ascending = [...card.frequencyGridMhz].sort((a, b) => a - b);
   const edge = [];
@@ -421,8 +450,9 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
     drift = Math.max(-driftMaxMv, Math.min(driftMaxMv, drift));
     const tremble = (noise() - 0.5) * 2 * noiseAmplitudeMv;
     const wanted = headroomAt(mhz) + drift + tremble;
-    const mv = snap(Math.max(grid[0], Math.min(stock, stock - wanted)));
-    edge.push({ mhz, edgeMv: mv, stockMv: stock, headroomMv: stock - mv });
+    // Одна десятая милливольта — не точность модели, а признак того, что это НЕ ступень сетки.
+    const mv = Number(Math.max(floorMv, Math.min(stock, stock - wanted)).toFixed(1));
+    edge.push({ mhz, edgeMv: mv, stockMv: stock, headroomMv: Number((stock - mv).toFixed(1)) });
   }
 
   // The trend is measured rather than asserted, and the local inversions are COUNTED and published:
@@ -430,7 +460,9 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
   let violations = 0;
   let maxDropMv = 0;
   for (let i = 1; i < edge.length; i++) {
-    const drop = edge[i - 1].edgeMv - edge[i].edgeMv;
+    // Округление здесь не косметика: разности чисел с плавающей точкой дают хвосты вида
+    // 16.800000000000068, и такое число уезжает прямо в отчёт владельцу.
+    const drop = Number((edge[i - 1].edgeMv - edge[i].edgeMv).toFixed(1));
     if (drop > 0) { violations++; maxDropMv = Math.max(maxDropMv, drop); }
   }
 
@@ -1102,8 +1134,14 @@ export async function selfTest() {
     `краёв ${F.edge.length}, частот ${CARD.frequencyGridMhz.length}`);
   check('КРАЙ: определение записано в артефакт, а не подразумевается',
     typeof F.edgeDefinition === 'string' && F.edgeDefinition.includes('половине'), 'определения нет');
-  check('КРАЙ: каждый лежит НА сетке напряжений — на нём можно стоять',
-    F.edge.every((r) => CARD.voltageGridMv.includes(r.edgeMv)), 'край между ступенями');
+  // The edge is a property of the SILICON; the grid is what the interface can be SET to. Demanding
+  // the first sit on the second was this module's own error, caught by the owner reading the file:
+  // every edge came out a multiple of 5 mV, so the «noise» was the ladder's, not the card's.
+  const offGrid = F.edge.filter((r) => !CARD.voltageGridMv.includes(r.edgeMv)).length;
+  check('КРАЙ: НЕ привязан к сетке — сетка это что мы ЗАДАЁМ, а край это какой кремний ЕСТЬ',
+    offGrid / F.edge.length > 0.8, `на ступенях сетки ${F.edge.length - offGrid} из ${F.edge.length}`);
+  check('КРАЙ: лежит внутри диапазона карты и не выше стока',
+    F.edge.every((r) => r.edgeMv >= CARD.voltageGridMv[0] && r.edgeMv <= r.stockMv), 'край вне диапазона');
   const ascEdge = [...F.edge].sort((a, b) => a.mhz - b.mhz);
   // ЛЁГКИЙ ДРЕЙФ И ШУМ — слово владельца 2026-08-15. Гладкий край делает интерполяцию законной, а
   // она записана антипаттерном эпика (E2-AC3); плюс шум сам рождает «редкий случай» с затравкой.
@@ -1111,10 +1149,17 @@ export async function selfTest() {
   // distinct headroom values and was worthless: a perfectly smooth curve produces hundreds of them,
   // so the block stayed green when the noise was mutated away. Mutation testing found that, which is
   // the entire reason it is run — a suite is only worth what its red proves (EXP-0008).
+  //
+  // AND IT IS MEASURED ON THE HEADROOM, NOT ON THE EDGE — the second thing mutation testing had to
+  // teach this block. The edge is «stock minus headroom», and the STOCK voltage is a step function of
+  // frequency: it stands still for several neighbours and then jumps a rung. Those jumps alternate
+  // with the headroom's own slope and produce sign changes on their own, so a perfectly smooth card
+  // still looked rough. Subtracting the stock step — i.e. looking at the headroom — leaves exactly
+  // the quantity the noise lives in.
   let flips = 0; let compared = 0;
   for (let i = 2; i < ascEdge.length; i++) {
-    const d1 = ascEdge[i - 1].edgeMv - ascEdge[i - 2].edgeMv;
-    const d2 = ascEdge[i].edgeMv - ascEdge[i - 1].edgeMv;
+    const d1 = ascEdge[i - 1].headroomMv - ascEdge[i - 2].headroomMv;
+    const d2 = ascEdge[i].headroomMv - ascEdge[i - 1].headroomMv;
     if (d1 !== 0 && d2 !== 0) { compared++; if (Math.sign(d1) !== Math.sign(d2)) flips++; }
   }
   check('КРАЙ: ШУМИТ, как кремний, — разность меняет знак постоянно, а не идёт гладко',
