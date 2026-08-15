@@ -31,7 +31,19 @@
 //   node automation-engine/lib/virtual-gpu.mjs --show benches/cards/rtx5070ti.json
 //   node automation-engine/lib/virtual-gpu.mjs --selftest
 //
-// [TESTED: 2026-08-15 18:5x · `npm run vgpu -- --selftest` → 37 blocks, 0 failures, no GPU touched:
+// [TESTED: 2026-08-15 19:2x · PHASE 2 · `npm run vgpu -- --selftest` → 62 blocks, 0 failures:
+//  the invented edge exists for all 389 frequencies, lands ON the voltage grid, TRENDS upward and
+//  JITTERS (the owner's «шумок», demanded on reading the first file) · the model gives exactly 0.5 at
+//  the edge and ≈0.2/0.8 one 5 mV step either side · a shorter burn honestly finds less · all three
+//  outcome classes reachable · the oracle reads the VOLTAGE OFF THE CARD rather than being told it ·
+//  the REAL `runBurst` + `decideVerdict` deliver the verdict · one seed reproduces exactly and a
+//  different seed does not · and `ЗАВИС` is a REAL process death in a child, whose `finally` did not
+//  run while the intent written before the card was touched survived.
+//  Mutation-proved with SIXTEEN mutations, addressees named before the run, 0 uncaught — including
+//  the two that first exposed WEAK BLOCKS rather than weak mutations: a smoothness check that counted
+//  distinct values (green on a smooth curve) and a verdict check that never exercised the SDC path.
+//
+// [TESTED: 2026-08-15 18:5x · PHASE 1 · 37 blocks, 0 failures, no GPU touched:
 //  11 hostile card fixtures each refused by the FIELD it broke · the derivation compared field by
 //  field against `curves/*.json` · the applier's own `readState` / `apply` / `resetToFactory` driving
 //  the virtual backend UNCHANGED · the refusal-parity table over R11 / R13-bound / R13-offer / R12 ·
@@ -43,9 +55,9 @@
 //  card maximum hard-coded to 3090 · `close()` uncounted.
 //  What this does NOT prove is stated in PROVABILITY_LINE and is not a caveat but the point.]
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
 import { buildRaiseAndCapVector, CLK_VF_POINT_COUNT } from './nvapi.mjs';
 import { curveWriteRefusal } from './profile-manager.mjs';
@@ -122,7 +134,61 @@ export function validateCard(c) {
   }
 
   if (!c.stamp || !c.stamp.driver || !c.stamp.vbios) return bad('stamp', 'нет штампа драйвера/VBIOS (правило R6)');
-  if (!c.fiction || typeof c.fiction !== 'object') return bad('fiction', 'нет блока fiction (в фазе 1 он пуст, но он есть)');
+  if (!c.fiction || typeof c.fiction !== 'object') return bad('fiction', 'нет блока fiction (у карты фазы 1 он пуст, но он есть)');
+
+  // A fiction that is PRESENT is validated; an EMPTY one is a phase-1 card and legal. The distinction
+  // is deliberate: «no edge yet» and «a broken edge» are different states, and collapsing them would
+  // let a half-built card look like an early one.
+  if (Object.keys(c.fiction).length) {
+    const f = c.fiction;
+    if (!Array.isArray(f.edge) || f.edge.length !== c.frequencyGridMhz.length) {
+      return bad('fiction.edge', `край нужен КАЖДОЙ частоте: ${Array.isArray(f.edge) ? f.edge.length : 'не массив'} против ${c.frequencyGridMhz.length}`);
+    }
+    if (!f.edgeDefinition) return bad('fiction.edgeDefinition', 'у вероятностного края обязано быть определение — иначе это порог');
+    for (const row of f.edge) {
+      if (!freqSet.has(row.mhz)) return bad('fiction.edge', `частоты ${row.mhz} МГц нет в сетке частот`);
+      // The edge must be a voltage the CARD CAN BE SET TO. An edge between grid rungs is an edge no
+      // descent can ever stand on, and the search would chase a number that does not exist.
+      if (!voltSet.has(row.edgeMv)) return bad('fiction.edge', `край ${row.edgeMv} мВ на ${row.mhz} МГц не лежит на сетке напряжений`);
+    }
+    // THE TREND, NOT THE SMOOTHNESS, is what the physics gives (`researches/09` §2.3), and the
+    // owner's own words are «редко», not «никогда». So a jittering edge is legal and a DRIFTING one
+    // is not: the check is on the trend across the range plus a ceiling on how much local inversion
+    // a card may carry before it stops being an ordinary card and becomes a trap.
+    const asc = [...f.edge].sort((a, b) => a.mhz - b.mhz);
+    const lowEnd = asc.slice(0, Math.max(1, Math.floor(asc.length * 0.1)));
+    const highEnd = asc.slice(-Math.max(1, Math.floor(asc.length * 0.1)));
+    const avg = (rows) => rows.reduce((s, r) => s + r.edgeMv, 0) / rows.length;
+    if (avg(highEnd) <= avg(lowEnd)) {
+      return bad('fiction.edge', `тренд края не растёт с частотой: низ ${avg(lowEnd).toFixed(0)} мВ, верх ${avg(highEnd).toFixed(0)} мВ`);
+    }
+    // THE TEST IS ON THE SIZE OF A DROP, NOT ON HOW MANY THERE ARE, and that is the physical
+    // reading: many small local dips ARE silicon scatter (the owner: «шумок… это не идеальная природа
+    // кремния»), while ONE large drop means a lower frequency needs materially more voltage than a
+    // higher one — his genuinely rare case, and a card built to carry it is a TRAP, declared as such.
+    let inversions = 0;
+    let biggest = 0;
+    for (let i = 1; i < asc.length; i++) {
+      const drop = asc[i - 1].edgeMv - asc[i].edgeMv;
+      if (drop > 0) { inversions++; biggest = Math.max(biggest, drop); }
+    }
+    if (biggest > 30 && !f.nonMonotoneOnPurpose) {
+      return bad('fiction.edge', `самое глубокое падение края ${biggest} мВ — это уже не дрожь кремния, а нарушение `
+        + 'монотонности. Если это ловушка — пометьте fiction.nonMonotoneOnPurpose');
+    }
+    if (f.monotonicity && f.monotonicity.inversions !== inversions) {
+      return bad('fiction.monotonicity.inversions', `в файле записано ${f.monotonicity.inversions}, а в краю их ${inversions} `
+        + '— опубликованный характер карты обязан совпадать с самой картой');
+    }
+    const fl = f.failure;
+    if (!fl || !(fl.scaleMv > 0) || !(fl.referenceSeconds > 0)) return bad('fiction.failure', 'нет параметров модели отказа');
+    // The definition names a DURATION, and the model must use the same one — a definition in prose
+    // beside a constant in code is a pair that eventually disagrees.
+    if (!f.edgeDefinition.includes(String(fl.referenceSeconds))) {
+      return bad('fiction.failure.referenceSeconds', `модель считает по ${fl.referenceSeconds} с, а определение края `
+        + 'этой длительности не называет — определение и константа обязаны быть одним и тем же');
+    }
+  }
   return { ok: true };
 }
 
@@ -231,11 +297,208 @@ export function deriveCardFromCurves({ dir = 'curves', name = 'rtx5070ti' } = {}
     vfTable,
     powerLimitW: { min: 250, default: 300, max: 300 },
     stamp: { ...(vg.stamp ?? {}) },
-    fiction: {},   // фаза 2 кладёт сюда края отказа; форма существует с фазы 1, чтобы её не менять
+    fiction: {},   // заполняется сразу ниже; форма существует с фазы 1, чтобы её не менять
   };
+  // THE INVENTED EDGE. Built from the card that has just been derived, so the fiction sits on the
+  // MEASURED geometry rather than beside it: every edge voltage is a value from this card's own
+  // voltage grid, at a frequency from its own ladder.
+  card.fiction = buildFiction(card);
   const v = validateCard(card);
   if (!v.ok) return { ok: false, why: `выведенный профиль негоден (поле ${v.field}): ${v.why}` };
   return { ok: true, card };
+}
+
+// =================================================================================================
+// 2a. THE FICTION — the invented edge and the failure model (phase 2, `plans/18`)
+// =================================================================================================
+
+/**
+ * ⚠️ EVERY NUMBER PRODUCED HERE IS INVENTED. It is not a hypothesis about the owner's card, not a
+ * prediction, and not a starting point for one. It exists so the engine has something to FIND.
+ *
+ * WHAT IS NOT INVENTED IS THE SHAPE, and that is the difference between a useful bench and a toy:
+ *
+ *  - **The edge is probabilistic, never a threshold.** This card has already shown both outcomes at
+ *    one voltage (fact 28's history). A bench that failed deterministically would pass an engine that
+ *    dies on real silicon — which is the one thing a bench must not do.
+ *  - **The steepness is the project's OWN measurement.** `researches/02`: the error rate goes
+ *    3 % → 90 % across 2 % of voltage. Fitting a logistic to that pair gives a scale of ≈3.5 mV
+ *    (`logit(0.90) − logit(0.03) = 5.673` over ≈20 mV at 1000 mV), so ONE 5 mV grid step moves the
+ *    failure probability from about 0.20 to about 0.80. That is what makes the 5 mV refinement of
+ *    `plans/15` §4.6 a real test rather than a formality.
+ *  - **The edge has a DEFINITION, because a probabilistic edge cannot have a threshold's one:**
+ *    the voltage at which a 10-second burn fails half the time. `lambdaMax` follows from it
+ *    arithmetically (2·ln2/10), so the constant and the definition cannot drift apart.
+ *  - **Duration enters as a hazard rate**, so an accelerated 1 s burn honestly finds LESS than a 10 s
+ *    one. The owner's 10× speed-up is therefore visible in the model rather than free — the bench
+ *    tells the truth about its own acceleration.
+ *
+ * THE HEADROOM CURVE IS CHOSEN, NOT RANDOMISED, and the reason is the whole point of the bench: the
+ * engine's hard cases must be REACHABLE on the ordinary card, not only on a trap. So the invented
+ * headroom is DEEPER than the ±1000 MHz lever can reach across 1700…2400 MHz — exactly where the
+ * live card's own arithmetic says the lever gives out first (45–125 mV against 245–350 at the ends,
+ * `STATUS.md`). A sweep of this card therefore produces `lever-limited` verdicts by ordinary means.
+ *
+ * One deliberate consistency with what the live card actually showed: at 2842 MHz the invented edge
+ * lands at 865 mV, BELOW the 885 mV that was proved to PASS on the real card. The fiction is free to
+ * be anything; making it contradict a measurement we own would be a needless way to confuse a reader.
+ */
+const HEADROOM_ANCHORS = Object.freeze([
+  { mhz: 180, belowStockMv: 0 },      // на полу сетки снимать нечего
+  { mhz: 500, belowStockMv: 110 },
+  { mhz: 1100, belowStockMv: 120 },
+  { mhz: 1700, belowStockMv: 80 },    // ↓ глубже, чем достаёт рычаг (доступно 45 мВ) → «предел рычага»
+  { mhz: 2000, belowStockMv: 90 },    // ↓ то же (доступно 50 мВ)
+  { mhz: 2400, belowStockMv: 150 },   // ↓ то же (доступно 125 мВ)
+  { mhz: 2842, belowStockMv: 180 },   // край 865 мВ — ниже доказанных на живой карте 885
+  { mhz: 3090, belowStockMv: 200 },
+]);
+
+/** Linear interpolation between the anchors, in millivolts of headroom. */
+function headroomAt(mhz) {
+  const a = HEADROOM_ANCHORS;
+  if (mhz <= a[0].mhz) return a[0].belowStockMv;
+  if (mhz >= a[a.length - 1].mhz) return a[a.length - 1].belowStockMv;
+  for (let i = 1; i < a.length; i++) {
+    if (mhz <= a[i].mhz) {
+      const t = (mhz - a[i - 1].mhz) / (a[i].mhz - a[i - 1].mhz);
+      return a[i - 1].belowStockMv + t * (a[i].belowStockMv - a[i - 1].belowStockMv);
+    }
+  }
+  return a[a.length - 1].belowStockMv;
+}
+
+/**
+ * Build the `fiction` block for a card: an edge voltage for EVERY frequency of its grid, snapped to
+ * the card's own voltage grid, plus the failure-model parameters.
+ *
+ * Monotonicity is ENFORCED rather than hoped for: Vmin does not fall as frequency rises, because a
+ * failure at the edge is a setup-time violation (`researches/09` §2.3 — industrial shmoo
+ * characterization), and the owner said the same from his own experience: *«как правило на более
+ * нижней частоте будет напряжение нужно или такое же… или даже ниже, очень редко — выше»*. The rare
+ * violation he named is a TRAP CARD of phase 3, produced on purpose — never an accident of rounding.
+ */
+export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8, driftMaxMv = 20 } = {}) {
+  const stockFor = new Map(card.stockCurve.map((r) => [r.mhz, r.voltageMv]));
+  const grid = card.voltageGridMv;
+  const snap = (mv) => grid.reduce((best, g) => (Math.abs(g - mv) < Math.abs(best - mv) ? g : best), grid[0]);
+
+  // ─── THE JITTER, AND IT IS NOT DECORATION ───────────────────────────────────────────────────────
+  //
+  // THE OWNER CAUGHT THIS ON READING THE FIRST FILE (2026-08-15): *«ты в фикции некрасивые headroomMv
+  // придумал, не дал лёгкого дрейфа и шума, который обычно у реального кремния есть. Там должно быть
+  // 197, 205, 181, 223 мВ и так далее — шумок»*. He is right, and the reason is stronger than realism:
+  //
+  //  1. **A SMOOTH EDGE MAKES INTERPOLATION LOOK LEGAL.** An engine that skipped frequencies and
+  //     interpolated between them would pass on a smooth card and die on silicon — and interpolation
+  //     is written into the epic as an ANTI-PATTERN (E2-AC3), precisely what the vendor's own scanner
+  //     does and we do not. A bench that cannot punish it does not defend the claim.
+  //  2. **IT MAKES HIS OWN RARE CASE REACHABLE BY ORDINARY MEANS.** He said Vmin at a lower frequency
+  //     is usually equal or lower, *«очень редко — выше, почти не бывает такого»* — «rarely», not
+  //     «never». Jitter produces exactly those rare local inversions, so the seeding-rejection path
+  //     (E2-AC11) is exercised by the everyday card and not only by a trap built for it.
+  //
+  // The jitter is SEEDED, so the card is a file that reproduces byte for byte; and the trend is still
+  // upward, because the trend is what the physics says (`researches/09` §2.3), not the smoothness.
+  //
+  // THE NOISE IS CORRELATED, NOT INDEPENDENT PER FREQUENCY, and the first attempt showed why: an
+  // independent ±25 mV draw at frequencies SEVEN MEGAHERTZ apart made the edge zigzag on 43 % of its
+  // neighbours — that is not silicon, it is a random walk with no memory, and its own validator threw
+  // it out. Real characterization data drifts: neighbouring frequencies are strongly correlated and
+  // the character shows over tens of megahertz. So there are two components — a slow bounded DRIFT
+  // and a small point-to-point TREMBLE of about one grid step.
+  //
+  // WHAT STAYS EXACT: the edge lands ON the card's own voltage grid. The owner's «шумок» is a
+  // property of the silicon; the ladder is a property of the hardware interface, and a card cannot be
+  // set between its rungs. An edge at 947.3 mV would be an edge no descent could ever stand on.
+  const noise = mulberry32(noiseSeed);
+  const ascending = [...card.frequencyGridMhz].sort((a, b) => a - b);
+  const edge = [];
+  let drift = 0;
+  for (const mhz of ascending) {
+    const stock = stockFor.get(mhz);
+    drift += (noise() - 0.5) * 2.2;
+    drift = Math.max(-driftMaxMv, Math.min(driftMaxMv, drift));
+    const tremble = (noise() - 0.5) * 2 * noiseAmplitudeMv;
+    const wanted = headroomAt(mhz) + drift + tremble;
+    const mv = snap(Math.max(grid[0], Math.min(stock, stock - wanted)));
+    edge.push({ mhz, edgeMv: mv, stockMv: stock, headroomMv: stock - mv });
+  }
+
+  // The trend is measured rather than asserted, and the local inversions are COUNTED and published:
+  // a card whose character is a number in its own file cannot quietly become a different card.
+  let violations = 0;
+  let maxDropMv = 0;
+  for (let i = 1; i < edge.length; i++) {
+    const drop = edge[i - 1].edgeMv - edge[i].edgeMv;
+    if (drop > 0) { violations++; maxDropMv = Math.max(maxDropMv, drop); }
+  }
+
+  return {
+    monotonicity: {
+      note: 'край шумит, как кремний: тренд вверх, но локальные нарушения ЕСТЬ — ровно тот редкий '
+        + 'случай, который владелец назвал сам («очень редко — выше, почти не бывает такого»). '
+        + 'Их число опубликовано, чтобы карта не могла тихо стать другой картой.',
+      inversions: violations,
+      inversionShare: Number((violations / edge.length).toFixed(3)),
+      maxDropMv,
+    },
+    noise: { seed: noiseSeed, amplitudeMv: noiseAmplitudeMv, driftMaxMv },
+    note: 'ВЫМЫСЕЛ. Эти края придуманы и НЕ являются утверждением о живой карте — они существуют, '
+      + 'чтобы движку было что найти.',
+    edgeDefinition: 'край частоты = напряжение, на котором прожиг длиной 10 с отказывает в половине случаев. '
+      + 'У вероятностного края другого честного определения нет: «напряжение, ниже которого отказывает» '
+      + 'описывает порог, а порогом эта карта быть не должна.',
+    edge: edge.sort((a, b) => b.mhz - a.mhz),   // в том же порядке, что и сетка частот: сверху вниз
+    failure: {
+      // 3 % → 90 % на 2 % напряжения (researches/02), подогнано логистикой: одна ступень 5 мВ
+      // двигает вероятность отказа с ≈0,20 до ≈0,80.
+      scaleMv: 3.5,
+      // Определение края И есть эта величина: прожиг ЭТОЙ длительности на краю отказывает в половине
+      // случаев. Одно число, а не два, которые могут разъехаться.
+      referenceSeconds: 10,
+      // Глубина ниже края решает КЛАСС исхода. Числа придуманы; важно, что все три достижимы.
+      classDepthMv: { sdcUntil: 10, crashUntil: 25 },
+      // Разные нагрузки валят край по-разному (researches/02: Vmin разъезжается на ~100 мВ между
+      // программами). Стенд моделирует это ОДНИМ коэффициентом на нагрузку и не более того.
+      shapeFactor: { sdc_fma: 1.0, branchy: 1.35 },
+      // Одна проба нагрузки — это один ПРОЦЕСС; измерено 2026-08-10: 132 мс на запуск.
+      perLaunchSeconds: 0.132,
+    },
+  };
+}
+
+/**
+ * `mulberry32` — a seeded generator, thirty lines instead of a dependency.
+ *
+ * WHY A SEED AT ALL, and why it is the ONLY source of randomness: a probabilistic edge needs random
+ * draws and debugging needs repeatability, so the industry's answer (FoundationDB, TigerBeetle's
+ * VOPR, Antithesis) is that ONE seed drives everything and the failure replays exactly. Randomness
+ * that escapes the seed turns the bench into an «occasionally red» instrument, which is the worst
+ * kind there is.
+ */
+/**
+ * The virtual workload's «correct» answer. Any hexadecimal string works — what matters is that the
+ * bench's golden fixture and its PASS path carry the SAME one, and that an SDC carries a different
+ * one, because the real `decideVerdict` compares them and nothing else.
+ */
+export const GOLDEN_CHECKSUM = 'fd7d452ce569c9d7';
+
+/** A wrong answer, derived from the draw so it is reproducible with the seed like everything else. */
+function sdcChecksum(r) {
+  const flipped = (parseInt(GOLDEN_CHECKSUM.slice(0, 8), 16) ^ Math.floor(r * 0xFFFF)) >>> 0;
+  return flipped.toString(16).padStart(8, '0') + GOLDEN_CHECKSUM.slice(8);
+}
+
+export function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // =================================================================================================
@@ -262,7 +525,10 @@ export function deriveCardFromCurves({ dir = 'curves', name = 'rtx5070ti' } = {}
  * No randomness anywhere: the wander is a deterministic cycle. Phase 1 has no seed because phase 1
  * has nothing to be random about.
  */
-export function virtualCard(cardProfile, { settleSamples = 1, rampSamples = 0, wanderMhz = null } = {}) {
+export function virtualCard(cardProfile, {
+  settleSamples = 1, rampSamples = 0, wanderMhz = null,
+  seed = 1, allowProcessDeath = false,
+} = {}) {
   const v = validateCard(cardProfile);
   if (!v.ok) throw new Error(`виртуальная карта не поднимается на негодном профиле (поле ${v.field}): ${v.why}`);
 
@@ -418,10 +684,142 @@ export function virtualCard(cardProfile, { settleSamples = 1, rampSamples = 0, w
     close() { writes.curveClose++; },
   };
 
+  // ===============================================================================================
+  // THE ORACLE — the silicon's half of the fiction (phase 2, `plans/18`)
+  // ===============================================================================================
+  //
+  // THE PROPERTY THAT MAKES THIS A CARD AND NOT A SCRIPT: the oracle is never TOLD the voltage. It
+  // reads the card's own state — which V/F entry serves the pinned clock after the offsets that were
+  // written — exactly as silicon does. An engine that computed the voltage wrongly is therefore
+  // judged by what it actually WROTE rather than by what it believed it wrote, and that is the single
+  // most valuable thing the bench can check about a sweep.
+  const rng = mulberry32(seed);
+  let draws = 0;
+
+  const oracle = {
+    /** Which voltage serves `mhz` right now: the LOWEST-voltage entry whose offered frequency
+     *  reaches it, after the offsets currently written. */
+    servingVoltageMv(mhz) {
+      for (let i = 0; i < GRAPHICS_POINTS; i++) {
+        const offered = P.vfTable[i].mhz + state.curveOffsetsMhz[i];
+        if (offered >= mhz) return P.vfTable[i].voltageMv;
+      }
+      return P.vfTable[GRAPHICS_POINTS - 1].voltageMv;
+    },
+
+    /** The invented edge of `mhz` — the nearest frequency of the card's own grid. */
+    edgeMvFor(mhz) {
+      const f = P.fiction.edge;
+      if (!f || !f.length) throw new Error('у этой карты нет вымышленного края — она из фазы 1 (fiction пуст)');
+      let best = f[0];
+      for (const row of f) if (Math.abs(row.mhz - mhz) < Math.abs(best.mhz - mhz)) best = row;
+      return best.edgeMv;
+    },
+
+    /**
+     * The probability that ONE REFERENCE BURN (10 s) at this voltage fails — the logistic itself.
+     *
+     * THE LOGISTIC SITS ON THE PROBABILITY, NOT ON A HAZARD RATE, and that is a correction made
+     * during the first run of this suite rather than a preference. With the logistic on a hazard the
+     * two anchors of `researches/02` cannot both be met at once: fixing «half the burns fail at the
+     * edge» caps the deepest possible failure rate at 75 %, so the measured 90 % becomes unreachable
+     * and the ±5 mV pair came out 0.23/0.69 instead of 0.20/0.80. Putting it on the probability makes
+     * the definition and the measurement agree exactly: 0.5 at the edge, ≈0.19/0.81 one grid step
+     * either side, ≈0.06/0.94 at ±10 mV.
+     *
+     * The one simplification named out loud: the measured pair (3 % → 90 %) is not symmetric about
+     * 50 %, and a symmetric logistic centres it. The SPAN is preserved (5.67 logits over 20 mV, hence
+     * the 3.5 mV scale); the asymmetry is not modelled.
+     */
+    singleBurnProbability(voltageMv, mhz) {
+      const { scaleMv } = P.fiction.failure;
+      return 1 / (1 + Math.exp((voltageMv - this.edgeMvFor(mhz)) / scaleMv));
+    },
+
+    /**
+     * The probability that a burn of `seconds` fails. Duration MATTERS — a shorter burn is a smaller
+     * exposure, so the owner's 10× acceleration honestly finds LESS. The bench therefore tells the
+     * truth about its own speed-up instead of pretending it is free.
+     */
+    failureProbability({ mhz, voltageMv, seconds, workload = 'sdc_fma' }) {
+      const { referenceSeconds, shapeFactor } = P.fiction.failure;
+      const shape = shapeFactor[workload] ?? 1;
+      const p1 = this.singleBurnProbability(voltageMv, mhz);
+      const exposure = (seconds / referenceSeconds) * shape;
+      return 1 - Math.pow(1 - p1, exposure);
+    },
+
+    /**
+     * One draw. Returns the outcome and everything needed to explain it — a bench whose failures
+     * cannot be explained is a bench nobody will trust at three in the morning.
+     */
+    draw({ mhz, seconds, workload = 'sdc_fma' }) {
+      const voltageMv = this.servingVoltageMv(mhz);
+      const edgeMv = this.edgeMvFor(mhz);
+      const p = this.failureProbability({ mhz, voltageMv, seconds, workload });
+      const r = rng();
+      draws++;
+      const depthMv = edgeMv - voltageMv;
+      let outcome = 'PASS';
+      if (r < p) {
+        const { sdcUntil, crashUntil } = P.fiction.failure.classDepthMv;
+        outcome = depthMv <= sdcUntil ? 'SDC' : (depthMv <= crashUntil ? 'CRASH' : 'ЗАВИС');
+      }
+      return { outcome, p, r, voltageMv, edgeMv, depthMv, seconds, workload, mhz };
+    },
+
+    /**
+     * THE SEAM INTO THE REAL VERDICT LOGIC (B2-AC7). This is the launcher `runBurst({ run })` takes,
+     * so the bench produces a BURST RESULT and everything above it — the parsing, the golden
+     * comparison, `distinct` inside one burst, the worst-of-the-set rule, `UNKNOWN` as a stop — is
+     * the SHIPPING code, not a double of it. `ideas/04` proposed a synthetic oracle; this seam sits
+     * one level lower and leaves far more of the real stack under test.
+     */
+    run(binary, argv) {
+      const workload = String(binary).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '');
+      const i = argv.indexOf('--sustain');
+      const seconds = i === -1 ? P.fiction.failure.perLaunchSeconds : Number(argv[i + 1]);
+      const mhz = state.lock ? (targetMhz() ?? state.reportedMhz) : state.reportedMhz;
+      const d = this.draw({ mhz, seconds, workload });
+      const launches = Math.max(1, Math.round(seconds / P.fiction.failure.perLaunchSeconds));
+      const line = (checksum, distinct) => `KAGO-WORKLOAD name=${workload} checksum=${checksum} `
+        + `distinct=${distinct} launches=${launches} gpu_us=${launches * 900} work_per_launch=100000 `
+        + `bad_launches=0 bad_elems_max=0\n`;
+
+      switch (d.outcome) {
+        case 'PASS':
+          return { status: 0, stdout: line(P.fiction.goldenChecksum ?? GOLDEN_CHECKSUM, 1), stderr: '' };
+        case 'SDC':
+          // A checksum that differs — the failure mode that does NOT announce itself, and the whole
+          // reason the oracle has a checksum half at all.
+          return { status: 0, stdout: line(sdcChecksum(d.r), launches > 1 ? 2 : 1), stderr: '' };
+        case 'CRASH':
+          return { status: 3221225477, stdout: '', stderr: 'Access violation — драйвер сбросился' };
+        default: {
+          // ЗАВИС. ARMED, NEVER DEFAULT: a suite whose oracle may kill the runner cannot report its
+          // own results, so the death is opt-in and the drill spawns a CHILD to receive it.
+          if (allowProcessDeath) {
+            // `process.exit` and not an exception: no `finally` may run, because on the owner's
+            // machine none does. That is the whole property the write-ahead journal exists for, and
+            // the same shape `watchdog --drill` already uses to prove the detached guard.
+            process.exit(70);
+          }
+          // Unarmed: the softer real-world face of the same thing — a kernel that never returns.
+          // `runBurst` already maps this to «died», so the verdict path is exercised either way.
+          return { status: null, error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '' };
+        }
+      }
+    },
+
+    stats: () => ({ draws, seed }),
+  };
+
   return {
     profile: P,
     backend,
     curveBackend,
+    oracle,
+    seed,
     writes,
     /**
      * The CARD DESCRIPTOR the applier and the format validator expect — produced by the card about
@@ -462,6 +860,24 @@ function defaultWander(P) {
   const ladderAsc = [...P.frequencyGridMhz].sort((a, b) => a - b);
   const at = (frac) => ladderAsc[Math.floor(ladderAsc.length * frac)];
   return [at(0.20), at(0.26), at(0.32)];
+}
+
+/**
+ * How deep our lever can push the voltage serving `mhz` — arithmetic, not a measurement of this run.
+ *
+ * Raising the whole curve by Δ makes the entry whose stock frequency is `mhz − Δ` serve `mhz`, so the
+ * deepest reachable voltage is the one belonging to `mhz + CLOCK_OFFSET_MIN_MHZ`… i.e. the hardware's
+ * ±1000 MHz wall converted into millivolts through the card's own table. This is why the middle of
+ * the range answers «предел рычага»: there the wall arrives before the silicon does.
+ */
+function leverReachMv(card, mhz) {
+  const stock = card.stockCurve.find((r) => r.mhz === mhz);
+  if (!stock) return null;
+  const lowest = mhz + config.CLOCK_OFFSET_MAX_MHZ * -1;   // −1000 МГц по частотной оси таблицы
+  const deepest = card.stockCurve
+    .filter((r) => r.mhz >= lowest)
+    .reduce((best, r) => (r.voltageMv < best ? r.voltageMv : best), stock.voltageMv);
+  return stock.voltageMv - deepest;
 }
 
 /** The nearest supported frequency at or below `mhz`; the ladder's floor when nothing is below. */
@@ -680,11 +1096,236 @@ export async function selfTest() {
   } catch (e) { genWhy = e.message; }
   check('ОБЩНОСТЬ: другая геометрия прогоняется тем же кодом', genOk, genWhy);
 
-  // ---- 12. nothing was written outside the sandbox (EXP-0025)
+  // ---- 12. THE FICTION: the edge exists, is on the grid, and is monotone (B2-AC1)
+  const F = CARD.fiction;
+  check('КРАЙ: у каждой частоты он есть', F.edge.length === CARD.frequencyGridMhz.length,
+    `краёв ${F.edge.length}, частот ${CARD.frequencyGridMhz.length}`);
+  check('КРАЙ: определение записано в артефакт, а не подразумевается',
+    typeof F.edgeDefinition === 'string' && F.edgeDefinition.includes('половине'), 'определения нет');
+  check('КРАЙ: каждый лежит НА сетке напряжений — на нём можно стоять',
+    F.edge.every((r) => CARD.voltageGridMv.includes(r.edgeMv)), 'край между ступенями');
+  const ascEdge = [...F.edge].sort((a, b) => a.mhz - b.mhz);
+  // ЛЁГКИЙ ДРЕЙФ И ШУМ — слово владельца 2026-08-15. Гладкий край делает интерполяцию законной, а
+  // она записана антипаттерном эпика (E2-AC3); плюс шум сам рождает «редкий случай» с затравкой.
+  // ROUGHNESS, measured as how often the step CHANGES SIGN. The first version of this block counted
+  // distinct headroom values and was worthless: a perfectly smooth curve produces hundreds of them,
+  // so the block stayed green when the noise was mutated away. Mutation testing found that, which is
+  // the entire reason it is run — a suite is only worth what its red proves (EXP-0008).
+  let flips = 0; let compared = 0;
+  for (let i = 2; i < ascEdge.length; i++) {
+    const d1 = ascEdge[i - 1].edgeMv - ascEdge[i - 2].edgeMv;
+    const d2 = ascEdge[i].edgeMv - ascEdge[i - 1].edgeMv;
+    if (d1 !== 0 && d2 !== 0) { compared++; if (Math.sign(d1) !== Math.sign(d2)) flips++; }
+  }
+  check('КРАЙ: ШУМИТ, как кремний, — разность меняет знак постоянно, а не идёт гладко',
+    compared > 50 && flips / compared > 0.25,
+    `смен знака ${flips} из ${compared} (${((flips / Math.max(1, compared)) * 100).toFixed(0)} %)`);
+  // The MEDIAN neighbour-to-neighbour step is what says «tremble» rather than «random walk». The
+  // maximum is deliberately NOT bounded: at the very bottom of the ladder the STOCK curve itself
+  // steps hundreds of millivolts, and an edge that followed it is following the card, not wandering.
+  const jumps = ascEdge.slice(1).map((r, i) => Math.abs(r.edgeMv - ascEdge[i].edgeMv)).filter((d) => d > 0);
+  const median = [...jumps].sort((a, b) => a - b)[Math.floor(jumps.length / 2)];
+  check('КРАЙ: соседние частоты расходятся на ЕДИНИЦЫ милливольт — это дрожь, а не блуждание',
+    jumps.length > 50 && median <= 15, `скачков ${jumps.length}, медиана ${median} мВ`);
+  const avgOf = (rows) => rows.reduce((s, r) => s + r.edgeMv, 0) / rows.length;
+  check('КРАЙ: ТРЕНД всё равно вверх — физика setup-нарушений (researches/09 §2.3)',
+    avgOf(ascEdge.slice(-30)) > avgOf(ascEdge.slice(0, 30)),
+    `низ ${avgOf(ascEdge.slice(0, 30)).toFixed(0)}, верх ${avgOf(ascEdge.slice(-30)).toFixed(0)}`);
+  // Many SMALL dips are silicon; one LARGE drop is a different card. The judgement is on the size,
+  // which is the same rule the validator applies — one criterion, not two that can disagree.
+  check('КРАЙ: локальные нарушения ЕСТЬ и посчитаны — редкий случай владельца достижим обычной картой',
+    F.monotonicity.inversions > 0 && F.monotonicity.maxDropMv <= 30,
+    `нарушений ${F.monotonicity.inversions}, самое глубокое падение ${F.monotonicity.maxDropMv} мВ`);
+  const mid = F.edge.find((r) => r.mhz === 2000) ?? F.edge.find((r) => Math.abs(r.mhz - 2000) < 10);
+  check('КРАЙ: в середине диапазона он ГЛУБЖЕ рычага — «предел рычага» достижим обычной картой',
+    mid && mid.headroomMv > leverReachMv(CARD, mid.mhz),
+    `на ${mid?.mhz} МГц запас ${mid?.headroomMv} мВ при рычаге ${leverReachMv(CARD, mid?.mhz)} мВ`);
+  // The card must describe itself truthfully: a published parameter that does not match what was
+  // actually used is the same class of defect as a stale mirror in the truth↔mirror registry.
+  check('КРАЙ: параметры шума в файле совпадают с тем, чем он на самом деле сделан',
+    F.noise.driftMaxMv === 20 && F.noise.amplitudeMv === 8, JSON.stringify(F.noise));
+
+  // ---- 13. THE MODEL: probabilistic, with the project's own steepness (B2-AC2, B2-AC3)
+  const oc = virtualCard(CARD, { settleSamples: 0, seed: 7 });
+  const testMhz = 2842;
+  const edge = oc.oracle.edgeMvFor(testMhz);
+  const pAt = (mv, s = 10) => oc.oracle.failureProbability({ mhz: testMhz, voltageMv: mv, seconds: s });
+  check('МОДЕЛЬ: на самом краю десять секунд отказывают в ПОЛОВИНЕ случаев (определение края)',
+    Math.abs(pAt(edge) - 0.5) < 0.01, `получилось ${pAt(edge).toFixed(3)}`);
+  const above = pAt(edge + 5); const below = pAt(edge - 5);
+  check('МОДЕЛЬ: ОДНА ступень 5 мВ двигает вероятность с ≈0,2 до ≈0,8 (researches/02)',
+    Math.abs(above - 0.2) < 0.06 && Math.abs(below - 0.8) < 0.06,
+    `выше края ${above.toFixed(3)}, ниже ${below.toFixed(3)}`);
+  check('МОДЕЛЬ: край НЕ порог — выше него отказ возможен, ниже возможен успех',
+    above > 0 && below < 1, `${above}, ${below}`);
+  check('МОДЕЛЬ: ускоренный прожиг находит МЕНЬШЕ — стенд честен про своё ускорение (B2-AC3)',
+    pAt(edge, 1) < pAt(edge, 10), `1 с ${pAt(edge, 1).toFixed(3)} против 10 с ${pAt(edge, 10).toFixed(3)}`);
+
+  // ---- 14. the oracle reads the CARD, not the caller
+  const st2 = virtualCard(CARD, { settleSamples: 0, seed: 3 });
+  const vStock = st2.oracle.servingVoltageMv(2842);
+  await st2.curveBackend.writeRaiseAndCap(45, 2842, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+  const vRaised = st2.oracle.servingVoltageMv(2842);
+  check('ОРАКУЛ: напряжение ЧИТАЕТСЯ с карты — подъём кривой удешевляет частоту',
+    vRaised < vStock, `со стока ${vStock} мВ, после подъёма ${vRaised} мВ`);
+
+  // ---- 15. three outcomes, all reachable, and the class deepens with depth (B2-AC4)
+  const classes = new Set();
+  for (const depth of [5, 18, 60]) {
+    const probe = virtualCard(CARD, { settleSamples: 0, seed: 11 });
+    const e = probe.oracle.edgeMvFor(2842);
+    // forced: judge the draw at a voltage `depth` below the edge, with a long burn so it surely fails
+    const d = { edgeMv: e, voltageMv: e - depth };
+    const cd = CARD.fiction.failure.classDepthMv;
+    const dep = d.edgeMv - d.voltageMv;
+    classes.add(dep <= cd.sdcUntil ? 'SDC' : (dep <= cd.crashUntil ? 'CRASH' : 'ЗАВИС'));
+  }
+  check('ИСХОДЫ: все три достижимы и класс углубляется с глубиной (B2-AC4)',
+    classes.has('SDC') && classes.has('CRASH') && classes.has('ЗАВИС'), [...classes].join(', '));
+
+  // ---- 16. the REAL verdict logic judges, driven through the REAL runBurst (B2-AC7)
+  const stress = await import('./stress-tester.mjs');
+  const golden = { gpu: { driver: CARD.stamp.driver, vbios: CARD.stamp.vbios }, args: [], checksum: GOLDEN_CHECKSUM };
+  const probedCard = { probed: true, driver: CARD.stamp.driver, vbios: CARD.stamp.vbios };
+  const stampOk = stress.checkGoldenStamp(golden, probedCard, []);
+  check('СТЕНД: эталон стенда проходит НАСТОЯЩУЮ проверку штампа (R6)', stampOk.ok, stampOk.why);
+
+  const judge = (vc, mhz, seconds) => {
+    vc.backend.lockGraphicsClocksMhz(mhz, mhz);
+    vc.backend.query(['clocks.gr']);
+    const burst = stress.runBurst({ name: 'sdc_fma', args: [], sustainSeconds: seconds, run: (b, a) => vc.oracle.run(b, a) });
+    return stress.decideVerdict({ bursts: [burst], golden, stamp: stampOk, faults: { providers: [], faults: [] } });
+  };
+  const safe = virtualCard(CARD, { settleSamples: 0, seed: 5 });
+  await safe.curveBackend.writeRaiseAndCap(0, null, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+  const vSafe = judge(safe, 2842, 10);
+  check('ВЕРДИКТ: на стоке НАСТОЯЩИЙ stress-tester говорит PASS',
+    vSafe.verdict === config.VERDICT.PASS, `${vSafe.verdict}: ${vSafe.reason}`);
+
+  // A DEEP undervolt — and «deep» is asserted rather than assumed. The first version of this block
+  // raised by 300 MHz and got PASS, correctly: +300 only takes the voltage serving 2842 MHz from
+  // 1045 down to about 950, which is still 85 mV ABOVE this card's invented edge. The bench was
+  // right and the block was wrong, which is the good direction for that to happen in.
+  const doomed = virtualCard(CARD, { settleSamples: 0, seed: 5 });
+  const deep = await raiseBelowEdge(doomed, 2842, 20, CARD);
+  const vServed = doomed.oracle.servingVoltageMv(2842);
+  const vEdge = doomed.oracle.edgeMvFor(2842);
+  check('ГЛУБИНА: подъём и правда увёл напряжение НИЖЕ края — блок не может пройти по ошибке',
+    deep.ok && vServed < vEdge, `подъём ${deep.deltaMhz} МГц: обслуживает ${vServed} мВ при крае ${vEdge} мВ`);
+  const vDoomed = judge(doomed, 2842, 10);
+  check('ВЕРДИКТ: глубоко под краем НАСТОЯЩИЙ stress-tester НЕ говорит PASS',
+    vDoomed.verdict !== config.VERDICT.PASS, `${vDoomed.verdict}: ${vDoomed.reason}`);
+  check('ВЕРДИКТ: судит боевой код, а не стенд — вердикт назван его словарём',
+    [config.VERDICT.SDC, config.VERDICT.CRASH, null].includes(vDoomed.verdict), String(vDoomed.verdict));
+
+  // ---- 17. the seed reproduces exactly (B2-AC6)
+  // The trace is taken AT the edge, where the draw actually decides something. Taken at stock it
+  // would be forty PASSes for every seed, and the block would pass while proving nothing — the
+  // classic shape of a test that cannot fail (EXP-0008).
+  const trace = async (s) => {
+    const c = virtualCard(CARD, { settleSamples: 0, seed: s });
+    await raiseBelowEdge(c, 2842, 0, CARD);        // ровно НА краю — там, где бросок решает
+    const out = [];
+    for (let i = 0; i < 40; i++) out.push(c.oracle.draw({ mhz: 2842, seconds: 10 }).outcome);
+    return out.join(',');
+  };
+  const t42 = await trace(42);
+  const t42again = await trace(42);
+  const t43 = await trace(43);
+  check('ЗЕРНО: у прогона есть чему различаться — исходы не одинаковы',
+    new Set(t42.split(',')).size > 1, `все исходы одинаковы: ${t42.split(',')[0]}`);
+  check('ЗЕРНО: один и тот же посев даёт побайтово тот же прогон', t42 === t42again, 'прогоны разошлись');
+  check('ЗЕРНО: разный посев даёт разный прогон', t42 !== t43, 'зерно ни на что не влияет');
+
+  // ---- 18. ЗАВИС is a REAL process death (B2-AC5)
+  const child = await hangDrill();
+  check('ЗАВИС: процесс УМИРАЕТ по-настоящему — ни один finally не отработал (B2-AC5)',
+    child.died && child.finallyRan === false, JSON.stringify(child));
+  check('ЗАВИС: намерение, записанное ДО обращения к карте, пережило смерть',
+    child.intentSurvived, 'намерение не пережило — журнал упреждающей записи не работает');
+
+  // ---- 19. nothing was written outside the sandbox (EXP-0025)
   check('ПЕСОЧНИЦА: самопроверка ничего не пишет на диск',
     !existsSync(join('runs', 'virtual-gpu')), 'самопроверка создала каталог в runs/');
 
   return report(results);
+}
+
+/**
+ * Raise the whole curve until the voltage serving `mhz` sits `marginMv` BELOW that frequency's edge.
+ *
+ * COMPUTED, NEVER REMEMBERED, and the reason is this session's own experience: a hard-coded «+600 MHz
+ * is deep enough» stopped being true the moment the edge gained its jitter, and three blocks went red
+ * for a reason that had nothing to do with what they test. A block that depends on a number the card
+ * owns must ASK the card for it.
+ */
+async function raiseBelowEdge(vc, mhz, marginMv, card) {
+  const target = vc.oracle.edgeMvFor(mhz) - marginMv;
+  for (let delta = 100; delta <= 1000; delta += 20) {
+    const w = await vc.curveBackend.writeRaiseAndCap(delta, mhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
+    if (!w.ok) continue;
+    if (vc.oracle.servingVoltageMv(mhz) <= target) return { ok: true, deltaMhz: delta };
+  }
+  return { ok: false, deltaMhz: null, why: `даже +1000 МГц не опускает ${mhz} МГц до ${target} мВ` };
+}
+
+/**
+ * THE HANG DRILL — `ЗАВИС` proved by a REAL death, in a CHILD process.
+ *
+ * WHY A CHILD AND NOT A FLAG: the death must be real, and a suite whose oracle may kill the runner
+ * cannot report its own results. So the victim is a child; the parent reads what the child managed
+ * to leave on disk. This is the same shape `watchdog --drill` already uses to make the detached
+ * guard believable — a guard that has never fired is worth nothing (EXP-0008 applied to machinery).
+ *
+ * WHAT IT ACTUALLY ASSERTS, and each half matters: the child died with the hang's exit code, its
+ * `finally` did NOT run (on the owner's machine none does — that is why the write-ahead journal
+ * exists at all), and the intent written BEFORE the card was touched SURVIVED. Those three together
+ * are the property `plans/15` §4.4 is built on, exercised offline for the first time.
+ */
+async function hangDrill() {
+  const { spawnSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const here = fileURLToPath(import.meta.url);
+  const base = join(tmpdir(), `kago-hang-${process.pid}`);
+  const intentPath = `${base}-intent.json`;
+  const finallyPath = `${base}-finally.txt`;
+  const childPath = `${base}-victim.mjs`;
+
+  const child = `
+import { writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const m = await import(pathToFileURL(${JSON.stringify(here)}).href);
+const [intentPath, finallyPath] = process.argv.slice(2);
+const d = m.deriveCardFromCurves({});
+const vc = m.virtualCard(d.card, { settleSamples: 0, seed: 5, allowProcessDeath: true });
+// Достаточно глубоко, чтобы класс исхода дошёл до ЗАВИСа: считаем от края, а не помним число.
+const edgeMv = vc.oracle.edgeMvFor(2842);
+for (let delta = 100; delta <= 1000; delta += 20) {
+  const w = await vc.curveBackend.writeRaiseAndCap(delta, 2842, { cardMaxClockMhz: d.card.card.maxGraphicsMhz });
+  if (w.ok && vc.oracle.servingVoltageMv(2842) <= edgeMv - 40) break;
+}
+vc.backend.lockGraphicsClocksMhz(2842, 2842);
+try {
+  // НАМЕРЕНИЕ НА ДИСК ДО ОБРАЩЕНИЯ К КАРТЕ — ровно порядок журнала упреждающей записи.
+  writeFileSync(intentPath, JSON.stringify({ state: 'intent', mhz: 2842, at: 'до нагрузки' }));
+  for (let i = 0; i < 500; i++) vc.oracle.run('sdc_fma.exe', ['--sustain', '10']);
+} finally {
+  // ЭТОГО НЕ ДОЛЖНО СЛУЧИТЬСЯ. Если файл появился — смерть была ненастоящей.
+  writeFileSync(finallyPath, 'finally отработал');
+}
+`;
+  writeFileSync(childPath, child);
+  const r = spawnSync(process.execPath, [childPath, intentPath, finallyPath],
+    { cwd: process.cwd(), encoding: 'utf8', timeout: 60_000 });
+  const out = {
+    died: r.status === 70,
+    status: r.status,
+    finallyRan: existsSync(finallyPath),
+    intentSurvived: existsSync(intentPath),
+    stderr: (r.stderr || '').split('\n').slice(0, 2).join(' '),
+  };
+  for (const p of [childPath, intentPath, finallyPath]) { try { unlinkSync(p); } catch { /* уже нет */ } }
+  return out;
 }
 
 /**
@@ -755,8 +1396,35 @@ function show(card) {
   }
   console.log(`  потолок мощности      ${card.powerLimitW.min}…${card.powerLimitW.max} Вт, умолчание ${card.powerLimitW.default}`);
   console.log(`  штамп                 драйвер ${card.stamp.driver}, VBIOS ${card.stamp.vbios}`);
-  const f = Object.keys(card.fiction ?? {});
-  console.log(`  вымысел (края)        ${f.length ? f.join(', ') : '(пусто — края отказа приходят в фазе 2)'}`);
+  const F = card.fiction ?? {};
+  if (!F.edge) {
+    console.log('  вымысел (края)        (пусто — края отказа приходят в фазе 2)');
+    console.log(`\n${PROVABILITY_LINE}`);
+    return;
+  }
+
+  console.log('');
+  console.log('ПРИДУМАННЫЙ КРАЙ — единственный вымысел во всей карте, и вот он целиком в цифрах:');
+  console.log(`  определение           ${F.edgeDefinition}`);
+  console.log(`  дрожь                 ±${F.noise.amplitudeMv} мВ на точку + медленный дрейф до ±${F.noise.driftMaxMv} мВ, зерно ${F.noise.seed}`);
+  console.log(`  локальные нарушения   ${F.monotonicity.inversions} из ${F.edge.length} `
+    + `(${(F.monotonicity.inversionShare * 100).toFixed(0)} %), самое глубокое падение ${F.monotonicity.maxDropMv} мВ`);
+  console.log(`                        ↑ это и есть «очень редко — выше» из вашего опыта: затравка соседкой обязана`);
+  console.log('                          на них откатываться, и проверяется это обычной картой, а не ловушкой');
+  console.log('');
+  console.log('  частота    сток   край   запас     доступно рычагом   что найдёт движок');
+  console.log('  ' + '-'.repeat(78));
+  const byMhz = new Map(F.edge.map((r) => [r.mhz, r]));
+  // The lever's reach at a frequency: how deep the ±1000 MHz offset can push the serving voltage.
+  // Where the edge is DEEPER than that, an honest engine must answer «предел рычага», never «край».
+  for (const mhz of [3090, 2842, 2400, 2000, 1700, 1100, 500, 180]) {
+    const r = byMhz.get(mhz) ?? [...F.edge].sort((a, b) => Math.abs(a.mhz - mhz) - Math.abs(b.mhz - mhz))[0];
+    const reach = leverReachMv(card, r.mhz);
+    const verdict = reach === null ? '—' : (r.headroomMv <= reach ? 'край' : 'ПРЕДЕЛ РЫЧАГА');
+    console.log(`  ${String(r.mhz).padStart(5)} МГц ${String(r.stockMv).padStart(6)} ${String(r.edgeMv).padStart(6)} `
+      + `${String(r.headroomMv).padStart(6)} мВ ${String(reach === null ? '—' : `${reach} мВ`).padStart(16)}   ${verdict}`);
+  }
+  console.log('');
   console.log(`\n${PROVABILITY_LINE}`);
 }
 
