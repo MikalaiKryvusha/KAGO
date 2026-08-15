@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <title>KAGO — анимация прогона развёртки</title>
 <style>
+  /* DSEG7 Classic — настоящий семисегментный шрифт, SIL OFL.
+     Встроен в страницу: дашборд работает без сети, потому что во время
+     прогона внешний запрос — это отказ ровно в тот момент, когда он не нужен.
+     Файл и лицензия лежат в assets/fonts/. */
+  @font-face{font-family:"DSEG7";src:url(data:font/woff2;base64,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) format("woff2");font-weight:400;font-style:normal;font-display:block}
+  .seg{font-family:"DSEG7",monospace;font-size:13px;letter-spacing:.5px}
+  .seg.off{fill:#123047;opacity:.75}
+  .seg.on{fill:#4fc8ff;filter:url(#neon)}
+
   :root{
     --bg:#14161a; --panel:#1b1f25; --line:#2a3038; --ink:#e8edf3; --dim:#8b98a8;
     --ice:#8794a3; --fire:#ff7a3c; --ok:#4ade80; --alarm:#ff4d4d;
@@ -61,7 +70,7 @@
 
   /* Жало скрывается за кожухом ЧУТЬ-ЧУТЬ: в покое оно на 14 px выше кромки,
      ход 24 px, значит за карту уходит ровно 10 px. */
-  .arm{animation:arm 11s cubic-bezier(.42,0,.58,1) infinite}
+  .arm{animation:arm 24s cubic-bezier(.42,0,.58,1) infinite}
   @keyframes arm{
     0%,7%   {transform:translateY(0)}
     32%,64% {transform:translateY(24px)}
@@ -72,649 +81,649 @@
      Сгенерировано расчётом, не подобрано на глаз. Каждая грань — точка на
      окружности: x = R·sin(a), видима при cos(a) > 0, ширина и яркость ∝ cos(a).
      Поэтому грани СЖИМАЮТСЯ и ГАСНУТ у силуэта, а движутся неравномерно —
-     быстро в середине, медленно у кромки. Равномерные полоски, ехавшие ровно,
-     были 2D-подделкой под цилиндр. */
+     быстро в середине, медленно у кромки. Ход МЕДЛЕННЫЙ: цикл 24 с,
+     за подкрут 1 оборот — слово владельца «сильно медленнее». */
   .flute{transform-box:fill-box;transform-origin:center}
 @keyframes fl0{
   0%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
   7%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
   32%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
-  33%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  34%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  35%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  36%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  46%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  47%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  48%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  49%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  50%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  51%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  52%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  62%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  63%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  33%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  34%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  35%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  36%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  37%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  38%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  39%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  40%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  58%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  59%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  60%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  61%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  62%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  63%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
   64%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
   89%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
   100%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
 }
-.fl0{animation:fl0 11s linear infinite}
+.fl0{animation:fl0 24s linear infinite}
 @keyframes fl1{
   0%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
   7%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
   32%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  33%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  34%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  35%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  45%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  46%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  47%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  48%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  49%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  50%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  51%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  61%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  62%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  63%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  33%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  34%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  35%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  36%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  37%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  38%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  56%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  57%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  58%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  59%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  60%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  61%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  62%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  63%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
   64%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
   89%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
   100%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
 }
-.fl1{animation:fl1 11s linear infinite}
+.fl1{animation:fl1 24s linear infinite}
 @keyframes fl2{
   0%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
   7%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
   32%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  33%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  34%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  44%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  45%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  46%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  47%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  48%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  49%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  50%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  60%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  61%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  62%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  63%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  33%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  34%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  35%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  36%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  54%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  55%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  56%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  57%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  58%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  59%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  60%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  61%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  62%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  63%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
   64%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
   89%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
   100%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
 }
-.fl2{animation:fl2 11s linear infinite}
+.fl2{animation:fl2 24s linear infinite}
 @keyframes fl3{
   0%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
   7%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
   32%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  33%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  43%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  44%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  45%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  46%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  47%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  48%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  49%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  59%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  60%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  61%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  62%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  63%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  33%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  34%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  52%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  53%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  54%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  55%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  56%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  57%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  58%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  59%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  60%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  61%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  62%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  63%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
   64%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
   89%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
   100%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
 }
-.fl3{animation:fl3 11s linear infinite}
+.fl3{animation:fl3 24s linear infinite}
 @keyframes fl4{
   0%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  42%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  43%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  44%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  45%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  46%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  47%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  48%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  58%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  59%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  60%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  61%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  62%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  63%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  33%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  50%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  51%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  52%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  53%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  54%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  55%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  56%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  57%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  58%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  59%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  60%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  61%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  62%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  63%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
   64%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
 }
-.fl4{animation:fl4 11s linear infinite}
+.fl4{animation:fl4 24s linear infinite}
 @keyframes fl5{
   0%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  41%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  42%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  43%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  44%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  45%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  46%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  47%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  57%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  58%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  59%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  60%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  61%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  62%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  63%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  48%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  49%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  50%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  51%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  52%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  53%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  54%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  55%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  56%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  57%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  58%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  59%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  60%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  61%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  62%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
 }
-.fl5{animation:fl5 11s linear infinite}
+.fl5{animation:fl5 24s linear infinite}
 @keyframes fl6{
   0%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  40%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  41%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  42%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  43%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  44%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  45%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  46%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  56%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  57%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  58%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  59%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  60%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  61%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  62%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  46%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  47%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  48%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  49%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  50%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  51%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  52%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  53%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  54%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  55%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  56%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  57%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  58%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  59%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  60%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
 }
-.fl6{animation:fl6 11s linear infinite}
+.fl6{animation:fl6 24s linear infinite}
 @keyframes fl7{
   0%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  39%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  40%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  41%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  42%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  43%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  44%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  45%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  55%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  56%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  57%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  58%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  59%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  60%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  61%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  44%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  45%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  46%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  47%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  48%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  49%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  50%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  51%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  52%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  53%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  54%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  55%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  56%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  57%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  58%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
 }
-.fl7{animation:fl7 11s linear infinite}
+.fl7{animation:fl7 24s linear infinite}
 @keyframes fl8{
   0%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  38%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  39%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  40%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  41%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  42%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  43%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  44%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  54%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  55%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  56%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  57%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  58%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  59%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  60%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  42%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  43%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  44%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  45%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  46%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  47%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  48%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  49%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  50%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  51%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  52%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  53%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  54%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  55%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  56%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
 }
-.fl8{animation:fl8 11s linear infinite}
+.fl8{animation:fl8 24s linear infinite}
 @keyframes fl9{
   0%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  37%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  38%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  39%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  40%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  41%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  42%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  43%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  53%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  54%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  55%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  56%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  57%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  58%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  59%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  40%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  41%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  42%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  43%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  44%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  45%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  46%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  47%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  48%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  49%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  50%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  51%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  52%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  53%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  54%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
 }
-.fl9{animation:fl9 11s linear infinite}
+.fl9{animation:fl9 24s linear infinite}
 @keyframes fl10{
   0%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  36%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  37%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  38%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  39%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  40%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  41%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  42%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  52%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  53%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  54%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  55%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  56%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  57%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  58%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  38%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  39%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  40%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  41%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  42%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  43%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  44%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  45%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  46%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  47%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  48%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  49%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  50%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  51%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  52%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
 }
-.fl10{animation:fl10 11s linear infinite}
+.fl10{animation:fl10 24s linear infinite}
 @keyframes fl11{
   0%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  35%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  36%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  37%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  38%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  39%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  40%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  41%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  51%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  52%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  53%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  54%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  55%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  56%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  57%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  36%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  37%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  38%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  39%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  40%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  41%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  42%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  43%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  44%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  45%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  46%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  47%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  48%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  49%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  50%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
 }
-.fl11{animation:fl11 11s linear infinite}
+.fl11{animation:fl11 24s linear infinite}
 @keyframes fl12{
   0%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
   7%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
   32%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  34%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  35%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  36%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  37%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  38%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  39%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  40%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  50%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  51%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  52%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  53%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  54%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  55%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  56%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  34%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  35%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  36%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  37%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  38%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  39%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  40%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  41%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  42%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  43%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  44%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  45%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  46%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  47%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  48%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
   64%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
   89%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
   100%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
 }
-.fl12{animation:fl12 11s linear infinite}
+.fl12{animation:fl12 24s linear infinite}
 @keyframes fl13{
   0%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
   7%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
   32%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  33%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  34%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  35%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  36%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  37%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  38%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  39%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  49%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  50%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  51%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  52%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  53%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  54%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  55%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  34%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  35%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  36%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  37%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  38%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  39%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  40%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  41%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  42%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  43%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  44%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  45%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  46%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
   64%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
   89%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
   100%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
 }
-.fl13{animation:fl13 11s linear infinite}
+.fl13{animation:fl13 24s linear infinite}
 @keyframes fl14{
   0%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
   7%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
   32%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  33%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  34%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  35%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  36%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  37%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  38%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  48%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  49%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  50%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  51%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  52%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  53%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  54%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  33%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
+  34%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  35%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  36%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  37%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  38%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  39%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  40%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  41%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  42%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  43%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  44%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  62%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  63%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
   64%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
   89%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
   100%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
 }
-.fl14{animation:fl14 11s linear infinite}
+.fl14{animation:fl14 24s linear infinite}
 @keyframes fl15{
   0%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
   7%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
   32%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  33%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  34%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  35%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  36%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  37%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  47%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  48%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  49%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  50%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  51%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  52%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  53%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  63%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  33%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
+  34%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  35%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
+  36%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  37%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
+  38%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  39%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
+  40%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  41%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
+  42%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
+  60%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  61%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
+  62%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  63%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
   64%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
   89%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
   100%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
 }
-.fl15{animation:fl15 11s linear infinite}
+.fl15{animation:fl15 24s linear infinite}
 </style>
 </head>
 <body>
@@ -805,6 +814,10 @@
                    C -18,-86 -17,-92 -16,-99
                    C -15,-107 -9,-112 0,-112 Z"/>
           <clipPath id="gripClip"><use href="#grip-shape"/></clipPath>
+          <filter id="neon" x="-70%" y="-70%" width="240%" height="240%">
+            <feGaussianBlur stdDeviation="1.1" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
         </defs>
 
         <!-- ── ОТВЁРТКА РИСУЕТСЯ ПЕРВОЙ — порядок отрисовки и есть глубина.
@@ -859,12 +872,12 @@
         </g>
 
         <!-- ── ПЛАТА, ЗАДНЯЯ ПЛАСТИНА, ГРЕБЁНКА PCIe ───────────────────── -->
-        <rect x="34" y="250" width="316" height="12" rx="2" fill="#1e232a" stroke="#39424d"/>
+        <rect x="34" y="236" width="316" height="24" rx="2" fill="#1e232a" stroke="#39424d"/>
         <!-- Гребёнка PCIe одной сплошной медяшкой: зубы дробили взгляд и мешали
              заметить остановку — а именно ради этого вся картинка и рисуется. -->
         <g>
-          <rect x="70" y="262" width="132" height="12" rx="1.5" fill="url(#gold)"/>
-          <rect x="212" y="262" width="52" height="12" rx="1.5" fill="url(#gold)"/>
+          <rect x="70" y="258" width="132" height="12" rx="1.5" fill="url(#gold)"/>
+          <rect x="212" y="258" width="52" height="12" rx="1.5" fill="url(#gold)"/>
         </g>
 
         <!-- ── КРОНШТЕЙН, ВИД С РЕБРА ────────────────────────────────────
@@ -922,32 +935,41 @@
           </g>
         </g>
 
-        <!-- ── ПОЛОСА ДИСПЛЕЕВ НА САМОЙ КАРТЕ ────────────────────────────
-             Идея владельца: опустить контакты, освободить горизонтальную полосу
-             под вентиляторами и положить туда экранчики с показаниями карты.
-             Первая моя попытка клала текст ПОВЕРХ лопастей — он был нечитаем;
-             здесь у показаний своё место, и они читаются как часть железа.
-             Это ДАННЫЕ, а не анимация: тот же посекундный сэмплер, который
-             проект уже гоняет отдельным процессом. -->
-        <g font-family="Consolas,Menlo,monospace">
-          <rect x="38" y="218" width="306" height="22" rx="3" fill="#161b21" stroke="#454e59"/>
+        <!-- ── ЧЕТЫРЕ СЕМИСЕГМЕНТНЫХ ИНДИКАТОРА НА САМОЙ КАРТЕ ───────────
+             Шрифт DSEG7 Classic (SIL OFL) — настоящий сегментный, встроен в
+             страницу base64, а не тянется из сети: дашборд поднимается во время
+             прогона, и внешний запрос отказал бы ровно тогда, когда сети нет.
+             Погашенные сегменты — штатный приём DSEG: тусклая «8888» подложкой,
+             поверх неё яркое значение. Общего контейнера у панелей нет.
+             Это ДАННЫЕ, а не анимация. -->
+        <g>
           <g>
-            <rect x="42" y="221" width="96" height="16" rx="2" fill="#08120f" stroke="#2e3a3a"/>
-            <text x="47" y="233" font-size="11" fill="#5fbfa8" letter-spacing=".6">T</text>
-            <text x="133" y="233" font-size="11.5" fill="#8ffbdd" text-anchor="end"
-                  letter-spacing=".5" font-weight="700">74 C</text>
+            <rect x="38" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
+            <text x="43" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">CLK</text>
+            <text x="43" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">MHz</text>
+            <text class="seg off" x="107" y="235" text-anchor="end">8888</text>
+            <text class="seg on"  x="107" y="235" text-anchor="end">2842</text>
           </g>
           <g>
-            <rect x="144" y="221" width="96" height="16" rx="2" fill="#08120f" stroke="#2e3a3a"/>
-            <text x="149" y="233" font-size="11" fill="#5fbfa8" letter-spacing=".6">FAN</text>
-            <text x="235" y="233" font-size="11.5" fill="#8ffbdd" text-anchor="end"
-                  letter-spacing=".5" font-weight="700">62% 1770</text>
+            <rect x="116" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
+            <text x="121" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">TEMP</text>
+            <text x="121" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">C</text>
+            <text class="seg off" x="185" y="235" text-anchor="end">88</text>
+            <text class="seg on"  x="185" y="235" text-anchor="end">74</text>
           </g>
           <g>
-            <rect x="246" y="221" width="94" height="16" rx="2" fill="#08120f" stroke="#2e3a3a"/>
-            <text x="251" y="233" font-size="11" fill="#5fbfa8" letter-spacing=".6">P</text>
-            <text x="335" y="233" font-size="11.5" fill="#8ffbdd" text-anchor="end"
-                  letter-spacing=".5" font-weight="700">248 W</text>
+            <rect x="194" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
+            <text x="199" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">FAN</text>
+            <text x="199" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">RPM</text>
+            <text class="seg off" x="263" y="235" text-anchor="end">8888</text>
+            <text class="seg on"  x="263" y="235" text-anchor="end">1770</text>
+          </g>
+          <g>
+            <rect x="272" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
+            <text x="277" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">PWR</text>
+            <text x="277" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">W</text>
+            <text class="seg off" x="341" y="235" text-anchor="end">888</text>
+            <text class="seg on"  x="341" y="235" text-anchor="end">248</text>
           </g>
         </g>
       </svg>
@@ -964,10 +986,10 @@
     <!-- «прожиг» — жаргон (слово владельца 2026-08-16). На самом деле идёт
          СТРЕСС-ТЕСТ УСТОЙЧИВОСТИ, так и называем — здесь и во всём, что он читает. -->
     <div class="m"><span>стресс-тест устойчивости</span><b>6,2 <span style="font-size:17px;color:var(--dim)">из 10 с</span></b></div>
-    <div class="m"><span>пройдено по полосе</span><b>2842…2800</b>
+    <div class="m"><span>пройдено по диапазону частот</span><b>2842…2800</b>
       <span style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df">
-        закрыто частот <b style="display:inline;font-size:13px">7 из 43</b></span></div>
-    <p class="state alive">● ИДЁТ СТРЕСС-ТЕСТ УСТОЙЧИВОСТИ</p>
+        настроено <b style="display:inline;font-size:13px">7 из 43</b></span></div>
+    <p class="state alive">● ИДЁТ СТРЕСС-ТЕСТ</p>
     <p class="state dead">■ ЗАМЕРЛО — 2842 МГц / 995 мВ</p>
   </div>
 </div>
