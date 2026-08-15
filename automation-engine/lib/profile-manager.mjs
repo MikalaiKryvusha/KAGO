@@ -158,6 +158,86 @@ export function nvidiaSmiBackend() {
  * [NOT-TESTED] live — the injected twin in the selftest proves the SHAPE; this proves nothing until it
  * runs on the card, and the profile it applies is a draft until the owner's acceptance says otherwise.
  */
+/**
+ * THE FOUR REFUSALS THAT STAND BETWEEN A COMPUTED VECTOR AND THE DEVICE — extracted 2026-08-15 so
+ * that the virtual card of epic 03 can be held to the SAME bar rather than to a copy of it.
+ *
+ * WHY EXTRACTED RATHER THAN DUPLICATED, because it looks like ceremony and is not. A test double is
+ * only worth its FIDELITY, and the one way a double silently becomes worthless is by being MORE
+ * PERMISSIVE than the thing it stands in for: every later green would then be a lie, and nothing
+ * would go red to say so (`researches/10` §2.2 — the industry's whole reason for contract tests).
+ * Two copies of these four checks would be a truth↔mirror pair that must be WATCHED; one function
+ * called by both is a pair that cannot drift. The registry's own preference, stated in
+ * `AGENT_GUIDE.md`: «a pair that can be removed beats a pair that must be watched».
+ *
+ * Pure: it decides, it does not write. Returns `null` when the write may proceed, or `{ ok: false,
+ * why, rule }` — `rule` naming which guard spoke, so a caller (and a parity block) can assert WHICH
+ * rule refused rather than only THAT something did.
+ *
+ * [TESTED: 2026-08-15 18:5x · the extraction changed no behaviour — `profile-manager --selftest` is
+ *  still 41 blocks / 0 failures, INCLUDING the two that judge these very rules («R13: кривая ВЫШЕ
+ *  МАКСИМУМА КАРТЫ отвергнута до записи» and «ВЕКТОР: инверсия ОТВЕРГНУТА последней строкой перед
+ *  записью»). That both survived an extraction they never mention is the evidence: they exercise the
+ *  backend, not this function, so they would have gone red had the move changed a verdict.
+ *  `virtual-gpu --selftest` adds the parity block, and a mutation that stops the virtual backend from
+ *  calling this function reddens it — i.e. the shared decision is proved SHARED, not merely present.]
+ */
+export function curveWriteRefusal(vec, { capMhz = null, cardMaxClockMhz = null } = {}) {
+  // ─── R11: A CEILING MUST BE HELD BY SOMETHING ──────────────────────────────────────────────────
+  // The format already refuses a cap below the curve's floor, and this is the same rule at the moment
+  // of writing, where the CARD's own top is in hand rather than the ladder's. Two checks of one fact
+  // is not duplication when one of them is the last line before a device write (R11, `bugs/02`).
+  if (vec.capIsBelowTop && vec.capEnforced === false) {
+    return { ok: false, rule: 'R11', why: `потолок ${capMhz} МГц кривой не удержать: утечка ${vec.capLeakMhz} МГц, `
+      + `пол ${vec.lowestEnforceableCapMhz} МГц (R11)` };
+  }
+  // ─── R13: THE CARD'S OWN CEILING, born from `bugs/11` ──────────────────────────────────────────
+  //
+  // The owner's rule, verbatim (`GOAL.md` → «⭐ ЧТО ТАКОЕ ТЮНИНГ VF-КРИВОЙ», 2026-08-15):
+  // *«НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ»* — «this frequency» being what the specimen itself
+  // answers, not what the reference spec publishes.
+  //
+  // THE INCIDENT THIS EXISTS FOR: a raise of +592 MHz proven only under a ceiling of 2842 MHz was
+  // applied with the ceiling removed. The card was handed a curve offering 3180 MHz — past the
+  // validated 2842, past the V/F table's own top of 3157, past the card's maximum of 3090 — and
+  // bugchecked in `nvlddmkm.sys` two minutes later, on an IDLE desktop.
+  //
+  // WHY THE BOUND IS REQUIRED RATHER THAN DEFAULTED: a write whose ceiling is unknown is exactly the
+  // write this guard exists to stop. Defaulting an absent bound to «no limit» would make the guard
+  // disappear precisely for the caller careless enough not to pass it.
+  const bound = Number(cardMaxClockMhz);
+  if (!Number.isFinite(bound) || bound <= 0) {
+    return { ok: false, rule: 'R13-bound', why: 'максимум карты не передан — писать кривую, не зная потолка экземпляра, запрещено '
+      + '(правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ», R13, bugs/11)' };
+  }
+  // The judged number is what WE lifted, never what the factory table already offered: on this card
+  // the stock top entry is 3172 MHz against a card maximum of 3090, so reading the whole curve's top
+  // here would refuse a vector of all zeroes.
+  if (vec.highestRaisedOfferMhz !== null && vec.highestRaisedOfferMhz > bound) {
+    return { ok: false, rule: 'R13-offer', why: `мы подняли точку до ${vec.highestRaisedOfferMhz} МГц при максимуме карты ${bound} МГц `
+      + `— превышение ${vec.highestRaisedOfferMhz - bound} МГц. Это правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ `
+      + 'ЭТОЙ ЧАСТОТЫ» (R13). Опустите подъём или поставьте потолок; ровно эта форма уронила машину '
+      + '2026-08-15 (bugs/11)' };
+  }
+  // ─── R12: A UNIFORM RAISE CANNOT INVERT THE CURVE; A VECTOR CAN ────────────────────────────────
+  // That is a proof about `min(F_i + Δ, F_top)`. Raise point i more than point i+1 and a
+  // lower-VOLTAGE point ends up offering a HIGHER frequency than its neighbour. This project has
+  // never written such a curve and has never observed what the card does with one, so it refuses
+  // instead of finding out on the owner's machine — «look it up FIRST, never learn a state-changing
+  // flag's semantics by running it» (the owner's-machine rule).
+  //
+  // It refuses on `introducesInversion`, NOT on `monotone`: an inversion the CARD's own factory
+  // curve already has is not ours to blame the write for, and refusing on it would block writes
+  // that work today — a guard causing the regression it exists to prevent.
+  if (vec.introducesInversion) {
+    const f = vec.firstInversionAt;
+    return { ok: false, rule: 'R12', why: `вектор ЛОМАЕТ ПОРЯДОК кривой: точка ${f.at} даёт ${f.mhz} МГц после ${f.previousMhz} МГц `
+      + `у точки ${f.previous} — то есть меньшее напряжение предлагает БОЛЬШУЮ частоту. Такой формы карта от нас `
+      + 'ещё не получала, и что она с ней делает — не измерено. Поднимите точку ' + `${f.at} или опустите ${f.previous}` };
+  }
+  return null;
+}
+
 export function nvapiCurveBackend({ nvapi = null } = {}) {
   let nv = null;
   let handle = null;
@@ -185,60 +265,11 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       // saying «cap at the curve's top», i.e. a UNIFORM raise with nothing pushed down.
       const vec = mod.buildRaiseAndCapVector(curve.points, deltaMhz, { capMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
-      // THE HOLDER CHECK, HERE TOO — the format already refuses a cap below the curve's floor, and this
-      // is the same rule at the moment of writing, where the CARD's own top is in hand rather than the
-      // ladder's. Two checks of one fact is not duplication when one of them is the last line before a
-      // device write (R11, `bugs/02`).
-      if (vec.capIsBelowTop && vec.capEnforced === false) {
-        return { ok: false, why: `потолок ${capMhz} МГц кривой не удержать: утечка ${vec.capLeakMhz} МГц, `
-          + `пол ${vec.lowestEnforceableCapMhz} МГц (R11)` };
-      }
-      // ─── THE CARD'S OWN CEILING — R13, born from `bugs/11` ─────────────────────────────────────────
-      //
-      // The owner's rule, verbatim (`GOAL.md` → «⭐ ЧТО ТАКОЕ ТЮНИНГ VF-КРИВОЙ», 2026-08-15):
-      // *«НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ»* — «this frequency» being what the specimen itself
-      // answers, not what the reference spec publishes.
-      //
-      // THE INCIDENT THIS EXISTS FOR: a raise of +592 MHz proven only under a ceiling of 2842 MHz was
-      // applied with the ceiling removed. The card was handed a curve offering 3180 MHz — past the
-      // validated 2842, past the V/F table's own top of 3157, past the card's maximum of 3090 — and
-      // bugchecked in `nvlddmkm.sys` two minutes later, on an IDLE desktop. Everything the stack had at
-      // the time was a `console.log` on the CLI path, which was printed, read, and walked past.
-      //
-      // WHY THE BOUND IS REQUIRED RATHER THAN DEFAULTED: a write whose ceiling is unknown is exactly the
-      // write this guard exists to stop. Defaulting an absent bound to «no limit» would make the guard
-      // disappear precisely for the caller careless enough not to pass it.
-      const bound = Number(cardMaxClockMhz);
-      if (!Number.isFinite(bound) || bound <= 0) {
-        return { ok: false, why: 'максимум карты не передан — писать кривую, не зная потолка экземпляра, запрещено '
-          + '(правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ», R13, bugs/11)' };
-      }
-      // The judged number is what WE lifted, never what the factory table already offered: on this
-      // card the stock top entry is 3172 MHz against a card maximum of 3090, so reading the whole
-      // curve's top here would refuse a vector of all zeroes.
-      if (vec.highestRaisedOfferMhz !== null && vec.highestRaisedOfferMhz > bound) {
-        return { ok: false, why: `мы подняли точку до ${vec.highestRaisedOfferMhz} МГц при максимуме карты ${bound} МГц `
-          + `— превышение ${vec.highestRaisedOfferMhz - bound} МГц. Это правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ `
-          + 'ЭТОЙ ЧАСТОТЫ» (R13). Опустите подъём или поставьте потолок; ровно эта форма уронила машину '
-          + '2026-08-15 (bugs/11)' };
-      }
-      // THE INVERSION CHECK, and it lives here because this is the last line before the device write
-      // (`plans/12` §4.4, P6-AC10). A uniform raise cannot invert the curve — that is a proof about
-      // `min(F_i + Δ, F_top)`. A VECTOR can: raise point i more than point i+1 and a lower-VOLTAGE
-      // point ends up offering a HIGHER frequency than its neighbour. This project has never written
-      // such a curve and has never observed what the card does with one, so it refuses instead of
-      // finding out on the owner's machine — «look it up FIRST, never learn a state-changing flag's
-      // semantics by running it» (the owner's-machine rule).
-      //
-      // It refuses on `introducesInversion`, NOT on `monotone`: an inversion the CARD's own factory
-      // curve already has is not ours to blame the write for, and refusing on it would block writes
-      // that work today — a guard causing the regression it exists to prevent.
-      if (vec.introducesInversion) {
-        const f = vec.firstInversionAt;
-        return { ok: false, why: `вектор ЛОМАЕТ ПОРЯДОК кривой: точка ${f.at} даёт ${f.mhz} МГц после ${f.previousMhz} МГц `
-          + `у точки ${f.previous} — то есть меньшее напряжение предлагает БОЛЬШУЮ частоту. Такой формы карта от нас `
-          + 'ещё не получала, и что она с ней делает — не измерено. Поднимите точку ' + `${f.at} или опустите ${f.previous}` };
-      }
+      // THE FOUR REFUSALS — R11, R13 (bound), R13 (raised offer), R12 — live in `curveWriteRefusal`
+      // above, so the virtual card of epic 03 is held to the SAME bar rather than to a copy of it.
+      // Everything the long comments there say applied here first and was moved, not softened.
+      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
+      if (refusal) return refusal;
       const w = mod.writeCurve(nv, handle, vec.offsets, { count: COUNT() });
       if (!w.ok) return { ok: false, why: `запись кривой: ${w.failed} точек из ${COUNT()} не записались` };
       return { ok: true, vector: vec.offsets.slice(0, COUNT()) };
