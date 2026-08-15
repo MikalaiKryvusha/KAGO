@@ -177,7 +177,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
   const COUNT = () => (mod.CLK_VF_POINT_COUNT ?? 128) - 1;
 
   return {
-    async writeRaiseAndCap(deltaMhz, capMhz) {
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null } = {}) {
       await open();
       const curve = mod.readVfCurve(nv, handle);
       if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
@@ -192,6 +192,35 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       if (vec.capIsBelowTop && vec.capEnforced === false) {
         return { ok: false, why: `потолок ${capMhz} МГц кривой не удержать: утечка ${vec.capLeakMhz} МГц, `
           + `пол ${vec.lowestEnforceableCapMhz} МГц (R11)` };
+      }
+      // ─── THE CARD'S OWN CEILING — R13, born from `bugs/11` ─────────────────────────────────────────
+      //
+      // The owner's rule, verbatim (`GOAL.md` → «⭐ ЧТО ТАКОЕ ТЮНИНГ VF-КРИВОЙ», 2026-08-15):
+      // *«НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ»* — «this frequency» being what the specimen itself
+      // answers, not what the reference spec publishes.
+      //
+      // THE INCIDENT THIS EXISTS FOR: a raise of +592 MHz proven only under a ceiling of 2842 MHz was
+      // applied with the ceiling removed. The card was handed a curve offering 3180 MHz — past the
+      // validated 2842, past the V/F table's own top of 3157, past the card's maximum of 3090 — and
+      // bugchecked in `nvlddmkm.sys` two minutes later, on an IDLE desktop. Everything the stack had at
+      // the time was a `console.log` on the CLI path, which was printed, read, and walked past.
+      //
+      // WHY THE BOUND IS REQUIRED RATHER THAN DEFAULTED: a write whose ceiling is unknown is exactly the
+      // write this guard exists to stop. Defaulting an absent bound to «no limit» would make the guard
+      // disappear precisely for the caller careless enough not to pass it.
+      const bound = Number(cardMaxClockMhz);
+      if (!Number.isFinite(bound) || bound <= 0) {
+        return { ok: false, why: 'максимум карты не передан — писать кривую, не зная потолка экземпляра, запрещено '
+          + '(правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ», R13, bugs/11)' };
+      }
+      // The judged number is what WE lifted, never what the factory table already offered: on this
+      // card the stock top entry is 3172 MHz against a card maximum of 3090, so reading the whole
+      // curve's top here would refuse a vector of all zeroes.
+      if (vec.highestRaisedOfferMhz !== null && vec.highestRaisedOfferMhz > bound) {
+        return { ok: false, why: `мы подняли точку до ${vec.highestRaisedOfferMhz} МГц при максимуме карты ${bound} МГц `
+          + `— превышение ${vec.highestRaisedOfferMhz - bound} МГц. Это правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ `
+          + 'ЭТОЙ ЧАСТОТЫ» (R13). Опустите подъём или поставьте потолок; ровно эта форма уронила машину '
+          + '2026-08-15 (bugs/11)' };
       }
       // THE INVERSION CHECK, and it lives here because this is the last line before the device write
       // (`plans/12` §4.4, P6-AC10). A uniform raise cannot invert the curve — that is a proof about
@@ -242,6 +271,13 @@ const STATE_FIELDS = Object.freeze([
   'driver_version', 'vbios_version',
   'power.limit', 'power.default_limit', 'power.min_limit', 'power.max_limit',
   'clocks.gr',
+  // THE CARD'S OWN CEILING, asked of the card rather than remembered (`GOAL.md` → «⭐ ЧТО ТАКОЕ ТЮНИНГ
+  // VF-КРИВОЙ», the owner's rule 1: «спросить у моего экземпляра локально, сколько она может
+  // максимально частоту гнать»). Measured here 2026-08-15: 3090 MHz, and the supported-clock ladder
+  // ends on exactly that. It is NOT the reference spec — NVIDIA publishes 2452 MHz boost for the
+  // 5070 Ti, which is a floor for this specimen, not a ceiling — and it is NOT the V/F table's top
+  // entry either, which reads 3157 MHz. That gap of 67 MHz is the one `bugs/11` drove through.
+  'clocks.max.graphics',
 ]);
 
 /** One sample of the two fields a write can move. */
@@ -261,6 +297,9 @@ export function readState(backend) {
     powerMinW: Number(r['power.min_limit']),
     powerMaxW: Number(r['power.max_limit']),
     clockMhz: Number(r['clocks.gr']),
+    // The specimen's own ceiling (R13). Read every time rather than cached: it is a fact of the card
+    // in front of us, and a driver change may move it — the same reason R6 stamps profiles.
+    clockMaxMhz: Number(r['clocks.max.graphics']),
   };
 }
 
@@ -407,7 +446,10 @@ export async function apply(backend, profile, {
     steps.push({
       what: `кривая V/F: ${raiseSaid}, ${wantCurve.capMhz === null ? 'без потолка' : `потолок ${wantCurve.capMhz} МГц`}`,
       run: async () => {
-        const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz);
+        // R13: the specimen's own maximum travels WITH the write. `before` was read from the card at
+        // the top of `apply`, so this is a measured bound rather than a constant anyone can forget to
+        // update after a driver change.
+        const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz, { cardMaxClockMhz: before.clockMaxMhz });
         if (!w.ok) throw new Error(`запись кривой не удалась: ${w.why ?? 'причина не названа'}`);
         // P6-AC3 — PROVED BY READ-BACK, never by a status code. `nvidia-smi` already taught this
         // project that a tool's own success text is not evidence (`researches/01` §5), and the curve
@@ -862,6 +904,10 @@ function fakeBackend({ staleReads = 0, lieOn = null, flashOn = null, failOn = nu
         'power.min_limit': '250.00',
         'power.max_limit': '300.00',
         'clocks.gr': String(shown.clockMhz),
+        // The real card's answer, not a round number: measured 2026-08-15 on this specimen, and the
+        // supported-clock ladder ends on exactly it. A stand-in that reported something else would let
+        // the R13 blocks pass against a card nobody has.
+        'clocks.max.graphics': '3090',
       };
       return Object.fromEntries(fields.map((f) => [f, map[f]]));
     },
@@ -1447,15 +1493,88 @@ async function cmdSelftest() {
     const cb = nvapiCurveBackend({ nvapi: injected });
     // Point 61 dragged 900 MHz above its neighbours: a LOWER-voltage point offering a HIGHER clock.
     const inverting = Array.from({ length: 127 }, (_, i) => (i === 61 ? 900 : 0));
-    const bad = await cb.writeRaiseAndCap(inverting, null);
+    // The bound is deliberately set ABOVE anything this synthetic curve can offer (its top is 3172 and
+    // the well-ordered vector below reaches 3472): this block is about ORDER, and it must not be
+    // pre-empted by R13's envelope refusal. R13 has its own block, on its own numbers.
+    const ROOMY = { cardMaxClockMhz: 3600 };
+    const bad = await cb.writeRaiseAndCap(inverting, null, ROOMY);
     if (bad.ok !== false) return 'инвертирующий вектор ПРОШЁЛ в карту';
     if (!/ЛОМАЕТ ПОРЯДОК/u.test(bad.why ?? '')) return `отказ не про порядок кривой: ${bad.why}`;
     if (!/точка 62/u.test(bad.why ?? '') || !/точки 61/u.test(bad.why ?? '')) return `отказ не назвал пару точек: ${bad.why}`;
     if (writes !== 0) return `отказ произошёл ПОСЛЕ записи: записей ${writes}`;
     // …and the same backend accepts a well-ordered vector, or the block above is green because
     // nothing ever passes.
-    const good = await cb.writeRaiseAndCap(Array.from({ length: 127 }, (_, i) => (i < 60 ? 40 : 300)), null);
+    const good = await cb.writeRaiseAndCap(Array.from({ length: 127 }, (_, i) => (i < 60 ? 40 : 300)), null, ROOMY);
     if (good.ok !== true) return `нормальный вектор тоже отвергнут: ${good.why}`;
+    return null;
+  });
+
+  block('R13: кривая ВЫШЕ МАКСИМУМА КАРТЫ отвергнута до записи, и бомба bugs/11 краснит именно этот блок', async () => {
+    // THE REGRESSION TEST OF THE BSOD, on the real backend with an injected nvapi module — the refusal
+    // lives in the last line before the device write, so a fake backend would prove nothing.
+    //
+    // The fixture is not invented: the synthetic curve is shaped like this card (top 3157 MHz in the
+    // V/F table), the bound is this card's answer (3090 MHz), and the raise is the one that shipped
+    // in `profiles/optimised.json` at commit `bd30ea3` — +592 MHz with `capMhz: null`. That exact
+    // trio bugchecked the owner's machine on 2026-08-15.
+    const nvapiReal = await import('./nvapi.mjs');
+    const points = Array.from({ length: 128 }, (_, i) => {
+      if (i === 127) return { i, mhz: 405, mv: 515, freqKhz: 405_000 };
+      const mhz = i <= 20 ? 180 : Math.round(180 + ((3157 - 180) * (i - 20)) / (126 - 20));
+      return { i, mhz, mv: 450 + i * 5, freqKhz: mhz * 1000 };
+    });
+    let writes = 0;
+    const injected = {
+      CLK_VF_POINT_COUNT: nvapiReal.CLK_VF_POINT_COUNT,
+      buildRaiseAndCapVector: nvapiReal.buildRaiseAndCapVector,
+      readVfCurve: () => ({ ok: true, points }),
+      writeCurve: () => { writes++; return { ok: true }; },
+      zeroCurve: () => ({ ok: true }),
+      readVfOffsets: () => ({ ok: true, offsets: new Array(128).fill(0) }),
+      openNvapi: () => ({ koffi: { call: () => {} }, resolve: () => ({ ptr: 0 }), protos: {} }),
+    };
+    const cb = nvapiCurveBackend({ nvapi: injected });
+    const CARD_MAX = 3090;
+
+    // 1. THE BOMB: exactly what was applied on 2026-08-15 — uniform +592, no cap.
+    const bomb = await cb.writeRaiseAndCap(592, null, { cardMaxClockMhz: CARD_MAX });
+    if (bomb.ok !== false) return 'форма, уронившая машину 2026-08-15, ПРОШЛА в карту';
+    if (!/НИКОГДА НЕ ГНАТЬ/u.test(bomb.why ?? '')) return `отказ не сослался на правило владельца: ${bomb.why}`;
+    if (!new RegExp(String(CARD_MAX), 'u').test(bomb.why ?? '')) return `отказ не назвал максимум карты: ${bomb.why}`;
+    if (!/мы подняли точку до/u.test(bomb.why ?? '')) return `отказ не назвал, что превышение НАШЕ: ${bomb.why}`;
+    if (writes !== 0) return `отказ произошёл ПОСЛЕ записи: записей ${writes}`;
+
+    // 1a. AND THE GUARD MUST NOT BE A WALL. This synthetic curve, like the real one, has a FACTORY top
+    //     (3157) ABOVE the card's maximum (3090). A guard reading the whole curve's top instead of what
+    //     WE lifted would refuse a vector of all zeroes — a guard causing the regression it exists to
+    //     prevent. Found by running the first version of this check against the live card.
+    const noop = await cb.writeRaiseAndCap(0, null, { cardMaxClockMhz: CARD_MAX });
+    if (noop.ok !== true) return `нулевой подъём отвергнут, хотя мы ничего не поднимали: ${noop.why}`;
+
+    // 2. THE BOUND IS REQUIRED, not defaulted: a caller that forgets it is refused, not waved through.
+    //    The write counter is compared against ITS OWN previous value, not against zero: case 1a above
+    //    legitimately writes, and an absolute-zero assertion would fail for the wrong reason (it did,
+    //    on the first run of this block — the assertion was wrong, not the guard).
+    const writesBeforeNoBound = writes;
+    const noBound = await cb.writeRaiseAndCap(592, null);
+    if (noBound.ok !== false) return 'запись без известного максимума карты прошла';
+    if (!/максимум карты не передан/u.test(noBound.why ?? '')) return `отказ не про отсутствующий максимум: ${noBound.why}`;
+    if (writes !== writesBeforeNoBound) return `отказ без максимума произошёл ПОСЛЕ записи: новых записей ${writes - writesBeforeNoBound}`;
+
+    // 3. THE SAME RAISE UNDER THE CEILING IT WAS PROVEN WITH PASSES — or block 1 is green because
+    //    nothing ever passes, and the guard would be a wall instead of a gate. 2842 MHz is the ceiling
+    //    the three live descents actually used.
+    const proven = await cb.writeRaiseAndCap(592, 2842, { cardMaxClockMhz: CARD_MAX });
+    if (proven.ok !== true) return `доказанная форма (подъём 592 под потолком 2842) отвергнута: ${proven.why}`;
+
+    // 4. THE EDGE IS INCLUSIVE: landing exactly on the card's maximum is legal, one MHz over is not.
+    //    Without this the guard's boundary would be whatever an off-by-one happened to make it.
+    const exact = await cb.writeRaiseAndCap(592, CARD_MAX, { cardMaxClockMhz: CARD_MAX });
+    if (exact.ok !== true) return `ровно максимум карты отвергнут, хотя он разрешён: ${exact.why}`;
+    const writesBeforeOver = writes;
+    const over = await cb.writeRaiseAndCap(592, CARD_MAX + 1, { cardMaxClockMhz: CARD_MAX });
+    if (over.ok !== false) return 'потолок на 1 МГц выше максимума карты прошёл';
+    if (writes !== writesBeforeOver) return `отказ на границе произошёл ПОСЛЕ записи: новых записей ${writes - writesBeforeOver}`;
     return null;
   });
 

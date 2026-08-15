@@ -1,6 +1,12 @@
 # Bug 11 — an uncapped curve raise was applied beyond the envelope it was proven in, and the machine BSOD'd
 
-**Status:** 🔴 OPEN
+**Status:** 🟡 PARTIAL — **the machine gate is in and proved (R13); the profile itself still ships the
+shape that crashed.** Fix-plan steps 2 and 4 are done: `profile-manager.writeRaiseAndCap` REFUSES
+before the device write, and the refusal is proved on the live curve read-only (`profiles/optimised.json`
+as it stands → «мы подняли точку до 3172 МГц при максимуме карты 3090 — превышение 82 МГц»), plus 6
+selftest blocks and four mutations each reddening only their own block. Steps 1, 3 and 5 remain: the
+envelope field in the profile format, the same check in `profile-store`, and rebuilding the modes from
+the owner's definition (`GOAL.md` → «⭐ ЧТО ТАКОЕ ТЮНИНГ VF-КРИВОЙ», given 2026-08-15 10:19).
 **Version/build:** driver 610.88 · VBIOS 98.03.58.40.8b · `profiles/optimised.json` as of commit `bd30ea3`
 **When/context:** 2026-08-15 ≈09:58 +03:00, session 20, while measuring the FPS price of `Optimised`
 on the Q2RTX bench (STATUS handoff item 2). **The owner was at the machine and lost his session.**

@@ -583,6 +583,24 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     highestOfferedMhz = Math.max(highestOfferedMhz, p.mhz + offsets[i]);
   }
   if (!Number.isFinite(highestOfferedMhz)) highestOfferedMhz = topMhz;
+  // WHAT **WE** LIFTED, kept apart from what the card already offered — and the distinction is not
+  // pedantry, it is the difference between a guard and a regression. MEASURED on this card
+  // 2026-08-15: the FACTORY table's top entry is 3172 MHz while the card's own maximum applicable
+  // clock is 3090. So `highestOfferedMhz` exceeds the card's maximum even for a vector of all zeroes,
+  // and a ceiling guard reading that number would refuse a no-op write — the exact shape R12's note
+  // warns about (a guard causing the regression it exists to prevent).
+  //
+  // Points we did NOT raise are the card's own business: we did not write them and cannot be
+  // responsible for what the factory table says there. Points we DID raise are ours, and the owner's
+  // rule binds them — *«НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ»* (`GOAL.md`, 2026-08-15). `null`
+  // when nothing was raised, so a caller cannot mistake «nothing lifted» for «lifted to zero».
+  let highestRaisedOfferMhz = null;
+  for (let i = 0; i < count; i++) {
+    const p = points[i];
+    if (!p || p.freqKhz <= 0 || offsets[i] <= 0) continue;
+    const offered = p.mhz + offsets[i];
+    if (highestRaisedOfferMhz === null || offered > highestRaisedOfferMhz) highestRaisedOfferMhz = offered;
+  }
   // The floor is arithmetic, not a measurement of this run: a point at F_top can be pushed down by at
   // most |CLOCK_OFFSET_MIN_MHZ|, so no cap below `topMhz + CLOCK_OFFSET_MIN_MHZ` can ever be held by
   // the curve alone. On this card that is 3172 − 1000 = 2172 MHz.
@@ -631,6 +649,7 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     maxOffset: Math.max(...offsets),
     minOffset: Math.min(...offsets),
     highestOfferedMhz,
+    highestRaisedOfferMhz,
     lowestEnforceableCapMhz,
     capEnforced: highestOfferedMhz <= cap,
     capLeakMhz: Math.max(0, highestOfferedMhz - cap),
