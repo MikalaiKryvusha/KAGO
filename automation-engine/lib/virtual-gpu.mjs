@@ -74,6 +74,18 @@ import { curveWriteRefusal } from './profile-manager.mjs';
 /** The graphics half of the V/F table. One definition, shared with the write path. */
 const GRAPHICS_POINTS = CLK_VF_POINT_COUNT - 1;
 
+/**
+ * THIS MODULE'S OWN URL, exported so a consumer that spawns a CHILD process can point that child at
+ * the bench IT actually imported — rather than at a path spelled out by hand.
+ *
+ * The distinction is not pedantry: `trap-suite.mjs` builds a victim child by resolving
+ * `./virtual-gpu.mjs` relative to itself, and a mutation run that swaps the bench for a broken copy
+ * would leave that child importing the INTACT one. The mutation then passes, the suite stays green,
+ * and the green means nothing — caught 2026-08-15 20:2x by exactly such a mutation (the deterministic
+ * trap hang disabled, and the suite did not notice).
+ */
+export const MODULE_URL = import.meta.url;
+
 /** Printed by every command. Not a footnote — the first thing a reader sees. */
 export const PROVABILITY_LINE =
   'ВИРТУАЛЬНАЯ КАРТА — ВЫМЫСЕЛ. Её числа не являются утверждением о живой карте: '
@@ -195,7 +207,11 @@ export function validateCard(c) {
     let inversions = 0;
     let biggest = 0;
     for (let i = 1; i < asc.length; i++) {
-      const drop = asc[i - 1].edgeMv - asc[i].edgeMv;
+      // Округление здесь по той же причине, что и в `buildFiction`: разности чисел с плавающей точкой
+      // дают хвосты вида 37.19999999999993, и этот отказ ЧИТАЕТ ЧЕЛОВЕК. Первая редакция считала
+      // сырую разность и печатала хвост в лицо читателю — тот же класс, который сосед исправил на
+      // две строки выше, пропущенный ровно потому, что здесь это «просто сообщение об ошибке».
+      const drop = Number((asc[i - 1].edgeMv - asc[i].edgeMv).toFixed(1));
       if (drop > 0) { inversions++; biggest = Math.max(biggest, drop); }
     }
     if (biggest > 30 && !f.nonMonotoneOnPurpose) {
@@ -251,7 +267,7 @@ export function loadCard(path) {
  * 82 MHz gap is exactly what `bugs/11` drove through. A virtual card without the gap could not
  * reproduce the incident, and reproducing it is half of why the bench exists.
  */
-export function deriveCardFromCurves({ dir = 'curves', name = 'rtx5070ti' } = {}) {
+export function deriveCardFromCurves({ dir = 'curves', name = 'rtx5070ti', fiction = {} } = {}) {
   const read = (f) => JSON.parse(readFileSync(join(dir, f), 'utf8'));
   let vg, fg, mc;
   try { vg = read('voltage-grid.json'); fg = read('frequency-grid.json'); mc = read('measured.json'); }
@@ -328,10 +344,121 @@ export function deriveCardFromCurves({ dir = 'curves', name = 'rtx5070ti' } = {}
   // THE INVENTED EDGE. Built from the card that has just been derived, so the fiction sits on the
   // MEASURED geometry rather than beside it: every edge voltage is a value from this card's own
   // voltage grid, at a frequency from its own ladder.
-  card.fiction = buildFiction(card);
+  card.fiction = buildFiction(card, fiction);
   const v = validateCard(card);
   if (!v.ok) return { ok: false, why: `выведенный профиль негоден (поле ${v.field}): ${v.why}` };
   return { ok: true, card };
+}
+
+// =================================================================================================
+// 2b. TRAP CARDS — the bench proves itself RED before anyone trusts its green (phase 3, `plans/19`)
+// =================================================================================================
+
+/**
+ * THE FIVE TRAPS OF `researches/10` §4.6, AS CARD FILES AND NOT AS CODE BRANCHES. Each is the
+ * ordinary derivation with a different `fiction` — which is the generality of `plans/16` paying for
+ * itself: a new trap costs a row here, never an `if` anywhere.
+ *
+ * ⚠️ THE CLASS IS PART OF THE ARTIFACT, and it is the finding that shaped this whole phase. Three of
+ * the five judge behaviour that DOES NOT EXIST YET: today's `engine.mjs` is the phase-5 search
+ * (`searchEdge` → ascent → bracket → bisection), with no write-ahead journal, no neighbour seeding,
+ * no `lever-limited` verdict and no two-hangs stop. Those four are deliverables of `plans/15` (epic
+ * 02 phase 2). Read from the tree 2026-08-15 20:0x, not recalled.
+ *
+ *   - class **A** — judgeable TODAY, against the real `searchEdge` driven through `runStepFn`;
+ *   - class **B** — the card and the ASSERTION ship now, the assertion reported as PENDING.
+ *
+ * A class-B row may honestly read «ждёт движка развёртки». It may not read green — that is E3-AC5's
+ * rule (no claim about an unrun half) applied INSIDE the epic, and it leaves `plans/15` an executable
+ * checklist instead of a paragraph.
+ */
+export const TRAPS = Object.freeze([
+  {
+    name: 'T1_edge_above_reach',
+    klass: 'A',
+    traps: 'край сразу под стоком: первая же ступень спуска уже ниже края',
+    mustDo: 'остановиться на первой ступени и назвать край, а не шагать мимо него',
+    otherwise: 'движок проходит край насквозь и продолжает спуск',
+    judgedBy: 'searchEdge сегодня',
+    // Headroom of 2…3 mV everywhere — LESS than one 5 mV rung, so the first step down is already past
+    // the edge. The noise is kept small ON PURPOSE: bigger jitter would clamp the edge onto `stock`
+    // itself, and a card whose edges sit exactly on rungs is refused by its own validator.
+    fiction: {
+      anchors: [{ mhz: 180, belowStockMv: 2 }, { mhz: 3090, belowStockMv: 3 }],
+      noiseAmplitudeMv: 0.3, driftMaxMv: 0.5, noiseSeed: 20260901,
+      // Sharp on purpose — see `scaleMv` in `buildFiction`. The assertion here is «the engine stopped
+      // at the first rung», and that must not be a two-in-three outcome.
+      scaleMv: 0.5,
+    },
+  },
+  {
+    name: 'T2_hangs_at_a_named_rung',
+    klass: 'A',   // half of it: the death itself. Naming the rung after re-launch is class B.
+    traps: 'детерминированный ЗАВИС на названном напряжении — 1000 мВ и ниже',
+    mustDo: 'умереть по-настоящему на этой ступени; запускающий видит смерть, а не исключение',
+    otherwise: 'ЗАВИС подделан возвращаемым значением, и журнал упреждающей записи декоративен',
+    judgedBy: 'детская форма из plans/18 §4.4 сегодня; НАЗЫВАНИЕ ступени после перезапуска — plans/15',
+    fiction: { hangAtOrBelowMv: 1000, noiseSeed: 20260902 },
+  },
+  {
+    name: 'T3_non_monotone_vmin',
+    klass: 'B',
+    traps: 'одна частота требует на 40 мВ БОЛЬШЕ соседки сверху — восемь ступеней сетки, далеко за дрожью',
+    mustDo: 'отвергнуть затравку, спуститься от стока и СКАЗАТЬ об этом вслух',
+    otherwise: 'редкий случай владельца молча поглощается, и профиль встаёт ниже края',
+    judgedBy: 'plans/15 (затравки сегодня нет)',
+    fiction: { inversionAt: { mhz: 2842, extraMv: 40 }, nonMonotoneOnPurpose: true, noiseSeed: 20260903 },
+  },
+  {
+    name: 'T4_edge_below_the_lever',
+    klass: 'B',
+    traps: 'край глубже, чем достаёт рычаг ±1000 МГц, ПО ВСЕЙ рабочей полосе 1700…3090 МГц',
+    mustDo: 'сказать «предел рычага», а не «край найден»',
+    otherwise: 'ложный [TESTED]: остановку НАШЕГО рычага выдали за свойство кремния',
+    judgedBy: 'plans/15 (вердикта «предел рычага» сегодня нет)',
+    // Deeper than the lever reaches at EVERY frequency of the working band (available: 1700 → 45 мВ ·
+    // 2000 → 50 · 2400 → 125 · 2842 → 245 · 3090 → 350). The low end stays ORDINARY, and that is a
+    // measurement rather than laziness: at 500 MHz stock is 745 mV against a 450 mV floor, so the
+    // full 295 mV to the floor IS the lever's reach — «deeper than the lever» has no room to exist
+    // there, and a card that tried would clamp onto the floor and be refused by its own validator.
+    fiction: {
+      anchors: [
+        { mhz: 180, belowStockMv: 0 }, { mhz: 500, belowStockMv: 110 }, { mhz: 1100, belowStockMv: 120 },
+        { mhz: 1700, belowStockMv: 200 }, { mhz: 2000, belowStockMv: 220 }, { mhz: 2400, belowStockMv: 260 },
+        { mhz: 2842, belowStockMv: 300 }, { mhz: 3090, belowStockMv: 400 },
+      ],
+      noiseAmplitudeMv: 4, noiseSeed: 20260904,
+    },
+  },
+  {
+    name: 'T5_hangs_twice_on_one_rung',
+    klass: 'B',
+    traps: 'тот же детерминированный ЗАВИС, но встреченный дважды подряд на ОДНОЙ ступени',
+    mustDo: 'отказаться от третьей попытки и выйти ненулевым кодом',
+    otherwise: 'бесконечный цикл перезагрузок на машине владельца',
+    judgedBy: 'plans/15 (счётчика попыток по ступени сегодня нет)',
+    fiction: { hangAtOrBelowMv: 1020, noiseSeed: 20260905 },
+  },
+]);
+
+/**
+ * Build one trap card. Same derivation, same validator, same everything — only `fiction` differs,
+ * and the trap's own description travels INSIDE the file so a reader of `benches/cards/traps/*.json`
+ * never has to come back here to learn what it traps.
+ */
+export function buildTrapCard(trap, { dir = 'curves' } = {}) {
+  const r = deriveCardFromCurves({ dir, name: trap.name, fiction: trap.fiction });
+  if (!r.ok) return r;
+  r.card.trap = {
+    klass: trap.klass,
+    traps: trap.traps,
+    mustDo: trap.mustDo,
+    otherwise: trap.otherwise,
+    judgedBy: trap.judgedBy,
+    note: 'ЛОВУШКА. Эта карта существует, чтобы НЕПРАВИЛЬНЫЙ движок на ней покраснел. Её числа — '
+      + 'вымысел вдвойне: они не про живую карту и они специально неудобны.',
+  };
+  return r;
 }
 
 // =================================================================================================
@@ -380,9 +507,15 @@ const HEADROOM_ANCHORS = Object.freeze([
   { mhz: 3090, belowStockMv: 200 },
 ]);
 
-/** Linear interpolation between the anchors, in millivolts of headroom. */
-function headroomAt(mhz) {
-  const a = HEADROOM_ANCHORS;
+/**
+ * Linear interpolation between the anchors, in millivolts of headroom.
+ *
+ * The anchor SET is a parameter rather than the frozen constant, because a trap card is a card with a
+ * different edge SHAPE and `plans/16` R7 is explicit that refining the model means a new card FILE,
+ * never a patch to the bench. Default = the ordinary specimen, so every existing caller is unchanged.
+ */
+function headroomAt(mhz, anchorSet = HEADROOM_ANCHORS) {
+  const a = anchorSet;
   if (mhz <= a[0].mhz) return a[0].belowStockMv;
   if (mhz >= a[a.length - 1].mhz) return a[a.length - 1].belowStockMv;
   for (let i = 1; i < a.length; i++) {
@@ -404,7 +537,31 @@ function headroomAt(mhz) {
  * нижней частоте будет напряжение нужно или такое же… или даже ниже, очень редко — выше»*. The rare
  * violation he named is a TRAP CARD of phase 3, produced on purpose — never an accident of rounding.
  */
-export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8, driftMaxMv = 20 } = {}) {
+export function buildFiction(card, {
+  noiseSeed = 20260815, noiseAmplitudeMv = 8, driftMaxMv = 20,
+  // TRAP KNOBS (phase 3). Each is a property of the CARD, never a branch in the engine or in the
+  // bench's mechanics — `plans/19` §4.1. Defaults reproduce the ordinary specimen byte for byte.
+  anchors = HEADROOM_ANCHORS,
+  // A deterministic hang at or below a named voltage. The probabilistic model cannot express «always
+  // hangs HERE», and two traps need exactly that: T2 (a hang at a NAMED rung, so the re-launch has
+  // something to name) and T5 (the SAME rung twice, so the sweep's two-crash stop has something to
+  // stop on). `null` = the ordinary card, whose only path to a hang is depth.
+  hangAtOrBelowMv = null,
+  // A forced local inversion: `{ mhz, extraMv }` makes ONE frequency need MORE voltage than its
+  // higher-frequency neighbour, by an amount far past the ordinary card's jitter — T3.
+  inversionAt = null,
+  // The declaration the validator demands for such a card. It is a SEPARATE flag rather than being
+  // implied by `inversionAt`, and deliberately so: the validator's job is to refuse a non-monotone
+  // card nobody meant to build, and a flag that sets itself would refuse nothing.
+  nonMonotoneOnPurpose = false,
+  // THE STEEPNESS. 3.5 mV is the ordinary card's, fitted to `researches/02` (3 % → 90 % across 2 % of
+  // voltage), and no ordinary card may move it. A TRAP may: a trap exists to test the engine's control
+  // flow, and an assertion about control flow must not ride on a coin flip. At 3.5 mV a rung 2.5 mV
+  // past the edge fails only two times in three, so «the engine stopped» would be a 33 % flake — the
+  // trap would be testing the model instead of the engine. A sharp trap edge is DECLARED here rather
+  // than smuggled in by tuning seeds until the run went the way it was wanted.
+  scaleMv = 3.5,
+} = {}) {
   const stockFor = new Map(card.stockCurve.map((r) => [r.mhz, r.voltageMv]));
   const grid = card.voltageGridMv;
   const floorMv = grid[0];
@@ -458,7 +615,10 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
     drift += (noise() - 0.5) * 2.2;
     drift = Math.max(-driftMaxMv, Math.min(driftMaxMv, drift));
     const tremble = (noise() - 0.5) * 2 * noiseAmplitudeMv;
-    const wanted = headroomAt(mhz) + drift + tremble;
+    let wanted = headroomAt(mhz, anchors) + drift + tremble;
+    // T3's forced inversion: LESS headroom at this frequency means a HIGHER edge, i.e. this frequency
+    // demands more voltage than its faster neighbour — the owner's «очень редко — выше».
+    if (inversionAt && mhz === inversionAt.mhz) wanted -= inversionAt.extraMv;
     // Одна десятая милливольта — не точность модели, а признак того, что это НЕ ступень сетки.
     const mv = Number(Math.max(floorMv, Math.min(stock, stock - wanted)).toFixed(1));
     edge.push({ mhz, edgeMv: mv, stockMv: stock, headroomMv: Number((stock - mv).toFixed(1)) });
@@ -485,6 +645,7 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
       maxDropMv,
     },
     noise: { seed: noiseSeed, amplitudeMv: noiseAmplitudeMv, driftMaxMv },
+    ...(nonMonotoneOnPurpose ? { nonMonotoneOnPurpose: true } : {}),
     note: 'ВЫМЫСЕЛ. Эти края придуманы и НЕ являются утверждением о живой карте — они существуют, '
       + 'чтобы движку было что найти.',
     edgeDefinition: 'край частоты = напряжение, на котором прожиг длиной 10 с отказывает в половине случаев. '
@@ -493,8 +654,9 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
     edge: edge.sort((a, b) => b.mhz - a.mhz),   // в том же порядке, что и сетка частот: сверху вниз
     failure: {
       // 3 % → 90 % на 2 % напряжения (researches/02), подогнано логистикой: одна ступень 5 мВ
-      // двигает вероятность отказа с ≈0,20 до ≈0,80.
-      scaleMv: 3.5,
+      // двигает вероятность отказа с ≈0,20 до ≈0,80. Обычная карта эту величину не двигает; ловушка
+      // может — и тогда это записано в её файле, а не спрятано в коде.
+      scaleMv,
       // Определение края И есть эта величина: прожиг ЭТОЙ длительности на краю отказывает в половине
       // случаев. Одно число, а не два, которые могут разъехаться.
       referenceSeconds: 10,
@@ -505,6 +667,9 @@ export function buildFiction(card, { noiseSeed = 20260815, noiseAmplitudeMv = 8,
       shapeFactor: { sdc_fma: 1.0, branchy: 1.35 },
       // Одна проба нагрузки — это один ПРОЦЕСС; измерено 2026-08-10: 132 мс на запуск.
       perLaunchSeconds: 0.132,
+      // ЛОВУШЕЧНОЕ, и на обычной карте это `null`. Детерминированный ЗАВИС на названном напряжении:
+      // вероятностная модель не умеет сказать «здесь ВСЕГДА», а двум ловушкам нужно ровно это.
+      hangAtOrBelowMv,
     },
   };
 }
@@ -806,7 +971,14 @@ export function virtualCard(cardProfile, {
         const { sdcUntil, crashUntil } = P.fiction.failure.classDepthMv;
         outcome = depthMv <= sdcUntil ? 'SDC' : (depthMv <= crashUntil ? 'CRASH' : 'ЗАВИС');
       }
-      return { outcome, p, r, voltageMv, edgeMv, depthMv, seconds, workload, mhz };
+      // THE TRAP RUNG, and it is checked AFTER the draw rather than instead of it, on purpose: the
+      // draw still consumes its random number, so a trap card and the ordinary card walk the seeded
+      // sequence identically and a trap cannot silently shift every later outcome. `null` on every
+      // ordinary card, so this branch does not exist for them.
+      const hangAt = P.fiction.failure.hangAtOrBelowMv;
+      const trapped = hangAt !== null && hangAt !== undefined && voltageMv <= hangAt;
+      if (trapped) outcome = 'ЗАВИС';
+      return { outcome, p, r, voltageMv, edgeMv, depthMv, seconds, workload, mhz, trapped };
     },
 
     /**
@@ -1526,6 +1698,33 @@ async function main() {
     console.log(`Профиль виртуальной карты записан: ${out}\n`);
     show(r.card);
     return;
+  }
+
+  if (argv.includes('--derive-traps')) {
+    const dir = arg('--out-dir', join('benches', 'cards', 'traps'));
+    mkdirSync(dir, { recursive: true });
+    console.log('ЛОВУШКИ — карты, на которых НЕПРАВИЛЬНЫЙ движок обязан покраснеть.\n');
+    let failed = 0;
+    for (const t of TRAPS) {
+      const r = buildTrapCard(t, { dir: arg('--from', 'curves') });
+      if (!r.ok) { console.error(`ОТКАЗ на ${t.name}: ${r.why}`); failed++; continue; }
+      const out = join(dir, `${t.name}.json`);
+      writeFileSync(out, `${JSON.stringify(r.card, null, 2)}\n`);
+      const edgeAt = (mhz) => r.card.fiction.edge.find((e) => e.mhz === mhz);
+      const s = edgeAt(2842);
+      console.log(`  [${t.klass}] ${t.name}`);
+      console.log(`      ловит:   ${t.traps}`);
+      console.log(`      движок:  ${t.mustDo}`);
+      console.log(`      иначе:   ${t.otherwise}`);
+      console.log(`      судится: ${t.judgedBy}`);
+      if (s) console.log(`      на 2842 МГц: сток ${s.stockMv} · край ${s.edgeMv} · запас ${s.headroomMv} мВ`);
+      console.log(`      → ${out}\n`);
+    }
+    const byClass = TRAPS.reduce((a, t) => ({ ...a, [t.klass]: (a[t.klass] ?? 0) + 1 }), {});
+    console.log(`Ловушек ${TRAPS.length}: класса A (судятся сегодня) ${byClass.A ?? 0}, `
+      + `класса B (утверждение ждёт plans/15) ${byClass.B ?? 0}. Отказов ${failed}.`);
+    console.log(`\n${PROVABILITY_LINE}`);
+    process.exit(failed ? 1 : 0);
   }
 
   const path = arg('--show');

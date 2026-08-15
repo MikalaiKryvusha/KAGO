@@ -41,6 +41,24 @@
 
 ## Entries
 
+### EXP-0070 · 2026-08-15 · ❌→✅ · #mutation #subprocess #modules #false-green #testing #harness
+**Context:** proving the new trap suite (epic 03 phase 3) by mutation — four mutations, addressees named before the run.
+**Tried \ did:** three reddened their own block. The fourth — disable the card's deterministic hang — left the suite GREEN, so I went looking for the hole in the suite rather than declaring the mutation bad.
+**Result:** ❌→✅ the hole was in HOW the suite ran its subject. The hang drill builds a victim CHILD process, and the child re-imported the bench by a path spelled out relative to the suite file (`new URL('./virtual-gpu.mjs', import.meta.url)`). A mutation run swaps the bench for a broken copy and points the SUITE at it — but the child kept importing the intact one. The suite was reporting green about a module it was not testing. ✅ Fixed by exporting `MODULE_URL = import.meta.url` from the bench and handing that down to the child; the mutation now reddens its own block alone.
+**Lesson:** **a subprocess that re-imports a module BY PATH escapes every substitution its parent made.** Dependency injection stops at the process boundary: whatever the parent swapped — a mutant, a stub, a different build — the child resolves the original from disk and nothing says so. Any parent that spawns a child which loads the module under test must HAND DOWN the module it is actually using, never a path the child re-derives. The failure is silent in the worst direction: the suite passes.   → link: plans/19 · EXP-0016 · EXP-0008
+**Repro:** in a mutation run, mutate the module and assert the child sees it — `grep -n "new URL('\./.*\.mjs', import\.meta\.url)" automation-engine/lib/*.mjs` finds every child-spawning site that re-derives a path. Positive check: `npm run traps` after disabling `if (trapped) outcome = 'ЗАВИС'` in a copy of the bench must redden «T2: процесс УМИРАЕТ по-настоящему».
+**Trigger:** about to spawn a child process that imports the module under test → pass the module's own URL down, and prove it by mutating the module and demanding the child notice.
+**Not for:** children that import nothing of ours (a plain CLI, a system binary) — there the path IS the subject and re-deriving it is correct.
+
+### EXP-0069 · 2026-08-15 · ❌ · #mutation #fixtures #harness #state #baseline
+**Context:** the same mutation run. Two of the mutations targeted code that GENERATES committed fixtures (the trap cards are JSON files, built by `--derive-traps` from the bench).
+**Tried \ did:** the harness mutated the bench, regenerated the cards from the mutant so the mutation could show, ran the suite, then deleted the mutant module.
+**Result:** ❌ it deleted the mutant and left the POISONED CARDS on disk. The next run's intact baseline came back red on a block that had nothing to do with the mutation, and for a moment the red looked like a defect in the suite. It was leftover state.
+**Lesson:** **a mutation harness that mutates a GENERATOR must restore what it generated, not only what it wrote.** Cleaning up the mutant module feels like the whole job because that is the file you created; the fixtures are the file you CHANGED, and they are the ones the next run reads as truth. Restore generated artifacts in the same `finally` that deletes the mutant — or regenerate from the intact source as the run's last act.   → link: plans/19 · EXP-0016
+**Repro:** after any mutation run that touches generated fixtures, `git status --short` must be clean of them; if it is not, regenerate (`node automation-engine/lib/virtual-gpu.mjs --derive-traps`) and re-run the intact baseline before believing any result.
+**Trigger:** about to mutate code whose output is a committed artifact → list what the run will rewrite, and restore that list, before reading a single result.
+**Not for:** mutations confined to pure logic with no artifact on disk — there deleting the mutant is genuinely the whole cleanup.
+
 ### EXP-0068 · 2026-08-15 · ❌→✅ · #terminology #owner #model #artifact #temperature #reframe
 **Context:** the owner, after reading a report that said «point 120 read 3112 MHz cold and 3105 MHz at 57 °C»: *«МЫ ПРЕКРАЩАЕМ НАЗЫВАТЬ ТОЧКИ НОМЕРАМИ… И того, что куда-то какая-то точка уплыла — такого больше не существует в нашем понимании. Есть только частоты по сетке частот.»*
 **Tried / did:** I had keyed the tuning-curve document by V/F TABLE INDEX — the coordinate the hardware writes in — and stored a frequency per index. When the factory table's frequencies moved with temperature I added a whole reclassification pass to chase the movement, and reported the movement as a finding.

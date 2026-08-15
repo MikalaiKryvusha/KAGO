@@ -40,7 +40,8 @@
     "setup": "node automation-engine/setup-desktop.mjs",
     "tray:selftest": "powershell -NoProfile -ExecutionPolicy Bypass -File automation-engine/tray.ps1 -SelfTest",
     "curve": "node automation-engine/lib/curve-store.mjs",
-    "vgpu": "node automation-engine/lib/virtual-gpu.mjs"
+    "vgpu": "node automation-engine/lib/virtual-gpu.mjs",
+    "traps": "node automation-engine/lib/trap-suite.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
