@@ -287,14 +287,26 @@ His words, 2026-08-15 (verbatim in `GOAL.md` → «📐 ЛЕСТНИЦА ШАГ�
 100 mV below stock · 10 mV (the minimum step ×2) from 100 to 150 mV · 5 mV below 150 mV. Rungs to
 reach depth *d*: `min(d,100)/25 + clamp(d−100,0,50)/10 + max(0,d−150)/5`.
 
-| Frequency | Available depth | Rungs at 5 mV throughout | Rungs on his ladder |
-|---|---|---|---|
-| 3090 | 350 mV | 70 | **49** |
-| 2842 | 245 mV | 49 | **28** |
-| 2400 | 125 mV | 25 | **7** |
-| 2000 | 50 mV | 10 | **2** |
-| 1700 | 45 mV | 9 | **2** |
-| 1100 | 320 mV | 64 | **43** |
+> ⚠️ **CORRECTED 2026-08-15 21:4x BY MEASUREMENT, and the correction is in the project's favour.** The
+> «rungs on his ladder» column below is the FORMULA's answer, and the formula assumes a grid fine
+> enough to express every policy step. **This card's grid is not** — it carries a 10 mV gap every
+> 25 mV (94 × 5 mV, 32 × 10 mV, measured in `curves/voltage-grid.json`), so in the 5 mV zone one grid
+> step covers what the formula counts as two. `descentLadder` (`plans/15` §4.1) walked the REAL grid
+> and produced the third column. The formula is not wrong about the POLICY; it is wrong about the
+> hardware, and the hardware is the side that gets to be right.
+
+| Frequency | Available depth | Rungs at 5 mV throughout | Rungs by the FORMULA | **Rungs MEASURED on the real grid** |
+|---|---|---|---|---|
+| 3090 | 350 mV | 70 | 49 | **42** (8 steps forced to 10 mV) |
+| 2842 | 245 mV | 49 | 28 | **24** (4 forced) |
+| 2400 | 125 mV | 25 | 6.5 → 7 | **7** — the two agree, and the last rung lands EXACTLY on the lever wall |
+| 2000 | 50 mV | 10 | 2 | — *(2000 MHz is not on the card's frequency ladder; 2002 is. The round numbers in this table are representative, not grid values)* |
+| 1700 | 45 mV | 9 | 2 | — *(same: the ladder carries 1702)* |
+| 1100 | 320 mV | 64 | 43 | — *(same: 1102)* |
+
+**What the correction changes downstream:** the sweep is **cheaper** than §4's estimate, not dearer —
+the ≈1.7 h shipped plan is an upper bound on this axis. And the estimate must not be «fixed» back to
+the formula: a selftest block asserts 24 at 2842 MHz precisely so that re-idealizing reddens.
 
 **It composes with two rules already in the code, and breaks neither:**
 

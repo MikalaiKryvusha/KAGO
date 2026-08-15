@@ -145,7 +145,7 @@
 | `npm run watchdog -- --status` · `--recover` · `--drill` | что держит карту · подобрать забытую запись · учебная тревога |
 | `npm run questions` · `npm run ask <док>` | сторож места вопросов · поднять контур согласований |
 | `node tools/grant-agent-rights.mjs` | **запускает ВЛАДЕЛЕЦ:** выдать агенту консольные права без вопросов (`--show`, `--revoke`). Агент себе их поднять не может — классификатор блокирует |
-| **Самопроверки без карты** — перемерены 2026-08-15 01:3x: | `stress` 55 · `engine` **76** · `vfstep` 29 · `vmin-store` 38 · `profiles` **45** · `profile` **40** · `power` 28 · `descend` 39 · `watchdog` 21 · `gfx` 48 · `nvapi --selftest-shape` **41** · `nvml --verify-decode` 5 (этот ПИШЕТ) |
+| **Самопроверки без карты** — перемерены 2026-08-15 01:3x: | `stress` 55 · `engine` **90** (было 76; +14 на лестницу шагов владельца, `plans/15` §4.1) · `vfstep` 29 · `vmin-store` 38 · `profiles` **45** · `profile` **40** · `power` 28 · `descend` 39 · `watchdog` 21 · `gfx` 48 · `nvapi --selftest-shape` **41** · `nvml --verify-decode` 5 (этот ПИШЕТ) |
 
 ## Живые факты, определяющие решения (нумерация сквозная)
 

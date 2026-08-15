@@ -231,6 +231,21 @@ export const CLOCK_LADDER_STEP_TOLERANCE_MHZ = 8;
 export const SESSION_MAX_DEPTH_BEYOND_KNOWN_MV = 30;
 
 /**
+ * ⚠️ **SUPERSEDED 2026-08-15 by `DESCENT_ZONES` below — kept, not deleted, and the reason is stated
+ * here rather than left to be rediscovered.** The owner replaced this rule the same day with a ladder
+ * keyed by DEPTH FROM STOCK instead of by an absolute voltage (`GOAL.md` → «📐 ЛЕСТНИЦА ШАГОВ
+ * СПУСКА»). **The two agree exactly where this one was spoken** — at 2842 MHz stock is 1045 mV, so his
+ * 150 mV boundary lands on 1045 − 150 = 895 ≈ 900 — but an ABSOLUTE key does not travel across the
+ * range: at 1702 MHz stock is already 795 mV, below this floor, so this rule would crawl at 5 mV
+ * through a band that offers only 45 mV in total.
+ *
+ * **Why it is still exported.** It is wired into `composeAscentLadder` and the `--band` / `--search`
+ * path — the ONLY search this project has ever run on the live card. `plans/15` §5 keeps that path
+ * standing until the sweep has run live once, because removing the proven path before its replacement
+ * is proven loses both. So the retirement is by SCOPE, not by deletion: **no new caller reads this
+ * constant.** Everything the epic-02 sweep does asks `DESCENT_ZONES`. When the sweep has replaced the
+ * band path on the card, this constant and its readers go together.
+ *
  * THE OWNER'S OWN FLOOR FOR FAST DESCENT — his word, chat, 2026-08-15, verbatim:
  *
  *   > *«до 900 можем опускаться быстрыми шагами. ниже 900 - опускаемся по 5 мВ»*
@@ -260,6 +275,39 @@ export const SESSION_MAX_DEPTH_BEYOND_KNOWN_MV = 30;
  * whole descent again in one go. If that matters, re-prove a shallow rung first.
  */
 export const FAST_DESCENT_FLOOR_MV = 900;
+
+/**
+ * THE OWNER'S DESCENT STEP LADDER — his word, chat, 2026-08-15 16:3x +03:00, verbatim:
+ *
+ *   > *«от стока вниз можно шагать не минимальными шагами. От стока вниз на дельту 100 мВ можно
+ *   > шагать шагом 25 мВ. Если дельта больше 100 мВ, меньше 150 мВ — шагаем минимальным шагом
+ *   > умноженным на 2. Если дельта от стока больше 150 мВ, то шагаем ниже минимальными шагами 5 мВ.»*
+ *
+ * **The key is DEPTH FROM STOCK, not absolute voltage** — that is the whole correction over
+ * `FAST_DESCENT_FLOOR_MV` above, and it is what makes one policy work at 3090 MHz (350 mV of headroom)
+ * and at 1702 MHz (45 mV) alike.
+ *
+ * IT SATISFIES THE `bugs/03` GOVERNOR RATHER THAN WEAKENING IT: his first step is exactly 25 mV
+ * (`ASCENT_FIRST_STEP_MAX_MV`) and his largest gap is 25 mV, well under `ASCENT_STEP_MAX_MV` = 35.
+ *
+ * ITS HONEST COST, stated once where the policy lives: a 25 mV step approaches the edge coarsely, and
+ * failure at the edge is an avalanche (3 % → 90 % of errors across 2 % of voltage, `researches/02`).
+ * So a coarse rung is likelier to HANG the machine than to be caught by the oracle. The owner accepted
+ * that risk explicitly the same day (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК»), and the ladder is
+ * shaped around it: coarse only where failure is improbable, fine where it is near.
+ *
+ * A COARSE FAILURE IS NOT AN EDGE. Whatever this ladder finds at 25 or 10 mV must be refined at the
+ * grid's own minimum before the +10 mV margin is applied (`plans/15` §4.6) — his margin rule is
+ * conditioned on it: *«Если нашли шагами по 5 мВ точку отказа…»*. Otherwise «V_fail + 10 mV» would name
+ * a voltage nobody ever burned.
+ *
+ * Ordered shallow → deep; the last zone must be open-ended.
+ */
+export const DESCENT_ZONES = Object.freeze([
+  Object.freeze({ untilDepthMv: 100, stepMv: 25 }),
+  Object.freeze({ untilDepthMv: 150, stepMv: 10 }),
+  Object.freeze({ untilDepthMv: Infinity, stepMv: 5 }),
+]);
 
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
@@ -938,6 +986,7 @@ export default Object.freeze({
   CLOCK_LADDER_STEP_TOLERANCE_MHZ,
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
   FAST_DESCENT_FLOOR_MV,
+  DESCENT_ZONES,
   CLOCK_OFFSET_RANGE_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,

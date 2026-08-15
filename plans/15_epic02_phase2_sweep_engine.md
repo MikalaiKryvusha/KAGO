@@ -94,27 +94,36 @@ up as an edge.
 
 ## 4. Steps
 
-### 4.1 — The owner's step ladder as a pure function 🔲
+### 4.1 — The owner's step ladder as a pure function ✅ **DONE 2026-08-15 21:4x**
 
 *Anchor: `GOAL.md` → «📐 ЛЕСТНИЦА ШАГОВ СПУСКА» — 25 mV over the first 100 below stock, 10 mV from 100
 to 150, 5 mV deeper.*
 
-- [ ] `descentLadder({ points, servingIndexAtStock, availableDepthMv })` → the ordered list of curve
-      POINTS the descent will visit, each carrying its voltage, its depth from stock, and the policy
-      zone that chose it.
-- [ ] **The grid is non-uniform (5 mV ×94, 10 mV ×32), so the policy is mapped onto POINTS:** the next
-      rung is **the deepest point whose voltage is still ≥ (current − policyStep)**. Rounding is always
-      toward the shallower point — asking the card for a voltage it does not have is not an option, and
-      overshooting the owner's policy is worse than undershooting it.
-- [ ] `config.mjs` gains `DESCENT_ZONES = [{ untilDepthMv: 100, stepMv: 25 }, { untilDepthMv: 150,
-      stepMv: 10 }, { untilDepthMv: Infinity, stepMv: 5 }]` with the owner's quote above it. **One
-      truth**; `FAST_DESCENT_FLOOR_MV` is retired in the same change, with a comment saying it was
-      superseded rather than deleted silently (they agree at 2842 MHz: 1045 − 150 = 895 ≈ 900).
-- [ ] Blocks: the zone boundaries · a 10 mV grid gap inside a 25 mV zone · a depth shallower than one
-      grid step (the ladder is then a single rung or empty) · the ladder truncated by the lever wall.
+- [x] `descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, zones })` → the ordered list of
+      rungs the descent will visit, each carrying `{mv, depthMv, stepMv, zoneStepMv, forcedByGrid}`.
+      **The signature is keyed by VOLTAGE, not by a point index** — this plan was written before the
+      owner retired numbered points, and `servingIndexAtStock` was that vocabulary.
+- [x] **The grid is non-uniform (5 mV ×94, 10 mV ×32), so the policy is mapped onto real rungs:** the
+      next rung is **the deepest grid point whose voltage is still ≥ (current − policyStep)**. Rounding
+      always lands on the shallower point.
+- [x] `config.mjs` gains `DESCENT_ZONES` with the owner's quote above it.
+      `FAST_DESCENT_FLOOR_MV` is **retired BY SCOPE, not deleted** — see §8, the deletion would have
+      broken the only search this project has ever run on the live card, which §5 keeps standing.
+- [x] Blocks: the zone boundaries (and the boundary read STRICTLY at depth exactly 100) · a grid that
+      cannot express the policy step · a depth shallower than one grid step · the lever wall ·
+      degenerate inputs · both card-level rung counts. **14 blocks; `engine --selftest` 76 → 90.**
+- [x] Mutation-proved with four mutations (addressees 24–27 in the suite header), and the header
+      records what they actually reddened rather than the tidy version.
 
-**Verification:** the ladder for 2842 MHz must be 28 rungs and for 2400 MHz 7 (`researches/09` §4.1) —
-numbers computed from the live curve, so a disagreement means the function or the table is wrong.
+**Verification — RUN, and it CORRECTS this plan's own number.** The ladder for **2400 MHz is 7 rungs**
+as predicted, landing exactly on the lever wall. The ladder for **2842 MHz is 24, not the 28** this
+line inherited from `researches/09` §4.1: that table computes the idealized
+`min(d,100)/25 + clamp(d−100,0,50)/10 + max(0,d−150)/5` on a grid fine enough to express every step,
+while the real grid has a 10 mV gap every 25 mV, and in the 5 mV zone one such gap swallows a rung.
+Same cause at 3090 MHz: **42 rungs, not 49.** The plan's own rule applies — «a disagreement means the
+function or the table is wrong» — and here it is the **table**: the grid is measured, the formula is
+an idealization. **The direction matters and is good news: the sweep is CHEAPER than estimated.**
+`researches/09` §4.1 is corrected in place.
 
 ### 4.2 — Seeding, and the governor that had to grow up 🔲
 
@@ -314,3 +323,31 @@ crash-then-read-back shape).*
   depth; where the grid cannot express it exactly, undershooting is obedience and overshooting is not.
 - **`FAST_DESCENT_FLOOR_MV` is retired in the same change that adds `DESCENT_ZONES`**, with the reason
   in the comment. Two policies for one decision is how a session picks the wrong one.
+
+**Added while EXECUTING §4.1 (2026-08-15 21:4x):**
+
+- **The retirement of `FAST_DESCENT_FLOOR_MV` is BY SCOPE, not by deletion — this reverses the letter
+  of §4.1 above, and the reason is §5 of this same plan.** The constant is wired into
+  `composeAscentLadder` and the `--band` / `--search` path, which §5 explicitly keeps standing until
+  the sweep has run live once. Deleting it would have changed the behaviour of the ONLY search ever
+  run on the owner's card, in the same commit that added its untested replacement. So its comment now
+  says «superseded, no new caller reads this», the sweep reads `DESCENT_ZONES` exclusively, and the
+  two go out together when the sweep replaces the band path on the card. **Two policies do coexist for
+  now, and the boundary between them is written down rather than left to be guessed.**
+- **A grid that cannot express the policy step forces a deeper rung, and the rung SAYS SO
+  (`forcedByGrid`).** The plan's rule — «rounding always toward the shallower point» — has no answer
+  where the local gap (10 mV) already exceeds the policy step (5 mV): the only shallower option is
+  standing still, which abandons the search. Taking the next grid point is forced by the hardware, it
+  stays far inside the `bugs/03` governor (10 ≪ 35 mV), and the count is reported instead of averaged
+  away. **On this card it is not rare — 4 of 24 rungs at 2842 MHz and 8 of 42 at 3090.**
+- **The two card-level rung counts are asserted as LITERALS (24 and 7), not computed from the zones.**
+  A block that derives its expectation from the same constants as the code has no independent opinion
+  and passes every mutation by construction (EXP-0055). The literals are what a re-idealization has to
+  break in order to land.
+- **The margin question this raises is NOT settled here, and it belongs to §4.6.** `PENDING:` where the
+  local gap is 10 mV, «V_fail + two grid steps» (`config.marginAboveFailureMv()`) means **+20 mV**,
+  while the owner said the number «+10 мВ» and the project implemented his rule as a STEP COUNT on
+  purpose (`STATUS.md` fact 32 — «на другой карте получится своё число»). The step-count reading is the
+  conservative one and the one already shipped, so nothing is broken today; but §4.6 must state which
+  it means, because the refinement it depends on ALSO cannot go finer than the local gap — a failure
+  found inside a 10 mV gap is only located to 10 mV, and «refine at 5 mV» is not available there.

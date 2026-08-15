@@ -108,6 +108,114 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
 }
 
 /**
+ * THE OWNER'S DESCENT LADDER, MAPPED ONTO THE CARD'S OWN NON-UNIFORM VOLTAGE GRID.
+ * `plans/15` §4.1 · policy in `config.DESCENT_ZONES` · his words in `GOAL.md` → «📐 ЛЕСТНИЦА ШАГОВ
+ * СПУСКА».
+ *
+ * The policy is stated in MILLIVOLTS (25 / 10 / 5 by depth from stock); the card accepts only voltages
+ * that exist ON ITS GRID, and that grid is **not uniform** — 5 mV in 94 places and 10 mV in 32,
+ * measured (`curves/voltage-grid.json`). So the policy is a CEILING ON STEP DEPTH that must be mapped
+ * onto real rungs, and the mapping direction is the whole safety content of this function:
+ *
+ *   **the next rung is the DEEPEST grid point whose voltage is still ≥ (current − policyStep)** —
+ *   i.e. rounding always lands on the SHALLOWER point. Undershooting his policy is obedience;
+ *   overshooting it is not, and asking the card for a voltage it does not have is not an option.
+ *
+ * ONE CASE BREAKS THAT RULE, AND IT IS FORCED BY THE HARDWARE, SO IT IS NAMED RATHER THAN HIDDEN.
+ * In the deep zone the policy asks for 5 mV, and where the grid's local gap is 10 mV there is NO point
+ * within the step — the shallowest legal move is already twice the policy. The descent then takes the
+ * next grid point and marks the rung `forcedByGrid`, because the alternative is standing still, which
+ * abandons the search. Two things make this safe rather than a loophole: 10 mV is far inside the
+ * `bugs/03` governor (first step ≤ 25, gap ≤ 35), and the rung SAYS SO — a run that overshot the
+ * owner's policy reports the count instead of averaging it away.
+ *
+ * ⚠️ **THE IDEALIZED RUNG COUNTS IN `researches/09` §4.1 ARE NOT WHAT THIS FUNCTION RETURNS, and the
+ * research is the side that is wrong.** That table computes
+ * `min(d,100)/25 + clamp(d−100,0,50)/10 + max(0,d−150)/5` on a grid fine enough to express every step,
+ * predicting 28 rungs at 2842 MHz and 49 at 3090. **Measured against the real grid: 24 and 42** — the
+ * deep zone loses one rung to each 10 mV gap, because one grid step there covers what the formula
+ * counted as two. `plans/15` §4.1 inherited «28» from the research and it is corrected there.
+ * The direction of the error is worth stating: the sweep is CHEAPER than estimated, not dearer.
+ * At 2400 MHz the two agree at **7** (the formula's 6.5, rounded up by a grid that lands exactly on the
+ * lever wall) — which is why that number was the one that looked verified.
+ *
+ * @param {object}   a
+ * @param {number[]} a.voltageGridMv     every voltage the card offers (any order; sorted here)
+ * @param {number}   a.stockVoltageMv    the voltage serving this frequency at stock — depth is measured from it
+ * @param {number}   a.availableDepthMv  how deep the ±1000 MHz lever can reach here; the wall, not a preference
+ * @param {Array}    [a.zones]           the policy; defaults to `config.DESCENT_ZONES`
+ * @returns {{rungs:Array<{mv:number,depthMv:number,stepMv:number,zoneStepMv:number,forcedByGrid:boolean}>,
+ *            refused:boolean, why:string, forcedByGridCount:number, floorMv:number}}
+ *
+ * [NOT-TESTED]
+ */
+export function descentLadder({
+  voltageGridMv = [],
+  stockVoltageMv = null,
+  availableDepthMv = 0,
+  zones = config.DESCENT_ZONES,
+} = {}) {
+  const empty = (why) => ({ rungs: [], refused: true, why, forcedByGridCount: 0, floorMv: null });
+  if (!Array.isArray(voltageGridMv) || voltageGridMv.length === 0) return empty('сетка напряжений пуста — спускаться не по чему');
+  if (!Number.isFinite(stockVoltageMv)) return empty('стоковое напряжение не названо — глубина отсчитывается от него');
+  if (!Array.isArray(zones) || zones.length === 0) return empty('политика шагов пуста');
+  if (!Number.isFinite(availableDepthMv) || availableDepthMv <= 0) {
+    return { rungs: [], refused: false, why: 'рычаг не даёт снять ни милливольта — спуск не начинается', forcedByGridCount: 0, floorMv: stockVoltageMv };
+  }
+
+  // High → low, deduplicated: the grid is the card's dictionary and the descent reads it downward.
+  const grid = [...new Set(voltageGridMv.filter(Number.isFinite))].sort((a, b) => b - a);
+  const floorMv = stockVoltageMv - availableDepthMv;
+  // The policy step for a given depth: the first zone whose boundary the depth has not yet reached.
+  const stepForDepth = (d) => (zones.find((z) => d < z.untilDepthMv) ?? zones[zones.length - 1]).stepMv;
+
+  const rungs = [];
+  let current = stockVoltageMv;
+  // The grid is finite and every iteration moves strictly downward, so this terminates; the bound is a
+  // backstop against a malformed grid, not part of the algorithm.
+  for (let guard = 0; guard <= grid.length; guard++) {
+    const zoneStepMv = stepForDepth(stockVoltageMv - current);
+    const want = current - zoneStepMv;
+    // Candidates: strictly below where we stand, and no deeper than the policy allows.
+    let next = null;
+    let forcedByGrid = false;
+    for (const v of grid) {
+      if (v < current && v >= want) { next = v; }   // grid is descending, so the last match is the deepest
+      else if (v < want) break;
+    }
+    if (next === null) {
+      // The grid cannot express this step — the nearest point down is already deeper than the policy.
+      next = grid.find((v) => v < current) ?? null;
+      forcedByGrid = true;
+    }
+    if (next === null) break;                  // the bottom of the card's grid
+    if (next < floorMv) break;                 // the lever wall — not a refusal, just where the rungs stop
+    rungs.push({
+      mv: next,
+      depthMv: stockVoltageMv - next,
+      stepMv: current - next,
+      zoneStepMv,
+      forcedByGrid,
+    });
+    current = next;
+  }
+
+  const forcedByGridCount = rungs.filter((r) => r.forcedByGrid).length;
+  if (rungs.length === 0) {
+    return {
+      rungs: [], refused: false, forcedByGridCount: 0, floorMv,
+      why: `рычаг даёт ${availableDepthMv} мВ, а ближайшая ступень сетки ниже ${stockVoltageMv} мВ глубже этого — `
+        + 'спускаться некуда, и это не отказ, а свойство участка',
+    };
+  }
+  return {
+    rungs, refused: false, forcedByGridCount, floorMv,
+    why: `ступеней ${rungs.length}, первый шаг −${rungs[0].stepMv} мВ, глубже всего −${rungs[rungs.length - 1].depthMv} мВ`
+      + (forcedByGridCount ? ` · сетка вынудила ${forcedByGridCount} шаг(ов) глубже политики (10 мВ там, где просили 5)` : ''),
+  };
+}
+
+/**
  * THE DEPTH GOVERNOR — written after `bugs/03`, which hung the owner's machine for five hours.
  *
  * An ascent exists so the FIRST FAILURE is met at the shallowest depth that can produce it. The
@@ -791,10 +899,113 @@ export async function searchEdge({
  *  21. key the inherited evidence by POINT INDEX again → «УЛИКА ПЕРЕЖИВАЕТ СПОЛЗАНИЕ КРИВОЙ»
  *  22. drop the owner's floor for the fast descent      → «БЕЗ ИСТОРИИ спуск быстрый, но НЕ НИЖЕ пола владельца»
  *  23. keep stepping coarsely BELOW that floor          → «НИЖЕ ПОЛА ВЛАДЕЛЬЦА шаг ровно 5 мВ, а не грубый»
+ *
+ * ADDED WITH `plans/15` §4.1 — the owner's descent ladder (`descentLadder`). Addressees named BEFORE
+ * the run (EXP-0016), and the RESULT is recorded honestly rather than as the tidy claim this header
+ * first carried. **These four do NOT each redden exactly one block, and saying so would have been the
+ * false half of a true statement**: `descentLadder` is a single walk, so breaking its core reddens
+ * every block downstream of the walk — including the two card-level rung counts, which are downstream
+ * of everything by construction. What each mutation owes is a block that goes red FOR ITS OWN REASON,
+ * and the `got` value printed next to it names which reason. Measured 2026-08-15 21:4x:
+ *
+ *  24. round the grid mapping toward the DEEPER point   → 7 red · **discriminating block:**
+ *      «округление всегда в сторону МЕЛКОЙ ступени» (got `stepMv: 30` where the policy allowed 25) —
+ *      the only block no other mutation here reddens
+ *  25. drop the zone boundaries (one step everywhere)   → 5 red · «зоны политики владельца: 25 → 10 → 5»
+ *      prints `[25,null,null]`, which is the signature of THIS break (24 prints `[null,null,null]`).
+ *      **Its red set is a subset of 24's, so it owns no exclusive block** — stated because a future
+ *      session comparing counts would otherwise read that as an accident
+ *  26. ignore the lever wall                            → 5 red · «ни одна ступень не уходит ЗА стену
+ *      рычага», plus the 3 mV budget walking the entire grid (98 rungs) instead of stopping
+ *  27. silence the forced-by-grid mark                  → **1 red, exactly its own**:
+ *      «10 мВ там, где политика просила 5, ПОСЧИТАНЫ и названы»
+ *
+ * ⚠️ AND THE HARNESS ITSELF FAILED FIRST, which is the reusable part: its first version filtered the
+ * output for «FAIL» while this suite prints «ПЛОХО», so it reported **0 red for all four mutations** —
+ * a blind verifier reading exactly like a clean bill of health (EXP-0016's third face). It now also
+ * asserts the suite's completion line, so a mutant that fails to LOAD cannot pass as «nothing red».
  */
 export function selfTest() {
   const results = [];
   const ok = (what, got, want) => results.push({ ok: JSON.stringify(got) === JSON.stringify(want), what, got, want });
+
+  // =============================================================================================
+  // `plans/15` §4.1 — THE OWNER'S DESCENT LADDER ON THE CARD'S OWN NON-UNIFORM GRID
+  //
+  // The fixtures are the REAL grid where the claim is about this card, and a hand-built grid where the
+  // claim is about the mapping RULE — a rule proved only on the real grid is a rule proved on one
+  // sample. Both kinds are here on purpose.
+  // =============================================================================================
+
+  // A grid shaped like this card's: 5 mV steps with a 10 mV gap every 25 mV (measured, 94 × 5 and
+  // 32 × 10 — `curves/voltage-grid.json`).
+  const gridLikeCard = (() => {
+    const v = [];
+    for (let mv = 1240; mv >= 450; mv -= 5) {
+      // the 10 mV gaps sit at 1235, 1210, 1185 … i.e. every 25 mV; skip the point below each
+      if ((1235 - mv) % 25 === 5 && mv < 1235) continue;
+      v.push(mv);
+    }
+    return v;
+  })();
+  const uniform5 = Array.from({ length: 159 }, (_, i) => 1240 - i * 5);
+
+  // — the zones themselves: his 25 / 10 / 5 by DEPTH FROM STOCK, on a grid that can express all three
+  const zoneWalk = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 200 });
+  ok('зоны политики владельца: 25 → 10 → 5 мВ по глубине от стока',
+    [zoneWalk.rungs.find((r) => r.depthMv === 25)?.stepMv,
+      zoneWalk.rungs.find((r) => r.depthMv === 110)?.stepMv,
+      zoneWalk.rungs.find((r) => r.depthMv === 155)?.stepMv],
+    [25, 10, 5]);
+  ok('граница зоны читается СТРОГО: на глубине ровно 100 шаг уже НЕ 25',
+    zoneWalk.rungs.find((r) => r.depthMv === 100)?.stepMv === 25
+      && zoneWalk.rungs.find((r) => r.depthMv > 100)?.stepMv === 10, true);
+
+  // — the mapping direction, which is the whole safety content of the function
+  //   A grid whose only point inside a 25 mV step is 20 mV down must yield 20, never the 30 below it.
+  ok('округление всегда в сторону МЕЛКОЙ ступени, а не глубокой',
+    descentLadder({ voltageGridMv: [1045, 1025, 1015, 990], stockVoltageMv: 1045, availableDepthMv: 100 }).rungs[0],
+    { mv: 1025, depthMv: 20, stepMv: 20, zoneStepMv: 25, forcedByGrid: false });
+
+  // — the forced case: the grid cannot express the policy step, and the run must SAY so
+  const forced = descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 1045, availableDepthMv: 245 });
+  ok('10 мВ там, где политика просила 5, ПОСЧИТАНЫ и названы',
+    forced.forcedByGridCount > 0 && /сетка вынудила/.test(forced.why), true);
+  ok('и ни один вынужденный шаг не пробивает сторож bugs/03 (потолок шага 35 мВ)',
+    forced.rungs.every((r) => r.stepMv <= (config.ASCENT_STEP_MAX_MV ?? 35)), true);
+  ok('первый шаг не глубже потолка первого шага владельца (25 мВ)',
+    forced.rungs[0].stepMv <= (config.ASCENT_FIRST_STEP_MAX_MV ?? 25), true);
+
+  // — the lever wall truncates; the policy does not
+  const walled = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 60 });
+  ok('стена рычага обрезает лестницу, а не глубина политики',
+    [walled.rungs.at(-1).depthMv <= 60, walled.rungs.at(-1).mv >= walled.floorMv], [true, true]);
+  ok('ни одна ступень не уходит ЗА стену рычага',
+    walled.rungs.every((r) => r.mv >= 1045 - 60), true);
+
+  // — depth shallower than one grid step: an honest empty ladder, and NOT a refusal
+  const tooShallow = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 3 });
+  ok('глубина мельче одной ступени сетки → пустая лестница, но не отказ',
+    [tooShallow.rungs.length, tooShallow.refused], [0, false]);
+  ok('и причина названа словами, а не пустой строкой', tooShallow.why.length > 20, true);
+
+  // — the numbers this card actually produces. `researches/09` §4.1 predicted 28 at 2842 MHz from an
+  //   IDEALIZED grid; the real grid gives 24 because each 10 mV gap in the deep zone swallows a rung.
+  //   The block asserts the MEASURED number and states the research's, so a future edit that "fixes"
+  //   the count back to 28 reddens here instead of quietly re-introducing the idealization.
+  ok('2842 МГц на РЕАЛЬНОЙ сетке: 24 ступени, а не идеализированные 28 из researches/09 §4.1',
+    descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 1045, availableDepthMv: 245 }).rungs.length, 24);
+  ok('2400 МГц: 7 ступеней — здесь формула и сетка сходятся, и последняя ступень встаёт РОВНО на стену',
+    (() => {
+      const l = descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 910, availableDepthMv: 125 });
+      return [l.rungs.length, l.rungs.at(-1).depthMv];
+    })(), [7, 125]);
+
+  // — degenerate inputs refuse rather than invent
+  ok('пустая сетка → отказ, а не молчаливая пустая лестница',
+    descentLadder({ voltageGridMv: [], stockVoltageMv: 1045, availableDepthMv: 100 }).refused, true);
+  ok('сток не назван → отказ (глубина отсчитывается от него)',
+    descentLadder({ voltageGridMv: uniform5, stockVoltageMv: null, availableDepthMv: 100 }).refused, true);
 
   // --- the ladder
   ok('лестница начинается с грубого шага, а не с нуля', coarseLadder({ limitMhz: 300 })[0], ASCENT_COARSE_MHZ);
