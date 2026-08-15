@@ -387,7 +387,7 @@ export function resolveTarget(profile, state) {
  * as tuning the card while the applier quietly writes nothing is the exact defect `profiles/README.md`
  * is written against.
  */
-export function effectiveCurveSetting(profile, { loadCurve = null } = {}) {
+export function effectiveCurveSetting(profile, { loadCurve = null, liveTable = null, toOffsets = null } = {}) {
   const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
   const ref = profile?.settings?.curveRef ?? null;
   if (inline && ref) {
@@ -405,8 +405,16 @@ export function effectiveCurveSetting(profile, { loadCurve = null } = {}) {
     err.refusals = [{ field: 'settings.curveRef', why: `документа кривой «${ref}» нет — применять профиль частично запрещено` }];
     throw err;
   }
-  const deltaByPointMhz = doc.points.map((p) => p.mhz - p.stockMhz);
-  return { deltaByPointMhz, capMhz: null, __fromRef: ref };
+  // The document says «this frequency costs this voltage». The card takes per-entry frequency
+  // offsets. The conversion is COMPUTED against the LIVE table (`curve-store.offsetsFor`), never
+  // stored — that is what makes one document produce the right write at 40 °C and at 57 °C.
+  if (!liveTable) {
+    const err = new Error(`профиль «${profile.name}» ссылается на кривую «${ref}», но живая таблица карты не передана`);
+    err.refusals = [{ field: 'settings.curveRef', why: 'перевод «частота → напряжение» в смещения требует ЖИВОГО чтения таблицы' }];
+    throw err;
+  }
+  const { offsets, clamped } = toOffsets(doc, liveTable);
+  return { deltaByPointMhz: offsets, capMhz: null, __fromRef: ref, __clamped: clamped };
 }
 
 function defaultCurveLoader(name) {
@@ -1737,9 +1745,15 @@ async function main(argv) {
     // sets no curve must not load nvapi64.dll for nothing.
     // The referenced document is loaded HERE, in the CLI, because only the CLI may `await import` the
     // store (which transitively pulls the card probes). Everything below sees one resolved shape.
-    const { loadCurveDoc } = await import('./curve-store.mjs');
+    const { loadCurveDoc, offsetsFor } = await import('./curve-store.mjs');
+    const { readLiveCurvePoints } = await import('./card-grids.mjs');
     const loadCurve = (name) => loadCurveDoc({ name });
-    const effCurve = effectiveCurveSetting(profile, { loadCurve });
+    const usesRef = (profile.settings?.curveRef ?? null) !== null;
+    const effCurve = effectiveCurveSetting(profile, {
+      loadCurve,
+      liveTable: usesRef ? await readLiveCurvePoints() : null,
+      toOffsets: offsetsFor,
+    });
     const needsCurve = effCurve !== null;
     const curveBackend = needsCurve ? nvapiCurveBackend() : null;
 

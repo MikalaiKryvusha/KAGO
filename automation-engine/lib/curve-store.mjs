@@ -1,46 +1,43 @@
 #!/usr/bin/env node
-// automation-engine/lib/curve-store.mjs — THE TUNING CURVE AS A DOCUMENT: one object per point,
-// carrying what it is, how it got there, and when.
+// automation-engine/lib/curve-store.mjs — THE TUNING CURVE: for every FREQUENCY on the card's grid,
+// the voltage that serves it.
 //
-// Plan anchor (plans/14 §4.2, executing the owner's `ideas/03` steps 1–2 and 5): *«В JSON VF-кривой
-// тюнинга видеокарты загружаются стоковые точки «напряжение — частота» в виде объектов. У точки есть
-// частота, напряжение, статус и дата, когда точка в последний раз редактировалась.»*
+// Plan anchor (plans/14 §4.2, the owner's `ideas/03` steps 1–2 and 5), and the terminology is HIS,
+// settled 2026-08-15: *«МЫ ПРЕКРАЩАЕМ НАЗЫВАТЬ ТОЧКИ НОМЕРАМИ. МЫ НАЗЫВАЕМ ТОЧКИ ЧАСТОТОЙ… Карта
+// хочет сменить частоту — она устанавливает новую частоту, мы обслуживаем её соответствующим
+// напряжением. Всё. Нет никаких "точка 120". Есть только частоты по сетке частот.»*
 //
-// ─── WHY THIS FILE EXISTS AT ALL, IN ONE PARAGRAPH ──────────────────────────────────────────────
+// ─── WHY HIS FRAMING IS THE CORRECT ONE, not merely the one we were told to use ─────────────────
 //
-// Until today the raise lived INSIDE the profile as a bare integer array (`deltaByPointMhz`). That
-// array can say «+592» and nothing else: not how the number was found, not when, not whether a burn
-// ever proved it, not whether the descent stopped at the card's edge or at our own lever. The owner's
-// convergence loop keeps one value PER POINT with a history — and a loop whose state has nowhere to
-// live either does not get written or gets flattened back into one number. EXP-0056 is the week that
-// cost. This document is the place the loop writes to.
+// The first version of this file keyed by table INDEX and stored a frequency per index. That made an
+// index look like an object that MOVES: «point 120 read 3112 MHz cold and 3105 at 57 °C», with a
+// reclassification pass to chase it. In the owner's framing that observation does not exist. What
+// exists is simpler and true: **1200 mV served 3112 MHz cold and 3105 MHz warm** — a statement about
+// what a frequency COSTS, not about a point travelling.
 //
-// ─── THE STATUS VOCABULARY IS CLOSED, AND ITS PROOF STATUSES ARE THE OWNER'S OWN WORDS ──────────
+// And it makes the artifact STABLE. «Frequency → voltage» is what we search for and what we keep, and
+// it does not depend on the temperature of the measurement. The per-entry offsets the hardware wants
+// DO depend on it — so they are COMPUTED at apply time from the live table and never stored. The old
+// shape stored exactly the thing that moves.
 //
-// An open string field lets a future session invent a status no consumer handles. Three of the eight
-// are quoted from `ideas/03` verbatim (see CURVE_STATUS below); `lever-limited` in particular exists
-// to be IMPOSSIBLE to confuse with an edge — in 1700…2400 MHz the descent runs out of our ±1000 MHz
-// lever before the silicon runs out, and reporting that as «край найден» would be a false [TESTED].
+// ─── THE ONE HARDWARE LIMIT, STATED UP FRONT ────────────────────────────────────────────────────
 //
-// ─── THE R13 RULE, AND WHY THE OBVIOUS VERSION OF IT IS WRONG ───────────────────────────────────
+// The card's write interface is 127 table entries, each at a FIXED voltage; only the entry's
+// frequency is writable. So the 389 grid frequencies CANNOT each get an independent voltage —
+// **neighbouring frequencies share one**, because there are only 127 voltage rungs (450…1240 mV,
+// 5 mV in 94 places and 10 mV in 32). «Serve the frequency with its voltage» is therefore executed
+// with the nearest rung AT OR ABOVE the measured minimum. There is no other quantity the card takes.
 //
-// «Never above the card's own maximum» cannot be checked as `mhz <= max`: the FACTORY table's top
-// entry is 3172 MHz while this card's maximum applicable clock is 3090, so that check would refuse a
-// document of all zeroes — a guard causing the regression it exists to prevent. What is judged is
-// what WE RAISED: `offsetMhz` may not carry a point above the card's maximum, and a point the factory
-// already put above it may not be raised at all. Same distinction `nvapi.buildRaiseAndCapVector`
-// draws with `highestRaisedOfferMhz`; it was learned on the live card, not by reading.
-//
-// GPU WRITES: none. This module reads the card to SEED a document and to VERIFY one; it never writes.
+// GPU WRITES: none. This module reads the card to seed a document and to verify one; it never writes.
 //
 // Usage:
 //   npm run curve -- --grids     probe and store both card dictionaries (ideas/03 steps 3–4)
-//   npm run curve -- --init      seed the tuning curve from the live stock curve (step 5)
-//   npm run curve -- --show      print the document as a table
-//   npm run curve -- --verify    hold the document against the live card (the pair check)
+//   npm run curve -- --init      seed frequency → voltage from the live card (step 5)
+//   npm run curve -- --show      print the table
+//   npm run curve -- --verify    hold the document against the live card
 //   npm run curve -- --selftest  hostile fixtures, no GPU
 //
-// [NOT-TESTED] — born 2026-08-15 with plan 14; flips per block on the observations in its §7.
+// [NOT-TESTED] — born 2026-08-15 with plan 14; re-keyed to frequency the same day on the owner's word.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -52,47 +49,44 @@ import { CURVES_DIR, writeJsonAtomic, loadGrid, localIso, buildGrids, writeGrids
 export { CURVES_DIR };
 
 /**
- * The eight statuses a point may carry. CLOSED — an unknown status is refused, never ignored.
+ * The statuses a frequency may carry. CLOSED — an unknown status is refused, never ignored.
  *
- * The three PROOF statuses are the owner's own words from `ideas/03`, quoted rather than paraphrased,
- * because a vocabulary that drifts from the document it implements is the first thing a weak session
- * gets wrong:
- *
+ * The three PROOF statuses are the owner's own words from `ideas/03`, quoted rather than paraphrased:
  *   step  9 — «точка проверена, работает, доказано коротким прожигом»  → short-burn-proved
  *   step 12 — «протестирована, край найден!»                           → edge-found
  *   step 15 — «доказаны длительным прожигом»                           → long-burn-proved
+ *
+ * TWO STATUSES WERE REMOVED when the document was re-keyed to frequency: `clock-floor` and
+ * `above-card-max` were artifacts of numbering table entries. The frequency grid IS 180…3090 MHz —
+ * there is nothing above the card's maximum by construction, and the bottom of the grid is just its
+ * bottom.
  */
 export const CURVE_STATUS = Object.freeze({
-  /** Untouched factory value. */
+  /** The factory voltage for this frequency, as read. Nothing tuned yet. */
   STOCK: 'stock',
-  /** A rung is IN FLIGHT — written before the card is touched, so a hang leaves this behind and the
-   *  next launch knows exactly which rung killed the machine (`ideas/03` step 12, phase 2). */
+  /** A rung is IN FLIGHT — written before the card is touched, so a hang leaves a trace and the next
+   *  launch knows which rung killed the machine (`ideas/03` step 12, phase 2). */
   PROBING: 'probing',
-  /** Held the owner's 10 s burn. */
+  /** This frequency held the owner's 10 s burn at this voltage. */
   SHORT_BURN_PROVED: 'short-burn-proved',
-  /** Failed one rung lower; parked at V_fail + 10 mV (his margin, two grid steps). */
+  /** One rung lower failed; parked at V_fail + 10 mV (his margin, two grid steps). */
   EDGE_FOUND: 'edge-found',
   /** Held the long burn — one minute since his amendment of 2026-08-15. */
   LONG_BURN_PROVED: 'long-burn-proved',
-  /** The ±1000 MHz lever ran out BEFORE the card did. **Not an edge**, and it must never be reported
-   *  as one: measured, 45 mV available at 1700 MHz against 245 at 2842 (`researches/09` §3.3). */
+  /** The ±1000 MHz lever ran out BEFORE the silicon did: no LOWER voltage can be made to serve this
+   *  frequency at all. **Not an edge**, and it must never be reported as one — measured, 45 mV of
+   *  headroom at 1700 MHz against 245 at 2842 (`researches/09` §3.3). */
   LEVER_LIMITED: 'lever-limited',
-  /** Sits on the card's frequency floor — no stock frequency to search. These 44 points are still the
-   *  LEVERS that serve low clocks cheaply when raised; «nothing to search» is not «nothing to do». */
-  CLOCK_FLOOR: 'clock-floor',
-  /** The factory table puts it above the card's own maximum, so the card can never run it. Never
-   *  raised. These 9 points are the 82 MHz gap `bugs/11` escaped through. */
-  ABOVE_CARD_MAX: 'above-card-max',
 });
 
 const STATUS_VALUES = Object.freeze(Object.values(CURVE_STATUS));
-/** The statuses that mean «a burn proved this», i.e. the ones a report may count as evidence. */
+/** Statuses that mean «a burn proved this» — the ones a report may count as evidence. */
 export const PROVEN_STATUSES = Object.freeze([
   CURVE_STATUS.SHORT_BURN_PROVED, CURVE_STATUS.EDGE_FOUND, CURVE_STATUS.LONG_BURN_PROVED,
 ]);
 
 export const CURVE_FILE = 'measured.json';
-const POINT_KEYS = Object.freeze(['i', 'voltageMv', 'stockMhz', 'mhz', 'offsetMhz', 'status', 'provenBy', 'editedAt']);
+const ROW_KEYS = Object.freeze(['mhz', 'voltageMv', 'stockVoltageMv', 'status', 'provenBy', 'editedAt']);
 const LOCAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/u;
 const refuse = (field, why) => ({ field, why });
 
@@ -101,118 +95,93 @@ export function curvePath(name = 'measured', dir = CURVES_DIR) {
 }
 
 // =================================================================================================
-// 1. Seeding a document from the live card (`ideas/03` step 5)
+// 1. Reading the card in the owner's coordinates: frequency → voltage
 // =================================================================================================
 
 /**
- * Build a fresh tuning-curve document from the card's stock curve.
+ * The voltage the card's factory table currently uses to serve `mhz`.
  *
- * Every point starts at `stock` except the two classes the card itself decides:
- *   · frequency at or below the ladder's floor → `clock-floor`
- *   · frequency above the card's own maximum   → `above-card-max`
- *
- * Those two are CLASSIFICATIONS, not verdicts — nothing has been burned. They exist so the sweep's
- * coverage count (74 of 74) is a real number rather than «74 of whatever we felt like visiting».
+ * The table is ascending in both axes, so the serving voltage is the LOWEST rung whose frequency
+ * reaches `mhz`. Returns `null` when no rung reaches it (which, for a frequency taken off the card's
+ * own grid, means the reading is wrong rather than the frequency is impossible).
  */
-export function initFromCard({ curvePoints, frequencyGrid, card, stamp, tempC = null, nowIso = null }) {
+export function stockVoltageFor(mhz, tablePoints) {
+  for (const p of tablePoints) {
+    if (p.freqKhz > 0 && p.mhz >= mhz) return p.mv;
+  }
+  return null;
+}
+
+/**
+ * The LOWEST voltage that could be made to serve `mhz` at all, given the hardware's ±1000 MHz lever.
+ *
+ * To serve `mhz` from a rung whose factory frequency is F, that rung must be raised by (mhz − F), and
+ * the raise is capped. So the reachable floor is the lowest rung within reach — and THAT is what
+ * `lever-limited` means when a descent stops there: our lever ran out, not the silicon.
+ */
+export function leverFloorFor(mhz, tablePoints, maxRaiseMhz = CLOCK_OFFSET_MAX_MHZ ?? 1000) {
+  for (const p of tablePoints) {
+    if (p.freqKhz > 0 && mhz - p.mhz <= maxRaiseMhz) return p.mv;
+  }
+  return null;
+}
+
+/**
+ * Seed a document: every frequency on the card's grid, with the voltage the factory currently uses.
+ *
+ * `ideas/03` step 5. Descending by frequency because the sweep walks top-down (step 6) and a table
+ * stored in the order it is consumed is one fewer place to get a direction wrong.
+ */
+export function initFromCard({ frequencyGrid, tablePoints, card, stamp, tempC = null, nowIso = null }) {
   const at = nowIso ?? localIso();
-  const points = curvePoints.slice(0, CURVE_GRAPHICS_POINT_COUNT).map((p, i) => ({
-    i,
-    voltageMv: p.mv,
-    stockMhz: p.mhz,
-    mhz: p.mhz,
-    offsetMhz: 0,
-    status: classify(p.mhz, frequencyGrid),
-    provenBy: null,
-    editedAt: at,
-  }));
+  const frequencies = [...frequencyGrid.values].sort((a, b) => b - a).map((mhz) => {
+    const v = stockVoltageFor(mhz, tablePoints);
+    return {
+      mhz,
+      voltageMv: v,
+      stockVoltageMv: v,
+      status: CURVE_STATUS.STOCK,
+      provenBy: null,
+      editedAt: at,
+    };
+  });
 
   return {
     kind: 'tuning-curve',
     name: 'measured',
-    card: { ...card, graphicsPointCount: points.length },
+    card: { ...card, frequencyCount: frequencies.length },
+    // The voltage rungs the card offers. Stored WITH the document because a voltage that is not on
+    // this list is not a voltage the card can be asked for, and the validator says so by name.
+    voltageGridMv: [...new Set(tablePoints.slice(0, CURVE_GRAPHICS_POINT_COUNT).map((p) => p.mv))].sort((a, b) => a - b),
     stamp: { ...stamp, takenAt: stamp.takenAt ?? at, tempC },
-    points,
+    frequencies,
   };
 }
 
-/**
- * Which class a point falls in, given the card's ladder. Pure.
- *
- * ─── THE SNAPSHOT WARNING, PAID FOR BY OBSERVATION ON THE DAY THIS WAS WRITTEN ──────────────────
- *
- * **`stockMhz` is a SNAPSHOT of a moving quantity, and so is this classification.** The curve slides
- * along the FREQUENCY axis with temperature (≈ −1.7 MHz per °C, `bugs/10`, EXP-0053) while the
- * VOLTAGE axis stands still. Measured 2026-08-15 within one hour on this card: point 120 read
- * **3112 MHz cold and 3105 MHz at 57 °C**, point 123 read **3142 → 3127**. That moved ONE point
- * across the 3090 MHz boundary, and the seeded document counted **9 points above the card's maximum
- * cold and 8 warm** — the same card, the same code, an hour apart.
- *
- * So the class stored in the file is «as of `stamp.tempC`», never a permanent property. Consumers
- * that are about to TOUCH THE CARD re-derive it from the live curve (`reclassify`), exactly as
- * `offsetMhz` is recomputed on load. The authority at write time is always the live reading; the
- * document is the memory, not the oracle.
- */
-export function classify(mhz, frequencyGrid) {
-  if (mhz > frequencyGrid.maxGraphicsMhz) return CURVE_STATUS.ABOVE_CARD_MAX;
-  if (mhz <= frequencyGrid.minGraphicsMhz) return CURVE_STATUS.CLOCK_FLOOR;
-  return CURVE_STATUS.STOCK;
-}
-
-/**
- * Re-derive `stockMhz` and the two CLASSIFICATIONS from a live curve reading, leaving every point
- * that carries a MEASUREMENT untouched.
- *
- * A point already proved by a burn keeps its status and its tuned frequency: the burn happened, and a
- * warmer card does not un-happen it. Only points whose status is still a classification (`stock`,
- * `clock-floor`, `above-card-max`) are re-derived — those were never verdicts.
- */
-export function reclassify(doc, curvePoints, frequencyGrid, { nowIso = null, tempC = null } = {}) {
-  const at = nowIso ?? localIso();
-  const live = curvePoints.slice(0, CURVE_GRAPHICS_POINT_COUNT);
-  const CLASSES = [CURVE_STATUS.STOCK, CURVE_STATUS.CLOCK_FLOOR, CURVE_STATUS.ABOVE_CARD_MAX];
-  const moved = [];
-  for (let i = 0; i < doc.points.length && i < live.length; i++) {
-    const p = doc.points[i];
-    if (!CLASSES.includes(p.status)) continue;
-    const was = { stockMhz: p.stockMhz, status: p.status };
-    p.stockMhz = live[i].mhz;
-    p.mhz = live[i].mhz;
-    p.offsetMhz = 0;
-    p.status = classify(live[i].mhz, frequencyGrid);
-    if (was.status !== p.status || was.stockMhz !== p.stockMhz) {
-      p.editedAt = at;
-      if (was.status !== p.status) moved.push({ i, from: was.status, to: p.status, wasMhz: was.stockMhz, nowMhz: p.stockMhz });
-    }
-  }
-  doc.stamp = { ...doc.stamp, tempC };
-  return { moved, reclassified: Math.min(doc.points.length, live.length) };
-}
-
-/** The coverage arithmetic the epic's E2-AC2 is counted with. Pure. */
+/** Coverage arithmetic — what E2-AC2 is counted with. Pure. */
 export function summarize(doc) {
+  const rows = doc.frequencies ?? [];
   const by = Object.fromEntries(STATUS_VALUES.map((s) => [s, 0]));
-  for (const p of doc.points ?? []) by[p.status] = (by[p.status] ?? 0) + 1;
-  const searchable = (doc.points ?? []).filter(
-    (p) => p.status !== CURVE_STATUS.CLOCK_FLOOR && p.status !== CURVE_STATUS.ABOVE_CARD_MAX,
-  ).length;
-  const closed = (doc.points ?? []).filter(
-    (p) => p.status === CURVE_STATUS.EDGE_FOUND || p.status === CURVE_STATUS.LEVER_LIMITED
-      || p.status === CURVE_STATUS.LONG_BURN_PROVED,
-  ).length;
-  return { total: (doc.points ?? []).length, byStatus: by, searchable, closed };
+  for (const r of rows) by[r.status] = (by[r.status] ?? 0) + 1;
+  const closed = rows.filter((r) => r.status === CURVE_STATUS.EDGE_FOUND
+    || r.status === CURVE_STATUS.LEVER_LIMITED || r.status === CURVE_STATUS.LONG_BURN_PROVED).length;
+  const savedMv = rows.reduce((n, r) => n + Math.max(0, (r.stockVoltageMv ?? 0) - (r.voltageMv ?? 0)), 0);
+  const tuned = rows.filter((r) => Number.isFinite(r.stockVoltageMv) && r.voltageMv < r.stockVoltageMv);
+  return {
+    total: rows.length,
+    byStatus: by,
+    closed,
+    tuned: tuned.length,
+    deepestCutMv: tuned.length ? Math.max(...tuned.map((r) => r.stockVoltageMv - r.voltageMv)) : 0,
+    averageCutMv: tuned.length ? Math.round((savedMv / tuned.length) * 10) / 10 : 0,
+  };
 }
 
 // =================================================================================================
 // 2. Validation — pure, provable on fixtures alone
 // =================================================================================================
 
-/**
- * @param {object} doc
- * @param {{card?: {maxGraphicsMhz:number}|null}} opts — the CARD tier runs only when a maximum is given
- * @returns {Array<{field:string,why:string}>} empty means accepted
- */
-export function validateCurveDoc(doc, { card = null } = {}) {
+export function validateCurveDoc(doc, { card = null, frequencyGrid = null } = {}) {
   const out = [];
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
     return [refuse('<кривая>', 'ожидался JSON-объект')];
@@ -233,99 +202,99 @@ export function validateCurveDoc(doc, { card = null } = {}) {
     }
   }
 
-  if (!Array.isArray(doc.points)) {
-    return [...out, refuse('points', 'обязательный массив точек отсутствует')];
+  if (!Array.isArray(doc.voltageGridMv) || doc.voltageGridMv.length === 0) {
+    out.push(refuse('voltageGridMv', 'сетка напряжений обязательна: напряжение, которого на ней нет, карта принять не может'));
   }
-  if (doc.points.length !== CURVE_GRAPHICS_POINT_COUNT) {
-    out.push(refuse('points', `точек ${doc.points.length}, а графических точек у кривой ${CURVE_GRAPHICS_POINT_COUNT} `
-      + '(128 записей структуры драйвера минус последняя — она не графическая). Кривая другой длины относится к другой карте'));
-    return out;
+  if (!Array.isArray(doc.frequencies) || doc.frequencies.length === 0) {
+    return [...out, refuse('frequencies', 'обязательная таблица частот отсутствует или пуста')];
   }
 
-  const lo = CLOCK_OFFSET_MIN_MHZ ?? -1000;
-  const hi = CLOCK_OFFSET_MAX_MHZ ?? 1000;
+  const grid = Array.isArray(doc.voltageGridMv) ? doc.voltageGridMv : [];
   const bound = card?.maxGraphicsMhz ?? null;
+  const ladder = frequencyGrid?.values ?? null;
 
-  for (let i = 0; i < doc.points.length; i++) {
-    const p = doc.points[i];
-    const at = `points[${i}]`;
-    if (!p || typeof p !== 'object' || Array.isArray(p)) {
-      out.push(refuse(at, 'ожидался объект точки'));
+  let prevMhz = Infinity;
+  for (let k = 0; k < doc.frequencies.length; k++) {
+    const r = doc.frequencies[k];
+    const at = `frequencies[${k}]`;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) {
+      out.push(refuse(at, 'ожидался объект строки'));
       continue;
     }
-    for (const k of Object.keys(p)) {
-      if (!POINT_KEYS.includes(k)) out.push(refuse(`${at}.${k}`, `неизвестное поле; известны: ${POINT_KEYS.join(', ')}`));
-    }
-    if (p.i !== i) out.push(refuse(`${at}.i`, `индекс внутри точки (${p.i}) не совпадает с её местом в массиве (${i}) — точка не может врать о том, кто она`));
-    for (const k of ['voltageMv', 'stockMhz', 'mhz']) {
-      if (!Number.isFinite(p[k])) out.push(refuse(`${at}.${k}`, `ожидалось число, получено ${JSON.stringify(p[k])}`));
-    }
-    if (!STATUS_VALUES.includes(p.status)) {
-      out.push(refuse(`${at}.status`, `неизвестный статус ${JSON.stringify(p.status)}; словарь закрыт: ${STATUS_VALUES.join(', ')}`));
-    }
-    if (!LOCAL_ISO.test(String(p.editedAt))) {
-      out.push(refuse(`${at}.editedAt`, `дата последней правки обязательна, локальный ISO со смещением; получено ${JSON.stringify(p.editedAt)}`));
+    for (const key of Object.keys(r)) {
+      if (!ROW_KEYS.includes(key)) out.push(refuse(`${at}.${key}`, `неизвестное поле; известны: ${ROW_KEYS.join(', ')}`));
     }
 
-    // offsetMhz is stored for human eyes and RECOMPUTED on load (`loadCurveDoc`). Here we still check
-    // it, because a file whose two numbers disagree is a file somebody hand-edited half way.
-    if (Number.isFinite(p.mhz) && Number.isFinite(p.stockMhz)) {
-      const derived = p.mhz - p.stockMhz;
-      if (Number.isFinite(p.offsetMhz) && p.offsetMhz !== derived) {
-        out.push(refuse(`${at}.offsetMhz`, `${p.offsetMhz} МГц не равен mhz − stockMhz = ${derived}; один и тот же факт записан дважды и разошёлся`));
+    // --- the frequency itself
+    if (!Number.isFinite(r.mhz)) {
+      out.push(refuse(`${at}.mhz`, `ожидалась частота в МГц, получено ${JSON.stringify(r.mhz)}`));
+    } else {
+      if (r.mhz >= prevMhz) {
+        out.push(refuse(`${at}.mhz`, `таблица идёт сверху вниз по частоте, а ${r.mhz} МГц стоит после ${prevMhz}`));
       }
-      if (!Number.isInteger(derived)) {
-        out.push(refuse(`${at}.mhz`, `сдвиг ${derived} МГц не целое число — железо принимает целые мегагерцы`));
-      } else if (derived < 0) {
-        // The search only ever RAISES: a raise is what makes a lower-voltage point serve the same
-        // clock. Pushing points down is the CAP, and the cap is computed at apply time against the
-        // live curve — never frozen into the measurement (`plans/12` §8).
-        out.push(refuse(`${at}.mhz`, `отрицательный сдвиг ${derived} МГц: тюнинг только ПОДНИМАЕТ точки, а придавливание — это потолок, и он считается при применении, а не хранится в замере`));
-      } else if (derived < lo || derived > hi) {
-        out.push(refuse(`${at}.mhz`, `сдвиг ${derived} МГц вне аппаратного диапазона ${lo}…${hi} МГц`));
-      } else if (bound !== null && derived > 0) {
-        // ─── R13, judged on WHAT WE RAISED ────────────────────────────────────────────────────────
-        // A point the factory already put above the card's maximum may not be raised at all; a point
-        // below it may not be raised past the maximum. Written as one comparison so there is no second
-        // branch to forget.
-        if (p.mhz > bound) {
-          out.push(refuse(`${at}.mhz`, `мы подняли точку до ${p.mhz} МГц при максимуме карты ${bound} МГц`
-            + (p.stockMhz > bound ? ' — эта точка и в заводской таблице выше максимума, её нельзя поднимать вовсе' : '')
-            + '. Слово владельца: «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ» (R13, bugs/11)'));
-        }
+      prevMhz = r.mhz;
+      if (ladder && !ladder.includes(r.mhz)) {
+        out.push(refuse(`${at}.mhz`, `${r.mhz} МГц нет на сетке частот карты — карта на этой частоте работать не станет`));
+      }
+      // R13 read in the owner's coordinates, and it is trivial here BY CONSTRUCTION: frequencies come
+      // off the card's own grid, whose top IS the instance maximum. The check stays because «by
+      // construction» is an argument about today's code, and this is the rule `bugs/11` cost a BSOD.
+      if (bound !== null && r.mhz > bound) {
+        out.push(refuse(`${at}.mhz`, `${r.mhz} МГц выше максимума этой карты (${bound} МГц). `
+          + 'Слово владельца: «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ» (R13, bugs/11)'));
       }
     }
 
-    // A classification must match what it claims about the card.
-    if (bound !== null && p.status === CURVE_STATUS.ABOVE_CARD_MAX && Number.isFinite(p.stockMhz) && p.stockMhz <= bound) {
-      out.push(refuse(`${at}.status`, `помечена above-card-max, но её заводская частота ${p.stockMhz} МГц не выше максимума карты ${bound} МГц`));
+    // --- the voltage that serves it
+    if (!Number.isFinite(r.voltageMv)) {
+      out.push(refuse(`${at}.voltageMv`, `ожидалось напряжение в мВ, получено ${JSON.stringify(r.voltageMv)}`));
+    } else if (grid.length && !grid.includes(r.voltageMv)) {
+      out.push(refuse(`${at}.voltageMv`, `${r.voltageMv} мВ нет на сетке напряжений карты — такого напряжения у неё попросить нельзя. `
+        + `Сетка: ${grid[0]}…${grid[grid.length - 1]} мВ, ${grid.length} ступеней`));
     }
-    if (PROVEN_STATUSES.includes(p.status) && (typeof p.provenBy !== 'string' || p.provenBy.trim() === '')) {
-      out.push(refuse(`${at}.provenBy`, `статус «${p.status}» утверждает, что точку доказал прожиг — тогда назови форму нагрузки и вердикт; статус без свидетеля это заявление, а не улика`));
+    if (Number.isFinite(r.stockVoltageMv) && Number.isFinite(r.voltageMv) && r.voltageMv > r.stockVoltageMv) {
+      // Tuning LOWERS the voltage a frequency needs. Raising it above stock is not undervolting, and
+      // it is not something this project has ever measured a reason for.
+      out.push(refuse(`${at}.voltageMv`, `${r.voltageMv} мВ ВЫШЕ стокового ${r.stockVoltageMv} мВ: тюнинг снижает напряжение частоты, `
+        + 'а не поднимает; повышение — это не андервольт и оснований для него не измерено'));
+    }
+
+    if (!STATUS_VALUES.includes(r.status)) {
+      out.push(refuse(`${at}.status`, `неизвестный статус ${JSON.stringify(r.status)}; словарь закрыт: ${STATUS_VALUES.join(', ')}`));
+    }
+    if (!LOCAL_ISO.test(String(r.editedAt))) {
+      out.push(refuse(`${at}.editedAt`, `дата последней правки обязательна, локальный ISO со смещением; получено ${JSON.stringify(r.editedAt)}`));
+    }
+    if (PROVEN_STATUSES.includes(r.status) && (typeof r.provenBy !== 'string' || r.provenBy.trim() === '')) {
+      out.push(refuse(`${at}.provenBy`, `статус «${r.status}» утверждает, что частоту доказал прожиг — тогда назови форму нагрузки и вердикт; `
+        + 'статус без свидетеля это заявление, а не улика'));
     }
   }
 
-  // ─── MONOTONICITY: measured, never inherited (`plans/12` P6-AC9/AC10) ─────────────────────────
-  // Under a uniform raise monotonicity was a PROOF about the formula. A per-point vector removes the
-  // proof: raising point i more than point i+1 puts a lower-voltage point above a higher-voltage one,
-  // and this project has never written such a curve nor observed what the card does with it. The
-  // refusal is conservative and says so — it can be lifted by a measurement.
-  const inv = firstInversion(doc.points);
+  // ─── MONOTONICITY, in the owner's coordinates and physically meaningful ────────────────────────
+  // A higher frequency cannot need LESS voltage than a lower one — that is the same setup-timing fact
+  // the whole search rests on, and the owner stated it from his own practice: «на более нижней частоте
+  // напряжение нужно такое же или ниже, очень редко выше, почти не бывает такого». A table that
+  // violates it is either a measurement error or that rare case, and either way it is not written
+  // silently. The refusal names BOTH frequencies.
+  const inv = firstInversion(doc.frequencies);
   if (inv) {
-    out.push(refuse(`points[${inv.at}].mhz`, `кривая перестала быть монотонной: точка ${inv.at} (${doc.points[inv.at].voltageMv} мВ) `
-      + `даёт ${doc.points[inv.at].mhz} МГц, а следующая ${inv.at + 1} (${doc.points[inv.at + 1].voltageMv} мВ) — только ${doc.points[inv.at + 1].mhz}. `
-      + 'Такую форму эта карта никогда не получала и что она с ней делает — не измерено; отказ снимается замером, а не правкой'));
+    const a = doc.frequencies[inv.at]; const b = doc.frequencies[inv.at + 1];
+    out.push(refuse(`frequencies[${inv.at + 1}].voltageMv`,
+      `${b.mhz} МГц требует ${b.voltageMv} мВ, а более ВЫСОКАЯ ${a.mhz} МГц — только ${a.voltageMv} мВ. `
+      + 'Более высокой частоте не может хватать меньшего напряжения: либо замер ошибочен, либо это тот редкий случай, '
+      + 'который владелец назвал сам, — и тогда его записывают явно, а не проносят молча'));
   }
 
   return out;
 }
 
-/** The first index where the tuned curve stops being non-decreasing, or `null`. */
-export function firstInversion(points) {
-  for (let i = 0; i + 1 < points.length; i++) {
-    const a = points[i]?.mhz;
-    const b = points[i + 1]?.mhz;
-    if (Number.isFinite(a) && Number.isFinite(b) && b < a) return { at: i };
+/** The first place where a LOWER frequency demands MORE voltage than the higher one above it in the
+ *  table (the table runs high → low). `null` when the table is consistent. */
+export function firstInversion(rows) {
+  for (let i = 0; i + 1 < rows.length; i++) {
+    const hi = rows[i]; const lo = rows[i + 1];
+    if (Number.isFinite(hi?.voltageMv) && Number.isFinite(lo?.voltageMv) && lo.voltageMv > hi.voltageMv) return { at: i };
   }
   return null;
 }
@@ -338,56 +307,86 @@ export function saveCurveDoc(doc, { name = 'measured', dir = CURVES_DIR, fs = nu
   return writeJsonAtomic(curvePath(name, dir), doc, { fs });
 }
 
-/**
- * Load a document. `offsetMhz` is RECOMPUTED, never trusted from the file: storing a frequency and its
- * offset is one fact written twice, and the only way to make that pair impossible to drift is to
- * derive one of them every time.
- */
 export function loadCurveDoc({ name = 'measured', dir = CURVES_DIR } = {}) {
   const file = curvePath(name, dir);
   if (!existsSync(file)) return null;
-  const doc = JSON.parse(readFileSync(file, 'utf8'));
-  if (Array.isArray(doc.points)) {
-    for (const p of doc.points) {
-      if (Number.isFinite(p.mhz) && Number.isFinite(p.stockMhz)) p.offsetMhz = p.mhz - p.stockMhz;
-    }
-  }
-  return doc;
-}
-
-/** The per-point vector the applier consumes — the document's whole point of contact with the GPU. */
-export function vectorFrom(doc) {
-  return doc.points.map((p) => p.mhz - p.stockMhz);
+  return JSON.parse(readFileSync(file, 'utf8'));
 }
 
 // =================================================================================================
-// 4. The pair check: the document against the live card
+// 4. The conversion to what the hardware takes — COMPUTED, never stored
 // =================================================================================================
 
 /**
- * The truth↔mirror check of `plans/14` F1-AC4. The two sides have DIFFERENT AUTHORS — the driver's
- * table and our stored copy — which is what makes this a real pair by EXP-0013's test.
+ * Turn «frequency → voltage» into the per-entry frequency offsets the card's table accepts.
  *
- * The VOLTAGE axis is what is compared, and that choice is a measurement: the curve slides along the
- * FREQUENCY axis with temperature (≈ −1.7 MHz per °C, `bugs/10`), while voltages do not move. A
- * frequency comparison would go red every time the room warmed up.
+ * ─── THIS FUNCTION IS WHERE THE OWNER'S FRAMING PAYS OFF ────────────────────────────────────────
+ *
+ * The document says what each frequency must cost. The hardware says «I have 127 entries, each at a
+ * fixed voltage; tell me each entry's frequency». So for every entry at voltage V we ask the document
+ * one question: **what is the highest frequency our table says V can serve?** — and that becomes the
+ * entry's frequency. The offset is that frequency minus what the entry reads RIGHT NOW.
+ *
+ * Because the current reading is taken live, the same document produces different offsets at 40 °C
+ * and at 57 °C — and the RESULT is identical: every frequency gets the voltage we measured for it.
+ * Storing the offsets instead would have frozen one temperature into the artifact.
  */
-export function verifyAgainstCard(doc, curvePoints, { card = null } = {}) {
-  const problems = [];
-  const live = curvePoints.slice(0, CURVE_GRAPHICS_POINT_COUNT);
-  if (live.length !== doc.points.length) {
-    problems.push({ field: 'points', why: `у карты ${live.length} графических точек, в документе ${doc.points.length}` });
-    return { ok: false, problems, compared: 0 };
+export function offsetsFor(doc, tablePoints, { count = CURVE_GRAPHICS_POINT_COUNT } = {}) {
+  const rows = doc.frequencies;
+  const offsets = new Array(count).fill(0);
+  const served = new Array(count).fill(null);
+  const lo = CLOCK_OFFSET_MIN_MHZ ?? -1000;
+  const hi = CLOCK_OFFSET_MAX_MHZ ?? 1000;
+  let clamped = 0;
+
+  for (let j = 0; j < count; j++) {
+    const entry = tablePoints[j];
+    if (!entry || entry.freqKhz <= 0) continue;
+    // The highest frequency this voltage is allowed to serve, per the document. Rows run high → low,
+    // so the FIRST row whose voltage fits is the answer.
+    const row = rows.find((r) => r.voltageMv <= entry.mv);
+    if (!row) continue;
+    served[j] = row.mhz;
+    const want = row.mhz - entry.mhz;
+    // Never LOWER an entry: pushing entries down is what a mode's ceiling does, and a ceiling is a
+    // mode's knob applied on top of this — not part of the measurement (`plans/14` §4.3).
+    const off = Math.max(0, Math.min(want, hi));
+    if (want > hi) clamped++;
+    offsets[j] = Math.max(lo, off);
   }
-  for (let i = 0; i < live.length; i++) {
-    if (live[i].mv !== doc.points[i].voltageMv) {
-      problems.push({
-        field: `points[${i}].voltageMv`,
-        why: `в документе ${doc.points[i].voltageMv} мВ, у карты ${live[i].mv} мВ`
-          + ` · штамп документа: драйвер ${doc.stamp?.driver}, VBIOS ${doc.stamp?.vbios}`
-          + (card ? ` · карта сейчас: драйвер ${card.driver}, VBIOS ${card.vbios}` : ''),
-      });
-      break; // The first disagreement is the finding; a hundred more are the same finding.
+  return { offsets, served, clamped };
+}
+
+// =================================================================================================
+// 5. The pair check: the document against the live card
+// =================================================================================================
+
+/**
+ * The truth↔mirror check of `plans/14` F1-AC4, re-expressed in the owner's coordinates.
+ *
+ * What is held against the card is **the voltage grid** — the set of rungs the card offers. Those do
+ * not move. What deliberately is NOT compared is the stock voltage per frequency: a warmer card wants
+ * more voltage for the same frequency, and an instrument that reddens because the room warmed up is
+ * an instrument nobody will keep running.
+ */
+export function verifyAgainstCard(doc, tablePoints, { card = null } = {}) {
+  const problems = [];
+  const liveGrid = [...new Set(tablePoints.slice(0, CURVE_GRAPHICS_POINT_COUNT).map((p) => p.mv))].sort((a, b) => a - b);
+  const stored = doc.voltageGridMv ?? [];
+
+  if (liveGrid.length !== stored.length) {
+    problems.push({ field: 'voltageGridMv', why: `у карты ${liveGrid.length} ступеней напряжения, в документе ${stored.length}` });
+  } else {
+    for (let i = 0; i < liveGrid.length; i++) {
+      if (liveGrid[i] !== stored[i]) {
+        problems.push({
+          field: `voltageGridMv[${i}]`,
+          why: `в документе ${stored[i]} мВ, у карты ${liveGrid[i]} мВ`
+            + ` · штамп документа: драйвер ${doc.stamp?.driver}, VBIOS ${doc.stamp?.vbios}`
+            + (card ? ` · карта сейчас: драйвер ${card.driver}, VBIOS ${card.vbios}` : ''),
+        });
+        break;
+      }
     }
   }
   if (card && doc.stamp && (doc.stamp.driver !== card.driver || doc.stamp.vbios !== card.vbios)) {
@@ -397,14 +396,19 @@ export function verifyAgainstCard(doc, curvePoints, { card = null } = {}) {
         + `${card.driver} / ${card.vbios} — по правилу R6 каждая запись недействительна до перепроверки`,
     });
   }
-  return { ok: problems.length === 0, problems, compared: live.length };
+  return { ok: problems.length === 0, problems, compared: stored.length };
 }
 
 // =================================================================================================
-// 5. The CLI
+// 6. The CLI
 // =================================================================================================
 
 const H = (t) => `\n${t}\n${'─'.repeat(Math.min(t.length, 96))}`;
+
+async function readLiveTable() {
+  const { readLiveCurvePoints } = await import('./card-grids.mjs');
+  return readLiveCurvePoints();
+}
 
 async function cmdGrids() {
   console.log(H('СЛОВАРИ КАРТЫ — только чтение (ideas/03 шаги 3–4)'));
@@ -417,75 +421,68 @@ async function cmdGrids() {
     console.log(`  переснимается: ${g.probe}`);
     console.log(`  проверка формата: ${bad.length === 0 ? 'ЧИСТО' : `ОТКАЗ — ${bad.map((b) => `${b.field}: ${b.why}`).join(' · ')}`}`);
   }
-  // The write REFUSES an invalid dictionary (card-grids.writeGrids). The first live run put an empty
-  // frequency grid on disk and only then printed the refusal — an artifact its own validator rejects
-  // must not reach the disk at all.
   const written = writeGrids(grids);
   console.log(`\nЗАПИСАНО: ${written.voltage}\n          ${written.frequency}`);
   return 0;
 }
 
 async function cmdInit({ force = false } = {}) {
-  console.log(H('ДОКУМЕНТ КРИВОЙ — посев со стоковой кривой карты (ideas/03 шаг 5)'));
+  console.log(H('ТЮНИНГ-КРИВАЯ — посев: каждой частоте её стоковое напряжение (ideas/03 шаг 5)'));
   const existing = loadCurveDoc();
   if (existing && !force) {
-    console.log(`ОТКАЗ: ${curvePath()} уже существует и несёт замеры.`);
     const s = summarize(existing);
-    console.log(`  ${s.total} точек · закрыто ${s.closed} · доказано прожигом ${PROVEN_STATUSES.reduce((n, k) => n + (s.byStatus[k] ?? 0), 0)}`);
+    console.log(`ОТКАЗ: ${curvePath()} уже существует.`);
+    console.log(`  частот ${s.total} · закрыто ${s.closed} · доказано прожигом ${PROVEN_STATUSES.reduce((n, k) => n + (s.byStatus[k] ?? 0), 0)}`);
     console.log('  Пересев СТЁР БЫ найденный край. Если это и требуется — `--init --force`.');
     return 1;
   }
   const freq = loadGrid('frequency');
   if (!freq) {
-    console.log('ОТКАЗ: словаря частот нет. Сперва `npm run curve -- --grids` — классификация точек считается по лестнице карты.');
+    console.log('ОТКАЗ: словаря частот нет. Сперва `npm run curve -- --grids`.');
     return 1;
   }
   const info = probeGpuInfo();
-  const points = await readLiveCurvePointsSafe();
+  const table = await readLiveTable();
   const doc = initFromCard({
-    curvePoints: points,
     frequencyGrid: freq,
+    tablePoints: table,
     card: { name: String(info.name), maxGraphicsMhz: Number(info['clocks.max.graphics']) },
     stamp: { driver: String(info.driver_version), vbios: String(info.vbios_version), takenAt: localIso() },
-    // The temperature is part of the reading, not a decoration: the curve slides ≈1.7 MHz per °C and
-    // the boundary classification moves with it (see `classify`). A number without its temperature is
-    // not a number on this project (fact 18).
+    // The temperature is part of the reading: at 57 °C the same frequency wants more voltage than
+    // cold. It is recorded so the STOCK column can be read honestly, not so anything is chased.
     tempC: Number(info['temperature.gpu']) || null,
   });
-  const bad = validateCurveDoc(doc, { card: doc.card });
+  const bad = validateCurveDoc(doc, { card: doc.card, frequencyGrid: freq });
   if (bad.length) {
-    console.log(`ОТКАЗ: свежепосеянный документ не проходит собственный валидатор — это дефект кода, а не данных:\n  ${bad.map((b) => `${b.field}: ${b.why}`).join('\n  ')}`);
+    console.log(`ОТКАЗ: свежепосеянный документ не проходит собственный валидатор — это дефект кода, а не данных:\n  ${bad.slice(0, 5).map((b) => `${b.field}: ${b.why}`).join('\n  ')}`);
     return 1;
   }
   const file = saveCurveDoc(doc);
   const s = summarize(doc);
   console.log(`ПОСЕЯНО: ${file}`);
-  console.log(`  точек ${s.total} · на полу частоты ${s.byStatus[CURVE_STATUS.CLOCK_FLOOR]} · выше максимума карты ${s.byStatus[CURVE_STATUS.ABOVE_CARD_MAX]}`);
-  console.log(`  В РАБОЧЕЙ ПОЛОСЕ (это и есть ширина задачи): ${s.searchable}`);
+  console.log(`  частот ${s.total} · ${doc.frequencies[doc.frequencies.length - 1].mhz}…${doc.frequencies[0].mhz} МГц`);
+  console.log(`  ступеней напряжения у карты: ${doc.voltageGridMv.length} (${doc.voltageGridMv[0]}…${doc.voltageGridMv[doc.voltageGridMv.length - 1]} мВ)`);
+  console.log(`  снято при ${doc.stamp.tempC ?? '—'} °C · всё пока стоковое, тюнинга ноль`);
   return 0;
-}
-
-async function readLiveCurvePointsSafe() {
-  const { readLiveCurvePoints } = await import('./card-grids.mjs');
-  return readLiveCurvePoints();
 }
 
 function cmdShow() {
   const doc = loadCurveDoc();
   if (!doc) { console.log(`Документа кривой нет: ${curvePath()}. Посеять — \`npm run curve -- --init\`.`); return 1; }
-  console.log(H(`ДОКУМЕНТ КРИВОЙ — ${doc.name} · ${doc.card?.name ?? '—'} · драйвер ${doc.stamp?.driver}, VBIOS ${doc.stamp?.vbios}, снят ${doc.stamp?.takenAt}`));
+  console.log(H(`ТЮНИНГ-КРИВАЯ «${doc.name}» · ${doc.card?.name ?? '—'} · драйвер ${doc.stamp?.driver}, VBIOS ${doc.stamp?.vbios}, снята ${doc.stamp?.takenAt} при ${doc.stamp?.tempC ?? '—'} °C`));
   const s = summarize(doc);
-  console.log(`\nВСЕГО ${s.total} · в рабочей полосе ${s.searchable} · закрыто ${s.closed}`);
+  console.log(`\nЧАСТОТ ${s.total} · закрыто ${s.closed} · оттюнено ${s.tuned}`
+    + (s.tuned ? ` · глубже всего −${s.deepestCutMv} мВ, в среднем −${s.averageCutMv} мВ` : ''));
   console.log(`ПО СТАТУСАМ: ${Object.entries(s.byStatus).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(' · ')}`);
-  console.log('\n   #    мВ   сток МГц   стало   сдвиг  статус             правлена');
-  for (const p of doc.points) {
-    const moved = p.mhz !== p.stockMhz;
-    if (!moved && p.status === CURVE_STATUS.STOCK && p.i % 10 !== 0) continue; // untouched stock: every tenth, the rest would be noise
-    console.log(`  ${String(p.i).padStart(3)} ${String(p.voltageMv).padStart(6)} ${String(p.stockMhz).padStart(9)} ${String(p.mhz).padStart(7)} ${String(p.mhz - p.stockMhz).padStart(7)}  ${p.status.padEnd(18)} ${p.editedAt}`);
+  console.log('\n   МГц    сток мВ   стало мВ   снято  статус             правлена');
+  for (const r of doc.frequencies) {
+    const cut = (r.stockVoltageMv ?? 0) - (r.voltageMv ?? 0);
+    if (cut === 0 && r.status === CURVE_STATUS.STOCK && r.mhz % 100 > 8) continue;
+    console.log(`  ${String(r.mhz).padStart(5)} ${String(r.stockVoltageMv).padStart(9)} ${String(r.voltageMv).padStart(10)} ${String(cut).padStart(7)}  ${r.status.padEnd(18)} ${r.editedAt}`);
   }
-  console.log('\n(нетронутые стоковые точки печатаются через десять — остальные были бы шумом)');
-  const bad = validateCurveDoc(doc, { card: doc.card });
-  console.log(`\nВАЛИДАТОР: ${bad.length === 0 ? 'ЧИСТО' : `ОТКАЗ (${bad.length})\n  ${bad.map((b) => `${b.field}: ${b.why}`).join('\n  ')}`}`);
+  console.log('\n(нетронутые стоковые частоты печатаются примерно через сотню МГц — остальные были бы шумом)');
+  const bad = validateCurveDoc(doc, { card: doc.card, frequencyGrid: loadGrid('frequency') });
+  console.log(`\nВАЛИДАТОР: ${bad.length === 0 ? 'ЧИСТО' : `ОТКАЗ (${bad.length})\n  ${bad.slice(0, 8).map((b) => `${b.field}: ${b.why}`).join('\n  ')}`}`);
   return bad.length === 0 ? 0 : 1;
 }
 
@@ -494,11 +491,12 @@ async function cmdVerify() {
   if (!doc) { console.log(`Документа кривой нет: ${curvePath()}.`); return 1; }
   console.log(H('СВЕРКА ДОКУМЕНТА С ЖИВОЙ КАРТОЙ (пара «правда ↔ зеркало»)'));
   const info = probeGpuInfo();
-  const points = await readLiveCurvePointsSafe();
-  const r = verifyAgainstCard(doc, points, {
+  const table = await readLiveTable();
+  const r = verifyAgainstCard(doc, table, {
     card: { driver: String(info.driver_version), vbios: String(info.vbios_version) },
   });
-  console.log(`\nСверено точек: ${r.compared} по оси НАПРЯЖЕНИЯ (ось частот едет с температурой — bugs/10, поэтому сверять по ней нельзя)`);
+  console.log(`\nСверено ступеней напряжения: ${r.compared}. Стоковые напряжения частот НЕ сверяются: `
+    + `при нагреве та же частота требует больше, и прибор краснел бы от прогретой комнаты (карта сейчас ${info['temperature.gpu']} °C).`);
   if (r.ok) { console.log('РАСХОЖДЕНИЙ НЕТ.'); return 0; }
   console.log(`РАСХОЖДЕНИЯ (${r.problems.length}):`);
   for (const p of r.problems) console.log(`  ${p.field}: ${p.why}`);
@@ -506,29 +504,27 @@ async function cmdVerify() {
 }
 
 // =================================================================================================
-// 6. Selftest — hostile fixtures, no GPU
+// 7. Selftest — hostile fixtures, no GPU
 // =================================================================================================
 
-function healthyDoc({ n = CURVE_GRAPHICS_POINT_COUNT, maxMhz = 3090 } = {}) {
+const GRID_MV = [800, 850, 900, 950, 1000, 1050, 1100];
+
+function healthyDoc({ maxMhz = 3090 } = {}) {
   const at = '2026-08-15T16:20:00+03:00';
-  const points = [];
-  for (let i = 0; i < n; i++) {
-    // A plausible shape: a floor, a rising middle, and a tail the factory puts above the card's max.
-    const mv = 450 + i * 5;
-    const mhz = i < 20 ? 180 : Math.min(180 + (i - 19) * 28, 3172);
-    points.push({
-      i, voltageMv: mv, stockMhz: mhz, mhz, offsetMhz: 0,
-      status: mhz > maxMhz ? CURVE_STATUS.ABOVE_CARD_MAX : (mhz <= 180 ? CURVE_STATUS.CLOCK_FLOOR : CURVE_STATUS.STOCK),
-      provenBy: null, editedAt: at,
-    });
-  }
+  const mhzList = [3090, 3000, 2900, 2800, 2400, 2000, 1500, 1000, 500, 180];
+  const volts = [1100, 1100, 1050, 1050, 1000, 950, 900, 850, 800, 800];
   return {
     kind: 'tuning-curve', name: 'measured',
-    card: { name: 'NVIDIA GeForce RTX 5070 Ti', maxGraphicsMhz: maxMhz, graphicsPointCount: n },
-    stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: at },
-    points,
+    card: { name: 'NVIDIA GeForce RTX 5070 Ti', maxGraphicsMhz: maxMhz, frequencyCount: mhzList.length },
+    voltageGridMv: [...GRID_MV],
+    stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: at, tempC: 44 },
+    frequencies: mhzList.map((mhz, i) => ({
+      mhz, voltageMv: volts[i], stockVoltageMv: volts[i],
+      status: CURVE_STATUS.STOCK, provenBy: null, editedAt: at,
+    })),
   };
 }
+const FAKE_LADDER = { values: [3090, 3000, 2900, 2800, 2400, 2000, 1500, 1000, 500, 180] };
 
 function cmdSelftest() {
   let pass = 0; let fail = 0;
@@ -537,132 +533,168 @@ function cmdSelftest() {
     else { fail++; console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ''}`); }
   };
   const card = { maxGraphicsMhz: 3090 };
-  const fieldsOf = (doc) => validateCurveDoc(doc, { card }).map((b) => b.field);
+  const fieldsOf = (doc) => validateCurveDoc(doc, { card, frequencyGrid: FAKE_LADDER }).map((b) => b.field);
 
   console.log(H('САМОПРОВЕРКА curve-store — враждебные фикстуры, карта не нужна'));
-  console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона (EXP-0016): словарь статусов · производный сдвиг · '
-    + 'потолок R13 · монотонность · штамп · длина · свидетель прожига · атомарная запись · классификация · '
-    + 'пересчёт классов при съезде кривой');
+  console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона (EXP-0016): словарь статусов · напряжение с сетки · '
+    + 'напряжение не выше стокового · монотонность по частоте · порядок таблицы · частота с сетки карты · '
+    + 'потолок R13 · штамп · свидетель прожига · атомарная запись · перевод в смещения · сверка сетки');
 
   console.log('\n— ЗДОРОВЫЙ ДОКУМЕНТ —');
   ok('чистый документ принимается', fieldsOf(healthyDoc()).length === 0, JSON.stringify(fieldsOf(healthyDoc()).slice(0, 3)));
-  ok('сводка считает рабочую полосу', (() => { const s = summarize(healthyDoc()); return s.total === CURVE_GRAPHICS_POINT_COUNT && s.searchable > 0 && s.searchable < s.total; })());
-  ok('вектор из нетронутого документа — все нули', vectorFrom(healthyDoc()).every((d) => d === 0));
+  ok('сводка: ничего не оттюнено на посеве', summarize(healthyDoc()).tuned === 0);
+  ok('сводка считает глубину среза', (() => {
+    const d = healthyDoc(); d.frequencies[0].voltageMv = 1000; d.frequencies[1].voltageMv = 1000;
+    const s = summarize(d); return s.tuned === 2 && s.deepestCutMv === 100;
+  })());
 
   console.log('\n— ФОРМА И ОБЯЗАТЕЛЬНЫЕ ПОЛЯ —');
   const cases = [
-    ['не объект', 'null', () => null, '<кривая>'],
-    ['чужой kind', 'kind', () => ({ ...healthyDoc(), kind: 'profile' }), 'kind'],
-    ['нет штампа', 'stamp', () => { const d = healthyDoc(); delete d.stamp; return d; }, 'stamp'],
-    ['штамп без драйвера', 'stamp.driver', () => { const d = healthyDoc(); d.stamp.driver = ''; return d; }, 'stamp.driver'],
-    ['takenAt в Z', 'stamp.takenAt', () => { const d = healthyDoc(); d.stamp.takenAt = '2026-08-15T13:20:00Z'; return d; }, 'stamp.takenAt'],
-    ['неверная длина', 'points', () => { const d = healthyDoc(); d.points.pop(); return d; }, 'points'],
-    ['индекс врёт о себе', 'points[5].i', () => { const d = healthyDoc(); d.points[5].i = 99; return d; }, 'points[5].i'],
-    ['неизвестное поле точки', 'points[7].hz', () => { const d = healthyDoc(); d.points[7].hz = 1; return d; }, 'points[7].hz'],
-    ['статуса нет в словаре', 'points[30].status', () => { const d = healthyDoc(); d.points[30].status = 'почти-хорошо'; return d; }, 'points[30].status'],
-    ['нет даты правки', 'points[30].editedAt', () => { const d = healthyDoc(); d.points[30].editedAt = 'вчера'; return d; }, 'points[30].editedAt'],
+    ['не объект', () => null, '<кривая>'],
+    ['чужой kind', () => ({ ...healthyDoc(), kind: 'profile' }), 'kind'],
+    ['нет штампа', () => { const d = healthyDoc(); delete d.stamp; return d; }, 'stamp'],
+    ['takenAt в Z', () => { const d = healthyDoc(); d.stamp.takenAt = '2026-08-15T13:20:00Z'; return d; }, 'stamp.takenAt'],
+    ['нет сетки напряжений', () => { const d = healthyDoc(); d.voltageGridMv = []; return d; }, 'voltageGridMv'],
+    ['пустая таблица частот', () => { const d = healthyDoc(); d.frequencies = []; return d; }, 'frequencies'],
+    ['неизвестное поле строки', () => { const d = healthyDoc(); d.frequencies[3].hz = 1; return d; }, 'frequencies[3].hz'],
+    ['статуса нет в словаре', () => { const d = healthyDoc(); d.frequencies[3].status = 'почти-хорошо'; return d; }, 'frequencies[3].status'],
+    ['нет даты правки', () => { const d = healthyDoc(); d.frequencies[3].editedAt = 'вчера'; return d; }, 'frequencies[3].editedAt'],
   ];
-  for (const [name, , make, expect] of cases) {
+  for (const [name, make, expect] of cases) {
     const fields = fieldsOf(make());
     ok(`${name} → ${expect}`, fields.includes(expect), `получено ${JSON.stringify(fields.slice(0, 3))}`);
   }
 
-  console.log('\n— СДВИГ: производный, неотрицательный, в диапазоне —');
-  ok('offsetMhz разошёлся с mhz − stockMhz', fieldsOf((() => { const d = healthyDoc(); d.points[40].offsetMhz = 7; return d; })()).includes('points[40].offsetMhz'));
-  ok('отрицательный сдвиг отвергается', fieldsOf((() => { const d = healthyDoc(); d.points[40].mhz -= 15; return d; })()).some((f) => f === 'points[40].mhz'));
-  ok('сдвиг за ±1000 МГц отвергается', fieldsOf((() => { const d = healthyDoc(); d.points[25].mhz += 1500; return d; })()).includes('points[25].mhz'));
-  ok('загрузка ПЕРЕСЧИТЫВАЕТ сдвиг, а не верит файлу', (() => {
-    const d = healthyDoc(); d.points[10].mhz = d.points[10].stockMhz + 15; d.points[10].offsetMhz = 999;
-    for (const p of d.points) if (Number.isFinite(p.mhz)) p.offsetMhz = p.mhz - p.stockMhz;
-    return d.points[10].offsetMhz === 15;
+  console.log('\n— ЧАСТОТА: только с сетки карты, только сверху вниз, не выше максимума —');
+  ok('частоты нет на сетке карты', fieldsOf((() => { const d = healthyDoc(); d.frequencies[4].mhz = 2401; return d; })()).includes('frequencies[4].mhz'));
+  ok('порядок таблицы нарушен', (() => {
+    const d = healthyDoc();
+    [d.frequencies[2], d.frequencies[3]] = [d.frequencies[3], d.frequencies[2]];
+    return fieldsOf(d).some((f) => f.startsWith('frequencies[') && f.endsWith('.mhz'));
+  })());
+  ok('R13: частота выше максимума карты отвергается', (() => {
+    const d = healthyDoc();
+    d.frequencies[0].mhz = 3200;
+    const bad = validateCurveDoc(d, { card, frequencyGrid: null }).find((b) => b.field === 'frequencies[0].mhz');
+    return Boolean(bad) && bad.why.includes('3090');
   })());
 
-  console.log('\n— R13: судится то, что подняли МЫ —');
-  ok('НУЛЕВОЙ документ с заводским хвостом выше 3090 ПРИНИМАЕТСЯ (первая версия сторожа его отвергала)',
-    fieldsOf(healthyDoc()).length === 0);
-  ok('подъём точки выше максимума карты отвергается', (() => {
-    const d = healthyDoc();
-    const i = d.points.findIndex((p) => p.stockMhz > 2900 && p.stockMhz <= 3090);
-    if (i < 0) return false;
-    d.points[i].mhz = 3100; d.points[i].offsetMhz = 3100 - d.points[i].stockMhz;
-    return fieldsOf(d).includes(`points[${i}].mhz`);
+  console.log('\n— НАПРЯЖЕНИЕ: только ступень сетки, только вниз от стока —');
+  ok('напряжения нет на сетке карты, и отказ печатает саму сетку', (() => {
+    const d = healthyDoc(); d.frequencies[5].voltageMv = 947;
+    const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field === 'frequencies[5].voltageMv');
+    return Boolean(bad) && bad.why.includes('ступеней');
   })());
-  ok('подъём точки, которая и в заводской таблице выше максимума, отвергается', (() => {
-    const d = healthyDoc();
-    const i = d.points.findIndex((p) => p.stockMhz > 3090);
-    if (i < 0) return false;
-    d.points[i].mhz = d.points[i].stockMhz + 8; d.points[i].offsetMhz = 8;
-    const bad = validateCurveDoc(d, { card }).find((b) => b.field === `points[${i}].mhz`);
-    return Boolean(bad) && bad.why.includes('нельзя поднимать вовсе');
+  ok('напряжение ВЫШЕ стокового отвергается (тюнинг снижает, а не поднимает)', (() => {
+    const d = healthyDoc(); d.frequencies[5].voltageMv = 1000;   // сток 950
+    return fieldsOf(d).includes('frequencies[5].voltageMv');
+  })());
+  ok('снижение напряжения принимается', (() => {
+    const d = healthyDoc(); d.frequencies[5].voltageMv = 900; d.frequencies[6].voltageMv = 900;
+    return fieldsOf(d).length === 0;
   })());
 
-  console.log('\n— МОНОТОННОСТЬ: измеряется, не наследуется —');
-  ok('инверсия находится и называет обе точки', (() => {
-    const d = healthyDoc();
-    const i = d.points.findIndex((p) => p.stockMhz > 1000 && p.stockMhz < 2500);
-    d.points[i].mhz = d.points[i].stockMhz + 400; d.points[i].offsetMhz = 400;
-    const inv = firstInversion(d.points);
-    return inv !== null && fieldsOf(d).some((f) => f.startsWith('points['));
+  console.log('\n— МОНОТОННОСТЬ: высокой частоте не может хватать МЕНЬШЕГО напряжения —');
+  ok('инверсия ловится и называет ОБЕ частоты', (() => {
+    // 2000 МГц опускаем до 850, а 1500 остаётся на 900 — более НИЗКОЙ частоте нужно БОЛЬШЕ. Снижение,
+    // а не повышение: иначе сработал бы соседний отказ «выше стокового» и блок зеленел бы не своей
+    // причиной (EXP-0016 — мутационный проход именно за этим и нужен).
+    const d = healthyDoc(); d.frequencies[5].voltageMv = 850;
+    const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field.endsWith('.voltageMv'));
+    return Boolean(bad) && bad.why.includes('1500') && bad.why.includes('2000');
   })());
-  ok('равномерно поднятая кривая монотонна', (() => {
-    const d = healthyDoc();
-    for (const p of d.points) { if (p.stockMhz <= 3090 - 20) { p.mhz = p.stockMhz + 20; p.offsetMhz = 20; } }
-    return firstInversion(d.points) === null;
-  })());
+  ok('равные напряжения соседних частот инверсией НЕ считаются (127 ступеней на 389 частот — они делятся)',
+    firstInversion(healthyDoc().frequencies) === null);
 
   console.log('\n— СВИДЕТЕЛЬ ПРОЖИГА —');
   ok('статус «доказано прожигом» без свидетеля отвергается', (() => {
-    const d = healthyDoc(); d.points[40].status = CURVE_STATUS.SHORT_BURN_PROVED;
-    return fieldsOf(d).includes('points[40].provenBy');
+    const d = healthyDoc(); d.frequencies[4].status = CURVE_STATUS.SHORT_BURN_PROVED;
+    return fieldsOf(d).includes('frequencies[4].provenBy');
   })());
   ok('тот же статус со свидетелем принимается', (() => {
-    const d = healthyDoc(); d.points[40].status = CURVE_STATUS.EDGE_FOUND; d.points[40].provenBy = 'sdc_fma/transient 10 с → SDC на 5 мВ ниже';
+    const d = healthyDoc(); d.frequencies[4].status = CURVE_STATUS.EDGE_FOUND;
+    d.frequencies[4].provenBy = 'sdc_fma/transient 10 с → SDC на 5 мВ ниже';
     return fieldsOf(d).length === 0;
   })());
-  ok('above-card-max на точке ниже максимума отвергается', (() => {
-    const d = healthyDoc(); d.points[40].status = CURVE_STATUS.ABOVE_CARD_MAX;
-    return fieldsOf(d).includes('points[40].status');
+
+  console.log('\n— ПЕРЕВОД В СМЕЩЕНИЯ: считается от ЖИВОЙ таблицы, не хранится —');
+  const table = (shiftMhz = 0) => [
+    { mv: 800, mhz: 500 + shiftMhz, freqKhz: 1 },
+    { mv: 900, mhz: 1500 + shiftMhz, freqKhz: 1 },
+    { mv: 1000, mhz: 2400 + shiftMhz, freqKhz: 1 },
+    { mv: 1100, mhz: 3000 + shiftMhz, freqKhz: 1 },
+  ];
+  // The document is SEEDED FROM the same fake table, so «untouched» genuinely means «what the card
+  // already does». Hand-writing both sides independently is how the first draft of these blocks
+  // measured its own fixture's disagreement instead of the function.
+  const seeded = (shift = 0) => initFromCard({
+    frequencyGrid: { values: [3000, 2400, 1500, 500] },
+    tablePoints: table(shift),
+    card: { maxGraphicsMhz: 3090 },
+    stamp: { driver: 'd', vbios: 'v', takenAt: '2026-08-15T16:20:00+03:00' },
+  });
+  ok('нетронутый документ даёт нулевые смещения', (() => {
+    const { offsets } = offsetsFor(seeded(), table(), { count: 4 });
+    return offsets.every((o) => o === 0);
+  })());
+  ok('снижение напряжения частоты поднимает НУЖНУЮ запись таблицы', (() => {
+    const d = seeded();
+    d.frequencies[0].voltageMv = 1000;                       // 3000 МГц теперь просит 1000, а не 1100
+    const { offsets, served } = offsetsFor(d, table(), { count: 4 });
+    // Проверяется ВЕСЬ раскрой, а не одна запись. Первая редакция этого блока смотрела только на
+    // запись 1000 мВ — и оставалась зелёной, когда выбор строки ломали целиком (мутация «берёт НЕ ту
+    // запись» отдавала всем записям высшую частоту). Блок, зелёный по соседней причине, EXP-0016.
+    return served[0] === 500 && served[1] === 1500        // низкие напряжения обслуживают СВОИ частоты
+      && served[2] === 3000 && offsets[2] === 3000 - 2400 // 1000 мВ забрала 3000 МГц у 1100
+      && offsets[3] === 0 && offsets[0] === 0 && offsets[1] === 0;
+  })());
+  ok('ТА ЖЕ таблица при другой температуре даёт ДРУГИЕ смещения и ТОТ ЖЕ результат', (() => {
+    const d = seeded();
+    d.frequencies[0].voltageMv = 1000;
+    const cold = offsetsFor(d, table(0), { count: 4 });
+    const warm = offsetsFor(d, table(-15), { count: 4 });
+    return cold.offsets[2] !== warm.offsets[2] && cold.served[2] === warm.served[2];
+  })());
+  ok('смещение никогда не отрицательное — придавливание это потолок режима, а не замер', (() => {
+    const { offsets } = offsetsFor(seeded(), table(500), { count: 4 });
+    return offsets.every((o) => o >= 0);
+  })());
+  ok('упор в аппаратный предел ±1000 МГц СЧИТАЕТСЯ и называется', (() => {
+    const d = seeded();
+    for (const r of d.frequencies) r.voltageMv = 800;         // всё на самой нижней ступени
+    const { clamped } = offsetsFor(d, table(), { count: 4 });
+    return clamped > 0;
   })());
 
-  console.log('\n— КРИВАЯ ЕЗДИТ С ТЕМПЕРАТУРОЙ: классификация это СНИМОК, а не свойство —');
-  const grid = { minGraphicsMhz: 180, maxGraphicsMhz: 3090 };
-  ok('classify: выше максимума карты → above-card-max', classify(3097, grid) === CURVE_STATUS.ABOVE_CARD_MAX);
-  ok('classify: на полу частоты → clock-floor', classify(180, grid) === CURVE_STATUS.CLOCK_FLOOR);
-  ok('classify: в полосе → stock', classify(2500, grid) === CURVE_STATUS.STOCK);
-  ok('ПОГРАНИЧНАЯ ТОЧКА МЕНЯЕТ КЛАСС ПРИ СЪЕЗДЕ КРИВОЙ, и пересчёт это НАЗЫВАЕТ (наблюдено на карте 2026-08-15: 3112 → 3105 за час)', (() => {
-    const d = healthyDoc();
-    const i = d.points.findIndex((p) => p.stockMhz > 3090);
-    if (i < 0) return false;
-    const cold = d.points[i].stockMhz;                       // холодная кривая: выше максимума
-    const live = d.points.map((p, k) => ({ mv: p.voltageMv, mhz: k === i ? 3085 : p.stockMhz })); // прогрелась
-    const r = reclassify(d, live, grid);
-    return d.points[i].status === CURVE_STATUS.STOCK
-      && r.moved.some((m) => m.i === i && m.from === CURVE_STATUS.ABOVE_CARD_MAX && m.wasMhz === cold && m.nowMhz === 3085);
+  console.log('\n— СВЕРКА С КАРТОЙ: сверяется то, что НЕ ездит —');
+  const tp = GRID_MV.map((mv, i) => ({ mv, mhz: 500 + i * 300, freqKhz: 1 }));
+  ok('совпадающая сетка проходит', verifyAgainstCard(healthyDoc(), tp).ok);
+  ok('СДВИНУТАЯ СТУПЕНЬ НАПРЯЖЕНИЯ ловится', (() => {
+    const t = tp.map((p, i) => (i === 3 ? { ...p, mv: p.mv + 5 } : p));
+    const r = verifyAgainstCard(healthyDoc(), t);
+    return !r.ok && r.problems[0].field.startsWith('voltageGridMv');
   })());
-  ok('пересчёт НЕ трогает точку, доказанную прожигом — прогрев не отменяет случившийся прожиг', (() => {
-    const d = healthyDoc();
-    d.points[40].status = CURVE_STATUS.EDGE_FOUND;
-    d.points[40].provenBy = 'branchy/sustained 10 с';
-    d.points[40].mhz = d.points[40].stockMhz + 30;
-    d.points[40].offsetMhz = 30;
-    const live = d.points.map((p) => ({ mv: p.voltageMv, mhz: p.stockMhz - 7 }));
-    reclassify(d, live, grid);
-    return d.points[40].status === CURVE_STATUS.EDGE_FOUND && d.points[40].offsetMhz === 30;
+  ok('ПРОГРЕВ (частоты таблицы уехали, напряжения те же) расхождением НЕ считается', (() => {
+    const t = tp.map((p) => ({ ...p, mhz: p.mhz - 15 }));
+    return verifyAgainstCard(healthyDoc(), t).ok;
+  })());
+  ok('другой драйвер ловится штампом (R6)', (() => {
+    const r = verifyAgainstCard(healthyDoc(), tp, { card: { driver: '620.10', vbios: '98.03.58.40.8b' } });
+    return !r.ok && r.problems.some((p) => p.field === 'stamp');
   })());
 
   console.log('\n— АТОМАРНАЯ ЗАПИСЬ: машина умирает посреди сохранения —');
   ok('обрыв ДО переименования не трогает целевой файл', (() => {
-    const seen = { wrote: null, renamed: false, removed: false, existing: new Set(['dir']) };
+    const seen = { wrote: null, removed: false, existing: new Set(['dir']) };
     const fs = {
       existsSync: (p) => seen.existing.has(p),
       mkdirSync: () => {},
-      writeFileSync: (p, t) => { seen.wrote = p; seen.existing.add(p); },
+      writeFileSync: (p) => { seen.wrote = p; seen.existing.add(p); },
       renameSync: () => { throw new Error('машина умерла между записью и переименованием'); },
       rmSync: (p) => { seen.removed = true; seen.existing.delete(p); },
     };
     let threw = false;
     try { saveCurveDoc(healthyDoc(), { dir: 'dir', fs }); } catch { threw = true; }
-    // The target was never touched (only the temp was), the temp was cleaned, and the caller was told.
     return threw && seen.wrote.endsWith('.tmp') && seen.removed;
   })());
   ok('успешная запись идёт через временный файл и переименование', (() => {
@@ -677,39 +709,13 @@ function cmdSelftest() {
     return order.length === 2 && order[0].endsWith('.tmp') && order[1].includes('→measured.json');
   })());
 
-  console.log('\n— СВЕРКА С КАРТОЙ: пара «правда ↔ зеркало» —');
-  const liveOf = (d) => d.points.map((p) => ({ mv: p.voltageMv, mhz: p.stockMhz }));
-  ok('совпадающий документ проходит', verifyAgainstCard(healthyDoc(), liveOf(healthyDoc())).ok);
-  ok('СДВИНУТОЕ НАПРЯЖЕНИЕ ловится и называет обе стороны', (() => {
-    const d = healthyDoc();
-    const live = liveOf(d);
-    live[40].mv += 5;
-    const r = verifyAgainstCard(d, live);
-    return !r.ok && r.problems[0].field === 'points[40].voltageMv' && r.problems[0].why.includes('у карты');
-  })());
-  ok('СЪЕХАВШАЯ ЧАСТОТА при тех же напряжениях НЕ является расхождением (иначе прибор краснел бы от прогрева)', (() => {
-    const d = healthyDoc();
-    const live = liveOf(d).map((p) => ({ ...p, mhz: p.mhz - 15 }));
-    return verifyAgainstCard(d, live).ok;
-  })());
-  ok('другой драйвер ловится штампом (R6)', (() => {
-    const d = healthyDoc();
-    const r = verifyAgainstCard(d, liveOf(d), { card: { driver: '620.10', vbios: '98.03.58.40.8b' } });
-    return !r.ok && r.problems.some((p) => p.field === 'stamp');
-  })());
-  ok('другая длина кривой ловится до поточечной сверки', (() => {
-    const d = healthyDoc();
-    return !verifyAgainstCard(d, liveOf(d).slice(0, 100)).ok;
-  })());
-
   console.log('\n— СЛОВАРИ СЕТОК —');
   const goodFreq = {
     kind: 'frequency-grid', probe: 'nvidia-smi -q -d SUPPORTED_CLOCKS', order: 'descending',
     count: 3, rangeMhz: [180, 3090], maxGraphicsMhz: 3090, values: [3090, 3082, 180],
     stamp: { driver: '610.88', vbios: 'v', takenAt: '2026-08-15T16:20:00+03:00' },
   };
-  ok('здоровый словарь частот принимается', validateGrid(goodFreq, { kind: 'frequency' }).length === 0,
-    JSON.stringify(validateGrid(goodFreq, { kind: 'frequency' })));
+  ok('здоровый словарь частот принимается', validateGrid(goodFreq, { kind: 'frequency' }).length === 0);
   ok('словарь без команды пересъёмки отвергается', validateGrid({ ...goodFreq, probe: '' }).some((b) => b.field === 'probe'));
   ok('count разошёлся с числом значений', validateGrid({ ...goodFreq, count: 4 }).some((b) => b.field === 'count'));
   ok('объявленный порядок не совпал с фактическим', validateGrid({ ...goodFreq, values: [180, 3082, 3090] }).some((b) => b.field === 'values'));
@@ -746,5 +752,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
 export default {
   CURVE_STATUS, CURVES_DIR, initFromCard, validateCurveDoc, saveCurveDoc, loadCurveDoc,
-  verifyAgainstCard, summarize, vectorFrom, firstInversion, curvePath, classify, reclassify,
+  verifyAgainstCard, summarize, offsetsFor, firstInversion, curvePath, stockVoltageFor, leverFloorFor,
 };

@@ -558,6 +558,31 @@ Two boundaries that keep this rule from being read narrowly:
   Scheduler state, and any GPU write with no proven way back. When in doubt about which side of the
   line an action sits on, it is on the destructive side — ask.
 
+### TERMINOLOGY THE OWNER SETTLED — frequencies, never numbered points
+
+His words, 2026-08-15 (verbatim in `GOAL.md` → «🔤 ТОЧЕК С НОМЕРАМИ НЕ СУЩЕСТВУЕТ»): *«МЫ ПРЕКРАЩАЕМ
+НАЗЫВАТЬ ТОЧКИ НОМЕРАМИ. МЫ НАЗЫВАЕМ ТОЧКИ ЧАСТОТОЙ… Карта хочет сменить частоту — она устанавливает
+новую частоту, мы обслуживаем её соответствующим напряжением. Всё. Нет никаких "точка 120". Есть
+только частоты по сетке частот.»*
+
+**Three bans and their replacements, in all NEW text, code and reports:**
+
+| Retired | Say instead |
+|---|---|
+| «точка 95», "point 120" | the FREQUENCY — «2842 МГц» — and, when needed, «напряжение, обслуживающее 2842 МГц» |
+| «кривая уплыла / точка переехала» | «при 57 °C та же частота требует больше напряжения» |
+| «сдвиг точки» as the stored quantity | the stored quantity is **frequency → voltage**; the per-entry offsets are COMPUTED at apply time from the live table and never stored |
+
+**Why it is a correction and not a preference:** the old wording made a table entry look like an object
+that travels, which spawned a whole reclassification pass to chase it. In his coordinates that
+observation does not exist, and the artifact becomes temperature-STABLE — «frequency → voltage» does
+not move, while the offsets that implement it do.
+
+**The boundary:** documents of the CLOSED past (`PROJECT_HISTORY.md`, `bugs/02`, `bugs/10`, plans of
+epic 01) keep their original wording — an original is not rewritten to match today's vocabulary. Tools
+that still carry the old flags (`vfstep --point N`, `nvml --probe-mask`) keep them until epic 02
+replaces them; their rows below say so.
+
 ### The truth↔mirror pairs registry
 
 One row per pair, with the command that catches the drift (`Document & text hygiene` below explains
@@ -573,7 +598,7 @@ its mirror, and drift is caught only by CHECKING PAIRS, never by reading one fil
 | `workloads/MANIFEST.json` → `run_checksum` | `runs/baseline/<name>.json` → `checksum` | `npm run workloads:verify` and `npm run stress -- --verify-baseline`; the two numbers are the same fact recorded twice, one shipped and one local |
 | The sampled field list | the `fields` array in each JSONL header | reading the header — it is written from the same constant the sampler uses |
 | The ascent ladder the RUN will walk (`searchEdge`, session bounds of `bugs/07`) | what `--dry-run` PRINTS as the plan (`--band` and `--search` alike) | `node automation-engine/engine.mjs --selftest` — block «ПЛАН ВИДИТ ТУ ЖЕ ГЛУБИНУ, ЧТО ПРОЙДЁТ ПРОГОН» compares the plan's promised depth and rung count against what a scripted run actually walked. Born drifted (`bugs/09`, 2026-08-14): the plan advertised −250 mV while the run stopped at −30 — and the dry run is the artifact S2 makes the operator read BEFORE writing to the owner's card. Collapsed to ONE computation (`composeAscentLadder` / `ratchetView`); the block is what keeps it collapsed |
-| The live card's V/F **voltages** | the `voltageMv` of every point in `curves/*.json` (the tuning-curve document and the voltage grid) | `npm run curve -- --verify` — a real pair by EXP-0013's test: the two sides have different AUTHORS (the driver's table and our stored copy). **Compared on the VOLTAGE axis on purpose:** the curve slides along the FREQUENCY axis with temperature (≈ −1.7 MHz/°C, `bugs/10`), so a frequency comparison would redden every time the room warms. Measured 2026-08-15 within one hour: point 120 read 3112 MHz cold and 3105 at 57 °C |
+| The card's **voltage grid** (the rungs it offers) | `voltageGridMv` in `curves/*.json` | `npm run curve -- --verify` — a real pair by EXP-0013's test: the two sides have different AUTHORS (the driver's table and our stored copy). **The grid is what is compared, because it is what does not move.** What deliberately is NOT compared is the stock voltage of a frequency: a warmer card wants more voltage for the same frequency (measured within one hour on 2026-08-15 — 1200 mV served 3112 MHz cold and 3105 MHz at 57 °C), and an instrument that reddens because the room warmed is one nobody keeps running |
 | The card's ACTUAL `ClkVfPointsSetControl` geometry | `CLK_VF_CONTROL_STRIDE` / `CLK_VF_CONTROL_FREQ_OFFSET_FIELD` in `nvapi.mjs` | `npm run nvml -- --verify-decode` — a real pair by EXP-0013's test, because the two sides have different AUTHORS: the driver's byte layout and our constants. It was already drifted when the row was written (the constants held the published 0x48/+0x00 and the card does 0x24/+0x14), which is exactly the class this registry exists for |
 
 **`hardware-mon` deliberately has NO second field list.** The pair `researches/03` ↔ sampler that the
