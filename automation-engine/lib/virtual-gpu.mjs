@@ -734,6 +734,25 @@ export function mulberry32(seed) {
 export function virtualCard(cardProfile, {
   settleSamples = 1, rampSamples = 0, wanderMhz = null,
   seed = 1, allowProcessDeath = false,
+  // ─── WALL CLOCK: THE BENCH DOES NOT SPEND IT BY DEFAULT, AND THAT IS A CLAIM WORTH READING ──────
+  //
+  // `plans/16` §8.3 said «движок спит по-настоящему эти секунды», and MEASUREMENT contradicted it
+  // (2026-08-15 20:3x): a 60-second burn on the bench completes instantly. The plan was not wrong
+  // about the LIVE path — there `runBurst` spawns the real workload, and `--sustain 60` really costs
+  // sixty seconds. It was wrong about the bench, and for a structural reason worth stating once:
+  //
+  //   THE SECONDS ARE SPENT BY THE WORKLOAD PROCESS, AND THE WORKLOAD PROCESS IS EXACTLY WHAT THE
+  //   BENCH REPLACES. The bench does not SHORTEN the burn — the burn's duration was never the
+  //   bench's to spend.
+  //
+  // What survives unchanged: `seconds` enters the failure model as exposure, so a 1-second burn
+  // honestly finds LESS than a 10-second one (B2-AC3, measured). The outcome is right.
+  // What does NOT survive, and is therefore said out loud rather than assumed: **the bench proves
+  // nothing that depends on time actually passing** — a watchdog lease expiring, a burst timeout, a
+  // sampler's window, a wall-clock budget. Those need the seconds, and by default they do not exist.
+  //
+  // `burnRealSeconds: true` buys them back for a run that needs them, at their real price.
+  burnRealSeconds = false,
 } = {}) {
   const v = validateCard(cardProfile);
   if (!v.ok) throw new Error(`виртуальная карта не поднимается на негодном профиле (поле ${v.field}): ${v.why}`);
@@ -992,6 +1011,12 @@ export function virtualCard(cardProfile, {
       const workload = String(binary).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '');
       const i = argv.indexOf('--sustain');
       const seconds = i === -1 ? P.fiction.failure.perLaunchSeconds : Number(argv[i + 1]);
+      // The seconds, bought back on request. `Atomics.wait` and not a promise: `runBurst`'s launcher
+      // is SYNCHRONOUS (it stands in for `spawnSync`), so an async sleep here would return instantly
+      // and quietly lie — the shape of the seam decides the shape of the wait.
+      if (burnRealSeconds && seconds > 0) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.round(seconds * 1000));
+      }
       const mhz = state.lock ? (targetMhz() ?? state.reportedMhz) : state.reportedMhz;
       const d = this.draw({ mhz, seconds, workload });
       const launches = Math.max(1, Math.round(seconds / P.fiction.failure.perLaunchSeconds));
