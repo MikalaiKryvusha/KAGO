@@ -1611,7 +1611,7 @@ try {
  * a constant accidentally written for the 5070 Ti has somewhere to fall out (`ideas/04`: «любая
  * константа, случайно вписанная в код вместо чтения с карты, вылезет здесь»).
  */
-function otherGeometryCard() {
+export function otherGeometryCard() {
   const frequencyGridMhz = [];
   for (let f = 2600; f >= 200; f -= 12) frequencyGridMhz.push(f);
   const voltageGridMv = [];

@@ -6,7 +6,24 @@
 > (the three seams), §3.2 (the three existing doubles), §4.3 (why the contract suite is the real
 > deliverable), §4.6 (the five traps), §4.7 (the bench measures the engine) · `researches/09` §4
 > (the 1.7 h / 13 h / 67 h arithmetic this phase turns into a measurement)
-> **Status:** 🔲 open · **ZERO GPU WRITES** · no owner needed · entry gate passed 2026-08-15 19:5x
+> **Status:** ✅ **ИСПОЛНЕНА 2026-08-15 21:4x** — все семь шагов и все одиннадцать критериев ·
+> **ZERO GPU WRITES** (сторож не взведён до и после) · no owner needed · entry gate passed 19:5x
+>
+> **Приёмка по критериям, каждый со своей уликой:**
+>
+> | # | Чем закрыт |
+> |---|---|
+> | B3-AC1 | 5 ловушек-файлов, класс внутри каждой · `npm run traps` |
+> | B3-AC2 | T1: правильный движок 2 ступени, неправильный 13, на трёх зёрнах каждый |
+> | B3-AC3 | 4 утверждения стоят «ждёт»; мутация, ставящая им OK, краснит все три сторожевых блока |
+> | B3-AC4 | 3 шва, 7 случаев, две колонки · `npm run contract` |
+> | B3-AC5 | **доказан красным:** мутация «залить живую колонку виртуальным прогоном» краснит ровно один блок и называет все 7 протёкших случаев |
+> | B3-AC6 | 0 веток в 23 файлах движка; освобождение меткой `KAGO-BENCH-OWN` внутри файла, а не по имени |
+> | B3-AC7 | **переписан замером:** по умолчанию 6 с → 1 мс, с `burnRealSeconds` 1 с → 1013 мс, длительность остаётся в модели |
+> | B3-AC8 | `npm run measure`: оценка 1,7 ч выдержала (+11 %), факт 38 воспроизвёлся сам |
+> | B3-AC9 | тот же контракт проходит карта на 201 частоту, равномерную сетку и максимум 2600 МГц — и на первом же прогоне нашла две зашитые частоты В ЭТОМ наборе |
+> | B3-AC10 | `npm run watchdog -- --status` до и после: сторож не взведён |
+> | B3-AC11 | 7 мутаций своими адресатами (4 по ловушкам, C7, B3-AC5, вторая геометрия); **одна не покраснела с первого раза и вскрыла EXP-0070** |
 > **Outbound:** the contract suite → the truth↔mirror registry in `AGENT_GUIDE.md` · the provability
 > boundary mechanism → `TESTING_FRAMEWORK.md` · the three doubles collapsing into one → the internal
 > map · closure → `plans/16` §4 and the entry gate of `plans/15`

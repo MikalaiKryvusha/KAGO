@@ -28,6 +28,17 @@
 //   - a branch on the bench planted in the engine → «ШОВ: ноль веток „мы на моке“ в движке»
 //   - the bench shortens a burn by itself         → «ЧАСЫ: секунды тратит НАГРУЗКА, и стенд про это не врёт»
 //
+// [TESTED: 2026-08-15 21:4x · `npm run contract` → **8 assertions, 0 failures**, seven cases green on
+//  the virtual side and «не прогонялась» on the live one.
+//  · B3-AC9 — the SAME contract walked by a card of another geometry: 201 frequencies, a UNIFORM
+//    127-rung grid, maximum 2600 MHz. Its first run found two hard-coded frequencies (2842 / 2400)
+//    IN THIS FILE — the criterion catching the class it exists for, in the suite rather than in the
+//    engine. Both are now derived from the card.
+//  · B3-AC5 proved RED: a mutation filling the live column from the virtual run reddens exactly one
+//    block and names all seven leaked cases. Without it the live column would have gone green off a
+//    bench run, which is the one fraud this whole suite exists to prevent.
+//  · C7 proved RED: renaming `resetGraphicsClocks` on one double reddens exactly C7.
+//
 // [TESTED: 2026-08-15 20:4x · `npm run contract` → 7 assertions, 0 failures; all six contract cases
 //  green on the virtual side and «не прогонялась» on the live one, which is the only legal reading
 //  until a live run happens. The branch grep covered 22 engine files and found zero.
@@ -46,7 +57,9 @@ import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import config from '../config.mjs';
-import { loadCard, virtualCard, GOLDEN_CHECKSUM, PROVABILITY_LINE } from './virtual-gpu.mjs';
+import {
+  loadCard, virtualCard, buildFiction, otherGeometryCard, GOLDEN_CHECKSUM, PROVABILITY_LINE,
+} from './virtual-gpu.mjs';
 
 const CARD_PATH = join('benches', 'cards', 'rtx5070ti.json');
 
@@ -102,6 +115,23 @@ async function runVirtualSide(card, stress) {
   const pass = (id, note = '') => done.set(id, { state: 'OK', note });
   const flunk = (id, why) => done.set(id, { state: 'FAIL', why });
 
+  // THE TEST FREQUENCIES ARE READ OFF THE CARD, NEVER TYPED. The first version of this suite had
+  // 2842 and 2400 written into it, and the second-geometry run (B3-AC9) found them within a minute —
+  // that card's maximum is 2600 MHz, so «2842» is not a frequency it has at all. Exactly the class of
+  // defect the criterion exists to surface, caught in THIS file rather than in the engine, which is
+  // the good direction for it to happen in.
+  //
+  // Both must sit ABOVE `top − 1000`: below that floor the curve cannot hold a ceiling (R11, STATUS
+  // fact 38) and the shipped write shape is refused — a contract case that wandered under it would be
+  // testing the refusal instead of the seam.
+  const freqs = [...card.frequencyGridMhz].sort((a, b) => a - b);
+  const top = freqs[freqs.length - 1];
+  const floorMhz = top - config.CLOCK_OFFSET_MAX_MHZ;
+  const nearest = (target) => freqs.filter((f) => f > floorMhz)
+    .reduce((best, f) => (Math.abs(f - target) < Math.abs(best - target) ? f : best), top);
+  const capMhz = nearest(Math.round(top * 0.92));
+  const lockMhz = nearest(Math.round(top * 0.78));
+
   const vc = virtualCard(card, { settleSamples: 0, seed: 3 });
 
   // C1 — query
@@ -110,17 +140,17 @@ async function runVirtualSide(card, stress) {
   if (!('clocks.gr' in q)) flunk('C1', `запрошенного поля нет в ответе: ${JSON.stringify(q)}`);
 
   // C2 — lock / release
-  vc.backend.lockGraphicsClocksMhz(2400, 2400);
+  vc.backend.lockGraphicsClocksMhz(lockMhz, lockMhz);
   const locked = vc.backend.query(['clocks.gr'])['clocks.gr'];
   vc.backend.resetGraphicsClocks();
   const freeA = vc.backend.query(['clocks.gr'])['clocks.gr'];
   const freeB = vc.backend.query(['clocks.gr'])['clocks.gr'];
-  if (Number(locked) === 2400 && !(Number(freeA) === 2400 && Number(freeB) === 2400)) {
+  if (Number(locked) === lockMhz && !(Number(freeA) === lockMhz && Number(freeB) === lockMhz)) {
     pass('C2', `закреплено ${locked}, после снятия ${freeA}/${freeB}`);
   } else flunk('C2', `закреплено ${locked}, после снятия ${freeA}/${freeB}`);
 
   // C3 — write / read back / zero
-  const w = await vc.curveBackend.writeRaiseAndCap(45, 2842, { cardMaxClockMhz: card.card.maxGraphicsMhz });
+  const w = await vc.curveBackend.writeRaiseAndCap(45, capMhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
   const back = await vc.curveBackend.readCurveOffsets();
   const nonZero = (back.offsets ?? []).filter((x) => x !== 0).length;
   await vc.curveBackend.zeroCurve();
@@ -139,7 +169,7 @@ async function runVirtualSide(card, stress) {
   const golden = { gpu: { driver: card.stamp.driver, vbios: card.stamp.vbios }, args: [], checksum: GOLDEN_CHECKSUM };
   const stampOk = stress.checkGoldenStamp(golden, { probed: true, driver: card.stamp.driver, vbios: card.stamp.vbios }, []);
   const fresh = virtualCard(card, { settleSamples: 0, seed: 3 });
-  fresh.backend.lockGraphicsClocksMhz(2842, 2842);
+  fresh.backend.lockGraphicsClocksMhz(capMhz, capMhz);
   fresh.backend.query(['clocks.gr']);
   const burst = stress.runBurst({ name: 'sdc_fma', args: [], sustainSeconds: 10, run: (b, a) => fresh.oracle.run(b, a) });
   const v = stress.decideVerdict({ bursts: [burst], golden, stamp: stampOk, faults: { providers: [], faults: [] } });
@@ -147,10 +177,10 @@ async function runVirtualSide(card, stress) {
   else flunk('C5', `на стоке ожидался PASS, получено ${v.verdict}: ${v.reason}`);
 
   // C6 — the oracle READS the voltage off the card
-  const before = fresh.oracle.servingVoltageMv(2842);
-  await fresh.curveBackend.writeRaiseAndCap(180, 2842, { cardMaxClockMhz: card.card.maxGraphicsMhz });
-  const after = fresh.oracle.servingVoltageMv(2842);
-  if (after < before) pass('C6', `подъём удешевил 2842 МГц: ${before} → ${after} мВ`);
+  const before = fresh.oracle.servingVoltageMv(capMhz);
+  await fresh.curveBackend.writeRaiseAndCap(180, capMhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
+  const after = fresh.oracle.servingVoltageMv(capMhz);
+  if (after < before) pass('C6', `подъём удешевил ${capMhz} МГц: ${before} → ${after} мВ`);
   else flunk('C6', `подъём не изменил обслуживающее напряжение: ${before} → ${after}`);
 
   // C7 — EVERY stand-in for the card backend satisfies the seam COMPLETELY.
@@ -204,6 +234,27 @@ export async function runContract({ live = false } = {}) {
   const cardR = loadCard(CARD_PATH);
   check('КОНТРАКТ: карта стенда загружена', cardR.ok, cardR.why ?? '');
   const virtualDone = cardR.ok ? await runVirtualSide(cardR.card, stress) : new Map();
+
+  // ---- 2a. B3-AC9 — THE SAME CONTRACT, WALKED BY A CARD OF ANOTHER GEOMETRY.
+  //
+  // Fewer frequencies, a UNIFORM voltage grid, a lower maximum. The contract is stated over the seam,
+  // so a card that is not the 5070 Ti must satisfy it identically; whatever does not is a constant
+  // accidentally written for this specimen instead of read off the card. Running it through the
+  // CONTRACT and not only through the bench's own selftest is the half that was missing: the selftest
+  // proves the MECHANICS generalise, this proves the SEAM does.
+  const other = otherGeometryCard();
+  other.fiction = buildFiction(other, { noiseSeed: 20260906, noiseAmplitudeMv: 4, driftMaxMv: 10 });
+  let otherWhy = '';
+  let otherDone = new Map();
+  try {
+    otherDone = await runVirtualSide(other, stress);
+  } catch (e) { otherWhy = e.message; }
+  const otherFailed = [...otherDone.entries()].filter(([, v]) => v.state === 'FAIL');
+  check('ОБЩНОСТЬ: тот же КОНТРАКТ проходит карта другой геометрии (B3-AC9)',
+    otherWhy === '' && otherDone.size > 0 && otherFailed.length === 0,
+    otherWhy || otherFailed.map(([id, v]) => `${id}: ${v.why}`).join(' | '),
+    `частот ${other.frequencyGridMhz.length}, ступеней ${other.voltageGridMv.length}, `
+      + `максимум ${other.card.maxGraphicsMhz} МГц`);
 
   // ---- 3. the live column — and it is EMPTY unless a live run actually happened
   //
