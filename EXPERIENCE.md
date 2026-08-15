@@ -69,6 +69,16 @@
 **Not for:** genuinely time-varying readings (temperature, watts, clocks under load) — those ARE snapshots and must carry their conditions. The rule is about the artifact's KEY, not about telemetry.
 
 ### EXP-0067 · 2026-08-15 · ❌❌→✅ · #shells #two-worlds #git #commit-message #silent-corruption #repeat-offender
+> **mechanized: `npm run check` — the mojibake gate (`tools/check.mjs`), added 2026-08-15 21:5x.**
+> **THIRD strike, same day, by the session that WROTE this entry:** a `Get-Content | Set-Content` pass
+> over `seam-contract.mjs` read UTF-8 as the machine's ANSI codepage and wrote every Cyrillic character
+> back as mojibake. `node --check` stayed green — the file still parsed — and only reading the result
+> showed it. The canon's rule is explicit (header of this file): two strikes → a mechanism, never a
+> third reminder. The gate now scans every `.mjs/.json/.md/.ps1/.cu` in the tree for the byte
+> sequences that UTF-8-read-as-cp1251 produces and cannot occur in correct Russian, English or code.
+> Proved red before its green was trusted: `node tools/check.mjs --selftest-mojibake`. Its own first
+> run then tightened it twice — it dropped two markers with a LEGITIMATE reading (the letter Р in
+> guillemets fired on the owner's stylometry portrait) and it exempts itself by a mark inside the file.
 **Context:** ONE session, TWO hits of the same family — passing marked-up Russian text through the shell instead of through the file tools.
 **Tried / did:** (1) `git commit -m @'…'@` — the PowerShell here-string, typed into the **Bash** tool. (2) Half an hour later, after writing this very entry: `node -e "…s.replace('… \`GOAL.md\` …')…"` — backticked doc names inside a DOUBLE-quoted bash string, to patch a STATUS paragraph.
 **Result:** ❌❌ Both failed SILENTLY with exit 0. (1) bash has no here-string, so `@'` became a literal argument: the commit's subject line was `@`. (2) bash executed the backticks as commands — `GOAL.md: command not found` — and wrote the paragraph with the names DELETED: «Все дословно в , указатель — в шапке .» ✅ Both repaired (`--amend -F <file>`; the Edit tool).
