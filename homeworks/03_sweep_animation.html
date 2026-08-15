@@ -2,273 +2,283 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>KAGO — макеты анимации прогона развёртки</title>
+<title>KAGO — анимация прогона развёртки</title>
 <style>
   :root{
     --bg:#14161a; --panel:#1b1f25; --line:#2a3038; --ink:#e8edf3; --dim:#8b98a8;
-    --ice:#5fd3ff; --fire:#ff7a3c; --ok:#4ade80; --alarm:#ff4d4d; --graphite:#3a4048;
+    --ice:#8794a3; --fire:#ff7a3c; --ok:#4ade80; --alarm:#ff4d4d;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:15px/1.5 "Segoe UI",system-ui,sans-serif;padding:24px}
   h1{font-size:20px;margin:0 0 4px}
-  .sub{color:var(--dim);margin:0 0 20px;max-width:900px}
-  .bar{display:flex;gap:12px;align-items:center;margin-bottom:22px;flex-wrap:wrap}
+  .sub{color:var(--dim);margin:0 0 18px;max-width:940px}
+  .bar{display:flex;gap:14px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
   button{background:var(--panel);color:var(--ink);border:1px solid var(--line);
          border-radius:8px;padding:10px 16px;font:inherit;cursor:pointer}
   button:hover{border-color:var(--ice)}
   button.hang{border-color:var(--alarm);color:#ffb3b3}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:20px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
-  .card h2{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
-  .card .note{color:var(--dim);font-size:13px;margin:0 0 14px;min-height:34px}
-  .stage{background:#0f1216;border:1px solid var(--line);border-radius:10px;
-         display:flex;align-items:center;justify-content:center;padding:10px}
+  .wrap{display:grid;grid-template-columns:minmax(520px,1fr) minmax(250px,320px);
+        gap:20px;align-items:start;max-width:1080px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .stage{background:#0f1216;border:1px solid var(--line);border-radius:10px;padding:4px}
   svg{display:block;width:100%;height:auto}
-  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
-  .m{background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
-  .m b{display:block;font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums}
+  .m{background:#0f1216;border:1px solid var(--line);border-radius:8px;
+     padding:9px 12px;margin-bottom:9px}
+  .m b{display:block;font-size:29px;line-height:1.1;font-variant-numeric:tabular-nums}
   .m span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
-  .state{margin-top:12px;font-weight:600;letter-spacing:.02em}
-  .alive{color:var(--ok)} .dead{color:var(--alarm)}
-  body.hung .spin,body.hung .bob{animation-play-state:paused!important}
-  body.hung .alive{display:none}
-  .dead{display:none} body.hung .dead{display:block}
-  footer{margin-top:26px;color:var(--dim);font-size:13px;max-width:900px}
+  .state{font-weight:700;letter-spacing:.02em;font-size:17px;margin:14px 0 0}
+  .alive{color:var(--ok)} .dead{color:var(--alarm);display:none}
+  body.hung .alive{display:none} body.hung .dead{display:block}
+  body.hung .spin,body.hung .arm,body.hung .grip{animation-play-state:paused!important}
+  footer{margin-top:24px;color:var(--dim);font-size:13px;max-width:940px}
   code{background:#0f1216;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
-  /* три кулера крутятся, отвёртка ходит вниз-вверх и на дне подкручивает */
-  .spin{transform-box:fill-box;transform-origin:center;animation:spin 1.1s linear infinite}
-  .spin.s2{animation-duration:1.35s} .spin.s3{animation-duration:.95s}
+
+  /* ── ДВИЖЕНИЕ ────────────────────────────────────────────────────────────
+     МЕДЛЕННО И РОВНО (слово владельца: «почти усыпляющие, чтобы не раздражали
+     оператора»). Медленное ровное движение при остановке заметнее быстрого:
+     быстрое смазывается в глазу.
+
+     ОДНА СКОРОСТЬ И ОДИН ЦВЕТ У ВСЕХ ТРЁХ — слово владельца. Заодно это правда
+     о карте: три кулера идут по ОДНОЙ кривой оборотов, так что разные скорости
+     были бы выдумкой. К телеметрии период НЕ привязан — анимация чистая графика.
+
+     Одно условие держим твёрдо: у вентиляторов НЕТ пауз. Паузу нельзя отличить
+     от смерти, поэтому сигнал жизни несут именно они; отвёртке паузы разрешены. */
+  .spin{transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .bob{animation:bob 2.4s ease-in-out infinite}
-  @keyframes bob{
-    0%,100%{transform:translateY(0)}
-    28%{transform:translateY(26px)}
-    62%{transform:translateY(26px)}
-    90%{transform:translateY(0)}
+
+  /* Жало скрывается за кожухом ЧУТЬ-ЧУТЬ: в покое оно на 14 px выше кромки,
+     ход 24 px, значит за карту уходит ровно 10 px. */
+  .arm{animation:arm 11s cubic-bezier(.42,0,.58,1) infinite}
+  @keyframes arm{
+    0%,7%   {transform:translateY(0)}
+    32%,64% {transform:translateY(24px)}
+    89%,100%{transform:translateY(0)}
   }
-  .twist{transform-box:fill-box;transform-origin:center;animation:twist 2.4s linear infinite}
-  @keyframes twist{
-    0%,27%{transform:rotate(0)}
-    62%{transform:rotate(540deg)}
-    100%{transform:rotate(540deg)}
+  /* Поворот цилиндра вокруг своей оси НЕ меняет силуэт — едут только продольные
+     грани; поперечные кольца стоят, потому что идут по окружности. */
+  .grip{animation:grip 11s linear infinite}
+  @keyframes grip{
+    0%,32%  {transform:translateX(0)}
+    64%     {transform:translateX(-44px)}
+    100%    {transform:translateX(-44px)}
   }
 </style>
 </head>
 <body>
 
-<h1>Макеты анимации прогона — сцена ваша, исполнение разное</h1>
-<p class="sub">Во всех четырёх одно и то же: нарисованная видеокарта, три вращающихся кулера, и
-отвёртка, которая опускается, подкручивает и поднимается — монотонным циклом. Различается только
-манера исполнения. <b>Нажмите «Симулировать зависание» — увидите ровно то, что увидит оператор:
-всё замирает, и последняя ступень остаётся на экране как точка отказа.</b></p>
+<h1>Анимация прогона — четвёртая правка</h1>
+<p class="sub">Вентиляторы одного цвета и одной скорости. Отвёртка перерисована: точёная ручка с
+перехватом, стальная обойма, длинный тонкий стержень, шлицевое жало. Винта нет — жало уходит
+<b>за карту</b> и работает в глубине.</p>
 
 <div class="bar">
   <button id="toggle" class="hang">⏸ Симулировать зависание</button>
-  <span class="sub" style="margin:0">В макете движение идёт от таймера браузера. В рабочем виде
-  каждый кадр приходит от пульса — нет пульса, нет движения.</span>
+  <span class="sub" style="margin:0">Анимация ничего не измеряет — данные несут цифры справа.</span>
 </div>
 
-<div class="grid">
-
-  <!-- 1 — ГРАФИТОВЫЙ, в языке логотипа KAGO -->
+<div class="wrap">
   <div class="card">
-    <h2>1 · Графитовый — язык логотипа KAGO</h2>
-    <p class="note">Тот же строгий графит, что у чипа на витрине; лёд и пламя как акценты.
-    Узнаваемо «своё», не похоже на чужой виджет.</p>
     <div class="stage">
-      <svg viewBox="0 0 320 190" role="img" aria-label="Графитовая видеокарта с тремя кулерами и отвёрткой">
+      <svg viewBox="0 0 380 268" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
         <defs>
-          <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#454c56"/><stop offset="1" stop-color="#2b3138"/>
+          <linearGradient id="shroud" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#4a525d"/><stop offset=".45" stop-color="#343b45"/>
+            <stop offset="1" stop-color="#252b33"/>
           </linearGradient>
-        </defs>
-        <!-- плата -->
-        <rect x="18" y="70" width="284" height="86" rx="10" fill="url(#g1)" stroke="#565f6b"/>
-        <rect x="18" y="70" width="284" height="10" rx="5" fill="#5b6672"/>
-        <rect x="26" y="146" width="268" height="6" rx="3" fill="#20252b"/>
-        <!-- три кулера -->
-        <g fill="none" stroke="#7d8794" stroke-width="2">
-          <circle cx="72" cy="113" r="27"/><circle cx="160" cy="113" r="27"/><circle cx="248" cy="113" r="27"/>
-        </g>
-        <g class="spin"><g transform="translate(72,113)">
-          <path d="M0,-21 A21,21 0 0 1 18,10 L0,0 Z" fill="var(--ice)" opacity=".85"/>
-          <path d="M18,10 A21,21 0 0 1-18,10 L0,0 Z" fill="#6f7b8a" opacity=".9"/>
-          <path d="M-18,10 A21,21 0 0 1 0,-21 L0,0 Z" fill="#59636f"/>
-          <circle r="5" fill="#2b3138" stroke="#7d8794"/>
-        </g></g>
-        <g class="spin s2"><g transform="translate(160,113)">
-          <path d="M0,-21 A21,21 0 0 1 18,10 L0,0 Z" fill="#6f7b8a" opacity=".9"/>
-          <path d="M18,10 A21,21 0 0 1-18,10 L0,0 Z" fill="var(--ice)" opacity=".85"/>
-          <path d="M-18,10 A21,21 0 0 1 0,-21 L0,0 Z" fill="#59636f"/>
-          <circle r="5" fill="#2b3138" stroke="#7d8794"/>
-        </g></g>
-        <g class="spin s3"><g transform="translate(248,113)">
-          <path d="M0,-21 A21,21 0 0 1 18,10 L0,0 Z" fill="#59636f"/>
-          <path d="M18,10 A21,21 0 0 1-18,10 L0,0 Z" fill="#6f7b8a" opacity=".9"/>
-          <path d="M-18,10 A21,21 0 0 1 0,-21 L0,0 Z" fill="var(--fire)" opacity=".8"/>
-          <circle r="5" fill="#2b3138" stroke="#7d8794"/>
-        </g></g>
-        <!-- отвёртка -->
-        <g class="bob">
-          <g transform="translate(160,8)">
-            <g class="twist">
-              <rect x="-9" y="0" width="18" height="34" rx="5" fill="var(--fire)"/>
-              <rect x="-9" y="6" width="18" height="3" fill="#c85a24"/>
-              <rect x="-9" y="14" width="18" height="3" fill="#c85a24"/>
-              <rect x="-2.5" y="34" width="5" height="34" fill="#aeb8c4"/>
-              <path d="M-5,68 L5,68 L2.5,76 L-2.5,76 Z" fill="#dfe6ee"/>
+          <linearGradient id="rail" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#5b6572"/><stop offset="1" stop-color="#3d4550"/>
+          </linearGradient>
+          <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e8c877"/><stop offset="1" stop-color="#a8862f"/>
+          </linearGradient>
+          <!-- сталь стержня: блик слева от центра, тень справа — цилиндр -->
+          <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"   stop-color="#5f6873"/><stop offset=".28" stop-color="#e6edf5"/>
+            <stop offset=".55" stop-color="#b6c0cc"/><stop offset="1"   stop-color="#5a636e"/>
+          </linearGradient>
+          <linearGradient id="ferrule" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#6b7480"/><stop offset=".3" stop-color="#dde4ec"/>
+            <stop offset=".62" stop-color="#9ba5b1"/><stop offset="1" stop-color="#646d78"/>
+          </linearGradient>
+          <!-- ручка: тот же принцип цилиндра, но насыщеннее -->
+          <linearGradient id="handle" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"   stop-color="#8e3410"/><stop offset=".26" stop-color="#ff9257"/>
+            <stop offset=".52" stop-color="#ee6f27"/><stop offset=".8"  stop-color="#b8480f"/>
+            <stop offset="1"   stop-color="#7d2d0c"/>
+          </linearGradient>
+
+          <!-- ЛОПАСТЬ: скошенная, от ступицы (r10) до обода (r31) -->
+          <path id="blade"
+                d="M-2.25,-9.74 L2.25,-9.74 Q11,-17.5 17.8,-25.4
+                   A31,31 0 0 0 4.85,-30.62 Q1.6,-19.5 -2.25,-9.74 Z"/>
+
+          <g id="fan">
+            <rect x="-37" y="-37" width="74" height="74" rx="9" fill="#222830" stroke="#4d5661"/>
+            <circle r="34.5" fill="#12161b" stroke="#525c68"/>
+            <circle r="32.6" fill="none"    stroke="#2c333b"/>
+            <g fill="#6d7885" opacity=".85">
+              <circle cx="-30" cy="-30" r="2.3"/><circle cx="30" cy="-30" r="2.3"/>
+              <circle cx="-30" cy="30"  r="2.3"/><circle cx="30" cy="30"  r="2.3"/>
             </g>
           </g>
-        </g>
-      </svg>
-    </div>
-    <div class="metrics">
-      <div class="m"><span>частота</span><b>2842</b></div>
-      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
-    </div>
-    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
-    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
-  </div>
 
-  <!-- 2 — ЧЕРТЁЖ -->
-  <div class="card">
-    <h2>2 · Технический чертёж</h2>
-    <p class="note">Только линии и один акцент. Регистр измерительного прибора: ничего лишнего,
-    любое движение читается мгновенно.</p>
-    <div class="stage">
-      <svg viewBox="0 0 320 190" role="img" aria-label="Чертёж видеокарты с кулерами и отвёрткой">
-        <g fill="none" stroke="var(--ice)" stroke-width="1.6">
-          <rect x="18" y="70" width="284" height="86" rx="6"/>
-          <line x1="18" y1="84" x2="302" y2="84" stroke-dasharray="4 4" opacity=".5"/>
-          <circle cx="72" cy="118" r="26"/><circle cx="160" cy="118" r="26"/><circle cx="248" cy="118" r="26"/>
-        </g>
-        <g stroke="var(--ice)" stroke-width="1.6" fill="none">
-          <g class="spin"><g transform="translate(72,118)">
-            <path d="M0,-20 L7,-6 M17,10 L2,7 M-17,10 L-2,7"/><circle r="4"/>
-            <path d="M0,-20 A20,20 0 0 1 17,10" opacity=".35"/>
-          </g></g>
-          <g class="spin s2"><g transform="translate(160,118)">
-            <path d="M0,-20 L7,-6 M17,10 L2,7 M-17,10 L-2,7"/><circle r="4"/>
-            <path d="M0,-20 A20,20 0 0 1 17,10" opacity=".35"/>
-          </g></g>
-          <g class="spin s3"><g transform="translate(248,118)">
-            <path d="M0,-20 L7,-6 M17,10 L2,7 M-17,10 L-2,7"/><circle r="4"/>
-            <path d="M0,-20 A20,20 0 0 1 17,10" opacity=".35"/>
-          </g></g>
-        </g>
-        <g class="bob"><g transform="translate(160,6)"><g class="twist">
-          <g fill="none" stroke="var(--fire)" stroke-width="1.8">
-            <rect x="-8" y="0" width="16" height="32" rx="4"/>
-            <line x1="0" y1="32" x2="0" y2="70"/>
-            <path d="M-4,70 L4,70 L0,78 Z"/>
+          <g id="rotor">
+            <use href="#blade"/>
+            <use href="#blade" transform="rotate(32.73)"/>
+            <use href="#blade" transform="rotate(65.45)"/>
+            <use href="#blade" transform="rotate(98.18)"/>
+            <use href="#blade" transform="rotate(130.9)"/>
+            <use href="#blade" transform="rotate(163.6)"/>
+            <use href="#blade" transform="rotate(196.4)"/>
+            <use href="#blade" transform="rotate(229.1)"/>
+            <use href="#blade" transform="rotate(261.8)"/>
+            <use href="#blade" transform="rotate(294.5)"/>
+            <use href="#blade" transform="rotate(327.3)"/>
           </g>
-        </g></g></g>
-      </svg>
-    </div>
-    <div class="metrics">
-      <div class="m"><span>частота</span><b>2842</b></div>
-      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
-    </div>
-    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
-    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
-  </div>
 
-  <!-- 3 — ПЛОСКИЙ КОНТРАСТНЫЙ -->
-  <div class="card">
-    <h2>3 · Плоский, максимально контрастный</h2>
-    <p class="note">Крупные заливки, силуэт вместо деталей. Замирание видно боковым зрением с
-    другого конца комнаты — а оператор именно что не смотрит в экран.</p>
-    <div class="stage">
-      <svg viewBox="0 0 320 190" role="img" aria-label="Плоская видеокарта с кулерами и отвёрткой">
-        <rect x="14" y="66" width="292" height="96" rx="8" fill="#222932"/>
-        <rect x="14" y="66" width="292" height="96" rx="8" fill="none" stroke="var(--ice)" stroke-width="3"/>
-        <g class="spin"><g transform="translate(70,116)">
-          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="var(--ice)"/>
-          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#2f6f8a"/>
-          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#17495e"/>
-        </g></g>
-        <g class="spin s2"><g transform="translate(160,116)">
-          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#2f6f8a"/>
-          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="var(--ice)"/>
-          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#17495e"/>
-        </g></g>
-        <g class="spin s3"><g transform="translate(250,116)">
-          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#17495e"/>
-          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#2f6f8a"/>
-          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="var(--ice)"/>
-        </g></g>
-        <g class="bob"><g transform="translate(160,0)"><g class="twist">
-          <rect x="-13" y="0" width="26" height="40" rx="6" fill="var(--fire)"/>
-          <rect x="-4" y="40" width="8" height="38" fill="#cfd8e3"/>
-          <path d="M-8,78 L8,78 L4,88 L-4,88 Z" fill="#fff"/>
-        </g></g></g>
-      </svg>
-    </div>
-    <div class="metrics">
-      <div class="m"><span>частота</span><b>2842</b></div>
-      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
-    </div>
-    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
-    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
-  </div>
+          <!-- СИЛУЭТ РУЧКИ: купол сверху, плечо, перехват, расширение к обойме.
+               Точёная форма вместо бочонка — по ней же обрезаются грани. -->
+          <path id="grip-shape"
+                d="M0,-112
+                   C 9,-112 15,-107 16,-99
+                   C 17,-92 18,-86 18,-80
+                   C 18,-73 14,-70 13,-66
+                   C 12,-62 15,-59 16,-56
+                   C 17,-53 15,-52 12,-52
+                   L -12,-52
+                   C -15,-52 -17,-53 -16,-56
+                   C -15,-59 -12,-62 -13,-66
+                   C -14,-70 -18,-73 -18,-80
+                   C -18,-86 -17,-92 -16,-99
+                   C -15,-107 -9,-112 0,-112 Z"/>
+          <clipPath id="gripClip"><use href="#grip-shape"/></clipPath>
+        </defs>
 
-  <!-- 4 — ИЗОМЕТРИЯ -->
-  <div class="card">
-    <h2>4 · Изометрия, «объёмная»</h2>
-    <p class="note">Карта под углом, отвёртка входит в неё по-настоящему сверху. Живее остальных,
-    но и деталей больше — а лишние детали на измерительном приборе спорны.</p>
-    <div class="stage">
-      <svg viewBox="0 0 320 190" role="img" aria-label="Изометрическая видеокарта с кулерами и отвёрткой">
+        <!-- ── ОТВЁРТКА РИСУЕТСЯ ПЕРВОЙ — порядок отрисовки и есть глубина.
+             Опускающееся жало уходит ЗА кожух само, без масок и обрезки. -->
+        <g class="arm">
+          <g transform="translate(142,116)">
+            <!-- жало шлицевое -->
+            <path d="M-4.6,-10 L4.6,-10 L4.6,-3 L2.2,0 L-2.2,0 L-4.6,-3 Z" fill="#eef3f9"/>
+            <path d="M0,-10 L0,0" stroke="#8f99a5" stroke-width=".9"/>
+            <!-- стержень -->
+            <rect x="-3.2" y="-46" width="6.4" height="36" fill="url(#steel)"/>
+            <rect x="-3.2" y="-46" width="6.4" height="36" fill="none" stroke="#404955" stroke-width=".5"/>
+            <!-- обойма -->
+            <path d="M-7,-56 L7,-56 L6,-45 L-6,-45 Z" fill="url(#ferrule)"/>
+            <rect x="-7.6" y="-57.5" width="15.2" height="3" rx="1.2" fill="#c8d2dd"/>
+            <!-- ручка -->
+            <use href="#grip-shape" fill="url(#handle)"/>
+            <g clip-path="url(#gripClip)">
+              <!-- продольные грани: едут при подкручивании -->
+              <g class="grip" fill="#7a2a09" opacity=".34">
+                <rect x="-52" y="-114" width="3.4" height="64"/><rect x="-46" y="-114" width="3.4" height="64"/>
+                <rect x="-40" y="-114" width="3.4" height="64"/><rect x="-34" y="-114" width="3.4" height="64"/>
+                <rect x="-28" y="-114" width="3.4" height="64"/><rect x="-22" y="-114" width="3.4" height="64"/>
+                <rect x="-16" y="-114" width="3.4" height="64"/><rect x="-10" y="-114" width="3.4" height="64"/>
+                <rect x="-4"  y="-114" width="3.4" height="64"/><rect x="2"   y="-114" width="3.4" height="64"/>
+                <rect x="8"   y="-114" width="3.4" height="64"/><rect x="14"  y="-114" width="3.4" height="64"/>
+              </g>
+              <!-- поперечное кольцо перехвата: при осевом повороте НЕ движется -->
+              <rect x="-20" y="-68" width="40" height="2.4" fill="#6b2408" opacity=".45"/>
+              <rect x="-20" y="-64" width="40" height="1.6" fill="#ffb489" opacity=".18"/>
+              <!-- блик и теневая сторона цилиндра: от света, тоже неподвижны -->
+              <rect x="-9"  y="-114" width="4.5" height="64" fill="#ffd3b1" opacity=".3"/>
+              <rect x="9"   y="-114" width="5"   height="64" fill="#000"    opacity=".18"/>
+            </g>
+            <use href="#grip-shape" fill="none" stroke="#5f2408" stroke-width=".8" opacity=".55"/>
+          </g>
+        </g>
+
+        <!-- ── ПЛАТА, ЗАДНЯЯ ПЛАСТИНА, ГРЕБЁНКА PCIe ───────────────────── -->
+        <rect x="34" y="222" width="316" height="12" rx="2" fill="#1e232a" stroke="#39424d"/>
+        <!-- Гребёнка PCIe одной сплошной медяшкой: зубы дробили взгляд и мешали
+             заметить остановку — а именно ради этого вся картинка и рисуется. -->
         <g>
-          <path d="M40,132 L168,74 L296,132 L168,190 Z" fill="#2b323b" stroke="#5c6674"/>
-          <path d="M40,132 L40,142 L168,190 L168,190 Z" fill="#1d232a"/>
-          <path d="M296,132 L296,142 L168,190 L168,190 Z" fill="#161b21"/>
+          <rect x="70" y="234" width="132" height="12" rx="1.5" fill="url(#gold)"/>
+          <rect x="212" y="234" width="52" height="12" rx="1.5" fill="url(#gold)"/>
+        </g>
+
+        <!-- ── КРОНШТЕЙН, ВИД С РЕБРА ────────────────────────────────────
+             Правка по замечанию владельца: раньше планка была развёрнута
+             ЛИЦОМ к зрителю, с видимыми окнами разъёмов, — так не бывает.
+             Кронштейн привинчен к задней стенке корпуса, то есть при виде
+             сбоку он виден С РЕБРА: тонкая полоса металла с отогнутой
+             верхней лапкой под винт. Никаких окон разъёмов отсюда не видно. -->
+        <g>
+          <rect x="22" y="124" width="7" height="116" fill="url(#ferrule)"/>
+          <rect x="22" y="124" width="7" height="116" fill="none" stroke="#48515c" stroke-width=".7"/>
+          <rect x="23.2" y="124" width="1.6" height="116" fill="#eef3f9" opacity=".35"/>
+          <!-- отогнутая лапка крепления, уходит к корпусу -->
+          <path d="M22,124 L29,124 L29,116 L36,116 L36,120 L29,120 Z" fill="url(#rail)" stroke="#69737f" stroke-width=".7"/>
+          <circle cx="32.5" cy="118" r="1.4" fill="#151a20"/>
+          <!-- нижний упор -->
+          <rect x="22" y="238" width="7" height="4" rx="1" fill="#5b6572"/>
+        </g>
+
+        <!-- ── КОЖУХ ───────────────────────────────────────────────────── -->
+        <path d="M30,130 L352,130 L352,218 L30,218 Z" fill="url(#shroud)" stroke="#5d6773"/>
+        <path d="M30,130 L352,130 L352,144 L30,144 Z" fill="url(#rail)" opacity=".5"/>
+        <g stroke="#1d222a" stroke-width="2" opacity=".6">
+          <path d="M64,130 L48,144"/><path d="M334,130 L318,144"/>
+          <path d="M64,218 L48,204"/><path d="M334,218 L318,204"/>
         </g>
         <g>
-          <ellipse cx="106" cy="126" rx="30" ry="15" fill="#191e24" stroke="#5c6674"/>
-          <ellipse cx="168" cy="99" rx="30" ry="15" fill="#191e24" stroke="#5c6674"/>
-          <ellipse cx="230" cy="126" rx="30" ry="15" fill="#191e24" stroke="#5c6674"/>
+          <rect x="296" y="118" width="50" height="13" rx="2.5" fill="#2b323b" stroke="#69737f"/>
+          <g fill="#4d5661">
+            <rect x="300" y="121" width="9" height="7" rx="1"/><rect x="311" y="121" width="9" height="7" rx="1"/>
+            <rect x="322" y="121" width="9" height="7" rx="1"/><rect x="333" y="121" width="9" height="7" rx="1"/>
+          </g>
         </g>
-        <g class="spin"><g transform="translate(106,126) scale(1,.5)">
-          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="var(--ice)" opacity=".9"/>
-          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#63707f"/>
-          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#48525d"/>
-        </g></g>
-        <g class="spin s2"><g transform="translate(168,99) scale(1,.5)">
-          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#63707f"/>
-          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="var(--ice)" opacity=".9"/>
-          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="#48525d"/>
-        </g></g>
-        <g class="spin s3"><g transform="translate(230,126) scale(1,.5)">
-          <path d="M0,-26 A26,26 0 0 1 22,13 L0,0 Z" fill="#48525d"/>
-          <path d="M22,13 A26,26 0 0 1-22,13 L0,0 Z" fill="#63707f"/>
-          <path d="M-22,13 A26,26 0 0 1 0,-26 L0,0 Z" fill="var(--fire)" opacity=".85"/>
-        </g></g>
-        <g class="bob"><g transform="translate(168,2)"><g class="twist">
-          <rect x="-10" y="0" width="20" height="34" rx="5" fill="var(--fire)"/>
-          <rect x="-3" y="34" width="6" height="42" fill="#b9c3cf"/>
-          <path d="M-6,76 L6,76 L3,84 L-3,84 Z" fill="#e9f0f7"/>
-        </g></g></g>
+
+        <!-- ── ТРИ ВЕНТИЛЯТОРА: один цвет, одна скорость ───────────────── -->
+        <g transform="translate(94,178)">
+          <use href="#fan"/>
+          <g class="spin">
+            <use href="#rotor" fill="var(--ice)" opacity=".92"/>
+            <circle r="9" fill="#2b323b" stroke="#6d7885"/><circle r="3.2" fill="#6d7885"/>
+          </g>
+        </g>
+        <g transform="translate(190,178)">
+          <use href="#fan"/>
+          <g class="spin">
+            <use href="#rotor" fill="var(--ice)" opacity=".92"/>
+            <circle r="9" fill="#2b323b" stroke="#6d7885"/><circle r="3.2" fill="#6d7885"/>
+          </g>
+        </g>
+        <g transform="translate(286,178)">
+          <use href="#fan"/>
+          <g class="spin">
+            <use href="#rotor" fill="var(--ice)" opacity=".92"/>
+            <circle r="9" fill="#2b323b" stroke="#6d7885"/><circle r="3.2" fill="#6d7885"/>
+          </g>
+        </g>
       </svg>
     </div>
-    <div class="metrics">
-      <div class="m"><span>частота</span><b>2842</b></div>
-      <div class="m"><span>напряжение</span><b>995 мВ</b></div>
-    </div>
-    <p class="state alive">● ИДЁТ ПРОЖИГ — 6,2 с</p>
-    <p class="state dead">■ ЗАМЕРЛО — ступень 2842 МГц / 995 мВ</p>
   </div>
 
+  <div>
+    <div class="m"><span>частота под тестом</span><b>2842 МГц</b></div>
+    <div class="m"><span>напряжение ступени</span><b>995 мВ</b></div>
+    <div class="m"><span>прожиг</span><b>6,2 с</b></div>
+    <div class="m"><span>ступень</span><b>4 из 24</b></div>
+    <p class="state alive">● ИДЁТ ПРОЖИГ</p>
+    <p class="state dead">■ ЗАМЕРЛО — 2842 МГц / 995 мВ</p>
+  </div>
 </div>
 
 <footer>
-  <p><b>Что в макете НЕ настоящее и будет иначе.</b> Здесь всё крутится от таймера браузера —
-  в рабочем виде фаза каждого элемента считается от последнего пришедшего пульса, иначе анимация
-  продолжит махать над мёртвым прогоном. Обороты кулеров возьмутся из живой телеметрии, а не будут
-  назначены; цифры — из событий движка (<code>onEvent</code>) и журнала
-  <code>runs/sweep/journal.jsonl</code>.</p>
-  <p><b>Скажите номер</b> — или «первый, но отвёртку как в третьем». Смешивать можно.</p>
+  <p><b>Анимация — чистая графика</b> (слово владельца): к телеметрии карты она не привязана,
+  крутится от таймера браузера и ничего не измеряет. Данные несут ЦИФРЫ справа — они приходят из
+  событий движка (<code>onEvent</code>) и журнала <code>runs/sweep/journal.jsonl</code>.</p>
+  <p><b>Что из этого следует, сказано один раз и без спора.</b> При жёстком зависании машины —
+  ровно том, что описано в задаче: картинка застыла и висит до BSOD — замирает и браузер, поэтому
+  анимация свою работу делает. Чего она НЕ поймает: случай «процесс развёртки умер, а машина жива»
+  — там анимация продолжит крутиться над мёртвым прогоном. Этот случай закрывают не картинкой, а
+  цифрами: если событий нет дольше порога, блок справа сам гаснет и переходит в тревогу. Так и
+  разделено — <b>анимация украшает, тревогу поднимают данные</b>.</p>
 </footer>
 
 <script>
