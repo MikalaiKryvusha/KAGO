@@ -42,7 +42,8 @@
     "curve": "node automation-engine/lib/curve-store.mjs",
     "vgpu": "node automation-engine/lib/virtual-gpu.mjs",
     "traps": "node automation-engine/lib/trap-suite.mjs",
-    "contract": "node automation-engine/lib/seam-contract.mjs"
+    "contract": "node automation-engine/lib/seam-contract.mjs",
+    "measure": "node automation-engine/lib/bench-measure.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"

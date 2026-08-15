@@ -68,7 +68,7 @@ const TRAP_DIR = join('benches', 'cards', 'traps');
  * `alwaysPass` is the wrong engine. It changes ONE thing — the verdict — and nothing else, so a
  * difference in the search's behaviour can only have come from the verdict it read.
  */
-function makeStepFn(vc, card, stress, golden, stampOk, { alwaysPass = false } = {}) {
+export function makeStepFn(vc, card, stress, golden, stampOk, { alwaysPass = false } = {}) {
   return async ({ offsetMhz, capMhz, sustain = 60 }) => {
     const before = vc.oracle.servingVoltageMv(capMhz);
     const w = await vc.curveBackend.writeRaiseAndCap(offsetMhz, capMhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
@@ -97,8 +97,8 @@ function makeStepFn(vc, card, stress, golden, stampOk, { alwaysPass = false } = 
   };
 }
 
-/** One search over one trap card. Returns what the engine did, in the terms the traps are stated in. */
-async function runSearch(card, { seed, alwaysPass, capMhz = 2842, stress, golden, stampOk }) {
+/** One search over one card. Returns what the engine did, in the terms the traps are stated in. */
+export async function runSearch(card, { seed, alwaysPass, capMhz = 2842, stress, golden, stampOk }) {
   const vc = virtualCard(card, { settleSamples: 0, seed });
   const out = await searchEdge({
     capMhz,
