@@ -13,6 +13,13 @@
 
 ---
 
+> 🔤 **TERMINOLOGY, SETTLED BY THE OWNER AFTER THIS DOCUMENT WAS FIRST WRITTEN** (2026-08-15, verbatim
+> in `GOAL.md` → «🔤 ТОЧЕК С НОМЕРАМИ НЕ СУЩЕСТВУЕТ»): *«Нет никаких "точка 120". Есть только частоты
+> по сетке частот»*. The measurements below are unchanged; the FRAMING is his. Where the first draft
+> spoke of «the point serving a clock», read **the voltage that serves a frequency**; where it spoke of
+> «the curve sliding», read **a warmer card wants more voltage for the same frequency**. The V/F
+> table's 127 entries survive only as an implementation detail of the WRITE path.
+
 ## 0. What this document answers, and what it deliberately does not
 
 The owner wrote an algorithm (`ideas/03`). Executing it literally as written costs **days** of machine
@@ -40,7 +47,7 @@ steps, reduces to five claims that matter for engineering:
 
 | Steps | The claim | Status in KAGO today |
 |---|---|---|
-| 1–2, 5 | A profile REFERENCES a V/F tuning-curve document; the curve holds per-point objects with frequency, voltage, **status** and **date last edited** | ❌ the profile EMBEDS a raw `deltaByPointMhz` array with no status and no date (`plans/12`) |
+| 1–2, 5 | A profile REFERENCES a V/F tuning-curve document; the curve holds one row PER FREQUENCY with its serving voltage, **status** and **date last edited** | ❌ the profile EMBEDS a raw `deltaByPointMhz` array with no status and no date (`plans/12`) |
 | 3–4 | The card is ASKED for its full voltage grid and its full frequency grid; each is stored as its own JSON dictionary | 🟡 both are readable (`nvapi --curve`, `nvidia-smi -q -d SUPPORTED_CLOCKS`) but neither is stored as an artifact |
 | 6–7 | The sweep walks frequencies **top-down at minimum step**, and at each one the card is **PINNED** to that frequency and no other | 🟡 the pin exists (`ladder-descent.mjs`) but the search uses a curve CAP instead, which has a floor of 2157 MHz (fact 38) |
 | 8–14 | From stock voltage, descend one grid step at a time under a 10 s burn judged by the oracle, until the machine hangs or the oracle sees errors; the point is fixed at **V_fail + 10 mV**; **a reboot is an expected outcome** | 🟡 the descent and the +10 mV margin exist; **surviving a reboot and attributing it to the right rung does not** |
@@ -220,19 +227,19 @@ today; the two agree, which is what makes it a pair rather than a memory.)
 
 | Capability | Where | Note |
 |---|---|---|
-| Read the curve, write a per-point vector, zero it | `nvapi.mjs` (`readVfCurve`, `writeCurve`, `zeroCurve`, `buildRaiseAndCapVector`) | one writer, R1 |
+| Read the table, write a per-entry offset vector, zero it | `nvapi.mjs` (`readVfCurve`, `writeCurve`, `zeroCurve`, `buildRaiseAndCapVector`) | one writer, R1 |
 | One atomic judged step with rollback in `finally` | `vf-step.mjs` (`runStep`) | the search's atom |
 | Verdict by the diverse set, worst wins, named | `stress-tester.mjs` (`judgeCandidate`, `DIVERSE_SET`) | fact 37, proved live |
-| Ratchet with per-point history, quarantine by stamp | `vmin-store.mjs` | 38 blocks |
+| Ratchet with per-entry history, quarantine by stamp | `vmin-store.mjs` | 38 blocks — phase-5 vocabulary (table indices); epic 02 re-keys the evidence to FREQUENCY |
 | Clock **PIN** with release in `finally`, abort on failed release | `ladder-descent.mjs` | 39 blocks — **this is step 7's mechanism, already built and mutation-proved** |
 | Armed watchdog, drilled at 2.5 s | `watchdog.mjs` | R9 |
 | Ceiling guard against the card's own max | `profile-manager.mjs` (R13) | born from `bugs/11` |
-| Profile format carrying a per-point vector | `profile-store.mjs` (`deltaByPointMhz`) | `plans/12` |
+| Profile format carrying a per-entry offset vector | `profile-store.mjs` (`deltaByPointMhz`) | `plans/12` |
 
 **Missing** — and this is the epic's actual work:
 
 1. **The two grid dictionaries as artifacts** (steps 3–4). Read today, stored never.
-2. **The tuning-curve document** with per-point `{frequency, voltage, status, date}` and a profile that
+2. **The tuning-curve document** with one row per FREQUENCY — `{frequency, serving voltage, status, date}` — and a profile that
    REFERENCES it (steps 1–2, 5). Today's profile embeds a bare integer array.
 3. **The outer sweep** over the whole range (step 6). Today's `searchEdge` searches ONE cap.
 4. **Pin-based search.** Today's search holds the region under test with a curve CAP, which cannot go
@@ -253,7 +260,7 @@ today; the two agree, which is what makes it a pair rather than a memory.)
 | **S3** — every write under an armed watchdog; rollback is a LIST, not a chain | R9, R10a | a direct `nvapi` write outside the rails |
 | **R13** — never above the instance's own maximum (3090) | `bugs/11`, the BSOD of 2026-08-15 09:59 | any vector offering a clock above 3090 — the 9 points of §3.2 |
 | **R6** — driver/VBIOS stamp on every record | phase 1 | a curve document without its stamp |
-| Evidence is keyed by the axis that does NOT move | `bugs/10`, EXP-0053 | keying by frequency: the curve slides ≈ −1.7 MHz per °C along the frequency axis; **the voltage axis is immovable, so the key is the point index** |
+| Evidence is keyed by what does NOT move | `bugs/10`, EXP-0053, superseded 2026-08-15 by the owner | Phase 5 keyed by TABLE INDEX because the factory table's frequencies move ≈1.7 MHz per °C. Epic 02 keys by **FREQUENCY**, and the drift stops being a problem rather than being chased: «frequency → voltage» is what is stored, and the per-entry offsets that implement it are COMPUTED at apply time from a live reading |
 | A guard is believed only after it has gone RED | EXP-0008, EXP-0016 | a selftest whose mutations were not addressed by name before the run |
 | The plan must print the depth the RUN will walk | `bugs/09`, EXP-0052 | a `--dry-run` that advertises a ladder deeper or shallower than the real one |
 | Method is the agent's authorship; risk appetite on his machine is his | EXP-0026 | asking the owner about step sizes, order, or workload choice |
@@ -358,7 +365,7 @@ instrument (`thermal-ladder.mjs`) and is not this pass's job.
 
 **Where the minute is spent — agent's decision:** 60 s per point using the shape that DECIDED that
 point's edge during the search (it is recorded in the evidence). `--lowload` gets its own whole-curve
-pass instead of a per-point one: it exercises the BOTTOM of the range, so running it under a pinned
+pass instead of a per-frequency one: it exercises the BOTTOM of the range, so running it under a pinned
 high clock would test nothing it exists to test.
 
 ### 4.3 Reboots are the owner's job, and that DELETES a subsystem
@@ -390,7 +397,7 @@ separate phase, and splittable by band because each point is independent.
 
 1. **The deliverable is one document — the tuning curve — and everything else references it.** Three
    profiles, one measured curve, one ratchet. This is the owner's steps 1–2 and it collapses the
-   project's current sprawl (a scalar in the profile, a ratchet store, a per-point vector) into one
+   project's current sprawl (a scalar in the profile, a ratchet store, a raw offset array) into one
    artifact with a status and a date per point.
 2. **Search by serving POINT, report by FREQUENCY.** 5.19× cheaper, identical table, and it is the
    hardware's own coordinate system. **Record this as a decision made without the owner, with the

@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0068 · 2026-08-15 · ❌→✅ · #terminology #owner #model #artifact #temperature #reframe
+**Context:** the owner, after reading a report that said «point 120 read 3112 MHz cold and 3105 MHz at 57 °C»: *«МЫ ПРЕКРАЩАЕМ НАЗЫВАТЬ ТОЧКИ НОМЕРАМИ… И того, что куда-то какая-то точка уплыла — такого больше не существует в нашем понимании. Есть только частоты по сетке частот.»*
+**Tried / did:** I had keyed the tuning-curve document by V/F TABLE INDEX — the coordinate the hardware writes in — and stored a frequency per index. When the factory table's frequencies moved with temperature I added a whole reclassification pass to chase the movement, and reported the movement as a finding.
+**Result:** ❌ the framing was the defect, not the temperature. In the owner's coordinates that observation does not exist: **1200 mV served 3112 MHz cold and 3105 MHz warm** — a statement about what a frequency COSTS. ✅ Re-keyed to frequency: the artifact holds «frequency → serving voltage», the per-entry offsets the card takes are COMPUTED at apply time from a live reading, and the reclassification pass, two status values and a whole class of «snapshot» caveats were DELETED.
+**Lesson:** **when a model needs a mechanism to chase something that moves, suspect the model before building the mechanism — you are probably storing the thing that moves instead of the thing that stands.** The tell was cheap and I walked past it: I was writing prose to explain why a stored value was only true «as of a temperature». A stored value that needs that sentence is the wrong stored value. General form: prefer the coordinate in which the ANSWER is invariant, and treat the hardware's own coordinate as an implementation detail of the write path — converting at the boundary costs one function and buys an artifact that does not rot.   → link: GOAL.md → «ТОЧЕК С НОМЕРАМИ НЕ СУЩЕСТВУЕТ» · EXP-0053 (whose framing this supersedes)
+**Repro:** `npm run curve -- --show` prints «частота · сток мВ · стало мВ»; `--verify` compares the VOLTAGE GRID (immovable) and says out loud that stock voltages are not compared. A selftest block proves one document yields DIFFERENT offsets at two table temperatures and the SAME served frequencies.
+**Trigger:** about to write «this value is a snapshot as of …», or to add a pass that re-derives stored data because the hardware moved → stop and ask which coordinate makes the answer invariant.
+**Not for:** genuinely time-varying readings (temperature, watts, clocks under load) — those ARE snapshots and must carry their conditions. The rule is about the artifact's KEY, not about telemetry.
+
 ### EXP-0067 · 2026-08-15 · ❌❌→✅ · #shells #two-worlds #git #commit-message #silent-corruption #repeat-offender
 **Context:** ONE session, TWO hits of the same family — passing marked-up Russian text through the shell instead of through the file tools.
 **Tried / did:** (1) `git commit -m @'…'@` — the PowerShell here-string, typed into the **Bash** tool. (2) Half an hour later, after writing this very entry: `node -e "…s.replace('… \`GOAL.md\` …')…"` — backticked doc names inside a DOUBLE-quoted bash string, to patch a STATUS paragraph.
@@ -160,6 +169,10 @@
 **Not for:** safety limits whose whole purpose is to be non-negotiable at runtime (first-step depth, rung-gap ceiling) — those stay in config, and a flag for them would be the hole they exist to close.
 
 ### EXP-0053 · 2026-08-14 · ❌→✅ · #gpu #curve #temperature #evidence #keys #ratchet #repeat-offender
+> ⚠️ **ЕГО РАМКА ОТМЕНЕНА 2026-08-15 словом владельца (EXP-0068).** Вывод «ключуй по тому, что не
+> движется» в силе. Но «то, что не движется» здесь названо ИНДЕКСОМ ЗАПИСИ ТАБЛИЦЫ, а верный ответ —
+> **ЧАСТОТА**: хранится «частота → напряжение», а смещения для железа считаются при применении от
+> живого чтения. Читать вместе с EXP-0068.
 **Context:** the search could not accumulate proven depth across sessions — a sweep proved −30 mV and the dry run one minute later printed «истории НЕТ».
 **Tried / did:** twelve read-only curve dumps across 41…63 °C, then re-keyed the evidence store.
 **Result:** ❌→✅ **the V/F curve slides along the FREQUENCY axis with temperature (≈ −1.7 MHz/°C) while the VOLTAGE axis stands still.** Four different point indices served 2842 MHz inside 22 °C (94 @ 1040 mV cold → 97 @ 1060 mV hot). Evidence was keyed by point index, so every session filed its results under a name the next session could not resolve. Re-keyed to `(capMhz, servingMv)` — absolute volts — and the same command now inherits: «доказано до 1020 мВ · пол сессии 990 мВ».

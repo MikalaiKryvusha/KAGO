@@ -31,6 +31,11 @@ accepted hang). Nothing in it waits on a measurement.
 what the sweep MEASURES — the count of seeding fallbacks, where the lever wall actually lands, how many
 reboots the card costs. A plan written for them today would be fiction by the time it is read.
 
+> 🔤 **TERMINOLOGY, SETTLED BY THE OWNER 2026-08-15** (`GOAL.md` → «🔤 ТОЧЕК С НОМЕРАМИ НЕ
+> СУЩЕСТВУЕТ»): *«Нет никаких "точка 120". Есть только частоты по сетке частот»*. This plan speaks of
+> FREQUENCIES and the voltages that serve them. The V/F table's 127 entries are an implementation
+> detail of the WRITE path (`curve-store.offsetsFor`), never a unit of search or of reporting.
+
 ## 1. Goal vector
 
 **The pain.** The owner's algorithm exists as eighteen steps and a set of refinements; the code that
@@ -183,8 +188,10 @@ crash-then-read-back shape).*
 *Anchor: `ideas/03` steps 6, 13, 14; `plans/13` E2-AC2.*
 
 - [ ] `sweepRange({ fromMhz, toMhz, bandLabel })` — walks the card's frequency ladder TOP-DOWN,
-      collapsed to **one representative frequency per serving point** (`plans/13` §8.1: 389 ladder
-      frequencies, 75 serving points, 5.19 per point — same table, one fifth the cost).
+      searching for the BOUNDARIES where the serving voltage changes rather than burning every
+      frequency separately (`plans/13` §8.1: 389 frequencies over 127 voltage rungs, so neighbours
+      share a voltage — same table, one fifth the cost, and every one of the 389 still carries a
+      verdict in the document).
 - [ ] Per frequency: seed (4.2) → descend (4.1 + 4.3) → on first non-PASS refine (4.6) → close the
       point with one of **three verdicts**, each with its own reason string:
       `edge-found` · `lever-limited` (the ±1000 MHz lever ran out before the card did) ·
