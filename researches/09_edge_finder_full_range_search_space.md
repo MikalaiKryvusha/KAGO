@@ -269,9 +269,68 @@ a 150 s lease).
 
 | Strategy | Rungs | Wall time | Verdict |
 |---|---|---|---|
-| **Literal**: all 389 frequencies × descend from stock each time (≈25 rungs avg) | ≈ 9 700 | **≈ 67 h** | not executable |
-| **Collapsed**: one representative frequency per serving point (75), still from stock | ≈ 1 900 | **≈ 13 h** | still not an evening |
-| **Collapsed + monotone seeding**: start each next (lower) frequency's descent at the previous frequency's answer, since Vmin is non-decreasing in frequency (§2.3) | **≈ 225** | **≈ 1.5 h** + reboot cost | **executable in one sitting with the owner present** |
+| **Literal**: all 389 frequencies × descend from stock at 5 mV each time | ≈ 9 700 | **≈ 67 h** | not executable |
+| **Collapsed**: one representative frequency per serving point (75), still from stock at 5 mV | ≈ 1 900 | **≈ 13 h** | still not an evening |
+| **Collapsed + the owner's STEP LADDER** (below) — from stock every time, no prior assumed | **≈ 700–1 000** | **≈ 5–7 h**, splittable by band | **THE SHIPPED PLAN for the first sweep** |
+| **+ monotone seeding**: start each next frequency's descent at the previous frequency's answer (§2.3) | ≈ 250 | ≈ 1.7 h | **held back until the first sweep MEASURES the prior** — see below |
+
+### 4.1 The owner's step ladder — coarse where failure is improbable, fine where it is near
+
+His words, 2026-08-15 (verbatim in `GOAL.md` → «📐 ЛЕСТНИЦА ШАГОВ СПУСКА»): 25 mV for the first
+100 mV below stock · 10 mV (the minimum step ×2) from 100 to 150 mV · 5 mV below 150 mV. Rungs to
+reach depth *d*: `min(d,100)/25 + clamp(d−100,0,50)/10 + max(0,d−150)/5`.
+
+| Frequency | Available depth | Rungs at 5 mV throughout | Rungs on his ladder |
+|---|---|---|---|
+| 3090 | 350 mV | 70 | **49** |
+| 2842 | 245 mV | 49 | **28** |
+| 2400 | 125 mV | 25 | **7** |
+| 2000 | 50 mV | 10 | **2** |
+| 1700 | 45 mV | 9 | **2** |
+| 1100 | 320 mV | 64 | **43** |
+
+**It composes with two rules already in the code, and breaks neither:**
+
+- `ASCENT_FIRST_STEP_MAX_MV = 25` and `ASCENT_STEP_MAX_MV = 35` (the `bugs/03` governor) — his first
+  step is exactly 25 and his largest gap is 25. **The guard is not weakened; it is satisfied.**
+- **A failure found on a coarse rung MUST be refined at 5 mV before the +10 mV margin is applied.**
+  His own margin rule is conditioned on it: *«Если нашли шагами по 5 мВ точку отказа…»*. Without the
+  refinement, «V_fail + 10 mV» would name a voltage nobody ever burned.
+
+**It supersedes `FAST_DESCENT_FLOOR_MV = 900` (absolute voltage) — and the two agree where the old one
+was stated.** At 2842 MHz stock is 1045 mV, so his 150 mV boundary lands at 895 ≈ 900. But an absolute
+key does not travel: at 1700 MHz stock is already 795 mV, below 900, so the old rule would crawl at
+5 mV through a band that offers only 45. **Depth-from-stock is the key that works everywhere.**
+
+**Its honest cost, stated once:** a 25 mV step approaches the edge coarsely, and failure at the edge is
+an avalanche (§2, `researches/02`). So a coarse rung is likelier to HANG than to be caught by the
+oracle. The owner accepted that risk explicitly the same day, and the ladder is shaped around it —
+coarse only where failure is improbable.
+
+### 4.2 Why monotone seeding is planned but NOT switched on for the first sweep
+
+The prior of §2.3 is sound silicon physics, and it is still a PRIOR. Turning it on means the descent
+JUMPS to a deep voltage instead of walking to it — which is the exact shape of `bugs/03` («the sweep
+started the ascent at a deep rung and hung the machine»), and `pickAscentRungs` refuses it by design.
+Defending the jump requires an argument from physics rather than from a measurement of THIS silicon,
+and this project's rule is the opposite way round.
+
+**So the first sweep walks from stock on the owner's ladder and MEASURES the prior.** Its output is a
+Vmin-versus-frequency curve — the very thing that says whether monotonicity holds here and how tightly.
+**The natural home for seeding is the RE-sweep:** R6 invalidates every record on a driver update, and a
+re-sweep seeded by the previous curve is both fast and evidence-based, because the seed then comes from
+a measurement of this card rather than from a paper about silicon in general.
+
+### 4.3 Reboots are the owner's job, and that DELETES a subsystem
+
+He settled it the same day: *«человек будет за компом во время тюнинга и поиска края. Человек будет
+комп из экранов смерти перезагружать»*. The plan had called for the sweep to resume itself on boot —
+i.e. a scheduler task that WRITES TO THE GPU on every startup. That task is now unnecessary: the resume
+is a command he runs, and the journal is what makes the command continue instead of restart.
+
+**This is a safety gain, not only a simplification.** `bugs/11` — the BSOD — happened on the
+apply-at-logon path. Putting the edge sweep, whose whole job is to write unproven voltages, into that
+same boot path would have installed the project's most dangerous operation into startup.
 
 **Reboot cost, named rather than hidden.** Each *new* edge discovery is one failure. With seeding, the
 number of failures across the sweep is bounded by the number of distinct voltage rungs the edge
@@ -300,8 +359,12 @@ separate phase, and splittable by band because each point is independent.
    cap cannot hold anything below 2157 MHz (fact 38); a pin holds any frequency on the 389-rung ladder.
    The pin is a MEASUREMENT instrument and never ships — `min = max` would forbid the card from
    clocking down (the owner's own requirement).
-4. **Monotonicity is the seeding prior, never a substitute for a burn.** Every reported rung is burned;
-   monotonicity only chooses where the descent begins.
+4. **Monotonicity is a prior to be MEASURED by the first sweep, not spent by it** (§4.2). The first
+   sweep walks from stock on the owner's step ladder; seeding becomes legitimate on the re-sweep,
+   where the seed is this card's own measured curve rather than a paper's generalization.
+4a. **The descent's step size is the owner's ladder** (25 / 10 / 5 mV by depth from stock, §4.1). It
+   satisfies the `bugs/03` governor exactly, supersedes the absolute 900 mV floor, and requires one
+   addition of its own: **a coarse-rung failure is refined at 5 mV before the +10 mV margin applies.**
 5. **`LEVER-LIMITED` is a first-class verdict.** In 1700–2400 MHz the sweep will end on our lever, not
    on the card's edge, and saying otherwise would be a false `[TESTED]`.
 6. **The write-ahead journal is the epic's one new organ**, and the industry shape (§2.4) matches the
@@ -320,15 +383,28 @@ separate phase, and splittable by band because each point is independent.
 
 ---
 
-## 6. Open forks for the owner — exactly one, and it is about his machine
+## 6. Forks — ALL CLOSED BY THE OWNER ON THE DAY THIS DOCUMENT WAS WRITTEN
 
-**FORK 1 — the sweep expects reboots. May it continue without you in the room?**
+**FORK 1 — the sweep expects reboots. May it continue without you in the room? — CLOSED, and it closed
+in two moves.**
 
-His algorithm (step 12) treats a hang and a reboot as a normal event in the loop. Rail S1 says live
-curve writes happen only with him at the machine, and it exists because an unattended sweep hung this
-machine for 5 h 40 min (`bugs/03`). The two cannot both hold for a sweep that may reboot tens of times.
-This is **risk appetite on his hardware**, which is his call and not the agent's (EXP-0026's boundary).
-Goes to `interviews/007`.
+1. *«зависание компа и перезагрузка — осознанный риск. Мы уже поняли, что не можем гарантировать, что
+   комп не зависнет при поиске края»* — the premise. A hang stops being an incident and becomes a
+   normal verdict path: `ЗАВИС` is first-class, and the write-ahead journal is what makes it usable
+   rather than merely survivable.
+2. *«человек будет за компом во время тюнинга и поиска края. Человек будет комп из экранов смерти
+   перезагружать»* — the presence half, and it is **option A**. It also deletes the boot-time resume
+   task the plan had budgeted for (§4.3).
+
+Both verbatim in `GOAL.md`; `interviews/007` is closed by them.
+
+**FORK 2 — none. Nothing else in this epic requires his word.** The step ladder he supplied
+unprompted (§4.1) closed the one remaining method question that had cost estimates attached to it.
+
+**Still a REPORT rather than a fork, and he must hear it before the sweep starts:** the mid-band lever
+wall (§3.3) means «для всех частот найдены минимальные напряжения» will be true at the ends of the
+range and **lever-limited** in the middle — through no fault of the method and with no way around it on
+this control path.
 
 **NOT forks — decided by the agent and recorded in the epic's §8:** search order, the collapse to
 serving points, the seeding prior, the step size, the workload set, the shape of the journal, what
