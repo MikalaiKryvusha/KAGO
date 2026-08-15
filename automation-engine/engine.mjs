@@ -64,6 +64,11 @@ import { marginAboveFailureMv } from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
 import { DIVERSE_SET } from './lib/stress-tester.mjs';
 import { localIso } from './lib/card-grids.mjs';
+// The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
+// measured; `curve-store` decides what the artifact may hold, and there is no second writer.
+import {
+  CURVE_STATUS, closePoint, leverFloorFor, validateCurveDoc, saveCurveDoc, loadCurveDoc,
+} from './lib/curve-store.mjs';
 import {
   writeIntent, writeVerdict,
   openJournal, readJournal, orphanIntents, resumeState,
@@ -159,7 +164,9 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
  * @returns {{rungs:Array<{mv:number,depthMv:number,stepMv:number,zoneStepMv:number,forcedByGrid:boolean}>,
  *            refused:boolean, why:string, forcedByGridCount:number, floorMv:number}}
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 21:4x, OFFLINE · 14 blocks in `engine --selftest`; the 2842 MHz and 2400 MHz
+ *  rung counts are LITERALS measured on the card's real grid (24 and 7, not the idealized 28 — EXP-0072),
+ *  mutation-proved with addressees 24–27. **NOT TESTED on a live card.**]
  */
 export function descentLadder({
   voltageGridMv = [],
@@ -235,7 +242,8 @@ export function descentLadder({
  * with the LOWEST voltage. That is exactly `vf-step.voltageForClock`'s rule, evaluated on the raised
  * curve instead of the stock one — same rule, one author, no second opinion about what "serving" means.
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:0x, OFFLINE · exercised by `planRung`'s blocks and by mutation 36, which drops
+ *  the re-assertion built on it and reddens two blocks. **NOT TESTED on a live card.**]
  */
 export function servingAfterRaise(points, deltaMhz, clockMhz) {
   if (!Array.isArray(points) || !Number.isFinite(deltaMhz) || !Number.isFinite(clockMhz)) return null;
@@ -279,7 +287,9 @@ export function servingAfterRaise(points, deltaMhz, clockMhz) {
  * @param {number}   [a.offsetMinMhz] / [a.offsetMaxMhz]  the hardware's own ±1000 MHz lever
  * @returns {{ok:boolean, deltaMhz:number|null, entry:object|null, serving:object|null, why:string}}
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:0x, OFFLINE · blocks in `engine --selftest` for the uniform raise, the lever
+ *  wall as its own outcome, and the non-monotone refusal that names BOTH entries; mutations 34–35.
+ *  **NOT TESTED on a live card.**]
  */
 export function planRung({
   points = [],
@@ -520,8 +530,12 @@ export async function runRung({
   // fault, not an edge, and a third attempt buys nothing but another reboot.
   const key = `${clockMhz}/${voltageMv}`;
   if (blockedKeys && blockedKeys.has(key)) {
-    return stop('refused', `СТУПЕНЬ ЗАБЛОКИРОВАНА ЖУРНАЛОМ: ${clockMhz} МГц / ${voltageMv} мВ повесила машину `
-      + 'ДВА РАЗА ПОДРЯД. Это не край, а поломка — край даёт вердикт оракула, поломка повторяется. Третий раз не начинаем');
+    // The FIELD, not the wording, is what the sweep tests (§4.5): a caller matching this message as a
+    // substring would be a truth↔mirror pair created on purpose, and it would go silent the first time
+    // the sentence is reworded. Same rule the dirty-rollback check already obeys (`undo: true`).
+    return { ...stop('refused', `СТУПЕНЬ ЗАБЛОКИРОВАНА ЖУРНАЛОМ: ${clockMhz} МГц / ${voltageMv} мВ повесила машину `
+      + 'ДВА РАЗА ПОДРЯД. Это не край, а поломка — край даёт вердикт оракула, поломка повторяется. Третий раз не начинаем'),
+    blocked: true };
   }
 
   // ---- 4. THE INTENT, DURABLE BEFORE THE FIRST BYTE REACHES THE CARD.
@@ -810,7 +824,10 @@ export async function refineEdge({
  * @returns {{seedMv:number, neighbourMhz:number, neighbourStatus:string}|null} — null means «descend
  *          from stock», which is the honest answer for the first frequency and after a lever wall.
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 22:4x, OFFLINE · blocks for «only from ABOVE», «only from PROVEN evidence» and the
+ *  nearest-neighbour rule; mutations 29–30 (a `lever-limited` neighbour seeding, a seed taken from below)
+ *  each redden their own block. Additionally driven end to end by the sweep (§4.5) and by trap T3.
+ *  **NOT TESTED on a live card.**]
  */
 export function seedFor({ frequencyMhz, curveDoc } = {}) {
   const rows = curveDoc?.frequencies;
@@ -849,7 +866,9 @@ export function seedFor({ frequencyMhz, curveDoc } = {}) {
  *
  * @returns {{seeded:boolean, restartFromStock:boolean, provenSavedMv:number, note:string}}
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 22:4x, OFFLINE · the PASS branch and the cancel branch, including НЕИЗВЕСТНО;
+ *  mutation 31 (continue seeded after a rejected seed) reddens its block, and trap T3 now drives the
+ *  whole path over a card whose Vmin really is non-monotone. **NOT TESTED on a live card.**]
  */
 export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, frequencyMhz } = {}) {
   const depth = Number.isFinite(stockVoltageMv) && Number.isFinite(seedMv) ? stockVoltageMv - seedMv : 0;
@@ -871,6 +890,499 @@ export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, fre
       + `это находка о карте, а не сбой прогона. Спуск начинается заново от стока ${stockVoltageMv} мВ `
       + 'по лестнице шагов владельца.',
   };
+}
+
+/**
+ * THE RUNGS OF THE SWEEP — the frequencies that are actually BURNED, and the ones that inherit.
+ * `plans/13` §8.1 · criterion E2-AC3.
+ *
+ * The card offers 127 voltage rungs for 389 frequencies, so neighbouring frequencies SHARE a serving
+ * voltage — measured on the live card: 5.19 frequencies per rung (`researches/09` §3.2). Burning every
+ * frequency separately would measure one fact five times and turn 13 hours into 67.
+ *
+ * So the frequencies that share a stock serving voltage form ONE rung, and the rung is burned at its
+ * HIGHEST frequency — the hardest member, because Vmin does not decrease with frequency. The rest
+ * inherit that result DOWNWARD, which is the safe direction and is why E2-AC3 calls it «the same
+ * measured fact» rather than interpolation.
+ *
+ * ⚠️ **THE GROUPING KEY IS THE STOCK VOLTAGE, NOT THE TUNED ONE**, and the difference matters: the
+ * tuned voltage is what this sweep is trying to find, so grouping by it would be grouping by the
+ * answer. The stock serving voltage is a property of the card read before the search starts.
+ *
+ * @returns {Array<{topMhz:number, bottomMhz:number, stockVoltageMv:number, count:number}>} top-down
+ *
+ * [TESTED: 2026-08-16 00:3x, OFFLINE · 2 blocks in `engine --selftest`; mutation 54 (group by the
+ *  TUNED voltage) reddens 6 blocks including «ступень группируется по СТОКОВОМУ напряжению», and
+ *  mutation 55 (burn the rung's LOWEST frequency) reddens «СТУПЕНЬ ПРОЖИГАЕТСЯ НА САМОЙ ВЫСОКОЙ
+ *  СВОЕЙ ЧАСТОТЕ». **NOT TESTED: no rung has ever been grouped against a live card's document.**]
+ */
+export function rungGroups({ rows = [], fromMhz = null, toMhz = null } = {}) {
+  const lo = Number.isFinite(toMhz) ? toMhz : -Infinity;
+  const hi = Number.isFinite(fromMhz) ? fromMhz : Infinity;
+  const inBand = rows.filter((r) => Number.isFinite(r?.mhz) && r.mhz >= lo && r.mhz <= hi
+    && Number.isFinite(r?.stockVoltageMv));
+  // The document is stored high → low, but a caller may hand over anything; sorting here means the
+  // direction of the sweep is a property of this function rather than of its input.
+  const sorted = [...inBand].sort((a, b) => b.mhz - a.mhz);
+
+  const groups = [];
+  for (const r of sorted) {
+    const last = groups[groups.length - 1];
+    if (last && last.stockVoltageMv === r.stockVoltageMv) {
+      last.bottomMhz = r.mhz;
+      last.count += 1;
+      continue;
+    }
+    groups.push({ topMhz: r.mhz, bottomMhz: r.mhz, stockVoltageMv: r.stockVoltageMv, count: 1 });
+  }
+  return groups;
+}
+
+/**
+ * ONE FREQUENCY, END TO END — seed, descend, refine, and close with ONE of TWO verdicts.
+ * `plans/15` §4.5.
+ *
+ * ─── TWO VERDICTS, NOT THREE, AND THE PLAN'S THIRD IS A LEFTOVER ──────────────────────────────────
+ *
+ * `plans/15` §4.5 lists `edge-found` · `lever-limited` · `clock-floor`. The epic settles it the other
+ * way and it is the LATER word: *«Вердиктов у частоты два: „край найден“ и „предел рычага“. Третий
+ * („пол частоты“) отменён вместе с нумерацией точек»* (`plans/13` §8.7). `clock-floor` was an artifact
+ * of numbering table entries — in the owner's coordinates the frequency grid IS 180…3090 MHz and its
+ * bottom is just its bottom (`GOAL.md` → «🔤 ТОЧЕК С НОМЕРАМИ НЕ СУЩЕСТВУЕТ»). `curve-store`'s status
+ * vocabulary agrees and is CLOSED, so the third verdict could not be written even if it were wanted.
+ *
+ * ─── AND EVERYTHING THAT IS NOT A VERDICT IS A STOP ───────────────────────────────────────────────
+ *
+ * `unknown`, `void` and a journal-blocked rung do not close a frequency at all: they HALT it with no
+ * shipped voltage, because closing a point around a boundary nobody observed would be a `[TESTED]`
+ * marker with no observation behind it (EXP-0011, and the same rule `refineEdge` already obeys).
+ *
+ * @returns {Promise<object>} `{frequencyMhz, verdict, voltageMv, provenBy, seeded, seedRejected,
+ *                              rungs, refinement, halted, why}`
+ *
+ * [TESTED: 2026-08-16 00:3x, OFFLINE · 6 blocks on scripted rungs — all-PASS closes `lever-limited`,
+ *  a failure is refined before it ships, a rung-reported lever wall does not become an edge, НЕИЗВЕСТНО
+ *  halts with no shipped voltage, a seed is taken and continued BELOW, a rejected seed falls back to
+ *  stock and is spoken. Mutations 56, 61, 62 each redden their own block. **NOT TESTED: no descent
+ *  has ever walked a real card — that is phase 3, with the owner present.**]
+ */
+export async function sweepFrequency({
+  frequencyMhz = null,
+  stockVoltageMv = null,
+  voltageGridMv = [],
+  availableDepthMv = null,
+  curveDoc = null,
+  runRungFn,
+  minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
+  zones = config.DESCENT_ZONES,
+  onEvent = null,
+} = {}) {
+  if (typeof runRungFn !== 'function') {
+    throw new Error('sweepFrequency требует runRungFn — движок сам в карту не пишет (правило R1)');
+  }
+  const say = (kind, text, extra = {}) => { if (onEvent) onEvent({ kind, frequencyMhz, text, ...extra }); };
+  const out = {
+    frequencyMhz,
+    verdict: null,
+    voltageMv: null,
+    provenBy: null,
+    seeded: false,
+    seedRejected: false,
+    seedFrom: null,
+    rungs: [],
+    refinement: null,
+    halted: false,
+    blocked: false,
+    why: '',
+  };
+
+  // ---- 1. THE SEED — the owner's optimization, and its first burn is a PROOF rather than a formality.
+  let lastPass = null;
+  let startMv = stockVoltageMv;
+  const seed = seedFor({ frequencyMhz, curveDoc });
+  if (seed && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv) {
+    out.seedFrom = seed;
+    // `frequencyMhz` is handed DOWN rather than known by the caller: naming the rung's frequency in
+    // two places would be a truth↔mirror pair inside one function, and it hid a mutation — burning
+    // the rung's lowest frequency instead of its highest reddened nothing, because the caller's
+    // hard-coded clock kept the burn where it belonged while the decision moved.
+    const sr = await runRungFn({
+      frequencyMhz, voltageMv: seed.seedMv, depthMv: stockVoltageMv - seed.seedMv, zoneStepMv: null, seeded: true,
+    });
+    out.rungs.push({ voltageMv: seed.seedMv, seed: true, outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null });
+    const decision = seedOutcome({
+      verdict: sr?.outcome === 'passed' ? sr?.verdict : null,
+      seedMv: seed.seedMv, stockVoltageMv, neighbourMhz: seed.neighbourMhz, frequencyMhz,
+    });
+    if (decision.seeded) {
+      out.seeded = true;
+      lastPass = seed.seedMv;
+      startMv = seed.seedMv;
+      say('seed-accepted', decision.note);
+    } else {
+      // E2-AC11: the rejection is a FINDING about the silicon, and it is counted as one. The seed is
+      // never retried at this frequency — repeating a jump that was not safe is `bugs/03` with extra
+      // steps.
+      out.seedRejected = true;
+      say('seed-rejected', decision.note, { seedMv: seed.seedMv, neighbourMhz: seed.neighbourMhz });
+    }
+  }
+
+  // ---- 2. THE LADDER — the owner's policy, always measured in depth FROM STOCK even when the descent
+  // starts lower. The zone a rung belongs to is a property of how deep it is, not of where we joined.
+  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, zones });
+  if (ladder.refused) {
+    out.halted = true;
+    out.why = `лестница спуска не построена: ${ladder.why}`;
+    return out;
+  }
+  const rungs = ladder.rungs.filter((r) => r.mv < startMv);
+
+  if (rungs.length === 0) {
+    // Nothing below where we stand that the lever can still reach — OUR wall, never the silicon's.
+    out.verdict = 'lever-limited';
+    out.voltageMv = lastPass ?? stockVoltageMv;
+    out.provenBy = lastPass === null
+      ? null
+      : `затравка ${lastPass} мВ от соседки ${out.seedFrom?.neighbourMhz} МГц прошла, а глубже рычаг не достаёт`;
+    out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${ladder.why}`;
+    return out;
+  }
+
+  // A seeded descent joins the ladder part-way down, so its first step is measured from the seed and
+  // not from the ladder's own previous rung. It stays far inside the `bugs/03` governor by
+  // arithmetic — the ladder's spacing is the policy step and the grid's local gap is at most 10 mV —
+  // but «by arithmetic» is exactly the kind of argument R12 says to COMPUTE, so it is computed.
+  const firstStep = startMv - rungs[0].mv;
+  const cliff = config.ASCENT_STEP_MAX_MV ?? 35;
+  if (firstStep > cliff) {
+    out.halted = true;
+    out.why = `первый шаг спуска от ${startMv} мВ до ${rungs[0].mv} мВ это ${firstStep} мВ, а сторож обрыва `
+      + `разрешает ${cliff} мВ (bugs/03). Спуск не начинается: обрыв, пройденный одним шагом, — тот же прыжок`;
+    return out;
+  }
+
+  // ---- 3. THE DESCENT.
+  for (const rung of rungs) {
+    const r = await runRungFn({
+      frequencyMhz, voltageMv: rung.mv, depthMv: rung.depthMv, zoneStepMv: rung.zoneStepMv, seeded: out.seeded,
+    });
+    out.rungs.push({ voltageMv: rung.mv, seed: false, outcome: r?.outcome ?? null, verdict: r?.verdict ?? null });
+
+    if (r?.outcome === 'passed') { lastPass = rung.mv; continue; }
+
+    if (r?.outcome === 'failed') {
+      // A COARSE failure is a SIGNAL, never the edge — the owner's rule, said three times. §4.6 walks
+      // back to the last PASS and re-finds it at the card's own step; only THAT failure gets the margin.
+      if (lastPass === null) {
+        out.halted = true;
+        out.why = `ОТКАЗ НА ПЕРВОЙ ЖЕ СТУПЕНИ ${rung.mv} мВ на ${frequencyMhz} МГц, а прошедшего напряжения `
+          + 'ещё нет — уточнять не от чего. Край здесь ниже стока меньше, чем на один шаг политики, и это находка, а не вердикт';
+        return out;
+      }
+      const refined = await refineEdge({
+        voltageGridMv, lastPassMv: lastPass, coarseFailMv: rung.mv, minStepMv, runRungFn: (mv) => runRungFn({
+          frequencyMhz, voltageMv: mv, depthMv: stockVoltageMv - mv, zoneStepMv: minStepMv, seeded: out.seeded,
+        }),
+      });
+      out.refinement = refined;
+      for (const rr of refined.rungs ?? []) out.rungs.push({ ...rr, refine: true });
+      if (!refined.ok) {
+        out.halted = true;
+        out.why = refined.why;
+        return out;
+      }
+      out.verdict = 'edge-found';
+      out.voltageMv = refined.shipMv;
+      out.provenBy = `край ${refined.failMv} мВ${refined.reproduced ? '' : ' (грубый, на мелких ступенях не воспроизведён)'}`
+        + ` · отгружается ${refined.shipMv} мВ = отказ + запас владельца`
+        + (refined.resolutionMv !== null && refined.resolutionMv > minStepMv
+          ? ` · разрешение карты здесь ${refined.resolutionMv} мВ, шага ${minStepMv} мВ у неё нет`
+          : '')
+        + ` · прожиг ${config.SWEEP_PROBE_SECONDS ?? 10} с формой ${SHORT_PROBE[0]?.id ?? 'sdc_fma/transient'}`;
+      out.why = `КРАЙ НАЙДЕН на ${frequencyMhz} МГц: ${refined.why}`;
+      return out;
+    }
+
+    if (r?.outcome === 'lever-limited') {
+      out.verdict = 'lever-limited';
+      out.voltageMv = lastPass ?? stockVoltageMv;
+      out.provenBy = lastPass === null ? null : `глубже ${lastPass} мВ рычаг ±1000 МГц не достаёт`;
+      out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${r.why}`;
+      return out;
+    }
+
+    // `unknown`, `void`, `refused` — a STOP, and each keeps its own word.
+    out.halted = true;
+    // The journal's two-hangs stop travels as a FIELD (`blocked`), never as a substring of the
+    // message: F2-AC5 demands the sweep exit non-zero and NAME the rung, and a report that reads its
+    // own prose to decide would go silent the first time the sentence is reworded.
+    if (r?.blocked === true) out.blocked = true;
+    out.why = `РАЗВЁРТКА ОСТАНОВЛЕНА на ${frequencyMhz} МГц / ${rung.mv} мВ, исход «${r?.outcome ?? 'нет ответа'}»: ${r?.why ?? ''}`;
+    return out;
+  }
+
+  // ---- 4. THE LADDER RAN OUT AND NOTHING FAILED. Our lever or the card's grid stopped the descent,
+  // not the silicon — and calling that an edge is the false `[TESTED]` E2-AC2 exists to forbid.
+  out.verdict = 'lever-limited';
+  out.voltageMv = lastPass ?? stockVoltageMv;
+  out.provenBy = lastPass === null ? null
+    : `${lastPass} мВ прошло на ${frequencyMhz} МГц, а глубже спускаться нечем: ${ladder.why}`;
+  out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${ladder.why}`;
+  return out;
+}
+
+/**
+ * THE SWEEP — the loop `plans/15` §4.5 asks for, and the first thing in this project that writes the
+ * owner's tuning-curve document.
+ *
+ * ─── WHAT IT COMPOSES, AND WHY NONE OF IT IS RE-IMPLEMENTED HERE ──────────────────────────────────
+ *
+ *   `rungGroups`     which frequencies are BURNED and which INHERIT (E2-AC3)
+ *   `seedFor` /      where a descent starts, and what a rejected seed means (§4.2, E2-AC11)
+ *   `seedOutcome`
+ *   `descentLadder`  the owner's 25 / 10 / 5 mV policy on the card's real grid (§4.1)
+ *   `runRung`        one rung, live, with the journal and the watchdog inside it (§4.3, §4.4)
+ *   `refineEdge`     a coarse failure re-found at the card's own step (§4.6)
+ *   `closePoint`     the document's ONLY author (R14a), inheritance and the ratchet included
+ *
+ * ─── THE THREE THINGS THIS FUNCTION ITSELF OWNS ───────────────────────────────────────────────────
+ *
+ * **(1) `watchdog --recover`, ONCE.** It is an action on the whole sweep rather than on a rung — the
+ * atom already runs its own preflight recovery every time (`vf-step.runStep` step 1), and a second
+ * per-rung copy would be two recoveries that could disagree. A record found at rest means a previous
+ * run died holding the card, and no new work begins on a state nobody can describe.
+ *
+ * **(2) The blocked-rung set, computed ONCE** from `sweep-journal.resumeState`. Within one process a
+ * rung can hang at most once — the hang ends the process — so re-reading the journal per rung would
+ * cost a file read and buy nothing (§4.4).
+ *
+ * **(3) The document is saved BEFORE the next frequency starts**, atomically, and it is VALIDATED
+ * first. A document that fails its own validator never reaches the disk: the next session would trust
+ * it, and «the machine died mid-save» is a case this project handles rather than hopes to avoid
+ * (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК»).
+ *
+ * @param {object}   a
+ * @param {object}   a.curveDoc     the tuning-curve document — read AND written
+ * @param {Array}    a.points       the card's live V/F table
+ * @param {function} a.runStepFn    the atom. REQUIRED — this module never writes to the card (R1)
+ * @param {object}   [a.journal]    the write-ahead journal; `null` runs journal-less (fixtures only)
+ * @param {function} [a.recover]    `watchdog --recover`; called once, before any rung
+ * @param {function} [a.saveFn]     how the document is persisted; injected offline
+ * @returns {Promise<object>} the report E2-AC2 is counted from
+ *
+ * [TESTED: 2026-08-16 00:3x, OFFLINE · 9 blocks on an injected atom and an injected save, plus the
+ *  trap suite driving it over five bench cards (`npm run traps`, 28 assertions, 0 pending). Proved:
+ *  the whole band closes and the coverage is COUNTED; the document is saved before the next rung
+ *  starts; a document failing its own validator never reaches the disk; `recover` runs once and
+ *  before any rung; two consecutive hangs stop the sweep and the card is not touched a third time.
+ *  Mutations 54, 55, 58, 59, 63 each redden their own blocks. **NOT TESTED: the LIVE wiring in
+ *  `mainSweep` — real NVAPI, a real watchdog, a real card — has never run.**]
+ */
+export async function sweepRange({
+  curveDoc = null,
+  points = [],
+  fromMhz = null,
+  toMhz = null,
+  bandLabel = null,
+  runStepFn,
+  journal = null,
+  recover = null,
+  saveFn = null,
+  canPin = true,
+  pinCard = null,
+  seconds = config.SWEEP_PROBE_SECONDS ?? 10,
+  sustain = config.SWEEP_PROBE_SECONDS ?? 10,
+  minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
+  buildVector = null,
+  chooseShape = chooseWriteShape,
+  now = null,
+  clockMs = () => Date.now(),
+  onEvent = null,
+  estimateHours = 1.7,
+} = {}) {
+  if (typeof runStepFn !== 'function') {
+    throw new Error('sweepRange требует runStepFn — движок сам в карту не пишет (правило R1)');
+  }
+  if (!curveDoc || !Array.isArray(curveDoc.frequencies) || curveDoc.frequencies.length === 0) {
+    throw new Error('sweepRange требует документ кривой: развёртка пишет в него, а не в память процесса');
+  }
+  const say = (kind, text, extra = {}) => { if (onEvent) onEvent({ kind, text, ...extra }); };
+  const startedMs = clockMs();
+
+  // ---- (1) THE CARD IS DESCRIBABLE BEFORE ANY WORK BEGINS.
+  let recovered = null;
+  if (typeof recover === 'function') {
+    recovered = await recover();
+    if (recovered && recovered.ok === false) {
+      return {
+        ok: false, stoppedBy: 'recover',
+        why: `ПОДБОР ЗАБЫТОЙ ЗАПИСИ НЕ УДАЛСЯ: ${recovered.why ?? 'без причины'}. Развёртка не начинается на карте, `
+          + 'состояние которой никто не может назвать',
+        groups: [], closed: 0, doc: curveDoc, hung: [], blocked: [], seedRejections: 0, verdicts: {}, elapsedMs: 0,
+      };
+    }
+    if (recovered?.recovered) say('recovered', `подобрана забытая запись предыдущего прогона: ${recovered.why ?? ''}`);
+  }
+
+  // ---- (2) WHAT THE LAST LAUNCH LEFT BEHIND. A hang that killed the previous process left an intent
+  // nobody closed, and closing it here is what turns the owner's accepted risk into a measurement.
+  let resume = { hung: [], blocked: [], nextSeq: 1, truncated: 0 };
+  if (journal) {
+    resume = resumeState(journal, { at: now ? now() : null });
+    for (const h of resume.hung) say('hang-attributed', h.why ?? `ЗАВИС: ${h.frequencyMhz} МГц / ${h.voltageMv} мВ`, h);
+  }
+  const blockedKeys = new Set((resume.blocked ?? []).map((b) => b.key));
+  let seq = resume.nextSeq ?? 1;
+
+  const groups = rungGroups({ rows: curveDoc.frequencies, fromMhz, toMhz });
+  const voltageGridMv = curveDoc.voltageGridMv ?? [];
+  const report = {
+    ok: true,
+    stoppedBy: null,
+    why: '',
+    bandLabel,
+    groups: [],
+    groupCount: groups.length,
+    frequenciesInBand: groups.reduce((n, g) => n + g.count, 0),
+    closed: 0,
+    verdicts: { 'edge-found': 0, 'lever-limited': 0 },
+    seedRejections: 0,
+    raised: [],
+    hung: resume.hung ?? [],
+    blocked: resume.blocked ?? [],
+    doc: curveDoc,
+    elapsedMs: 0,
+    estimateHours,
+  };
+
+  let doc = curveDoc;
+
+  for (const g of groups) {
+    // The lever's reach at THIS frequency — the wall that produces `lever-limited`, read off the
+    // card's own table rather than assumed. 45 mV at 1700 MHz against 245 at 2842 is a measurement.
+    const floorMv = leverFloorFor(g.topMhz, points);
+    const availableDepthMv = Number.isFinite(floorMv) ? g.stockVoltageMv - floorMv : 0;
+
+    const outcome = await sweepFrequency({
+      frequencyMhz: g.topMhz,
+      stockVoltageMv: g.stockVoltageMv,
+      voltageGridMv,
+      availableDepthMv,
+      curveDoc: doc,
+      minStepMv,
+      onEvent,
+      runRungFn: async ({ frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded }) => {
+        const r = await runRung({
+          points, clockMhz: frequencyMhz, voltageMv,
+          seconds, sustain, pinCard, canPin,
+          depthMv, zoneStepMv, seeded,
+          journal, seq: seq++, blockedKeys, now,
+          runStepFn, buildVector, chooseShape,
+        });
+        say('rung', r.why, { frequencyMhz, voltageMv, outcome: r.outcome });
+        return r;
+      },
+    });
+
+    if (outcome.seedRejected) report.seedRejections += 1;
+
+    if (outcome.halted || outcome.verdict === null) {
+      report.ok = false;
+      report.stoppedBy = outcome.blocked === true ? 'blocked-rung' : 'halt';
+      report.why = outcome.why;
+      report.groups.push({ ...g, ...outcome });
+      break;
+    }
+
+    // ---- (3) THE DOCUMENT, BEFORE THE NEXT FREQUENCY. Validated first, saved atomically second.
+    const status = outcome.verdict === 'edge-found' ? CURVE_STATUS.EDGE_FOUND : CURVE_STATUS.LEVER_LIMITED;
+    const closed = closePoint(doc, {
+      mhz: g.topMhz,
+      voltageMv: outcome.voltageMv,
+      status,
+      provenBy: outcome.provenBy,
+      inheritDownToMhz: g.bottomMhz,
+      at: now ? now() : null,
+    });
+    if (!closed.ok) {
+      report.ok = false;
+      report.stoppedBy = 'document';
+      report.why = `ДОКУМЕНТ КРИВОЙ ОТВЕРГ ЗАПИСЬ ${g.topMhz} МГц: ${closed.why}`;
+      report.groups.push({ ...g, ...outcome });
+      break;
+    }
+    const refusals = validateCurveDoc(closed.doc);
+    if (refusals.length) {
+      report.ok = false;
+      report.stoppedBy = 'document';
+      report.why = `ДОКУМЕНТ ПОСЛЕ ЗАПИСИ ${g.topMhz} МГц НЕ ПРОШЁЛ СВОЙ ЖЕ СТОРОЖ (${refusals.length}): `
+        + refusals.slice(0, 3).map((r) => `${r.field} — ${r.why}`).join(' · ')
+        + '. На диск он не поехал: следующая сессия поверила бы ему';
+      report.groups.push({ ...g, ...outcome });
+      break;
+    }
+    doc = closed.doc;
+    if (closed.raised.length) {
+      report.raised.push(...closed.raised);
+      say('ratchet', closed.why, { frequencyMhz: g.topMhz });
+    }
+    if (saveFn) {
+      const saved = await saveFn(doc);
+      if (saved && saved.ok === false) {
+        report.ok = false;
+        report.stoppedBy = 'save';
+        report.why = `ДОКУМЕНТ НЕ СОХРАНЁН после ${g.topMhz} МГц: ${saved.why ?? 'без причины'}. Развёртка останавливается — `
+          + 'знание, которого нет на диске, теряется первой же перезагрузкой';
+        report.groups.push({ ...g, ...outcome });
+        break;
+      }
+    }
+
+    report.closed += closed.closed;
+    report.verdicts[outcome.verdict] += 1;
+    report.groups.push({ ...g, ...outcome, inherited: closed.inherited.length, raised: closed.raised });
+    say('closed', closed.why, { frequencyMhz: g.topMhz });
+  }
+
+  report.doc = doc;
+  report.elapsedMs = clockMs() - startedMs;
+  return report;
+}
+
+/**
+ * THE SWEEP'S REPORT, in the owner's language — coverage COUNTED rather than claimed (E2-AC2).
+ *
+ * The wall time is printed against the estimate on purpose: **an estimate nobody ever checks is a
+ * number that drifts**, and this project has already caught one such number by measuring it
+ * (`researches/09`'s rung counts, EXP-0072).
+ *
+ * [TESTED: 2026-08-16 00:3x, OFFLINE · 1 block asserting coverage, the verdict histogram, the seeding
+ *  scoreboard and the wall time against the estimate are all PRESENT in the printed lines.]
+ */
+export function sweepReportLines(report) {
+  const lines = [];
+  const pct = (n, d) => (d > 0 ? `${Math.round((n / d) * 1000) / 10} %` : '—');
+  lines.push(`РАЗВЁРТКА${report.bandLabel ? ` «${report.bandLabel}»` : ''}: ступеней ${report.groupCount}, `
+    + `частот в полосе ${report.frequenciesInBand}`);
+  lines.push(`ПОКРЫТИЕ: закрыто ${report.closed} из ${report.frequenciesInBand} (${pct(report.closed, report.frequenciesInBand)})`);
+  lines.push(`ВЕРДИКТЫ: край найден ${report.verdicts['edge-found']} · предел рычага ${report.verdicts['lever-limited']}`);
+  lines.push(`ЗАТРАВКА: отвергнута ${report.seedRejections} раз(а) — это ЗАМЕР монотонности на этом кремнии, а не сбой прогона`);
+  if (report.raised.length) {
+    lines.push(`ХРАПОВИК ПОДНЯЛ ${report.raised.length} частот(у): `
+      + report.raised.map((r) => `${r.mhz} МГц ${r.fromMv}→${r.toMv} мВ`).join(', '));
+  }
+  if (report.hung.length) {
+    lines.push(`ЗАВИСАНИЙ ПРИПИСАНО: ${report.hung.length} — `
+      + report.hung.map((h) => `${h.frequencyMhz} МГц / ${h.voltageMv} мВ`).join(', '));
+  }
+  if (report.blocked.length) {
+    lines.push(`ЗАБЛОКИРОВАНО ДВУМЯ ЗАВИСАНИЯМИ ПОДРЯД: ${report.blocked.map((b) => `${b.frequencyMhz} МГц / ${b.voltageMv} мВ`).join(', ')}`);
+  }
+  const hours = report.elapsedMs / 3_600_000;
+  lines.push(`ВРЕМЯ: ${(report.elapsedMs / 1000).toFixed(1)} с (${hours.toFixed(2)} ч) против оценки ${report.estimateHours} ч на весь диапазон`);
+  if (!report.ok) lines.push(`ОСТАНОВЛЕНО (${report.stoppedBy}): ${report.why}`);
+  return lines;
 }
 
 /**
@@ -2553,6 +3065,312 @@ export function selfTest() {
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
+    // =============================================================================================
+    // `plans/15` §4.5 — THE SWEEP: the loop, the document, and the two verdicts
+    //
+    // Everything runs on an INJECTED atom and an INJECTED save. Not one line reaches a GPU or the
+    // real `curves/` directory (F2-AC10), and the document under test is built here rather than read
+    // from disk — a suite that edits the production artifact is `bugs/08` waiting to happen.
+    // =============================================================================================
+
+    // A uniform 5 mV window: SHORT ladders make the assertions about the LOOP crisp. The card's real
+    // 10 mV gaps are exercised where they belong — §4.6's refinement, on `gridLikeCard`.
+    const sweepGrid = Array.from({ length: 24 }, (_, i) => 930 + i * 5);          // 930…1045, ascending
+    const sweepPoints = sweepGrid.map((mv, k) => {
+      const mhz = 2000 + (mv - 930) * 6;                                          // 2000…2690, monotone
+      return { i: k, mv, mhz, freqKhz: mhz * 1000 };
+    });
+    const sweepRow = (mhz, stock, over = {}) => ({
+      mhz, voltageMv: stock, stockVoltageMv: stock, status: CURVE_STATUS.STOCK,
+      provenBy: null, editedAt: '2026-08-16T00:00:00+03:00', ...over,
+    });
+    const sweepDoc = (rows) => ({
+      kind: 'tuning-curve', name: 'measured',
+      card: { maxGraphicsMhz: 3090 },
+      voltageGridMv: sweepGrid,
+      stamp: { driver: '610.88', vbios: 'v1', takenAt: '2026-08-16T00:00:00+03:00', tempC: 42 },
+      frequencies: rows,
+    });
+    // Two rungs of the card: three frequencies served by 1045 mV at stock, two by 1040.
+    const bandRows = [
+      sweepRow(2842, 1045), sweepRow(2835, 1045), sweepRow(2828, 1045),
+      sweepRow(2820, 1040), sweepRow(2813, 1040),
+    ];
+
+    // — the grouping, and the two things about it that are decisions rather than mechanics
+    const groups = rungGroups({ rows: bandRows });
+    ok('РАЗВЁРТКА ИДЁТ ПО СТУПЕНЯМ: пять частот дают две ступени, а не пять прожигов',
+      groups.map((g) => [g.topMhz, g.bottomMhz, g.stockVoltageMv, g.count]),
+      [[2842, 2828, 1045, 3], [2820, 2813, 1040, 2]]);
+    // The key is the STOCK voltage — grouping by the tuned one would be grouping by the answer the
+    // sweep is looking for. Here the tuned column is deliberately scrambled, and the grouping ignores it.
+    ok('ступень группируется по СТОКОВОМУ напряжению, а не по уже найденному',
+      rungGroups({ rows: [sweepRow(2842, 1045, { voltageMv: 990 }), sweepRow(2835, 1045, { voltageMv: 1010 })] })
+        .map((g) => [g.topMhz, g.count]),
+      [[2842, 2]]);
+
+    // A scripted rung: passes above the threshold, fails at or below it.
+    const scriptSweepRung = (failsAtOrBelow, extra = () => null) => async ({ voltageMv }) => (
+      extra(voltageMv) ?? {
+        outcome: voltageMv <= failsAtOrBelow ? 'failed' : 'passed',
+        verdict: voltageMv <= failsAtOrBelow ? config.VERDICT.SDC : P,
+        why: '',
+      });
+    const freqOK = (over = {}) => sweepFrequency({
+      frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: sweepGrid,
+      availableDepthMv: 115, curveDoc: sweepDoc(bandRows),
+      runRungFn: scriptSweepRung(-1), ...over,
+    });
+
+    // — F2-AC7: a descent that never failed is the LEVER's wall, never an edge. Calling it `edge-found`
+    // is the false `[TESTED]` this verdict exists to forbid.
+    const allPass = await freqOK();
+    // The rung count and the floor are LITERALS taken from a run, not derived from `DESCENT_ZONES` —
+    // a block that recomputes its expectation from the same constants as the code has no independent
+    // opinion (EXP-0055). 1020/995/970/945 in the 25 mV zone, then 935 and 930 where the 10 mV zone
+    // starts and the lever floor (1045 − 115) stops it.
+    ok('СПУСК БЕЗ ОТКАЗА — ПРЕДЕЛ РЫЧАГА, а не край',
+      [allPass.verdict, allPass.voltageMv, allPass.rungs.length],
+      ['lever-limited', 930, 6]);
+
+    // — a failure is refined and only THEN shipped: the coarse rung 970 signals, the walk re-finds the
+    // failure at 980, and the shipped value is 980 + 10.
+    const edge = await freqOK({ runRungFn: scriptSweepRung(980) });
+    ok('ОТКАЗ УТОЧНЯЕТСЯ ШАГОМ СЕТКИ, и отгружается уточнённый край + запас',
+      [edge.verdict, edge.refinement?.failMv, edge.refinement?.reproduced, edge.voltageMv],
+      ['edge-found', 980, true, 990]);
+    ok('и свидетель записи НАЗЫВАЕТ прожиг, а не остаётся пустым',
+      typeof edge.provenBy === 'string' && edge.provenBy.includes('990'), true);
+
+    // — the lever wall reported BY THE RUNG ITSELF (`planRung` refuses the offset before any write).
+    // This block exists because a mutation that renamed that outcome `edge-found` reddened NOTHING:
+    // no fixture reached the branch, so the verdict was satisfied by a path no run could enter —
+    // EXP-0073's class, and the second time this project has met it in one plan.
+    const leverWall = await freqOK({
+      runRungFn: async ({ voltageMv }) => (voltageMv <= 995
+        ? { outcome: 'lever-limited', verdict: null, why: 'ПРЕДЕЛ РЫЧАГА: нужен сдвиг больше ±1000 МГц' }
+        : { outcome: 'passed', verdict: P }),
+    });
+    ok('ПРЕДЕЛ РЫЧАГА, названный САМОЙ СТУПЕНЬЮ, доезжает до вердикта частоты и не становится краем',
+      [leverWall.verdict, leverWall.voltageMv, leverWall.halted], ['lever-limited', 1020, false]);
+
+    // — anything that is not a PASS and not a failure is a STOP, with no shipped voltage at all
+    const murky = await freqOK({
+      runRungFn: async ({ voltageMv }) => (voltageMv === 995
+        ? { outcome: 'unknown', verdict: null, why: 'оракул не смог' }
+        : { outcome: 'passed', verdict: P }),
+    });
+    ok('НЕИЗВЕСТНО в спуске — СТОП: частота не закрывается и напряжение не отгружается',
+      [murky.halted, murky.verdict, murky.voltageMv], [true, null, null]);
+
+    // — §4.2 wired at last: the seed is taken, PROVED, and the descent continues BELOW it
+    const seededDoc = sweepDoc([
+      sweepRow(2850, 1045, { voltageMv: 1000, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг' }),
+      ...bandRows,
+    ]);
+    const seenRungs = [];
+    const seeded = await freqOK({
+      curveDoc: seededDoc,
+      runRungFn: async ({ voltageMv }) => { seenRungs.push(voltageMv); return { outcome: 'passed', verdict: P }; },
+    });
+    ok('ЗАТРАВКА СОСЕДКОЙ: спуск НАЧИНАЕТСЯ с её напряжения и продолжается НИЖЕ него',
+      [seeded.seeded, seenRungs[0], seenRungs[1], seenRungs.every((mv) => mv <= 1000)],
+      [true, 1000, 995, true]);
+
+    // — E2-AC11 and trap T3: a non-PASS on the seed CANCELS it, drops the descent back to stock, and
+    // the event is SPOKEN. Silence here is the whole defect: the owner's rare case absorbed unnoticed.
+    const said = [];
+    const rejectedRungs = [];
+    const rejected = await freqOK({
+      curveDoc: seededDoc,
+      onEvent: (e) => said.push(e.kind),
+      runRungFn: async ({ voltageMv }) => {
+        rejectedRungs.push(voltageMv);
+        return voltageMv === 1000
+          ? { outcome: 'failed', verdict: config.VERDICT.SDC }
+          : { outcome: 'passed', verdict: P };
+      },
+    });
+    ok('ОТВЕРГНУТАЯ ЗАТРАВКА роняет спуск НА СТОК и говорит об этом вслух',
+      [rejected.seedRejected, rejected.seeded, rejectedRungs[1], said.includes('seed-rejected')],
+      [true, false, 1020, true]);
+
+    // =============================================================================================
+    // `plans/15` §4.5 — THE DOCUMENT'S ONLY AUTHOR (`curve-store.closePoint`, rule R14a)
+    // =============================================================================================
+
+    // — E2-AC3: the rung's other frequencies inherit DOWNWARD, and the witness names whose burn it was
+    const closedOne = closePoint(sweepDoc(bandRows), {
+      mhz: 2842, voltageMv: 990, status: CURVE_STATUS.EDGE_FOUND,
+      provenBy: 'край 980 мВ', inheritDownToMhz: 2828, at: '2026-08-16T01:00:00+03:00',
+    });
+    ok('СТУПЕНЬ НАСЛЕДУЕТ ВНИЗ: прожгли одну частоту — закрылись все три',
+      [closedOne.ok, closedOne.closed, closedOne.inherited],
+      [true, 3, [2835, 2828]]);
+    ok('и унаследованная строка НАЗЫВАЕТ, чей это был прожиг',
+      closedOne.doc.frequencies.find((r) => r.mhz === 2835).provenBy.includes('от 2842 МГц'), true);
+    // Upward inheritance is the UNSAFE direction — a higher frequency needs at least as much voltage.
+    ok('НАСЛЕДОВАНИЕ ТОЛЬКО ВНИЗ: вверх по частоте оно отвергается по имени',
+      closePoint(sweepDoc(bandRows), {
+        mhz: 2828, voltageMv: 990, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'x', inheritDownToMhz: 2842,
+      }).ok, false);
+
+    // — the ratchet: the rare case the owner named himself. A lower frequency measuring MORE than an
+    // already-closed higher one cannot be written as an inversion, and it is not silently clamped
+    // either — the higher rows come UP and every one of them is NAMED (`plans/13` §4).
+    const invertedDoc = sweepDoc([
+      sweepRow(2850, 1045, { voltageMv: 990, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг' }),
+      ...bandRows,
+    ]);
+    const ratcheted = closePoint(invertedDoc, {
+      mhz: 2842, voltageMv: 1010, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг',
+      at: '2026-08-16T01:00:00+03:00',
+    });
+    ok('ХРАПОВИК ПОДНИМАЕТ СОСЕДОК СВЕРХУ и называет каждую',
+      [ratcheted.ok, ratcheted.raised, ratcheted.doc.frequencies[0].voltageMv],
+      [true, [{ mhz: 2850, fromMv: 990, toMv: 1010 }], 1010]);
+    ok('и документ после храповика проходит СВОЙ ЖЕ сторож (инверсии не осталось)',
+      validateCurveDoc(ratcheted.doc).length, 0);
+
+    // — the closed vocabulary and the card's grid are refusals, not warnings
+    ok('мутатор отвергает статус вне закрытого словаря',
+      closePoint(sweepDoc(bandRows), { mhz: 2842, voltageMv: 990, status: 'почти-край', provenBy: 'x' }).ok, false);
+    ok('мутатор отвергает напряжение, которого у карты нет',
+      closePoint(sweepDoc(bandRows), { mhz: 2842, voltageMv: 993, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'x' }).ok, false);
+    ok('и статус-улику без свидетеля — тоже',
+      closePoint(sweepDoc(bandRows), { mhz: 2842, voltageMv: 990, status: CURVE_STATUS.EDGE_FOUND, provenBy: '  ' }).ok, false);
+
+    // =============================================================================================
+    // `plans/15` §4.5 — THE LOOP END TO END, on an injected atom and an injected save
+    // =============================================================================================
+
+    const cleanUndoS = [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }];
+    const sweepAtom = (failsAtOrBelow) => async ({ offsetMhz, capMhz }) => {
+      // What voltage did this offset put under the clock? The same rule the card uses, run on the
+      // fixture table — so the atom answers about the voltage actually ordered rather than echoing it.
+      const serving = sweepPoints.filter((p) => p.mhz + offsetMhz >= capMhz).sort((a, b) => a.mv - b.mv)[0];
+      const mv = serving?.mv ?? null;
+      return {
+        verdict: mv !== null && mv <= failsAtOrBelow ? config.VERDICT.SDC : P,
+        worstShape: 'sdc_fma/transient', deliveredMhz: capMhz, deliveredMaxMhz: capMhz,
+        undervolt: { capMhz, after: { mv } },
+        blocks: cleanUndoS,
+      };
+    };
+    const vectorPinned = () => ({ ok: true, capEnforced: false, capMhz: 2842, topMhz: 3172, lowestEnforceableCapMhz: 2172, capLeakMhz: 670 });
+
+    const saves = [];
+    const order = [];
+    const burned = [];
+    const full = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints,
+      runStepFn: async (args) => { order.push(`ступень ${args.capMhz}`); burned.push(args.capMhz); return sweepAtom(980)(args); },
+      buildVector: vectorPinned,
+      saveFn: async (d) => { saves.push(d.frequencies.filter((r) => r.status !== CURVE_STATUS.STOCK).length); order.push('сохранение'); return { ok: true }; },
+      now: () => '2026-08-16T02:00:00+03:00',
+      clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('РАЗВЁРТКА ЗАКРЫВАЕТ ВСЮ ПОЛОСУ: пять частот из пяти, обе ступени (E2-AC2)',
+      [full.ok, full.closed, full.frequenciesInBand, full.verdicts['edge-found']],
+      [true, 5, 5, 2]);
+    // WHICH frequencies were actually BURNED — and this block exists because a mutation that burned
+    // the rung's LOWEST frequency instead of its highest reddened NOTHING: the document came out
+    // identical, since `closePoint` is called with the rung's top either way. Only the burn moved,
+    // and the burn is the whole safety argument — Vmin does not decrease with frequency, so the
+    // HARDEST member of the rung is the one that must be proved before the others inherit (E2-AC3).
+    ok('СТУПЕНЬ ПРОЖИГАЕТСЯ НА САМОЙ ВЫСОКОЙ СВОЕЙ ЧАСТОТЕ — она самая трудная, остальные наследуют от неё',
+      [...new Set(burned)].sort((a, b) => b - a), [2842, 2820]);
+    // The order proof, and it is the point of «before the next frequency»: the document is on disk
+    // before a single rung of the next rung is written.
+    ok('ДОКУМЕНТ СОХРАНЯЕТСЯ ДО СЛЕДУЮЩЕЙ ЧАСТОТЫ, а не в конце прогона',
+      [saves, order[order.length - 1], order.filter((x) => x === 'сохранение').length],
+      [[3, 5], 'сохранение', 2]);
+
+    // — F2-AC5, the only emergency stop the owner left, driven through a REAL journal: two machines
+    // died on one rung, so the sweep does not start it a third time. The fixture is built the way a
+    // hang actually builds it — an intent nobody closed, twice — rather than by handing the sweep a
+    // pre-cooked blocked set, which would test the seam instead of the mechanism.
+    const stopBox = mkdtempSync(join(tmpdir(), 'kago-sweep-blocked-'));
+    try {
+      const jstop = openJournal({ dir: join(stopBox, 'twice') });
+      const at = '2026-08-16T02:00:00+03:00';
+      for (const seq of [1, 2]) {
+        // an intent with no verdict IS a hang, and `resumeState` is what turns it into one
+        writeIntent(jstop, { seq, at, frequencyMhz: 2842, voltageMv: 1020, pointIndex: 4, deltaMhz: 100 });
+        resumeState(jstop, { at });
+      }
+      const cardsUntouched = [];
+      const stopped = await sweepRange({
+        curveDoc: sweepDoc(bandRows), points: sweepPoints,
+        runStepFn: async (a) => { cardsUntouched.push(a.capMhz); return sweepAtom(-1)(a); },
+        buildVector: vectorPinned, journal: jstop,
+        now: () => at,
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('ДВА ЗАВИСАНИЯ ПОДРЯД НА ОДНОЙ СТУПЕНИ ОСТАНАВЛИВАЮТ РАЗВЁРТКУ, и карту третий раз не трогают (F2-AC5)',
+        [stopped.ok, stopped.stoppedBy, stopped.closed, cardsUntouched.length],
+        [false, 'blocked-rung', 0, 0]);
+      ok('и заблокированная ступень НАЗВАНА в отчёте — 2842 МГц / 1020 мВ',
+        (stopped.blocked ?? []).map((b) => [b.frequencyMhz, b.voltageMv]), [[2842, 1020]]);
+      ok('одно зависание — НЕ блокировка: вероятностный край стирать нельзя',
+        (() => {
+          const jone = openJournal({ dir: join(stopBox, 'once') });
+          writeIntent(jone, { seq: 1, at, frequencyMhz: 2842, voltageMv: 1020, pointIndex: 4, deltaMhz: 100 });
+          return resumeState(jone, { at }).blocked.length;
+        })(), 0);
+    } finally {
+      // The same teardown discipline as §4.4's: a temp directory this block created, and nothing else.
+      // `bugs/08` is what a careless teardown costs — it deleted the production evidence store.
+      rmSync(stopBox, { recursive: true, force: true });
+    }
+
+    // — a document that fails its own validator NEVER reaches the disk. Here the stamp is missing, so
+    // the validator refuses the whole document after the first close.
+    const badSaves = [];
+    const noStamp = sweepDoc(bandRows);
+    delete noStamp.stamp;
+    const refusedDoc = await sweepRange({
+      curveDoc: noStamp, points: sweepPoints,
+      runStepFn: sweepAtom(980), buildVector: vectorPinned,
+      saveFn: async () => { badSaves.push(1); return { ok: true }; },
+      now: () => '2026-08-16T02:00:00+03:00',
+      clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('ДОКУМЕНТ, НЕ ПРОШЕДШИЙ СВОЙ СТОРОЖ, НА ДИСК НЕ ЕДЕТ',
+      [refusedDoc.ok, refusedDoc.stoppedBy, badSaves.length], [false, 'document', 0]);
+
+    // — `watchdog --recover` is a once-per-SWEEP action, and a failed recovery means no work begins
+    let recoverCalls = 0;
+    const recoverOrder = [];
+    await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints,
+      runStepFn: async (a) => { recoverOrder.push('ступень'); return sweepAtom(-1)(a); },
+      buildVector: vectorPinned,
+      recover: async () => { recoverCalls += 1; recoverOrder.push('подбор'); return { ok: true, recovered: false }; },
+      now: () => '2026-08-16T02:00:00+03:00',
+      clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('ПОДБОР ЗАБЫТОЙ ЗАПИСИ — ОДИН РАЗ НА РАЗВЁРТКУ и ДО первой ступени',
+      [recoverCalls, recoverOrder[0]], [1, 'подбор']);
+    const deadRecover = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints,
+      runStepFn: async () => { throw new Error('атом не должен был запуститься'); },
+      buildVector: vectorPinned,
+      recover: async () => ({ ok: false, why: 'сторож держит карту' }),
+      now: () => '2026-08-16T02:00:00+03:00',
+    });
+    ok('и провалившийся подбор ОСТАНАВЛИВАЕТ развёртку до первой записи в карту',
+      [deadRecover.ok, deadRecover.stoppedBy, deadRecover.closed], [false, 'recover', 0]);
+
+    // — the report is COUNTED, not claimed (E2-AC2), and the wall time stands against the estimate
+    const lines = sweepReportLines(full);
+    ok('ОТЧЁТ СЧИТАЕТ покрытие, вердикты, откаты затравки и время против оценки',
+      [lines.some((l) => l.includes('ПОКРЫТИЕ: закрыто 5 из 5')),
+        lines.some((l) => l.includes('край найден 2')),
+        lines.some((l) => l.includes('ЗАТРАВКА: отвергнута')),
+        lines.some((l) => l.includes('против оценки 1.7 ч'))],
+      [true, true, true, true]);
+
     const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
     ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
 
@@ -2777,6 +3595,70 @@ async function mainBand(argv, arg) {
   return 0;
 }
 
+/**
+ * THE SWEEP AS A COMMAND — `npm run engine -- --sweep --from <МГц> --to <МГц>` (`plans/15` §4.5).
+ *
+ * A COMMAND and not a scheduled task, by the owner's decision: he is at the machine and reboots it
+ * himself (`GOAL.md` → «🧑‍💻 ЧЕЛОВЕК ЗА МАШИНОЙ»), so nothing is ever installed into the boot path —
+ * and the same run that starts a sweep is the one that RESUMES an interrupted one, because the
+ * journal is what tells them apart. Re-running after a hang is the whole recovery procedure.
+ *
+ * ⚠️ **THIS PATH WRITES TO THE CARD.** Everything it composes is proved offline (183 blocks), but no
+ * rung of it has ever run on the owner's hardware — that is phase 3, with him present. The command
+ * therefore behaves the way the owner's-machine rule demands: it names the band, the rung count and
+ * the journal BEFORE the first write, and it exits non-zero on any stop.
+ *
+ * [NOT-TESTED] — the LIVE path. Its decisions are `sweepRange`'s and those are proved; what has never
+ * been exercised is this wiring against real NVAPI, a real watchdog and a real card.
+ */
+async function mainSweep(argv, arg) {
+  const fromMhz = Number(arg('from'));
+  const toMhz = Number(arg('to'));
+  if (!Number.isFinite(fromMhz) || !Number.isFinite(toMhz) || toMhz > fromMhz) {
+    console.error('ОШИБКА: --sweep требует --from <МГц> и --to <МГц>, причём --to не выше --from');
+    return 2;
+  }
+
+  const nvapi = await import('./lib/nvapi.mjs');
+  const vf = await import('./lib/vf-step.mjs');
+  const watchdog = await import('./lib/watchdog.mjs');
+
+  const doc = loadCurveDoc({});
+  if (!doc) {
+    console.error('ОШИБКА: документа кривой нет — сначала `npm run curve -- --init`. Развёртке некуда писать,');
+    console.error('        а знание, которому некуда лечь, теряется первой же перезагрузкой.');
+    return 2;
+  }
+
+  const nv = nvapi.openNvapi();
+  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+  const handle = handles.readBigUInt64LE(0);
+  const points = nvapi.readVfCurve(nv, handle).points;
+
+  const journal = openJournal({});
+  assertJournalSandbox(journal);
+
+  const report = await sweepRange({
+    curveDoc: doc,
+    points,
+    fromMhz,
+    toMhz,
+    bandLabel: arg('label', `${fromMhz}…${toMhz} МГц`),
+    journal,
+    // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
+    // recoveries that could disagree are worse than one that cannot.
+    recover: async () => watchdog.recover(),
+    runStepFn: (a) => vf.runStep(a),
+    saveFn: async (d) => saveCurveDoc(d),
+    onEvent: (e) => console.log(`  ${e.text}`),
+  });
+
+  for (const line of sweepReportLines(report)) console.log(line);
+  return report.ok ? 0 : 1;
+}
+
 async function main(argv) {
   if (argv.includes('--selftest')) {
     const r = await selfTest();
@@ -2793,10 +3675,12 @@ async function main(argv) {
     return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
   };
 
+  if (argv.includes('--sweep')) return mainSweep(argv, arg);
   if (argv.includes('--band')) return mainBand(argv, arg);
 
   if (!argv.includes('--search')) {
-    console.error('ОШИБКА: нужен один из режимов — --band <частоты> · --search --cap <МГц> · --selftest');
+    console.error('ОШИБКА: нужен один из режимов — --sweep --from <МГц> --to <МГц> · --band <частоты> · '
+      + '--search --cap <МГц> · --selftest');
     return 2;
   }
 

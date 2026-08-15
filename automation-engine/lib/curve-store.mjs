@@ -279,8 +279,8 @@ export function validateCurveDoc(doc, { card = null, frequencyGrid = null } = {}
   // silently. The refusal names BOTH frequencies.
   const inv = firstInversion(doc.frequencies);
   if (inv) {
-    const a = doc.frequencies[inv.at]; const b = doc.frequencies[inv.at + 1];
-    out.push(refuse(`frequencies[${inv.at + 1}].voltageMv`,
+    const a = doc.frequencies[inv.at]; const b = doc.frequencies[inv.loAt];
+    out.push(refuse(`frequencies[${inv.loAt}].voltageMv`,
       `${b.mhz} МГц требует ${b.voltageMv} мВ, а более ВЫСОКАЯ ${a.mhz} МГц — только ${a.voltageMv} мВ. `
       + 'Более высокой частоте не может хватать меньшего напряжения: либо замер ошибочен, либо это тот редкий случай, '
       + 'который владелец назвал сам, — и тогда его записывают явно, а не проносят молча'));
@@ -289,14 +289,215 @@ export function validateCurveDoc(doc, { card = null, frequencyGrid = null } = {}
   return out;
 }
 
-/** The first place where a LOWER frequency demands MORE voltage than the higher one above it in the
- *  table (the table runs high → low). `null` when the table is consistent. */
+/**
+ * The first place where a LOWER frequency demands MORE voltage than the higher one above it in the
+ * table (the table runs high → low). `null` when the table is consistent.
+ *
+ * ⚠️ **ONLY MEASURED ROWS ARE COMPARED, and that is a correction paid for by running the sweep**
+ * (`plans/15` §4.5, 2026-08-16). An inversion is a contradiction between two MEASUREMENTS — «this
+ * frequency costs more than a higher one» — and a row still carrying its FACTORY voltage is not a
+ * measurement, it is the absence of one. A sweep walks top-down, so between the frequency it just
+ * closed and the ones it has not reached yet there is ALWAYS an apparent inversion: the closed row
+ * dropped to its measured voltage while its lower neighbours still hold the higher factory value.
+ * Comparing those two reddened on every single point and stopped the sweep at its first write —
+ * **a guard causing the very regression it exists to prevent**, which is the trap R12 and R13 both
+ * name and which the first version of R13's check fell into as well.
+ *
+ * What this deliberately does NOT weaken: a FINISHED document has no unmeasured rows, so every
+ * comparison it can make is still made. And the comparison walks CONSECUTIVE MEASURED rows rather
+ * than adjacent ones — an unmeasured gap between two measurements does not excuse a contradiction
+ * across it.
+ *
+ * The boundary, stated because it is the thing this correction moves rather than removes: a partially
+ * swept document is CONSISTENT but not APPLICABLE — a frequency still at stock cannot be served the
+ * factory voltage once a HIGHER frequency has been made cheaper, because the card serves a clock with
+ * the lowest entry that reaches it. Applying is epic 02's phase 5 and that is where the applicability
+ * check belongs; refusing to SAVE knowledge because it is incomplete would simply lose it.
+ *
+ * [TESTED: 2026-08-16 00:3x, OFFLINE · 4 blocks in `curve --selftest` — an inversion between two
+ *  MEASURED rows is caught and names both frequencies; equal voltages are not an inversion; an
+ *  UNMEASURED row is not one either; and a contradiction ACROSS an unmeasured gap still is.
+ *  Mutation 63 (judge unmeasured rows too) reddens the last two and stops the sweep in `engine
+ *  --selftest` as well — which is the regression this correction removed.]
+ */
 export function firstInversion(rows) {
-  for (let i = 0; i + 1 < rows.length; i++) {
-    const hi = rows[i]; const lo = rows[i + 1];
-    if (Number.isFinite(hi?.voltageMv) && Number.isFinite(lo?.voltageMv) && lo.voltageMv > hi.voltageMv) return { at: i };
+  const measured = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (!Number.isFinite(r?.voltageMv)) continue;
+    if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
+    measured.push({ at: i, mv: r.voltageMv });
+  }
+  for (let k = 0; k + 1 < measured.length; k++) {
+    if (measured[k + 1].mv > measured[k].mv) return { at: measured[k].at, loAt: measured[k + 1].at };
   }
   return null;
+}
+
+// =================================================================================================
+// 2a. THE ONE MUTATOR — how a measured frequency enters the document (`plans/15` §4.5)
+// =================================================================================================
+
+/**
+ * CLOSE ONE FREQUENCY, AND KEEP THE DOCUMENT A DOCUMENT.
+ *
+ * This is the ONLY way a sweep's result reaches the artifact, and it lives here rather than in the
+ * engine because R14a says this module is the document's single author: a second writer would be a
+ * second truth about what the silicon proved, which is the shape R1 forbids for the card itself.
+ *
+ * ─── IT DOES THREE THINGS, AND THE SECOND AND THIRD ARE NOT DECORATION ────────────────────────────
+ *
+ * **(1) It writes the measured row.** Frequency, the voltage that now serves it, the status from the
+ * CLOSED vocabulary, the witness, the date. Every refusal names the field, because a mutator that
+ * silently drops a bad value is how a document becomes a rumour.
+ *
+ * **(2) It carries the value DOWN to the rest of the rung — and that is not interpolation** (E2-AC3,
+ * the criterion this project measures itself against, and the exact thing the vendor's OC Scanner
+ * does that we do not). The card has 127 voltage rungs for 389 frequencies, so neighbouring
+ * frequencies SHARE a voltage by construction; a rung's frequencies are burned at the HIGHEST of
+ * them, and the lower ones inherit that result. The direction is what makes it safe rather than
+ * convenient: **Vmin does not decrease with frequency** (setup-time violation at the edge,
+ * `researches/09` §2.3, and the owner's own practice — «на более нижней частоте напряжение нужно
+ * такое же или ниже»), so a voltage PROVEN at a higher frequency is not optimistic at a lower one.
+ * The inherited rows carry the rung's verdict, and `provenBy` says whose burn it was — which is why
+ * `provenBy` is a REQUIRED field for a proven status in the first place: a status can never stand
+ * without naming its witness.
+ *
+ * **(3) It ratchets the frequencies ABOVE, upward, and NAMES every one it moved.** A lower frequency
+ * that measures a HIGHER requirement than an already-closed higher one is the rare case the owner
+ * named himself (*«очень редко — выше, почти не бывает такого»*, `plans/13` risk R8). The document
+ * cannot hold it — `validateCurveDoc` refuses an inversion, and rightly, because «a higher frequency
+ * needs less voltage» is physically false. The resolution is forced rather than chosen: shipping the
+ * higher frequency at a voltage a LOWER frequency demonstrably failed at would be shipping a known
+ * failure, so the higher rows come UP to the measured value. Raising is the safe direction and it
+ * invents no measurement — it refuses to keep one that a neighbour's measurement contradicts. The
+ * epic already expects this vocabulary at its phase-4 gate: *«поднятые храповиком частоты названы»*
+ * (`plans/13` §4), and `raised` is what names them.
+ *
+ * ─── WHAT IT DELIBERATELY DOES NOT DO ─────────────────────────────────────────────────────────────
+ *
+ * It does not save. Persistence is `saveCurveDoc` and it is atomic; keeping them apart is what lets
+ * the sweep validate the RESULT before it reaches the disk, so a document that would fail its own
+ * validator never becomes the file the next session trusts.
+ *
+ * @param {object} doc  the tuning-curve document; NOT mutated — a new one is returned
+ * @param {object} a
+ * @param {number} a.mhz            the frequency that was burned
+ * @param {number} a.voltageMv      the voltage that now serves it — must be on the card's grid
+ * @param {string} a.status         from `CURVE_STATUS`; the vocabulary is closed
+ * @param {string} [a.provenBy]     the witness — REQUIRED for a proven status
+ * @param {number} [a.inheritDownToMhz]  the bottom of this rung; rows in [that, mhz) inherit
+ * @param {string} [a.at]           the stamp; defaults to now, local ISO
+ * @returns {{ok:boolean, doc:object, closed:number, inherited:Array, raised:Array, why:string}}
+ *
+ * [TESTED: 2026-08-16 00:3x, OFFLINE · 7 blocks in `engine --selftest` (inheritance down the rung and
+ *  its witness, the refusal of upward inheritance, the ratchet naming every frequency it moved, the
+ *  closed vocabulary, the card's grid, the missing witness). Mutations 57 (drop the ratchet) and 60
+ *  (allow upward inheritance) each redden their own block. **NOT TESTED: never called against the
+ *  production `curves/measured.json`.**]
+ */
+export function closePoint(doc, {
+  mhz = null,
+  voltageMv = null,
+  status = null,
+  provenBy = null,
+  inheritDownToMhz = null,
+  at = null,
+} = {}) {
+  const no = (why) => ({ ok: false, doc, closed: 0, inherited: [], raised: [], why });
+  if (!doc || !Array.isArray(doc.frequencies) || doc.frequencies.length === 0) {
+    return no('документ кривой пуст — закрывать частоту не в чем');
+  }
+  if (!Number.isFinite(mhz)) return no('частота не названа');
+  if (!Number.isFinite(voltageMv)) return no(`напряжение для ${mhz} МГц не названо`);
+  if (!STATUS_VALUES.includes(status)) {
+    return no(`неизвестный статус ${JSON.stringify(status)}; словарь закрыт: ${STATUS_VALUES.join(', ')}`);
+  }
+  if (PROVEN_STATUSES.includes(status) && (typeof provenBy !== 'string' || provenBy.trim() === '')) {
+    return no(`статус «${status}» утверждает, что частоту доказал прожиг — тогда назови форму нагрузки и вердикт; `
+      + 'статус без свидетеля это заявление, а не улика');
+  }
+  const grid = Array.isArray(doc.voltageGridMv) ? doc.voltageGridMv : [];
+  if (grid.length && !grid.includes(voltageMv)) {
+    return no(`${voltageMv} мВ нет на сетке напряжений карты — такого напряжения у неё попросить нельзя`);
+  }
+
+  const rows = doc.frequencies.map((r) => ({ ...r }));
+  const idx = rows.findIndex((r) => r.mhz === mhz);
+  if (idx < 0) return no(`частоты ${mhz} МГц нет в документе — она не с сетки этой карты`);
+  if (Number.isFinite(rows[idx].stockVoltageMv) && voltageMv > rows[idx].stockVoltageMv) {
+    return no(`${voltageMv} мВ ВЫШЕ стокового ${rows[idx].stockVoltageMv} мВ для ${mhz} МГц: тюнинг снижает напряжение частоты, а не поднимает`);
+  }
+
+  const stamp = at ?? localIso();
+
+  // ---- the measured row itself
+  rows[idx] = { ...rows[idx], voltageMv, status, provenBy, editedAt: stamp };
+
+  // ---- (2) the rest of the rung inherits, DOWNWARD ONLY. The table runs high → low, so the rows
+  // that inherit are the ones AFTER this index.
+  const inherited = [];
+  if (Number.isFinite(inheritDownToMhz)) {
+    if (inheritDownToMhz > mhz) {
+      return no(`наследование идёт ВНИЗ по частоте: ${inheritDownToMhz} МГц не ниже ${mhz} МГц. `
+        + 'Вверх наследовать нельзя — там напряжения требуется не меньше, а это и есть небезопасное направление');
+    }
+    for (let k = idx + 1; k < rows.length; k++) {
+      if (!Number.isFinite(rows[k].mhz) || rows[k].mhz < inheritDownToMhz) break;
+      // Inside one rung every stock voltage is the same by construction; a caller that hands over a
+      // range straddling rungs would silently ship a frequency ABOVE its own stock, and that is a
+      // refusal rather than a clamp — a clamp would hide the caller's bug in the artifact.
+      if (Number.isFinite(rows[k].stockVoltageMv) && voltageMv > rows[k].stockVoltageMv) {
+        return no(`наследование ${voltageMv} мВ от ${mhz} МГц не годится для ${rows[k].mhz} МГц: там сток `
+          + `${rows[k].stockVoltageMv} мВ, то есть УЖЕ дешевле доказанного. Диапазон наследования пересёк ступень напряжения`);
+      }
+      rows[k] = {
+        ...rows[k],
+        voltageMv,
+        status,
+        provenBy: `${provenBy ?? ''} · унаследовано ступенью от ${mhz} МГц (прожиг там): Vmin не убывает с частотой, `
+          + 'значит доказанное выше по частоте не оптимистично ниже (E2-AC3 — не интерполяция, а тот же измеренный факт)',
+        editedAt: stamp,
+      };
+      inherited.push(rows[k].mhz);
+    }
+  }
+
+  // ---- (3) the ratchet, UPWARD, and every moved frequency is named
+  const raised = [];
+  for (let k = idx - 1; k >= 0; k--) {
+    const r = rows[k];
+    // A row still at its FACTORY value is not a measurement, and the ratchet exists to reconcile two
+    // measurements that contradict each other. Raising an untouched row would be inventing one — and
+    // it cannot be needed anyway: the factory table is monotone, so a stock row above already carries
+    // at least as much as this frequency's stock, hence at least as much as anything we ship for it.
+    if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
+    if (!Number.isFinite(r.voltageMv) || r.voltageMv >= voltageMv) continue;
+    if (Number.isFinite(r.stockVoltageMv) && voltageMv > r.stockVoltageMv) {
+      return no(`храповик хотел поднять ${r.mhz} МГц до ${voltageMv} мВ, а её сток всего ${r.stockVoltageMv} мВ — `
+        + 'выше стока не поднимаем, и молча оставить инверсию тоже нельзя. Замер противоречит стоковой таблице');
+    }
+    raised.push({ mhz: r.mhz, fromMv: r.voltageMv, toMv: voltageMv });
+    rows[k] = {
+      ...r,
+      voltageMv,
+      provenBy: `${r.provenBy ?? 'сток'} · ПОДНЯТО ХРАПОВИКОМ до ${voltageMv} мВ измерением на ${mhz} МГц: `
+        + 'более низкая частота потребовала больше, а более высокой не может хватать меньшего',
+      editedAt: stamp,
+    };
+  }
+
+  const closed = 1 + inherited.length;
+  return {
+    ok: true,
+    doc: { ...doc, frequencies: rows },
+    closed,
+    inherited,
+    raised,
+    why: `${mhz} МГц закрыта: ${voltageMv} мВ, статус «${status}»`
+      + (inherited.length ? ` · ступень унаследовали ${inherited.length} частот(ы) до ${inheritDownToMhz} МГц` : '')
+      + (raised.length ? ` · ⚠️ ХРАПОВИК ПОДНЯЛ ${raised.length} частот(у) выше: ${raised.map((x) => `${x.mhz} МГц ${x.fromMv}→${x.toMv} мВ`).join(', ')}` : ''),
+  };
 }
 
 // =================================================================================================
@@ -599,12 +800,40 @@ function cmdSelftest() {
     // 2000 МГц опускаем до 850, а 1500 остаётся на 900 — более НИЗКОЙ частоте нужно БОЛЬШЕ. Снижение,
     // а не повышение: иначе сработал бы соседний отказ «выше стокового» и блок зеленел бы не своей
     // причиной (EXP-0016 — мутационный проход именно за этим и нужен).
-    const d = healthyDoc(); d.frequencies[5].voltageMv = 850;
+    // ⚠️ ОБЕ СТРОКИ ОБЪЯВЛЕНЫ ИЗМЕРЕННЫМИ, и это не украшение фикстуры: инверсия — противоречие
+    // между двумя ЗАМЕРАМИ, а строка на заводском значении замером не является. Прежняя редакция
+    // фикстуры правила одно напряжение и оставляла статус `stock`, то есть моделировала не инверсию,
+    // а недомеренный документ — ровно то состояние, в котором развёртка находится всё время работы.
+    const d = healthyDoc();
+    for (const i of [5, 6]) { d.frequencies[i].status = CURVE_STATUS.EDGE_FOUND; d.frequencies[i].provenBy = 'прожиг'; }
+    d.frequencies[5].voltageMv = 850;
     const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field.endsWith('.voltageMv'));
     return Boolean(bad) && bad.why.includes('1500') && bad.why.includes('2000');
   })());
   ok('равные напряжения соседних частот инверсией НЕ считаются (127 ступеней на 389 частот — они делятся)',
     firstInversion(healthyDoc().frequencies) === null);
+  // — THE CORRECTION `plans/15` §4.5 PAID FOR, and it has its own block because it is what a
+  // mutation must be able to break: a top-down sweep leaves EVERY closed frequency standing above
+  // lower ones that still carry the factory voltage. Judging that as an inversion stopped the sweep
+  // at its first write — a guard causing the regression it exists to prevent.
+  ok('НЕДОМЕРЕННАЯ строка инверсией НЕ считается — иначе развёртка встанет на первой же записи', (() => {
+    const d = healthyDoc();
+    d.frequencies[4].status = CURVE_STATUS.EDGE_FOUND;
+    d.frequencies[4].provenBy = 'прожиг';
+    d.frequencies[4].voltageMv = 850;                       // 2400 МГц закрыта, 2000 и ниже ещё на стоке
+    return validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).length === 0;
+  })());
+  // The assertion names BOTH frequencies rather than merely counting a refusal: 845 vs 850 could also
+  // trip «not on the card's grid», and a block that greens on a neighbour's reason is a false green.
+  ok('но противоречие между двумя ЗАМЕРАМИ ловится и ЧЕРЕЗ недомеренный промежуток', (() => {
+    const d = healthyDoc();
+    d.frequencies[4].status = CURVE_STATUS.EDGE_FOUND; d.frequencies[4].provenBy = 'прожиг';
+    d.frequencies[4].voltageMv = 800;                       // 2400 МГц измерена на 800
+    d.frequencies[7].status = CURVE_STATUS.EDGE_FOUND; d.frequencies[7].provenBy = 'прожиг';
+    d.frequencies[7].voltageMv = 850;                       // 1000 МГц измерена ВЫШЕ, через две стоковые строки
+    const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field.endsWith('.voltageMv'));
+    return Boolean(bad) && bad.why.includes('2400') && bad.why.includes('1000');
+  })());
 
   console.log('\n— СВИДЕТЕЛЬ ПРОЖИГА —');
   ok('статус «доказано прожигом» без свидетеля отвергается', (() => {

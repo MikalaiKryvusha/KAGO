@@ -21,22 +21,35 @@
 // What this suite does NOT model is a wrong LADDER or a wrong bisection; those are mutated in
 // `engine --selftest`, which is where they belong.
 //
-// ─── THE CLASS SPLIT, AND WHY IT IS NOT AN EXCUSE ─────────────────────────────────────────────────
+// ─── THE CLASS SPLIT, AND HOW IT ENDED ────────────────────────────────────────────────────────────
 //
-// Three of the five traps judge behaviour that does not exist yet: today's engine is the phase-5
-// search, with no write-ahead journal, no neighbour seeding, no `lever-limited` verdict and no
-// two-hangs stop — all four are `plans/15` deliverables. Their cards and their assertions ship NOW
-// and are reported PENDING. A pending row may read «ждёт движка развёртки»; it may never read green.
-// That is E3-AC5's rule (no claim about an unrun half) applied inside the epic.
+// Until 2026-08-16 three of the five traps judged behaviour that did not exist: the engine was the
+// phase-5 search, with no write-ahead journal, no neighbour seeding, no `lever-limited` verdict and
+// no two-hangs stop. Their cards and their assertions shipped anyway and were reported PENDING —
+// E3-AC5's rule (no claim about an unrun half) applied inside the epic.
+//
+// **`plans/15` §4.5 built the sweep, and all four pending assertions now RUN.** The pending state
+// ended the only honest way a waiver can: its condition came true. What they run against is the
+// shipped `sweepRange`, driven through this suite's own seam — and for T2 and T5 through REAL child
+// processes that REALLY die at the rung their card names, because a throw unwinds and lets `finally`
+// blocks run, which is precisely what a hang does not do (R10).
 //
 // ─── MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016) ─────────────────────────────────────────
 //
 //   - the wrong engine reads the real verdict     → «T1: НЕПРАВИЛЬНЫЙ движок проходит край насквозь»
-//   - a class-B assertion reported OK not pending → «утверждение НАПИСАНО и стоит „ждёт“» (все три)
+//   - a class-B assertion silently disappears     → «утверждение НАПИСАНО и ПРОГНАНО» (все три)
 //   - the deterministic trap hang ignored         → «T2: процесс УМИРАЕТ по-настоящему»
 //   - the forced inversion dropped                → «T3: инверсия НАСТОЯЩАЯ»
+//   - the sweep ignores the blocked-rung set      → «T5: отказаться от третьей попытки…»
+//   - a lever wall reported as an edge            → «T4: сказать „предел рычага“…»
 //
-// [TESTED: 2026-08-15 20:2x · `npm run traps` → 22 assertions, 0 failures, 4 honestly pending.
+// [TESTED: 2026-08-16 00:2x · `npm run traps` → **27 assertions, 0 failures, 0 pending**. T2's second
+//  half and T5's two deaths are child processes that exited 70 with no `finally`, and the re-launch
+//  named the killed rung — 2842 MHz / 995 mV — closing it ЗАВИС from the shipped journal. T3 rejected
+//  its seed and printed the rejection; T4 closed two frequencies `lever-limited` and zero as edges.
+//  Mutations for the two new addressees are recorded in `plans/15` §4.5.
+//
+//  EARLIER: 2026-08-15 20:2x · 22 assertions, 0 failures, 4 honestly pending.
 //  T1 is the load-bearing one and it DISCRIMINATES: the right engine stops after 2 rungs, the wrong
 //  one walks 13 — on three seeds each, through the REAL `searchEdge`, the REAL `runBurst` and the
 //  REAL `decideVerdict`. T2 kills a child process for real at the rung its CARD names (exit 70, no
@@ -58,7 +71,8 @@ import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
 import { loadCard, virtualCard, TRAPS, GOLDEN_CHECKSUM, PROVABILITY_LINE, MODULE_URL } from './virtual-gpu.mjs';
-import { searchEdge } from '../engine.mjs';
+import { searchEdge, sweepRange } from '../engine.mjs';
+import { openJournal, readJournal, resumeState, RUNG_OUTCOME } from './sweep-journal.mjs';
 
 const TRAP_DIR = join('benches', 'cards', 'traps');
 
@@ -97,6 +111,94 @@ export function makeStepFn(vc, card, stress, golden, stampOk, { alwaysPass = fal
       deliveredMhz: capMhz,
     };
   };
+}
+
+/**
+ * THE STEP FUNCTION THE SWEEP IS DRIVEN THROUGH (`plans/15` §4.5) — the atom's contract, on the bench.
+ *
+ * It differs from `makeStepFn` above in exactly one way that matters: the sweep's rung asks the card
+ * what voltage ACTUALLY served the clock after the write (`undervolt.after.mv`), and `runRung` VOIDS
+ * the rung if that is not the voltage it ordered. So this returns the card's own reading rather than
+ * an echo of the order — which is the whole reason a bench is worth more than a stub.
+ *
+ * The rollback is real too: the curve is zeroed and the block is stamped `undo: true`, because a rung
+ * whose rollback failed is never reported as passed and a bench that faked a clean undo would hide
+ * exactly that.
+ */
+export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
+  return async ({ offsetMhz, capMhz, pinMhz = null, sustain = 10 }) => {
+    const w = await vc.curveBackend.writeRaiseAndCap(offsetMhz, capMhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
+    if (!w.ok) {
+      await vc.curveBackend.zeroCurve();
+      return { verdict: null, reason: `запись отвергнута: ${w.why}`, blocks: [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }] };
+    }
+    const clock = pinMhz ?? capMhz;
+    vc.backend.lockGraphicsClocksMhz(clock, clock);
+    const after = vc.oracle.servingVoltageMv(clock);
+
+    const burst = stress.runBurst({
+      name: 'sdc_fma', args: [], sustainSeconds: sustain, run: (b, a) => vc.oracle.run(b, a),
+    });
+    const v = stress.decideVerdict({ bursts: [burst], golden, stamp: stampOk, faults: { providers: [], faults: [] } });
+
+    await vc.curveBackend.zeroCurve();
+    return {
+      verdict: v.verdict,
+      reason: v.reason,
+      worstShape: 'sdc_fma/transient',
+      deliveredMhz: clock,
+      deliveredMaxMhz: clock,
+      undervolt: { capMhz, after: { mv: after } },
+      blocks: [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }],
+    };
+  };
+}
+
+/** The card's V/F table in the shape `planRung` reads it. Graphics points only — the table's 128th
+ *  entry is not one of the 127 the curve document knows. */
+export function pointsForCard(card) {
+  return card.vfTable.slice(0, card.voltageGridMv.length)
+    .map((p, i) => ({ i, mv: p.voltageMv, mhz: p.mhz, freqKhz: p.mhz * 1000 }));
+}
+
+/** A tuning-curve document for a band of this card — every frequency at its factory serving voltage,
+ *  which is exactly what `curve --init` produces from a live card. */
+export function curveDocForCard(card, { fromMhz, toMhz }) {
+  const pts = pointsForCard(card);
+  const frequencies = card.frequencyGridMhz
+    .filter((mhz) => mhz >= toMhz && mhz <= fromMhz)
+    .sort((a, b) => b - a)
+    .map((mhz) => {
+      const serving = pts.find((p) => p.mhz >= mhz) ?? pts[pts.length - 1];
+      return {
+        mhz, voltageMv: serving.mv, stockVoltageMv: serving.mv,
+        status: 'stock', provenBy: null, editedAt: '2026-08-16T00:00:00+03:00',
+      };
+    });
+  return {
+    kind: 'tuning-curve', name: 'measured',
+    card: { ...card.card },
+    voltageGridMv: [...card.voltageGridMv],
+    stamp: { driver: card.stamp.driver, vbios: card.stamp.vbios, takenAt: '2026-08-16T00:00:00+03:00', tempC: 42 },
+    frequencies,
+  };
+}
+
+/** One SWEEP over one card — the real `sweepRange`, through the bench's own seam. */
+export async function runSweep(card, { seed, fromMhz, toMhz, journal = null, stress, golden, stampOk, onEvent = null }) {
+  const vc = virtualCard(card, { settleSamples: 0, seed });
+  const said = [];
+  const report = await sweepRange({
+    curveDoc: curveDocForCard(card, { fromMhz, toMhz }),
+    points: pointsForCard(card),
+    fromMhz, toMhz,
+    journal,
+    runStepFn: makeSweepStepFn(vc, card, stress, golden, stampOk),
+    onEvent: (e) => { said.push(e); if (onEvent) onEvent(e); },
+    now: () => '2026-08-16T03:00:00+03:00',
+    clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+  });
+  return { report, said, vc };
 }
 
 /** One search over one card. Returns what the engine did, in the terms the traps are stated in. */
@@ -181,16 +283,108 @@ export async function runTrapSuite() {
       `код ${drill.status}, finally ${drill.finallyRan ? 'ОТРАБОТАЛ' : 'не отработал'}: ${drill.stderr}`);
     check('T2: намерение, записанное ДО обращения к карте, пережило смерть',
       drill.intentSurvived, 'намерения на диске нет — журналу упреждающей записи нечего было бы читать');
-    pending('T2 (вторая половина): перезапуск НАЗЫВАЕТ убитую ступень',
-      'нужен журнал упреждающей записи — plans/15 §4.4');
+
+    // ── THE SECOND HALF, AND IT IS NO LONGER PENDING (`plans/15` §4.5 wired the sweep) ────────────
+    // A REAL child process runs a REAL `sweepRange` on this card and REALLY dies at the rung the
+    // card names. Then this process re-launches and must name that exact rung. Nothing here is
+    // simulated: the death is a process exit with no `finally`, and the journal is the shipped one.
+    const relaunch = await sweepDeathAndRelaunch(join(TRAP_DIR, 'T2_hangs_at_a_named_rung.json'), hangAt);
+    check('T2 (вторая половина): перезапуск НАЗЫВАЕТ убитую ступень — частоту И напряжение',
+      relaunch.died && relaunch.named !== null && relaunch.named.voltageMv <= hangAt,
+      `умер ${relaunch.died} (код ${relaunch.status}), названо ${JSON.stringify(relaunch.named)}: ${relaunch.why}`,
+      relaunch.named ? `${relaunch.named.frequencyMhz} МГц / ${relaunch.named.voltageMv} мВ, вердикт ЗАВИС` : '');
+    check('T2: и убитая ступень закрыта именно вердиктом ЗАВИС, а не «нет ответа»',
+      relaunch.named?.verdict === config.VERDICT.HUNG,
+      `вердикт ${JSON.stringify(relaunch.named?.verdict ?? null)}, ждали ${config.VERDICT.HUNG}`);
   } else fail('T2: карта загружена', 'карты нет на диске');
 
-  // ---- 3. class B — the cards ship, the assertions wait, and they are NEVER green
+  // ---- 3. class B — the cards ship, and since `plans/15` §4.5 the assertions RUN. Every one of them
+  // drives the REAL `sweepRange` over the trap card through the bench's own seam.
   for (const t of TRAPS.filter((x) => x.klass === 'B')) {
     const card = cards.get(t.name);
     check(`${t.name}: карта существует и её вымысел годен`, Boolean(card), 'карты нет на диске');
-    pending(`${t.name}: ${t.mustDo}`, t.judgedBy);
   }
+
+  // The assertion's NAME carries the trap's own `mustDo` verbatim, and that is not decoration: the
+  // report guard below finds an assertion by that substring, so a renamed check would read as a
+  // VANISHED one. One string, one source — the trap's definition.
+  const mustDoOf = (name) => TRAPS.find((t) => t.name === name)?.mustDo ?? `<ловушки ${name} нет>`;
+
+  const stressFor = (card) => {
+    const golden = { gpu: { driver: card.stamp.driver, vbios: card.stamp.vbios }, args: [], checksum: GOLDEN_CHECKSUM };
+    const probed = { probed: true, driver: card.stamp.driver, vbios: card.stamp.vbios };
+    return { golden, stampOk: stress.checkGoldenStamp(golden, probed, []) };
+  };
+
+  // ── T3 — the owner's rare case: one frequency needs MORE than its higher neighbour. The seed comes
+  // from above, so it FAILS here, and the sweep must cancel it, fall back to stock, and SAY SO.
+  const t3card = cards.get('T3_non_monotone_vmin');
+  if (t3card) {
+    const { golden, stampOk } = stressFor(t3card);
+    // A band that CONTAINS the inversion: the neighbour above 2842 is tuned first and seeds it.
+    const r = await runSweep(t3card, { seed: 21, fromMhz: 2857, toMhz: 2842, stress, golden, stampOk });
+    const spoken = r.said.filter((e) => e.kind === 'seed-rejected');
+    check(`T3: ${mustDoOf('T3_non_monotone_vmin')} — прогнано, а не заявлено`,
+      r.report.seedRejections >= 1 && spoken.length >= 1
+        && spoken.every((e) => typeof e.text === 'string' && e.text.includes('2842')),
+      `откатов затравки ${r.report.seedRejections}, сказано ${spoken.length}: ${JSON.stringify(spoken[0]?.text ?? null)?.slice(0, 160)}`,
+      `${r.report.seedRejections} откат(ов), и каждый напечатан`);
+    check('T3: и после отката спуск ВСЁ РАВНО закрывает частоту, а не бросает её',
+      r.report.closed >= 1,
+      `закрыто ${r.report.closed}, остановлено: ${r.report.stoppedBy ?? '—'} ${r.report.why}`);
+    // The `mustDo` has THREE parts — reject, fall back to STOCK, say so — and the middle one needs its
+    // own assertion: a mutation that kept the rejection and kept descending from the seed left both
+    // other checks green. What proves the fall-back is that the descent's rung right after the seed
+    // is the ladder's FIRST rung from stock, i.e. shallower than the seed rather than below it.
+    const inverted = r.report.groups.find((g) => g.seedRejected);
+    const afterSeed = inverted?.rungs?.filter((x) => !x.seed && !x.refine) ?? [];
+    check('T3: и спуск после отката идёт ОТ СТОКА — первая же ступень ВЫШЕ отвергнутой затравки',
+      Boolean(inverted) && afterSeed.length > 0
+        && afterSeed[0].voltageMv > (inverted.rungs.find((x) => x.seed)?.voltageMv ?? Infinity),
+      `затравка ${inverted?.rungs?.find((x) => x.seed)?.voltageMv ?? '—'} мВ, первая ступень после неё `
+        + `${afterSeed[0]?.voltageMv ?? '—'} мВ — если она НИЖЕ, спуск продолжился от затравки, а не от стока`);
+  } else fail('T3: карта загружена', 'карты нет на диске');
+
+  // ── T4 — the edge lies DEEPER than our ±1000 MHz lever reaches. Reporting that as an edge would be
+  // the false `[TESTED]` the second verdict exists to forbid.
+  const t4card = cards.get('T4_edge_below_the_lever');
+  if (t4card) {
+    const { golden, stampOk } = stressFor(t4card);
+    const r = await runSweep(t4card, { seed: 31, fromMhz: 2842, toMhz: 2827, stress, golden, stampOk });
+    check(`T4: ${mustDoOf('T4_edge_below_the_lever')} — прогнано, а не заявлено`,
+      r.report.verdicts['lever-limited'] >= 1 && r.report.verdicts['edge-found'] === 0,
+      `край найден ${r.report.verdicts['edge-found']}, предел рычага ${r.report.verdicts['lever-limited']}, `
+        + `остановлено: ${r.report.stoppedBy ?? '—'} ${r.report.why}`,
+      `предел рычага ${r.report.verdicts['lever-limited']}, краёв 0`);
+    check('T4: и такая частота записана в документ кривой статусом lever-limited, а не уликой прожига',
+      r.report.doc.frequencies.some((x) => x.status === 'lever-limited'),
+      `статусы: ${[...new Set(r.report.doc.frequencies.map((x) => x.status))].join(', ')}`);
+  } else fail('T4: карта загружена', 'карты нет на диске');
+
+  // ── T5 — the same rung kills the machine TWICE. A third attempt is an infinite reboot loop on the
+  // owner's desk, and the sweep must refuse it and report a failure the CLI turns into exit 1.
+  const t5card = cards.get('T5_hangs_twice_on_one_rung');
+  if (t5card) {
+    const { golden, stampOk } = stressFor(t5card);
+    const twice = await twoDeathsOnOneRung(join(TRAP_DIR, 'T5_hangs_twice_on_one_rung.json'),
+      t5card.fiction.failure.hangAtOrBelowMv);
+    check('T5: обе смерти НАСТОЯЩИЕ и приписаны ОДНОЙ И ТОЙ ЖЕ ступени',
+      twice.deaths === 2 && twice.blocked.length === 1,
+      `смертей ${twice.deaths}, заблокировано ${JSON.stringify(twice.blocked)}: ${twice.why}`,
+      twice.blocked[0] ? `${twice.blocked[0].frequencyMhz} МГц / ${twice.blocked[0].voltageMv} мВ` : '');
+    const third = await runSweep(t5card, {
+      seed: 41, fromMhz: twice.frequencyMhz, toMhz: twice.frequencyMhz,
+      journal: openJournal({ dir: twice.dir }), stress, golden, stampOk,
+    });
+    check(`T5: ${mustDoOf('T5_hangs_twice_on_one_rung')} — развёртка встаёт, а не пропускает молча`,
+      third.report.ok === false && third.report.stoppedBy === 'blocked-rung',
+      `ok ${third.report.ok}, остановлено «${third.report.stoppedBy}»: ${third.report.why}`,
+      'ok=false → команда выходит ненулевым кодом');
+    check('T5: и ненулевой код — это ровно отображение ok=false, а не отдельное решение',
+      sweepExitCode(third.report) === 1 && sweepExitCode({ ok: true }) === 0,
+      `ok=false → ${sweepExitCode(third.report)}, ok=true → ${sweepExitCode({ ok: true })}`);
+    twice.cleanup();
+  } else fail('T5: карта загружена', 'карты нет на диске');
 
   // T3 carries one thing worth asserting TODAY: that the inversion it exists for is really there.
   const t3 = cards.get('T3_non_monotone_vmin');
@@ -205,14 +399,19 @@ export async function runTrapSuite() {
       `на ${drop} мВ глубже, ступень ${rung} мВ`);
   }
 
-  // ---- 4. THE GUARD ON THE REPORT ITSELF (B3-AC3). Without it, «pending» is a convention, and a
-  // convention is what a weak session quietly turns into a green. The assertion of every class-B trap
-  // must be PRESENT and must be PENDING — never absent (it would be forgotten) and never OK (it would
-  // be a claim about an engine nobody has run).
+  // ---- 4. THE GUARD ON THE REPORT ITSELF (B3-AC3), and it has CHANGED SIDES rather than been
+  // deleted — which is the honest way for a «pending» convention to end.
+  //
+  // Until 2026-08-16 this guard demanded that every class-B assertion be PRESENT and PENDING: never
+  // absent (it would be forgotten) and never OK (it would be a claim about an engine nobody had run).
+  // `plans/15` §4.5 built that engine, so the second half of the demand expired the moment its
+  // condition came true — the only way a waiver may end. What the guard still refuses is the thing it
+  // was always for: an assertion that quietly VANISHES. Present-and-run, never absent, and never
+  // pending again, because a pending row now would mean the sweep exists and nobody pointed it here.
   for (const t of TRAPS.filter((x) => x.klass === 'B')) {
     const rows = results.filter((r) => r.n.includes(t.mustDo));
-    check(`${t.name}: утверждение НАПИСАНО и стоит «ждёт» — не отсутствует и не зелёное`,
-      rows.length > 0 && rows.every((r) => r.state === 'ЖДЁТ'),
+    check(`${t.name}: утверждение НАПИСАНО и ПРОГНАНО — не отсутствует и больше не «ждёт»`,
+      rows.length > 0 && rows.every((r) => r.state !== 'ЖДЁТ'),
       rows.length === 0 ? 'утверждения нет вовсе' : `состояния: ${rows.map((r) => r.state).join(', ')}`);
   }
 
@@ -271,6 +470,136 @@ try {
   return out;
 }
 
+/**
+ * THE EXIT CODE OF A SWEEP — one line, in one place, so «exits non-zero» is a MAPPING that can be
+ * asserted rather than a behaviour buried in the CLI's tail. T5's `mustDo` names it explicitly.
+ */
+export function sweepExitCode(report) {
+  return report && report.ok === true ? 0 : 1;
+}
+
+/**
+ * A REAL DEATH INSIDE A REAL SWEEP, AND THE RE-LAUNCH THAT NAMES IT — T2's second half.
+ *
+ * The child runs the shipped `sweepRange` against a trap card whose hang is deterministic, with the
+ * shipped write-ahead journal. It dies the way the owner's machine dies: a process exit with no
+ * `finally`, nothing written afterwards. Then THIS process reads that journal and must be told which
+ * rung was in flight.
+ *
+ * Why a child and not a throwing atom: a throw unwinds and lets `finally` blocks run, which is
+ * exactly the thing a hang does NOT do (R10 — three of the four rollback layers need a live OS).
+ */
+async function sweepDeathAndRelaunch(cardPath, hangAt) {
+  const { tmpdir } = await import('node:os');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'kago-trap-sweep-'));
+  const journalDir = join(dir, 'journal');
+  const death = await spawnSweepChild(cardPath, journalDir, dir);
+
+  const jrn = openJournal({ dir: journalDir });
+  const before = readJournal(jrn).records.length;
+  resumeState(jrn, { at: '2026-08-16T03:30:00+03:00' });
+  const { records } = readJournal(jrn);
+  const intents = new Map(records.filter((r) => r?.state === 'intent').map((r) => [r.seq, r]));
+  const hung = records
+    .filter((r) => r?.state === 'verdict' && r.outcome === RUNG_OUTCOME.HUNG)
+    .map((v) => ({
+      outcome: v.outcome,
+      verdict: v.verdict ?? null,
+      frequencyMhz: intents.get(v.seq)?.frequencyMhz ?? null,
+      voltageMv: intents.get(v.seq)?.voltageMv ?? null,
+    }));
+
+  const out = {
+    died:death.died,
+    status:death.status,
+    named: hung.length ? hung[hung.length - 1] : null,
+    why: `строк в журнале до перезапуска ${before}, зависаний приписано ${hung.length}. ${death.stderr}`,
+    hangAt,
+  };
+  rmSync(dir, { recursive: true, force: true });
+  return out;
+}
+
+/**
+ * TWO REAL DEATHS ON ONE RUNG — T5's fixture, built the way the owner's evening would build it: run,
+ * die, reboot, run again, die again. Both runs share ONE journal, which is what makes «consecutive»
+ * countable at all.
+ */
+async function twoDeathsOnOneRung(cardPath, hangAt) {
+  const { tmpdir } = await import('node:os');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'kago-trap-twice-'));
+  const journalDir = join(dir, 'journal');
+
+  let deaths = 0;
+  const notes = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await spawnSweepChild(cardPath, journalDir, dir);
+    if (r.died) deaths += 1;
+    notes.push(`попытка ${attempt + 1}: код ${r.status}`);
+    // The re-launch is what CLOSES the orphan intent as ЗАВИС — the same call the next run makes.
+    resumeState(openJournal({ dir: journalDir }), { at: `2026-08-16T0${4 + attempt}:00:00+03:00` });
+  }
+  const state = resumeState(openJournal({ dir: journalDir }), { at: '2026-08-16T06:00:00+03:00' });
+  return {
+    deaths,
+    blocked: state.blocked,
+    frequencyMhz: state.blocked[0]?.frequencyMhz ?? 2842,
+    dir: journalDir,
+    why: `${notes.join(' · ')}, порог зависания ${hangAt} мВ`,
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+/**
+ * The victim: a child process that runs the shipped sweep on a trap card and dies where the card says.
+ *
+ * The bench module is handed down by its OWN url (`MODULE_URL`) rather than by a path spelled out
+ * here — a child that re-derives the path escapes every substitution a mutation run made, and this
+ * suite has already paid for that once (EXP-0070).
+ */
+async function spawnSweepChild(cardPath, journalDir, dir) {
+  const { spawnSync } = await import('node:child_process');
+  const { writeFileSync } = await import('node:fs');
+  const vgpu = fileURLToPath(MODULE_URL);
+  const suite = fileURLToPath(import.meta.url);
+  const childPath = join(dir, 'victim-sweep.mjs');
+
+  const child = `
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const bench = await import(pathToFileURL(${JSON.stringify(vgpu)}).href);
+const suite = await import(pathToFileURL(${JSON.stringify(suite)}).href);
+const engine = await import(pathToFileURL(${JSON.stringify(fileURLToPath(new URL('../engine.mjs', import.meta.url)))}).href);
+const journal = await import(pathToFileURL(${JSON.stringify(fileURLToPath(new URL('./sweep-journal.mjs', import.meta.url)))}).href);
+const stress = await import(pathToFileURL(${JSON.stringify(fileURLToPath(new URL('./stress-tester.mjs', import.meta.url)))}).href);
+const [cardPath, journalDir] = process.argv.slice(2);
+const card = JSON.parse(readFileSync(cardPath, 'utf8'));
+// allowProcessDeath — the card is permitted to really kill this process at its named rung.
+const vc = bench.virtualCard(card, { settleSamples: 0, seed: 7, allowProcessDeath: true });
+const golden = { gpu: { driver: card.stamp.driver, vbios: card.stamp.vbios }, args: [], checksum: bench.GOLDEN_CHECKSUM };
+const stampOk = stress.checkGoldenStamp(golden, { probed: true, driver: card.stamp.driver, vbios: card.stamp.vbios }, []);
+await engine.sweepRange({
+  curveDoc: suite.curveDocForCard(card, { fromMhz: 2842, toMhz: 2842 }),
+  points: suite.pointsForCard(card),
+  fromMhz: 2842, toMhz: 2842,
+  journal: journal.openJournal({ dir: journalDir }),
+  runStepFn: suite.makeSweepStepFn(vc, card, stress, golden, stampOk),
+  now: () => '2026-08-16T03:00:00+03:00',
+  clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+});
+`;
+  writeFileSync(childPath, child);
+  const r = spawnSync(process.execPath, [childPath, cardPath, journalDir],
+    { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000 });
+  return {
+    died: r.status === 70,
+    status: r.status,
+    stderr: (r.stderr || '').split('\n').slice(0, 2).join(' '),
+  };
+}
+
 function report(results) {
   for (const r of results) {
     if (r.state === 'OK') console.log(`OK   ${r.n}${r.note ? `  — ${r.note}` : ''}`);
@@ -280,7 +609,12 @@ function report(results) {
   const failed = results.filter((r) => r.state === 'FAIL').length;
   const waiting = results.filter((r) => r.state === 'ЖДЁТ').length;
   console.log(`\nНАБОР ЛОВУШЕК: ${results.length} утверждений, провалов ${failed}, ждут движка развёртки ${waiting}.`);
-  console.log('«ЖДЁТ» — это НЕ зелёный. Утверждение написано и будет прогнано, когда plans/15 даст движок развёртки.');
+  // The line is printed only while something actually waits. Printing it over a run with zero pending
+  // rows would be the report describing a state it is not in — and a footer nobody trusts is a footer
+  // nobody reads. All four class-B assertions started running on 2026-08-16 (`plans/15` §4.5).
+  if (waiting > 0) {
+    console.log('«ЖДЁТ» — это НЕ зелёный. Утверждение написано и будет прогнано, когда движок дорастёт до него.');
+  }
   console.log(PROVABILITY_LINE);
   return { total: results.length, failed, waiting };
 }

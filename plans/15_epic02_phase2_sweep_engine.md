@@ -306,26 +306,100 @@ and both suites completing:
 > RED BLOCK naming the exception instead of a dead report. **The other suites do not have that net yet;
 > it is named here rather than claimed.**
 
-### 4.5 — The sweep: the loop, and the three verdicts 🔲
+### 4.5 — The sweep: the loop, and the TWO verdicts ✅ **DONE 2026-08-16 00:3x**
 
 *Anchor: `ideas/03` steps 6, 13, 14; `plans/13` E2-AC2.*
 
-- [ ] `sweepRange({ fromMhz, toMhz, bandLabel })` — walks the card's frequency ladder TOP-DOWN,
+> 🔴 **THIS STEP'S HEADING USED TO SAY «three verdicts», AND THE THIRD IS RETIRED.** `plans/13` §8.7 —
+> the parent, and the LATER word — settles it: *«Вердиктов у частоты два: „край найден“ и „предел
+> рычага“. Третий („пол частоты“) отменён вместе с нумерацией точек»*. `clock-floor` was an artifact
+> of numbering table entries; in the owner's coordinates the frequency grid IS 180…3090 MHz and its
+> bottom is just its bottom. `curve-store`'s status vocabulary is CLOSED and does not contain it, so
+> the third verdict could not have been written even if it had been wanted. Resolved by finding the
+> arbiter rather than by choosing (EXP-0074, met for the second time in this plan).
+
+- [x] `sweepRange({ fromMhz, toMhz, bandLabel })` — walks the card's frequency ladder TOP-DOWN,
       searching for the BOUNDARIES where the serving voltage changes rather than burning every
-      frequency separately (`plans/13` §8.1: 389 frequencies over 127 voltage rungs, so neighbours
-      share a voltage — same table, one fifth the cost, and every one of the 389 still carries a
-      verdict in the document).
-- [ ] Per frequency: seed (4.2) → descend (4.1 + 4.3) → on first non-PASS refine (4.6) → close the
-      point with one of **three verdicts**, each with its own reason string:
-      `edge-found` · `lever-limited` (the ±1000 MHz lever ran out before the card did) ·
-      `clock-floor` (nothing to search).
-- [ ] Every closed point is written to the curve document **before the next frequency starts**, through
-      `curve-store`'s atomic save (`plans/14` §4.2).
-- [ ] `--band <from>,<to>` runs one band; bands are independent and each is a self-contained sitting —
-      this is what makes ≈1.7 h fit the owner's evening in pieces.
-- [ ] The final report: coverage (closed / total), verdict histogram, the seeding scoreboard, reboots,
-      and **the wall time actually spent** against the estimate — an estimate never checked is a number
-      that drifts.
+      frequency separately (`plans/13` §8.1). **`rungGroups` groups by the STOCK serving voltage** —
+      grouping by the tuned one would be grouping by the answer the sweep is looking for — and the
+      rung is burned at its **HIGHEST** frequency, the hardest member, because Vmin does not decrease
+      with frequency.
+- [x] Per frequency: seed (4.2) → descend (4.1 + 4.3) → on first non-PASS refine (4.6) → close the
+      point with one of **two verdicts**: `edge-found` · `lever-limited` (the ±1000 MHz lever or the
+      card's own grid ran out before the silicon did). **Everything else — `unknown`, `void`, a
+      journal-blocked rung — HALTS the frequency with no shipped voltage**, because closing a point
+      around a boundary nobody observed would be a `[TESTED]` marker with no observation behind it.
+- [x] Every closed point is written to the curve document **before the next frequency starts**, through
+      `curve-store`'s atomic save, and **validated first** — a document that fails its own validator
+      never reaches the disk. Proved by an ORDER block, not by reading the code.
+- [x] **`curve-store.closePoint` is the document's mutator, and it lives THERE** (R14a — one author).
+      It carries the rung's value DOWN to the frequencies that inherit it (E2-AC3, the witness names
+      whose burn it was) and **ratchets the frequencies above UPWARD when a lower one measures more**,
+      naming every frequency it moved — the vocabulary `plans/13` §4 already expects at the phase-4
+      gate («поднятые храповиком частоты названы»).
+- [x] `watchdog --recover` runs **once per sweep**, before any rung, and a failed recovery stops the
+      run before the first write (carried here from §4.4).
+- [x] The blocked-rung set is computed **once** from `sweep-journal.resumeState`, and the two-hangs
+      stop travels as a **FIELD** (`blocked: true`), never as a substring of a message.
+- [x] `npm run engine -- --sweep --from <МГц> --to <МГц>` — the command. Bands are independent and
+      each is a self-contained sitting; the same command RESUMES an interrupted sweep, because the
+      journal is what tells the two apart.
+- [x] The final report: coverage (closed / total), verdict histogram, the seeding scoreboard, hangs and
+      blocked rungs, and **the wall time actually spent** against the 1.7 h estimate.
+
+**Verification — RUN, 2026-08-16 00:3x. `engine --selftest` 156 → 183, `curve --selftest` 40 → 42,
+`npm run traps` 22 → 28 assertions with ZERO pending. No GPU writes.**
+
+**AND THE STEP'S REAL ACCEPTANCE IS THE BENCH, not the engine's own suite** — the owner asked at the
+close of session 25 *«это будет тест на виртуальной видеокарте?»*, and the four class-B trap
+assertions had been waiting for exactly this step. All four now RUN against the shipped `sweepRange`:
+
+| Trap | What it demanded | How it is now judged |
+|---|---|---|
+| **T2** (2nd half) | a re-launch NAMES the killed rung | a REAL child process runs a REAL sweep and exits 70 with no `finally`; the re-launch reads the shipped journal and names **2842 MHz / 995 mV**, closing it `ЗАВИС` |
+| **T3** | reject the seed, fall back to STOCK, say so | the sweep rejects it, prints it, and the rung after the seed is **shallower** than the seed — which is what «from stock» means and what a mutation had otherwise left green |
+| **T4** | say «lever limit», not «edge found» | two frequencies closed `lever-limited`, **zero** edges, and the document carries the status |
+| **T5** | refuse the third attempt, exit non-zero | two REAL deaths on one rung; the third launch stops with `blocked-rung`, the card is **not touched**, and `sweepExitCode` maps it to 1 |
+
+**Ten mutations, addressees named BEFORE the run (EXP-0016), each reddening its own block(s):**
+
+| # | Mutation | Red |
+|---|---|---|
+| 54 | group by the TUNED voltage instead of the stock one | 6 |
+| 55 | burn the rung's LOWEST frequency instead of its highest | 2 |
+| 56 | close an all-PASS descent as `edge-found` | 1 engine + **1 trap (T4)** |
+| 57 | drop the ratchet, let the inversion into the document | 2 |
+| 58 | save the document before validating it | 1 |
+| 59 | ignore the blocked-rung set | 2 engine + **1 trap (T5)** |
+| 60 | allow inheritance UPWARD as well as downward | 1 |
+| 61 | treat a rejected seed as a stop instead of a fall-back to stock | 1 engine + **1 trap (T3)** |
+| 62 | report a rung-declared lever wall as an edge | 1 |
+| 63 | judge an UNMEASURED row as an inversion (revert §4.5's correction) | 5 engine + 2 curve |
+
+> 🔴 **TWO MUTATIONS FOUND HOLES IN THE FIRST PASS, AND THAT IS THE HALF WORTH KEEPING.**
+>
+> **55 reddened NOTHING.** Burning the rung's lowest frequency instead of its highest left the
+> document byte-identical, because `closePoint` was called with the rung's top either way — only the
+> BURN moved, and the burn is the entire safety argument. The cause was a truth↔mirror pair created
+> by accident **inside one function**: `sweepFrequency` was told the frequency, and its caller
+> separately hard-coded the same frequency into the rung call. Collapsed to one source (the frequency
+> is handed DOWN), and a block now asserts WHICH frequencies were burned.
+>
+> **62 reddened NOTHING** either: no fixture reached the branch where the RUNG itself declares a lever
+> wall, so the verdict was satisfied by a path no run could enter — EXP-0073's class, met for the
+> second time in this plan. A fixture was added and the branch now goes red.
+>
+> 🟡 **AND ONE GUARD HAD TO BE CORRECTED RATHER THAN SATISFIED — `firstInversion`.** A sweep walks
+> top-down, so between the frequency it just closed and the ones it has not reached there is ALWAYS an
+> apparent inversion: the closed row dropped to its measured voltage while its lower neighbours still
+> hold the higher FACTORY value. The validator judged that an inversion and refused every save, so the
+> sweep stopped at its first write — **a guard causing the very regression it exists to prevent**, the
+> trap R12 and R13 both name and which R13's own first version fell into. The correction is narrow and
+> it is the honest one: **an inversion is a contradiction between two MEASUREMENTS**, and a row at its
+> factory value is not a measurement. A finished document has no unmeasured rows, so nothing it could
+> catch before is lost, and a contradiction ACROSS an unmeasured gap is still caught. The boundary is
+> stated where the code is: a partially swept document is CONSISTENT but not APPLICABLE, and
+> applicability belongs to epic 02's phase 5.
 
 ### 4.6 — The refinement: a coarse failure is not an edge ✅ **DONE 2026-08-15 23:4x**
 
@@ -457,7 +531,7 @@ failure reproduced (1).
 | 4.2 | the no-evidence identity block green; the `seedRejected` fixture prints its line; both mutation-proved |
 | 4.3 | ✅ **22 blocks, `engine --selftest` 115 → 137, zero writes.** The paper refusal keeps the atom uncalled; the re-assertion voids a PASS taken on a foreign voltage; a dirty rollback voids a PASS; the holder is named on every rung and no pin reaches the atom under a curve-held ceiling. Mutations 34–39, each reddening its own block |
 | 4.4 | ✅ **`npm run journal -- --selftest` 17 blocks + 7 wiring blocks in the engine (137 → 144), zero writes.** The atom sees the intent already on disk at the instant it is called; a throwing atom leaves the rung as a dead machine would and the next launch names it `ЗАВИС`; two consecutive hangs block the rung, one hang does not. Mutations 40, 42–48 |
-| 4.5 | a scripted full-band run on injected everything closes every point with one of three verdicts |
+| 4.5 | ✅ **27 blocks (`engine --selftest` 156 → 183, `curve --selftest` 40 → 42), zero writes, plus `npm run traps` 22 → 28 assertions with ZERO pending.** A scripted full-band run closes every point with one of TWO verdicts; the document is saved before the next rung and never saved unvalidated; `recover` runs once and first; two consecutive hangs stop the sweep untouched. Mutations 54–63, each reddening its own block — and two of them found holes on the first pass |
 | 4.6 | ✅ **12 blocks (144 → 156), zero writes.** The walk descends by grid steps from the last PASS; the shipped voltage is `V_fail + 10 mV` SNAPPED UP to a voltage the card has; a non-reproducing failure is named as such; a non-PASS non-fail halts. Mutations 49–53 |
 | 4.7 | planned rungs == walked rungs, computed once |
 | phase | `npm run watchdog -- --status` unarmed before and after · `npm run check` green |
@@ -565,6 +639,33 @@ failure reproduced (1).
   Three assertions in the new blocks threw under mutation instead of reddening, and a class fixed three
   times by hand needs a mechanism. **The other eleven suites do not have this net**, and that is stated
   rather than quietly generalized — retro-fitting them is its own backlog item, not a rider on this step.
+**Added while EXECUTING §4.5 (2026-08-16 00:3x):**
+
+- **The third verdict `clock-floor` is NOT implemented, and the plan's own §4.5 was wrong to list it.**
+  The arbiter is `plans/13` §8.7 — the parent plan, written later than the owner retired numbered
+  points — plus `curve-store`'s CLOSED status vocabulary, which does not contain it. Found by looking
+  for the arbiter instead of deciding (EXP-0074); the heading is corrected in place.
+- **The inheritance status is the RUNG'S VERDICT, and the honesty lives in `provenBy`.** E2-AC2 wants
+  a verdict on each of the 389 frequencies; E2-AC3 blesses inheritance as «the same measured fact»;
+  and `provenBy` is a REQUIRED field for a proven status precisely so a status can never stand without
+  naming its witness. So an inherited row carries the rung's verdict AND a witness that says whose
+  burn it was and why the direction is safe. Writing `stock` there instead would have made E2-AC2
+  unreachable; writing the verdict with a silent witness would have been the false `[TESTED]` class.
+- **The ratchet reconciles two contradicting MEASUREMENTS by raising, never by clamping down.** A lower
+  frequency measuring more than an already-closed higher one is the rare case the owner named himself.
+  Shipping the higher frequency at a voltage a lower one demonstrably failed at would be shipping a
+  known failure, so the higher rows come UP. It touches ONLY measured rows — raising an untouched
+  factory row would be inventing a measurement, and it cannot be needed anyway because the factory
+  table is monotone.
+- **A partially swept document is CONSISTENT but not APPLICABLE, and that boundary is written into
+  `firstInversion` rather than left to be discovered.** Refusing to SAVE incomplete knowledge would
+  simply lose it; refusing to APPLY it is a real requirement and it belongs to phase 5.
+- **The sweep's stop reasons travel as FIELDS** (`blocked`, `undo`), never as substrings of their own
+  messages. A caller that reads prose to decide is a truth↔mirror pair created on purpose, and it goes
+  silent the first time a sentence is reworded (R10a states the same rule for the rollback).
+- **The frequency of a rung has ONE source and it is handed DOWN.** Two places naming it is what let
+  mutation 55 pass unnoticed — the decision moved to another frequency while the burn stayed put.
+
 **Added while EXECUTING §4.6 (2026-08-15 23:4x):**
 
 - **The shipped voltage SNAPS UP to the grid, and the direction is the decision.** `V_fail + 10 mV` is
