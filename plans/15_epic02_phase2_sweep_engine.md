@@ -237,27 +237,74 @@ none — the baseline printed 0 red and its completion line, which is the second
 | 38 | pin even when the CURVE holds the ceiling | 1 | «ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА» (got `pinMhz = 2842`) |
 | 39 | let a dirty rollback still report PASS | 2 | «грязный откат отменяет PASS» + «называет, какой шаг не отработал» |
 
-### 4.4 — The write-ahead journal: a hang becomes a verdict 🔲
+### 4.4 — The write-ahead journal: a hang becomes a verdict ✅ **DONE 2026-08-15 23:2x**
 
 *Anchor: `GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК»; `researches/09` §2.4 (the industry's
 crash-then-read-back shape).*
 
-- [ ] `runs/sweep/journal.jsonl` — **append-only, one line per rung, flushed and `fsync`ed BEFORE the
-      card is touched**: `{seq, at, frequencyMhz, targetPoint, voltageMv, depthMv, zone, seeded,
-      holder, state: 'intent'}`. A second line with `state: 'verdict'` closes it.
-- [ ] **On launch, an `intent` with no `verdict` IS the answer:** that rung is marked `ЗАВИС` — a
-      first-class verdict beside `SDC` and `CRASH` — attributed to its exact (point, voltage), and the
-      sweep continues from the next rung. This is the owner's step 12, executed.
-- [ ] **Resume is a COMMAND, not a scheduled task** (`GOAL.md` → «🧑‍💻 ЧЕЛОВЕК ЗА МАШИНОЙ»): the same
-      `--sweep` invocation sees an unfinished journal and continues instead of restarting. Nothing is
-      installed into the boot path — the phase that would have needed it is deleted.
-- [ ] **F2-AC5, the only emergency stop left:** two consecutive `ЗАВИС` at the SAME (point, voltage) →
-      refuse to start it a third time, name it, exit non-zero. That is a fault, not an edge.
-- [ ] `watchdog --recover` runs first when a record is found at rest — never begin on a state nobody
-      can describe.
+- [x] `runs/sweep/journal.jsonl` — **append-only, one line per rung, written and `fsync`ed BEFORE the
+      card is touched** (`lib/sweep-journal.mjs`). `writeFileSync(…, 'a')` returns when the data reaches
+      the OS page cache, **not the platter**, and a hang hard enough to need the reset button takes that
+      cache with it — so the journal would have been durable exactly when nothing went wrong. The
+      sequence is open → write → **fsync** → close, and the `fs` seam is injected so the ORDER is
+      provable rather than asserted.
+- [x] **It is its own module, not a second `vmin-store`.** They answer different questions and are keyed
+      differently: the ratchet answers «what offset is this point still allowed», the journal answers
+      «what was in flight when the machine died», and it is keyed the way the owner settled the project
+      speaks — by FREQUENCY and the VOLTAGE serving it, never a table index (EXP-0053, R14b). One file
+      holding two truths is how a session updates the side it sees and misses the other.
+- [x] **On launch, an `intent` with no `verdict` IS the answer:** that rung is closed as `ЗАВИС` —
+      `config.VERDICT.HUNG`, first-class beside `SDC` and `CRASH` by the owner's word — attributed to
+      its exact (frequency, voltage). **The closure is APPENDED, not re-derived**, and that is what makes
+      «two in a row» countable at all: an orphan re-inferred on every launch would be one event or a
+      hundred depending on how often someone ran the command.
+- [x] **Resume is a COMMAND, not a scheduled task** (`GOAL.md` → «🧑‍💻 ЧЕЛОВЕК ЗА МАШИНОЙ»):
+      `resumeState()` is what that command reads — what hung, what is blocked, where to carry on.
+      Nothing is installed into the boot path.
+- [x] **F2-AC5, the only emergency stop left:** two **consecutive** `ЗАВИС` at the SAME (frequency,
+      voltage) → the rung is not started a third time, and it is named as a FAULT rather than an edge.
+      **Consecutive, not cumulative** — a rung that hung, ran cleanly, then hung again is a
+      probabilistic edge (this card has shown one, fact 28), and blocking it would delete a real
+      observation. Enforced at the point the card is touched (`runRung`), from a set the caller computes
+      once: within one process a rung can hang at most once, because the hang ends the process.
+- [ ] `watchdog --recover` runs first when a record is found at rest — **carried to §4.5**: it is a
+      once-per-SWEEP action, not a per-rung one, and the atom already performs its own preflight
+      recovery on every rung (`vf-step.runStep` step 1).
 
-**Verification:** the drill of F2-AC4 — kill the process between the intent write and the verdict write
-(injected), re-launch, assert the killed rung is named and marked; plus a two-crash fixture for F2-AC5.
+**Verification — RUN, 2026-08-15 23:2x.** `npm run journal -- --selftest`: **17 blocks**, sandboxed, and
+the production journal is photographed before and after (EXP-0025, `bugs/08`). `engine --selftest`
+**137 → 144**: seven more blocks proving the WIRING, which cannot be checked inside the journal module
+because only the rung knows when the card is touched.
+
+**The drill that closes F2-AC4 is in the engine's suite and it is an ORDERING proof, not an outcome
+one:** the injected atom reads the journal AT THE MOMENT it is called — i.e. at the instant the card
+would be touched — and reports what it finds. It finds the intent. A rung whose intent landed after the
+write would find nothing. The kill drill sits beside it: a throwing atom leaves the rung exactly as a
+dead machine would, and the next launch names that exact rung and closes it `ЗАВИС`.
+
+Eight mutations, addressees named in both suite headers BEFORE the run, each reddening its own blocks
+and both suites completing:
+
+| # | Mutation | Red | Its own block |
+|---|---|---|---|
+| 40 | append without the `fsync` | 2 | «намерение на диске ДО обращения к карте: fsync вызван» + the order block |
+| 42 | infer a hang instead of CLOSING it | 5 | exclusive: «повторный запуск НЕ считает то же зависание заново» |
+| 43 | count hangs cumulatively, not consecutively | 1 | «через успешный прогон это ВЕРОЯТНОСТНЫЙ край» |
+| 44 | treat a truncated line as an orphan intent | 2 | «обрезанная строка СЧИТАЕТСЯ, но ступени из неё не выдумывают» |
+| 45 | take a bare path as the journal directory | 1 | «путь СТРОКОЙ — громкий отказ, а не молчаливый продакшен» |
+| 46 | write the intent AFTER the atom | 4 | «НАМЕРЕНИЕ УЖЕ НА ДИСКЕ В МОМЕНТ, КОГДА ТРОГАЮТ КАРТУ» |
+| 47 | skip the verdict line that closes the intent | 1 | «вердикт ЗАКРЫВАЕТ намерение» |
+| 48 | ignore the blocked-rung set | 1 | «повесившая машину ДВАЖДЫ ПОДРЯД третий раз не начинается» |
+
+> ⚠️ **AND THE FIRST RUN OF THOSE MUTATIONS FOUND A DEFECT IN THE NEW BLOCKS THEMSELVES, which is the
+> half worth keeping.** Mutations 42 and 46 did not redden anything — they made three assertions
+> *throw* (`.find(…).verdict`, `list[0].why`), and a thrown assertion takes the whole report with it, so
+> the harness read «suite did not complete» instead of the name of what broke. That is EXP-0040's rule
+> about assertions that kill the reporter, met three times in one sitting. Each site was fixed with
+> `?.` and a spoken fallback — and because a class fixed three times by hand is a class that needs a
+> mechanism, `sweep-journal` now runs its suite through `runSelfTest()`, which turns a crash into ONE
+> RED BLOCK naming the exception instead of a dead report. **The other suites do not have that net yet;
+> it is named here rather than claimed.**
 
 ### 4.5 — The sweep: the loop, and the three verdicts 🔲
 
@@ -383,7 +430,7 @@ crash-then-read-back shape).*
 | 4.1 | `engine --selftest` — the 2842 MHz ladder is 28 rungs, the 2400 MHz ladder is 7, mapping rounds shallow |
 | 4.2 | the no-evidence identity block green; the `seedRejected` fixture prints its line; both mutation-proved |
 | 4.3 | ✅ **22 blocks, `engine --selftest` 115 → 137, zero writes.** The paper refusal keeps the atom uncalled; the re-assertion voids a PASS taken on a foreign voltage; a dirty rollback voids a PASS; the holder is named on every rung and no pin reaches the atom under a curve-held ceiling. Mutations 34–39, each reddening its own block |
-| 4.4 | the kill drill — re-launch names the killed rung and marks it `ЗАВИС`; the two-crash fixture stops the sweep |
+| 4.4 | ✅ **`npm run journal -- --selftest` 17 blocks + 7 wiring blocks in the engine (137 → 144), zero writes.** The atom sees the intent already on disk at the instant it is called; a throwing atom leaves the rung as a dead machine would and the next launch names it `ЗАВИС`; two consecutive hangs block the rung, one hang does not. Mutations 40, 42–48 |
 | 4.5 | a scripted full-band run on injected everything closes every point with one of three verdicts |
 | 4.6 | a coarse failure fixture closes at `V_fail(5 mV) + 10 mV`, with the refinement burns in the journal |
 | 4.7 | planned rungs == walked rungs, computed once |
@@ -470,6 +517,28 @@ crash-then-read-back shape).*
   non-positive offset, which would hand the sweep an exception where it needs an outcome. A rung of a
   descent has Δ > 0 by the same argument that makes the serving entry unique; a caller that supplies a
   voltage already serving the clock at stock gets told exactly that.
+**Added while EXECUTING §4.4 (2026-08-15 23:2x):**
+
+- **The journal is a NEW module, not a widened `vmin-store`.** Same reasoning R14a gives for the curve
+  document: two truths in one file is how a session updates the side it sees. They are keyed
+  differently (frequency+voltage vs. point+offset) and have different lifecycles.
+- **`config.VERDICT` gained `HUNG: 'ЗАВИС'`** — the owner said it is first-class beside `SDC` and
+  `CRASH`, so the code says the same. It is the one verdict no oracle ever returns: nobody is alive to
+  report a hang, and it is DERIVED at the next launch. No consumer iterates `VERDICT`, so the addition
+  is additive.
+- **The verdict line is fsynced too, not only the intent.** A verdict lost to the page cache would make
+  the next launch read a finished rung as the one that killed the machine — and on the second such loss
+  it would BLOCK a rung that never misbehaved. The cost is microseconds against a 10 s burn.
+- **`watchdog --recover` stays a per-SWEEP action and is carried to §4.5**, because the atom already
+  runs its own preflight recovery on every rung; a second per-rung recovery would be a duplicate whose
+  two copies could disagree.
+- **The blocked-rung set is computed ONCE by the caller, not re-read per rung.** Within one process a
+  rung can hang at most once — the hang ends the process — so a per-rung re-read of the journal would
+  buy nothing and cost a file read per rung.
+- **`sweep-journal` runs its suite through `runSelfTest()`, which turns a crash into a red block.**
+  Three assertions in the new blocks threw under mutation instead of reddening, and a class fixed three
+  times by hand needs a mechanism. **The other eleven suites do not have this net**, and that is stated
+  rather than quietly generalized — retro-fitting them is its own backlog item, not a rider on this step.
 - **The short probe is a ONE-ELEMENT SET, not the legacy single-shape path.** Going through
   `judgeCandidate` costs nothing and buys the field `worstShape` — the shape that decided — which the
   single-shape path does not produce. A rung record that cannot name the load that judged it is a

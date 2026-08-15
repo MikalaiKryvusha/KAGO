@@ -40,6 +40,7 @@
     "setup": "node automation-engine/setup-desktop.mjs",
     "tray:selftest": "powershell -NoProfile -ExecutionPolicy Bypass -File automation-engine/tray.ps1 -SelfTest",
     "curve": "node automation-engine/lib/curve-store.mjs",
+    "journal": "node automation-engine/lib/sweep-journal.mjs",
     "vgpu": "node automation-engine/lib/virtual-gpu.mjs",
     "traps": "node automation-engine/lib/trap-suite.mjs",
     "contract": "node automation-engine/lib/seam-contract.mjs",

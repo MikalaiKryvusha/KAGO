@@ -63,6 +63,12 @@ import { marginAboveFailureMv } from './config.mjs';
 // lazily, inside the functions that write, so nothing here reaches for koffi or the driver.
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
 import { DIVERSE_SET } from './lib/stress-tester.mjs';
+import { localIso } from './lib/card-grids.mjs';
+import {
+  writeIntent, writeVerdict,
+  openJournal, readJournal, orphanIntents, resumeState,
+  assertSandbox as assertJournalSandbox,
+} from './lib/sweep-journal.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -417,6 +423,12 @@ export async function runRung({
   sustain = config.SWEEP_PROBE_SECONDS ?? 10,
   shapes = SHORT_PROBE,
   pinCard = null,
+  // Carried into the journal, not used by the decision: after a hang these three are what a post-mortem
+  // has to reconstruct the descent from — how deep this rung sat, which policy zone produced it, and
+  // whether the descent had been seeded at this frequency (§4.2).
+  depthMv = null,
+  zoneStepMv = null,
+  seeded = false,
   // WHETHER A CLOCK PIN IS AVAILABLE AT ALL — and this parameter exists because without it F2-AC9's
   // refusal branch is UNREACHABLE. `chooseWriteShape` refuses only when the curve cannot hold the
   // ceiling AND nothing is pinned; a caller that hard-codes «pinned: true» can never see that answer,
@@ -425,6 +437,17 @@ export async function runRung({
   // it from the card's own clock ladder: no ladder, no pin, and a rung below the curve's cap floor
   // then has no holder and is refused BEFORE any write instead of discovered mid-burn.
   canPin = true,
+  // THE WRITE-AHEAD JOURNAL (§4.4), and it is wired HERE rather than in the sweep loop for one
+  // reason: the intent must be durable in the instruction before the card is touched, and this is the
+  // function that touches it. Anywhere else leaves a gap, and the gap is exactly where a hang lands.
+  // `null` keeps the rung journal-less, which is what every offline fixture wants.
+  journal = null,
+  seq = null,
+  // Rungs already closed as «two hangs in a row» (F2-AC5). Computed ONCE by the caller from
+  // `sweep-journal.resumeState`, because within a single process a rung can hang at most once — the
+  // hang ends the process — so re-reading the journal per rung would buy nothing.
+  blockedKeys = null,
+  now = null,
   runStepFn,
   buildVector = null,
   chooseShape = chooseWriteShape,
@@ -493,7 +516,32 @@ export async function runRung({
   // НЕИЗВЕСТНО. `pinRequired` is the field that decides it, and it belongs to `chooseWriteShape`.
   const pinMhz = held.pinRequired ? clockMhz : null;
 
-  // ---- 3. THE ATOM. Everything dangerous happens inside it, and all of it is already proved.
+  // ---- 3. THE ONE EMERGENCY STOP THE OWNER LEFT (F2-AC5). Two hangs in a row on this rung is a
+  // fault, not an edge, and a third attempt buys nothing but another reboot.
+  const key = `${clockMhz}/${voltageMv}`;
+  if (blockedKeys && blockedKeys.has(key)) {
+    return stop('refused', `СТУПЕНЬ ЗАБЛОКИРОВАНА ЖУРНАЛОМ: ${clockMhz} МГц / ${voltageMv} мВ повесила машину `
+      + 'ДВА РАЗА ПОДРЯД. Это не край, а поломка — край даёт вердикт оракула, поломка повторяется. Третий раз не начинаем');
+  }
+
+  // ---- 4. THE INTENT, DURABLE BEFORE THE FIRST BYTE REACHES THE CARD.
+  //
+  // A rung that hangs the machine kills the process with it, so nothing survives to write a verdict:
+  // the only record that CAN exist is this one, written and fsynced in advance. That is what turns the
+  // owner's accepted risk into a measurement instead of a lost evening (`GOAL.md` → «⚠️ ЗАВИСАНИЕ —
+  // ОСОЗНАННЫЙ РИСК»). Nothing above this line touched the card, so nothing above it is journalled —
+  // an intent for a rung that was refused on paper would be a rung nobody ran.
+  const stamp = now ? now() : localIso();
+  if (journal) {
+    writeIntent(journal, {
+      seq, at: stamp,
+      frequencyMhz: clockMhz, voltageMv, pointIndex: plan.entry.i,
+      deltaMhz: plan.deltaMhz, depthMv, zoneStepMv, seeded,
+      holder: held.heldBy, writeShape: held.shape,
+    });
+  }
+
+  // ---- 5. THE ATOM. Everything dangerous happens inside it, and all of it is already proved.
   record.cardTouched = true;
   const atom = await runStepFn({
     point: plan.entry.i,
@@ -513,55 +561,71 @@ export async function runRung({
   record.deliveredMaxMhz = atom?.deliveredMaxMhz ?? null;
   record.servingMvAfter = atom?.undervolt?.after?.mv ?? null;
 
-  // ---- 4. DID THE CARD COME BACK? Asked before anything else, because every later question is about
+  // FROM HERE ON, EVERY EXIT CLOSES THE JOURNAL LINE — an intent left open by a rung that finished is
+  // a rung the next launch would blame for a hang that never happened. Twice in a row it would even
+  // BLOCK that rung. So the closure runs through one function rather than being repeated at six
+  // returns, which is the only way it cannot be forgotten at the seventh.
+  const close = (result) => {
+    if (journal) {
+      writeVerdict(journal, {
+        seq, at: now ? now() : localIso(),
+        outcome: result.outcome, verdict: result.verdict,
+        decidedBy: result.decidedBy, servingMvAfter: result.servingMvAfter,
+        why: result.why,
+      });
+    }
+    return result;
+  };
+
+  // ---- 6. DID THE CARD COME BACK? Asked before anything else, because every later question is about
   // a card whose state we can describe.
   const dirty = (atom?.blocks ?? []).filter((b) => b && b.undo === true && b.ok === false);
   record.undoClean = dirty.length === 0;
   if (dirty.length) {
-    return stop('unknown', `ОТКАТ НЕ ЧИСТ на ${clockMhz} МГц / ${voltageMv} мВ — ${dirty.length} шаг(ов) не отработали: `
+    return close(stop('unknown', `ОТКАТ НЕ ЧИСТ на ${clockMhz} МГц / ${voltageMv} мВ — ${dirty.length} шаг(ов) не отработали: `
       + `${dirty.map((b) => b.name).join(' · ')}. Следующая ступень стартовала бы на карте, состояние которой `
-      + 'никто не может назвать, и это СТОП, а не вердикт о напряжении');
+      + 'никто не может назвать, и это СТОП, а не вердикт о напряжении'));
   }
 
-  // ---- 5. THE ORACLE COULD NOT JUDGE — a STOP, never progress (EXP-0011).
+  // ---- 7. THE ORACLE COULD NOT JUDGE — a STOP, never progress (EXP-0011).
   if (record.verdict === null) {
     const failed = (atom?.blocks ?? []).filter((b) => b && b.ok === false).map((b) => b.name);
-    return stop('unknown', `НЕИЗВЕСТНО на ${clockMhz} МГц / ${voltageMv} мВ — оракул не вынес вердикта`
+    return close(stop('unknown', `НЕИЗВЕСТНО на ${clockMhz} МГц / ${voltageMv} мВ — оракул не вынес вердикта`
       + (atom?.reason ? `: ${atom.reason}` : '')
       + (failed.length ? ` · красные блоки: ${failed.join(' · ')}` : '')
-      + '. Это СТОП: уточнять край вокруг ненаблюдённой границы значило бы выдумать измерение');
+      + '. Это СТОП: уточнять край вокруг ненаблюдённой границы значило бы выдумать измерение'));
   }
 
-  // ---- 6. THE RE-ASSERTION, AGAINST THE CARD'S OWN RE-READ TABLE.
+  // ---- 8. THE RE-ASSERTION, AGAINST THE CARD'S OWN RE-READ TABLE.
   //
   // The plan proved this voltage WOULD serve the clock; only the card can say it DID. A mismatch is
   // not a failure of the silicon — it is the instrument having measured something nobody ordered, and
   // a verdict about an unordered voltage is worse than no verdict at all.
   if (record.servingMvAfter === null) {
-    return stop('void', `ступень ${clockMhz} МГц / ${voltageMv} мВ прошла с вердиктом ${record.verdict}, но карта НЕ сказала, `
-      + 'какое напряжение обслуживало частоту после записи — отсутствие наблюдения не является наблюдением совпадения');
+    return close(stop('void', `ступень ${clockMhz} МГц / ${voltageMv} мВ прошла с вердиктом ${record.verdict}, но карта НЕ сказала, `
+      + 'какое напряжение обслуживало частоту после записи — отсутствие наблюдения не является наблюдением совпадения'));
   }
   if (record.servingMvAfter !== voltageMv) {
-    return stop('void', `СТУПЕНЬ ИЗМЕРИЛА ЧУЖОЕ НАПРЯЖЕНИЕ: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
+    return close(stop('void', `СТУПЕНЬ ИЗМЕРИЛА ЧУЖОЕ НАПРЯЖЕНИЕ: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
       + `частоту обслуживало ${record.servingMvAfter} мВ по ПЕРЕЧИТАННОЙ таблице карты. Вердикт ${record.verdict} `
-      + 'относится не к заказанному напряжению и в документ кривой не идёт');
+      + 'относится не к заказанному напряжению и в документ кривой не идёт'));
   }
 
-  // ---- 7. THE VERDICT, AT LAST — and a failure is a SIGNAL, never the edge (§4.6).
+  // ---- 9. THE VERDICT, AT LAST — and a failure is a SIGNAL, never the edge (§4.6).
   if (isPass(record.verdict)) {
-    return {
+    return close({
       ...record,
       outcome: 'passed',
       why: `${voltageMv} мВ обслуживает ${clockMhz} МГц и ПРОШЛО (сдвиг +${plan.deltaMhz} МГц, потолок держит ${held.heldBy}`
         + `${record.decidedBy ? `, решала форма ${record.decidedBy}` : ''})`,
-    };
+    });
   }
-  return {
+  return close({
     ...record,
     outcome: 'failed',
     why: `ОТКАЗ ${record.verdict} на ${clockMhz} МГц / ${voltageMv} мВ${record.decidedBy ? ` (форма ${record.decidedBy})` : ''}. `
       + 'Это СИГНАЛ, что край рядом, а НЕ край: край ищется шагом 5 мВ, и только к нему применяется запас +10 мВ',
-  };
+  });
 }
 
 /**
@@ -1421,6 +1485,13 @@ export async function searchEdge({
  *  38. pin even when the CURVE holds the ceiling                → «ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА: под кривой закрепления нет»
  *  39. let a dirty rollback still report PASS                   → «грязный откат отменяет PASS»
  *
+ * ADDED WITH `plans/15` §4.4 — the write-ahead journal, WIRED where the card is touched. (The
+ * journal's own logic carries addressees 40–45 in `lib/sweep-journal.mjs`; these three are the
+ * wiring's.) Named BEFORE the run:
+ *  46. write the intent AFTER the atom instead of before   → «НАМЕРЕНИЕ УЖЕ НА ДИСКЕ В МОМЕНТ, КОГДА ТРОГАЮТ КАРТУ»
+ *  47. skip the verdict line that closes the intent        → «вердикт ЗАКРЫВАЕТ намерение»
+ *  48. ignore the blocked-rung set                         → «повесившая машину ДВАЖДЫ ПОДРЯД третий раз не начинается»
+ *
  * ⚠️ AND THE HARNESS ITSELF FAILED FIRST, which is the reusable part: its first version filtered the
  * output for «FAIL» while this suite prints «ПЛОХО», so it reported **0 red for all four mutations** —
  * a blind verifier reading exactly like a clean bill of health (EXP-0016's third face). It now also
@@ -1765,6 +1836,85 @@ export function selfTest() {
     ok('запись ступени несёт всё, на чём будет ключеваться журнал',
       ['frequencyMhz', 'voltageMv', 'deltaMhz', 'pointIndex', 'outcome', 'verdict', 'writeShape', 'holder', 'undoClean']
         .filter((k) => good[k] === undefined), []);
+
+    // =============================================================================================
+    // `plans/15` §4.4 — THE WRITE-AHEAD JOURNAL, WIRED WHERE THE CARD IS TOUCHED
+    //
+    // The journal's own logic is proved in `sweep-journal --selftest` (17 blocks). What is proved
+    // HERE is the WIRING, and specifically its ORDER — the property that cannot be checked inside the
+    // journal module because only the rung knows when the card is touched.
+    // =============================================================================================
+
+    const journalBox = mkdtempSync(join(tmpdir(), 'kago-engine-journal-'));
+    try {
+      const jrn = openJournal({ dir: join(journalBox, 'wired') });
+      const clock = () => '2026-08-15T23:15:00+03:00';
+
+      // THE DRILL, and it is the whole criterion F2-AC4: the atom looks at the journal AT THE MOMENT
+      // it is called — i.e. at the instant the card would be touched — and reports what it finds
+      // there. A rung whose intent lands after the write would find nothing.
+      let seenAtCardTime = null;
+      const wired = await runRung({
+        points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+        buildVector: vectorCapped, journal: jrn, seq: 1, now: clock,
+        depthMv: 45, zoneStepMv: 25, seeded: true,
+        runStepFn: async () => {
+          seenAtCardTime = readJournal(jrn).records.map((r) => [r.state, r.frequencyMhz ?? null, r.voltageMv ?? null]);
+          return atomPass(1000);
+        },
+      });
+      ok('НАМЕРЕНИЕ УЖЕ НА ДИСКЕ В МОМЕНТ, КОГДА ТРОГАЮТ КАРТУ (и это F2-AC4 целиком)',
+        seenAtCardTime, [['intent', 2842, 1000]]);
+      ok('и оно несёт всё, чем восстанавливают спуск после перезагрузки',
+        (() => { const i = readJournal(jrn).records[0]; return [i.depthMv, i.zoneStepMv, i.seeded, i.holder, i.writeShape, i.pointIndex]; })(),
+        [45, 25, true, 'кривая', 'raise-and-cap', 90]);
+      ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
+        [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
+
+      // A rung refused ON PAPER never reaches the journal: an intent for a rung nobody ran is a rung
+      // the next launch would mark ЗАВИС for a hang that never happened.
+      const jrn2 = openJournal({ dir: join(journalBox, 'paper-refusal') });
+      await runRung({
+        points: tablePoints, clockMhz: 2842, voltageMv: 745,
+        buildVector: vectorCapped, journal: jrn2, seq: 1, now: clock,
+        runStepFn: atom(atomPass(1000)),
+      });
+      ok('бумажный отказ в журнал НЕ попадает — это ступень, которую никто не прогонял',
+        readJournal(jrn2).records.length, 0);
+
+      // THE KILL DRILL. A throwing atom leaves the rung exactly as a dead machine would: an intent
+      // with no verdict. The next launch must name that rung and close it as ЗАВИС.
+      const jrn3 = openJournal({ dir: join(journalBox, 'killed') });
+      let died = false;
+      try {
+        await runRung({
+          points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, journal: jrn3, seq: 7, now: clock,
+          runStepFn: async () => { throw new Error('машина перестала существовать'); },
+        });
+      } catch { died = true; }
+      const after = resumeState(jrn3, { at: clock() });
+      ok('убитый посреди ступени прогон оставляет НАМЕРЕНИЕ, и следующий запуск называет ту самую ступень',
+        [died, after.hung.map((h) => [h.frequencyMhz, h.voltageMv, h.seq])], [true, [[2842, 1000, 7]]]);
+      // `?.` with a spoken fallback, not a bare `.verdict` — a block that throws takes the report with
+      // it, and the mutation that should have reddened it reads as «suite did not complete» instead
+      // (EXP-0040). Measured: mutation 46 crashed this line before the fallback existed.
+      ok('и закрывает её вердиктом ЗАВИС — первого класса, словом владельца',
+        readJournal(jrn3).records.find((r) => r.state === 'verdict')?.verdict ?? 'строки вердикта нет вовсе',
+        config.VERDICT.HUNG);
+
+      // F2-AC5 at the point where the card is touched: a rung blocked by two hangs is not started.
+      atomLog.length = 0;
+      const blocked = await runRung({
+        points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+        buildVector: vectorCapped, runStepFn: atom(atomPass(1000)),
+        blockedKeys: new Set(['2842/1000']),
+      });
+      ok('ступень, повесившая машину ДВАЖДЫ ПОДРЯД, третий раз не начинается, и атом не зван',
+        [blocked.outcome, atomLog.length, /не край, а поломка/.test(blocked.why)], ['refused', 0, true]);
+    } finally {
+      rmSync(assertJournalSandbox({ dir: journalBox }), { recursive: true, force: true });
+    }
 
     // the card fails somewhere between 150 and 225
     const r1 = await run((o) => (o < 200 ? P : config.VERDICT.SDC));

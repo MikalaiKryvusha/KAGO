@@ -563,6 +563,15 @@ export const VERDICT = Object.freeze({
   PASS: 'PASS',    // output matches the golden reference and no fault was logged
   SDC: 'SDC',      // output differs, nothing crashed — the dangerous one
   CRASH: 'CRASH',  // a fault provider fired, or the process died
+  // THE MACHINE STOPPED EXISTING. Added 2026-08-15 on the owner's word (`GOAL.md` → «⚠️ ЗАВИСАНИЕ —
+  // ОСОЗНАННЫЙ РИСК»): *«Вердикт `ЗАВИС` — первого класса, наравне с `SDC` и `CRASH`.»*
+  //
+  // IT IS THE ONE VERDICT NO ORACLE EVER RETURNS, and that is not a quirk — it is why the write-ahead
+  // journal exists. Nobody is alive to report a hang, so it is DERIVED at the next launch from an
+  // intent that never got its verdict (`lib/sweep-journal.mjs`). Its value is the Russian word because
+  // it is printed to the owner and written into the curve document as the reason a frequency stands
+  // where it stands.
+  HUNG: 'ЗАВИС',
 });
 
 // =============================================================================================
