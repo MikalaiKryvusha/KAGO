@@ -125,6 +125,10 @@ reproduce `researches/09` §3.1 exactly — a disagreement means one of the two 
       in the same directory and rename over the target (rename is atomic on NTFS), so a crash mid-save
       leaves either the old document or the new one, never a truncated one. Phase 2's journal depends on
       this property and it is cheaper to build it here than to retrofit it after the first lost sweep.
+      **Promoted from prudence to a requirement by the owner, 2026-08-15:** *«зависание компа и
+      перезагрузка — осознанный риск»* (`GOAL.md`). A hang is now a NORMAL path through this code, not
+      an exceptional one, so «the machine died while we were saving» is a case this phase must handle
+      rather than a case it may hope to avoid.
 
 **Verification:** `--show` on a freshly seeded document — 127 points, 44 `clock-floor`, 9
 `above-card-max`, 74 in the working band, matching `researches/09` §3.2; `--verify` green against the
