@@ -3403,8 +3403,30 @@ export function selfTest() {
     ok('СТУПЕНЬ НАСЛЕДУЕТ ВНИЗ: прожгли одну частоту — закрылись все три',
       [closedOne.ok, closedOne.closed, closedOne.inherited],
       [true, 3, [2835, 2828]]);
+    // `?.` AND A SPOKEN FALLBACK — EXP-0075's prescribed form, and this block is why the lesson is a
+    // repeat offender: written the day AFTER the lesson, it still dereferenced the very field a
+    // mutation removes, so a judge's mutation that nulled the witness CRASHED the suite instead of
+    // reddening this block. A thrown assertion takes the whole report with it, which is worse than a
+    // false green because a false green at least completes.
     ok('и унаследованная строка НАЗЫВАЕТ, чей это был прожиг',
-      closedOne.doc.frequencies.find((r) => r.mhz === 2835).provenBy.includes('от 2842 МГц'), true);
+      closedOne.doc.frequencies.find((r) => r.mhz === 2835)?.provenBy?.includes('от 2842 МГц')
+        ?? 'свидетеля у унаследованной строки нет вовсе', true);
+    // The refusal that had NO block until a judge's mutation found it silent: `closePoint` forbids a
+    // voltage above stock, and `validateCurveDoc` forbids it again downstream — two guards, one of
+    // them unproven, which is EXP-0008's class («a check that has never failed proves nothing»).
+    // 2820 MHz sits at 1040 mV at stock, and 1045 is a real grid rung one step ABOVE it. The first
+    // draft of this block used 2842 / 1045 — which is EXACTLY that frequency's stock, not above it —
+    // and went red on intact code. The fixture was wrong, not the mutator; moving it onto a frequency
+    // where «above stock» can actually be expressed is the honest fix (the same class as §4.6's
+    // fixtures, EXP-0072 one level down).
+    ok('мутатор отвергает напряжение ВЫШЕ стокового — тюнинг снижает, а не поднимает',
+      closePoint(sweepDoc(bandRows), {
+        mhz: 2820, voltageMv: 1045, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'x',
+      }).ok, false);
+    ok('а РОВНО стоковое — не отвергает: это не подъём, а точка, которую не удалось удешевить',
+      closePoint(sweepDoc(bandRows), {
+        mhz: 2842, voltageMv: 1045, status: CURVE_STATUS.LEVER_LIMITED, provenBy: null,
+      }).ok, true);
     // Upward inheritance is the UNSAFE direction — a higher frequency needs at least as much voltage.
     ok('НАСЛЕДОВАНИЕ ТОЛЬКО ВНИЗ: вверх по частоте оно отвергается по имени',
       closePoint(sweepDoc(bandRows), {
