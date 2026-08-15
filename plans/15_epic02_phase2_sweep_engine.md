@@ -30,8 +30,8 @@ accepted hang). Nothing in it waits on a measurement.
 
 | Condition | State | Disposition |
 |---|---|---|
-| Phase 1 closed (`plans/14`) | 🔲 not started | **Waived for WRITING this plan; NOT waived for EXECUTING it.** No step below may run until the curve document and the grids exist |
-| `/fable-judge` over phase 1 | 🔲 not run | Same — it is this plan's entry gate (§2) |
+| Phase 1 closed (`plans/14_DONE`) | ✅ **closed 2026-08-15 21:2x** | The waiver has EXPIRED because the condition came true, which is the only honest way for a waiver to end. The curve document and both grids exist and validate against the live card |
+| `/fable-judge` over phase 1 | ✅ **passed 2026-08-15 21:2x** — VERIFIED WITH CAVEATS | Recorded in `plans/14_DONE` §9. Execution of the steps below is now unblocked |
 
 **Phases 3–5 stay skeletons on purpose.** They are live runs, and what they should do next depends on
 what the sweep MEASURES — the count of seeding fallbacks, where the lever wall actually lands, how many
@@ -63,13 +63,18 @@ up as an edge.
 
 ## 2. Entry gate
 
+> ✅ **THE GATE IS OPEN — checked 2026-08-15 21:2x, and it was NOT open before that.** Phase 1 was
+> built on 17:28 and left unclosed; sessions 22 and 23 went on to epic 03 over it. Session 24 ran the
+> judge, fixed its three findings and closed `plans/14_DONE` — the row-by-row evidence is that plan's
+> §9, and it is the artifact this table points at rather than a claim repeated here.
+
 | Gate | Required state | Evidence |
 |---|---|---|
-| Phase 1 closed | curve document + both grids exist and validate | `npm run curve -- --show` · `--verify` green |
-| `/fable-judge` over phase 1 | passed | its verdict recorded in `plans/14` |
-| `npm run check` green | 33+ files, 0 failures | — |
-| Watchdog unarmed | no record held at rest | `npm run watchdog -- --status` |
-| Goldens valid | every stamp matches the live card | `npm run stress -- --verify-baseline` |
+| Phase 1 closed | curve document + both grids exist and validate | ✅ `--show`: 389 rows · `--verify` against the LIVE card: **127 voltage rungs, 0 disagreements** |
+| `/fable-judge` over phase 1 | passed | ✅ **VERIFIED WITH CAVEATS**, recorded in `plans/14_DONE` §9. Three caveats, all documentation, all repaired |
+| `npm run check` green | 33+ files, 0 failures | ✅ **39 files, 0 failed**, plus 233 text files scanned for encoding corruption, 0 corrupt |
+| Watchdog unarmed | no record held at rest | ✅ «СТОРОЖ НЕ ВЗВЕДЁН» |
+| Goldens valid | every stamp matches the live card | 🔲 **checked at the moment it first matters** — this phase writes nothing and loads nothing, so a stale golden cannot poison it; the check belongs to the first step that runs a burn (phase 3). Stated rather than silently skipped |
 
 ## 3. Acceptance criteria
 
