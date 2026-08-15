@@ -173,16 +173,34 @@ to make point j serve the pinned clock C:  Δ = C − F_j   (a UNIFORM raise)
 Every point below j has a lower stock frequency, so after a uniform Δ none of them reaches C — **point
 j becomes the serving point by construction**, with no cap needed to arrange it.
 
-- [ ] `runRung({ clockMhz, targetPointIndex, seconds, shapes })`:
-      arm the watchdog → **pin** through `profile-manager` (`-lgc C,C`) → write the uniform raise →
-      read back until two samples agree (EXP-0014) → assert the serving point IS `targetPointIndex` →
-      load → judge → **release and zero in a `finally`, as a LIST** (R10a: a throwing undo must not
-      cancel the ones behind it).
+> **STEP 4.3 IS HALF DONE — 2026-08-15 23:0x. The PAPER half is built and proved; the LIVE half is
+> not, and it is listed unticked below rather than folded into a summary.**
+
+- [x] **`planRung({ points, clockMhz, voltageMv })` — the rung's arithmetic, pure.** Δ = C − F_V, the
+      lever's ±1000 MHz bound, and the choice of which entry ends up serving. **`servingAfterRaise`
+      evaluates the card's OWN rule (lowest voltage among those reaching C) on the raised curve**, so
+      "serving" has one definition shared with `vf-step.voltageForClock` rather than two.
+- [x] **«By construction» is COMPUTED, not asserted.** The plan's own argument — every lower-voltage
+      entry has a lower stock frequency, so the chosen one becomes the serving one automatically — is
+      true of a MONOTONE table and this project has already paid for treating such an argument as a
+      proof (R12, EXP-0057). A non-monotone table would hand the load to a different voltage while
+      every read-back agreed. `planRung` therefore refuses and names BOTH entries. **Checked on paper
+      first because a refusal that costs nothing beats one that costs a watchdog lease.**
+- [x] **The lever wall is its own outcome (`leverLimited`), never an ordinary refusal** — the seed of
+      the `lever-limited` verdict (`plans/13` E2-AC2). Mutation 33 proves it cannot be flattened.
+- [ ] **The LIVE orchestration** — arm the watchdog → **pin** through `profile-manager` (`-lgc C,C`) →
+      write the uniform raise → read back until two samples agree (EXP-0014) → re-assert the serving
+      entry **against the card's own re-read table** → load → judge → **release and zero in a `finally`,
+      as a LIST**. `vf-step.runUndo` is that list and is already built and proved (R10a); this step
+      composes it, it does not re-implement it.
 - [ ] **F2-AC9, the ceiling's holder, named per rung.** A uniform raise for a deep undervolt pushes the
       curve's top above the card's maximum; under a pin the card cannot go there, but the CURVE still
       offers it. So each rung states its holder: `кривая` when a cap at C is expressible
       (C ≥ top − 1000 = 2157 MHz), otherwise `закрепление`. **When neither can hold it, the rung is
-      refused** — that is R13 applied to what the card can actually reach rather than to the table.
+      refused.** **This decision is `vf-step.chooseWriteShape` and it ALREADY EXISTS, built and
+      mutation-proved in phase 5 — including the live lesson «ONE HOLDER, NEVER TWO» (a capped curve
+      plus a pin fought each other on 2026-08-14 and turned three PASSing shapes into НЕИЗВЕСТНО).
+      What remains is to CALL it with the real vector, never to write a second copy of the rule.**
 - [ ] The short probe judges with ONE shape — `sdc_fma --transient`, the shape voltage noise lives in
       (`researches/02` §2) — for the owner's 10 s. **The EDGE, once bracketed, is re-judged by the full
       three-shape set before it is written to the document** (fact 37): 10 s is the owner's search

@@ -220,6 +220,110 @@ export function descentLadder({
 }
 
 /**
+ * WHICH TABLE ENTRY WOULD SERVE A CLOCK AFTER A UNIFORM RAISE — the same rule the card applies, run
+ * on paper. `plans/15` §4.3.
+ *
+ * A point serves clock C iff its raised frequency reaches C; of those that do, the card uses the one
+ * with the LOWEST voltage. That is exactly `vf-step.voltageForClock`'s rule, evaluated on the raised
+ * curve instead of the stock one — same rule, one author, no second opinion about what "serving" means.
+ *
+ * [NOT-TESTED]
+ */
+export function servingAfterRaise(points, deltaMhz, clockMhz) {
+  if (!Array.isArray(points) || !Number.isFinite(deltaMhz) || !Number.isFinite(clockMhz)) return null;
+  const reaching = points
+    .filter((p) => Number.isFinite(p?.mhz) && Number.isFinite(p?.mv) && p.mv > 0 && (p.mhz + deltaMhz) >= clockMhz)
+    .sort((a, b) => a.mv - b.mv);
+  return reaching.length ? reaching[0] : null;
+}
+
+/**
+ * THE RUNG'S PLAN — the uniform raise that makes ONE chosen voltage serve the pinned clock.
+ * `plans/15` §4.3.
+ *
+ * The arithmetic is one line, and it is why a PIN makes the whole range reachable where a curve cap
+ * could not (a cap dies below `topMhz − 1000` = 2157 MHz on this card — fact 38):
+ *
+ *   to make the entry sitting at voltage V serve the pinned clock C:   Δ = C − F_V   (a UNIFORM raise)
+ *
+ * Every entry with a LOWER voltage has a lower stock frequency, so after the same Δ none of them
+ * reaches C — **the chosen entry becomes the serving one by construction, with no ceiling needed to
+ * arrange it.**
+ *
+ * ⚠️ **«BY CONSTRUCTION» IS AN ARGUMENT ABOUT A MONOTONE TABLE, AND THIS PROJECT HAS ALREADY PAID FOR
+ * TREATING SUCH AN ARGUMENT AS A PROOF (R12, EXP-0057).** The factory curve is monotone in the working
+ * band today; nothing guarantees it everywhere, and a table that is not monotone would hand the load to
+ * a DIFFERENT voltage than the one being measured — silently, with every read-back agreeing. So the
+ * conclusion is COMPUTED here rather than asserted: `servingAfterRaise` is run on the plan, and a
+ * disagreement is a refusal that names both entries. The live path checks the same thing again after
+ * the write, against the card's own re-read table (`plans/15` §4.3) — paper first, because a refusal
+ * that costs nothing beats a refusal that costs a watchdog lease.
+ *
+ * WHAT THIS FUNCTION DOES NOT DECIDE: who holds the ceiling. That is `vf-step.chooseWriteShape`'s
+ * single job (F2-AC9 — `кривая` / `закрепление частоты` / refuse), it is already built and
+ * mutation-proved, and it takes the REAL vector from `buildRaiseAndCapVector`. A second implementation
+ * here would be a truth↔mirror pair invented on purpose.
+ *
+ * @param {object}   a
+ * @param {Array}    a.points      the card's V/F entries, `{i, mv, mhz}` as `nvapi.readVfCurve` returns
+ * @param {number}   a.clockMhz    the frequency under test — the clock the run will PIN
+ * @param {number}   a.voltageMv   the voltage whose ability to serve that clock is being measured
+ * @param {number}   [a.offsetMinMhz] / [a.offsetMaxMhz]  the hardware's own ±1000 MHz lever
+ * @returns {{ok:boolean, deltaMhz:number|null, entry:object|null, serving:object|null, why:string}}
+ *
+ * [NOT-TESTED]
+ */
+export function planRung({
+  points = [],
+  clockMhz = null,
+  voltageMv = null,
+  offsetMinMhz = config.CLOCK_OFFSET_MIN_MHZ ?? -1000,
+  offsetMaxMhz = config.CLOCK_OFFSET_MAX_MHZ ?? 1000,
+} = {}) {
+  const no = (why) => ({ ok: false, deltaMhz: null, entry: null, serving: null, why });
+  if (!Array.isArray(points) || points.length === 0) return no('таблица кривой пуста — ступень не спланировать');
+  if (!Number.isFinite(clockMhz)) return no('частота ступени не названа');
+  if (!Number.isFinite(voltageMv)) return no('напряжение ступени не названо');
+
+  const entry = points.find((p) => p?.mv === voltageMv && Number.isFinite(p?.mhz));
+  if (!entry) {
+    return no(`напряжения ${voltageMv} мВ нет в таблице карты — такого напряжения у неё попросить нельзя`);
+  }
+
+  const deltaMhz = clockMhz - entry.mhz;
+  if (deltaMhz < offsetMinMhz || deltaMhz > offsetMaxMhz) {
+    // NOT a silicon edge — our lever ran out. The distinction is the whole reason `lever-limited`
+    // exists as a verdict (`plans/13` E2-AC2), and it must never be reported as an edge.
+    return {
+      ok: false, deltaMhz, entry, serving: null,
+      leverLimited: true,
+      why: `ПРЕДЕЛ РЫЧАГА, а не край: чтобы ${voltageMv} мВ обслуживало ${clockMhz} МГц, нужен равномерный `
+        + `сдвиг ${deltaMhz} МГц, а железо принимает только ${offsetMinMhz}…${offsetMaxMhz}. `
+        + 'Спуск здесь останавливает НАШ рычаг, и называть это краем значило бы выдать ложный вердикт',
+    };
+  }
+
+  const serving = servingAfterRaise(points, deltaMhz, clockMhz);
+  if (!serving) {
+    return no(`при сдвиге ${deltaMhz} МГц частоту ${clockMhz} МГц не обслуживает НИ ОДНА запись таблицы`);
+  }
+  if (serving.mv !== voltageMv) {
+    return {
+      ok: false, deltaMhz, entry, serving,
+      why: `СТУПЕНЬ НЕ ИЗМЕРЯЛА БЫ ТО, ЧТО ЗАКАЗАНО: при сдвиге ${deltaMhz} МГц частоту ${clockMhz} МГц `
+        + `обслуживало бы ${serving.mv} мВ (запись ${serving.i}), а мерить заказано ${voltageMv} мВ `
+        + `(запись ${entry.i}). Такое возможно на НЕМОНОТОННОЙ таблице, и вердикт был бы о чужом напряжении`,
+    };
+  }
+
+  return {
+    ok: true, deltaMhz, entry, serving,
+    why: `равномерный сдвиг ${deltaMhz >= 0 ? '+' : ''}${deltaMhz} МГц делает ${voltageMv} мВ обслуживающим `
+      + `${clockMhz} МГц (запись ${entry.i}, сток ${entry.mhz} МГц)`,
+  };
+}
+
+/**
  * THE SEED — where a frequency's descent STARTS, taken from its already-tuned higher neighbour.
  * `plans/15` §4.2 · the owner's words in `GOAL.md` → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ СОСЕДКИ».
  *
@@ -1063,6 +1167,10 @@ export async function searchEdge({
  *  30. seed from a LOWER frequency                              → «затравка приходит только СВЕРХУ по частоте»
  *  31. continue seeded after a rejected seed                    → «не-PASS на затравке ОТМЕНЯЕТ её»
  *
+ * ADDED WITH `plans/15` §4.3 — the rung's plan. Addressees named BEFORE the run:
+ *  32. skip the serving check (trust «by construction»)         → «НЕМОНОТОННАЯ таблица ловится ДО записи»
+ *  33. report a lever wall as an ordinary refusal               → «предел рычага НАЗВАН пределом рычага, а не краем»
+ *
  * ⚠️ AND THE HARNESS ITSELF FAILED FIRST, which is the reusable part: its first version filtered the
  * output for «FAIL» while this suite prints «ПЛОХО», so it reported **0 red for all four mutations** —
  * a blind verifier reading exactly like a clean bill of health (EXP-0016's third face). It now also
@@ -1204,6 +1312,51 @@ export function selfTest() {
     (() => { const n = seedOutcome({ verdict: config.VERDICT.SDC, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }).note; return /2400/.test(n) && /2842/.test(n) && /900/.test(n) && /1045/.test(n) && /находка/.test(n); })(), true);
   ok('НЕИЗВЕСТНО на затравке тоже отменяет её — не-PASS это не только отказ',
     seedOutcome({ verdict: null, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }).seeded, false);
+
+  // =============================================================================================
+  // `plans/15` §4.3 — THE RUNG'S PLAN: the uniform raise that puts ONE voltage under the pinned clock
+  // =============================================================================================
+
+  // A monotone slice of a card-like table: lower voltage → lower stock frequency.
+  const tablePoints = [
+    { i: 90, mv: 1000, mhz: 2700 },
+    { i: 94, mv: 1040, mhz: 2842 },
+    { i: 97, mv: 1060, mhz: 2900 },
+    { i: 61, mv: 835, mhz: 2100 },
+    { i: 47, mv: 745, mhz: 500 },
+  ];
+
+  ok('сдвиг считается так, чтобы ЗАКАЗАННОЕ напряжение обслуживало закреплённую частоту',
+    (() => { const p = planRung({ points: tablePoints, clockMhz: 2842, voltageMv: 1000 }); return [p.ok, p.deltaMhz, p.serving.mv]; })(),
+    [true, 142, 1000]);
+  ok('и на самой стоковой паре сдвиг ноль, а обслуживающая запись — она сама',
+    (() => { const p = planRung({ points: tablePoints, clockMhz: 2842, voltageMv: 1040 }); return [p.ok, p.deltaMhz]; })(),
+    [true, 0]);
+  ok('напряжения нет в таблице карты → отказ, а не ближайшее похожее',
+    planRung({ points: tablePoints, clockMhz: 2842, voltageMv: 999 }).ok, false);
+
+  // — the lever wall is its own verdict, never an edge (`plans/13` E2-AC2)
+  ok('предел рычага НАЗВАН пределом рычага, а не краем',
+    (() => { const p = planRung({ points: tablePoints, clockMhz: 2842, voltageMv: 745 }); return [p.ok, p.leverLimited === true, /ПРЕДЕЛ РЫЧАГА/.test(p.why)]; })(),
+    [false, true, true]);
+  ok('и он печатает сам нужный сдвиг рядом с тем, что принимает железо',
+    (() => { const w = planRung({ points: tablePoints, clockMhz: 2842, voltageMv: 745 }).why; return /2342/.test(w) && /1000/.test(w); })(), true);
+
+  // — the check that «by construction» is not allowed to replace (R12, EXP-0057)
+  const nonMonotone = [
+    { i: 10, mv: 800, mhz: 2600 },   // LOWER voltage, HIGHER frequency than its neighbour below
+    { i: 11, mv: 900, mhz: 2000 },
+  ];
+  ok('НЕМОНОТОННАЯ таблица ловится ДО записи: ступень мерила бы ЧУЖОЕ напряжение',
+    (() => { const p = planRung({ points: nonMonotone, clockMhz: 2400, voltageMv: 900 }); return [p.ok, p.serving?.mv]; })(),
+    [false, 800]);
+  ok('и отказ называет ОБЕ записи — заказанную и ту, что обслуживала бы на самом деле',
+    (() => { const w = planRung({ points: nonMonotone, clockMhz: 2400, voltageMv: 900 }).why; return /900 мВ/.test(w) && /800 мВ/.test(w); })(), true);
+
+  ok('обслуживающую запись выбирает то же правило, что у карты: самое НИЗКОЕ напряжение из дотянувшихся',
+    servingAfterRaise(tablePoints, 142, 2842)?.mv, 1000);
+  ok('никто не дотянулся → null, а не выдуманная запись',
+    servingAfterRaise(tablePoints, 0, 3500), null);
 
   // — degenerate inputs refuse rather than invent
   ok('пустая сетка → отказ, а не молчаливая пустая лестница',
