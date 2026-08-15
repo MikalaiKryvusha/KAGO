@@ -51,6 +51,8 @@
 //  than the fix: **a subprocess that re-imports a module by PATH escapes every substitution its
 //  parent made**, so the parent must hand down the module it is really using.]
 
+// KAGO-BENCH-OWN — bench's own file; the «no branches on the bench» guard skips it by this mark.
+
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';

@@ -87,6 +87,10 @@ export const CASES = Object.freeze([
     id: 'C6', seam: 'оракул', side: 'virtual', writes: false,
     what: 'у карты есть придуманный край, и оракул ЧИТАЕТ обслуживающее напряжение с неё, а не получает его',
   },
+  {
+    id: 'C7', seam: 'бэкенд карты', side: 'virtual', writes: false,
+    what: 'КАЖДЫЙ двойник шва реализует его ЦЕЛИКОМ — виртуальная карта и обе существующие подделки',
+  },
 ]);
 
 // =================================================================================================
@@ -149,6 +153,31 @@ async function runVirtualSide(card, stress) {
   if (after < before) pass('C6', `подъём удешевил 2842 МГц: ${before} → ${after} мВ`);
   else flunk('C6', `подъём не изменил обслуживающее напряжение: ${before} → ${after}`);
 
+  // C7 — EVERY stand-in for the card backend satisfies the seam COMPLETELY.
+  //
+  // ⚠️ THIS IS WHAT «migrating the doubles onto the contract» TURNED OUT TO MEAN, and it is less than
+  // `plans/16` §8.7 assumed. Reading the three doubles settled it: they model FAILURE — stale reads, a
+  // clock that flashes the target for one sample (EXP-0014's incident, preserved as a fixture), a
+  // refused lock, a broken reset. The virtual card models a WORKING card and cannot lie. Collapsing
+  // them into it would DELETE the failure fixtures — a regression wearing a refactor's clothes, which
+  // is the exact thing `plans/19` §4.6 warns against. So they are not merged; what the contract does
+  // is hold every one of them to the SAME seam, which is the drift that actually matters.
+  const pm = await import('./profile-manager.mjs');
+  const ld = await import('./ladder-descent.mjs');
+  const standIns = [
+    ['виртуальная карта', vc.backend],
+    ['profile-manager.fakeBackend', pm.fakeBackend()],
+    ['ladder-descent.fakeBackend', ld.fakeBackend()],
+  ];
+  const missing = [];
+  for (const [name, impl] of standIns) {
+    for (const m of SEAMS['бэкенд карты']) {
+      if (typeof impl?.[m] !== 'function') missing.push(`${name}: нет ${m}()`);
+    }
+  }
+  if (missing.length === 0) pass('C7', `двойников ${standIns.length}, методов у каждого ${SEAMS['бэкенд карты'].length}`);
+  else flunk('C7', missing.join(' | '));
+
   return done;
 }
 
@@ -206,12 +235,17 @@ export async function runContract({ live = false } = {}) {
     }
   };
   walk('automation-engine');
-  const BENCH_OWN = ['virtual-gpu.mjs', 'trap-suite.mjs', 'seam-contract.mjs'];
+  // THE EXEMPTION IS A MARKER INSIDE THE FILE, NOT ITS NAME. A name-based list looked equivalent and
+  // is not: a copy or a rename of a bench file loses the exemption and the guard reddens on the
+  // bench's own vocabulary — observed 2026-08-15 21:2x, when a mutation run's copy of THIS file was
+  // flagged by THIS check, on the very line that lists the identifiers. A marker travels with the file.
+  const BENCH_MARK = 'KAGO-BENCH-OWN';
   const BENCH_IDENT = /\b(isVirtual|isMock|onBench|virtualMode|benchMode|IS_VIRTUAL|IS_MOCK|usingBench)\b/;
   const suspects = [];
+  let exempt = 0;
   for (const f of engineFiles) {
-    if (BENCH_OWN.some((b) => f.endsWith(b))) continue;
     const text = readFileSync(f, 'utf8');
+    if (text.includes(BENCH_MARK)) { exempt++; continue; }
     text.split(/\r?\n/).forEach((line, i) => {
       // CODE, not prose: the words are legal in a comment (this very file explains them), and banning
       // the word instead of the branch makes a check nobody can keep green.
@@ -220,7 +254,8 @@ export async function runContract({ live = false } = {}) {
     });
   }
   check('ШОВ: ноль веток «мы на моке» в движке (E3-AC1)',
-    suspects.length === 0, suspects.join(' | '), `просмотрено файлов ${engineFiles.length - BENCH_OWN.length}`);
+    suspects.length === 0, suspects.join(' | '),
+    `просмотрено файлов ${engineFiles.length - exempt}, освобождено меткой ${exempt}`);
 
   // ---- 6. THE CLOCK (B3-AC7). Measured, and the answer is NOT what `plans/16` §8.3 assumed.
   const card = cardR.ok ? cardR.card : null;

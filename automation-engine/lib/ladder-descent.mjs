@@ -391,7 +391,11 @@ export function findKnee(rows, {
  * and a wandering value afterwards — which is what makes the release PROVABLE here exactly as it is on
  * the real card (a value that stops varying is the lock; a value that moves is the release, EXP-0014).
  */
-function fakeBackend({ lockFails = false, resetFails = false, lockedTo = null } = {}) {
+// Exported for the CONTRACT SUITE (`seam-contract.mjs`, epic 03 phase 3), which asserts that every
+// stand-in for the card backend implements the seam COMPLETELY. Exporting widens the surface and
+// changes no behaviour; this double stays exactly what it is — a liar that models lock and reset
+// FAILURES, which the virtual card deliberately cannot do.
+export function fakeBackend({ lockFails = false, resetFails = false, lockedTo = null } = {}) {
   const calls = [];
   let released = false;
   return {

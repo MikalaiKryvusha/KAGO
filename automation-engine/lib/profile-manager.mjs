@@ -969,7 +969,11 @@ const factoryFixture = () => ({
  *   failOn      — an operation that returns a non-zero exit
  *   wander      — the values an UNLOCKED idle clock walks through (observed 810…1065)
  */
-function fakeBackend({ staleReads = 0, lieOn = null, flashOn = null, failOn = null, wander = [810, 940, 1065] } = {}) {
+// Exported for the CONTRACT SUITE (`seam-contract.mjs`, epic 03 phase 3) — see the twin note in
+// `ladder-descent.mjs`. This one models STALE READS and a clock that FLASHES the target for a single
+// sample, which is EXP-0014's incident preserved as a fixture. The virtual card cannot lie, so this
+// double is NOT replaced by it; the contract only checks that both satisfy the same seam.
+export function fakeBackend({ staleReads = 0, lieOn = null, flashOn = null, failOn = null, wander = [810, 940, 1065] } = {}) {
   const st = { powerLimitW: 300, defaultW: 300, lockedTo: null, wanderAt: 0 };
   let stale = 0;
   let flash = null;

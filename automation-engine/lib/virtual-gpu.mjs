@@ -64,6 +64,9 @@
 //  card maximum hard-coded to 3090 · `close()` uncounted.
 //  What this does NOT prove is stated in PROVABILITY_LINE and is not a caveat but the point.]
 
+// KAGO-BENCH-OWN — this file IS the bench, so the «no branches on the bench» guard skips it. The mark
+// is inside the file rather than in a list of filenames, so a copy or a rename keeps its exemption.
+
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';

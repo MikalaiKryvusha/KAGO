@@ -170,7 +170,29 @@ The epic's real deliverable (`researches/10` §4.3). One suite, run twice.
       a fixture that flatters the estimate — and the estimate is protected by naming, not by tuning.
       A second card with owner-calibrated noise is added if `plans/15` wants the optimistic number.
 
-### 4.6 — The three existing doubles migrate onto the contract 🔲
+### 4.6 — The three existing doubles are held to the contract — NOT merged into it ✅ 2026-08-15 21:2x
+
+> **DONE, and the step turned out to be SMALLER than this plan assumed — by reading the code rather
+> than by trusting the framing.** The three doubles model **FAILURE**: stale reads, a clock that
+> flashes the target for exactly one sample (EXP-0014's incident, preserved), a refused lock, a broken
+> reset. The virtual card models a **WORKING** card and cannot lie. Merging them into it would DELETE
+> the failure fixtures — the «regression wearing a refactor's clothes» this very section warned about.
+>
+> **What was built instead, and it catches the drift that actually matters:** case **C7** holds EVERY
+> stand-in for the card seam — the virtual card and both `fakeBackend`s — to the SAME four methods.
+> Proved red: a mutation renaming `resetGraphicsClocks` on one double reddens exactly C7 and nothing
+> else. Both doubles are now exported (surface only; no behaviour changed) and stay exactly what they
+> are.
+>
+> **`profile-manager.fakeCurve` is deliberately left alone.** It is a nested `const` inside that
+> module's selftest, and hoisting it to module scope would edit the test scaffolding of the project's
+> single GPU writer (R1) for a conformance check whose value is modest. Named as a conscious omission
+> rather than done quietly: the curve seam is already covered by C3 and C4 against the virtual card.
+>
+> **One guard was hardened as a side effect, because a mutation exposed it.** The «no branches on the
+> bench» check (E3-AC1) exempted the bench's own files BY FILENAME, so a copy under another name was
+> flagged on its own list of identifiers. The exemption is now a `KAGO-BENCH-OWN` marker INSIDE each
+> file, which travels with a copy or a rename.
 
 - [ ] `profile-manager.fakeBackend` · `ladder-descent.fakeBackend` · `profile-manager.fakeCurve`
       (`researches/10` §3.2) move to the contract — **AFTER the suite is green, never before**
