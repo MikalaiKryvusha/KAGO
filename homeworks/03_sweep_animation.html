@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>KAGO — анимация прогона развёртки</title>
+<title>KAGO — Выполняется автоматический тюнинг-прогон видеокарты</title>
 <style>
   /* DSEG7 Classic — настоящий семисегментный шрифт, SIL OFL.
      Встроен в страницу: дашборд работает без сети, потому что во время
@@ -10,8 +10,8 @@
      Файл и лицензия лежат в assets/fonts/. */
   @font-face{font-family:"DSEG7";src:url(data:font/woff2;base64,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) format("woff2");font-weight:400;font-style:normal;font-display:block}
   .seg{font-family:"DSEG7",monospace;font-size:13px;letter-spacing:.5px}
-  .seg.off{fill:#123047;opacity:.75}
-  .seg.on{fill:#4fc8ff;filter:url(#neon)}
+  .seg.off{fill:#102240;opacity:.8}
+  .seg.on{fill:#3d86ff;filter:url(#neon)}
 
   :root{
     --bg:#14161a; --panel:#1b1f25; --line:#2a3038; --ink:#e8edf3; --dim:#8b98a8;
@@ -39,9 +39,12 @@
   .state{font-weight:700;letter-spacing:.02em;font-size:17px;margin:14px 0 0}
   .alive{color:var(--ok)} .dead{color:var(--alarm);display:none}
   body.hung .alive{display:none} body.hung .dead{display:block}
-  body.hung .spin,body.hung .arm,body.hung [class^="fl"]{animation-play-state:paused!important}
+  body.hung .spin,body.hung .arm,body.hung .rock{animation-play-state:paused!important}
   /* шапка прогона */
-  .head{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;margin:0 0 18px}
+  .head{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:0 0 18px}
+  /* фирменный чип: мастер 1024 в assets/logo, здесь webp 512 — отдаётся вдвое
+     легче PNG и остаётся резким на любом масштабе окна */
+  .head .logo{width:72px;height:72px;display:block}
   .head .brand{font-size:56px;font-weight:800;letter-spacing:.06em;line-height:1;
                background:linear-gradient(180deg,#eef4fb,#9fb0c2);-webkit-background-clip:text;
                background-clip:text;color:transparent}
@@ -68,675 +71,37 @@
   .spin{transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* Жало скрывается за кожухом ЧУТЬ-ЧУТЬ: в покое оно на 14 px выше кромки,
-     ход 24 px, значит за карту уходит ровно 10 px. */
+  /* Ход: опускается, качает несколько раз, поднимается. Медленно —
+     «почти усыпляющие». Полный цикл 24 с. */
   .arm{animation:arm 24s cubic-bezier(.42,0,.58,1) infinite}
   @keyframes arm{
     0%,7%   {transform:translateY(0)}
-    32%,64% {transform:translateY(24px)}
+    30%,66% {transform:translateY(26px)}
     89%,100%{transform:translateY(0)}
   }
-
-  /* ── ГРАНИ РУЧКИ: НАСТОЯЩАЯ ПРОЕКЦИЯ ЦИЛИНДРА ───────────────────────────
-     Сгенерировано расчётом, не подобрано на глаз. Каждая грань — точка на
-     окружности: x = R·sin(a), видима при cos(a) > 0, ширина и яркость ∝ cos(a).
-     Поэтому грани СЖИМАЮТСЯ и ГАСНУТ у силуэта, а движутся неравномерно —
-     быстро в середине, медленно у кромки. Ход МЕДЛЕННЫЙ: цикл 24 с,
-     за подкрут 1 оборот — слово владельца «сильно медленнее». */
-  .flute{transform-box:fill-box;transform-origin:center}
-@keyframes fl0{
-  0%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
-  7%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
-  32%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
-  33%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  34%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  35%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  36%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  37%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  38%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  39%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  40%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  58%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  59%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  60%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  61%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  62%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  63%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  64%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  89%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  100%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-}
-.fl0{animation:fl0 24s linear infinite}
-@keyframes fl1{
-  0%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  7%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  32%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  33%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  34%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  35%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  36%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  37%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  38%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  56%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  57%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  58%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  59%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  60%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  61%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  62%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  63%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  64%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  89%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  100%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-}
-.fl1{animation:fl1 24s linear infinite}
-@keyframes fl2{
-  0%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  7%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  32%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  33%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  34%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  35%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  36%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  54%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  55%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  56%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  57%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  58%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  59%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  60%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  61%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  62%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  63%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  64%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  89%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  100%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-}
-.fl2{animation:fl2 24s linear infinite}
-@keyframes fl3{
-  0%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  7%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  32%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  33%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  34%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  52%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  53%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  54%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  55%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  56%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  57%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  58%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  59%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  60%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  61%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  62%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  63%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  64%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  89%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  100%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-}
-.fl3{animation:fl3 24s linear infinite}
-@keyframes fl4{
-  0%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  50%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  51%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  52%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  53%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  54%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  55%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  56%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  57%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  58%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  59%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  60%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  61%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  62%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  63%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  64%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-}
-.fl4{animation:fl4 24s linear infinite}
-@keyframes fl5{
-  0%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  48%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  49%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  50%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  51%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  52%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  53%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  54%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  55%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  56%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  57%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  58%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  59%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  60%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  61%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  62%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-}
-.fl5{animation:fl5 24s linear infinite}
-@keyframes fl6{
-  0%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  46%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  47%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  48%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  49%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  50%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  51%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  52%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  53%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  54%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  55%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  56%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  57%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  58%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  59%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  60%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-}
-.fl6{animation:fl6 24s linear infinite}
-@keyframes fl7{
-  0%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  42%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  44%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  45%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  46%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  47%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  48%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  49%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  50%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  51%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  52%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  53%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  54%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  55%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  56%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  57%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  58%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-}
-.fl7{animation:fl7 24s linear infinite}
-@keyframes fl8{
-  0%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  40%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  41%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  42%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  43%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  44%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  45%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  46%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  47%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  48%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  49%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  50%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  51%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  52%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  53%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  54%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  55%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  56%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-}
-.fl8{animation:fl8 24s linear infinite}
-@keyframes fl9{
-  0%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  38%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  39%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  40%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  41%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  42%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  43%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  44%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  45%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  46%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  47%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  48%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  49%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  50%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  51%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  52%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  53%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  54%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-}
-.fl9{animation:fl9 24s linear infinite}
-@keyframes fl10{
-  0%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  36%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  37%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  38%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  39%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  40%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  41%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  42%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  43%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  44%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  45%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  46%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  47%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  48%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  49%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  50%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  51%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  52%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-}
-.fl10{animation:fl10 24s linear infinite}
-@keyframes fl11{
-  0%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  34%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  35%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  36%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  37%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  38%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  39%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  40%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  41%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  42%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  43%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  44%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  45%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  46%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  47%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  48%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  49%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  50%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-}
-.fl11{animation:fl11 24s linear infinite}
-@keyframes fl12{
-  0%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  7%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  32%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  33%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  34%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  35%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  36%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  37%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  38%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  39%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  40%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  41%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  42%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  43%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  44%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  45%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  46%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  47%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  48%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  64%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  89%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  100%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-}
-.fl12{animation:fl12 24s linear infinite}
-@keyframes fl13{
-  0%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  7%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  32%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  33%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  34%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  35%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  36%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  37%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  38%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  39%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  40%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  41%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  42%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  43%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  44%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  45%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  46%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  62%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  63%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  64%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  89%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  100%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-}
-.fl13{animation:fl13 24s linear infinite}
-@keyframes fl14{
-  0%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  7%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  32%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  33%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  34%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  35%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  36%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  37%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  38%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  39%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  40%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  41%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  42%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  43%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  44%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  60%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  61%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  62%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  63%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  64%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  89%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  100%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-}
-.fl14{animation:fl14 24s linear infinite}
-@keyframes fl15{
-  0%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  7%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  32%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  33%{transform:translateX(-3.00px) scaleX(0.981);opacity:0.836}
-  34%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
-  35%{transform:translateX(3.00px) scaleX(0.981);opacity:0.836}
-  36%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
-  37%{transform:translateX(8.56px) scaleX(0.831);opacity:0.727}
-  38%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
-  39%{transform:translateX(12.80px) scaleX(0.556);opacity:0.516}
-  40%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
-  41%{transform:translateX(15.10px) scaleX(0.195);opacity:0.212}
-  42%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
-  43%{transform:translateX(15.10px) scaleX(0.020);opacity:0.000}
-  44%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
-  45%{transform:translateX(12.80px) scaleX(0.020);opacity:0.000}
-  46%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
-  47%{transform:translateX(8.56px) scaleX(0.020);opacity:0.000}
-  48%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
-  49%{transform:translateX(3.00px) scaleX(0.020);opacity:0.000}
-  50%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
-  51%{transform:translateX(-3.00px) scaleX(0.020);opacity:0.000}
-  52%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
-  53%{transform:translateX(-8.56px) scaleX(0.020);opacity:0.000}
-  54%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
-  55%{transform:translateX(-12.80px) scaleX(0.020);opacity:0.000}
-  56%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
-  57%{transform:translateX(-15.10px) scaleX(0.020);opacity:0.000}
-  58%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
-  59%{transform:translateX(-15.10px) scaleX(0.195);opacity:0.212}
-  60%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
-  61%{transform:translateX(-12.80px) scaleX(0.556);opacity:0.516}
-  62%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
-  63%{transform:translateX(-8.56px) scaleX(0.831);opacity:0.727}
-  64%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  89%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-  100%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
-}
-.fl15{animation:fl15 24s linear infinite}
+  /* Качание — вокруг ГАЙКИ, то есть вокруг зева внизу, а не вокруг середины. */
+  .rock{transform-box:fill-box;transform-origin:50% 96%;
+        animation:rock 24s cubic-bezier(.45,0,.55,1) infinite}
+  @keyframes rock{
+    0%,31%  {transform:rotate(0deg)}
+    36%     {transform:rotate(-9deg)}
+    41%     {transform:rotate(4deg)}
+    46%     {transform:rotate(-8deg)}
+    51%     {transform:rotate(3.5deg)}
+    56%     {transform:rotate(-7deg)}
+    61%     {transform:rotate(2deg)}
+    66%,100%{transform:rotate(0deg)}
+  }
 </style>
 </head>
 <body>
 
 <div class="head">
+  <img class="logo" src="../assets/logo/kago-logo.webp" alt="KAGO" width="72" height="72">
   <span class="brand">KAGO</span>
   <span class="what">Выполняется автоматический тюнинг-прогон видеокарты</span>
 </div>
 
-<div class="bar">
-  <button id="toggle" class="hang">⏸ Симулировать зависание</button>
-  <span class="sub" style="margin:0">Анимация ничего не измеряет — данные несут цифры справа.</span>
-</div>
 
 <div class="wrap">
   <div class="card">
@@ -762,11 +127,45 @@
             <stop offset="0" stop-color="#6b7480"/><stop offset=".3" stop-color="#dde4ec"/>
             <stop offset=".62" stop-color="#9ba5b1"/><stop offset="1" stop-color="#646d78"/>
           </linearGradient>
-          <!-- ручка: тот же принцип цилиндра, но насыщеннее -->
+          <!-- Базовый тон ручки РОВНЫЙ. Объём даёт не он, а слои света ниже:
+               смешивать градиент тела с текстурой — как раз то, что делало
+               ручку плоской. -->
           <linearGradient id="handle" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0"   stop-color="#8e3410"/><stop offset=".26" stop-color="#ff9257"/>
-            <stop offset=".52" stop-color="#ee6f27"/><stop offset=".8"  stop-color="#b8480f"/>
-            <stop offset="1"   stop-color="#7d2d0c"/>
+            <stop offset="0" stop-color="#d9601f"/><stop offset="1" stop-color="#d9601f"/>
+          </linearGradient>
+          <!-- ТЕНЬ ЦИЛИНДРА: тёмное к обеим кромкам, светлое там, где нормаль
+               смотрит на зрителя. Асимметрично — свет слева сверху. -->
+          <linearGradient id="cylShade" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"    stop-color="#000" stop-opacity=".66"/>
+            <stop offset=".13"  stop-color="#000" stop-opacity=".26"/>
+            <stop offset=".34"  stop-color="#000" stop-opacity="0"/>
+            <stop offset=".58"  stop-color="#000" stop-opacity=".06"/>
+            <stop offset=".82"  stop-color="#000" stop-opacity=".42"/>
+            <stop offset=".95"  stop-color="#000" stop-opacity=".62"/>
+            <stop offset="1"    stop-color="#000" stop-opacity=".5"/>
+          </linearGradient>
+          <!-- ЗЕРКАЛЬНЫЙ БЛИК: узкая горячая полоса, не размазанная по всей ручке -->
+          <linearGradient id="cylSpec" x1="0" y1="0" x2="1" y2="0">
+            <stop offset=".14" stop-color="#fff1e2" stop-opacity="0"/>
+            <stop offset=".24" stop-color="#fff1e2" stop-opacity=".55"/>
+            <stop offset=".3"  stop-color="#fff8f0" stop-opacity=".72"/>
+            <stop offset=".38" stop-color="#fff1e2" stop-opacity="0"/>
+          </linearGradient>
+          <!-- ОТРАЖЁННЫЙ СВЕТ на тёмной кромке: в природе тень никогда не чёрная,
+               её подсвечивает окружение. Без этой полосы цилиндр плоский. -->
+          <linearGradient id="cylRim" x1="0" y1="0" x2="1" y2="0">
+            <stop offset=".84" stop-color="#ff9d5e" stop-opacity="0"/>
+            <stop offset=".93" stop-color="#ff9d5e" stop-opacity=".42"/>
+            <stop offset="1"   stop-color="#ff9d5e" stop-opacity="0"/>
+          </linearGradient>
+          <radialGradient id="domeLight" cx=".5" cy=".5" r=".5">
+            <stop offset="0"   stop-color="#fff3e6" stop-opacity=".5"/>
+            <stop offset="1"   stop-color="#fff3e6" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="waistShade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0"   stop-color="#000" stop-opacity="0"/>
+            <stop offset=".55" stop-color="#000" stop-opacity=".3"/>
+            <stop offset="1"   stop-color="#000" stop-opacity="0"/>
           </linearGradient>
 
           <!-- ЛОПАСТЬ: скошенная, от ступицы (r10) до обода (r31) -->
@@ -818,66 +217,58 @@
             <feGaussianBlur stdDeviation="1.1" result="b"/>
             <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
+          <!-- ПЛОСКАЯ КОВАНАЯ СТАЛЬ: тёмные кромки, светлая середина, узкая
+               фаска. У плоской детали объём даёт именно фаска по контуру. -->
+          <linearGradient id="wrenchBody" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"   stop-color="#5b636d"/>
+            <stop offset=".18" stop-color="#aab4c0"/>
+            <stop offset=".42" stop-color="#e8eef5"/>
+            <stop offset=".62" stop-color="#b9c3cf"/>
+            <stop offset=".86" stop-color="#78818c"/>
+            <stop offset="1"   stop-color="#4e565f"/>
+          </linearGradient>
+          <linearGradient id="wrenchBevel" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"   stop-color="#fff" stop-opacity=".0"/>
+            <stop offset=".33" stop-color="#fff" stop-opacity=".55"/>
+            <stop offset=".46" stop-color="#fff" stop-opacity=".0"/>
+          </linearGradient>
         </defs>
 
-        <!-- ── ОТВЁРТКА РИСУЕТСЯ ПЕРВОЙ — порядок отрисовки и есть глубина.
-             Опускающееся жало уходит ЗА кожух само, без масок и обрезки. -->
+        <!-- ── ГАЕЧНЫЙ КЛЮЧ РИСУЕТСЯ ПЕРВЫМ — порядок отрисовки и есть глубина:
+             опускаясь, зев уходит ЗА кожух сам, без масок.
+             Покачивание — вращение вокруг ГАЙКИ, то есть вокруг точки зева, как у
+             настоящего ключа. Ось качания внизу, а не в середине инструмента. -->
         <g class="arm">
           <g transform="translate(142,116)">
-            <!-- СТЕРЖЕНЬ И ЖАЛО — ОДНОЙ ФИГУРОЙ, а не двумя приставленными.
-                 Раньше жало было ШИРЕ стержня и заливалось отдельным цветом,
-                 поэтому и читалось как приклеенная деталь. Настоящее шлицевое
-                 жало — это ПРОКОВАННЫЙ конец того же прутка: он сужается, слегка
-                 расплющивается и сходит на кромку. Один контур, одна заливка,
-                 один блик — тогда оно и выглядит частью инструмента. -->
-            <path d="M-3.2,-46 L3.2,-46 L3.2,-13 L3.9,-8.5 L3.9,-2.6 L2.1,0 L-2.1,0
-                     L-3.9,-2.6 L-3.9,-8.5 L-3.2,-13 Z" fill="url(#steel)"/>
-            <path d="M-3.2,-46 L3.2,-46 L3.2,-13 L3.9,-8.5 L3.9,-2.6 L2.1,0 L-2.1,0
-                     L-3.9,-2.6 L-3.9,-8.5 L-3.2,-13 Z"
-                  fill="none" stroke="#3c4551" stroke-width=".55"/>
-            <!-- фаска проковки: та же сталь, чуть светлее — переход, а не стык -->
-            <path d="M-3.9,-8.5 L3.9,-8.5 L3.9,-6.4 L-3.9,-6.4 Z" fill="#f2f6fa" opacity=".5"/>
-            <!-- обойма -->
-            <path d="M-7,-56 L7,-56 L6,-45 L-6,-45 Z" fill="url(#ferrule)"/>
-            <rect x="-7.6" y="-57.5" width="15.2" height="3" rx="1.2" fill="#c8d2dd"/>
-            <!-- ручка -->
-            <use href="#grip-shape" fill="url(#handle)"/>
-            <g clip-path="url(#gripClip)">
-              <!-- продольные грани: едут при подкручивании -->
-              <g class="fl0 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl1 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl2 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl3 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl4 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl5 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl6 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl7 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl8 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl9 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl10 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl11 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl12 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl13 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl14 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <g class="fl15 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
-              <!-- поперечное кольцо перехвата: при осевом повороте НЕ движется -->
-              <rect x="-20" y="-68" width="40" height="2.4" fill="#6b2408" opacity=".45"/>
-              <rect x="-20" y="-64" width="40" height="1.6" fill="#ffb489" opacity=".18"/>
-              <!-- блик и теневая сторона цилиндра: от света, тоже неподвижны -->
-              <rect x="-9"  y="-114" width="4.5" height="64" fill="#ffd3b1" opacity=".3"/>
-              <rect x="9"   y="-114" width="5"   height="64" fill="#000"    opacity=".18"/>
-            </g>
-            <use href="#grip-shape" fill="none" stroke="#5f2408" stroke-width=".8" opacity=".55"/>
+          <g class="rock">
+            <!-- рожковый зев -->
+            <path d="M-14,3 L-14,-11 L-6,-11 L-6,-4.2 L6,-4.2 L6,-11 L14,-11 L14,3 L6,3 L6,-0.4 L-6,-0.4 L-6,3 Z"
+                  fill="url(#wrenchBody)" stroke="#39414a" stroke-width=".7" stroke-linejoin="round"/>
+            <!-- шейка и стержень: слегка сужается к середине, как у настоящего ключа -->
+            <path d="M-9.8,-11 L9.8,-11 L7,-32 L6,-54 L8.2,-68 L-8.2,-68 L-6,-54 L-7,-32 Z"
+                  fill="url(#wrenchBody)" stroke="#39414a" stroke-width=".7" stroke-linejoin="round"/>
+            <!-- накидное кольцо сверху -->
+            <path d="M0,-68 m-15.4,0 a15.4,15.4 0 1,0 30.8,0 a15.4,15.4 0 1,0 -30.8,0 M0,-68 m-8.4,0 a8.4,8.4 0 1,0 16.8,0 a8.4,8.4 0 1,0 -16.8,0"
+                  fill="url(#wrenchBody)" fill-rule="evenodd"
+                  stroke="#39414a" stroke-width=".7"/>
+            <!-- фаска по контуру: узкая светлая полоса вдоль тела -->
+            <path d="M-9.8,-11 L9.8,-11 L7,-32 L6,-54 L8.2,-68 L-8.2,-68 L-6,-54 L-7,-32 Z"
+                  fill="url(#wrenchBevel)"/>
+            <path d="M-14,3 L-14,-11 L-6,-11 L-6,-4.2 L6,-4.2 L6,-11 L14,-11 L14,3 L6,3 L6,-0.4 L-6,-0.4 L-6,3 Z" fill="url(#wrenchBevel)"/>
+            <!-- клеймо на шейке: мелочь, по которой инструмент читается инструментом -->
+            <rect x="-3.4" y="-46" width="6.8" height="1.5" rx=".7" fill="#5d6772" opacity=".8"/>
+            <rect x="-3.4" y="-42" width="6.8" height="1.5" rx=".7" fill="#5d6772" opacity=".8"/>
+          </g>
           </g>
         </g>
 
         <!-- ── ПЛАТА, ЗАДНЯЯ ПЛАСТИНА, ГРЕБЁНКА PCIe ───────────────────── -->
-        <rect x="34" y="236" width="316" height="24" rx="2" fill="#1e232a" stroke="#39424d"/>
+        <rect x="34" y="230" width="316" height="22" rx="2" fill="#1e232a" stroke="#39424d"/>
         <!-- Гребёнка PCIe одной сплошной медяшкой: зубы дробили взгляд и мешали
              заметить остановку — а именно ради этого вся картинка и рисуется. -->
         <g>
-          <rect x="70" y="258" width="132" height="12" rx="1.5" fill="url(#gold)"/>
-          <rect x="212" y="258" width="52" height="12" rx="1.5" fill="url(#gold)"/>
+          <rect x="70" y="240" width="132" height="26" rx="1.5" fill="url(#gold)"/>
+          <rect x="212" y="240" width="52" height="26" rx="1.5" fill="url(#gold)"/>
         </g>
 
         <!-- ── КРОНШТЕЙН, ВИД С РЕБРА ────────────────────────────────────
@@ -945,29 +336,29 @@
         <g>
           <g>
             <rect x="38" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
-            <text x="43" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">CLK</text>
-            <text x="43" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">MHz</text>
+            <text x="43" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">CLK</text>
+            <text x="43" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">MHz</text>
             <text class="seg off" x="107" y="235" text-anchor="end">8888</text>
             <text class="seg on"  x="107" y="235" text-anchor="end">2842</text>
           </g>
           <g>
             <rect x="116" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
-            <text x="121" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">TEMP</text>
-            <text x="121" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">C</text>
+            <text x="121" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">TEMP</text>
+            <text x="121" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">C</text>
             <text class="seg off" x="185" y="235" text-anchor="end">88</text>
             <text class="seg on"  x="185" y="235" text-anchor="end">74</text>
           </g>
           <g>
             <rect x="194" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
-            <text x="199" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">FAN</text>
-            <text x="199" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">RPM</text>
-            <text class="seg off" x="263" y="235" text-anchor="end">8888</text>
-            <text class="seg on"  x="263" y="235" text-anchor="end">1770</text>
+            <text x="199" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">FAN</text>
+            <text x="199" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">%</text>
+            <text class="seg off" x="263" y="235" text-anchor="end">88</text>
+            <text class="seg on"  x="263" y="235" text-anchor="end">62</text>
           </g>
           <g>
             <rect x="272" y="219" width="74" height="20" rx="2.5" fill="#04121e" stroke="#1d4055"/>
-            <text x="277" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">PWR</text>
-            <text x="277" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="6.4" fill="#3f7d9e" letter-spacing=".9">W</text>
+            <text x="277" y="227" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">PWR</text>
+            <text x="277" y="236.5" font-family="Segoe UI,system-ui,sans-serif" font-size="8.6" font-weight="700" fill="#bfe2f7" letter-spacing=".9">W</text>
             <text class="seg off" x="341" y="235" text-anchor="end">888</text>
             <text class="seg on"  x="341" y="235" text-anchor="end">248</text>
           </g>
@@ -982,7 +373,7 @@
          Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. -->
     <div class="m"><span>напряжение</span><b>995 мВ</b>
       <span style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df">
-        сток 1045 · снято <b style="display:inline;font-size:13px;color:var(--ok)">−50 мВ</b></span></div>
+        сток 1045 · андервольт <b style="display:inline;font-size:13px;color:var(--ok)">−50 мВ</b></span></div>
     <!-- «прожиг» — жаргон (слово владельца 2026-08-16). На самом деле идёт
          СТРЕСС-ТЕСТ УСТОЙЧИВОСТИ, так и называем — здесь и во всём, что он читает. -->
     <div class="m"><span>стресс-тест устойчивости</span><b>6,2 <span style="font-size:17px;color:var(--dim)">из 10 с</span></b></div>
@@ -994,25 +385,6 @@
   </div>
 </div>
 
-<footer>
-  <p><b>Анимация — чистая графика</b> (слово владельца): к телеметрии карты она не привязана,
-  крутится от таймера браузера и ничего не измеряет. Данные несут ЦИФРЫ справа — они приходят из
-  событий движка (<code>onEvent</code>) и журнала <code>runs/sweep/journal.jsonl</code>.</p>
-  <p><b>Что из этого следует, сказано один раз и без спора.</b> При жёстком зависании машины —
-  ровно том, что описано в задаче: картинка застыла и висит до BSOD — замирает и браузер, поэтому
-  анимация свою работу делает. Чего она НЕ поймает: случай «процесс развёртки умер, а машина жива»
-  — там анимация продолжит крутиться над мёртвым прогоном. Этот случай закрывают не картинкой, а
-  цифрами: если событий нет дольше порога, блок справа сам гаснет и переходит в тревогу. Так и
-  разделено — <b>анимация украшает, тревогу поднимают данные</b>.</p>
-</footer>
 
-<script>
-  const b = document.getElementById('toggle');
-  b.addEventListener('click', () => {
-    document.body.classList.toggle('hung');
-    b.textContent = document.body.classList.contains('hung')
-      ? '▶ Вернуть движение' : '⏸ Симулировать зависание';
-  });
-</script>
 </body>
 </html>
