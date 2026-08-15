@@ -66,6 +66,27 @@ export const GUARDBAND_MIN_MILLIVOLTS = 25;
  * WHY NOT THE RESEARCH'S 25 mV: it buys protection against the same thing, three times more
  * expensively, and by ASSUMPTION rather than by observation. The owner's loop covers the residue by
  * observation instead — whole-curve retest, the ratchet, and his own play session as a second witness.
+ *
+ * 🔴 **«ЕСЛИ НАШЛИ ШАГАМИ ПО 5 мВ» IS A BINDING PRECONDITION, NOT SCENERY — the owner, 2026-08-15
+ * 21:5x, after an agent treated it as an open question:**
+ *
+ *   > *«ТАМ, ГДЕ ОТКАЗ — ЗНАЧИТ МЫ УЖЕ У КРАЯ!!!! А У КРАЯ ХОДИМ ВСЕГДА ПО 5 мВ. … Найти отказ нужно
+ *   > с шагом 5 мВ — это строгое правило! Если падало, когда ходили шагами отличающимися от 5 мВ —
+ *   > это значит мы у края. Переходим на шаг 5 мВ. Точно находим край этим шагом. И от него на 10 мВ
+ *   > поднимаемся вверх.»*
+ *
+ * So there are exactly two objects and they must never be confused: a **failure on a coarse rung** is
+ * a SIGNAL THAT THE EDGE IS NEAR — it is not the edge, it is not written to the curve document as one,
+ * and this margin is NOT applied to it. The descent returns to the last PASSING voltage and re-walks at
+ * 5 mV; the failure THAT walk finds is the edge, and it is the only input this margin accepts.
+ *
+ * ⚠️ **THEREFORE `gridStepMv` IS THE CARD'S MEASURED MINIMUM STEP (5 mV) AND NEVER A LOCAL GAP.** This
+ * card's grid is not uniform — 94 intervals of 5 mV and 32 of 10 mV — and feeding a 10 mV LOCAL GAP in
+ * here would silently double the owner's margin to 20 mV, which is not what he said twice. The
+ * parameter exists so another CARD with a different minimum step gets its own number, not so a caller
+ * can pass whatever gap happens to sit under the failure. Where the card offers no 5 mV step at all,
+ * the edge is located only to the card's own resolution there — that is a limit of the hardware, to be
+ * REPORTED, and it never changes the 10 mV that is added.
  */
 export const MARGIN_STEPS_ABOVE_FAILURE = 2;
 
@@ -950,8 +971,21 @@ export function powerEnvelope(probed) {
  * Returns the number AND whether the grid step under it was measured, so a caller reporting a
  * millivolt figure can say honestly which half of it is an estimate. On this card the step is
  * measured (5 mV), so the answer is a measurement: 10 mV.
+ *
+ * 🔴 **THE ONLY LEGAL INPUT IS A FAILURE FOUND AT 5 mV** (his binding precondition — see
+ * `MARGIN_STEPS_ABOVE_FAILURE`). `gridStepMv` is the CARD'S MINIMUM step, per card, never the local
+ * gap under this particular failure: passing a 10 mV gap would double his margin to 20 mV. The
+ * refusal below makes that misuse impossible instead of merely discouraged.
  */
 export function marginAboveFailureMv(gridStepMv = VOLTAGE_GRID_STEP_MV) {
+  if (Number.isFinite(gridStepMv) && gridStepMv > VOLTAGE_GRID_STEP_MV) {
+    throw new Error(
+      `marginAboveFailureMv: получен шаг ${gridStepMv} мВ, а минимальный измеренный шаг сетки карты — `
+      + `${VOLTAGE_GRID_STEP_MV} мВ. Похоже, сюда передали ЛОКАЛЬНЫЙ РАЗРЫВ сетки вместо шага карты: `
+      + 'это удвоило бы запас владельца до 20 мВ. Его слово — «от неё вверх поднимаемся на два шага: '
+      + 'на +10 мВ», и отказ ищется шагом 5 мВ (см. MARGIN_STEPS_ABOVE_FAILURE).',
+    );
+  }
   return {
     millivolts: MARGIN_STEPS_ABOVE_FAILURE * gridStepMv,
     steps: MARGIN_STEPS_ABOVE_FAILURE,

@@ -55,6 +55,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import config from './config.mjs';
+// The margin helper is a NAMED export only — `config.mjs`'s default object carries constants, not
+// functions, and reaching for `config.marginAboveFailureMv` crashes the suite instead of reddening a
+// block (paid for on 2026-08-15 21:5x, EXP-0040's rule about assertions that kill the reporter).
+import { marginAboveFailureMv } from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ } from './lib/vf-step.mjs';
 import { DIVERSE_SET } from './lib/stress-tester.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
@@ -1000,6 +1004,16 @@ export function selfTest() {
       const l = descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 910, availableDepthMv: 125 });
       return [l.rungs.length, l.rungs.at(-1).depthMv];
     })(), [7, 125]);
+
+  // — THE OWNER'S EDGE RULE, guarded where it can be violated (his words, 2026-08-15 21:5x:
+  //   «Найти отказ нужно с шагом 5 мВ — это строгое правило… И от него на 10 мВ поднимаемся вверх»).
+  //   The coarse ladder above exists only to approach the edge; the number that SHIPS comes from a
+  //   5 mV walk plus 10 mV, and nothing else may reach `marginAboveFailureMv`.
+  ok('запас владельца на этой карте = 10 мВ (два измеренных шага сетки по 5)',
+    (() => { try { return marginAboveFailureMv().millivolts; } catch (e) { return `упало: ${e.message.slice(0, 40)}`; } })(), 10);
+  ok('ЛОКАЛЬНЫЙ РАЗРЫВ сетки в 10 мВ, поданный как шаг, ПАДАЕТ — иначе запас молча стал бы 20 мВ',
+    (() => { try { marginAboveFailureMv(10); return 'не упало'; } catch (e) { return /20 мВ/.test(e.message) ? 'упало и назвало причину' : 'упало без причины'; } })(),
+    'упало и назвало причину');
 
   // — degenerate inputs refuse rather than invent
   ok('пустая сетка → отказ, а не молчаливая пустая лестница',

@@ -228,6 +228,29 @@ crash-then-read-back shape).*
 
 *Anchor: the owner — «Если нашли шагами по 5 мВ точку отказа, то от неё вверх поднимаемся на два шага».*
 
+> 🔴 **THE RULE IS BINDING AND IT IS NOT A DESIGN QUESTION — the owner said so again, 2026-08-15
+> 21:5x, after this plan's §8 recorded it as an open one:**
+>
+> > *«ТАМ, ГДЕ ОТКАЗ — ЗНАЧИТ МЫ УЖЕ У КРАЯ!!!! А У КРАЯ ХОДИМ ВСЕГДА ПО 5 мВ. … Найти отказ нужно с
+> > шагом 5 мВ — это строгое правило! Если падало, когда ходили шагами отличающимися от 5 мВ — это
+> > значит мы у края. Переходим на шаг 5 мВ. Точно находим край этим шагом. И от него на 10 мВ
+> > поднимаемся вверх.»*
+>
+> **Two objects, never to be confused.** A failure on a coarse rung is a SIGNAL THAT THE EDGE IS NEAR —
+> it is not an edge, it is never written to the curve document as one, and the margin is never applied
+> to it. The descent drops to 5 mV, finds the failure again with that step, and **that** failure is the
+> edge. `V_ship = V_fail(5 mV) + 10 mV`. There is nothing to decide here and nothing to ask.
+>
+> **The coarse ladder of §4.1 therefore has exactly one job: to reach the neighbourhood of the edge
+> cheaply.** It never produces a number that ships. That is what makes the 25 mV zone safe to want.
+>
+> **The one hardware limit, reported and not negotiated:** in 32 of this card's 126 grid intervals the
+> two neighbouring voltages differ by 10 mV, so no 5 mV step exists there to take — the card offers
+> nothing between them. The refinement then walks the card's minimum available step, and the run SAYS
+> that the edge at that frequency is located only to the card's own resolution. The margin added is
+> still 10 mV: `config.marginAboveFailureMv()` now THROWS if a caller hands it a local gap instead of
+> the card's minimum step, so the «+20 mV» misreading cannot be written by accident.
+
 - [ ] On a non-PASS at a rung coarser than 5 mV: **return to the last PASSING point and walk down in
       5 mV grid steps** until the failure reproduces. Each of those rungs is one shallow step from a
       proven-safe voltage, so S2 holds throughout.
@@ -344,10 +367,16 @@ crash-then-read-back shape).*
   A block that derives its expectation from the same constants as the code has no independent opinion
   and passes every mutation by construction (EXP-0055). The literals are what a re-idealization has to
   break in order to land.
-- **The margin question this raises is NOT settled here, and it belongs to §4.6.** `PENDING:` where the
-  local gap is 10 mV, «V_fail + two grid steps» (`config.marginAboveFailureMv()`) means **+20 mV**,
-  while the owner said the number «+10 мВ» and the project implemented his rule as a STEP COUNT on
-  purpose (`STATUS.md` fact 32 — «на другой карте получится своё число»). The step-count reading is the
-  conservative one and the one already shipped, so nothing is broken today; but §4.6 must state which
-  it means, because the refinement it depends on ALSO cannot go finer than the local gap — a failure
-  found inside a 10 mV gap is only located to 10 mV, and «refine at 5 mV» is not available there.
+- ~~**The margin question this raises is NOT settled here**~~ — **RETRACTED 2026-08-15 21:5x: it was
+  never open, and filing it as a `PENDING` was the mistake.** The owner had already stated the rule
+  twice, and restated it a third time when he saw this line: **a failure is found at 5 mV, always; a
+  failure on a coarser step means the edge is NEAR, not found, and the descent switches to 5 mV and
+  re-finds it; from that failure, up 10 mV.** §4.6 now carries it as a binding rule with his words, and
+  `marginAboveFailureMv()` THROWS on a local gap so the «+20 mV» reading cannot be written at all.
+  **What was genuinely mine to report — and it stays a report, not a question:** 32 of the card's 126
+  grid intervals have no 5 mV step in them, so at those frequencies the edge is located only to the
+  card's own resolution. That is a limit of the hardware, it goes in the run's output, and it changes
+  neither his rule nor the 10 mV.
+  **The process lesson, kept because it is the reusable half:** a precondition inside a quoted owner
+  rule («если нашли шагами по 5 мВ…») is part of the rule. Reading it as decoration and re-opening the
+  decision cost him a third explanation of something he had already settled.
