@@ -327,7 +327,7 @@ and both suites completing:
       and **the wall time actually spent** against the estimate — an estimate never checked is a number
       that drifts.
 
-### 4.6 — The refinement: a coarse failure is not an edge 🔲
+### 4.6 — The refinement: a coarse failure is not an edge ✅ **DONE 2026-08-15 23:4x**
 
 *Anchor: the owner — «Если нашли шагами по 5 мВ точку отказа, то от неё вверх поднимаемся на два шага».*
 
@@ -354,14 +354,40 @@ and both suites completing:
 > still 10 mV: `config.marginAboveFailureMv()` now THROWS if a caller hands it a local gap instead of
 > the card's minimum step, so the «+20 mV» misreading cannot be written by accident.
 
-- [ ] On a non-PASS at a rung coarser than 5 mV: **return to the last PASSING point and walk down in
-      5 mV grid steps** until the failure reproduces. Each of those rungs is one shallow step from a
-      proven-safe voltage, so S2 holds throughout.
-- [ ] The refined failure is the one the margin applies to: `V_ship = V_fail + 2 grid steps`
-      (`config.marginAboveFailureMv()`), and the record names the policy (`plans/13` E2-AC4).
-- [ ] **If the failure does NOT reproduce during refinement**, that is recorded as such — a
-      probabilistic edge, which this card has shown before (fact 28's history). The point closes at the
-      coarse failure's last PASS + margin, and the report says the edge was not reproducible.
+- [x] On a non-PASS at a rung coarser than 5 mV: **`refineEdge` returns to the last PASSING voltage and
+      walks down in the card's own grid steps** until the failure reproduces. Every one of those rungs
+      is one shallow step from a proven-safe voltage, so rail S2 holds throughout — the refinement is
+      the OPPOSITE of a plunge, it is the finest approach this card can make.
+- [x] The refined failure is the one the margin applies to: `V_ship = V_fail + 2 grid steps`
+      (`config.marginAboveFailureMv()`), and the helper is always asked with the card's MINIMUM step,
+      never with a local gap — it THROWS on a coarser one, so «+20 mV» cannot be written by accident.
+- [x] **`V_fail + 10 mV` may not exist on a non-uniform grid, so the shipped value SNAPS UP** to the
+      lowest voltage the card actually offers at or above it. Rounding toward MORE margin, because the
+      alternative is shipping closer to a measured failure than the owner's policy allows. On this card
+      it bites immediately: 1020 + 10 = 1030, and **1030 is one of the 32 gaps** — the shipped value is
+      1035.
+- [x] **If the failure does NOT reproduce during refinement**, the result says so in those words. The
+      edge is then the coarse failure itself, now bracketed to ONE grid step by the deepest intermediate
+      PASS — and both formulations of the owner's rule («from the failure, up two steps» and «from the
+      last PASS + margin») give the SAME number there, because the two rungs are adjacent.
+- [x] **Anything that is not a PASS and not a failure HALTS the refinement** — `unknown`, `void`,
+      `refused`, `lever-limited`. Narrowing an edge around a boundary nobody observed would be inventing
+      a measurement (EXP-0011), and the result carries `halted: true` with no shipped voltage at all.
+
+**Verification — RUN, 2026-08-15 23:4x.** 12 blocks, `engine --selftest` **144 → 156**, zero writes,
+on the card-shaped grid (5 mV with a 10 mV gap every 25). Five mutations, addressees named before the
+run, each reddening its own block and the intact code reddening none: **49** ship the coarse failure
+without walking (6 red; exclusive block «спуск уточнения идёт СВЕРХУ ВНИЗ, ступенями сетки») · **50**
+apply the margin to the local gap instead of the card's minimum step (2) · **51** snap the shipped
+voltage DOWN (1) · **52** treat a non-PASS non-fail as progress (1) · **53** call a non-reproducing
+failure reproduced (1).
+
+> ⚠️ **AND FOUR OF THE TWELVE BLOCKS WERE RED ON THE FIRST RUN — because the FIXTURES were wrong, not
+> the code.** Two of them picked 1030 mV as a failure threshold, and **1030 is not a voltage this card
+> has**: it sits in one of the 32 ten-millivolt gaps. That is EXP-0072's lesson met again one level
+> down — an idealized «5 mV grid» in my head instead of the measured dictionary — and the honest fix
+> was to move the fixtures onto the real grid rather than to widen the code. The blocks now show the
+> snap-up rule firing on a REAL gap, which is a better test than the one I meant to write.
 
 ### 4.7 — `--dry-run` prints the ladder the run will walk 🔲
 
@@ -432,7 +458,7 @@ and both suites completing:
 | 4.3 | ✅ **22 blocks, `engine --selftest` 115 → 137, zero writes.** The paper refusal keeps the atom uncalled; the re-assertion voids a PASS taken on a foreign voltage; a dirty rollback voids a PASS; the holder is named on every rung and no pin reaches the atom under a curve-held ceiling. Mutations 34–39, each reddening its own block |
 | 4.4 | ✅ **`npm run journal -- --selftest` 17 blocks + 7 wiring blocks in the engine (137 → 144), zero writes.** The atom sees the intent already on disk at the instant it is called; a throwing atom leaves the rung as a dead machine would and the next launch names it `ЗАВИС`; two consecutive hangs block the rung, one hang does not. Mutations 40, 42–48 |
 | 4.5 | a scripted full-band run on injected everything closes every point with one of three verdicts |
-| 4.6 | a coarse failure fixture closes at `V_fail(5 mV) + 10 mV`, with the refinement burns in the journal |
+| 4.6 | ✅ **12 blocks (144 → 156), zero writes.** The walk descends by grid steps from the last PASS; the shipped voltage is `V_fail + 10 mV` SNAPPED UP to a voltage the card has; a non-reproducing failure is named as such; a non-PASS non-fail halts. Mutations 49–53 |
 | 4.7 | planned rungs == walked rungs, computed once |
 | phase | `npm run watchdog -- --status` unarmed before and after · `npm run check` green |
 
@@ -539,6 +565,21 @@ and both suites completing:
   Three assertions in the new blocks threw under mutation instead of reddening, and a class fixed three
   times by hand needs a mechanism. **The other eleven suites do not have this net**, and that is stated
   rather than quietly generalized — retro-fitting them is its own backlog item, not a rider on this step.
+**Added while EXECUTING §4.6 (2026-08-15 23:4x):**
+
+- **The shipped voltage SNAPS UP to the grid, and the direction is the decision.** `V_fail + 10 mV` is
+  not always a voltage the card offers; asking for the nearest one DOWN would ship closer to a measured
+  failure than the owner's policy allows, so the rule is «the lowest grid voltage at or above». On this
+  card it fires immediately, at the very first 10 mV gap.
+- **A non-reproducing failure closes the point rather than re-running the failing rung.** Re-testing a
+  voltage that already failed is forbidden (the ascent's rule 1, and the reason is the avalanche), so
+  «did not reproduce» is decided from the intermediate rungs alone. When none of them fails, the coarse
+  failure IS the edge — bracketed to one grid step — and the report says the failure was not reproduced
+  at a finer rung. **The two readings of the owner's rule coincide exactly there**, which is what makes
+  this safe rather than a choice between them.
+- **Anything that is not PASS and not a failure halts the refinement with NO shipped voltage.** An
+  `unknown` mid-refinement means the oracle could not judge; closing the point anyway would be a
+  `[TESTED]` marker with no observation behind it.
 - **The short probe is a ONE-ELEMENT SET, not the legacy single-shape path.** Going through
   `judgeCandidate` costs nothing and buys the field `worstShape` — the shape that decided — which the
   single-shape path does not produce. A rung record that cannot name the load that judged it is a

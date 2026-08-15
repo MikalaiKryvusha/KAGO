@@ -629,6 +629,154 @@ export async function runRung({
 }
 
 /**
+ * THE REFINEMENT — a coarse failure is NOT an edge, and this is what turns one into the other.
+ * `plans/15` §4.6.
+ *
+ * ─── THE OWNER'S RULE, AND IT IS BINDING ──────────────────────────────────────────────────────────
+ *
+ * He said it three times, the last time after this project filed it as an open question (2026-08-15
+ * 21:5x):
+ *
+ *   > *«ТАМ, ГДЕ ОТКАЗ — ЗНАЧИТ МЫ УЖЕ У КРАЯ!!!! А У КРАЯ ХОДИМ ВСЕГДА ПО 5 мВ. … Найти отказ нужно
+ *   > с шагом 5 мВ — это строгое правило! Если падало, когда ходили шагами отличающимися от 5 мВ —
+ *   > это значит мы у края. Переходим на шаг 5 мВ. Точно находим край этим шагом. И от него на 10 мВ
+ *   > поднимаемся вверх.»*
+ *
+ * **TWO OBJECTS, NEVER TO BE CONFUSED.** A failure on a 25 or 10 mV rung is a SIGNAL that the edge is
+ * near. It is not the edge; it is never written to the curve document as one; the margin is never
+ * applied to it. The descent returns to the last PASSING voltage, walks down in the card's own minimum
+ * steps, and the failure found THAT way is the edge. **That is what makes the 25 mV zone safe to
+ * want** — the coarse ladder's only job is to reach the neighbourhood cheaply, and it never produces a
+ * number that ships.
+ *
+ * ─── WHY EVERY REFINEMENT RUNG IS STILL A SHALLOW STEP ────────────────────────────────────────────
+ *
+ * The walk starts at the last PROVEN-SAFE voltage and moves one grid point at a time, so rail S2 (the
+ * `bugs/03` governor — never plunge) holds throughout. The refinement is the OPPOSITE of a plunge: it
+ * is the finest approach this card can make.
+ *
+ * ─── THE ONE HARDWARE LIMIT, REPORTED AND NOT NEGOTIATED ─────────────────────────────────────────
+ *
+ * In 32 of this card's 126 grid intervals the neighbouring voltages differ by 10 mV — the card offers
+ * NOTHING between them, so no 5 mV step exists there to take. The refinement then walks the card's
+ * minimum AVAILABLE step and the result SAYS that at this frequency the edge is located only to the
+ * card's own resolution (`resolutionMv`). The margin added is still 10 mV: `marginAboveFailureMv` is
+ * always asked with the card's MINIMUM step and THROWS if handed a local gap, so the «+20 mV»
+ * misreading cannot be written by accident.
+ *
+ * ─── AND THE SHIPPED VOLTAGE IS SNAPPED UP, NEVER DOWN ───────────────────────────────────────────
+ *
+ * `V_fail + 10 mV` may not exist on a non-uniform grid. The shipped value is the lowest grid voltage
+ * that is at least that — rounding toward MORE margin, because the alternative is shipping a voltage
+ * closer to a measured failure than the owner's policy allows.
+ *
+ * @param {object}   a
+ * @param {number[]} a.voltageGridMv  the card's own voltage dictionary
+ * @param {number}   a.lastPassMv     the deepest voltage that PASSED on the coarse ladder
+ * @param {number}   a.coarseFailMv   the voltage that failed on a coarse rung — the SIGNAL, not the edge
+ * @param {function} a.runRungFn      `(voltageMv) => rung record` — injected; this module never writes
+ * @returns {Promise<object>} `{ok, refined, failMv, lastPassMv, shipMv, reproduced, resolutionMv,
+ *                              rungs, halted, why}`
+ *
+ * [NOT-TESTED]
+ */
+export async function refineEdge({
+  voltageGridMv = [],
+  lastPassMv = null,
+  coarseFailMv = null,
+  minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
+  runRungFn,
+} = {}) {
+  if (typeof runRungFn !== 'function') {
+    throw new Error('refineEdge требует runRungFn — движок сам в карту не пишет (правило R1)');
+  }
+  const bad = (why) => ({ ok: false, refined: false, failMv: null, lastPassMv, shipMv: null,
+    reproduced: false, resolutionMv: null, rungs: [], halted: false, why });
+  if (!Array.isArray(voltageGridMv) || voltageGridMv.length === 0) return bad('сетка напряжений пуста — уточнять не по чему');
+  if (!Number.isFinite(coarseFailMv)) return bad('напряжение отказа не названо — уточнять нечего');
+  if (!Number.isFinite(lastPassMv)) return bad('последнее прошедшее напряжение не названо — от чего спускаться заново, неизвестно');
+  if (!(lastPassMv > coarseFailMv)) {
+    return bad(`последнее прошедшее ${lastPassMv} мВ не ВЫШЕ отказа ${coarseFailMv} мВ — это не вилка, а перевёрнутый интервал`);
+  }
+
+  const grid = [...new Set(voltageGridMv.filter(Number.isFinite))].sort((a, b) => b - a);
+  // The rungs the card actually offers strictly INSIDE the bracket, deepest-last.
+  const between = grid.filter((v) => v < lastPassMv && v > coarseFailMv);
+
+  const rungs = [];
+  let pass = lastPassMv;
+  let failMv = null;
+
+  for (const mv of between) {
+    const r = await runRungFn(mv);
+    rungs.push({ voltageMv: mv, outcome: r?.outcome ?? null, verdict: r?.verdict ?? null });
+    if (r?.outcome === 'passed') { pass = mv; continue; }
+    if (r?.outcome === 'failed') { failMv = mv; break; }
+    // ANYTHING ELSE IS A STOP, NEVER PROGRESS — `unknown` (the oracle could not judge, or the
+    // rollback was dirty), `void` (the rung measured a foreign voltage), `refused`, `lever-limited`.
+    // Narrowing an edge around an unobserved boundary would be inventing a measurement (EXP-0011).
+    return {
+      ok: false, refined: false, failMv: null, lastPassMv: pass, shipMv: null,
+      reproduced: false, resolutionMv: null, rungs, halted: true,
+      why: `УТОЧНЕНИЕ ОСТАНОВЛЕНО на ${mv} мВ: исход «${r?.outcome ?? 'нет ответа'}» — не PASS и не отказ. `
+        + `${r?.why ?? ''} Край здесь НЕ найден, и записывать вместо него грубый отказ было бы враньём`,
+    };
+  }
+
+  // Nothing between the two failed → the coarse failure is now bracketed by a PASS one grid point
+  // above it, which is a 5 mV-resolved edge by construction. Both formulations of the owner's rule
+  // agree here and give the same number, because the two rungs are adjacent.
+  const reproduced = failMv !== null;
+  if (failMv === null) failMv = coarseFailMv;
+
+  // THE LOCAL RESOLUTION — the gap between the failure and the nearest grid point above it. On this
+  // card it is 5 mV in 94 intervals and 10 mV in 32, and where it is 10 the run must SAY that the edge
+  // is located only to the card's own resolution.
+  const above = grid.filter((v) => v > failMv);
+  const nearestAbove = above.length ? Math.min(...above) : null;
+  const resolutionMv = nearestAbove === null ? null : nearestAbove - failMv;
+
+  // THE MARGIN IS ALWAYS ASKED WITH THE CARD'S MINIMUM STEP, never with the local gap — the helper
+  // THROWS on a coarser step precisely so «+20 mV» cannot be written by accident.
+  const margin = marginAboveFailureMv(minStepMv);
+  const wanted = failMv + margin.millivolts;
+  // Snap UP to a voltage the card can actually be asked for. Rounding toward MORE margin, because the
+  // alternative is shipping closer to a measured failure than the owner's policy allows.
+  const shipMv = grid.filter((v) => v >= wanted).sort((a, b) => a - b)[0] ?? null;
+  if (shipMv === null) {
+    return {
+      ok: false, refined: reproduced, failMv, lastPassMv: pass, shipMv: null,
+      reproduced, resolutionMv, rungs, halted: true,
+      why: `отказ ${failMv} мВ + запас ${margin.millivolts} мВ = ${wanted} мВ, а такого напряжения (или выше) `
+        + 'в сетке карты нет — просить его не у кого',
+    };
+  }
+
+  return {
+    ok: true,
+    refined: between.length > 0,
+    failMv,
+    lastPassMv: pass,
+    shipMv,
+    reproduced,
+    resolutionMv,
+    rungs,
+    halted: false,
+    why: (between.length === 0
+      ? `грубая ступень БЫЛА одним шагом сетки: отказ ${failMv} мВ уже локализован разрешением карты`
+      : reproduced
+        ? `отказ воспроизведён шагом сетки: ${pass} мВ прошло, ${failMv} мВ отказало`
+        : `ОТКАЗ НЕ ВОСПРОИЗВЁЛСЯ ни на одной мелкой ступени (${between.length} шт., все PASS) — краем остаётся `
+          + `грубый отказ ${failMv} мВ, теперь взятый в вилку одним шагом сетки от ${pass} мВ`)
+      + `. Отгружается ${shipMv} мВ = отказ + запас ${margin.millivolts} мВ (${margin.steps} шага сетки по ${margin.gridStepMv})`
+      + (resolutionMv !== null && resolutionMv > minStepMv
+        ? `. ⚠️ На этой частоте у карты НЕТ шага ${minStepMv} мВ: ближайшее напряжение выше отказа отстоит на `
+          + `${resolutionMv} мВ, значит край локализован лишь разрешением карты`
+        : ''),
+  };
+}
+
+/**
  * THE SEED — where a frequency's descent STARTS, taken from its already-tuned higher neighbour.
  * `plans/15` §4.2 · the owner's words in `GOAL.md` → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ СОСЕДКИ».
  *
@@ -1492,6 +1640,14 @@ export async function searchEdge({
  *  47. skip the verdict line that closes the intent        → «вердикт ЗАКРЫВАЕТ намерение»
  *  48. ignore the blocked-rung set                         → «повесившая машину ДВАЖДЫ ПОДРЯД третий раз не начинается»
  *
+ * ADDED WITH `plans/15` §4.6 — the refinement (`refineEdge`). The owner's rule, stated three times.
+ * Addressees named BEFORE the run:
+ *  49. ship the COARSE failure + margin, skipping the walk  → «край ищется шагом сетки, а не грубой ступенью»
+ *  50. apply the margin to the LOCAL gap instead of the card's minimum step → «запас — ровно 10 мВ»
+ *  51. snap the shipped voltage DOWN to the grid            → «отгружаемое напряжение округляется В СТОРОНУ ЗАПАСА»
+ *  52. treat a non-PASS non-fail as progress                → «НЕИЗВЕСТНО в уточнении — СТОП, а не край»
+ *  53. call a non-reproducing failure «reproduced»          → «невоспроизведённый отказ НАЗВАН невоспроизведённым»
+ *
  * ⚠️ AND THE HARNESS ITSELF FAILED FIRST, which is the reusable part: its first version filtered the
  * output for «FAIL» while this suite prints «ПЛОХО», so it reported **0 red for all four mutations** —
  * a blind verifier reading exactly like a clean bill of health (EXP-0016's third face). It now also
@@ -1915,6 +2071,92 @@ export function selfTest() {
     } finally {
       rmSync(assertJournalSandbox({ dir: journalBox }), { recursive: true, force: true });
     }
+
+    // =============================================================================================
+    // `plans/15` §4.6 — THE REFINEMENT: a coarse failure is a SIGNAL, the edge is found at 5 mV
+    //
+    // The owner's rule, stated three times. The coarse ladder only reaches the neighbourhood; the
+    // number that SHIPS is always `V_fail(grid step) + 10 mV`.
+    // =============================================================================================
+
+    // This card's shape: 5 mV mostly, with a 10 mV gap every 25 mV.
+    const refineGrid = gridLikeCard;
+    const scriptRung = (failsAtOrBelow) => async (mv) => ({
+      outcome: mv <= failsAtOrBelow ? 'failed' : 'passed',
+      verdict: mv <= failsAtOrBelow ? config.VERDICT.SDC : P,
+    });
+
+    // — the walk finds the failure the coarse rung only signalled
+    // The threshold is a voltage that EXISTS on this grid — 1030 does not: it is one of the 32 places
+    // where the card's own gap is 10 mV, and picking it as a fixture would have been testing a rung
+    // the card cannot be asked for (EXP-0072's lesson, met again in a fixture).
+    const walked = [];
+    const fine = await refineEdge({
+      voltageGridMv: refineGrid, lastPassMv: 1045, coarseFailMv: 1015,
+      runRungFn: async (mv) => { walked.push(mv); return (await scriptRung(1025)(mv)); },
+    });
+    ok('край ищется ШАГОМ СЕТКИ от последнего прошедшего, а не грубой ступенью',
+      [walked[0], fine.failMv, fine.reproduced, fine.refined], [1040, 1025, true, true]);
+    ok('и отгружается ровно отказ + 10 мВ (два шага сетки по 5, слово владельца)',
+      fine.shipMv, 1035);
+    ok('спуск уточнения идёт СВЕРХУ ВНИЗ, ступенями сетки — ни одного прыжка',
+      walked.slice(0, 3), [1040, 1035, 1025]);
+
+    // — the margin snaps UP where the grid cannot express fail + 10 exactly
+    const gapGrid = [1045, 1035, 1025, 1015];        // a 10 mV grid: fail + 10 lands on a point here
+    const snapped = await refineEdge({
+      voltageGridMv: gapGrid, lastPassMv: 1045, coarseFailMv: 1015,
+      runRungFn: scriptRung(1025),
+    });
+    ok('отгружаемое напряжение округляется В СТОРОНУ ЗАПАСА, к напряжению, которое у карты ЕСТЬ',
+      [snapped.failMv, snapped.shipMv], [1025, 1035]);
+    ok('и там, где у карты нет шага 5 мВ, прогон ГОВОРИТ, что край локализован её разрешением',
+      [snapped.resolutionMv, /разрешением карты/.test(snapped.why)], [10, true]);
+
+    // — the coarse rung was already one grid step: nothing to walk, and that is not a defect
+    const already = await refineEdge({
+      voltageGridMv: [1055, 1050, 1045, 1040, 1035], lastPassMv: 1045, coarseFailMv: 1040,
+      runRungFn: async () => { throw new Error('уточнению здесь нечего прогонять'); },
+    });
+    ok('грубая ступень БЫЛА одним шагом сетки → уточнять нечего, и это не дефект',
+      [already.ok, already.refined, already.failMv, already.shipMv], [true, false, 1040, 1050]);
+
+    // — the failure that does not come back is NAMED, not dressed up
+    const notBack = await refineEdge({
+      voltageGridMv: refineGrid, lastPassMv: 1045, coarseFailMv: 1020,
+      runRungFn: scriptRung(1000),                    // nothing between 1045 and 1020 fails
+    });
+    ok('невоспроизведённый отказ НАЗВАН невоспроизведённым, а не выдан за найденный край',
+      [notBack.ok, notBack.reproduced, notBack.failMv, /НЕ ВОСПРОИЗВЁЛСЯ/.test(notBack.why)],
+      [true, false, 1020, true]);
+    // 1020 + 10 = 1030, and 1030 is one of this card's 10 mV gaps — the value does not exist. So the
+    // shipped voltage snaps UP to 1035: toward MORE margin, never toward the failure.
+    ok('и отгружается отказ + 10 мВ, подтянутое ВВЕРХ к существующему напряжению (1030 у карты нет)',
+      notBack.shipMv, 1035);
+
+    // — anything that is not PASS and not a failure STOPS the refinement
+    const stopped = await refineEdge({
+      voltageGridMv: refineGrid, lastPassMv: 1045, coarseFailMv: 1020,
+      runRungFn: async () => ({ outcome: 'unknown', why: 'оракул не смог' }),
+    });
+    ok('НЕИЗВЕСТНО в уточнении — СТОП, а не край',
+      [stopped.ok, stopped.halted, stopped.failMv, stopped.shipMv], [false, true, null, null]);
+
+    // — the margin helper is asked with the CARD'S minimum step, never with a local gap
+    let marginThrew = false;
+    try { marginAboveFailureMv(10); } catch { marginThrew = true; }
+    ok('запас — ровно 10 мВ, и подсунуть ему локальный разрыв сетки НЕЛЬЗЯ',
+      [marginAboveFailureMv().millivolts, marginThrew], [10, true]);
+
+    // — R1 again: the refinement decides, it does not write
+    let refineThrew = false;
+    try { await refineEdge({ voltageGridMv: refineGrid, lastPassMv: 1045, coarseFailMv: 1020 }); } catch { refineThrew = true; }
+    ok('без прогонщика ступеней уточнение БРОСАЕТ, а не пишет в карту само', refineThrew, true);
+
+    // — an inverted bracket is a refusal, not a silent empty walk
+    ok('перевёрнутая вилка — отказ с именем, а не пустая прогулка',
+      (await refineEdge({ voltageGridMv: refineGrid, lastPassMv: 1000, coarseFailMv: 1020, runRungFn: scriptRung(0) })).ok,
+      false);
 
     // the card fails somewhere between 150 and 225
     const r1 = await run((o) => (o < 200 ? P : config.VERDICT.SDC));
