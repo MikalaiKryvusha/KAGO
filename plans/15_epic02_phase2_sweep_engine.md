@@ -463,36 +463,66 @@ failure reproduced (1).
 > was to move the fixtures onto the real grid rather than to widen the code. The blocks now show the
 > snap-up rule firing on a REAL gap, which is a better test than the one I meant to write.
 
-### 4.7 — `--dry-run` prints the ladder the run will walk 🔲
+### 4.7 — `--dry-run` prints the ladder the run will walk ✅ **DONE 2026-08-16 01:0x**
 
 *Anchor: `bugs/09`, EXP-0052 — «граница, добавленная в ПРОГОН, не добавлена, пока её не печатает ПЛАН».*
 
-- [ ] One computation feeds both the plan and the run (`descentLadder`), so they cannot disagree.
-- [ ] The dry run prints, per frequency: the seed and where it came from · the rung count · **the depth
-      of the FIRST step** · the zones crossed · the ceiling's holder · the lever wall if it binds.
-- [ ] A selftest block drives a scripted run and asserts its visited rungs equal the printed plan
-      (F2-AC8).
+- [x] **ONE computation feeds both — `planFrequency`.** Not two functions kept in agreement, and not a
+      registry row: `sweepFrequency` WALKS what the plan returns. `bugs/09` is what two cost — the plan
+      advertised −250 mV while the run stopped at −30 — and that plan is the artifact rail S2 makes the
+      operator read BEFORE writing to the owner's card, so a plan that lies launders a guess into an
+      authorization. **A pair that can be REMOVED beats a pair that must be watched.**
+- [x] The dry run prints, per frequency: the seed and the neighbour it came from · the rung count ·
+      **the depth of the FIRST step** · the policy zones crossed and how often the grid forced a deeper
+      step · the lever's reach · **the ceiling's holder, asked of `chooseWriteShape` on the REAL
+      vector** and computed for the FIRST rung (said to be that, because the raise differs per rung).
+- [x] **BOTH ladders are printed when a seed exists** — the seeded one and the fall-back from stock. A
+      plan showing only the first would be honest exactly until the rare case the owner named himself.
+- [x] `npm run engine -- --sweep --dry-run` exits BEFORE opening the journal, recovering or arming
+      anything: rail S2's artifact must cost the card nothing. Exit 1 if any frequency would be refused.
+- [x] F2-AC8 block: a scripted run's visited rungs are compared, rung by rung, with the printed plan.
 
-### 4.8 — Selftests and mutations 🔲
+### 4.8 — Selftests and mutations ✅ **DONE 2026-08-16 01:0x**
 
-- [ ] `engine --selftest` grows the blocks of §4.1–§4.7 on injected backends: an injected card, an
-      injected oracle, an injected clock, an injected journal directory (sandboxed; a block asserts
-      `runs/sweep/` did not grow — EXP-0025).
-- [ ] **Mutations, addressees named in the suite header BEFORE the run:** re-base the governor on stock
-      only · drop the seed proof · continue seeded after a rejected seed · write the intent AFTER the
-      card write · skip the 5 mV refinement · report `lever-limited` as `edge-found` · let the plan and
-      the run compute the ladder separately · drop the two-crash stop · round the grid mapping toward
-      the DEEPER point.
+- [x] `engine --selftest` grew §4.5 and §4.7 on injected backends — an injected atom, an injected
+      vector builder, an injected save, an injected clock, a sandboxed journal directory — **and a
+      block asserts `runs/sweep/` did not grow** (EXP-0025, `bugs/08`), beside the one that already
+      asserted it for the ratchet store.
+- [x] **Fourteen mutations for this phase's last two steps (54–67), addressees named BEFORE each run**
+      (EXP-0016). Recorded in §4.5's table and §4.7's below. The list the plan asked for is covered:
+      re-base the governor on stock only (28) · continue seeded after a rejected seed (61) · write the
+      intent AFTER the card write (46) · skip the 5 mV refinement (49) · report a lever wall as an edge
+      (56, 62) · **let the plan and the run compute the ladder separately (64)** · drop the two-crash
+      stop (48, 59) · round the grid mapping toward the DEEPER point (26, §4.1).
+- [x] **Two mutations of §4.7 and one honest gap:**
 
-### 4.9 — The canon records what changed 🔲
+| # | Mutation | Red |
+|---|---|---|
+| 64 | let the PLAN and the RUN compute the ladder separately — i.e. restore `bugs/09` | 2 |
+| 65 | drop the first step's depth from the printed plan | 1 |
+| 66 | print only the seeded ladder, never the fall-back one | 1 |
+| 67 | let the dry run open the journal before planning | **0 — and it is REPORTED, not hidden** |
 
-- [ ] `GPU_TUNING_RAILS.md` §0 — rail **S2 gains its evidence clause**: the first step's depth is
-      measured from what evidence proves, not from stock; with no evidence the two are the same.
-- [ ] `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` — the journal as the sweep's memory; the rule that a
-      ceiling under a pin has a NAMED holder (extends R11).
-- [ ] `AGENT_GUIDE.md` — the harness table gains `npm run engine -- --sweep`; the truth↔mirror registry
-      gains the row **planned ladder ↔ walked ladder**, checked by the F2-AC8 block.
-- [ ] `STATUS.md` and `plans/13` §4 ticked.
+> **67 reddens nothing because the `--dry-run` early exit lives in `mainSweep`, the LIVE path, which
+> has no offline block and is marked `[NOT-TESTED]`.** Manufacturing a block for it would mean
+> extracting the CLI's argument handling purely to have something to assert — ceremony that would
+> prove the extraction, not the behaviour. What is honest is to say the coverage stops here, so the
+> marker says it and this row says it. The behaviour itself is one `return` before the journal opens,
+> and phase 3 exercises it the first time the owner runs the command.
+
+### 4.9 — The canon records what changed ✅ **DONE 2026-08-16 01:1x**
+
+- [x] `GPU_TUNING_RAILS.md` — rail **S2 gained its evidence clause**: the first step's depth is measured
+      from what evidence proves, not from stock; with no evidence the two are identical (asserted
+      byte-identical, mutation 28). Plus the operator's duty now names the sweep's own dry run.
+- [x] `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` — **R16** (the sweep composes, the document has one author,
+      the plan is the run's own computation) and **R17** (an inversion is a contradiction between two
+      MEASUREMENTS, and the half removed from that guard is REASSIGNED to phase 5 rather than dropped).
+      The journal as the sweep's memory was already **R15**, added with §4.4.
+- [x] `AGENT_GUIDE.md` — the harness table gained `--sweep` and `--sweep --dry-run`; the truth↔mirror
+      registry gained the row **planned ladder ↔ walked ladder**, recorded as COLLAPSED with the block
+      that keeps it collapsed.
+- [x] `STATUS.md` and `plans/13` §4 ticked.
 
 ## 5. What phase 2 does NOT do
 
@@ -533,7 +563,7 @@ failure reproduced (1).
 | 4.4 | ✅ **`npm run journal -- --selftest` 17 blocks + 7 wiring blocks in the engine (137 → 144), zero writes.** The atom sees the intent already on disk at the instant it is called; a throwing atom leaves the rung as a dead machine would and the next launch names it `ЗАВИС`; two consecutive hangs block the rung, one hang does not. Mutations 40, 42–48 |
 | 4.5 | ✅ **27 blocks (`engine --selftest` 156 → 183, `curve --selftest` 40 → 42), zero writes, plus `npm run traps` 22 → 28 assertions with ZERO pending.** A scripted full-band run closes every point with one of TWO verdicts; the document is saved before the next rung and never saved unvalidated; `recover` runs once and first; two consecutive hangs stop the sweep untouched. Mutations 54–63, each reddening its own block — and two of them found holes on the first pass |
 | 4.6 | ✅ **12 blocks (144 → 156), zero writes.** The walk descends by grid steps from the last PASS; the shipped voltage is `V_fail + 10 mV` SNAPPED UP to a voltage the card has; a non-reproducing failure is named as such; a non-PASS non-fail halts. Mutations 49–53 |
-| 4.7 | planned rungs == walked rungs, computed once |
+| 4.7 | ✅ **4 blocks (`engine --selftest` 183 → 188), zero writes.** Planned rungs == walked rungs, computed ONCE by `planFrequency`; the printed plan carries the first step's depth, the ceiling's holder and the lever wall; a seeded plan names both ladders. Mutations 64–66 each redden their own block; 67 is reported as uncovered rather than counted |
 | phase | `npm run watchdog -- --status` unarmed before and after · `npm run check` green |
 
 ## 8. Decisions made without the owner
@@ -639,6 +669,22 @@ failure reproduced (1).
   Three assertions in the new blocks threw under mutation instead of reddening, and a class fixed three
   times by hand needs a mechanism. **The other eleven suites do not have this net**, and that is stated
   rather than quietly generalized — retro-fitting them is its own backlog item, not a rider on this step.
+**Added while EXECUTING §4.7–§4.9 (2026-08-16 01:0x):**
+
+- **The plan is not a document the run agrees with — it is the run's own computation, returned early.**
+  `sweepFrequency` calls `planFrequency` and walks what it returns; the dry run calls the same function
+  and prints it. This is stricter than what §4.7 asked for («one computation feeds both») and it is the
+  only form in which `bugs/09` cannot recur.
+- **The ceiling's holder in the dry run is computed for the FIRST rung and SAID to be that.** The
+  uniform raise differs from rung to rung, so one holder for a whole descent would be a claim about
+  rungs nobody computed. What the operator needs before saying «go» is the QUESTION's answer — can the
+  curve carry a cap at this clock at all — and that does not vary with the rung.
+- **The dry run exits before the journal is opened, before recovery, before anything is armed.** Rail
+  S2's artifact must cost the card nothing; a plan that had already touched state would not be a plan.
+- **Mutation 67 is reported as uncovered instead of being given a manufactured block.** Extracting the
+  CLI's argument handling solely to have something to assert would prove the extraction, not the
+  behaviour. The `[NOT-TESTED]` marker and §4.8's table both say so.
+
 **Added while EXECUTING §4.5 (2026-08-16 00:3x):**
 
 - **The third verdict `clock-floor` is NOT implemented, and the plan's own §4.5 was wrong to list it.**

@@ -71,7 +71,7 @@ import {
 } from './lib/curve-store.mjs';
 import {
   writeIntent, writeVerdict,
-  openJournal, readJournal, orphanIntents, resumeState,
+  openJournal, readJournal, orphanIntents, resumeState, SWEEP_DIR,
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
@@ -939,6 +939,80 @@ export function rungGroups({ rows = [], fromMhz = null, toMhz = null } = {}) {
 }
 
 /**
+ * WHAT THE DESCENT WILL WALK AT ONE FREQUENCY — pure, no burns, and it is the SAME computation the
+ * run uses. `plans/15` §4.7, criterion F2-AC8.
+ *
+ * ─── WHY THIS FUNCTION EXISTS AT ALL, AND IT IS NOT «TIDINESS» ────────────────────────────────────
+ *
+ * `bugs/09`: the dry run advertised a ladder reaching −250 mV while the run stopped at −30. Nothing
+ * was broken in the run — the PLAN was a second implementation of it, and the two had drifted. That
+ * dry run is the artifact rail S2 makes the operator read BEFORE anything is written to the owner's
+ * card, so a plan that lies is worse than no plan: it launders a guess into an authorization.
+ * EXP-0052 states the rule the fix produced — **«a bound added to the RUN is not added until the PLAN
+ * prints it»** — and the mechanical form of that rule is this: ONE function, called by both. Not two
+ * functions kept in agreement, and not a pair in the truth↔mirror registry. A pair that can be
+ * REMOVED beats a pair that must be watched (`AGENT_GUIDE.md`).
+ *
+ * ─── TWO LADDERS, BOTH NAMED ─────────────────────────────────────────────────────────────────────
+ *
+ * `rungs` is the expected path — starting at the seed when a proven higher neighbour offers one.
+ * `rungsFromStock` is what the descent falls back to when the seed's first burn is not a PASS, which
+ * is the rare case the owner named himself. A dry run printing only the first would be honest exactly
+ * until that case happens, so both travel.
+ *
+ * @returns {object} `{frequencyMhz, seed, seedMv, startMv, rungs, rungsFromStock, firstStepMv,
+ *                     zonesCrossed, forcedByGridCount, floorMv, refused, cliffRefused, why}`
+ *
+ * [TESTED: 2026-08-16 01:0x, OFFLINE · exercised by every §4.5 and §4.7 block, because the run itself
+ *  walks what this returns. The load-bearing one is «ПЛАН ОБЕЩАЕТ РОВНО ТЕ СТУПЕНИ, ЧТО ПРОЙДЁТ
+ *  ПРОГОН» (F2-AC8), and mutation 64 — make the plan and the run compute separately, i.e. restore
+ *  `bugs/09` — reddens it. **NOT TESTED on a live card.**]
+ */
+export function planFrequency({
+  frequencyMhz = null,
+  stockVoltageMv = null,
+  voltageGridMv = [],
+  availableDepthMv = null,
+  curveDoc = null,
+  zones = config.DESCENT_ZONES,
+  cliffMv = config.ASCENT_STEP_MAX_MV ?? 35,
+} = {}) {
+  const seed = seedFor({ frequencyMhz, curveDoc });
+  const seedMv = seed && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv ? seed.seedMv : null;
+  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, zones });
+
+  // TWO ladders, and both are named because the run may walk either: the expected path starts at the
+  // seed, and a REJECTED seed drops the descent back to stock (§4.2, E2-AC11). A dry run that printed
+  // only one of them would be honest exactly until the rare case the owner said happens.
+  const fromStock = ladder.rungs;
+  const rungs = seedMv === null ? fromStock : fromStock.filter((r) => r.mv < seedMv);
+  const startMv = seedMv ?? stockVoltageMv;
+  const firstStepMv = rungs.length ? startMv - rungs[0].mv : null;
+  const zonesCrossed = [...new Set(rungs.map((r) => r.zoneStepMv))];
+
+  return {
+    frequencyMhz,
+    stockVoltageMv,
+    seed,
+    seedMv,
+    startMv,
+    rungs,
+    rungsFromStock: fromStock,
+    firstStepMv,
+    zonesCrossed,
+    forcedByGridCount: ladder.forcedByGridCount,
+    floorMv: ladder.floorMv,
+    availableDepthMv,
+    refused: ladder.refused,
+    // The `bugs/03` cliff on the FIRST step — checked here so the dry run can print the refusal too,
+    // rather than the run discovering it after the operator has already said «go».
+    cliffRefused: firstStepMv !== null && firstStepMv > cliffMv,
+    cliffMv,
+    why: ladder.why,
+  };
+}
+
+/**
  * ONE FREQUENCY, END TO END — seed, descend, refine, and close with ONE of TWO verdicts.
  * `plans/15` §4.5.
  *
@@ -996,11 +1070,16 @@ export async function sweepFrequency({
     why: '',
   };
 
+  // ---- 0. THE PLAN — and the run walks THIS, not a second computation of it (F2-AC8, `bugs/09`,
+  // EXP-0052). Everything the dry run prints comes from the very object the loop below consumes.
+  const plan = planFrequency({ frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, curveDoc, zones });
+  out.plan = plan;
+
   // ---- 1. THE SEED — the owner's optimization, and its first burn is a PROOF rather than a formality.
   let lastPass = null;
-  let startMv = stockVoltageMv;
-  const seed = seedFor({ frequencyMhz, curveDoc });
-  if (seed && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv) {
+  let seedTaken = false;
+  const seed = plan.seed;
+  if (plan.seedMv !== null) {
     out.seedFrom = seed;
     // `frequencyMhz` is handed DOWN rather than known by the caller: naming the rung's frequency in
     // two places would be a truth↔mirror pair inside one function, and it hid a mutation — burning
@@ -1016,8 +1095,8 @@ export async function sweepFrequency({
     });
     if (decision.seeded) {
       out.seeded = true;
+      seedTaken = true;
       lastPass = seed.seedMv;
-      startMv = seed.seedMv;
       say('seed-accepted', decision.note);
     } else {
       // E2-AC11: the rejection is a FINDING about the silicon, and it is counted as one. The seed is
@@ -1028,15 +1107,16 @@ export async function sweepFrequency({
     }
   }
 
-  // ---- 2. THE LADDER — the owner's policy, always measured in depth FROM STOCK even when the descent
-  // starts lower. The zone a rung belongs to is a property of how deep it is, not of where we joined.
-  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, zones });
-  if (ladder.refused) {
+  // ---- 2. THE LADDER — taken from the plan, in one of its two named forms. The zone a rung belongs
+  // to is a property of how deep it is FROM STOCK, not of where the descent joined; that is why the
+  // plan computes the ladder from stock and then cuts it at the seed rather than re-deriving it.
+  if (plan.refused) {
     out.halted = true;
-    out.why = `лестница спуска не построена: ${ladder.why}`;
+    out.why = `лестница спуска не построена: ${plan.why}`;
     return out;
   }
-  const rungs = ladder.rungs.filter((r) => r.mv < startMv);
+  const rungs = seedTaken ? plan.rungs : plan.rungsFromStock;
+  const startMv = seedTaken ? plan.seedMv : stockVoltageMv;
 
   if (rungs.length === 0) {
     // Nothing below where we stand that the lever can still reach — OUR wall, never the silicon's.
@@ -1045,7 +1125,7 @@ export async function sweepFrequency({
     out.provenBy = lastPass === null
       ? null
       : `затравка ${lastPass} мВ от соседки ${out.seedFrom?.neighbourMhz} МГц прошла, а глубже рычаг не достаёт`;
-    out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${ladder.why}`;
+    out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${plan.why}`;
     return out;
   }
 
@@ -1054,7 +1134,7 @@ export async function sweepFrequency({
   // arithmetic — the ladder's spacing is the policy step and the grid's local gap is at most 10 mV —
   // but «by arithmetic» is exactly the kind of argument R12 says to COMPUTE, so it is computed.
   const firstStep = startMv - rungs[0].mv;
-  const cliff = config.ASCENT_STEP_MAX_MV ?? 35;
+  const cliff = plan.cliffMv;
   if (firstStep > cliff) {
     out.halted = true;
     out.why = `первый шаг спуска от ${startMv} мВ до ${rungs[0].mv} мВ это ${firstStep} мВ, а сторож обрыва `
@@ -1127,8 +1207,8 @@ export async function sweepFrequency({
   out.verdict = 'lever-limited';
   out.voltageMv = lastPass ?? stockVoltageMv;
   out.provenBy = lastPass === null ? null
-    : `${lastPass} мВ прошло на ${frequencyMhz} МГц, а глубже спускаться нечем: ${ladder.why}`;
-  out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${ladder.why}`;
+    : `${lastPass} мВ прошло на ${frequencyMhz} МГц, а глубже спускаться нечем: ${plan.why}`;
+  out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${plan.why}`;
   return out;
 }
 
@@ -1348,6 +1428,119 @@ export async function sweepRange({
   report.doc = doc;
   report.elapsedMs = clockMs() - startedMs;
   return report;
+}
+
+/**
+ * THE DRY RUN — what the sweep WILL do, computed by the functions that will do it. `plans/15` §4.7.
+ *
+ * This is the artifact rail S2 makes the operator read BEFORE the first byte reaches the owner's card,
+ * so everything in it is taken from the same call the run makes (`planFrequency`) or from the same
+ * decision the rung takes (`chooseWriteShape` on the REAL vector). Nothing here is a second opinion.
+ *
+ * **The ceiling's holder is computed for the FIRST rung of each frequency and SAID to be that** — the
+ * uniform raise differs from rung to rung, so a single holder for the whole descent would be a claim
+ * about rungs nobody has computed. What does not vary with the rung is the question itself (can the
+ * curve carry a cap at this clock, or must the pin), and that is what the operator needs before
+ * saying «go».
+ *
+ * @returns {Promise<object>} `{groups, frequenciesInBand, rungTotal, refusals}`
+ *
+ * [TESTED: 2026-08-16 01:0x, OFFLINE · 4 blocks — the planned rungs equal the walked ones and the
+ *  count is not vacuously zero; the printed plan carries the first step's depth, the ceiling's holder
+ *  and the lever wall; a seeded plan names BOTH ladders. Mutations 64, 65, 66 each redden their own
+ *  block. **NOT TESTED: the `--dry-run` CLI exit itself (mutation 67 reddens nothing) — it is the
+ *  live wiring, and it has no offline block. Said here rather than counted as covered.**]
+ */
+export async function sweepDryRun({
+  curveDoc = null,
+  points = [],
+  fromMhz = null,
+  toMhz = null,
+  canPin = true,
+  buildVector = null,
+  chooseShape = chooseWriteShape,
+  zones = config.DESCENT_ZONES,
+} = {}) {
+  if (!curveDoc || !Array.isArray(curveDoc.frequencies)) {
+    throw new Error('sweepDryRun требует документ кривой — план строится по нему, а не по памяти процесса');
+  }
+  const build = buildVector ?? (await import('./lib/nvapi.mjs')).buildRaiseAndCapVector;
+  const groups = rungGroups({ rows: curveDoc.frequencies, fromMhz, toMhz });
+  const voltageGridMv = curveDoc.voltageGridMv ?? [];
+
+  const out = [];
+  for (const g of groups) {
+    const floorMv = leverFloorFor(g.topMhz, points);
+    const availableDepthMv = Number.isFinite(floorMv) ? g.stockVoltageMv - floorMv : 0;
+    const plan = planFrequency({
+      frequencyMhz: g.topMhz, stockVoltageMv: g.stockVoltageMv,
+      voltageGridMv, availableDepthMv, curveDoc, zones,
+    });
+
+    // WHO WOULD HOLD THE CEILING at the first rung — asked of `chooseWriteShape` rather than decided
+    // here, for the same reason `runRung` asks it: a second copy of that rule is a truth↔mirror pair
+    // invented on purpose (EXP-0074).
+    let holder = null;
+    let holderWhy = '';
+    if (plan.rungs.length) {
+      const rp = planRung({ points, clockMhz: g.topMhz, voltageMv: plan.rungs[0].mv });
+      if (rp.leverLimited) { holder = 'предел рычага уже на первой ступени'; holderWhy = rp.why; }
+      else if (!rp.ok) { holder = null; holderWhy = rp.why; }
+      else {
+        const vector = build(points, rp.deltaMhz, { capMhz: g.topMhz });
+        const held = vector && vector.ok === true ? chooseShape(vector, { pinned: canPin }) : null;
+        holder = held?.ok ? held.heldBy : null;
+        holderWhy = held?.why ?? (vector?.why ?? 'вектор записи не построен');
+      }
+    }
+    out.push({ ...g, plan, holder, holderWhy });
+  }
+
+  return {
+    groups: out,
+    groupCount: out.length,
+    frequenciesInBand: out.reduce((n, g) => n + g.count, 0),
+    rungTotal: out.reduce((n, g) => n + g.plan.rungs.length, 0),
+    refusals: out.filter((g) => g.plan.refused || g.plan.cliffRefused || g.holder === null).length,
+  };
+}
+
+/**
+ * THE DRY RUN, PRINTED. Every line the owner's rail S2 asks for, and the FIRST STEP'S DEPTH is on it —
+ * that is the number whose absence cost him a night (`bugs/09`).
+ *
+ * [TESTED: 2026-08-16 01:0x, OFFLINE · 2 blocks; mutations 65 (drop the first step's depth) and 66
+ *  (print only the seeded ladder) each redden their own block.]
+ */
+export function sweepDryRunLines(dry) {
+  const lines = [];
+  lines.push(`СУХОЙ ПРОГОН: ступеней ${dry.groupCount}, частот в полосе ${dry.frequenciesInBand}, `
+    + `прожигов запланировано ${dry.rungTotal}${dry.refusals ? ` · ОТКАЗОВ ${dry.refusals}` : ''}`);
+  lines.push('В КАРТУ НЕ ЗАПИСАНО НИЧЕГО — это план, а не прогон.');
+  for (const g of dry.groups) {
+    const p = g.plan;
+    const seed = p.seedMv === null
+      ? `затравки нет (спуск от стока ${p.stockVoltageMv} мВ)`
+      : `затравка ${p.seedMv} мВ от соседки ${p.seed.neighbourMhz} МГц (статус «${p.seed.neighbourStatus}»)`;
+    lines.push(`${g.topMhz} МГц — ступень из ${g.count} частот(ы) до ${g.bottomMhz} МГц, сток ${g.stockVoltageMv} мВ`);
+    lines.push(`   ${seed}`);
+    if (p.refused) { lines.push(`   ❌ ЛЕСТНИЦА НЕ ПОСТРОЕНА: ${p.why}`); continue; }
+    if (p.rungs.length === 0) { lines.push(`   ⚠️ ступеней нет: ${p.why}`); continue; }
+    lines.push(`   ступеней ${p.rungs.length}, ПЕРВЫЙ ШАГ −${p.firstStepMv} мВ, глубже всего `
+      + `${p.rungs[p.rungs.length - 1].mv} мВ (−${p.rungs[p.rungs.length - 1].depthMv} мВ от стока)`);
+    lines.push(`   зоны политики: ${p.zonesCrossed.map((z) => `${z} мВ`).join(' · ')}`
+      + (p.forcedByGridCount ? ` · сетка вынудила ${p.forcedByGridCount} шаг(ов) глубже политики` : ''));
+    lines.push(`   рычаг достаёт до ${p.floorMv} мВ (−${p.availableDepthMv} мВ) — ниже него это НАШ предел, а не кремний`);
+    lines.push(`   потолок на первой ступени держит: ${g.holder ?? 'НИКТО — ступень будет отвергнута ДО записи'}`);
+    if (p.cliffRefused) {
+      lines.push(`   ❌ СТОРОЖ ОБРЫВА: первый шаг ${p.firstStepMv} мВ больше разрешённых ${p.cliffMv} (bugs/03)`);
+    }
+    if (p.seedMv !== null) {
+      lines.push(`   если затравка НЕ пройдёт — спуск падает на сток и идёт ${p.rungsFromStock.length} ступеней `
+        + `с первого шага −${p.stockVoltageMv - p.rungsFromStock[0].mv} мВ`);
+    }
+  }
+  return lines;
 }
 
 /**
@@ -2821,6 +3014,9 @@ export function selfTest() {
     // A selftest that exercises only the paths without side effects is a selftest with a hole exactly
     // where the side effects are.
     const prodBefore = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
+    // The sweep journal has a production directory too, and this suite drives the journal through
+    // `runRung` and `sweepRange`. `bugs/08` is what a suite that writes into production costs.
+    const sweepBefore = existsSync(SWEEP_DIR) ? readdirSync(SWEEP_DIR).length : 0;
     const sandbox = mkdtempSync(join(tmpdir(), 'kago-engine-'));
     try {
       const store = openStore({ dir: sandbox });
@@ -3362,6 +3558,59 @@ export function selfTest() {
     ok('и провалившийся подбор ОСТАНАВЛИВАЕТ развёртку до первой записи в карту',
       [deadRecover.ok, deadRecover.stoppedBy, deadRecover.closed], [false, 'recover', 0]);
 
+    // =============================================================================================
+    // `plans/15` §4.7 — THE DRY RUN PRINTS THE LADDER THE RUN WILL WALK (F2-AC8)
+    //
+    // `bugs/09` is the whole reason: the plan once advertised −250 mV while the run stopped at −30.
+    // The fix is not «keep them in agreement» — it is ONE computation, and these blocks are what
+    // keeps it collapsed.
+    // =============================================================================================
+
+    const dryWalked = [];
+    const dryDoc = sweepDoc(bandRows);
+    const dry = await sweepDryRun({
+      curveDoc: dryDoc, points: sweepPoints, buildVector: vectorPinned,
+    });
+    await sweepRange({
+      curveDoc: dryDoc, points: sweepPoints,
+      runStepFn: sweepAtom(-1), buildVector: vectorPinned,
+      onEvent: (e) => { if (e.kind === 'rung') dryWalked.push([e.frequencyMhz, e.voltageMv]); },
+      now: () => '2026-08-16T02:00:00+03:00',
+      clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    // The comparison is the criterion itself: every rung the scripted run visited, against every rung
+    // the plan promised — same order, same voltages, same frequencies.
+    const dryPlanned = dry.groups.flatMap((g) => g.plan.rungs.map((r) => [g.topMhz, r.mv]));
+    ok('ПЛАН ОБЕЩАЕТ РОВНО ТЕ СТУПЕНИ, ЧТО ПРОЙДЁТ ПРОГОН (F2-AC8)', dryWalked, dryPlanned);
+    ok('и это НЕ пустое совпадение — ступеней в плане столько же, сколько прожигов насчитано',
+      [dryPlanned.length > 0, dry.rungTotal], [true, dryPlanned.length]);
+
+    // THE NUMBER WHOSE ABSENCE COST THE OWNER A NIGHT — the depth of the FIRST step, printed.
+    const dryLines = sweepDryRunLines(dry);
+    ok('СУХОЙ ПРОГОН ПЕЧАТАЕТ ГЛУБИНУ ПЕРВОГО ШАГА, держателя потолка и стену рычага',
+      [dryLines.some((l) => l.includes('ПЕРВЫЙ ШАГ −25 мВ')),
+        dryLines.some((l) => l.includes('потолок на первой ступени держит: закрепление частоты')),
+        dryLines.some((l) => l.includes('рычаг достаёт до 930 мВ')),
+        dryLines.some((l) => l.includes('В КАРТУ НЕ ЗАПИСАНО НИЧЕГО'))],
+      [true, true, true, true]);
+
+    // A SEEDED plan names BOTH ladders, because a rejected seed drops the descent to stock and the
+    // operator would otherwise be reading a plan that stops being true exactly in the rare case the
+    // owner said happens.
+    const drySeeded = await sweepDryRun({
+      curveDoc: sweepDoc([
+        sweepRow(2850, 1045, { voltageMv: 1000, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг' }),
+        ...bandRows,
+      ]),
+      points: sweepPoints, buildVector: vectorPinned, fromMhz: 2842, toMhz: 2828,
+    });
+    ok('СУХОЙ ПРОГОН НАЗЫВАЕТ ОБЕ ЛЕСТНИЦЫ: по затравке и запасную от стока',
+      (() => {
+        const l = sweepDryRunLines(drySeeded);
+        return [l.some((x) => x.includes('затравка 1000 мВ от соседки 2850 МГц')),
+          l.some((x) => x.includes('если затравка НЕ пройдёт'))];
+      })(), [true, true]);
+
     // — the report is COUNTED, not claimed (E2-AC2), and the wall time stands against the estimate
     const lines = sweepReportLines(full);
     ok('ОТЧЁТ СЧИТАЕТ покрытие, вердикты, откаты затравки и время против оценки',
@@ -3373,6 +3622,8 @@ export function selfTest() {
 
     const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
     ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
+    ok('ПРОДАКШЕН-ЖУРНАЛ НЕ ВЫРОС: ни одна ступень набора не писала в runs/sweep/ (EXP-0025, bugs/08)',
+      existsSync(SWEEP_DIR) ? readdirSync(SWEEP_DIR).length : 0, sweepBefore);
 
     return { ok: results.every((r) => r.ok), results };
   })();
@@ -3636,6 +3887,14 @@ async function mainSweep(argv, arg) {
   nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
   const handle = handles.readBigUInt64LE(0);
   const points = nvapi.readVfCurve(nv, handle).points;
+
+  // THE DRY RUN IS A SEPARATE EXIT AND IT HAPPENS BEFORE ANYTHING ELSE — no journal is opened, no
+  // recovery is attempted, no watchdog is armed. Rail S2's artifact must cost the card nothing.
+  if (argv.includes('--dry-run')) {
+    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz });
+    for (const line of sweepDryRunLines(dry)) console.log(line);
+    return dry.refusals ? 1 : 0;
+  }
 
   const journal = openJournal({});
   assertJournalSandbox(journal);
