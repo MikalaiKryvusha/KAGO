@@ -29,8 +29,8 @@
   button.hang{border-color:var(--alarm);color:#ffb3b3}
   .wrap{display:grid;grid-template-columns:minmax(520px,1fr) minmax(250px,320px);
         gap:20px;align-items:start;max-width:1080px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
-  .stage{background:#0f1216;border:1px solid var(--line);border-radius:10px;padding:4px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px}
+  .stage{background:#0f1216;border:1px solid var(--line);border-radius:10px;padding:2px}
   svg{display:block;width:100%;height:auto}
   .m{background:#0f1216;border:1px solid var(--line);border-radius:8px;
      padding:9px 12px;margin-bottom:9px}
@@ -78,31 +78,37 @@
      работают в паре: короткие приподнимания приходятся ровно на перехваты. */
   .arm{animation:arm 24s ease-in-out infinite}
   @keyframes arm{
-    0%,6%    {transform:translateY(0)}
-    18%      {transform:translateY(22px)}   /* сел на гайку */
-    27%      {transform:translateY(22px)}   /* повернул */
-    30%      {transform:translateY(16px)}   /* приподнялся для перехвата */
-    36%      {transform:translateY(22px)}   /* сел снова */
-    45%      {transform:translateY(22px)}   /* повернул */
-    48%      {transform:translateY(16px)}   /* приподнялся */
-    54%      {transform:translateY(22px)}   /* сел */
-    63%      {transform:translateY(22px)}   /* повернул */
-    78%,100% {transform:translateY(0)}      /* ушёл вверх */
+    0%,3%    {transform:translateY(0)}
+    12%      {transform:translateY(22px)}
+    20%      {transform:translateY(22px)}
+    23%      {transform:translateY(16px)}
+    28%      {transform:translateY(22px)}
+    36%      {transform:translateY(22px)}
+    39%      {transform:translateY(16px)}
+    44%      {transform:translateY(22px)}
+    52%      {transform:translateY(22px)}
+    55%      {transform:translateY(16px)}
+    60%      {transform:translateY(22px)}
+    68%      {transform:translateY(22px)}
+    77%,100% {transform:translateY(0)}
   }
   /* Поворот идёт вокруг ЗЕВА — то есть вокруг гайки. Рабочий ход по часовой,
      перехват — обратно, и обратный ход быстрее рабочего, как рукой и делают. */
   .rock{transform-box:view-box;transform-origin:0 0;
         animation:rock 24s ease-in-out infinite}
   @keyframes rock{
-    0%,18%  {transform:translate(150px,116px) rotate(0deg)}
-    27%     {transform:translate(150px,116px) rotate(26deg)}
-    30%     {transform:translate(150px,116px) rotate(26deg)}
-    36%     {transform:translate(150px,116px) rotate(0deg)}
-    45%     {transform:translate(150px,116px) rotate(26deg)}
-    48%     {transform:translate(150px,116px) rotate(26deg)}
-    54%     {transform:translate(150px,116px) rotate(0deg)}
-    63%     {transform:translate(150px,116px) rotate(26deg)}
-    78%,100%{transform:translate(150px,116px) rotate(0deg)}
+    0%,12%  {transform:translate(150px,116px) rotate(-30deg)}
+    20%     {transform:translate(150px,116px) rotate(-4deg)}
+    23%     {transform:translate(150px,116px) rotate(-4deg)}
+    28%     {transform:translate(150px,116px) rotate(-30deg)}
+    36%     {transform:translate(150px,116px) rotate(-4deg)}
+    39%     {transform:translate(150px,116px) rotate(-4deg)}
+    44%     {transform:translate(150px,116px) rotate(-30deg)}
+    52%     {transform:translate(150px,116px) rotate(-4deg)}
+    55%     {transform:translate(150px,116px) rotate(-4deg)}
+    60%     {transform:translate(150px,116px) rotate(-30deg)}
+    68%     {transform:translate(150px,116px) rotate(-4deg)}
+    77%,100%{transform:translate(150px,116px) rotate(-30deg)}
   }
 </style>
 </head>
@@ -118,7 +124,7 @@
 <div class="wrap">
   <div class="card">
     <div class="stage">
-      <svg viewBox="0 0 380 292" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
+      <svg viewBox="0 14 380 278" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
         <defs>
           <linearGradient id="shroud" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stop-color="#4a525d"/><stop offset=".45" stop-color="#343b45"/>
@@ -246,13 +252,14 @@
           </linearGradient>
         </defs>
         <!-- ── ПЛАТА, ЗАДНЯЯ ПЛАСТИНА, ГРЕБЁНКА PCIe ───────────────────── -->
-        <rect x="34" y="230" width="316" height="22" rx="2" fill="#1e232a" stroke="#39424d"/>
-        <!-- Гребёнка PCIe одной сплошной медяшкой: зубы дробили взгляд и мешали
-             заметить остановку — а именно ради этого вся картинка и рисуется. -->
+        <!-- Медь идёт САМОЙ ПЕРВОЙ — ниже неё в рисунке нет ничего: ни платы,
+             ни кожуха, ни кронштейна. Поэтому она выходит из-под всего сразу.
+             Гребёнка сплошной медяшкой: зубы дробили взгляд. -->
         <g>
           <rect x="70" y="240" width="132" height="26" rx="1.5" fill="url(#gold)"/>
           <rect x="212" y="240" width="52" height="26" rx="1.5" fill="url(#gold)"/>
         </g>
+        <rect x="34" y="230" width="316" height="22" rx="2" fill="#1e232a" stroke="#39424d"/>
 
 
         <!-- ── ГАЕЧНЫЙ КЛЮЧ ────────────────────────────────────────────────
@@ -268,12 +275,14 @@
              Рисуется ПЕРВЫМ после контактов — значит уходит за кожух сам. -->
         <g class="arm">
           <g class="rock">
-              <g transform="translate(-59,-59) scale(4.4)">
+              <g transform="scale(-1,1)">
+              <g transform="translate(-75,-75) scale(5.6)">
                 <g transform="rotate(180 8 8)">
                   <path d="M.102 2.223A3.004 3.004 0 0 0 3.78 5.897l6.341 6.252A3.003 3.003 0 0 0 13 16a3 3 0 1 0-.851-5.878L5.897 3.781A3.004 3.004 0 0 0 2.223.1l2.141 2.142L4 4l-1.757.364zm13.37 9.019.528.026.287.445.445.287.026.529L15 13l-.242.471-.026.529-.445.287-.287.445-.529.026L13 15l-.471-.242-.529-.026-.287-.445-.445-.287-.026-.529L11 13l.242-.471.026-.529.445-.287.287-.445.529-.026L13 11z" fill="url(#wrenchBody)" stroke="#39414a"
                         stroke-width=".22" stroke-linejoin="round"/>
                   <path d="M.102 2.223A3.004 3.004 0 0 0 3.78 5.897l6.341 6.252A3.003 3.003 0 0 0 13 16a3 3 0 1 0-.851-5.878L5.897 3.781A3.004 3.004 0 0 0 2.223.1l2.141 2.142L4 4l-1.757.364zm13.37 9.019.528.026.287.445.445.287.026.529L15 13l-.242.471-.026.529-.445.287-.287.445-.529.026L13 15l-.471-.242-.529-.026-.287-.445-.445-.287-.026-.529L11 13l.242-.471.026-.529.445-.287.287-.445.529-.026L13 11z" fill="url(#wrenchBevel)"/>
                 </g>
+              </g>
               </g>
             </g>
           </g>
