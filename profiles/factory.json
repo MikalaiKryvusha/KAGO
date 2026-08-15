@@ -5,6 +5,7 @@
   "settings": {
     "powerLimitWatts": null,
     "graphicsClockLockMhz": null,
-    "curveRaiseAndCapMhz": null
+    "curveRaiseAndCapMhz": null,
+    "curveRef": null
   }
 }

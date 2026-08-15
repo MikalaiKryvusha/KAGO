@@ -110,6 +110,10 @@ export function candidateProfile(mhz, card) {
       // voltage curve: the whole point of the pin is that the region under test is the region the
       // load actually reaches, and a raised curve would change what that region costs.
       curveRaiseAndCapMhz: null,
+      // Same reasoning, and the key is spelled out rather than omitted because the format treats an
+      // OMITTED setting as ambiguous: «leave as is» and «restore factory» are different instructions
+      // (`plans/14` §4.3 added the reference; the rule is older than it).
+      curveRef: null,
     },
     stamp: {
       driver: card.driver,

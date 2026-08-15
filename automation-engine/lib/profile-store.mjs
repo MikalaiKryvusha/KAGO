@@ -44,7 +44,7 @@ const GPU_INFO = fileURLToPath(new URL('../../tools/gpu-info.mjs', import.meta.u
 
 /** The settings a profile may carry. An unknown key is REFUSED, never ignored — `powerLimitWats`
  *  silently ignored is a profile that does nothing while reading as if it does. */
-const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz']);
+const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz', 'curveRef']);
 const STAMP_KEYS = Object.freeze(['driver', 'vbios', 'takenAt']);
 
 /**
@@ -223,7 +223,7 @@ export function probeCard() {
  * @param {{fileName?: string|null, card?: object|null}} opts
  * @returns {Array<{field:string, why:string}>} empty means accepted
  */
-export function validateProfile(profile, { fileName = null, card = null } = {}) {
+export function validateProfile(profile, { fileName = null, card = null, resolveCurve = null } = {}) {
   const out = [];
 
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
@@ -447,6 +447,46 @@ export function validateProfile(profile, { fileName = null, card = null } = {}) 
           }
         }
       }
+    }
+  }
+
+  // --- curveRef (plans/14 §4.3, the owner's `ideas/03` step 1) ----------------------------------
+  //
+  // *«Есть профили. Они ассоциированы с JSON-объектом… и есть ссылка на JSON — тюнинг-кривую
+  // видеокарты компа.»* Three modes share ONE measured curve, so embedding it three times would
+  // create three copies of one measurement — the drift class this project keeps paying for.
+  //
+  // EXACTLY ONE of `curveRaiseAndCapMhz` / `curveRef` may be set, and the exclusivity is a refusal
+  // rather than a precedence rule: «both» has no honest reading, and a precedence would silently
+  // ignore half of what the file says. The same shape `deltaMhz` / `deltaByPointMhz` already uses.
+  //
+  // THE RESOLUTION IS INJECTED, NOT IMPORTED. This module stays pure and koffi-free (its whole value
+  // is being provable on fixtures alone), and `curve-store` transitively imports the card probes. So
+  // the SHAPE is checked here and the CONTENT by a resolver the caller supplies; with no resolver a
+  // profile is validated as far as it honestly can be, and the report says which tier ran.
+  const ref = s.curveRef;
+  if (ref !== null && ref !== undefined) {
+    if (typeof ref !== 'string' || !NAME_RE.test(ref)) {
+      out.push(refuse('settings.curveRef', `ожидалось имя документа кривой (строчные буквы, цифры, дефисы) или null, получено ${JSON.stringify(ref)}`));
+    } else if (resolveCurve) {
+      const r = resolveCurve(ref);
+      if (!r || r.missing) {
+        out.push(refuse('settings.curveRef', `документа кривой «${ref}» нет: профиль ссылается на замер, которого не существует`));
+      } else if (Array.isArray(r.problems) && r.problems.length) {
+        out.push(refuse('settings.curveRef', `документ кривой «${ref}» сам не проходит валидатор: ${r.problems.slice(0, 3).map((p) => `${p.field} — ${p.why}`).join('; ')}`));
+      } else if (card && r.doc?.stamp && (r.doc.stamp.driver !== card.driver || r.doc.stamp.vbios !== card.vbios)) {
+        out.push(refuse('settings.curveRef', `кривая «${ref}» снята на драйвере ${r.doc.stamp.driver} / VBIOS ${r.doc.stamp.vbios}, `
+          + `а карта сейчас ${card.driver} / ${card.vbios} — по R6 недействительна до перепроверки`));
+      }
+    }
+  }
+  {
+    const hasRef = ref !== null && ref !== undefined;
+    const hasInline = s.curveRaiseAndCapMhz !== null && s.curveRaiseAndCapMhz !== undefined;
+    if (hasRef && hasInline) {
+      out.push(refuse('settings.curveRef', 'кривая задана ДВАЖДЫ — и ссылкой (curveRef), и встроенным объектом '
+        + '(curveRaiseAndCapMhz). У этого нет честного прочтения: правило старшинства молча выбросило бы половину '
+        + 'написанного в файле. Оставьте ровно одно'));
     }
   }
 
@@ -691,14 +731,14 @@ const FAKE_CARD = Object.freeze({
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
 });
 
 const measuredFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
@@ -920,6 +960,63 @@ function cmdSelftest() {
       alsoMustSay: ['max-performance', 'stock-default'],
     },
     {
+      // --- ССЫЛКА НА ДОКУМЕНТ КРИВОЙ (`plans/14` §4.3, F1-AC5). Шесть враждебных фикстур, каждая
+      // несёт РОВНО один дефект и называет поле, на которое обязан показать валидатор.
+      what: 'ССЫЛКА: профиль ссылается на существующую здоровую кривую -> принят',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRef = 'measured'; return p; })(),
+      resolveCurve: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: [],
+    },
+    {
+      what: 'ССЫЛКА: кривая задана ДВАЖДЫ — и ссылкой, и встроенным объектом -> отказ',
+      profile: (() => {
+        const p = measuredFixture();
+        p.settings.curveRef = 'measured';
+        p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: null };
+        return p;
+      })(),
+      resolveCurve: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: ['settings.curveRef'],
+      alsoMustSay: ['ДВАЖДЫ'],
+    },
+    {
+      what: 'ССЫЛКА: имя не похоже на имя документа -> отказ',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRef = '../секрет'; return p; })(),
+      expect: ['settings.curveRef'],
+    },
+    {
+      what: 'ССЫЛКА: документа кривой нет -> отказ (профиль ссылается на замер, которого не существует)',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRef = 'measured'; return p; })(),
+      resolveCurve: () => ({ missing: true }),
+      expect: ['settings.curveRef'],
+      alsoMustSay: ['не существует'],
+    },
+    {
+      what: 'ССЫЛКА: сам документ кривой не проходит валидатор -> отказ, и он цитирует ЕГО поле',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRef = 'measured'; return p; })(),
+      resolveCurve: () => ({ doc: {}, problems: [{ field: 'points[40].status', why: 'неизвестный статус' }] }),
+      expect: ['settings.curveRef'],
+      alsoMustSay: ['points[40].status'],
+    },
+    {
+      what: 'ССЫЛКА: кривая снята на другом драйвере -> отказ по R6',
+      profile: (() => { const p = measuredFixture(); p.settings.curveRef = 'measured'; return p; })(),
+      resolveCurve: () => ({ doc: { stamp: { driver: '620.10', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: ['settings.curveRef'],
+      alsoMustSay: ['R6'],
+    },
+    {
+      what: 'ССЫЛКА: stock-default со ссылкой на кривую -> отказ (сброс, который настраивает, не сброс)',
+      profile: (() => {
+        const p = factoryFixture();
+        p.mode = 'stock-default';
+        p.settings.curveRef = 'measured';
+        return p;
+      })(),
+      resolveCurve: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: ['mode'],
+    },
+    {
       what: 'stock-default, который что-то задаёт -> отказ (сброс, который настраивает, это не сброс)',
       profile: (() => { const p = measuredFixture(); p.mode = 'stock-default'; return p; })(),
       expect: ['mode'],
@@ -1014,7 +1111,13 @@ function cmdSelftest() {
 
   let failed = 0;
   for (const b of blocks) {
-    const refusals = validateProfile(b.profile, { card: FAKE_CARD, fileName: b.fileName ?? `${b.profile?.name ?? 'x'}.json` });
+    const refusals = validateProfile(b.profile, {
+      card: FAKE_CARD,
+      fileName: b.fileName ?? `${b.profile?.name ?? 'x'}.json`,
+      // The curve resolver is INJECTED per block: this module must stay provable without a card and
+      // without `curve-store` (which transitively imports the FFI probes).
+      resolveCurve: b.resolveCurve ?? null,
+    });
     const fields = refusals.map((r) => r.field);
     const text = refusals.map((r) => `${r.field}: ${r.why}`).join(' | ');
 

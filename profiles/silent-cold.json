@@ -6,7 +6,8 @@
   "settings": {
     "powerLimitWatts": 250,
     "graphicsClockLockMhz": null,
-    "curveRaiseAndCapMhz": null
+    "curveRaiseAndCapMhz": null,
+    "curveRef": null
   },
   "stamp": {
     "driver": "610.88",

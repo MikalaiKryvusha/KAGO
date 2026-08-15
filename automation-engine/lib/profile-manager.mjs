@@ -375,6 +375,47 @@ export function resolveTarget(profile, state) {
  *
  * @returns {Promise<{applied:boolean, steps:Array, before:object, after:object, lockedTo:number|null}>}
  */
+/**
+ * The curve a profile actually asks for — inline or BY REFERENCE — reduced to one shape.
+ *
+ * `plans/14` §4.3: `settings.curveRef` names a tuning-curve document, and the applier resolves it to
+ * the same `{deltaByPointMhz, capMhz}` the inline key produces. Downstream nothing changes: one
+ * arithmetic (`nvapi.buildRaiseAndCapVector`), one writer (R1). Pure apart from the injected loader,
+ * so it is provable on fixtures.
+ *
+ * A reference that cannot be resolved THROWS rather than degrading to «no curve»: a profile that reads
+ * as tuning the card while the applier quietly writes nothing is the exact defect `profiles/README.md`
+ * is written against.
+ */
+export function effectiveCurveSetting(profile, { loadCurve = null } = {}) {
+  const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
+  const ref = profile?.settings?.curveRef ?? null;
+  if (inline && ref) {
+    const err = new Error(`профиль «${profile.name}» задаёт кривую дважды — и ссылкой, и встроенным объектом`);
+    err.refusals = [{ field: 'settings.curveRef', why: 'кривая задана дважды; формат это отвергает, применяющий тоже' }];
+    throw err;
+  }
+  if (inline) return inline;
+  if (!ref) return null;
+
+  const load = loadCurve ?? defaultCurveLoader;
+  const doc = load(ref);
+  if (!doc) {
+    const err = new Error(`профиль «${profile.name}» ссылается на кривую «${ref}», которой нет`);
+    err.refusals = [{ field: 'settings.curveRef', why: `документа кривой «${ref}» нет — применять профиль частично запрещено` }];
+    throw err;
+  }
+  const deltaByPointMhz = doc.points.map((p) => p.mhz - p.stockMhz);
+  return { deltaByPointMhz, capMhz: null, __fromRef: ref };
+}
+
+function defaultCurveLoader(name) {
+  // Imported lazily and synchronously through `createRequire`-free means is not possible in ESM, so
+  // the real loader is injected by the CLI (which can `await import`). A module that reaches for the
+  // store on its own would drag the card probes into every consumer of this file.
+  throw new Error(`ссылка на кривую «${name}» не разрешена: загрузчик не передан (loadCurve)`);
+}
+
 export async function apply(backend, profile, {
   card, timing = {}, verifyLock = 'idle', curveBackend = null,
   // THE ONE NAMED WAY PAST THE QUALIFICATION GATE (`plans/11` §4.4, P6-AC4), and it is a PARAMETER
@@ -385,6 +426,9 @@ export async function apply(backend, profile, {
   // acceptance. An explicit flag says «I am knowingly applying a draft» in the one place that can
   // audit it, and leaves the file untouched.
   witness = false,
+  // The tuning-curve loader, INJECTED so this module stays testable without a `curves/` directory and
+  // so the selftest can drive a document that exists only in memory. Defaults to the real store.
+  loadCurve = null,
 } = {}) {
   const before = readState(backend);
 
@@ -417,6 +461,17 @@ export async function apply(backend, profile, {
   // why the step without one is deliberately last.
   const steps = [];
 
+  // --- THE REFERENCED CURVE BECOMES AN INLINE ONE, ONCE, HERE (`plans/14` §4.3) ----------------
+  //
+  // `settings.curveRef` names a tuning-curve document; the applier turns it into the SAME
+  // `{deltaByPointMhz, capMhz}` shape the inline key already produces, and everything downstream —
+  // the vector build, the R13 ceiling, the read-back, the undo — is untouched. One arithmetic, one
+  // writer (R1). A second code path for «the same curve, but from a file» would be a pair to watch.
+  //
+  // `capMhz: null` deliberately: this phase does not assemble modes (`plans/14` §5), and the cap is a
+  // MODE's knob, not the measurement's. Phase 5 decides how a mode carries its ceiling; inventing that
+  // shape now, before a measured curve exists, would be inventing.
+
   // --- THE CURVE, FIRST (`plans/11` §4.2) -------------------------------------------------------
   //
   // First in the order for the same reason it is zeroed first in the reset: it is the step whose undo
@@ -426,7 +481,7 @@ export async function apply(backend, profile, {
   // A profile that asks for a curve and gets NO curve backend is REFUSED, not applied without it. This
   // is the whole reason the format kept the key out until today: a profile that reads as raising the
   // curve while the applier quietly ignores it is the defect `profiles/README.md` is written against.
-  const wantCurve = profile.settings.curveRaiseAndCapMhz ?? null;
+  const wantCurve = effectiveCurveSetting(profile, { loadCurve });
   if (wantCurve) {
     if (!curveBackend) {
       const err = new Error(`профиль «${profile.name}» задаёт кривую V/F, а бэкенд кривой не передан — `
@@ -852,14 +907,14 @@ const silentColdFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
 });
 
 /**
@@ -1088,7 +1143,7 @@ async function cmdSelftest() {
     const p = {
       name: 'max-performance', title: '🚀 Max Perfomance', mode: 'max-performance',
       qualified: false, draft: { candidate: '+180, потолок 3172', source: 'STATUS факты 24, 27' },
-      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null },
+      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
     };
     try {
       await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
@@ -1348,7 +1403,7 @@ async function cmdSelftest() {
     title: '⚖️ Optimised',
     mode: 'optimised',
     qualified: true,
-    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRef: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
     stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-15T00:30:00+03:00' },
   });
 
@@ -1680,7 +1735,12 @@ async function main(argv) {
     const isDraft = profile.qualified !== true && profile.mode !== undefined;
     // The curve backend is opened only when the profile actually asks for a curve — a profile that
     // sets no curve must not load nvapi64.dll for nothing.
-    const needsCurve = (profile.settings?.curveRaiseAndCapMhz ?? null) !== null;
+    // The referenced document is loaded HERE, in the CLI, because only the CLI may `await import` the
+    // store (which transitively pulls the card probes). Everything below sees one resolved shape.
+    const { loadCurveDoc } = await import('./curve-store.mjs');
+    const loadCurve = (name) => loadCurveDoc({ name });
+    const effCurve = effectiveCurveSetting(profile, { loadCurve });
+    const needsCurve = effCurve !== null;
     const curveBackend = needsCurve ? nvapiCurveBackend() : null;
 
     console.log(`ПРИМЕНЕНИЕ «${profile.name}» — «${profile.title}»`);
@@ -1690,8 +1750,11 @@ async function main(argv) {
       console.log('    Ярлык на столе этот профиль по-прежнему отвергает.');
     }
     if (needsCurve) {
-      const c = profile.settings.curveRaiseAndCapMhz;
-      console.log(`    кривая V/F: подъём +${c.deltaMhz} МГц, ${c.capMhz === null ? 'ПОТОЛКА НЕТ' : `потолок ${c.capMhz} МГц`} (пишется через NVAPI)`);
+      const c = effCurve;
+      const shape = c.__fromRef
+        ? `вектор из документа «${c.__fromRef}» на ${c.deltaByPointMhz.length} точек`
+        : (Array.isArray(c.deltaByPointMhz) ? `вектор на ${c.deltaByPointMhz.length} точек` : `подъём +${c.deltaMhz} МГц`);
+      console.log(`    кривая V/F: ${shape}, ${c.capMhz === null ? 'ПОТОЛКА НЕТ' : `потолок ${c.capMhz} МГц`} (пишется через NVAPI)`);
       if (c.capMhz === null) {
         console.log('    ⚠️  БЕЗ ПОТОЛКА карта уйдёт на частоты ВЫШЕ измеренных: андервольт проверялся');
         console.log('        на точке, обслуживавшей потолок, а выше её обслуживают другие точки.');

@@ -9,7 +9,8 @@
     "curveRaiseAndCapMhz": {
       "deltaMhz": 592,
       "capMhz": null
-    }
+    },
+    "curveRef": null
   },
   "stamp": {
     "driver": "610.88",

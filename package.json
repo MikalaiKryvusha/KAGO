@@ -38,7 +38,8 @@
     "thermal": "node automation-engine/lib/thermal-ladder.mjs",
     "shortcuts": "node automation-engine/lib/desktop-shortcuts.mjs",
     "setup": "node automation-engine/setup-desktop.mjs",
-    "tray:selftest": "powershell -NoProfile -ExecutionPolicy Bypass -File automation-engine/tray.ps1 -SelfTest"
+    "tray:selftest": "powershell -NoProfile -ExecutionPolicy Bypass -File automation-engine/tray.ps1 -SelfTest",
+    "curve": "node automation-engine/lib/curve-store.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
