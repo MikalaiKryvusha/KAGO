@@ -271,8 +271,8 @@ a 150 s lease).
 |---|---|---|---|
 | **Literal**: all 389 frequencies × descend from stock at 5 mV each time | ≈ 9 700 | **≈ 67 h** | not executable |
 | **Collapsed**: one representative frequency per serving point (75), still from stock at 5 mV | ≈ 1 900 | **≈ 13 h** | still not an evening |
-| **Collapsed + the owner's STEP LADDER** (below) — from stock every time, no prior assumed | **≈ 700–1 000** | **≈ 5–7 h**, splittable by band | **THE SHIPPED PLAN for the first sweep** |
-| **+ monotone seeding**: start each next frequency's descent at the previous frequency's answer (§2.3) | ≈ 250 | ≈ 1.7 h | **held back until the first sweep MEASURES the prior** — see below |
+| **Collapsed + the owner's STEP LADDER** (§4.1) — from stock every time, no prior assumed | ≈ 700–1 000 | ≈ 5–7 h | the fallback shape, used per-frequency whenever the seed is refused |
+| **+ the owner's SEEDING** (§4.2): start each next frequency's descent at the higher frequency's already-tuned voltage | **≈ 250** | **≈ 1.7 h**, splittable by band | **THE SHIPPED PLAN** — authorized by the owner 2026-08-15 |
 
 ### 4.1 The owner's step ladder — coarse where failure is improbable, fine where it is near
 
@@ -307,19 +307,59 @@ an avalanche (§2, `researches/02`). So a coarse rung is likelier to HANG than t
 oracle. The owner accepted that risk explicitly the same day, and the ladder is shaped around it —
 coarse only where failure is improbable.
 
-### 4.2 Why monotone seeding is planned but NOT switched on for the first sweep
+### 4.2 Seeding: the agent deferred it, the OWNER switched it on — and named the exception himself
 
-The prior of §2.3 is sound silicon physics, and it is still a PRIOR. Turning it on means the descent
-JUMPS to a deep voltage instead of walking to it — which is the exact shape of `bugs/03` («the sweep
-started the ascent at a deep rung and hung the machine»), and `pickAscentRungs` refuses it by design.
-Defending the jump requires an argument from physics rather than from a measurement of THIS silicon,
-and this project's rule is the opposite way round.
+**The agent's position, recorded because it was wrong to hold and is useful to keep:** the prior of
+§2.3 is sound silicon physics and it is still a PRIOR. Seeding means the descent JUMPS to a deep
+voltage instead of walking to it — the exact shape of `bugs/03` («the sweep started the ascent at a
+deep rung and hung the machine»), which `pickAscentRungs` refuses by design. So the agent planned to
+walk from stock first and let the sweep MEASURE the prior before spending it.
 
-**So the first sweep walks from stock on the owner's ladder and MEASURES the prior.** Its output is a
-Vmin-versus-frequency curve — the very thing that says whether monotonicity holds here and how tightly.
-**The natural home for seeding is the RE-sweep:** R6 invalidates every record on a driver update, and a
-re-sweep seeded by the previous curve is both fast and evidence-based, because the seed then comes from
-a measurement of this card rather than from a paper about silicon in general.
+**The owner read that reasoning and decided otherwise the same day**, in three messages:
+
+> *«можно начинать спуск не со стокового напряжения, а с верхней по частоте отюненной точки»*
+>
+> *«как правило на более нижней частоте будет напряжение нужно или такое же как у старшей по частоте
+> точки, или даже ниже, очень редко — выше, почти не бывает такого»*
+
+**Two things make this a good decision rather than merely an authorized one.** First, his rule is the
+same statement §2.3 arrived at from silicon-characterization literature — two independent sources, one
+practitioner and one industrial, agreeing on the shape of Vmin(f). Second, **he stated the exception
+himself** («очень редко — выше»), which is exactly the fact a safeguard needs in order to be designed
+rather than hoped for.
+
+**How the jump is made honest — three mechanisms, none of which soften his decision:**
+
+1. **The first-step governor is GENERALIZED, not disabled.** Today it refuses a first step deeper than
+   `ASCENT_FIRST_STEP_MAX_MV` **below stock**. The correct generalization: below **the deepest voltage
+   already PROVEN by evidence**. With no evidence, proven = stock, so today's behaviour is the
+   degenerate case — and that identity is the mutation this change must survive (EXP-0008).
+2. **The seed is the neighbour's PASSING value** (its edge + 10 mV), never its failure voltage.
+3. **A non-PASS on the seed cancels seeding for that frequency**, drops the descent back to stock on
+   the owner's ladder, and is REPORTED as a finding about this silicon rather than swallowed as a
+   failed run (E2-AC11). That is his rare case, made visible instead of assumed away.
+
+**What the first sweep therefore still delivers:** a measured Vmin-versus-frequency curve, plus a count
+of how many points needed the fallback. If that count is zero, monotonicity is confirmed on this card
+by 74 observations; if it is not, the exceptions are named with their frequencies.
+
+### 4.2a Long-burn duration: one minute, and it is the owner's ORIGINAL figure
+
+*«Длительные прожиги сокращаем с 3 минут до 1 минуты»* (2026-08-15), amending step 15 of `ideas/03`.
+
+**This is a return, not a relaxation.** On 2026-08-10 he said *«было бы здорово мерить… на длительных,
+например, минуту»*, and `plans/05` P5-AC6 has stood at **≥ 60 s per shape** ever since. Three minutes
+was the outlier in his own record.
+
+**What a minute does NOT buy, said so nobody assumes it does:** neither one minute nor three reaches
+thermal equilibrium — measured, the plateau arrives at **395–753 s** under load (fact 34+36). Burn
+duration buys **error-detection probability**, not a thermal state. The thermal question has its own
+instrument (`thermal-ladder.mjs`) and is not this pass's job.
+
+**Where the minute is spent — agent's decision:** 60 s per point using the shape that DECIDED that
+point's edge during the search (it is recorded in the evidence). `--lowload` gets its own whole-curve
+pass instead of a per-point one: it exercises the BOTTOM of the range, so running it under a pinned
+high clock would test nothing it exists to test.
 
 ### 4.3 Reboots are the owner's job, and that DELETES a subsystem
 
@@ -359,9 +399,11 @@ separate phase, and splittable by band because each point is independent.
    cap cannot hold anything below 2157 MHz (fact 38); a pin holds any frequency on the 389-rung ladder.
    The pin is a MEASUREMENT instrument and never ships — `min = max` would forbid the card from
    clocking down (the owner's own requirement).
-4. **Monotonicity is a prior to be MEASURED by the first sweep, not spent by it** (§4.2). The first
-   sweep walks from stock on the owner's step ladder; seeding becomes legitimate on the re-sweep,
-   where the seed is this card's own measured curve rather than a paper's generalization.
+4. **Monotonicity is SPENT as a seed from the first sweep — the owner's call, with his own exception
+   built in** (§4.2). The seed is the neighbour's passing value; the first-step governor is generalized
+   from «below stock» to «below what evidence proves»; a non-PASS on the seed cancels it for that
+   frequency, falls back to stock, and is reported as a finding. The sweep still MEASURES the prior —
+   the count of fallbacks is the measurement.
 4a. **The descent's step size is the owner's ladder** (25 / 10 / 5 mV by depth from stock, §4.1). It
    satisfies the `bugs/03` governor exactly, supersedes the absolute 900 mV floor, and requires one
    addition of its own: **a coarse-rung failure is refined at 5 mV before the +10 mV margin applies.**
@@ -370,9 +412,11 @@ separate phase, and splittable by band because each point is independent.
 6. **The write-ahead journal is the epic's one new organ**, and the industry shape (§2.4) matches the
    owner's steps 11–13 exactly: record the intent BEFORE the write; on boot, an intent with no verdict
    IS the failure.
-7. **Two instruments, two durations, said out loud.** 10 s = probe (finds the edge), 3 min = qualifier
-   (step 15), and the industry's "hours" is answered by the convergent loop plus the owner's own play
-   sessions — not by pretending 10 s is a proof.
+7. **Two instruments, two durations, said out loud.** 10 s = probe (finds the edge), **60 s = qualifier**
+   (step 15, amended by the owner 2026-08-15 — and it is his original figure, §4.2a), and the
+   industry's "hours" is answered by the convergent loop plus the owner's own play sessions — not by
+   pretending 10 s is a proof. **Neither duration reaches thermal equilibrium (395–753 s); that is a
+   different instrument's job.**
 8. **The 9 points above 3090 MHz are the `bugs/11` gap and get an explicit rule**: they can never serve
    a runnable clock, so they are never raised, and R13 refuses any vector that would offer more.
 9. **The owner's algorithm is safer than the engine it replaces** on the one axis that has hurt this
