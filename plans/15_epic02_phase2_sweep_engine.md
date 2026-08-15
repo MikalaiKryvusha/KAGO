@@ -9,8 +9,14 @@
 > **Status:** 🔲 open · **entry gate is phase 1's closure and is NOT waived for execution** (§0) ·
 > **ZERO GPU WRITES for the whole phase** — every line here is proved on injected backends
 > **Outbound:** the generalized first-step governor → `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` and
-> `GPU_TUNING_RAILS.md` §0 (rail S2 gains its evidence clause) · the journal → `plans/16` (phase 3's
-> live sweep) · closure → `plans/13` §4
+> `GPU_TUNING_RAILS.md` §0 (rail S2 gains its evidence clause) · the journal → the phase-3 operational
+> plan, whose number is assigned when it is written (16 and 17 went to epic 03, the virtual bench) ·
+> closure → `plans/13` §4
+>
+> **Debugging surface, added 2026-08-15 after this plan was written:** the owner ordered a virtual GPU
+> bench BEFORE this phase is implemented (`plans/16_EPIC_virtual_gpu_bench.md`). Six of the eleven
+> criteria below cannot be exercised without it (`researches/10` §3.3) — F2-AC3, AC4, AC5, AC6, AC7,
+> AC8. This plan does not change; what changes is that its criteria stop needing the owner's machine.
 
 ---
 
