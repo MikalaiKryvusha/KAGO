@@ -330,6 +330,28 @@ export const DESCENT_ZONES = Object.freeze([
   Object.freeze({ untilDepthMv: Infinity, stepMv: 5 }),
 ]);
 
+/**
+ * HOW LONG ONE SWEEP RUNG BURNS — the owner's number, `ideas/03` step 9, verbatim:
+ *
+ *   > *«Запускается прожиг расчётами… Прожиг длится 10 секунд.»*
+ *
+ * WHAT THESE TEN SECONDS ARE AND ARE NOT, said here because the distinction is the whole reason a
+ * separate constant exists beside `EXPRESS_TEST_SECONDS` and the qualification minute:
+ *
+ *   • they are the SEARCH's price per rung — the descent visits 24 rungs at 2842 MHz alone, so the
+ *     duration is multiplied by every rung of every frequency, and it is what makes ≈1.7 h possible;
+ *   • they are NOT a qualification. A rung that passes 10 s is «доказано коротким прожигом» and the
+ *     owner's own algorithm re-burns the closed edge for a minute afterwards (`GOAL.md` → «⏱
+ *     ДЛИТЕЛЬНЫЙ ПРОЖИГ — ОДНА МИНУТА», phase 4). Ten seconds buys the probability of catching an
+ *     error, never a thermal state: this card reaches its plateau at 395–753 s (fact 34+36).
+ *
+ * The shape those ten seconds run in is `sdc_fma --transient` and that is not a free choice either —
+ * voltage noise lives in the TRANSITIONS (`researches/02` §2), so a steady burn is the wrong load to
+ * spend the search's budget on. The three-shape set is what judges the EDGE once it is bracketed
+ * (fact 37), not what walks the ladder.
+ */
+export const SWEEP_PROBE_SECONDS = 10;
+
 // =============================================================================================
 // 2. Workload timing — how long a thing runs before it is allowed to mean something
 // =============================================================================================
@@ -1021,6 +1043,7 @@ export default Object.freeze({
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
   FAST_DESCENT_FLOOR_MV,
   DESCENT_ZONES,
+  SWEEP_PROBE_SECONDS,
   CLOCK_OFFSET_RANGE_IS_MEASURED,
   EXPRESS_TEST_SECONDS,
   TRANSIENT_ON_SECONDS,

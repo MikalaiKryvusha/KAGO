@@ -142,9 +142,11 @@ an idealization. **The direction matters and is good news: the sweep is CHEAPER 
       **reddens the generalization block while leaving «БЕЗ УЛИК сторож ведёт себя ровно как сегодня»
       GREEN** — which is exactly what F2-AC2 asks for. Rule 3 (the rung-to-rung cliff of `bugs/03`) is
       untouched by the generalization, and a block asserts that too.
-- [ ] ~~The seed's first burn runs the full rung machinery of 4.3~~ → **carried to §4.3**, which is what
-      builds `runRung`. What exists now is the DECISION the burn feeds (`seedOutcome`); the burn itself
-      has nothing to run on yet, and faking one here would be a fixture pretending to be machinery.
+- [ ] ~~The seed's first burn runs the full rung machinery of 4.3~~ → **carried onward: §4.3 built the
+      machinery (`runRung`, 2026-08-15 23:0x), §4.5 is what WIRES it to the seed**, because the wiring
+      is the descent loop and that loop does not exist yet. What exists now is the DECISION the burn
+      feeds (`seedOutcome`) and the burn it will feed from; joining them here would be a fixture
+      pretending to be a sweep.
 - [x] **Not-PASS on the seed → the seed is CANCELLED** (`seedOutcome`): the descent restarts from stock
       on §4.1's ladder, proven ground drops back to zero, and the event prints both frequencies, both
       voltages and the verdict — **as a finding about the silicon, not a stumble in the run**.
@@ -159,7 +161,7 @@ Each reddened its named block; the intact code reddened none; **and mutation 28'
 that the identity block STAYS green — is the one that proves the guard was generalized rather than
 loosened.**
 
-### 4.3 — One rung: pin the clock, make the target point serve it, judge, roll back 🔲
+### 4.3 — One rung: pin the clock, make the target point serve it, judge, roll back ✅ **DONE 2026-08-15 23:0x**
 
 *Anchor: `ideas/03` steps 7–9; internal map R1 (only `profile-manager` touches the card), R9 (armed
 watchdog), R10a (the rollback is a list).*
@@ -173,8 +175,9 @@ to make point j serve the pinned clock C:  Δ = C − F_j   (a UNIFORM raise)
 Every point below j has a lower stock frequency, so after a uniform Δ none of them reaches C — **point
 j becomes the serving point by construction**, with no cap needed to arrange it.
 
-> **STEP 4.3 IS HALF DONE — 2026-08-15 23:0x. The PAPER half is built and proved; the LIVE half is
-> not, and it is listed unticked below rather than folded into a summary.**
+> **STEP 4.3 IS COMPLETE — the paper half 2026-08-15 23:0x, the live half the same evening. The live
+> half is a COMPOSER (`runRung`) and not a second writer: it decides, and everything dangerous happens
+> inside `vf-step.runStep`, which phase 5 already built and proved.**
 
 - [x] **`planRung({ points, clockMhz, voltageMv })` — the rung's arithmetic, pure.** Δ = C − F_V, the
       lever's ±1000 MHz bound, and the choice of which entry ends up serving. **`servingAfterRaise`
@@ -188,27 +191,51 @@ j becomes the serving point by construction**, with no cap needed to arrange it.
       first because a refusal that costs nothing beats one that costs a watchdog lease.**
 - [x] **The lever wall is its own outcome (`leverLimited`), never an ordinary refusal** — the seed of
       the `lever-limited` verdict (`plans/13` E2-AC2). Mutation 33 proves it cannot be flattened.
-- [ ] **The LIVE orchestration** — arm the watchdog → **pin** through `profile-manager` (`-lgc C,C`) →
-      write the uniform raise → read back until two samples agree (EXP-0014) → re-assert the serving
-      entry **against the card's own re-read table** → load → judge → **release and zero in a `finally`,
-      as a LIST**. `vf-step.runUndo` is that list and is already built and proved (R10a); this step
-      composes it, it does not re-implement it.
-- [ ] **F2-AC9, the ceiling's holder, named per rung.** A uniform raise for a deep undervolt pushes the
-      curve's top above the card's maximum; under a pin the card cannot go there, but the CURVE still
-      offers it. So each rung states its holder: `кривая` when a cap at C is expressible
-      (C ≥ top − 1000 = 2157 MHz), otherwise `закрепление`. **When neither can hold it, the rung is
-      refused.** **This decision is `vf-step.chooseWriteShape` and it ALREADY EXISTS, built and
-      mutation-proved in phase 5 — including the live lesson «ONE HOLDER, NEVER TWO» (a capped curve
-      plus a pin fought each other on 2026-08-14 and turned three PASSing shapes into НЕИЗВЕСТНО).
-      What remains is to CALL it with the real vector, never to write a second copy of the rule.**
-- [ ] The short probe judges with ONE shape — `sdc_fma --transient`, the shape voltage noise lives in
-      (`researches/02` §2) — for the owner's 10 s. **The EDGE, once bracketed, is re-judged by the full
-      three-shape set before it is written to the document** (fact 37): 10 s is the owner's search
+- [x] **The LIVE orchestration** — `runRung`, and it COMPOSES rather than re-implements. The atom
+      (`vf-step.runStep`, injected as `runStepFn`) owns the whole dangerous half: the watchdog armed
+      BEFORE the write, the write through `profile-manager`/`nvapi` (R1 — the engine never writes), the
+      point-by-point read-back, the pin, the separate-process sampler, the oracle, and `runUndo` as a
+      LIST (R10a). What `runRung` adds is the DECISION: plan on paper against the live table, refuse
+      before touching the card, and then judge what came back.
+- [x] **The re-assertion, and it is the one thing nothing else did.** `planRung` proves the ordered
+      voltage WOULD serve the clock; only the card says it DID. `runRung` compares the ordered voltage
+      against `undervolt.after` — `voltageForClock` on the table read back FROM THE CARD — and a
+      mismatch makes the rung **`void`: not a PASS, not an edge, not a data point**, naming both
+      voltages. A missing observation is void too: absence of observation is not observation of
+      agreement (the same rule as mutation 10 of this suite).
+- [x] **And a rung whose ROLLBACK failed is never reported as passed**, whatever the oracle said — the
+      next rung would begin on a card nobody can describe, which is the state `watchdog --recover`
+      exists to forbid building on. `runUndo` now marks its blocks `undo: true`, so this is a FIELD
+      test rather than a match on block names (a name match would be a truth↔mirror pair created on
+      purpose, and a block reworded once would silence it).
+- [x] **F2-AC9, the ceiling's holder, named per rung.** `chooseWriteShape` is CALLED with the real
+      vector and its answer is OBEYED in both directions — including «the curve holds it, and pinning
+      here would be harmful», which is the live lesson «ONE HOLDER, NEVER TWO» (2026-08-14: a capped
+      curve and a pin fought over one frequency and three PASSing shapes came back НЕИЗВЕСТНО). Above
+      the curve's cap floor the holder is `кривая` and **no pin reaches the atom**; below it the holder
+      is `закрепление частоты` and the raise is uniform.
+- [x] The short probe judges with ONE shape — `sdc_fma --transient`, the shape voltage noise lives in
+      (`researches/02` §2) — for the owner's 10 s (`config.SWEEP_PROBE_SECONDS`, his number from
+      `ideas/03` step 9). The probe is TAKEN FROM `DIVERSE_SET` rather than re-declared, so the probe
+      and the set cannot describe one shape two ways. **The EDGE, once bracketed, is re-judged by the
+      full three-shape set before it is written to the document** (fact 37): 10 s is the owner's search
       price, the set is what makes the number trustworthy.
-- [ ] `UNKNOWN` is a STOP, never progress — the rule the ascent already obeys (EXP-0011).
+- [x] `UNKNOWN` is a STOP, never progress — the rule the ascent already obeys (EXP-0011). So is a void,
+      and so is a dirty rollback: three different reasons, three different words, one behaviour.
 
-**Verification:** on an injected backend — the serving-point assertion fires on a wrong Δ; the undo
-runs as a list with an injected throw in the middle; the holder line is present on every rung.
+**Verification — RUN, 2026-08-15 23:0x.** 22 blocks on an injected atom and an injected vector builder
+(`engine --selftest` **115 → 137**), zero GPU writes. Six mutations, addressees named in the suite
+header BEFORE the run (EXP-0016), each reddening its own named block while the intact code reddened
+none — the baseline printed 0 red and its completion line, which is the second half EXP-0071 paid for:
+
+| # | Mutation | Red | Block it reddened |
+|---|---|---|---|
+| 34 | call the atom even when the paper plan refused | 1 | «бумажный отказ означает, что КАРТА НЕ ТРОНУТА» (got `["void", 1, true]` — the atom ran) |
+| 35 | flatten the lever wall into an ordinary refusal | 1 | «предел рычага доезжает до исхода ступени» |
+| 36 | drop the re-assertion (trust the plan, not the card) | 2 | «ступень, измерившая ЧУЖОЕ напряжение, — НЕ PASS» (got `["passed", 995]`) + its naming block |
+| 37 | map `НЕИЗВЕСТНО` to a failure instead of a stop | 1 | «НЕИЗВЕСТНО — это СТОП, а не отказ и не край» |
+| 38 | pin even when the CURVE holds the ceiling | 1 | «ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА» (got `pinMhz = 2842`) |
+| 39 | let a dirty rollback still report PASS | 2 | «грязный откат отменяет PASS» + «называет, какой шаг не отработал» |
 
 ### 4.4 — The write-ahead journal: a hang becomes a verdict 🔲
 
@@ -355,7 +382,7 @@ crash-then-read-back shape).*
 |---|---|
 | 4.1 | `engine --selftest` — the 2842 MHz ladder is 28 rungs, the 2400 MHz ladder is 7, mapping rounds shallow |
 | 4.2 | the no-evidence identity block green; the `seedRejected` fixture prints its line; both mutation-proved |
-| 4.3 | injected backend: serving-point assertion fires; undo runs as a list through a thrown step; holder named per rung |
+| 4.3 | ✅ **22 blocks, `engine --selftest` 115 → 137, zero writes.** The paper refusal keeps the atom uncalled; the re-assertion voids a PASS taken on a foreign voltage; a dirty rollback voids a PASS; the holder is named on every rung and no pin reaches the atom under a curve-held ceiling. Mutations 34–39, each reddening its own block |
 | 4.4 | the kill drill — re-launch names the killed rung and marks it `ЗАВИС`; the two-crash fixture stops the sweep |
 | 4.5 | a scripted full-band run on injected everything closes every point with one of three verdicts |
 | 4.6 | a coarse failure fixture closes at `V_fail(5 mV) + 10 mV`, with the refinement burns in the journal |
@@ -409,3 +436,42 @@ crash-then-read-back shape).*
   **The process lesson, kept because it is the reusable half:** a precondition inside a quoted owner
   rule («если нашли шагами по 5 мВ…») is part of the rule. Reading it as decoration and re-opening the
   decision cost him a third explanation of something he had already settled.
+
+**Added while EXECUTING §4.3's LIVE half (2026-08-15 23:0x):**
+
+- **`chooseWriteShape`'s answer is OBEYED, and this plan carried two readings of that.** §4.3's
+  orchestration line says «write the uniform raise» under a pin; the F2-AC9 bullet says the holder is
+  `кривая` where a cap at C is expressible. Those prescribe different shapes above 2157 MHz. **The
+  resolution is that the plan already named the arbiter — «CALL it, never write a second copy of the
+  rule» — so the rung asks and complies:** above the curve's cap floor the shipped `raise-and-cap`
+  shape is written and NO pin is applied; below it the raise is uniform and the pin is the holder.
+  **The price is named rather than discovered later:** a capped card deliberately sits a little BELOW
+  its ceiling (measured three times — cap 2842 → 2812 median), so on a capped rung the load runs a
+  clock slightly under C, and the voltage exercised may be a cheaper neighbour than the one ordered.
+  The re-assertion catches the case where that changes the SERVING entry for C; it does not turn a
+  capped rung into a pinned one. **If the live sweep shows that gap mattering, it is a defect of the
+  rule and belongs in a bug document against `chooseWriteShape` — not in a quiet divergence inside a
+  new function.**
+- **`canPin` was added because F2-AC9's refusal branch was otherwise UNREACHABLE.** With `pinned: true`
+  hard-coded, `chooseWriteShape` can never answer «neither holds it»: the cap holds it, or the pin
+  does. The criterion «refuses if neither can» would then be satisfied by a branch no run can enter —
+  a guard that has never gone red proves nothing. The sweep sets `canPin` from the card's own clock
+  ladder, and a rung below the cap floor on a card that cannot pin is refused BEFORE any write instead
+  of discovered mid-burn.
+- **A rung whose ROLLBACK failed is never reported as passed — a rule this plan did not carry.** It
+  follows from the machinery that already exists rather than from taste: the next rung would arm a
+  watchdog and write to a card whose state nobody can describe, which is precisely the situation
+  `watchdog --recover` exists to refuse. Reported as `unknown` (a STOP), with the failed undo steps
+  named.
+- **The undo is recognised by a FIELD, not by a block name.** `runUndo` now stamps `undo: true` on
+  every block it emits. The alternative — matching «ОТКАТ:» in the name — is a truth↔mirror pair
+  created deliberately, and it would go silent the first time a block is reworded.
+- **Δ ≤ 0 is refused BY NAME, not left to the atom.** `runStep` throws a `RangeError` on a
+  non-positive offset, which would hand the sweep an exception where it needs an outcome. A rung of a
+  descent has Δ > 0 by the same argument that makes the serving entry unique; a caller that supplies a
+  voltage already serving the clock at stock gets told exactly that.
+- **The short probe is a ONE-ELEMENT SET, not the legacy single-shape path.** Going through
+  `judgeCandidate` costs nothing and buys the field `worstShape` — the shape that decided — which the
+  single-shape path does not produce. A rung record that cannot name the load that judged it is a
+  record fact 37 forbids relying on. The element is TAKEN FROM `DIVERSE_SET` rather than re-declared,
+  so the probe and the set cannot drift into two descriptions of one shape.

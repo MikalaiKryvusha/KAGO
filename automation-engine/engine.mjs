@@ -59,7 +59,9 @@ import config from './config.mjs';
 // functions, and reaching for `config.marginAboveFailureMv` crashes the suite instead of reddening a
 // block (paid for on 2026-08-15 21:5x, EXP-0040's rule about assertions that kill the reporter).
 import { marginAboveFailureMv } from './config.mjs';
-import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ } from './lib/vf-step.mjs';
+// `chooseWriteShape` is imported STATICALLY and that is safe offline: `vf-step` imports `nvapi`
+// lazily, inside the functions that write, so nothing here reaches for koffi or the driver.
+import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
 import { DIVERSE_SET } from './lib/stress-tester.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
 
@@ -320,6 +322,245 @@ export function planRung({
     ok: true, deltaMhz, entry, serving,
     why: `равномерный сдвиг ${deltaMhz >= 0 ? '+' : ''}${deltaMhz} МГц делает ${voltageMv} мВ обслуживающим `
       + `${clockMhz} МГц (запись ${entry.i}, сток ${entry.mhz} МГц)`,
+  };
+}
+
+/**
+ * THE SHORT PROBE — the ONE load shape a descent rung is judged by, and the owner's ten seconds.
+ * `plans/15` §4.3 · `ideas/03` step 9 (*«Прожиг длится 10 секунд»*).
+ *
+ * Why one shape and not the set: the set is what makes a NUMBER trustworthy (fact 37 — a point's
+ * verdict is the WORST over three shapes), and the ladder does not produce numbers. It produces the
+ * neighbourhood of the edge, cheaply, so that §4.6 can re-find the failure at 5 mV and the set can
+ * judge THAT. Spending three burns on every one of 24 rungs would triple the sweep to buy confidence
+ * about rungs the sweep is going to walk past anyway.
+ *
+ * Why THIS shape: voltage noise — IR drop and di/dt droop — dominates Vmin variability, and it lives
+ * in the TRANSITIONS rather than in a steady 100 % (`researches/02` §2). A sustained burn is the
+ * cheapest way to walk past an unsafe rung without noticing it.
+ *
+ * It is TAKEN FROM `DIVERSE_SET` rather than re-declared, so the probe and the set cannot describe
+ * the same shape two different ways; a selftest block asserts the id resolves.
+ */
+export const SHORT_PROBE = Object.freeze([
+  DIVERSE_SET.find((s) => s.id === 'sdc_fma/transient'),
+].filter(Boolean));
+
+/**
+ * ONE RUNG, LIVE — the orchestration `plans/15` §4.3 asks for, and it is a COMPOSER rather than a
+ * second writer.
+ *
+ * The paper half (`planRung` above) turned «measure voltage V at frequency C» into a uniform raise Δ
+ * and PROVED, on the card's own table, that V is the entry that would serve C afterwards. This is what
+ * happens next, and every load-bearing part of it already exists and is already mutation-proved:
+ *
+ *   `chooseWriteShape`  decides WHO holds the ceiling — the curve or the clock pin — and refuses when
+ *                       neither can (F2-AC9). It carries the live lesson «ONE HOLDER, NEVER TWO»:
+ *                       on 2026-08-14 a capped curve and a pin fought over one frequency and three
+ *                       PASSing load shapes came back НЕИЗВЕСТНО. **This function OBEYS its answer
+ *                       instead of forming a second opinion** — a second copy of that rule would be a
+ *                       truth↔mirror pair created on purpose.
+ *   `vf-step.runStep`   arms the watchdog BEFORE the write, writes through `profile-manager`/`nvapi`
+ *                       (R1 — this module never writes), reads back POINT BY POINT, pins the clock,
+ *                       samples telemetry from a separate process, judges with the oracle, and undoes
+ *                       as a LIST (`runUndo`, R10a). It is injected as `runStepFn`, which is what
+ *                       keeps this whole decision testable with zero GPU writes (F2-AC10).
+ *
+ * WHAT THIS FUNCTION ADDS THAT NOTHING ELSE DOES — the re-assertion. The paper proof says V will be
+ * the serving entry; that is a statement about the table we READ. After the write, the card's own
+ * re-read table is the only authority on what the load actually exercised, and `runStep` already
+ * computes it (`undervolt.after` = `voltageForClock` on the curve read back). **If that voltage is
+ * not the ordered one, the rung measured somebody else's voltage and its verdict is VOID — not a
+ * PASS, not an edge, not a data point.** Silently keeping such a verdict is exactly the class R12 and
+ * EXP-0057 are about: a property that was a proof under the old shape, inherited instead of measured.
+ *
+ * AND ONE MORE THING IT REFUSES TO OVERLOOK: a rung whose ROLLBACK failed is never reported as
+ * passed, whatever the oracle said. The next rung would then start on a card nobody can describe,
+ * which is the state `watchdog --recover` exists to forbid ever being built on. `runUndo` marks its
+ * blocks `undo: true`, so this is a field test rather than a match on block names.
+ *
+ * THE FIVE OUTCOMES, and none of them may masquerade as another (F2-AC7):
+ *
+ *   `passed`        the oracle said PASS and the card confirms the ordered voltage was the one loaded
+ *   `failed`        SDC or CRASH — **a SIGNAL that the edge is near, NEVER the edge itself.** On a
+ *                   coarse rung §4.6 must re-find it at 5 mV before any margin is applied; that is the
+ *                   owner's rule, stated three times (`plans/15` §4.6)
+ *   `lever-limited` our ±1000 MHz lever ran out before the silicon did. Not an edge, and the card is
+ *                   never touched — the refusal is arithmetic
+ *   `refused`       the rung cannot be run honestly (non-monotone table, no ceiling holder, nothing to
+ *                   write). The card is never touched
+ *   `unknown`       the oracle could not judge, or the rollback was not clean. **A STOP, never
+ *                   progress** — the rule the ascent already obeys (EXP-0011)
+ *   `void`          the rung ran, but on a different voltage than ordered. A STOP, and a loud one
+ *
+ * @param {object}   a
+ * @param {Array}    a.points        the card's V/F table, freshly read (`nvapi.readVfCurve().points`)
+ * @param {number}   a.clockMhz      the frequency under test
+ * @param {number}   a.voltageMv     the voltage whose ability to serve it is being measured
+ * @param {function} a.runStepFn     the atom. REQUIRED — this module does not write to the card
+ * @param {function} [a.buildVector] `nvapi.buildRaiseAndCapVector`; injected offline, imported live
+ * @param {function} [a.chooseShape] `vf-step.chooseWriteShape`; injectable for the same reason
+ * @returns {Promise<object>} the rung record the journal (§4.4) and the sweep (§4.5) both read
+ *
+ * [TESTED: 2026-08-15 23:0x, OFFLINE HALF ONLY · 22 blocks in `engine --selftest` against an injected
+ *  atom and an injected vector builder, six mutations (addressees 34–39, named before the run) each
+ *  reddening its own named block while the intact code reddened none. **NOT TESTED: no rung has ever
+ *  run on the card.** Everything downstream of `runStepFn` — the watchdog lease, the write, the pin,
+ *  the sampler, the rollback — is proved only to the extent phase 5 proved it; what these blocks
+ *  prove is the DECISION, which is this module's whole job.]
+ */
+export async function runRung({
+  points = [],
+  clockMhz = null,
+  voltageMv = null,
+  seconds = config.SWEEP_PROBE_SECONDS ?? 10,
+  sustain = config.SWEEP_PROBE_SECONDS ?? 10,
+  shapes = SHORT_PROBE,
+  pinCard = null,
+  // WHETHER A CLOCK PIN IS AVAILABLE AT ALL — and this parameter exists because without it F2-AC9's
+  // refusal branch is UNREACHABLE. `chooseWriteShape` refuses only when the curve cannot hold the
+  // ceiling AND nothing is pinned; a caller that hard-codes «pinned: true» can never see that answer,
+  // so the criterion «refuses if neither can» would be satisfied by a branch no run can enter — a
+  // guard that has never gone red proves nothing (`BUG_FIXING_FRAMEWORK.md` → Guards). The sweep sets
+  // it from the card's own clock ladder: no ladder, no pin, and a rung below the curve's cap floor
+  // then has no holder and is refused BEFORE any write instead of discovered mid-burn.
+  canPin = true,
+  runStepFn,
+  buildVector = null,
+  chooseShape = chooseWriteShape,
+  offsetMinMhz = config.CLOCK_OFFSET_MIN_MHZ ?? -1000,
+  offsetMaxMhz = config.CLOCK_OFFSET_MAX_MHZ ?? 1000,
+} = {}) {
+  if (typeof runStepFn !== 'function') {
+    throw new Error('runRung требует runStepFn — движок сам в карту не пишет (правило R1)');
+  }
+
+  const record = {
+    frequencyMhz: clockMhz,
+    voltageMv,
+    deltaMhz: null,
+    pointIndex: null,
+    outcome: null,
+    verdict: null,
+    writeShape: null,
+    holder: null,
+    decidedBy: null,
+    servingMvAfter: null,
+    deliveredMhz: null,
+    deliveredMaxMhz: null,
+    undoClean: null,
+    cardTouched: false,
+    why: '',
+    atom: null,
+  };
+  const stop = (outcome, why) => ({ ...record, outcome, why });
+
+  // ---- 1. THE PAPER PLAN, ON THE LIVE TABLE. A refusal here costs the card nothing at all — no
+  // watchdog lease, no write, no reboot. That is the whole reason it runs first.
+  const plan = planRung({ points, clockMhz, voltageMv, offsetMinMhz, offsetMaxMhz });
+  record.deltaMhz = plan.deltaMhz;
+  record.pointIndex = plan.entry?.i ?? null;
+  if (plan.leverLimited) return stop('lever-limited', plan.why);
+  if (!plan.ok) return stop('refused', plan.why);
+
+  // A rung of the descent is by construction a voltage BELOW the one serving this clock at stock, so
+  // its own stock frequency is below the clock and Δ is strictly positive. Δ ≤ 0 therefore means the
+  // caller handed over a voltage that ALREADY serves this clock — there is nothing to write and
+  // nothing to measure. Named here rather than left to the atom, whose `RangeError` on a
+  // non-positive offset would leave the sweep with an exception instead of an outcome.
+  if (!(plan.deltaMhz > 0)) {
+    return stop('refused', `${voltageMv} мВ обслуживает ${clockMhz} МГц уже на стоке (сдвиг ${plan.deltaMhz} МГц) — `
+      + 'писать нечего и мерить нечего: это не ступень спуска');
+  }
+
+  // ---- 2. WHO HOLDS THE CEILING. The vector is the REAL one the write would carry, so the decision
+  // is taken on what the card would actually get rather than on an idea of it.
+  const build = buildVector ?? (await import('./lib/nvapi.mjs')).buildRaiseAndCapVector;
+  const vector = build(points, plan.deltaMhz, { capMhz: clockMhz });
+  if (!vector || vector.ok !== true) {
+    return stop('refused', `вектор записи не построен: ${vector?.why ?? 'нет ответа строителя'}`);
+  }
+  // `pinned` is the CAPABILITY, not the preference — «a pin is available here», which is the question
+  // `chooseWriteShape` answers with «then who should hold the ceiling». Its answer is obeyed in both
+  // directions, including «the curve holds it, and pinning here would be harmful».
+  const held = chooseShape(vector, { pinned: canPin });
+  record.holder = held.heldBy;
+  record.writeShape = held.shape;
+  if (!held.ok) return stop('refused', held.why);
+
+  // ONE HOLDER, NEVER TWO. When the curve carries the ceiling itself, the pin is not merely redundant
+  // — it fought the cap for one frequency on 2026-08-14 and turned three PASSing shapes into
+  // НЕИЗВЕСТНО. `pinRequired` is the field that decides it, and it belongs to `chooseWriteShape`.
+  const pinMhz = held.pinRequired ? clockMhz : null;
+
+  // ---- 3. THE ATOM. Everything dangerous happens inside it, and all of it is already proved.
+  record.cardTouched = true;
+  const atom = await runStepFn({
+    point: plan.entry.i,
+    offsetMhz: plan.deltaMhz,
+    writeShape: held.shape,
+    capMhz: clockMhz,
+    pinMhz,
+    pinCard,
+    shapes,
+    seconds,
+    sustain,
+  });
+  record.atom = atom ?? null;
+  record.verdict = atom?.verdict ?? null;
+  record.decidedBy = atom?.worstShape ?? null;
+  record.deliveredMhz = atom?.deliveredMhz ?? null;
+  record.deliveredMaxMhz = atom?.deliveredMaxMhz ?? null;
+  record.servingMvAfter = atom?.undervolt?.after?.mv ?? null;
+
+  // ---- 4. DID THE CARD COME BACK? Asked before anything else, because every later question is about
+  // a card whose state we can describe.
+  const dirty = (atom?.blocks ?? []).filter((b) => b && b.undo === true && b.ok === false);
+  record.undoClean = dirty.length === 0;
+  if (dirty.length) {
+    return stop('unknown', `ОТКАТ НЕ ЧИСТ на ${clockMhz} МГц / ${voltageMv} мВ — ${dirty.length} шаг(ов) не отработали: `
+      + `${dirty.map((b) => b.name).join(' · ')}. Следующая ступень стартовала бы на карте, состояние которой `
+      + 'никто не может назвать, и это СТОП, а не вердикт о напряжении');
+  }
+
+  // ---- 5. THE ORACLE COULD NOT JUDGE — a STOP, never progress (EXP-0011).
+  if (record.verdict === null) {
+    const failed = (atom?.blocks ?? []).filter((b) => b && b.ok === false).map((b) => b.name);
+    return stop('unknown', `НЕИЗВЕСТНО на ${clockMhz} МГц / ${voltageMv} мВ — оракул не вынес вердикта`
+      + (atom?.reason ? `: ${atom.reason}` : '')
+      + (failed.length ? ` · красные блоки: ${failed.join(' · ')}` : '')
+      + '. Это СТОП: уточнять край вокруг ненаблюдённой границы значило бы выдумать измерение');
+  }
+
+  // ---- 6. THE RE-ASSERTION, AGAINST THE CARD'S OWN RE-READ TABLE.
+  //
+  // The plan proved this voltage WOULD serve the clock; only the card can say it DID. A mismatch is
+  // not a failure of the silicon — it is the instrument having measured something nobody ordered, and
+  // a verdict about an unordered voltage is worse than no verdict at all.
+  if (record.servingMvAfter === null) {
+    return stop('void', `ступень ${clockMhz} МГц / ${voltageMv} мВ прошла с вердиктом ${record.verdict}, но карта НЕ сказала, `
+      + 'какое напряжение обслуживало частоту после записи — отсутствие наблюдения не является наблюдением совпадения');
+  }
+  if (record.servingMvAfter !== voltageMv) {
+    return stop('void', `СТУПЕНЬ ИЗМЕРИЛА ЧУЖОЕ НАПРЯЖЕНИЕ: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
+      + `частоту обслуживало ${record.servingMvAfter} мВ по ПЕРЕЧИТАННОЙ таблице карты. Вердикт ${record.verdict} `
+      + 'относится не к заказанному напряжению и в документ кривой не идёт');
+  }
+
+  // ---- 7. THE VERDICT, AT LAST — and a failure is a SIGNAL, never the edge (§4.6).
+  if (isPass(record.verdict)) {
+    return {
+      ...record,
+      outcome: 'passed',
+      why: `${voltageMv} мВ обслуживает ${clockMhz} МГц и ПРОШЛО (сдвиг +${plan.deltaMhz} МГц, потолок держит ${held.heldBy}`
+        + `${record.decidedBy ? `, решала форма ${record.decidedBy}` : ''})`,
+    };
+  }
+  return {
+    ...record,
+    outcome: 'failed',
+    why: `ОТКАЗ ${record.verdict} на ${clockMhz} МГц / ${voltageMv} мВ${record.decidedBy ? ` (форма ${record.decidedBy})` : ''}. `
+      + 'Это СИГНАЛ, что край рядом, а НЕ край: край ищется шагом 5 мВ, и только к нему применяется запас +10 мВ',
   };
 }
 
@@ -1171,6 +1412,15 @@ export async function searchEdge({
  *  32. skip the serving check (trust «by construction»)         → «НЕМОНОТОННАЯ таблица ловится ДО записи»
  *  33. report a lever wall as an ordinary refusal               → «предел рычага НАЗВАН пределом рычага, а не краем»
  *
+ * ADDED WITH `plans/15` §4.3, THE LIVE HALF — the rung's orchestration (`runRung`). Addressees named
+ * BEFORE the run:
+ *  34. call the atom even when the paper plan refused           → «бумажный отказ означает, что КАРТА НЕ ТРОНУТА»
+ *  35. flatten the lever wall into an ordinary refusal here     → «предел рычага доезжает до исхода ступени, а не сплющивается в отказ»
+ *  36. drop the re-assertion (trust the plan, not the card)     → «ступень, измерившая ЧУЖОЕ напряжение, не PASS»
+ *  37. map НЕИЗВЕСТНО to a failure instead of a stop            → «НЕИЗВЕСТНО — это СТОП, а не отказ и не край»
+ *  38. pin even when the CURVE holds the ceiling                → «ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА: под кривой закрепления нет»
+ *  39. let a dirty rollback still report PASS                   → «грязный откат отменяет PASS»
+ *
  * ⚠️ AND THE HARNESS ITSELF FAILED FIRST, which is the reusable part: its first version filtered the
  * output for «FAIL» while this suite prints «ПЛОХО», so it reported **0 red for all four mutations** —
  * a blind verifier reading exactly like a clean bill of health (EXP-0016's third face). It now also
@@ -1386,6 +1636,136 @@ export function selfTest() {
   });
 
   return (async () => {
+    // =============================================================================================
+    // `plans/15` §4.3, THE LIVE HALF — ONE RUNG ORCHESTRATED (`runRung`)
+    //
+    // Everything here runs on an INJECTED atom, an INJECTED vector builder and the REAL
+    // `chooseWriteShape`: the decision under test is this module's, the write shape's decision belongs
+    // to the function that already owns it, and no line of this reaches a GPU (F2-AC10).
+    // =============================================================================================
+
+    // The atom, as a recorder: it remembers what it was handed, and answers what the block needs.
+    const atomLog = [];
+    const atom = (reply) => async (args) => {
+      atomLog.push(args);
+      return typeof reply === 'function' ? reply(args) : reply;
+    };
+    const cleanUndo = [{ name: 'ОТКАТ: вся кривая обнулена', ok: true, undo: true, detail: '' }];
+    // A PASS as the atom reports one: the verdict, the deciding shape, and — the load-bearing part —
+    // the voltage the CARD says served the clock after the write.
+    const atomPass = (servingMv) => ({
+      verdict: P, worstShape: 'sdc_fma/transient', deliveredMhz: 2842, deliveredMaxMhz: 2845,
+      undervolt: { capMhz: 2842, after: { pointIndex: 90, mv: servingMv } },
+      blocks: cleanUndo,
+    });
+
+    // Vectors as `buildRaiseAndCapVector` returns them. Above the curve's cap floor (2172 MHz here)
+    // the CURVE can carry the ceiling; below it, only a pin can.
+    const vectorCapped = () => ({ ok: true, capEnforced: true, capMhz: 2842, topMhz: 3172, lowestEnforceableCapMhz: 2172, capLeakMhz: 0 });
+    const vectorLeaky = () => ({ ok: true, capEnforced: false, capMhz: 1700, topMhz: 3172, lowestEnforceableCapMhz: 2172, capLeakMhz: 472 });
+
+    // A low-band table: below 2172 MHz, where epic 02 exists because the curve cannot cap at all.
+    const lowPoints = [
+      { i: 40, mv: 760, mhz: 1400 },
+      { i: 45, mv: 790, mhz: 1700 },
+      { i: 50, mv: 820, mhz: 1900 },
+    ];
+
+    const rungOK = async (over = {}) => {
+      atomLog.length = 0;
+      return runRung({
+        points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+        buildVector: vectorCapped, runStepFn: atom(atomPass(1000)), ...over,
+      });
+    };
+
+    // — the happy path: the atom is called ONCE, with the plan's own arithmetic
+    const good = await rungOK();
+    ok('исправная ступень зовёт атом РОВНО ОДИН РАЗ', atomLog.length, 1);
+    ok('и передаёт ему сдвиг и запись ИЗ ПЛАНА, а не из заказа',
+      [atomLog[0].offsetMhz, atomLog[0].point, atomLog[0].capMhz], [142, 90, 2842]);
+    ok('исход исправной ступени — PASS', [good.outcome, good.verdict, good.undoClean], ['passed', P, true]);
+
+    // — a paper refusal means the card is NEVER touched. `bugs/03`'s whole lesson is that the cheapest
+    //   refusal is the one that happens before the first write.
+    const nonMono = await rungOK({ points: nonMonotone, clockMhz: 2400, voltageMv: 900 });
+    ok('бумажный отказ означает, что КАРТА НЕ ТРОНУТА',
+      [nonMono.outcome, atomLog.length, nonMono.cardTouched], ['refused', 0, false]);
+
+    const lever = await rungOK({ voltageMv: 745 });
+    ok('предел рычага доезжает до исхода ступени, а не сплющивается в отказ',
+      [lever.outcome, atomLog.length, /ПРЕДЕЛ РЫЧАГА/.test(lever.why)], ['lever-limited', 0, true]);
+
+    const atStock = await rungOK({ voltageMv: 1040 });
+    ok('напряжение, которое обслуживает частоту уже на стоке, — не ступень спуска',
+      [atStock.outcome, atomLog.length], ['refused', 0]);
+
+    // — F2-AC9: who holds the ceiling, named on every rung, and never two at once
+    ok('ДЕРЖАТЕЛЬ ПОТОЛКА НАЗВАН, и над полом кривой это КРИВАЯ',
+      [good.holder, good.writeShape], ['кривая', 'raise-and-cap']);
+    // ONE HOLDER, NEVER TWO — the 2026-08-14 lesson, asserted where it can be violated: when the curve
+    // carries the ceiling, no pin may reach the atom.
+    await rungOK();
+    ok('ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА: под кривой закрепление НЕ запрашивается', atomLog[0].pinMhz, null);
+
+    const low = await rungOK({ points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky });
+    ok('ниже пола кривой потолок держит ЗАКРЕПЛЕНИЕ, и оно доезжает до атома',
+      [low.holder, low.writeShape, atomLog[0].pinMhz, atomLog[0].offsetMhz],
+      ['закрепление частоты', 'uniform', 1700, 300]);
+
+    const noHolder = await rungOK({ points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky, canPin: false });
+    ok('потолок не держит НИЧТО → отказ ДО записи, а не открытие посреди прожига',
+      [noHolder.outcome, atomLog.length, /не держит НИЧТО/.test(noHolder.why)], ['refused', 0, true]);
+
+    // — THE RE-ASSERTION against the card's own re-read table. This is what the paper proof may not
+    //   replace (R12, EXP-0057): the plan says the voltage WOULD serve; only the card says it DID.
+    const wrongVolt = await rungOK({ runStepFn: atom(atomPass(995)) });
+    ok('ступень, измерившая ЧУЖОЕ напряжение, — НЕ PASS',
+      [wrongVolt.outcome, wrongVolt.servingMvAfter], ['void', 995]);
+    ok('и отказ называет ОБА напряжения — заказанное и то, что обслуживало на самом деле',
+      /1000 мВ/.test(wrongVolt.why) && /995 мВ/.test(wrongVolt.why), true);
+    const noVolt = await rungOK({ runStepFn: atom({ verdict: P, blocks: cleanUndo }) });
+    ok('отсутствие наблюдения — не наблюдение совпадения', noVolt.outcome, 'void');
+
+    // — UNKNOWN is a STOP, and a failure is a SIGNAL rather than the edge (the owner's rule, §4.6)
+    const unknown = await rungOK({ runStepFn: atom({ verdict: null, blocks: cleanUndo, reason: 'эталон просрочен' }) });
+    ok('НЕИЗВЕСТНО — это СТОП, а не отказ и не край',
+      [unknown.outcome, /СТОП/.test(unknown.why)], ['unknown', true]);
+    const failed = await rungOK({ runStepFn: atom({ verdict: config.VERDICT.SDC, worstShape: 'sdc_fma/transient', undervolt: { after: { mv: 1000 } }, blocks: cleanUndo }) });
+    ok('отказ оракула — это СИГНАЛ близкого края, и ступень говорит это словами',
+      [failed.outcome, /СИГНАЛ/.test(failed.why) && /5 мВ/.test(failed.why)], ['failed', true]);
+
+    // — the rollback. A rung whose undo failed is never a PASS: the next rung would start on a card
+    //   nobody can describe.
+    const dirty = await rungOK({
+      runStepFn: atom({ ...atomPass(1000), blocks: [{ name: 'ОТКАТ: частота ОТПУЩЕНА', ok: false, undo: true, detail: 'сброс отказал' }] }),
+    });
+    ok('грязный откат отменяет PASS', [dirty.outcome, dirty.undoClean], ['unknown', false]);
+    ok('и ступень называет, какой именно шаг отката не отработал', /ОТКАТ: частота ОТПУЩЕНА/.test(dirty.why), true);
+    // The undo is recognised by its FIELD, not by its name — otherwise the check is a truth↔mirror
+    // pair against block wording and drifts the first time a name is reworded.
+    const redButNotUndo = await rungOK({
+      runStepFn: atom({ ...atomPass(1000), blocks: [{ name: 'ОТКАТ: похоже на откат, но это не он', ok: false }] }),
+    });
+    ok('грязный откат опознаётся ПОЛЕМ блока, а не подстрокой в его имени',
+      [redButNotUndo.outcome, redButNotUndo.undoClean], ['passed', true]);
+
+    // — the probe itself: the owner's ten seconds, in the one shape voltage noise lives in
+    ok('короткий прожиг — ОДНА форма, и это транзиент',
+      [SHORT_PROBE.length, SHORT_PROBE[0]?.id], [1, 'sdc_fma/transient']);
+    ok('десять секунд владельца (ideas/03 шаг 9) доезжают до атома вместе с формой',
+      [atomLog[0].seconds, atomLog[0].shapes[0].id], [config.SWEEP_PROBE_SECONDS, 'sdc_fma/transient']);
+
+    // — R1: this module decides, it does not write
+    let rungThrew = false;
+    try { await runRung({ points: tablePoints, clockMhz: 2842, voltageMv: 1000 }); } catch { rungThrew = true; }
+    ok('без атома ступень БРОСАЕТ, а не пишет в карту сама', rungThrew, true);
+
+    // — the record the journal (§4.4) and the sweep (§4.5) will key on
+    ok('запись ступени несёт всё, на чём будет ключеваться журнал',
+      ['frequencyMhz', 'voltageMv', 'deltaMhz', 'pointIndex', 'outcome', 'verdict', 'writeShape', 'holder', 'undoClean']
+        .filter((k) => good[k] === undefined), []);
+
     // the card fails somewhere between 150 and 225
     const r1 = await run((o) => (o < 200 ? P : config.VERDICT.SDC));
     ok('первый отказ закрывает направление', r1.attempts.filter((a) => a.offsetMhz === 225).length, 1);

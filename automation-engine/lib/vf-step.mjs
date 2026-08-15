@@ -136,8 +136,15 @@ function cardTemperatureC() {
  * failed undo is LOUD. Silence would be the worse defect (EXP-0029: a tool whose refusals are mute
  * trains its reader to treat silence as success).
  *
+ * EVERY BLOCK CARRIES `undo: true`, and that field is not decoration — it is what lets a CALLER ask
+ * «did the card come back?» without matching on block NAMES. Added 2026-08-15 with `plans/15` §4.3:
+ * the sweep must never call a rung PASSED while the rollback of that same rung failed, and the only
+ * other way to recognise these blocks from outside would be a string prefix — i.e. a truth↔mirror
+ * pair invented on purpose, drifting the first time a name is reworded (`AGENT_GUIDE.md` → the pairs
+ * registry: a pair that can be REMOVED beats a pair that must be watched).
+ *
  * @param {Array<{name:string, run:function}>} actions
- * @returns {Promise<Array<{name:string, ok:boolean, detail:string}>>}
+ * @returns {Promise<Array<{name:string, ok:boolean, detail:string, undo:true}>>}
  *
  * [NOT-TESTED]
  */
@@ -145,14 +152,14 @@ export async function runUndo(actions) {
   const blocks = [];
   for (const a of actions) {
     if (!a || typeof a.run !== 'function') {
-      blocks.push({ name: a?.name ?? 'без имени', ok: false, detail: 'шаг отката без исполняемой части — это дефект списка, а не карты' });
+      blocks.push({ name: a?.name ?? 'без имени', ok: false, undo: true, detail: 'шаг отката без исполняемой части — это дефект списка, а не карты' });
       continue;
     }
     try {
       const detail = await a.run();
-      blocks.push({ name: a.name, ok: true, detail: typeof detail === 'string' ? detail : (detail?.detail ?? '') });
+      blocks.push({ name: a.name, ok: true, undo: true, detail: typeof detail === 'string' ? detail : (detail?.detail ?? '') });
     } catch (e) {
-      blocks.push({ name: a.name, ok: false, detail: `шаг отката упал: ${e.message}` });
+      blocks.push({ name: a.name, ok: false, undo: true, detail: `шаг отката упал: ${e.message}` });
     }
   }
   return blocks;
