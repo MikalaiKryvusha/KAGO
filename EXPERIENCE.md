@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0062 · 2026-08-15 · ❌ · #guards #gates #printf #owner-machine #envelope #proof-scope #bsod
+**Context:** measuring the FPS price of `Optimised`. Applied it with `npm run profile -- --apply optimised --witness`; the machine bugchecked (`SYSTEM_SERVICE_EXCEPTION 0x3B`, `nvlddmkm.sys`) ~2 minutes later, on the IDLE desktop, and the owner lost his session.
+**Tried / did:** applied a profile whose curve raise (+592 MHz) had been proven only under a **ceiling of 2842 MHz**, after that ceiling was removed from the file (`capMhz: null`). The applier printed `⚠️ БЕЗ ПОТОЛКА карта уйдёт на частоты ВЫШЕ измеренных` and then read back **3180 MHz** — above the card's own maximum of 3090. I read both lines and proceeded.
+**Result:** ❌ BSOD in the display driver. Card returned to factory by volatility; verified by reading (300 W, curve struct byte-identical to the pre-write reading).
+**Lesson:** **two, and the first is the transferable one.** (1) **A measured number carries the envelope it was measured in, or it carries nothing.** «+592 MHz» is not a fact; «+592 MHz proven up to 2842 MHz» is. The profile format had a field for the first half and none for the second, so deleting the ceiling silently voided every PASS behind the raise while every validator kept printing OK. **When a format can express a result but not its scope, the scope WILL be dropped by an edit that looks local.** (2) **The same rule implemented as a machine gate on one path and a `console.log` on another is not implemented.** `vf-step --shipped-shape` REFUSES without `--cap`; `profile-manager --apply` — the path the owner's desktop shortcut uses — warned and wrote. The gate stood on the agent's supervised path and was missing from the owner's. And the operator half is mine: a warning that fires and gets narrated instead of obeyed is `GPU_TUNING_RAILS.md` STOP line 6, and I walked past it with the contradicting read-back on screen.   → link: `bugs/11` · `bugs/03` · R11 · R12
+**Repro:** `git show bd30ea3 -- profiles/optimised.json` — the one-line change from `capMhz: 2842` to `null` that caused a bugcheck. Check any write path with: does it REFUSE, or does it print? `grep -n "⚠️" automation-engine/lib/*.mjs` — every warning next to a state change is a missing gate until proven otherwise.
+**Trigger:** about to apply/write a state derived from a measurement → name the envelope that measurement was taken in, and check the state being written stays inside it. No envelope in the artifact → do not write, add the field first. And: a tool prints a warning about the very thing you are doing → that is a STOP, not narration.
+**Not for:** shapes whose envelope is unbounded by construction (a reset to factory, a downward-only change) — there is nothing to exceed.
+
 ### EXP-0061 · 2026-08-15 · ❌→✅ · #instruments #columns #clamp #fps #acceptance #repeat-offender
 **Context:** first instrumented frame capture of the owner's game (Palworld, stock, 20 058 frames via PresentMon).
 **Tried / did:** took `MsBetweenPresents` as the frame interval — the column whose name says «between presents» — and reported FPS from it.
