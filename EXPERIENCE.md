@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0067 · 2026-08-15 · ❌→✅ · #shells #two-worlds #git #commit-message #silent-corruption
+**Context:** committing the epic-02 planning ladder with a long multi-line Russian commit message through the **Bash** tool.
+**Tried / did:** wrote `git commit -m @'…'@` — the PowerShell single-quoted here-string. That syntax is documented in this session's PowerShell instructions and it is muscle memory in a two-shell environment.
+**Result:** ❌ **bash has no such construct**, so `@'` was passed as a literal argument: the commit's SUBJECT LINE became `@`, and the real subject dropped to line 2. Nothing errored — exit 0, commit created, message silently ruined in permanent history. ✅ Fixed by `git commit --amend -F <file>` after stripping the stray markers with Node.
+**Lesson:** **this machine has two shells with two incompatible quoting worlds, and choosing the wrong one for a multi-line string fails SILENTLY rather than loudly.** The dossier already warns that `tar`/`curl`/`find` differ per shell; string quoting differs the same way and is worse, because a mangled argument still exits 0. The general rule that survives both worlds: **a multi-line commit message goes through a FILE (`-F`), never through `-m`** — one form, both shells, and it also sidesteps the heredoc-executes-backticks trap this project already paid for.   → link: `AGENT_GUIDE.md` → Environment dossier (shells) · STATUS → две ловушки оболочки
+**Repro:** after any scripted commit, `git log -1 --format=%s` — the subject must be the subject. A bare `@`, a stray quote, or an empty line means the quoting was eaten; amend with `-F` before pushing.
+**Trigger:** about to pass a multi-line string to a native CLI (commit message, PR body, JSON payload) → write it to a file and pass the path, whichever shell you are in.
+**Not for:** single-line `-m "…"` messages — those are portable in both shells and need no file.
+
 ### EXP-0066 · 2026-08-15 · ❌→✅ · #permissions #harness #rule-form #owner-time #diagnosis
 **Context:** the owner had granted wide rights, and prompts kept arriving anyway — twice in one morning, the second time with «я устал от этого».
 **Tried / did:** the grant script wrote `Bash(*)` and `PowerShell(*)` into `permissions.allow` and everyone assumed that meant «this tool, always».
