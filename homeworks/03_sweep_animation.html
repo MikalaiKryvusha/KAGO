@@ -30,7 +30,18 @@
   .state{font-weight:700;letter-spacing:.02em;font-size:17px;margin:14px 0 0}
   .alive{color:var(--ok)} .dead{color:var(--alarm);display:none}
   body.hung .alive{display:none} body.hung .dead{display:block}
-  body.hung .spin,body.hung .arm,body.hung .grip{animation-play-state:paused!important}
+  body.hung .spin,body.hung .arm,body.hung [class^="fl"]{animation-play-state:paused!important}
+  /* шапка прогона */
+  .head{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;margin:0 0 18px}
+  .head .brand{font-size:56px;font-weight:800;letter-spacing:.06em;line-height:1;
+               background:linear-gradient(180deg,#eef4fb,#9fb0c2);-webkit-background-clip:text;
+               background-clip:text;color:transparent}
+  .head .what{font-size:22px;font-weight:600;color:#c9d3df}
+  /* показания карты — строкой под рисунком, а не поверх лопастей */
+  .telemetry{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+  .telemetry div{background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+  .telemetry b{display:block;font-size:24px;line-height:1.15;font-variant-numeric:tabular-nums}
+  .telemetry span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
   footer{margin-top:24px;color:var(--dim);font-size:13px;max-width:940px}
   code{background:#0f1216;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 
@@ -56,22 +67,662 @@
     32%,64% {transform:translateY(24px)}
     89%,100%{transform:translateY(0)}
   }
-  /* Поворот цилиндра вокруг своей оси НЕ меняет силуэт — едут только продольные
-     грани; поперечные кольца стоят, потому что идут по окружности. */
-  .grip{animation:grip 11s linear infinite}
-  @keyframes grip{
-    0%,32%  {transform:translateX(0)}
-    64%     {transform:translateX(-44px)}
-    100%    {transform:translateX(-44px)}
-  }
+
+  /* ── ГРАНИ РУЧКИ: НАСТОЯЩАЯ ПРОЕКЦИЯ ЦИЛИНДРА ───────────────────────────
+     Сгенерировано расчётом, не подобрано на глаз. Каждая грань — точка на
+     окружности: x = R·sin(a), видима при cos(a) > 0, ширина и яркость ∝ cos(a).
+     Поэтому грани СЖИМАЮТСЯ и ГАСНУТ у силуэта, а движутся неравномерно —
+     быстро в середине, медленно у кромки. Равномерные полоски, ехавшие ровно,
+     были 2D-подделкой под цилиндр. */
+  .flute{transform-box:fill-box;transform-origin:center}
+@keyframes fl0{
+  0%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
+  7%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
+  32%{transform:translateX(0.00px) scaleX(1.000);opacity:0.850}
+  33%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  34%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  35%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  36%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  46%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  47%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  48%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  49%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  50%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  51%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  52%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  62%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  63%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  64%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  89%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  100%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+}
+.fl0{animation:fl0 11s linear infinite}
+@keyframes fl1{
+  0%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  7%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  32%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  33%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  34%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  35%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  45%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  46%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  47%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  48%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  49%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  50%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  51%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  61%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  62%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  63%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  64%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  89%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  100%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+}
+.fl1{animation:fl1 11s linear infinite}
+@keyframes fl2{
+  0%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  7%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  32%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  33%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  34%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  44%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  45%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  46%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  47%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  48%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  49%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  50%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  60%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  61%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  62%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  63%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  64%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  89%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  100%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+}
+.fl2{animation:fl2 11s linear infinite}
+@keyframes fl3{
+  0%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  7%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  32%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  33%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  43%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  44%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  45%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  46%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  47%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  48%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  49%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  59%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  60%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  61%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  62%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  63%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  64%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  89%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  100%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+}
+.fl3{animation:fl3 11s linear infinite}
+@keyframes fl4{
+  0%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  42%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  43%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  44%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  45%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  46%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  47%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  48%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  58%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  59%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  60%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  61%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  62%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  63%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  64%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+}
+.fl4{animation:fl4 11s linear infinite}
+@keyframes fl5{
+  0%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  41%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  42%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  43%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  44%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  45%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  46%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  47%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  57%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  58%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  59%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  60%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  61%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  62%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  63%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+}
+.fl5{animation:fl5 11s linear infinite}
+@keyframes fl6{
+  0%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  40%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  41%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  42%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  43%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  44%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  45%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  46%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  56%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  57%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  58%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  59%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  60%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  61%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  62%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+}
+.fl6{animation:fl6 11s linear infinite}
+@keyframes fl7{
+  0%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  39%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  40%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  41%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  42%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  43%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  44%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  45%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  55%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  56%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  57%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  58%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  59%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  60%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  61%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+}
+.fl7{animation:fl7 11s linear infinite}
+@keyframes fl8{
+  0%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  37%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  38%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  39%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  40%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  41%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  42%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  43%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  44%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  53%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  54%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  55%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  56%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  57%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  58%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  59%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  60%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+}
+.fl8{animation:fl8 11s linear infinite}
+@keyframes fl9{
+  0%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  36%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  37%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  38%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  39%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  40%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  41%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  42%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  43%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  52%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  53%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  54%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  55%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  56%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  57%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  58%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  59%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+}
+.fl9{animation:fl9 11s linear infinite}
+@keyframes fl10{
+  0%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  35%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  36%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  37%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  38%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  39%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  40%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  41%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  42%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  51%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  52%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  53%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  54%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  55%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  56%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  57%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  58%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+}
+.fl10{animation:fl10 11s linear infinite}
+@keyframes fl11{
+  0%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  34%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  35%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  36%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  37%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  38%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  39%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  40%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  41%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  50%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  51%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  52%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  53%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  54%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  55%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  56%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  57%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+}
+.fl11{animation:fl11 11s linear infinite}
+@keyframes fl12{
+  0%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  7%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  32%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  33%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  34%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  35%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  36%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  37%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  38%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  39%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  40%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  49%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  50%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  51%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  52%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  53%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  54%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  55%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  56%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  89%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  100%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+}
+.fl12{animation:fl12 11s linear infinite}
+@keyframes fl13{
+  0%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  7%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  32%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  33%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  34%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  35%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  36%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  37%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  38%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  39%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  48%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  49%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  50%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  51%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  52%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  53%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  54%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  55%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  64%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  89%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  100%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+}
+.fl13{animation:fl13 11s linear infinite}
+@keyframes fl14{
+  0%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  7%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  32%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  33%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  34%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  35%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  36%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  37%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  38%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  47%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  48%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  49%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  50%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  51%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  52%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  53%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  54%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  63%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  64%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  89%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  100%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+}
+.fl14{animation:fl14 11s linear infinite}
+@keyframes fl15{
+  0%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  7%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  32%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  33%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  34%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  35%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  36%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  37%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  38%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  39%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  40%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  41%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  42%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  43%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  44%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  45%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  46%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  47%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  48%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  49%{transform:translateX(-0.00px) scaleX(1.000);opacity:0.850}
+  50%{transform:translateX(5.89px) scaleX(0.924);opacity:0.795}
+  51%{transform:translateX(10.89px) scaleX(0.707);opacity:0.633}
+  52%{transform:translateX(14.23px) scaleX(0.383);opacity:0.376}
+  53%{transform:translateX(15.40px) scaleX(0.020);opacity:0.000}
+  54%{transform:translateX(14.23px) scaleX(0.020);opacity:0.000}
+  55%{transform:translateX(10.89px) scaleX(0.020);opacity:0.000}
+  56%{transform:translateX(5.89px) scaleX(0.020);opacity:0.000}
+  57%{transform:translateX(0.00px) scaleX(0.020);opacity:0.000}
+  58%{transform:translateX(-5.89px) scaleX(0.020);opacity:0.000}
+  59%{transform:translateX(-10.89px) scaleX(0.020);opacity:0.000}
+  60%{transform:translateX(-14.23px) scaleX(0.020);opacity:0.000}
+  61%{transform:translateX(-15.40px) scaleX(0.020);opacity:0.000}
+  62%{transform:translateX(-14.23px) scaleX(0.383);opacity:0.376}
+  63%{transform:translateX(-10.89px) scaleX(0.707);opacity:0.633}
+  64%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  89%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+  100%{transform:translateX(-5.89px) scaleX(0.924);opacity:0.795}
+}
+.fl15{animation:fl15 11s linear infinite}
 </style>
 </head>
 <body>
 
-<h1>Анимация прогона — четвёртая правка</h1>
-<p class="sub">Вентиляторы одного цвета и одной скорости. Отвёртка перерисована: точёная ручка с
-перехватом, стальная обойма, длинный тонкий стержень, шлицевое жало. Винта нет — жало уходит
-<b>за карту</b> и работает в глубине.</p>
+<div class="head">
+  <span class="brand">KAGO</span>
+  <span class="what">Выполняется автоматический тюнинг-прогон видеокарты</span>
+</div>
 
 <div class="bar">
   <button id="toggle" class="hang">⏸ Симулировать зависание</button>
@@ -81,7 +732,7 @@
 <div class="wrap">
   <div class="card">
     <div class="stage">
-      <svg viewBox="0 0 380 268" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
+      <svg viewBox="0 0 380 292" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
         <defs>
           <linearGradient id="shroud" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stop-color="#4a525d"/><stop offset=".45" stop-color="#343b45"/>
@@ -160,12 +811,19 @@
              Опускающееся жало уходит ЗА кожух само, без масок и обрезки. -->
         <g class="arm">
           <g transform="translate(142,116)">
-            <!-- жало шлицевое -->
-            <path d="M-4.6,-10 L4.6,-10 L4.6,-3 L2.2,0 L-2.2,0 L-4.6,-3 Z" fill="#eef3f9"/>
-            <path d="M0,-10 L0,0" stroke="#8f99a5" stroke-width=".9"/>
-            <!-- стержень -->
-            <rect x="-3.2" y="-46" width="6.4" height="36" fill="url(#steel)"/>
-            <rect x="-3.2" y="-46" width="6.4" height="36" fill="none" stroke="#404955" stroke-width=".5"/>
+            <!-- СТЕРЖЕНЬ И ЖАЛО — ОДНОЙ ФИГУРОЙ, а не двумя приставленными.
+                 Раньше жало было ШИРЕ стержня и заливалось отдельным цветом,
+                 поэтому и читалось как приклеенная деталь. Настоящее шлицевое
+                 жало — это ПРОКОВАННЫЙ конец того же прутка: он сужается, слегка
+                 расплющивается и сходит на кромку. Один контур, одна заливка,
+                 один блик — тогда оно и выглядит частью инструмента. -->
+            <path d="M-3.2,-46 L3.2,-46 L3.2,-13 L3.9,-8.5 L3.9,-2.6 L2.1,0 L-2.1,0
+                     L-3.9,-2.6 L-3.9,-8.5 L-3.2,-13 Z" fill="url(#steel)"/>
+            <path d="M-3.2,-46 L3.2,-46 L3.2,-13 L3.9,-8.5 L3.9,-2.6 L2.1,0 L-2.1,0
+                     L-3.9,-2.6 L-3.9,-8.5 L-3.2,-13 Z"
+                  fill="none" stroke="#3c4551" stroke-width=".55"/>
+            <!-- фаска проковки: та же сталь, чуть светлее — переход, а не стык -->
+            <path d="M-3.9,-8.5 L3.9,-8.5 L3.9,-6.4 L-3.9,-6.4 Z" fill="#f2f6fa" opacity=".5"/>
             <!-- обойма -->
             <path d="M-7,-56 L7,-56 L6,-45 L-6,-45 Z" fill="url(#ferrule)"/>
             <rect x="-7.6" y="-57.5" width="15.2" height="3" rx="1.2" fill="#c8d2dd"/>
@@ -173,14 +831,22 @@
             <use href="#grip-shape" fill="url(#handle)"/>
             <g clip-path="url(#gripClip)">
               <!-- продольные грани: едут при подкручивании -->
-              <g class="grip" fill="#7a2a09" opacity=".34">
-                <rect x="-52" y="-114" width="3.4" height="64"/><rect x="-46" y="-114" width="3.4" height="64"/>
-                <rect x="-40" y="-114" width="3.4" height="64"/><rect x="-34" y="-114" width="3.4" height="64"/>
-                <rect x="-28" y="-114" width="3.4" height="64"/><rect x="-22" y="-114" width="3.4" height="64"/>
-                <rect x="-16" y="-114" width="3.4" height="64"/><rect x="-10" y="-114" width="3.4" height="64"/>
-                <rect x="-4"  y="-114" width="3.4" height="64"/><rect x="2"   y="-114" width="3.4" height="64"/>
-                <rect x="8"   y="-114" width="3.4" height="64"/><rect x="14"  y="-114" width="3.4" height="64"/>
-              </g>
+              <g class="fl0 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl1 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl2 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl3 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl4 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl5 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl6 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl7 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl8 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl9 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl10 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl11 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl12 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl13 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl14 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
+              <g class="fl15 flute"><rect x="-1.5" y="-114" width="1.9" height="64" fill="#5c1f06"/><rect x="0.4"  y="-114" width="1.1" height="64" fill="#ffc79c"/></g>
               <!-- поперечное кольцо перехвата: при осевом повороте НЕ движется -->
               <rect x="-20" y="-68" width="40" height="2.4" fill="#6b2408" opacity=".45"/>
               <rect x="-20" y="-64" width="40" height="1.6" fill="#ffb489" opacity=".18"/>
@@ -193,12 +859,12 @@
         </g>
 
         <!-- ── ПЛАТА, ЗАДНЯЯ ПЛАСТИНА, ГРЕБЁНКА PCIe ───────────────────── -->
-        <rect x="34" y="222" width="316" height="12" rx="2" fill="#1e232a" stroke="#39424d"/>
+        <rect x="34" y="250" width="316" height="12" rx="2" fill="#1e232a" stroke="#39424d"/>
         <!-- Гребёнка PCIe одной сплошной медяшкой: зубы дробили взгляд и мешали
              заметить остановку — а именно ради этого вся картинка и рисуется. -->
         <g>
-          <rect x="70" y="234" width="132" height="12" rx="1.5" fill="url(#gold)"/>
-          <rect x="212" y="234" width="52" height="12" rx="1.5" fill="url(#gold)"/>
+          <rect x="70" y="262" width="132" height="12" rx="1.5" fill="url(#gold)"/>
+          <rect x="212" y="262" width="52" height="12" rx="1.5" fill="url(#gold)"/>
         </g>
 
         <!-- ── КРОНШТЕЙН, ВИД С РЕБРА ────────────────────────────────────
@@ -208,22 +874,22 @@
              сбоку он виден С РЕБРА: тонкая полоса металла с отогнутой
              верхней лапкой под винт. Никаких окон разъёмов отсюда не видно. -->
         <g>
-          <rect x="22" y="124" width="7" height="116" fill="url(#ferrule)"/>
-          <rect x="22" y="124" width="7" height="116" fill="none" stroke="#48515c" stroke-width=".7"/>
-          <rect x="23.2" y="124" width="1.6" height="116" fill="#eef3f9" opacity=".35"/>
+          <rect x="24.5" y="124" width="4.5" height="144" fill="#4e5763"/>
+          <rect x="24.5" y="124" width="4.5" height="144" fill="none" stroke="#3a424c" stroke-width=".6"/>
+          <rect x="25.3" y="124" width="1" height="144" fill="#aebac7" opacity=".18"/>
           <!-- отогнутая лапка крепления, уходит к корпусу -->
-          <path d="M22,124 L29,124 L29,116 L36,116 L36,120 L29,120 Z" fill="url(#rail)" stroke="#69737f" stroke-width=".7"/>
-          <circle cx="32.5" cy="118" r="1.4" fill="#151a20"/>
+          <path d="M24.5,124 L29,124 L29,118 L34,118 L34,121 L29,121 Z" fill="#4e5763" stroke="#3a424c" stroke-width=".6"/>
+          <circle cx="31.6" cy="119.5" r="1.1" fill="#20262e"/>
           <!-- нижний упор -->
-          <rect x="22" y="238" width="7" height="4" rx="1" fill="#5b6572"/>
+          <rect x="24.5" y="266" width="4.5" height="3.5" rx="1" fill="#454e59"/>
         </g>
 
         <!-- ── КОЖУХ ───────────────────────────────────────────────────── -->
-        <path d="M30,130 L352,130 L352,218 L30,218 Z" fill="url(#shroud)" stroke="#5d6773"/>
+        <path d="M30,130 L352,130 L352,246 L30,246 Z" fill="url(#shroud)" stroke="#5d6773"/>
         <path d="M30,130 L352,130 L352,144 L30,144 Z" fill="url(#rail)" opacity=".5"/>
         <g stroke="#1d222a" stroke-width="2" opacity=".6">
           <path d="M64,130 L48,144"/><path d="M334,130 L318,144"/>
-          <path d="M64,218 L48,204"/><path d="M334,218 L318,204"/>
+          <path d="M64,246 L48,232"/><path d="M334,246 L318,232"/>
         </g>
         <g>
           <rect x="296" y="118" width="50" height="13" rx="2.5" fill="#2b323b" stroke="#69737f"/>
@@ -255,16 +921,53 @@
             <circle r="9" fill="#2b323b" stroke="#6d7885"/><circle r="3.2" fill="#6d7885"/>
           </g>
         </g>
+
+        <!-- ── ПОЛОСА ДИСПЛЕЕВ НА САМОЙ КАРТЕ ────────────────────────────
+             Идея владельца: опустить контакты, освободить горизонтальную полосу
+             под вентиляторами и положить туда экранчики с показаниями карты.
+             Первая моя попытка клала текст ПОВЕРХ лопастей — он был нечитаем;
+             здесь у показаний своё место, и они читаются как часть железа.
+             Это ДАННЫЕ, а не анимация: тот же посекундный сэмплер, который
+             проект уже гоняет отдельным процессом. -->
+        <g font-family="Consolas,Menlo,monospace">
+          <rect x="38" y="218" width="306" height="22" rx="3" fill="#161b21" stroke="#454e59"/>
+          <g>
+            <rect x="42" y="221" width="96" height="16" rx="2" fill="#08120f" stroke="#2e3a3a"/>
+            <text x="47" y="233" font-size="11" fill="#5fbfa8" letter-spacing=".6">T</text>
+            <text x="133" y="233" font-size="11.5" fill="#8ffbdd" text-anchor="end"
+                  letter-spacing=".5" font-weight="700">74 C</text>
+          </g>
+          <g>
+            <rect x="144" y="221" width="96" height="16" rx="2" fill="#08120f" stroke="#2e3a3a"/>
+            <text x="149" y="233" font-size="11" fill="#5fbfa8" letter-spacing=".6">FAN</text>
+            <text x="235" y="233" font-size="11.5" fill="#8ffbdd" text-anchor="end"
+                  letter-spacing=".5" font-weight="700">62% 1770</text>
+          </g>
+          <g>
+            <rect x="246" y="221" width="94" height="16" rx="2" fill="#08120f" stroke="#2e3a3a"/>
+            <text x="251" y="233" font-size="11" fill="#5fbfa8" letter-spacing=".6">P</text>
+            <text x="335" y="233" font-size="11.5" fill="#8ffbdd" text-anchor="end"
+                  letter-spacing=".5" font-weight="700">248 W</text>
+          </g>
+        </g>
       </svg>
     </div>
   </div>
 
   <div>
     <div class="m"><span>частота под тестом</span><b>2842 МГц</b></div>
-    <div class="m"><span>напряжение ступени</span><b>995 мВ</b></div>
-    <div class="m"><span>прожиг</span><b>6,2 с</b></div>
-    <div class="m"><span>ступень</span><b>4 из 24</b></div>
-    <p class="state alive">● ИДЁТ ПРОЖИГ</p>
+    <!-- «4 из 24» убрано: номер ступени внутри спуска не говорит оператору ничего.
+         Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. -->
+    <div class="m"><span>напряжение</span><b>995 мВ</b>
+      <span style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df">
+        сток 1045 · снято <b style="display:inline;font-size:13px;color:var(--ok)">−50 мВ</b></span></div>
+    <!-- «прожиг» — жаргон (слово владельца 2026-08-16). На самом деле идёт
+         СТРЕСС-ТЕСТ УСТОЙЧИВОСТИ, так и называем — здесь и во всём, что он читает. -->
+    <div class="m"><span>стресс-тест устойчивости</span><b>6,2 <span style="font-size:17px;color:var(--dim)">из 10 с</span></b></div>
+    <div class="m"><span>пройдено по полосе</span><b>2842…2800</b>
+      <span style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df">
+        закрыто частот <b style="display:inline;font-size:13px">7 из 43</b></span></div>
+    <p class="state alive">● ИДЁТ СТРЕСС-ТЕСТ УСТОЙЧИВОСТИ</p>
     <p class="state dead">■ ЗАМЕРЛО — 2842 МГц / 995 мВ</p>
   </div>
 </div>
