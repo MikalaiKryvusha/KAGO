@@ -41,6 +41,33 @@
 
 ## Entries
 
+### EXP-0066 · 2026-08-15 · ❌→✅ · #permissions #harness #rule-form #owner-time #diagnosis
+**Context:** the owner had granted wide rights, and prompts kept arriving anyway — twice in one morning, the second time with «я устал от этого».
+**Tried / did:** the grant script wrote `Bash(*)` and `PowerShell(*)` into `permissions.allow` and everyone assumed that meant «this tool, always».
+**Result:** ❌ it does not. In the Claude Code permission schema `Tool(...)` is a **prefix pattern over the ARGUMENT** — `Bash(*)` is the same kind of rule as `Bash(git *)` and does not match every invocation. «Allow the tool in all its uses» is the **bare tool name, no parentheses**: `Bash`. ✅ Two fixes together: bare names for every tool actually used, plus `permissions.defaultMode: "dontAsk"` — because a LIST can only cover what is listed, and a prompt arrives precisely for what is NOT.
+**Lesson:** **when a permission grant keeps failing, the defect is in the RULE FORM, not in the breadth of the list — read the schema instead of adding more entries.** The general shape: a config key that silently accepts a wrong-but-plausible value gives no error, just no effect, and the cost lands on the human as repeated interruptions. Also: `bypassPermissions` is not «wider», it DISABLES the deny list too — offering it in place of `dontAsk` would have removed the owner's own guards, the opposite of the ask.   → link: `tools/grant-agent-rights.mjs`
+**Repro:** `node tools/grant-agent-rights.mjs --show` prints how many wide rules are present AND the current defaultMode. A prompt on a call that "should" be allowed → check the form first: bare name vs `Name(*)`.
+**Trigger:** the human says a permission prompt appeared again → do NOT add another pattern; open the settings schema, check whether the rule form means what you think, and report the diagnosis.
+**Not for:** narrowing rules on purpose (`Bash(git *)` as a deliberate limit) — there the prefix form is exactly right.
+
+### EXP-0065 · 2026-08-15 · ❌ · #measurement #instruments #spread #premature-claim #repeat-offender
+**Context:** first instrumented frame capture of Palworld at the owner's «decent graphics» — 30 % of frames at the 144 Hz cap instead of yesterday's 48.8 %, median 99 FPS instead of 141.9.
+**Tried / did:** reported to the owner that the earlier verdict was overturned and a mode's cost CAN now be measured in his game. One run. No spread.
+**Result:** ❌ the second identical stock run gave median 105.6 — **the instrument's own run-to-run scatter is 6.7 %, against the owner's 5 % criterion**, and 1 % low scattered 21.8 %. The verdict was not overturned at all; I had to retract it in the next message.
+**Lesson:** **a statement about a DIFFERENCE is illegal until the instrument's own spread is measured — and one run measures no spread.** This project already carries the rule in `MASTER_PLAN.md` («ноль процентов, показанный инструментом с разбросом в три процента, — не находка, а тупой инструмент») and I walked past it anyway, because the single run looked like good news. The tell is grammatical: the moment a sentence compares («now measurable», «no loss», «X % better»), the spread must already be in hand. Telemetry passed the same test in the same hour and earned its trust honestly: watts 2.2 %, clock 0 % across three windows.   → link: EXP-0061 · `MASTER_PLAN.md` → ведущие принципы п.5
+**Repro:** two identical runs BEFORE any comparison; quote the spread next to the delta. Palworld frames: median 6.7 % · 1 % low 21.8 % · Q2RTX: 0.90 %.
+**Trigger:** about to write a sentence containing «меньше / больше / не изменилось / теперь можно измерить» → the spread of that instrument must appear in the same message, or the sentence does not ship.
+**Not for:** single-run OBSERVATIONS that claim nothing comparative («the card reached 2775 MHz») — those are readings, not differences.
+
+### EXP-0064 · 2026-08-15 · ❌ · #instruments #targeting #process #evidence #labels
+**Context:** attaching PresentMon to the owner's game to count frames; two separate defects in one instrument, both mine, both cheap to avoid.
+**Tried / did:** (1) resolved the game process as «first process whose name matches Palworld»; (2) wrote every capture to one fixed path.
+**Result:** ❌ (1) it picked `Palworld.exe` — the launcher shim, which presents nothing — so PresentMon ran a full 3-minute session and wrote **zero rows** while reporting no error. The neighbouring project KUMM had targeted `Palworld-Win64-Shipping.exe` from the start and got its data. ❌ (2) the third run reopened the same path and **overwrote the second run's raw CSV**; the numbers were already extracted, the evidence was not.
+**Lesson:** **two rules, both about the gap between a thing's NAME and the thing.** (1) Attach a measurement tool to the process that DOES the work, not to the one named after the product — for Unreal that is `*-Win64-Shipping.exe`, and the general form is «find the process by what it does (renders, listens, allocates), not by what it is called». (2) **Every capture carries a label, and a fixed output path is a data-loss defect, not a convenience** — this project already enforces it everywhere else (`gfx --capture` REFUSES without `--label`: «замер без имени нельзя сравнить»), and the one throwaway script that skipped the rule is the one that destroyed evidence.   → link: EXP-0060 · `researches/08`
+**Repro:** `Get-CimInstance Win32_Process -Filter "Name LIKE 'PresentMon%'" | Select CommandLine` shows what each capture actually targets — compare against the process that owns the swap chain. For labels: a capture path with no run identifier in it is the bug.
+**Trigger:** pointing any profiler/sampler at «the app» → name the process that performs the measured act, and give the output a per-run label, before the first run.
+**Not for:** single-shot probes whose output is consumed immediately and never compared.
+
 ### EXP-0062 · 2026-08-15 · ❌ · #guards #gates #printf #owner-machine #envelope #proof-scope #bsod
 **Context:** measuring the FPS price of `Optimised`. Applied it with `npm run profile -- --apply optimised --witness`; the machine bugchecked (`SYSTEM_SERVICE_EXCEPTION 0x3B`, `nvlddmkm.sys`) ~2 minutes later, on the IDLE desktop, and the owner lost his session.
 **Tried / did:** applied a profile whose curve raise (+592 MHz) had been proven only under a **ceiling of 2842 MHz**, after that ceiling was removed from the file (`capMhz: null`). The applier printed `⚠️ БЕЗ ПОТОЛКА карта уйдёт на частоты ВЫШЕ измеренных` and then read back **3180 MHz** — above the card's own maximum of 3090. I read both lines and proceeded.
