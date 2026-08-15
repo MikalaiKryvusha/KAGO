@@ -31,17 +31,26 @@
 //   node automation-engine/lib/virtual-gpu.mjs --show benches/cards/rtx5070ti.json
 //   node automation-engine/lib/virtual-gpu.mjs --selftest
 //
-// [TESTED: 2026-08-15 19:2x · PHASE 2 · `npm run vgpu -- --selftest` → 62 blocks, 0 failures:
-//  the invented edge exists for all 389 frequencies, lands ON the voltage grid, TRENDS upward and
-//  JITTERS (the owner's «шумок», demanded on reading the first file) · the model gives exactly 0.5 at
-//  the edge and ≈0.2/0.8 one 5 mV step either side · a shorter burn honestly finds less · all three
-//  outcome classes reachable · the oracle reads the VOLTAGE OFF THE CARD rather than being told it ·
-//  the REAL `runBurst` + `decideVerdict` deliver the verdict · one seed reproduces exactly and a
-//  different seed does not · and `ЗАВИС` is a REAL process death in a child, whose `finally` did not
-//  run while the intent written before the card was touched survived.
+// [TESTED: 2026-08-15 19:5x · PHASE 2 · `npm run vgpu -- --selftest` → 63 blocks, 0 failures:
+//  the invented edge exists for all 389 frequencies, does NOT land on the voltage grid (the grid is
+//  what we COMMAND, the edge is what the silicon IS — see the block of the same name and 59bd8eb),
+//  TRENDS upward and JITTERS (the owner's «шумок», demanded on reading the first file) · the model
+//  gives exactly 0.5 at the edge and ≈0.2/0.8 one 5 mV step either side · a shorter burn honestly
+//  finds less · all three outcome classes reachable · the oracle reads the VOLTAGE OFF THE CARD
+//  rather than being told it · the REAL `runBurst` + `decideVerdict` deliver the verdict · one seed
+//  reproduces exactly and a different seed does not · and `ЗАВИС` is a REAL process death in a child,
+//  whose `finally` did not run while the intent written before the card was touched survived.
 //  Mutation-proved with SIXTEEN mutations, addressees named before the run, 0 uncaught — including
 //  the two that first exposed WEAK BLOCKS rather than weak mutations: a smoothness check that counted
 //  distinct values (green on a smooth curve) and a verdict check that never exercised the SDC path.
+//
+//  ⚠️ THIS BLOCK WAS ITSELF STALE AND A JUDGE PASS CAUGHT IT (2026-08-15 19:5x). It certified «lands
+//  ON the voltage grid» — a property `59bd8eb` had DELETED half an hour earlier at the owner's word,
+//  and which the suite now has a block to REFUSE. The fix commit changed the behaviour, the guard and
+//  the validator, and left its own receipt describing the old world. The lesson generalises past this
+//  file: a `[TESTED]` marker is a MIRROR of the code it sits on, so it drifts exactly like every pair
+//  in the truth↔mirror registry — silently, on the side nobody re-read. Re-read the marker in the
+//  same commit that changes what it certifies.
 //
 // [TESTED: 2026-08-15 18:5x · PHASE 1 · 37 blocks, 0 failures, no GPU touched:
 //  11 hostile card fixtures each refused by the FIELD it broke · the derivation compared field by
@@ -924,7 +933,9 @@ function snapToLadder(ladderDesc, mhz) {
 
 /**
  * MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016). Each mutation must redden the block named
- * beside it and no other:
+ * beside it and no other.
+ *
+ * PHASE 1:
  *   - validator accepts a voltage off the grid            → «ВАЛИДАТОР: напряжение вне сетки»
  *   - derived fixture keeps a stale/absent stamp          → «ВЫВОД: штамп доезжает из словарей»
  *   - drop `curveWriteRefusal` from the virtual backend   → «ПАРИТЕТ: оба бэкенда зовут одно решение»
@@ -932,6 +943,27 @@ function snapToLadder(ladderDesc, mhz) {
  *   - store the clock instead of computing it             → «ПОВАДКА: снятие блокировки — клок гуляет»
  *   - hard-code 127 instead of the shared constant        → «ОБЩНОСТЬ: другая геометрия»
  *   - make `close()` silent                               → «СЧЁТЧИКИ: close() считается»
+ *
+ * PHASE 2 — these lived only in `plans/18` §4.5 until a judge pass moved them here (2026-08-15 19:5x).
+ * The plan is where they were named BEFORE the run, so the rule was kept; but the plan is not what a
+ * future session opens when it mutates this file, and an addressee nobody can find is an addressee
+ * that stops being checked:
+ *   - snap the edge back onto the voltage grid            → «КРАЙ: НЕ привязан к сетке»  ⚠️ see below
+ *   - flatten the logistic (`scaleMv` ≫ one rung)         → «МОДЕЛЬ: ОДНА ступень 5 мВ двигает…»
+ *   - make the edge a hard threshold                      → «МОДЕЛЬ: край НЕ порог»
+ *   - drop `seconds` from the hazard                      → «МОДЕЛЬ: ускоренный прожиг находит МЕНЬШЕ»
+ *   - make every outcome `SDC`                            → «ИСХОДЫ: все три достижимы…»
+ *   - tell the oracle the voltage instead of reading it   → «ОРАКУЛ: напряжение ЧИТАЕТСЯ с карты»
+ *   - let the bench decide the verdict itself             → «ВЕРДИКТ: судит боевой код, а не стенд»
+ *   - let `ЗАВИС` return instead of dying                 → «ЗАВИС: процесс УМИРАЕТ по-настоящему»
+ *   - reseed from the clock                               → «ЗЕРНО: один и тот же посев…»
+ *
+ * ⚠️ ONE ADDRESSEE IS NOT REACHABLE BY ITS OWN MUTATION, and saying so is the point of naming them:
+ * re-snapping the edge to the grid is refused by `validateCard` FIRST (the >20 % on-rung rule born
+ * with `59bd8eb`), so the suite short-circuits on «ВЫВОД: профиль строится из снятых словарей» and
+ * the 62 blocks behind it never run. The property is therefore guarded TWICE and more strongly than
+ * named — but the suite proves the validator, not this block. Whoever needs this block's own
+ * addressivity must mutate the check, not the generator.
  */
 export async function selfTest() {
   const results = [];
