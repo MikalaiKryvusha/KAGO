@@ -220,6 +220,99 @@ export function descentLadder({
 }
 
 /**
+ * THE SEED — where a frequency's descent STARTS, taken from its already-tuned higher neighbour.
+ * `plans/15` §4.2 · the owner's words in `GOAL.md` → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ СОСЕДКИ».
+ *
+ *   > *«можно начинать спуск не со стокового напряжения, а с верхней по частоте отюненной точки»*
+ *
+ * This is what turns a 5–7 hour sweep into ≈1.7 h, and the AGENT WAS AGAINST IT — a seed is a jump
+ * onto a deep voltage rather than a walk down to it, i.e. the shape of `bugs/03`. The owner read that
+ * reasoning and decided otherwise; the decision is his and it is taken. What makes it executable is
+ * three mechanisms, and this function owns the first two:
+ *
+ *   1. **The seed is the neighbour's PASSING voltage, never its failure.** He said «край + 10 мВ» is
+ *      what a tuned frequency carries, so a frequency closed as `edge-found` / `short-burn-proved` /
+ *      `long-burn-proved` offers its `voltageMv`. A frequency closed as `lever-limited` offers
+ *      NOTHING: our lever ran out there, so its voltage is not evidence about silicon.
+ *   2. **Only a HIGHER frequency may seed a lower one**, because that is the direction the physics
+ *      runs: Vmin does not decrease with frequency (setup-time violation at the edge —
+ *      `researches/09` §2.3), so a voltage proven at a HIGHER frequency is not optimistic at a lower
+ *      one. Seeding upward would be exactly the unsafe direction.
+ *
+ * The third mechanism is not here: the seed's first burn is a PROOF, and a non-PASS on it cancels the
+ * seed (`seedOutcome` below). His own caveat is why that exists — *«очень редко — выше, почти не
+ * бывает такого»* is not «никогда».
+ *
+ * @param {object}  a
+ * @param {number}  a.frequencyMhz  the frequency about to be tuned
+ * @param {object}  a.curveDoc      the tuning-curve document (`curves/measured.json` shape)
+ * @returns {{seedMv:number, neighbourMhz:number, neighbourStatus:string}|null} — null means «descend
+ *          from stock», which is the honest answer for the first frequency and after a lever wall.
+ *
+ * [NOT-TESTED]
+ */
+export function seedFor({ frequencyMhz, curveDoc } = {}) {
+  const rows = curveDoc?.frequencies;
+  if (!Array.isArray(rows) || !Number.isFinite(frequencyMhz)) return null;
+  // Statuses that mean «a burn proved this voltage here». `lever-limited` is deliberately absent.
+  const PROVEN = new Set(['short-burn-proved', 'edge-found', 'long-burn-proved']);
+  let best = null;
+  for (const r of rows) {
+    if (!r || !Number.isFinite(r.mhz) || !Number.isFinite(r.voltageMv)) continue;
+    if (r.mhz <= frequencyMhz) continue;              // only from ABOVE
+    if (!PROVEN.has(r.status)) continue;              // only PASSED evidence
+    // The NEAREST higher frequency: the closest neighbour is the least extrapolation.
+    if (best === null || r.mhz < best.mhz) best = r;
+  }
+  if (best === null) return null;
+  return { seedMv: best.voltageMv, neighbourMhz: best.mhz, neighbourStatus: best.status };
+}
+
+/**
+ * WHAT THE SEED'S FIRST BURN MEANS — the third mechanism, and the one that keeps the owner's rule
+ * honest instead of assumed. `plans/15` §4.2, criterion F2-AC3.
+ *
+ * He stated the physics as a TENDENCY and said so himself: *«как правило… или даже ниже, очень редко —
+ * выше, почти не бывает такого»*. «Почти не бывает» is not «never», so the engine must be able to meet
+ * the rare case and must not read it as a normal failure of the run:
+ *
+ *   • **PASS** — monotonicity holds on this silicon here; the descent continues FROM the seed, and the
+ *     seed depth becomes the governor's proven ground (`provenSavedMv`).
+ *   • **anything else** — the seed is CANCELLED for this frequency, the descent restarts from stock on
+ *     the owner's step ladder, and the event is PRINTED with both voltages and the neighbour that
+ *     supplied it. That is a finding about the silicon, not a stumble in the sweep, and the count of
+ *     these events IS the measurement of monotonicity on this card (`researches/09` §4.2).
+ *
+ * A cancelled seed is never retried at the same frequency: the whole point is that the jump was not
+ * safe there, and repeating it is the `bugs/03` shape with extra steps.
+ *
+ * @returns {{seeded:boolean, restartFromStock:boolean, provenSavedMv:number, note:string}}
+ *
+ * [NOT-TESTED]
+ */
+export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, frequencyMhz } = {}) {
+  const depth = Number.isFinite(stockVoltageMv) && Number.isFinite(seedMv) ? stockVoltageMv - seedMv : 0;
+  if (isPass(verdict)) {
+    return {
+      seeded: true,
+      restartFromStock: false,
+      provenSavedMv: depth > 0 ? depth : 0,
+      note: `затравка ${seedMv} мВ от соседки ${neighbourMhz} МГц прошла — монотонность здесь держится, `
+        + `спуск продолжается от неё (доказанная глубина −${depth} мВ)`,
+    };
+  }
+  return {
+    seeded: false,
+    restartFromStock: true,
+    provenSavedMv: 0,
+    note: `ЗАТРАВКА ОТВЕРГНУТА на ${frequencyMhz} МГц: ${seedMv} мВ от соседки ${neighbourMhz} МГц дало `
+      + `вердикт ${verdict ?? 'НЕИЗВЕСТНО'}, а не PASS. Монотонность на этом кремнии здесь НАРУШЕНА — `
+      + `это находка о карте, а не сбой прогона. Спуск начинается заново от стока ${stockVoltageMv} мВ `
+      + 'по лестнице шагов владельца.',
+  };
+}
+
+/**
  * THE DEPTH GOVERNOR — written after `bugs/03`, which hung the owner's machine for five hours.
  *
  * An ascent exists so the FIRST FAILURE is met at the shallowest depth that can produce it. The
@@ -239,6 +332,30 @@ export function descentLadder({
  *   3. **No step-to-step increase beyond `stepMaxMv`.** This card's bottom has a cliff in it (−5 mV,
  *      then −230 mV), and a cliff walked in one stride is the same plunge wearing a later index.
  *
+ * ── GENERALIZED 2026-08-15 FOR SEEDING (`plans/15` §4.2), AND GENERALIZED IS NOT WEAKENED ──────────
+ *
+ * The owner switched on seeding: a frequency's descent may START at the voltage its already-tuned
+ * HIGHER neighbour proved, instead of at stock (`GOAL.md` → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ
+ * СОСЕДКИ»). Under rule 2 as originally written that is illegal by construction — a seed 150 mV below
+ * stock IS a first step of 150 mV — so the governor had to learn what «first step» means when the
+ * ground under it is already proven. His own instruction names the generalization exactly:
+ *
+ *   > *«Сторож первого шага обобщается, а не отключается… глубже 25 мВ ОТ САМОГО ГЛУБОКОГО
+ *   > НАПРЯЖЕНИЯ, УЖЕ ДОКАЗАННОГО УЛИКОЙ. Улик нет → доказанное = сток → сторож ведёт себя ровно как
+ *   > сегодня.»*
+ *
+ * So rule 2 now measures the first step from `provenSavedMv` — the undervolt depth some evidence has
+ * already carried — instead of from zero. **`provenSavedMv` defaults to 0, which IS stock, so every
+ * existing caller gets byte-identical behaviour** (F2-AC2), and that identity is asserted by its own
+ * selftest block with its own mutation rather than left as a claim.
+ *
+ * WHAT THE GENERALIZATION DELIBERATELY DOES NOT TOUCH: rule 3. A gap between two rungs is a plunge
+ * wherever it sits, proven ground or not — evidence about a VOLTAGE says nothing about the size of the
+ * jump that follows it. `bugs/03`'s cliff (−5 mV then −230 mV) is caught by rule 3, and it stays.
+ *
+ * @param {number} [o.provenSavedMv]  undervolt depth already PROVEN safe here, in mV (0 = stock = no
+ *                                    evidence). Only evidence that PASSED may raise it — never a
+ *                                    voltage that merely failed one rung lower.
  * @returns {{rungs:Array, refused:boolean, why:string}}
  *
  * [NOT-TESTED]
@@ -247,6 +364,7 @@ export function pickAscentRungs(fine, {
   stride = 5,
   firstStepMaxMv = config.ASCENT_FIRST_STEP_MAX_MV ?? 25,
   stepMaxMv = config.ASCENT_STEP_MAX_MV ?? 35,
+  provenSavedMv = 0,
 } = {}) {
   if (!Array.isArray(fine) || !fine.length) return { rungs: [], refused: false, why: 'лестница пуста' };
   const graded = fine.every((r) => Number.isFinite(r.savedMv));
@@ -277,16 +395,28 @@ export function pickAscentRungs(fine, {
     }
   }
 
-  // RULE 2 — the first step's own depth.
-  if (picked[0].savedMv > firstStepMaxMv) {
+  // RULE 2 — the first step's own depth, measured from PROVEN GROUND rather than from stock.
+  // With no evidence `provenSavedMv` is 0 and this is the original comparison, unchanged.
+  const proven = Number.isFinite(provenSavedMv) && provenSavedMv > 0 ? provenSavedMv : 0;
+  const firstStepFromProven = picked[0].savedMv - proven;
+  if (firstStepFromProven > firstStepMaxMv) {
     return {
       rungs: [],
       refused: true,
-      why: `ОТКАЗ: самая мелкая доступная ступень здесь снимает сразу ${picked[0].savedMv} мВ, `
+      why: `ОТКАЗ: самая мелкая доступная ступень здесь снимает сразу ${firstStepFromProven} мВ `
+        + (proven
+          ? `от уже ДОКАЗАННОЙ глубины −${proven} мВ (сама ступень −${picked[0].savedMv} мВ), `
+          : '')
         + `а потолок первого шага ${firstStepMaxMv} мВ. Участок, где мельче нельзя, этим рычагом не тестируется (bugs/03).`,
     };
   }
-  return { rungs: picked, refused: false, why: `первая ступень −${picked[0].savedMv} мВ, всего ступеней ${picked.length}` };
+  return {
+    rungs: picked,
+    refused: false,
+    why: `первая ступень −${picked[0].savedMv} мВ`
+      + (proven ? ` (это −${firstStepFromProven} мВ от доказанного −${proven} мВ)` : '')
+      + `, всего ступеней ${picked.length}`,
+  };
 }
 
 /**
@@ -924,6 +1054,15 @@ export async function searchEdge({
  *  27. silence the forced-by-grid mark                  → **1 red, exactly its own**:
  *      «10 мВ там, где политика просила 5, ПОСЧИТАНЫ и названы»
  *
+ * ADDED WITH `plans/15` §4.2 — seeding and the GENERALIZED first-step governor. Addressees named
+ * BEFORE the run:
+ *  28. re-base the governor on stock only (drop `provenSavedMv`) → «СТОРОЖ ОБОБЩЁН: от ДОКАЗАННОГО, а
+ *      не от стока» — and CRUCIALLY not «БЕЗ УЛИК сторож ведёт себя ровно как сегодня», which must
+ *      stay green under this mutation: the identity is what proves the change did not weaken anything
+ *  29. let a `lever-limited` neighbour seed                     → «затравку даёт только ДОКАЗАННАЯ соседка»
+ *  30. seed from a LOWER frequency                              → «затравка приходит только СВЕРХУ по частоте»
+ *  31. continue seeded after a rejected seed                    → «не-PASS на затравке ОТМЕНЯЕТ её»
+ *
  * ⚠️ AND THE HARNESS ITSELF FAILED FIRST, which is the reusable part: its first version filtered the
  * output for «FAIL» while this suite prints «ПЛОХО», so it reported **0 red for all four mutations** —
  * a blind verifier reading exactly like a clean bill of health (EXP-0016's third face). It now also
@@ -1014,6 +1153,57 @@ export function selfTest() {
   ok('ЛОКАЛЬНЫЙ РАЗРЫВ сетки в 10 мВ, поданный как шаг, ПАДАЕТ — иначе запас молча стал бы 20 мВ',
     (() => { try { marginAboveFailureMv(10); return 'не упало'; } catch (e) { return /20 мВ/.test(e.message) ? 'упало и назвало причину' : 'упало без причины'; } })(),
     'упало и назвало причину');
+
+  // =============================================================================================
+  // `plans/15` §4.2 — SEEDING, AND THE GOVERNOR THAT HAD TO GROW UP
+  // =============================================================================================
+
+  const seedDoc = {
+    frequencies: [
+      { mhz: 3090, voltageMv: 1100, status: 'edge-found' },
+      { mhz: 2900, voltageMv: 1050, status: 'lever-limited' },   // our lever ran out — NOT evidence
+      { mhz: 2842, voltageMv: 1000, status: 'short-burn-proved' },
+      { mhz: 2400, voltageMv: 900, status: 'stock' },            // untouched — nothing proven
+      { mhz: 2000, voltageMv: 850, status: 'long-burn-proved' },
+    ],
+  };
+
+  ok('затравка приходит только СВЕРХУ по частоте, и от БЛИЖАЙШЕЙ доказанной соседки',
+    seedFor({ frequencyMhz: 2500, curveDoc: seedDoc }),
+    { seedMv: 1000, neighbourMhz: 2842, neighbourStatus: 'short-burn-proved' });
+  ok('затравку даёт только ДОКАЗАННАЯ соседка: lever-limited пропускается, берётся следующая выше',
+    seedFor({ frequencyMhz: 2850, curveDoc: seedDoc })?.neighbourMhz, 3090);
+  ok('стоковая соседка не затравка — прожига там не было',
+    seedFor({ frequencyMhz: 2300, curveDoc: seedDoc })?.neighbourMhz, 2842);
+  ok('выше всех частот затравки нет — спуск от стока, и это НЕ ошибка',
+    seedFor({ frequencyMhz: 3090, curveDoc: seedDoc }), null);
+  ok('пустой документ кривой → затравки нет, а не выдуманное напряжение',
+    seedFor({ frequencyMhz: 2500, curveDoc: { frequencies: [] } }), null);
+
+  // — the governor's generalization, and the IDENTITY that proves it did not weaken anything
+  const deepLadder = [{ savedMv: 150 }, { savedMv: 160 }, { savedMv: 170 }, { savedMv: 180 }];
+  ok('БЕЗ УЛИК сторож ведёт себя ровно как сегодня: первый шаг −150 мВ ОТКАЗ (потолок 25)',
+    pickAscentRungs(deepLadder).refused, true);
+  ok('СТОРОЖ ОБОБЩЁН: от ДОКАЗАННОГО, а не от стока — та же лестница при доказанных −140 мВ ПРОХОДИТ',
+    pickAscentRungs(deepLadder, { provenSavedMv: 140 }).refused, false);
+  ok('и обобщение НЕ безгранично: доказанных −100 мВ мало для шага в −150 (это −50 от доказанного)',
+    pickAscentRungs(deepLadder, { provenSavedMv: 100 }).refused, true);
+  ok('отказ НАЗЫВАЕТ обе величины — и шаг от доказанного, и саму ступень',
+    (() => { const w = pickAscentRungs(deepLadder, { provenSavedMv: 100 }).why; return /50 мВ/.test(w) && /150 мВ/.test(w); })(), true);
+  ok('правило 3 обобщением НЕ тронуто: обрыв между ступенями остаётся обрывом и на доказанной земле',
+    pickAscentRungs([{ savedMv: 145 }, { savedMv: 150 }, { savedMv: 400 }], { provenSavedMv: 140 }).refused, true);
+
+  // — the seed's first burn is a PROOF, and its rejection is a finding
+  ok('PASS на затравке: спуск идёт ОТ неё, и её глубина становится доказанной землёй',
+    (() => { const o = seedOutcome({ verdict: config.VERDICT.PASS, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }); return [o.seeded, o.restartFromStock, o.provenSavedMv]; })(),
+    [true, false, 145]);
+  ok('не-PASS на затравке ОТМЕНЯЕТ её: спуск заново от стока, доказанной земли НЕТ',
+    (() => { const o = seedOutcome({ verdict: config.VERDICT.SDC, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }); return [o.seeded, o.restartFromStock, o.provenSavedMv]; })(),
+    [false, true, 0]);
+  ok('и это печатается как НАХОДКА О КРЕМНИИ с обеими частотами и обоими напряжениями',
+    (() => { const n = seedOutcome({ verdict: config.VERDICT.SDC, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }).note; return /2400/.test(n) && /2842/.test(n) && /900/.test(n) && /1045/.test(n) && /находка/.test(n); })(), true);
+  ok('НЕИЗВЕСТНО на затравке тоже отменяет её — не-PASS это не только отказ',
+    seedOutcome({ verdict: null, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }).seeded, false);
 
   // — degenerate inputs refuse rather than invent
   ok('пустая сетка → отказ, а не молчаливая пустая лестница',

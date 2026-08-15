@@ -125,28 +125,39 @@ function or the table is wrong» — and here it is the **table**: the grid is m
 an idealization. **The direction matters and is good news: the sweep is CHEAPER than estimated.**
 `researches/09` §4.1 is corrected in place.
 
-### 4.2 — Seeding, and the governor that had to grow up 🔲
+### 4.2 — Seeding, and the governor that had to grow up ✅ **DONE 2026-08-15 22:4x** *(two items carried to their own steps, named below)*
 
 *Anchor: `GOAL.md` → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ СОСЕДКИ»; the owner: «очень редко — выше,
 почти не бывает такого».*
 
-- [ ] `seedFor(frequency, curveDoc)` → the PASSING voltage of the nearest already-tuned HIGHER
-      frequency (its edge + 10 mV), or `null` when there is none (the first frequency, or the
-      neighbour closed as `lever-limited` with no proven value).
-- [ ] **`pickAscentRungs` gains an evidence base.** Today it refuses a first step deeper than
-      `ASCENT_FIRST_STEP_MAX_MV` **below stock**. It becomes: deeper than that below
-      **`deepestProvenMv`** — the deepest voltage evidence already proves safe. `deepestProvenMv`
-      defaults to the stock voltage, so **a call with no evidence behaves exactly as today** (F2-AC2),
-      and that identity is a selftest block with its own mutation.
-- [ ] The seed's first burn is a PROOF, not a formality: it runs the full rung machinery of 4.3.
-- [ ] **Not-PASS on the seed → `seedRejected`:** cancel seeding for this frequency, restart the descent
-      from stock on the ladder of 4.1, and record `{frequency, seedMv, neighbourFrequency, verdict}` in
-      the journal and the report. This is the owner's rare case and it is printed, never absorbed.
-- [ ] The report ends with **the seeding scoreboard** — seeded / fallen back / never seeded. That count
-      IS the measurement of monotonicity on this silicon (`researches/09` §4.2).
+- [x] `seedFor({ frequencyMhz, curveDoc })` → the PASSING voltage of the **nearest already-tuned HIGHER**
+      frequency, or `null` (the first frequency, or every neighbour above closed as `lever-limited` /
+      still `stock`). Two directions are enforced, not assumed: **only from above** (Vmin does not
+      decrease with frequency, so a lower frequency seeding a higher one is the unsafe direction) and
+      **only from PASSED evidence** — `lever-limited` is deliberately absent from the proven set,
+      because there OUR lever ran out and its voltage says nothing about silicon.
+- [x] **`pickAscentRungs` gained its evidence base** as `provenSavedMv` (undervolt depth already proven,
+      0 = stock = no evidence). Rule 2 now measures the first step from proven ground.
+      **The identity is proved, not claimed:** mutation 28 re-bases the governor on stock only and
+      **reddens the generalization block while leaving «БЕЗ УЛИК сторож ведёт себя ровно как сегодня»
+      GREEN** — which is exactly what F2-AC2 asks for. Rule 3 (the rung-to-rung cliff of `bugs/03`) is
+      untouched by the generalization, and a block asserts that too.
+- [ ] ~~The seed's first burn runs the full rung machinery of 4.3~~ → **carried to §4.3**, which is what
+      builds `runRung`. What exists now is the DECISION the burn feeds (`seedOutcome`); the burn itself
+      has nothing to run on yet, and faking one here would be a fixture pretending to be machinery.
+- [x] **Not-PASS on the seed → the seed is CANCELLED** (`seedOutcome`): the descent restarts from stock
+      on §4.1's ladder, proven ground drops back to zero, and the event prints both frequencies, both
+      voltages and the verdict — **as a finding about the silicon, not a stumble in the run**.
+      `НЕИЗВЕСТНО` cancels it too: the rule is «not PASS», not «failed».
+- [ ] ~~The report ends with the seeding scoreboard~~ → **carried to §4.5**, which is what builds the
+      report. The per-frequency records it counts are produced here.
 
-**Verification:** a fixture where the neighbour's value fails must produce a from-stock descent and a
-named `seedRejected` line; the no-evidence identity block must be mutation-proved.
+**Verification — RUN.** 14 blocks (`engine --selftest` 92 → 106), and four mutations with their
+addressees named in the suite header beforehand: a `lever-limited` neighbour seeding · a seed taken
+from BELOW · the governor re-based on stock only · the sweep continuing seeded after a rejected seed.
+Each reddened its named block; the intact code reddened none; **and mutation 28's second expectation —
+that the identity block STAYS green — is the one that proves the guard was generalized rather than
+loosened.**
 
 ### 4.3 — One rung: pin the clock, make the target point serve it, judge, roll back 🔲
 
