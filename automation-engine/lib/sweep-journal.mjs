@@ -32,9 +32,15 @@
 // GPU WRITES: none. This module writes ONE file under `runs/sweep/` and reads it back.
 //
 // Usage:
-//   node automation-engine/lib/sweep-journal.mjs --selftest    the logic, sandboxed, no GPU
+//   npm run journal -- --selftest    the logic, sandboxed, no GPU
 //
-// [NOT-TESTED]
+// [TESTED: 2026-08-15 23:2x, OFFLINE ONLY · 17 blocks in a sandboxed directory, with the PRODUCTION
+//  journal photographed before and after (EXP-0025, `bugs/08`). Five mutations — 40 (append without
+//  the fsync), 42 (infer a hang instead of closing it), 43 (count hangs cumulatively), 44 (treat a
+//  truncated line as an orphan), 45 (take a bare path as the directory) — each reddening its own
+//  blocks, addressees named before the run. The ORDER of «intent before the card» is proved in
+//  `engine --selftest`, not here: only the rung knows when the card is touched.
+//  **NOT TESTED: no sweep has ever run on the card, so this journal has never recorded a real hang.**]
 
 import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,7 +78,8 @@ export const RUNG_OUTCOME = Object.freeze({
  * production directory — a valid object pointing at the one place the parameter exists to avoid. The
  * type check is loud so that failure cannot be silent.
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function openJournal(opts = {}) {
   if (typeof opts === 'string') {
@@ -86,7 +93,7 @@ export function openJournal(opts = {}) {
 
 /** Refuse to delete the production journal — the same second guard `vmin-store` carries, and for the
  *  same incident. A teardown is the one place that deliberately deletes, so it is the one place that
- *  must be unable to delete the wrong thing. [NOT-TESTED] */
+ *  must be unable to delete the wrong thing. [TESTED: 2026-08-15 23:2x - offline, by this module's 17-block suite] */
 export function assertSandbox(journal) {
   const dir = typeof journal === 'string' ? journal : journal?.dir;
   if (!dir) throw new TypeError('нечего проверять: журнал без каталога');
@@ -99,7 +106,7 @@ export function assertSandbox(journal) {
 
 /** The rung's identity, in the owner's coordinates. Frequency and voltage, never a table index: the
  *  factory table slides along the FREQUENCY axis with temperature while the voltage axis stands still,
- *  so an index is a name and not an identity (EXP-0053, R14b). [NOT-TESTED] */
+ *  so an index is a name and not an identity (EXP-0053, R14b). [TESTED: 2026-08-15 23:2x - offline, by this module's 17-block suite] */
 export function rungKey({ frequencyMhz, voltageMv } = {}) {
   return `${frequencyMhz}/${voltageMv}`;
 }
@@ -121,7 +128,8 @@ export function rungKey({ frequencyMhz, voltageMv } = {}) {
  * @param {object} [io]     `{ openSync, writeSync, fsyncSync, closeSync }` — injected in tests
  * @returns {object} the record as written
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function appendLine(journal, record, io = {}) {
   const open = io.openSync ?? openSync;
@@ -150,7 +158,8 @@ export function appendLine(journal, record, io = {}) {
  *
  * @returns {object} the intent record, carrying the `seq` its verdict must quote
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function writeIntent(journal, rung, io = {}) {
   const record = {
@@ -173,7 +182,7 @@ export function writeIntent(journal, rung, io = {}) {
 /** The line that CLOSES an intent. Fsynced too: a verdict lost to the page cache would make the next
  *  launch read a finished rung as the one that killed the machine — safe, but it would cost the sweep
  *  a rung it had already paid for, and on the second such loss it would block the rung outright.
- *  [NOT-TESTED] */
+ *  [TESTED: 2026-08-15 23:2x - offline, by this module's 17-block suite] */
 export function writeVerdict(journal, closing, io = {}) {
   const record = {
     state: LINE.VERDICT,
@@ -190,7 +199,7 @@ export function writeVerdict(journal, closing, io = {}) {
 
 /** Read every line. A truncated final line means the writer died mid-append — which on this journal is
  *  an expected event, not a corruption: it is DROPPED and COUNTED, never silently treated as absent.
- *  [NOT-TESTED] */
+ *  [TESTED: 2026-08-15 23:2x - offline, by this module's 17-block suite] */
 export function readJournal(journal) {
   if (!existsSync(journal.path)) return { records: [], truncated: 0 };
   const lines = readFileSync(journal.path, 'utf8').split(/\r?\n/).filter((l) => l.trim());
@@ -211,7 +220,8 @@ export function readJournal(journal) {
  * A truncated final line is deliberately NOT treated as an orphan: it was dropped by `readJournal`,
  * and inventing a rung from an unparseable line would be forensics out of thin air.
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function orphanIntents(records) {
   const closed = new Set(records.filter((r) => r?.state === LINE.VERDICT).map((r) => r.seq));
@@ -227,7 +237,8 @@ export function orphanIntents(records) {
  *
  * @returns {Array} the rungs that were closed as hung, in the order they were found
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function closeHangs(journal, { at = null, io = {} } = {}) {
   const { records } = readJournal(journal);
@@ -251,7 +262,8 @@ export function closeHangs(journal, { at = null, io = {} } = {}) {
  *
  * @returns {Map<string, Array<{seq, outcome, frequencyMhz, voltageMv}>>}
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function attributions(records) {
   const intents = new Map(records.filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
@@ -284,7 +296,8 @@ export function attributions(records) {
  *
  * @returns {Array<{key, frequencyMhz, voltageMv, why}>}
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function blockedRungs(records) {
   const out = [];
@@ -311,7 +324,8 @@ export function blockedRungs(records) {
  * (`GOAL.md` → «🧑‍💻 ЧЕЛОВЕК ЗА МАШИНОЙ»), so nothing is installed into the boot path. This function
  * is what the command reads.
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
+ *  module header for the addressees]
  */
 export function resumeState(journal, { at = null, io = {} } = {}) {
   const hung = closeHangs(journal, { at, io });

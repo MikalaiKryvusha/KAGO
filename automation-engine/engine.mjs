@@ -678,7 +678,11 @@ export async function runRung({
  * @returns {Promise<object>} `{ok, refined, failMv, lastPassMv, shipMv, reproduced, resolutionMv,
  *                              rungs, halted, why}`
  *
- * [NOT-TESTED]
+ * [TESTED: 2026-08-15 23:4x, OFFLINE ONLY · 12 blocks on the card-shaped grid (5 mV with a 10 mV gap
+ *  every 25), five mutations (49–53) each reddening its own block. Four of the twelve were RED on the
+ *  first run because the FIXTURES were wrong — two picked 1030 mV, a voltage this card does not have —
+ *  and the fix was to move the fixtures onto the measured grid, not to widen the code.
+ *  **NOT TESTED: no refinement has ever walked a real card.**]
  */
 export async function refineEdge({
   voltageGridMv = [],
