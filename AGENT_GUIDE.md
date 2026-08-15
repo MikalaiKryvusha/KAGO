@@ -1056,6 +1056,28 @@ interpretation. Interviews are for vision-level forks that outlive the task.
 
 ## Notes from the human
 
+**THE REGISTER — ACADEMIC AND SCIENTIFIC, AND IT IS THE OWNER'S STANDING RULE** (chat, 2026-08-15
+22:0x). His words, verbatim:
+
+> *«мы тут не прозу пишем, а серьезный инструмент, и пользуемся академическим и научным языком»*
+
+Said after the agent printed «мохибейк» — a transliteration of a Japanese term used in English
+documentation — in a tool's diagnostic, in `STATUS.md` and in a commit message, and he had to ask
+what it meant. He first offered the colloquial Russian «абракадабра», then ruled it out himself in
+favour of the strict term **«порча кодировки»**. Both halves of that exchange are the rule:
+
+1. **A borrowed or transliterated term is not a term.** If a Russian technical name exists, it is the
+   name. Foreign jargon reaches the owner only through its Russian equivalent, and a term genuinely
+   without one is expanded at first use (the storefront rule, item 6 — this is that rule applied to
+   the working artifacts, not only to the showcase).
+2. **The register is the instrument's, not the essayist's.** Colloquial synonyms are rejected even
+   when the owner himself supplies one and even when they are clearer to a casual reader: KAGO writes
+   in the register of a measuring device. Wit, folksiness and metaphor do not belong in a diagnostic,
+   a status line or a document that decides what to do with his hardware.
+3. **Scope: everything the owner reads** — chat replies, `STATUS.md`, `GOAL.md`, `MASTER_PLAN.md`,
+   epic meta-plans, interviews, commit messages, and every string a command PRINTS. Identifiers and
+   agent-internal comments stay English (the Languages rule above); the register binds the output.
+
 **The owner's standing constraints for KAGO** (their words, `GOAL.md` and chat, 2026-08-09):
 
 - *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАТНО!!!! ТРИЖДЫ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО-ТО ДЕЛАТЬ! НЕ

@@ -44,7 +44,19 @@ for (const file of files) {
   }
 }
 
-// ─── THE MOJIBAKE GATE — a lesson that repeated, so it stopped being a lesson ────────────────────
+// ─── THE ENCODING-CORRUPTION GATE — a lesson that repeated, so it stopped being a lesson ─────────
+//
+// THE TERM IS «ПОРЧА КОДИРОВКИ», AND IT WAS SETTLED BY THE OWNER (chat, 2026-08-15). The agent had
+// printed «мохибейк» — a transliteration of the Japanese term used in English documentation — in this
+// tool's output, in `STATUS.md` and in a commit message, and the owner had to ask what it meant. He
+// offered the colloquial Russian «абракадабра» and then ruled it out himself: *«мы тут не прозу
+// пишем, а серьёзный инструмент, и пользуемся академическим и научным языком»*. So the diagnostic
+// says exactly what happened, in the register of an instrument: ПОРЧА КОДИРОВКИ.
+//
+// Two rules met here, and both were already written down: the storefront rule that an internal word
+// expands into a human name (`AGENT_GUIDE.md` → the storefront, item 6), and the owner's register
+// (`AGENT_GUIDE.md` → Notes from the human). Identifiers stay English — code is read by the agent;
+// the OUTPUT is the owner's language, in his register.
 //
 // EXP-0067 (text through the shell instead of through the file tools) was written on 2026-08-15 and
 // VIOLATED THE SAME DAY, by the session that wrote it: a `Get-Content | Set-Content` pass over
@@ -57,7 +69,7 @@ for (const file of files) {
 // two-character sequences that CANNOT occur in correct Russian, English or code — `Рµ`, `С‚`, `вЂ`,
 // `в†’`. Matching those is precise: a false positive would need a file to contain a Cyrillic capital
 // followed by another Cyrillic letter with no vowel pattern, which real words do not do. The guard is
-// proved red by `--selftest-mojibake`, per EXP-0008: a check that has never failed proves nothing.
+// proved red by `--selftest-encoding`, per EXP-0008: a check that has never failed proves nothing.
 const MOJIBAKE = ['Рµ', 'Р°', 'Рѕ', 'С‚', 'вЂ', 'в†', 'РЅ', 'Рё'];
 const TEXT_EXT = ['.mjs', '.json', '.md', '.ps1', '.cu'];
 
@@ -92,7 +104,7 @@ function mojibakeIn(text) {
   return MOJIBAKE.filter((m) => text.includes(m));
 }
 
-if (process.argv.includes('--selftest-mojibake')) {
+if (process.argv.includes('--selftest-encoding')) {
   // Prove the guard RED before its green is trusted (EXP-0008). The sample is built here rather than
   // stored as a fixture, because a mojibake fixture on disk is a file every future tool must be told
   // to ignore.
@@ -114,13 +126,15 @@ for (const file of textFiles) {
   const found = mojibakeIn(text);
   if (found.length) {
     mojibake++;
-    console.error(`МОХИБЕЙК ${relative(ROOT, file)} — найдено: ${found.join(' ')}`);
-    console.error('       Файл прогнали через оболочку вместо файловых инструментов (EXP-0067).');
-    console.error('       Восстанови из git и переделай правку Edit/Write, а не Set-Content.');
+    console.error(`ПОРЧА КОДИРОВКИ: ${relative(ROOT, file)}`);
+    console.error(`       Русский текст в этом файле нечитаем — найдено: ${found.join(' ')}`);
+    console.error('       Так выглядит UTF-8, прочитанный как windows-1251: одна буква стала двумя.');
+    console.error('       Причина всегда одна — файл прогнали через оболочку, а не через файловые');
+    console.error('       инструменты (EXP-0067). Восстанови из git и переделай правку Edit/Write.');
   }
 }
 
 console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
-console.log(`проверено на мохибейк ${textFiles.length - guardExempt} текстовых файлов, `
+console.log(`проверено на порчу кодировки ${textFiles.length - guardExempt} текстовых файлов, `
   + `испорченных ${mojibake} (сам сторож освобождён меткой)`);
 process.exit(failed === 0 && mojibake === 0 ? 0 : 1);
