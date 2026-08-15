@@ -120,10 +120,11 @@ Power range    250.00 … 300.00 W  → only 50 W of headroom
 Graphics clock 1050 MHz (max 3090 MHz)
 Temperature    52 °C   Perf state P5
 Memory clocks  405, 810, 7001, 13801, 14001 MHz
-Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (phase 5's search space)
+Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (the edge search's space)
                identical on all 4 full memory rungs — sweep the graphics clock once
 Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
-               This is the CLOCK grid. The VOLTAGE grid is 5 mV, read off the live curve.
+               This is the CLOCK grid. The VOLTAGE grid is 127 rungs, 450 … 1240 mV,
+               spaced 5 mV in 94 places and 10 mV in 32 — NOT uniform, read off the live curve.
 ```
 
 That headroom line is the finding that shaped everything else. The driver will only move
@@ -362,10 +363,11 @@ Power range    250.00 … 300.00 W  → only 50 W of headroom
 Graphics clock 1050 MHz (max 3090 MHz)
 Temperature    52 °C   Perf state P5
 Memory clocks  405, 810, 7001, 13801, 14001 MHz
-Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (phase 5's search space)
+Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (the edge search's space)
                identical on all 4 full memory rungs — sweep the graphics clock once
 Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
-               This is the CLOCK grid. The VOLTAGE grid is 5 mV, read off the live curve.
+               This is the CLOCK grid. The VOLTAGE grid is 127 rungs, 450 … 1240 mV,
+               spaced 5 mV in 94 places and 10 mV in 32 — NOT uniform, read off the live curve.
 ```
 
 Строка про запас и определила всё остальное. Потолок мощности драйвер двигает только с
