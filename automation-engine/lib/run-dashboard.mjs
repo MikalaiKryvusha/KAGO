@@ -137,11 +137,28 @@ export function openPulse({
   now = () => new Date().toISOString(),
 } = {}) {
   const startedMs = clockMs();
+  // HOW LONG SILENCE IS EXPECTED TO LAST FROM THIS PULSE — the field that stops the screen from
+  // lying. `bugs/14`, the owner watching the second live run: *«почему-то написано, что замерло»*,
+  // *«если оно работает, то и визуализатор должен так говорить»*, *«состояние должно быть
+  // актуальное, не должно лгать»*.
+  //
+  // The run BLOCKS during a burn — the load is started synchronously, so nothing can be sent for ten
+  // seconds, over SSE or a socket alike (a blocked event loop sends neither; the transport is not
+  // what was wrong). The page had a fixed 3 s patience, so every single rung tripped the freeze
+  // alarm. An alarm that fires 68 times per run is an alarm nobody believes on the 69th — and that
+  // 69th is the real hang this instrument exists for.
+  //
+  // So the run DECLARES its silence instead of leaving the page to guess: «I am about to go quiet for
+  // about N seconds». Silence within the declaration is a burn and the page says so; silence BEYOND
+  // it is a hang and the page says that. Both statements are then true.
+  const QUIET_IDLE_MS = 4000;
+  const quietForBurnMs = Math.round(probeSeconds * 1000 * 1.6) + 8000;
   const snap = {
     kind: 'kago-run-pulse',
     seq: 0,
     runMs: 0,
     at: now(),
+    quietMs: QUIET_IDLE_MS,
     run: {
       source,
       band,
@@ -213,9 +230,15 @@ export function openPulse({
           if (r.voltageMv !== null && r.depthMv !== null) r.stockVoltageMv = r.voltageMv + r.depthMv;
           r.probe.elapsedSeconds = 0;
           r.coverage.rungs += 1;
+          // THE DECLARATION, and it is made HERE because this event is the last thing sent before the
+          // burn blocks everything. Announced after the burn it would be worthless: the silence it
+          // describes would already be over.
+          snap.quietMs = quietForBurnMs;
           break;
         case 'rung':
           r.state = RUN_STATE.CLOSING;
+          // The burn is over and the loop is free again — ordinary patience applies from here.
+          snap.quietMs = QUIET_IDLE_MS;
           break;
         case 'closed':
           r.coverage.closed = e.closedTotal ?? r.coverage.closed;
@@ -267,6 +290,7 @@ export function openPulse({
       snap.run.state = state ?? (ok ? RUN_STATE.DONE : RUN_STATE.STOPPED);
       if (why) snap.run.note = why;
       snap.run.probe.elapsedSeconds = 0;
+      snap.quietMs = QUIET_IDLE_MS;
       this.write();
     },
   };
@@ -516,6 +540,18 @@ export async function selfTest() {
   check('ПУЛЬС: полоса даёт знаменатель покрытия', afterStart.run.coverage.total === 43,
     `в пульсе ${afterStart.run.coverage.total}`);
 
+  // — `bugs/14`: ПРОГОН ОБЪЯВЛЯЕТ СВОЁ МОЛЧАНИЕ, и страница из-за этого перестаёт лгать.
+  //   Владелец, второй живой прогон: «почему-то написано, что замерло» — при живом и здоровом
+  //   прогоне. Прожиг блокирует процесс на десять секунд, а терпение страницы было три.
+  //   АДРЕСАТЫ МУТАЦИЙ, названы ДО прогона:
+  //     AB. не поднимать бюджет перед прожигом      → «БЮДЖЕТ МОЛЧАНИЯ ПОДНЯТ ПЕРЕД ПРОЖИГОМ»
+  //     AC. не опускать его после                   → «и ОПУЩЕН, как только процесс снова свободен»
+  //     AD. бюджет короче самого прожига            → «бюджет ПОКРЫВАЕТ прожиг с запасом»
+  check('БЮДЖЕТ МОЛЧАНИЯ ПОДНЯТ ПЕРЕД ПРОЖИГОМ — иначе тревога врёт на каждой ступени',
+    afterStart.quietMs > 10_000, `quietMs=${afterStart.quietMs}, а прожиг 10 с`);
+  check('и бюджет ПОКРЫВАЕТ прожиг С ЗАПАСОМ — тревога зажигается только за пределом объявленного',
+    afterStart.quietMs >= 10_000 * 1.5, `quietMs=${afterStart.quietMs}`);
+
   const seqBefore = afterStart.seq;
   pulse.telemetry({ clockMhz: 2842, voltageMv: 995, tempC: 61.2, fanPct: 44, powerW: 248, underLoad: true, synthetic: true });
   pulse.telemetry({ clockMhz: 2842, voltageMv: 995, tempC: 62.0, fanPct: 45, powerW: 249, underLoad: true, synthetic: true });
@@ -535,6 +571,9 @@ export async function selfTest() {
   check('ПОКРЫТИЕ: закрытые частоты берутся из собственного счёта прогона',
     afterClosed.run.coverage.closed === 7 && afterClosed.run.verdicts['edge-found'] === 1,
     JSON.stringify(afterClosed.run.coverage));
+  check('и бюджет молчания ОПУЩЕН, как только процесс снова свободен — иначе зависание после прожига проспим',
+    afterClosed.quietMs < 10_000 && afterClosed.quietMs > 0,
+    `quietMs=${afterClosed.quietMs} после закрытия ступени`);
 
   const keys = Object.keys(afterClosed);
   check('ГАУГЕ: один объект, а не журнал — у прибора нет памяти и он не может её завести',
