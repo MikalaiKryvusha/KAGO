@@ -488,11 +488,21 @@ export async function runRung({
   // it from the card's own clock ladder: no ladder, no pin, and a rung below the curve's cap floor
   // then has no holder and is refused BEFORE any write instead of discovered mid-burn.
   canPin = true,
-  // THE OWNER'S ALGORITHM, STEP 7 — lock the card on the frequency under test, always. Default ON,
-  // because `ideas/03` is the specification this engine was written from and the sweep is the command
-  // that executes it. `false` restores the shipped-shape-when-possible behaviour, which is what the
-  // engine did between 2026-08-14 and 2026-08-16 and what `bugs/12` is about.
-  demandPin = true,
+  // THE CLOCK LOCK — available, and NOT the default. `researches/11`, measured on the owner's card
+  // the same day this option was written:
+  //
+  //   `-lgc 3082,3082` → the card delivered 2887 and never moved. `-lgc 2700,2700` → 2692, likewise.
+  //
+  // **A clock lock is a CEILING, not a command: it holds a card down and cannot lift it up.** So it
+  // cannot deliver `ideas/03` step 7 («ВИДЕОКАРТА БЛОКИРУЕТСЯ РАБОТАТЬ ИМЕННО НА ЭТОЙ ЧАСТОТЕ») at
+  // any frequency above where the boost arbitration already lands, and defaulting it ON made every
+  // sweep stop on its first rung — which is exactly what the first live run did.
+  //
+  // What DOES bound the card at a frequency is a FLATTENED CURVE — every point that would offer more
+  // pushed down onto the tested clock. `buildRaiseAndCapVector` has always built that shape, and it
+  // is what `demandPin: false` selects. The lock stays reachable because below the curve's cap floor
+  // (2157 MHz) it is the only holder there is.
+  demandPin = false,
   // THE CARD'S OWN MAXIMUM GRAPHICS CLOCK — `frequency-grid.maxGraphicsMhz`, the SAME number R13
   // reads. It is the ceiling the locked shape writes, and it is required whenever `demandPin` is on:
   // a uniform raise with no ceiling at all pushes the curve's tail (3172 MHz here) above the card's
@@ -2823,46 +2833,46 @@ export function selfTest() {
       [atStock.outcome, atomLog.length], ['refused', 0]);
 
     // — F2-AC9: who holds the ceiling, named on every rung, and never two at once
-    // — THE OWNER'S ALGORITHM, STEP 7, IS THE DEFAULT (`ideas/03`, `bugs/12`). The card is LOCKED on
-    //   the frequency under test even where the curve could carry a ceiling, because a capped card
-    //   sits 20–30 MHz UNDER its ceiling and the voltage would otherwise be recorded against a clock
-    //   the card never ran. MUTATION ADDRESSEES, NAMED BEFORE THE RUN:
-    //     F. default `demandPin` back to false            → «ЗАКРЕПЛЕНИЕ ПО УМОЛЧАНИЮ»
-    //     G. pass the cap alongside the pin               → «РОВНО ОДИН ДЕРЖАТЕЛЬ»
-    //     H. ignore `demandPin` in `chooseWriteShape`     → both of the above
-    //     I. delete the explicit shipped-shape escape     → «прежняя форма ДОСТИЖИМА явно»
-    ok('ЗАКРЕПЛЕНИЕ ПО УМОЛЧАНИЮ (алгоритм владельца, шаг 7): карта заперта на испытуемой частоте',
-      [good.holder, good.writeShape], ['закрепление частоты', 'raise-and-cap']);
-    // ONE HOLDER PER FREQUENCY — the 2026-08-14 lesson, and it survives the envelope ceiling because
-    // the ceiling and the lock now name DIFFERENT frequencies. The invariant is no longer «never both»
-    // but «never both on the SAME clock», which is what actually fought that day.
-    await rungOK();
+    // — THE DEFAULT IS THE FLATTENED CURVE, NOT A CLOCK LOCK (`researches/11`, measured 2026-08-16:
+    //   `-lgc 3082,3082` delivered 2887, `-lgc 2700,2700` delivered 2692 — a lock is a CEILING and
+    //   cannot lift a card). `bugs/12`'s diagnosis stands, its remedy did not: the lock as a default
+    //   made the first live sweep stop on its first rung. The lock stays REACHABLE because below the
+    //   curve's cap floor it is the only holder there is.
+    //   MUTATION ADDRESSEES, NAMED BEFORE THE RUN:
+    //     F. default `demandPin` back to true          → «ПО УМОЛЧАНИЮ ЗАМКА НЕТ»
+    //     G. pass the cap alongside the pin            → «потолок и замок НИКОГДА не на одной частоте»
+    //     H. ignore `demandPin` in `chooseWriteShape`  → «ЗАКРЕПЛЕНИЕ ПО ЗАПРОСУ»
+    //     I. delete the explicit locked shape          → «ЗАКРЕПЛЕНИЕ ПО ЗАПРОСУ»
+    // Re-run first: three refusing rungs stand between `good` and here, and `atomLog` holds only the
+    // LAST call. Reading it stale would assert about a rung that is not the one named.
+    const byDefault = await rungOK();
+    ok('ПО УМОЛЧАНИЮ ЗАМКА НЕТ: потолок стоит на ИСПЫТУЕМОЙ частоте и держит его КРИВАЯ',
+      [byDefault.holder, byDefault.writeShape, atomArg('capMhz'), atomArg('pinMhz')],
+      ['кривая', 'raise-and-cap', 2842, null]);
+
+    // THE LOCKED SHAPE, ON REQUEST. Its ceiling is the card's ENVELOPE, never the clock under test —
+    // two holders on ONE frequency is what fought on 2026-08-14.
+    const locked = await rungOK({ demandPin: true });
+    ok('ЗАКРЕПЛЕНИЕ ПО ЗАПРОСУ: держит замок, а потолок уезжает на конверт карты',
+      [locked.holder, locked.writeShape, atomArg('capMhz'), atomArg('pinMhz')],
+      ['закрепление частоты', 'raise-and-cap', 3090, 2842]);
     ok('потолок и замок НИКОГДА не встают на одну частоту — именно это дралось 2026-08-14',
       atomLog.length ? atomLog[0].capMhz === atomLog[0].pinMhz : 'АТОМ НЕ ВЫЗЫВАЛСЯ', false);
-
-    // THE SHIPPED SHAPE IS NOT DELETED, only dethroned — and it stays PROVED, because the profiles
-    // still ship in it and a path nothing exercises is a path that rots.
-    const shipped = await rungOK({ demandPin: false });
-    ok('прежняя форма ДОСТИЖИМА явно: без требования замка потолок держит КРИВАЯ',
-      [shipped.holder, shipped.writeShape, atomArg('capMhz'), atomArg('pinMhz')],
-      ['кривая', 'raise-and-cap', 2842, null]);
 
     const low = await rungOK({ points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky });
     ok('ниже пола кривой потолок держит ЗАКРЕПЛЕНИЕ, и оно доезжает до атома',
       [low.holder, low.writeShape, atomArg('pinMhz'), atomArg('offsetMhz')],
       ['закрепление частоты', 'uniform', 1700, 300]);
 
-    // NOTHING CAN HOLD THE FREQUENCY. Under the owner's algorithm the refusal is sharper than before —
-    // not «the ceiling has no holder» but «the card cannot be locked, so the burn would land on a
-    // frequency nobody named». Both wordings are asserted, each on its own path.
+    // NOTHING CAN HOLD THE CEILING — the refusal keeps its own wording on each path.
     const noHolder = await rungOK({ points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky, canPin: false });
-    ok('нечем удержать частоту → отказ ДО записи, а не открытие посреди прожига',
-      [noHolder.outcome, atomLog.length, /ЗАКРЕПИТЬ/.test(noHolder.why)], ['refused', 0, true]);
-    const noHolderShipped = await rungOK({
-      points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky, canPin: false, demandPin: false,
+    ok('потолок не держит НИЧТО → отказ ДО записи, а не открытие посреди прожига',
+      [noHolder.outcome, atomLog.length, /не держит НИЧТО/.test(noHolder.why)], ['refused', 0, true]);
+    const noHolderLocked = await rungOK({
+      points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky, canPin: false, demandPin: true,
     });
-    ok('и в прежней форме тот же отказ звучит про ПОТОЛОК, который не держит ничто',
-      [noHolderShipped.outcome, /не держит НИЧТО/.test(noHolderShipped.why)], ['refused', true]);
+    ok('и по запросу закрепления тот же отказ звучит про НЕВОЗМОЖНОСТЬ ЗАПЕРЕТЬ частоту',
+      [noHolderLocked.outcome, /ЗАКРЕПИТЬ/.test(noHolderLocked.why)], ['refused', true]);
 
     // — THE ENVELOPE IS REQUIRED, NEVER GUESSED (R13, `bugs/11`). A locked raise with no ceiling lifts
     //   the curve's tail (3172 here) above the card's maximum (3090) — the 82 MHz gap the BSOD escaped
@@ -2870,18 +2880,18 @@ export function selfTest() {
     //   the V/F table», which would read 3172 and prove nothing.
     //   ADDRESSEES: J. default the envelope to the curve's top → this block · K. drop the same-clock
     //   refusal → «конверт и испытуемая частота не совпадают».
-    const noEnvelope = await rungOK({ envelopeMhz: null });
+    const noEnvelope = await rungOK({ envelopeMhz: null, demandPin: true });
     ok('БЕЗ КОНВЕРТА КАРТЫ закреплённая ступень ОТКАЗЫВАЕТ — конверт не выдумывается (R13, bugs/11)',
       [noEnvelope.outcome, atomLog.length, /bugs\/11|R13/.test(noEnvelope.why)], ['refused', 0, true]);
     // AND THE DEGENERATE CASE: testing the envelope itself would put the ceiling and the lock on ONE
     // frequency — exactly the 2026-08-14 conflict. Refused before any write, and the refusal says why.
-    const atEnvelope = await rungOK({ clockMhz: 3090, voltageMv: 1000, envelopeMhz: 3090 });
+    const atEnvelope = await rungOK({ clockMhz: 3090, voltageMv: 1000, envelopeMhz: 3090, demandPin: true });
     ok('конверт и испытуемая частота не совпадают: прогон на самом максимуме ОТКАЗЫВАЕТ до записи',
       [atEnvelope.outcome, atomLog.length, /2026-08-14/.test(atEnvelope.why)], ['refused', 0, true]);
     // The ceiling that actually reaches the atom under the lock is the ENVELOPE, and the clock under
     // test reaches it as the PIN. Two different numbers, and swapping them would record the voltage
     // of a frequency nobody burned.
-    await rungOK();
+    await rungOK({ demandPin: true });
     ok('под замком в атом едут ДВА РАЗНЫХ числа: потолок = конверт, испытуемая частота = замок',
       [atomArg('capMhz'), atomArg('pinMhz')], [3090, 2842]);
 
@@ -2973,7 +2983,7 @@ export function selfTest() {
           if (!i) return 'НАМЕРЕНИЯ В ЖУРНАЛЕ НЕТ (ступень отказала до записи)';
           return [i.depthMv, i.zoneStepMv, i.seeded, i.holder, i.writeShape, i.pointIndex];
         })(),
-        [45, 25, true, 'закрепление частоты', 'raise-and-cap', 90]);
+        [45, 25, true, 'кривая', 'raise-and-cap', 90]);
       ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
         [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
 
