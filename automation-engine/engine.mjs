@@ -481,6 +481,18 @@ export async function runRung({
   depthMv = null,
   zoneStepMv = null,
   seeded = false,
+  // ДОКАЗАННАЯ ЗЕМЛЯ И СТЕНА ОТ НЕЁ — `interviews/009`, слово владельца 2026-08-16:
+  // *«Ты знаешь сетку напряжений видеокарты? Если знаешь, то ты знаешь, какого размера ты шаг можешь
+  // сделать. В чём проблема?»*
+  //
+  // `provenMv` — самое глубокое напряжение, на котором эта частота УЖЕ ПРОШЛА (сток или затравка на
+  // первой ступени, прошлый PASS дальше). `maxStepFromProvenMv` — та же стена `bugs/03`, которую план
+  // применяет к заказанному шагу (`plan.cliffMv`). Судится ими ВЫДАННОЕ напряжение, а не заказанное:
+  // заказ это намерение, он ничего не доказывает, и совпадает с приземлением ровно тогда, когда
+  // сторож и не нужен. Оба необязательны — вызывающий, который их не передал, получает прежнее
+  // поведение без проверки глубины (её тогда делает только «выше стока»).
+  provenMv = null,
+  maxStepFromProvenMv = null,
   // WHETHER A CLOCK PIN IS AVAILABLE AT ALL — and this parameter exists because without it F2-AC9's
   // refusal branch is UNREACHABLE. `chooseWriteShape` refuses only when the curve cannot hold the
   // ceiling AND nothing is pinned; a caller that hard-codes «pinned: true» can never see that answer,
@@ -750,10 +762,34 @@ export async function runRung({
   // то есть сторож зависел от того, что ему передадут. Сток частоты — это то напряжение, которое
   // обслуживает её при НУЛЕВОМ сдвиге, и оно всегда есть в таблице, которая для ступени обязательна.
   const stockMv = servingAfterRaise(points, 0, clockMhz)?.mv ?? null;
-  if (measuredMv < voltageMv) {
-    return close(stop('void', `КАРТА УШЛА ГЛУБЖЕ ЗАКАЗАННОГО: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
-      + `частоту обслуживало ${measuredMv} мВ — это НИЖЕ заказа, то есть андервольт глубже того, под который считались `
-      + 'сторожа шага. Вниз мы так не соглашаемся: правило владельца — ближайшее ВЕРХНЕЕ из тех, что карта предоставляет'));
+  // ГЛУБИНА ОТ ДОКАЗАННОГО, А НЕ РАССТОЯНИЕ ДО ЗАКАЗА (`interviews/009`, живой прогон 2026-08-16).
+  //
+  // Прежняя редакция сравнивала выданное с ЗАКАЗАННЫМ и останавливала прогон на любом промахе вниз.
+  // Она встала на 2857 МГц: заказано 1025, карта подставила 1020 — соседняя ступень сетки. Разбор
+  // показал, что остановка была лишней **по собственным числам развёртки**: сток 2857 это 1050, то
+  // есть приземление на 1020 — шаг в 30 мВ при стене `plan.cliffMv` = 35. Ни один сторож нарушен не
+  // был; сработала проверка, меряющая не ту величину.
+  //
+  // ПОЧЕМУ ПРОМАХ НЕИЗБЕЖЕН И ЗНАНИЕМ СЕТКИ НЕ ЛЕЧИТСЯ. Напряжение нельзя заказать: у каждой из 127
+  // записей оно ЗАКРЕПЛЕНО, двигается только частота записи, и какая запись дотянется до испытуемой
+  // частоты — решает карта. А дотягивается она по оси, которая ЕДЕТ: ось напряжений стоит намертво,
+  // ось частот сползает с нагревом ≈1,7 МГц на градус (R14b), и десять секунд прожига этот сдвиг
+  // производят. Улика того же прогона: «985 мВ обслуживало 2662 МГц, теперь 2677 МГц». Значит заказ у
+  // нас точный, а приземление — плюс-минус соседняя ступень, и так будет всегда.
+  //
+  // ЧТО ПРИ ЭТОМ НЕ ОСЛАБЛЕНО, и это главное. Стена та же самая (`plan.cliffMv`, `bugs/03`), земля —
+  // самое глубокое ДОКАЗАННОЕ напряжение. Побочно проверка стала СТРОЖЕ там, где прежняя была слепа:
+  // выдачу ВЫШЕ заказа, но на 40 мВ ниже доказанного, старый код пропускал молча — теперь она
+  // остановит. Слово владельца «ближайшее ВЕРХНЕЕ» остаётся правилом ЗАКАЗА (его исполняет план); тут
+  // судится ФАКТ приземления, и судится он тем же числом, которым план судил намерение.
+  if (Number.isFinite(provenMv) && Number.isFinite(maxStepFromProvenMv) && Number.isFinite(measuredMv)) {
+    const stepFromProven = provenMv - measuredMv;
+    if (stepFromProven > maxStepFromProvenMv) {
+      return close(stop('void', `ШАГ ОТ ДОКАЗАННОГО СЛИШКОМ ГЛУБОК: на ${clockMhz} МГц доказано ${provenMv} мВ, `
+        + `заказано ${voltageMv} мВ, а после записи частоту обслуживало ${measuredMv} мВ — это ${stepFromProven} мВ `
+        + `от доказанного при разрешённых ${maxStepFromProvenMv} (bugs/03). Размер шага — единственная защита, `
+        + 'которая действует ДО того, как состояние возникнет: все остальные откаты требуют живой ОС'));
+    }
   }
   // ⚠️ СТРОГО ВЫШЕ СТОКА, А НЕ «НА СТОКЕ». Живой прогон 2026-08-16 отверг первую редакцию этой
   // строки (`>=`): на 2880 МГц дрейф за время прожига съел весь первый шаг −25 мВ, карта вернулась
@@ -1337,6 +1373,13 @@ export async function sweepFrequency({
   for (const rung of rungs) {
     const r = await runRung({
       frequencyMhz, voltageMv: rung.mv, depthMv: rung.depthMv, zoneStepMv: rung.zoneStepMv, seeded: out.seeded,
+      // THE PROVEN GROUND, HANDED DOWN (`interviews/009`). `lastPass` is the deepest voltage this
+      // frequency has actually SURVIVED; before the first PASS it is the descent's start — stock, or
+      // the seed, which the neighbour above already proved. The wall is the same `bugs/03` cliff the
+      // plan applied to the ordered step, so the ordered and the delivered step are judged by ONE
+      // number and cannot drift apart.
+      provenMv: lastPass ?? startMv,
+      maxStepFromProvenMv: cliff,
     });
     // THE DELIVERED VOLTAGE IS THE MEASUREMENT — the owner's rule on this axis too. `rung.mv` is what
     // we ASKED for; `r.measuredMv` is what the card actually served and therefore what was burned.
@@ -1362,6 +1405,10 @@ export async function sweepFrequency({
       const refined = await refineEdge({
         voltageGridMv, lastPassMv: lastPass, coarseFailMv: rung.mv, minStepMv, runRungFn: (mv) => runRung({
           frequencyMhz, voltageMv: mv, depthMv: stockVoltageMv - mv, zoneStepMv: minStepMv, seeded: out.seeded,
+          // Refinement walks back UP from the coarse failure toward `lastPass`, so the proven ground is
+          // the same one the descent had — and it must not be re-derived here (one number, one place).
+          provenMv: lastPass ?? startMv,
+          maxStepFromProvenMv: cliff,
         }),
       });
       out.refinement = refined;
@@ -1635,7 +1682,17 @@ export async function sweepRange({
       curveDoc: doc,
       minStepMv,
       onEvent,
-      runRungFn: async ({ frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded }) => {
+      // ⚠️ АРГУМЕНТЫ ПРОБРАСЫВАЮТСЯ ЦЕЛИКОМ (`rungArgs`), А НЕ ПЕРЕПИСЫВАЮТСЯ ПО ИМЕНАМ.
+      // Первая редакция этой обёртки разбирала пять полей и звала `runRung` со СВОИМ списком — то
+      // есть была парой «правда ↔ зеркало» между тем, что `sweepFrequency` отдаёт, и тем, что
+      // ступень получает. Пара немедленно разошлась: добавленные `provenMv` / `maxStepFromProvenMv`
+      // (`interviews/009`) до ступени НЕ доезжали, и сторож глубины в живой развёртке был бы мёртв,
+      // оставаясь зелёным во всех наборах. Нашла это мутация «развёртка перестала передавать
+      // доказанную землю», которая не покраснила НИЧЕГО — EXP-0073.
+      // Пара, которую можно УБРАТЬ, лучше пары, за которой надо следить: теперь новое поле у
+      // источника доезжает само, а не ждёт, пока кто-то вспомнит про второй список.
+      runRungFn: async (rungArgs) => {
+        const { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded } = rungArgs;
         // THE RUNG IS ANNOUNCED BEFORE THE CARD IS TOUCHED (`ideas/06` §3, `plans/20` §4.2). A frozen
         // screen shows the LAST thing drawn, so a rung published after its own burn would make the
         // frozen frame accuse the PREVIOUS rung — the exact misattribution the write-ahead journal
@@ -1687,9 +1744,9 @@ export async function sweepRange({
         }
 
         const r = await runRung({
+          ...rungArgs,                       // всё, что решил `sweepFrequency`, включая доказанную землю
           points: livePoints, clockMhz: frequencyMhz, voltageMv,
           seconds, sustain, pinCard, canPin,
-          depthMv, zoneStepMv, seeded,
           journal, seq: seq++, blockedKeys, now,
           runStepFn, buildVector, chooseShape, demandPin, envelopeMhz,
         });
@@ -3161,15 +3218,32 @@ export function selfTest() {
 
     // — THE RE-ASSERTION against the card's own re-read table. This is what the paper proof may not
     //   replace (R12, EXP-0057): the plan says the voltage WOULD serve; only the card says it DID.
-    //   ⚠️ AND THE DIRECTION DECIDES, by the owner's word of 2026-08-16: *«мы должны попасть в
-    //   ближайшее верхнее напряжение… из тех, которые карточка предоставляет»*. BELOW the order is a
-    //   deeper undervolt than the step governors were sized for — a stop. ABOVE the order is the
-    //   rule being obeyed by the card itself (its table slides with heat), so it is the MEASUREMENT.
-    const wrongVolt = await rungOK({ runStepFn: atom(atomPass(995)) });
-    ok('ступень, ушедшая НИЖЕ заказанного, — НЕ PASS: это незаказанный более глубокий андервольт',
-      [wrongVolt.outcome, wrongVolt.servingMvAfter], ['void', 995]);
-    ok('и отказ называет ОБА напряжения — заказанное и то, что обслуживало на самом деле',
-      /1000 мВ/.test(wrongVolt.why) && /995 мВ/.test(wrongVolt.why), true);
+    //   ⚠️ ЧТО ЗДЕСЬ СУДИТСЯ — ГЛУБИНА ОТ ДОКАЗАННОГО, А НЕ РАССТОЯНИЕ ДО ЗАКАЗА (`interviews/009`).
+    //
+    //   ПРЕЖНЯЯ ПАРА БЛОКОВ СТОРОЖИЛА ДРУГОЕ ПОВЕДЕНИЕ и заменена целиком, а не подправлена. Она
+    //   требовала «выдача ниже заказа -> void» и на живом прогоне 2026-08-16 остановила здоровую
+    //   развёртку: на 2857 МГц заказали 1025, карта подставила 1020 — соседнюю ступень своей сетки.
+    //   По собственным числам развёртки останавливать было НЕ ЗА ЧТО: сток той частоты 1050, то есть
+    //   приземление на 1020 это шаг 30 мВ при стене `cliffMv` = 35.
+    //
+    //   Промах неизбежен и знанием сетки не лечится: напряжение нельзя заказать (у записи оно
+    //   закреплено, двигается частота), а какая запись дотянется до испытуемой частоты — решает карта
+    //   по оси, которая ЕДЕТ с нагревом (R14b). Поэтому судить надо факт приземления, и тем же числом,
+    //   которым план судил намерение.
+    //
+    //   ⚠️ И ОБРАТИТЬ ВНИМАНИЕ НА ВТОРОЙ БЛОК: замена НЕ ослабила проверку, она её РАСШИРИЛА. Прежняя
+    //   редакция пропускала молча выдачу ВЫШЕ заказа, но глубоко ниже доказанного; новая её ловит,
+    //   и `atomPass(940)` — фикстура ровно этого случая, которую старый код прошёл бы как PASS.
+    const nearMiss = await rungOK({ runStepFn: atom(atomPass(995)), provenMv: 1020, maxStepFromProvenMv: 35 });
+    ok('промах на соседнюю ступень ВНИЗ — ПОПАДАНИЕ, пока шаг от доказанного в стене (25 из 35)',
+      [nearMiss.outcome, nearMiss.measuredMv, nearMiss.orderedMv], ['passed', 995, 1000]);
+    const tooDeep = await rungOK({ runStepFn: atom(atomPass(940)), provenMv: 1020, maxStepFromProvenMv: 35 });
+    ok('шаг от ДОКАЗАННОГО глубже стены — void, даже если выдача ВЫШЕ заказа (старый код это пропускал)',
+      [tooDeep.outcome, tooDeep.measuredMv], ['void', 940]);
+    ok('и отказ называет доказанное, заказанное, выданное и стену — все четыре числа',
+      /1020 мВ/.test(tooDeep.why) && /1000 мВ/.test(tooDeep.why) && /940 мВ/.test(tooDeep.why) && /35/.test(tooDeep.why), true);
+    ok('без доказанной земли проверка глубины НЕ выдумывается — прежнее поведение сохранено',
+      (await rungOK({ runStepFn: atom(atomPass(995)) })).outcome, 'passed');
     //   ВЫШЕ ЗАКАЗА, НО НИЖЕ СТОКА — честный замер. Ступень заказана на глубине 40 мВ (сток 1040),
     //   выдача 1005 лежит между заказом и стоком.
     const above = await rungOK({ runStepFn: atom(atomPass(1005)), depthMv: 40 });
@@ -3878,6 +3952,24 @@ export function selfTest() {
     ok('СПУСК БЕЗ ОТКАЗА — ПРЕДЕЛ РЫЧАГА, а не край',
       [allPass.verdict, allPass.voltageMv, allPass.rungs.length],
       ['lever-limited', 930, 6]);
+
+    // — ДОКАЗАННАЯ ЗЕМЛЯ ДОЕЗЖАЕТ ДО СТУПЕНИ (`interviews/009`). Без этого блока сторож глубины
+    //   зелёный и мёртвый: мутация «развёртка перестала передавать доказанную землю» не покраснила
+    //   НИЧЕГО, и та же мутация вскрыла, что обёртка `sweepRange` разбирала аргументы по именам и
+    //   молча теряла оба новых поля (EXP-0073 плюс пара «правда ↔ зеркало» внутри одной функции).
+    //   Проверяется ИМЕННО передача: земля обязана быть стоком на первой ступени и подниматься до
+    //   каждого прошедшего напряжения дальше — иначе сторож мерил бы от точки, которую никто не брал.
+    const handed = [];
+    await freqOK({
+      runRungFn: async (a) => {
+        handed.push([a.voltageMv, a.provenMv, a.maxStepFromProvenMv]);
+        return { outcome: 'passed', verdict: P, why: '' };
+      },
+    });
+    ok('ДОКАЗАННАЯ ЗЕМЛЯ ДОЕЗЖАЕТ ДО СТУПЕНИ: на первой это сток, дальше — каждое прошедшее напряжение',
+      handed.slice(0, 3), [[1020, 1045, 35], [995, 1020, 35], [970, 995, 35]]);
+    ok('и стена, которой судят приземление, — ТА ЖЕ, которой план судил заказ (одно число, не два)',
+      [...new Set(handed.map((h) => h[2]))], [config.ASCENT_STEP_MAX_MV ?? 35]);
 
     // — a failure is refined and only THEN shipped: the coarse rung 970 signals, the walk re-finds the
     // failure at 980, and the shipped value is 980 + 10.
