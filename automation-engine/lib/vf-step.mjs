@@ -849,6 +849,15 @@ export async function runStep({
             const stats = summarizeSamples(records);
             const proof = stats ? ld.verifyLockUnderLoad({ medians: stats }, pinMhz) : { ok: false, why: 'сводка по пробам не собралась' };
             out.pinProof = proof;
+            // THE DELIVERED CLOCK IS CARRIED ON THIS PATH TOO — it was not, and that was a hole.
+            // The owner's rule (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ») records a voltage against
+            // the frequency the card ACTUALLY ran, so a path that measures the clock and then drops
+            // it leaves the sweep with nothing to key the row by. The capped branch below already
+            // sets these two fields; the locked branch simply never did.
+            if (Number.isFinite(proof.delivered)) {
+              out.deliveredMhz = proof.delivered;
+              out.deliveredMaxMhz = proof.delivered;
+            }
             if (!proof.ok && out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; out.reason = proof.why; }
             if (!proof.ok) throw new Error(proof.why);
             return `${proof.why}${proof.delivered ? ` · выдано ${proof.delivered} МГц` : ''}`;

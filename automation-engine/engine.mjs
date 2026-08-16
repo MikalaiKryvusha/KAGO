@@ -1165,7 +1165,44 @@ export async function sweepFrequency({
     refinement: null,
     halted: false,
     blocked: false,
+    // THE FREQUENCY THE CARD ACTUALLY RAN — the owner's rule, `GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА
+    // ВЫДАЁТ»: *«хотим заказать N, она нам выдала M — примиряемся с её выдачей и тюним то, что она
+    // нам даёт»*. `frequencyMhz` above is the ORDER; this is the OBSERVATION, and it is the one the
+    // curve document is keyed by.
+    deliveredMhz: null,
+    deliveredSpread: null,
     why: '',
+  };
+
+  // ─── ONE PLACE OBSERVES THE DELIVERED CLOCK, AND IT IS THIS WRAPPER ─────────────────────────────
+  //
+  // Every rung in this function — the seed, the coarse descent, and each of `refineEdge`'s fine
+  // steps — goes through here, so no path can forget to record what the card delivered. Recording it
+  // at the three call sites instead would be three chances to miss one, and the refinement's sites
+  // live inside ANOTHER function. That is the truth↔mirror shape this project keeps paying for
+  // (EXP-0074), avoided by having a single author.
+  //
+  // The value kept is the delivered clock of the LAST PASSING rung, because the voltage that ships is
+  // the one a PASS proved. Every observed value is also collected, so the report can say how much the
+  // delivered clock moved across the descent — it moves with the raise, and a spread nobody printed
+  // is a spread nobody would notice.
+  let lastPassDeliveredMhz = null;
+  const seenDelivered = [];
+  const runRung = async (a) => {
+    const r = await runRungFn(a);
+    if (Number.isFinite(r?.deliveredMhz)) {
+      seenDelivered.push(r.deliveredMhz);
+      if (r?.outcome === 'passed') lastPassDeliveredMhz = r.deliveredMhz;
+    }
+    return r;
+  };
+  // Stamped onto `out` by every exit that carries a verdict — collected here so the exits stay short.
+  const withDelivered = () => {
+    out.deliveredMhz = lastPassDeliveredMhz;
+    if (seenDelivered.length) {
+      out.deliveredSpread = { min: Math.min(...seenDelivered), max: Math.max(...seenDelivered), samples: seenDelivered.length };
+    }
+    return out;
   };
 
   // ---- 0. THE PLAN — and the run walks THIS, not a second computation of it (F2-AC8, `bugs/09`,
@@ -1183,7 +1220,7 @@ export async function sweepFrequency({
     // two places would be a truth↔mirror pair inside one function, and it hid a mutation — burning
     // the rung's lowest frequency instead of its highest reddened nothing, because the caller's
     // hard-coded clock kept the burn where it belonged while the decision moved.
-    const sr = await runRungFn({
+    const sr = await runRung({
       frequencyMhz, voltageMv: seed.seedMv, depthMv: stockVoltageMv - seed.seedMv, zoneStepMv: null, seeded: true,
     });
     out.rungs.push({ voltageMv: seed.seedMv, seed: true, outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null });
@@ -1211,7 +1248,7 @@ export async function sweepFrequency({
   if (plan.refused) {
     out.halted = true;
     out.why = `лестница спуска не построена: ${plan.why}`;
-    return out;
+    return withDelivered();
   }
   const rungs = seedTaken ? plan.rungs : plan.rungsFromStock;
   const startMv = seedTaken ? plan.seedMv : stockVoltageMv;
@@ -1224,7 +1261,7 @@ export async function sweepFrequency({
       ? null
       : `затравка ${lastPass} мВ от соседки ${out.seedFrom?.neighbourMhz} МГц прошла, а глубже рычаг не достаёт`;
     out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${plan.why}`;
-    return out;
+    return withDelivered();
   }
 
   // A seeded descent joins the ladder part-way down, so its first step is measured from the seed and
@@ -1237,12 +1274,12 @@ export async function sweepFrequency({
     out.halted = true;
     out.why = `первый шаг спуска от ${startMv} мВ до ${rungs[0].mv} мВ это ${firstStep} мВ, а сторож обрыва `
       + `разрешает ${cliff} мВ (bugs/03). Спуск не начинается: обрыв, пройденный одним шагом, — тот же прыжок`;
-    return out;
+    return withDelivered();
   }
 
   // ---- 3. THE DESCENT.
   for (const rung of rungs) {
-    const r = await runRungFn({
+    const r = await runRung({
       frequencyMhz, voltageMv: rung.mv, depthMv: rung.depthMv, zoneStepMv: rung.zoneStepMv, seeded: out.seeded,
     });
     out.rungs.push({ voltageMv: rung.mv, seed: false, outcome: r?.outcome ?? null, verdict: r?.verdict ?? null });
@@ -1256,10 +1293,10 @@ export async function sweepFrequency({
         out.halted = true;
         out.why = `ОТКАЗ НА ПЕРВОЙ ЖЕ СТУПЕНИ ${rung.mv} мВ на ${frequencyMhz} МГц, а прошедшего напряжения `
           + 'ещё нет — уточнять не от чего. Край здесь ниже стока меньше, чем на один шаг политики, и это находка, а не вердикт';
-        return out;
+        return withDelivered();
       }
       const refined = await refineEdge({
-        voltageGridMv, lastPassMv: lastPass, coarseFailMv: rung.mv, minStepMv, runRungFn: (mv) => runRungFn({
+        voltageGridMv, lastPassMv: lastPass, coarseFailMv: rung.mv, minStepMv, runRungFn: (mv) => runRung({
           frequencyMhz, voltageMv: mv, depthMv: stockVoltageMv - mv, zoneStepMv: minStepMv, seeded: out.seeded,
         }),
       });
@@ -1268,7 +1305,7 @@ export async function sweepFrequency({
       if (!refined.ok) {
         out.halted = true;
         out.why = refined.why;
-        return out;
+        return withDelivered();
       }
       out.verdict = 'edge-found';
       out.voltageMv = refined.shipMv;
@@ -1279,7 +1316,7 @@ export async function sweepFrequency({
           : '')
         + ` · прожиг ${config.SWEEP_PROBE_SECONDS ?? 10} с формой ${SHORT_PROBE[0]?.id ?? 'sdc_fma/transient'}`;
       out.why = `КРАЙ НАЙДЕН на ${frequencyMhz} МГц: ${refined.why}`;
-      return out;
+      return withDelivered();
     }
 
     if (r?.outcome === 'lever-limited') {
@@ -1287,7 +1324,7 @@ export async function sweepFrequency({
       out.voltageMv = lastPass ?? stockVoltageMv;
       out.provenBy = lastPass === null ? null : `глубже ${lastPass} мВ рычаг ±1000 МГц не достаёт`;
       out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${r.why}`;
-      return out;
+      return withDelivered();
     }
 
     // `unknown`, `void`, `refused` — a STOP, and each keeps its own word.
@@ -1297,7 +1334,7 @@ export async function sweepFrequency({
     // own prose to decide would go silent the first time the sentence is reworded.
     if (r?.blocked === true) out.blocked = true;
     out.why = `РАЗВЁРТКА ОСТАНОВЛЕНА на ${frequencyMhz} МГц / ${rung.mv} мВ, исход «${r?.outcome ?? 'нет ответа'}»: ${r?.why ?? ''}`;
-    return out;
+    return withDelivered();
   }
 
   // ---- 4. THE LADDER RAN OUT AND NOTHING FAILED. Our lever or the card's grid stopped the descent,
@@ -1307,7 +1344,59 @@ export async function sweepFrequency({
   out.provenBy = lastPass === null ? null
     : `${lastPass} мВ прошло на ${frequencyMhz} МГц, а глубже спускаться нечем: ${plan.why}`;
   out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${plan.why}`;
-  return out;
+  return withDelivered();
+}
+
+/**
+ * WHICH ROW OF THE CURVE DOCUMENT A DELIVERED CLOCK BELONGS TO.
+ *
+ * The owner's rule (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ») keys a measurement by the frequency
+ * the card actually ran. That number comes off `clocks.gr`, which reports on the card's own ladder —
+ * the same ladder the document's 389 rows are built from — so in the normal case it lands exactly on
+ * a row. This function exists for the two cases that are not normal, and it refuses to invent in both:
+ *
+ *   • **No delivered clock at all** (no sampler, no loaded samples, a lock proof that never ran).
+ *     REFUSED. There is no honest row for a measurement whose frequency nobody observed, and falling
+ *     back to the ordered clock would restore the exact claim the owner's rule removes.
+ *   • **A clock between two rows.** Snapped DOWNWARD, and the snap is SAID. Downward is the safe
+ *     direction and it is the project's existing one: Vmin does not decrease with frequency, so a
+ *     voltage proved at the higher clock is not optimistic at the lower one — the same argument
+ *     `rungGroups` inheritance already rests on (E2-AC3). Upward would be a claim about silicon that
+ *     was never loaded.
+ *
+ * @returns {{ok:boolean, mhz:number|null, snapped:boolean, why:string}}
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function resolveDeliveredRow(doc, deliveredMhz) {
+  if (!Number.isFinite(deliveredMhz) || deliveredMhz <= 0) {
+    return {
+      ok: false,
+      mhz: null,
+      snapped: false,
+      why: 'выданная частота не прочитана (сэмплер не дал проб под нагрузкой, либо доказательство '
+        + 'потолка не отработало) — строку выбрать не по чему',
+    };
+  }
+  const rows = (doc?.frequencies ?? []).map((r) => r?.mhz).filter(Number.isFinite);
+  if (!rows.length) return { ok: false, mhz: null, snapped: false, why: 'в документе кривой нет ни одной частоты' };
+  if (rows.includes(deliveredMhz)) return { ok: true, mhz: deliveredMhz, snapped: false, why: 'выданная частота есть в документе' };
+  const below = rows.filter((m) => m < deliveredMhz);
+  if (!below.length) {
+    return {
+      ok: false,
+      mhz: null,
+      snapped: false,
+      why: `выданные ${deliveredMhz} МГц ниже самой нижней частоты документа ${Math.min(...rows)} МГц — притягивать некуда`,
+    };
+  }
+  const snappedMhz = Math.max(...below);
+  return {
+    ok: true,
+    mhz: snappedMhz,
+    snapped: true,
+    why: `выданных ${deliveredMhz} МГц в документе нет; притянуто ВНИЗ к ${snappedMhz} МГц — безопасная сторона`,
+  };
 }
 
 /**
@@ -1433,6 +1522,11 @@ export async function sweepRange({
     closed: 0,
     verdicts: { 'edge-found': 0, 'lever-limited': 0 },
     seedRejections: 0,
+    // WHERE THE ORDER AND THE OBSERVATION PARTED — one entry per frequency whose measurement landed in
+    // a DIFFERENT row from the one asked for. Counted rather than smoothed over: under the owner's
+    // rule the card decides the coverage, and a run that hid that would look like it swept the band
+    // it named (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ», consequence 2).
+    delivered: [],
     raised: [],
     hung: resume.hung ?? [],
     blocked: resume.blocked ?? [],
@@ -1497,14 +1591,49 @@ export async function sweepRange({
       break;
     }
 
-    // ---- (3) THE DOCUMENT, BEFORE THE NEXT FREQUENCY. Validated first, saved atomically second.
+    // ---- (3) WHICH ROW THIS MEASUREMENT BELONGS TO — the owner's rule, `GOAL.md` → «🎚 ТЮНИМ ТО,
+    // ЧТО КАРТА ВЫДАЁТ»: *«хотим заказать N, она нам выдала M — примиряемся с её выдачей и тюним то,
+    // что она нам даёт»*.
+    //
+    // The descent ORDERED `g.topMhz` by capping the curve there. The card, measured on this machine
+    // 2026-08-16, sits 20–30 MHz BELOW its ceiling and cannot be pushed up by anything
+    // (`researches/11`). So the voltage that was just proved belongs to the clock the card RAN, and
+    // writing it against the clock we asked for would be a `[TESTED]` marker over an observation
+    // nobody made.
+    const orderedMhz = g.topMhz;
+    const rowMhz = resolveDeliveredRow(doc, outcome.deliveredMhz);
+    if (!rowMhz.ok) {
+      // NOT CLOSED AT THE ORDERED FREQUENCY AS A FALLBACK. A fallback here would silently restore the
+      // exact claim this rule exists to remove, and it would do it precisely when the evidence is
+      // missing — the worst moment to start guessing (PHILOSOPHY → the three doors).
+      report.ok = false;
+      report.stoppedBy = 'delivered';
+      report.why = `НЕ ЗНАЕМ, НА КАКОЙ ЧАСТОТЕ КАРТА РАБОТАЛА на заказе ${orderedMhz} МГц: ${rowMhz.why}. `
+        + 'Записывать напряжение против заказанной частоты запрещено словом владельца — карта садится ниже '
+        + 'заказа, и это была бы строка, которой никто не мерил';
+      report.groups.push({ ...g, ...outcome });
+      break;
+    }
+    if (rowMhz.mhz !== orderedMhz) {
+      report.delivered.push({ orderedMhz, deliveredMhz: outcome.deliveredMhz, rowMhz: rowMhz.mhz });
+      say('delivered-elsewhere',
+        `заказали ${orderedMhz} МГц — карта выдала ${outcome.deliveredMhz} МГц, замер ложится в строку ${rowMhz.mhz} МГц`,
+        { orderedMhz, deliveredMhz: outcome.deliveredMhz, rowMhz: rowMhz.mhz });
+    }
+    // INHERITANCE ONLY DOWNWARD FROM THE ROW WE ACTUALLY PROVED. The group's members ABOVE the
+    // delivered clock were not exercised at all — the card never went there — so they inherit
+    // nothing. `Math.min` is what stops the range from inverting when the card lands below its group.
+    const inheritFloorMhz = Math.min(g.bottomMhz, rowMhz.mhz);
+
+    // ---- THE DOCUMENT, BEFORE THE NEXT FREQUENCY. Validated first, saved atomically second.
     const status = outcome.verdict === 'edge-found' ? CURVE_STATUS.EDGE_FOUND : CURVE_STATUS.LEVER_LIMITED;
     const closed = closePoint(doc, {
-      mhz: g.topMhz,
+      mhz: rowMhz.mhz,
       voltageMv: outcome.voltageMv,
       status,
-      provenBy: outcome.provenBy,
-      inheritDownToMhz: g.bottomMhz,
+      provenBy: `${outcome.provenBy ?? 'без свидетеля'} · ЗАКАЗАНО ${orderedMhz} МГц, ВЫДАНО `
+        + `${outcome.deliveredMhz} МГц${rowMhz.snapped ? ` (притянуто к строке ${rowMhz.mhz})` : ''}`,
+      inheritDownToMhz: inheritFloorMhz,
       at: now ? now() : null,
     });
     if (!closed.ok) {
@@ -1705,6 +1834,20 @@ export function sweepReportLines(report) {
   lines.push(`ПОКРЫТИЕ: закрыто ${report.closed} из ${report.frequenciesInBand} (${pct(report.closed, report.frequenciesInBand)})`);
   lines.push(`ВЕРДИКТЫ: край найден ${report.verdicts['edge-found']} · предел рычага ${report.verdicts['lever-limited']}`);
   lines.push(`ЗАТРАВКА: отвергнута ${report.seedRejections} раз(а) — это ЗАМЕР монотонности на этом кремнии, а не сбой прогона`);
+  // THE ORDER-vs-OBSERVATION LINE. Printed even when it is zero, because «нисколько не разошлось» is
+  // itself a finding about the card — and a line that appears only on divergence teaches the reader
+  // nothing about the runs where it did not.
+  if (report.delivered?.length) {
+    const uniqueRows = new Set(report.delivered.map((d) => d.rowMhz));
+    lines.push(`ЗАКАЗ ↔ ВЫДАЧА: разошлись на ${report.delivered.length} частоте(ах) — замер лёг НЕ в заказанную строку `
+      + `(строк-адресатов ${uniqueRows.size}): `
+      + report.delivered.slice(0, 6).map((d) => `${d.orderedMhz}→${d.rowMhz}`).join(', ')
+      + (report.delivered.length > 6 ? ` и ещё ${report.delivered.length - 6}` : ''));
+    lines.push('   Это НЕ сбой: карту нельзя поднять до заказа, и напряжение записано против той частоты, '
+      + 'на которой она работала (GOAL.md → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ»).');
+  } else {
+    lines.push('ЗАКАЗ ↔ ВЫДАЧА: не разошлись ни разу — карта отдала каждую заказанную частоту');
+  }
   if (report.raised.length) {
     lines.push(`ХРАПОВИК ПОДНЯЛ ${report.raised.length} частот(у): `
       + report.raised.map((r) => `${r.mhz} МГц ${r.fromMv}→${r.toMv} мВ`).join(', '));
@@ -3930,6 +4073,163 @@ export function selfTest() {
           .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
         return /assertJournalSandbox\s*\(/.test(code);
       })(), false);
+
+    // =============================================================================================
+    // THE OWNER'S RULE — «ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ» (`GOAL.md`, 2026-08-16)
+    //
+    // The card sits 20–30 MHz below any ceiling and cannot be lifted (`researches/11`, measured), so
+    // the voltage a rung proves belongs to the clock the card RAN, not the one we asked for.
+    //
+    // MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+    //   M. close at `g.topMhz` again (ignore the delivered clock)  → «ЗАМЕР ЛОЖИТСЯ В СТРОКУ ВЫДАННОЙ»
+    //   N. fall back to the ordered clock when delivered is null   → «БЕЗ ВЫДАННОЙ ЧАСТОТЫ РАЗВЁРТКА ВСТАЁТ»
+    //   O. drop the `Math.min` on the inheritance floor            → «НАСЛЕДОВАНИЕ НЕ ЛЕЗЕТ ВВЕРХ»
+    //   P. snap the off-grid clock UPWARD instead of down          → «ВНЕ СЕТКИ ПРИТЯГИВАЕТСЯ ВНИЗ»
+    //   Q. stop counting divergences into `report.delivered`       → «ОТЧЁТ НАЗЫВАЕТ КАЖДОЕ РАСХОЖДЕНИЕ»
+    //   R. keep the delivered clock only from the LAST rung        → «СТРОКУ РЕШАЕТ ПОСЛЕДНИЙ ПРОШЕДШИЙ»
+    // =============================================================================================
+
+    // — the resolver alone, on hostile inputs. It is the one place allowed to pick a row.
+    const docForRows = sweepDoc(bandRows);
+    ok('ВНЕ СЕТКИ ПРИТЯГИВАЕТСЯ ВНИЗ: 2831 МГц → строка 2828, и притяжка НАЗВАНА',
+      (() => { const r = resolveDeliveredRow(docForRows, 2831); return [r.ok, r.mhz, r.snapped]; })(),
+      [true, 2828, true]);
+    ok('точное попадание строкой — не притяжка',
+      (() => { const r = resolveDeliveredRow(docForRows, 2835); return [r.ok, r.mhz, r.snapped]; })(),
+      [true, 2835, false]);
+    ok('нет выданной частоты → ОТКАЗ, а не подстановка заказанной',
+      (() => { const r = resolveDeliveredRow(docForRows, null); return [r.ok, r.mhz]; })(), [false, null]);
+    ok('выданное НИЖЕ всего документа → отказ: притягивать некуда',
+      resolveDeliveredRow(docForRows, 1000).ok, false);
+
+    // — the loop, end to end, on a card that delivers 14 MHz BELOW every order. Two ladder steps, so
+    //   each measurement lands two rows down and the divergence is unmistakable.
+    const sagAtom = (sagMhz) => async (a) => {
+      const r = await sweepAtom(0)(a);                       // 0 = nothing fails; we are testing the row, not the edge
+      const clock = (a.pinMhz ?? a.capMhz) - sagMhz;
+      return { ...r, deliveredMhz: clock, deliveredMaxMhz: clock };
+    };
+    // ONE LADDER STEP OF SAG, so every landing is an EXACT row and the assertions are about the rule
+    // rather than about snapping. Orders 2842 and 2820 → landings 2835 and 2813.
+    const sagged = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090,
+      runStepFn: sagAtom(7), buildVector: vectorPinned,
+      saveFn: async () => ({ ok: true }),
+      now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    // The whole band is walked, and the rows that carry evidence are the DELIVERED ones plus what
+    // legitimately inherits DOWN from them (2835 → 2828). Written as a literal list because a
+    // computed expectation here would be the vacuous-assertion trap: an expectation derived from the
+    // result agrees with anything.
+    ok('ЗАМЕР ЛОЖИТСЯ В СТРОКУ ВЫДАННОЙ ЧАСТОТЫ, а не заказанной (слово владельца 2026-08-16)',
+      [sagged.ok, sagged.doc.frequencies.filter((r) => r.status !== CURVE_STATUS.STOCK).map((r) => r.mhz)],
+      [true, [2835, 2828, 2813]]);
+    ok('и ЗАКАЗАННЫЕ частоты остались СТОКОВЫМИ — на них карта не работала, мерить их было нечем',
+      [sagged.doc.frequencies.find((r) => r.mhz === 2842)?.status,
+        sagged.doc.frequencies.find((r) => r.mhz === 2820)?.status],
+      [CURVE_STATUS.STOCK, CURVE_STATUS.STOCK]);
+    ok('ОТЧЁТ НАЗЫВАЕТ КАЖДОЕ РАСХОЖДЕНИЕ заказа и выдачи, а не сглаживает его',
+      sagged.delivered.map((d) => [d.orderedMhz, d.deliveredMhz, d.rowMhz]),
+      [[2842, 2835, 2835], [2820, 2813, 2813]]);
+    ok('и печать отчёта говорит это ВСЛУХ, вместе с причиной',
+      (() => {
+        const l = sweepReportLines(sagged);
+        return [l.some((x) => x.includes('ЗАКАЗ ↔ ВЫДАЧА: разошлись на 2')), l.some((x) => x.includes('2842→2835'))];
+      })(), [true, true]);
+    // THE WITNESS CARRIES BOTH NUMBERS — a row that says only its own frequency cannot be audited
+    // later against what was actually asked for.
+    ok('свидетель строки несёт И ЗАКАЗ, И ВЫДАЧУ',
+      /ЗАКАЗАНО 2842 МГц, ВЫДАНО 2835 МГц/.test(sagged.doc.frequencies.find((r) => r.mhz === 2835)?.provenBy ?? ''), true);
+    // INHERITANCE MUST NOT CLIMB. The group 2842…2828 was ordered; the card ran 2835, so 2842 was
+    // never exercised and inherits nothing — while 2828, which IS below the delivered clock, does.
+    ok('НАСЛЕДОВАНИЕ НЕ ЛЕЗЕТ ВВЕРХ: выше выданной сток, ниже — унаследованный замер',
+      [sagged.doc.frequencies.find((r) => r.mhz === 2842)?.status,
+        sagged.doc.frequencies.find((r) => r.mhz === 2828)?.status !== CURVE_STATUS.STOCK],
+      [CURVE_STATUS.STOCK, true]);
+
+    // THE CASE THE BLOCK ABOVE DOES NOT REACH, and the mutation proof is what said so: when the card
+    // lands BELOW its whole group, `g.bottomMhz` is ABOVE the delivered clock and an inheritance range
+    // built from it would run BACKWARDS — writing the measurement into frequencies the card never
+    // touched. `Math.min` is the only thing stopping that, so it needs a fixture that inverts without it.
+    // Group 2842…2828 ordered; card delivers 2820, a real row below the whole group.
+    const undershot = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2828,
+      runStepFn: sagAtom(22), buildVector: vectorPinned,
+      saveFn: async () => ({ ok: true }),
+      now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('КАРТА УПАЛА НИЖЕ ВСЕЙ СТУПЕНИ: закрыта ОДНА строка 2820, и ни одна частота ступени не тронута',
+      [undershot.ok, undershot.doc.frequencies.filter((r) => r.status !== CURVE_STATUS.STOCK).map((r) => r.mhz)],
+      [true, [2820]]);
+
+    // — no delivered clock at all: the sweep STOPS. A fallback here would restore the very claim the
+    //   owner's rule removes, and it would do it exactly when the evidence is missing.
+    const blindAtom = async (a) => {
+      const r = await sweepAtom(0)(a);
+      return { ...r, deliveredMhz: null, deliveredMaxMhz: null };
+    };
+    const blind = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090,
+      runStepFn: blindAtom, buildVector: vectorPinned,
+      saveFn: async () => ({ ok: true }),
+      now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('БЕЗ ВЫДАННОЙ ЧАСТОТЫ РАЗВЁРТКА ВСТАЁТ и НЕ подставляет заказанную',
+      [blind.ok, blind.stoppedBy, blind.closed,
+        blind.doc.frequencies.every((r) => r.status === CURVE_STATUS.STOCK)],
+      [false, 'delivered', 0, true]);
+
+    // — WHICH rung's delivered clock decides the row: the LAST PASSING one, because the voltage that
+    //   ships is the one a PASS proved. A descent whose clock climbs as the raise deepens must key on
+    //   the end of the walk, not on its first step.
+    // The clock CLIMBS as the descent deepens — which is what the card really does, since a deeper
+    // rung is a bigger raise. The row must come from the END of the walk, and the earlier, lower
+    // readings must not decide it. The sequence is explicit and clamps on a real row, so the block
+    // asserts LITERALS rather than something recomputed from the run.
+    let climbCalls = 0;
+    const climbSeq = [2813, 2820, 2828];
+    const climbAtom = async (a) => {
+      const r = await sweepAtom(0)(a);
+      const clock = climbSeq[Math.min(climbCalls, climbSeq.length - 1)];
+      climbCalls += 1;
+      return { ...r, deliveredMhz: clock, deliveredMaxMhz: clock };
+    };
+    const climbed = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2828,
+      runStepFn: climbAtom, buildVector: vectorPinned,
+      saveFn: async () => ({ ok: true }),
+      now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('СТРОКУ РЕШАЕТ ПОСЛЕДНИЙ ПРОШЕДШИЙ прожиг, а не первый',
+      [climbCalls >= 3, climbed.delivered.map((d) => [d.orderedMhz, d.deliveredMhz])],
+      [true, [[2842, 2828]]]);
+    ok('и разброс выданной частоты по спуску ЗАПИСАН, а не потерян',
+      (() => {
+        const sp = climbed.groups[0]?.deliveredSpread;
+        return [sp?.min, sp?.max];
+      })(), [2813, 2828]);
+
+    // AND THE OTHER HALF OF THAT RULE, which the climbing fixture cannot reach because everything in
+    // it PASSES: a rung that did NOT pass must not decide the row. Its clock was measured while the
+    // card was failing, and a failing card's frequency is not evidence about a shipped voltage.
+    // Here the coarse rung passes at 2828, the failure and the refinement's failing steps report 2813,
+    // and the shipped voltage comes out of the refinement — so only «last PASS» gives 2828.
+    const failClockAtom = async (a) => {
+      const r = await sweepAtom(1000)(a);
+      const passed = r.verdict === P;
+      const clock = passed ? 2828 : 2813;
+      return { ...r, deliveredMhz: clock, deliveredMaxMhz: clock };
+    };
+    const mixed = await sweepRange({
+      curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2828,
+      runStepFn: failClockAtom, buildVector: vectorPinned,
+      saveFn: async () => ({ ok: true }),
+      now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    ok('ЧАСТОТУ СБОЙНУВШЕЙ СТУПЕНИ В СТРОКУ НЕ БЕРЁМ — решает последний ПРОШЕДШИЙ прожиг',
+      [mixed.verdict === undefined ? mixed.verdicts['edge-found'] : null,
+        mixed.delivered.map((d) => [d.orderedMhz, d.rowMhz])],
+      [1, [[2842, 2828]]]);
 
     const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
     ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
