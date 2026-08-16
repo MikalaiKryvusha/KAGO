@@ -44,7 +44,7 @@
 //  is what its screenshot proves; what is NOT tested here is the LIVE sweep's `--dashboard` wiring —
 //  it has never run against a real card, and that is phase 3.]
 
-import { writeFileSync, renameSync, readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { writeFileSync, renameSync, readFileSync, existsSync, mkdirSync, unlinkSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -52,6 +52,8 @@ import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export const PULSE_PATH = join('runs', 'dashboard', 'live.json');
+/** Where the side-car sampler writes the card's readings for the whole run. One file, appended. */
+export const TELEMETRY_PATH = join('runs', 'dashboard', 'telemetry.jsonl');
 export const PAGE_PATH = join('assets', 'dashboard', 'sweep.html');
 export const FONT_PATH = join('assets', 'fonts', 'DSEG7Classic-Regular.woff2');
 export const LOGO_PATH = join('assets', 'logo', 'kago-logo.webp');
@@ -334,9 +336,23 @@ export function clearPulse(path = PULSE_PATH) {
  *
  * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
  */
+export const FINISHED_GRACE_MS = 60_000;
+
 export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
   const p = readPulse(path);
-  if (!p) {
+  // A FINISHED RUN STOPS BEING THE CURRENT RUN. The owner, opening the window long after one ended:
+  // «поднялось на ПРОГОН ОСТАНОВЛЕН - баг». He is right — his rule is «состояние ТЕКУЩЕГО прогона»,
+  // and a run that ended ten minutes ago is not current, however honestly its ending is described.
+  //
+  // The grace exists because the opposite mistake is just as bad: wiping the result the instant a run
+  // finishes hides the ending from the person who was watching for it. So the finish is shown for a
+  // minute — long enough to read — and after that the window says what is true: nothing is running.
+  const finishedAgeMs = p?.run?.finished && Number.isFinite(Date.parse(p.at)) ? nowMs - Date.parse(p.at) : 0;
+  const staleFinish = p?.run?.finished === true && finishedAgeMs > FINISHED_GRACE_MS;
+  if (!p || staleFinish) {
+    const tail = staleFinish
+      ? `прогона сейчас нет · последний («${p.run.state}») завершён ${Math.round(finishedAgeMs / 60_000)} мин назад`
+      : 'прибор пуст — ни один прогон сейчас не идёт';
     return {
       kind: 'kago-run-pulse',
       noRun: true,
@@ -352,7 +368,7 @@ export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
         bandFromMhz: null, bandToMhz: null,
         coverage: { closed: 0, total: null, rungs: 0 },
         verdicts: { 'edge-found': 0, 'lever-limited': 0 },
-        lastEvent: '', note: 'прибор пуст — ни один прогон сейчас не идёт', finished: false, ok: null,
+        lastEvent: '', note: tail, finished: false, ok: null,
       },
       card: {
         clockMhz: null, voltageMv: null, tempC: null, fanPct: null, powerW: null,
@@ -362,7 +378,42 @@ export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
   }
   const stampedMs = Date.parse(p.at);
   const ageMs = Number.isFinite(stampedMs) ? Math.max(0, nowMs - stampedMs) : 0;
-  return { ...p, noRun: false, ageMs };
+  // THE CARD'S OWN READINGS, MERGED FROM THE SEPARATE SAMPLER. The owner: «лсд дисплеи мертвые,
+  // ничего не показывают - баг» — and they were, on the live path, by construction: the sweep is
+  // blocked inside the burn and cannot sample its own card (`ideas/06` §A). Only a process that is
+  // NOT blocked can, so one runs alongside for the whole sweep and the server reads its last line.
+  // Merged HERE rather than pushed by the run, because the run is precisely the thing that is busy.
+  const card = latestTelemetry();
+  return { ...p, noRun: false, ageMs, card: card ? { ...p.card, ...card } : p.card };
+}
+
+/** The freshest sample the side-car sampler has written, or `null`. Read-only, never throws. */
+export function latestTelemetry(path = TELEMETRY_PATH, maxAgeMs = 15_000) {
+  try {
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, 'utf8');
+    const lines = raw.trimEnd().split('\n');
+    for (let i = lines.length - 1; i >= 0 && i > lines.length - 4; i--) {
+      let rec = null;
+      try { rec = JSON.parse(lines[i]); } catch { continue; }      // a torn last line is normal
+      const s = rec?.sample ?? rec;
+      if (!s) continue;
+      const at = Date.parse(rec?.at ?? s?.at ?? '');
+      if (Number.isFinite(at) && Date.now() - at > maxAgeMs) return null;   // stale is not a reading
+      const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+      return {
+        clockMhz: num(s['clocks.gr']),
+        tempC: num(s['temperature.gpu']),
+        fanPct: num(s['fan.speed']),
+        powerW: num(s['power.draw.instant'] ?? s['power.draw']),
+        underLoad: num(s['utilization.gpu']) > 50,
+        synthetic: false,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // =================================================================================================
@@ -666,6 +717,46 @@ export async function selfTest() {
   check('ПУСТОЙ ПРИБОР — ЭТО СОСТОЯНИЕ «ПРОГОНА НЕТ», а не тишина и не тревога',
     empty.noRun === true && empty.run.state === 'ПРОГОНА НЕТ' && empty.run.finished === false,
     JSON.stringify({ noRun: empty.noRun, state: empty.run.state }));
+
+  // — `bugs/14`: ЗАВЕРШЁННЫЙ ПРОГОН ПЕРЕСТАЁТ БЫТЬ ТЕКУЩИМ. Владелец: «поднялось на ПРОГОН
+  //   ОСТАНОВЛЕН - баг». Отсрочка есть, чтобы не отнять у смотрящего сам финал.
+  //   АДРЕСАТЫ: AH. показывать финал вечно → «ЗАВЕРШЁННЫЙ ПРОГОН СТАРЕЕТ» ·
+  //   AI. стирать финал сразу → «свежий финал ПОКАЗЫВАЕТСЯ».
+  {
+    const finBox = join('runs', 'dashboard-selftest-fin');
+    const finPath = join(finBox, 'live.json');
+    clearPulse(finPath);
+    const fp = openPulse({ path: finPath, probeSeconds: 10, now: () => '2026-08-16T10:00:00+03:00' });
+    fp.finish({ ok: true });
+    const t0 = Date.parse('2026-08-16T10:00:00+03:00');
+    const justFinished = pulseNow(finPath, t0 + 5_000);
+    check('свежий финал ПОКАЗЫВАЕТСЯ — тот, кто ждал результата, обязан его увидеть',
+      justFinished.noRun === false && justFinished.run.finished === true,
+      JSON.stringify({ noRun: justFinished.noRun, state: justFinished.run.state }));
+    const longFinished = pulseNow(finPath, t0 + 10 * 60_000);
+    check('ЗАВЕРШЁННЫЙ ПРОГОН СТАРЕЕТ и перестаёт быть текущим — окно говорит «прогона нет»',
+      longFinished.noRun === true && /последний/.test(longFinished.run.note),
+      JSON.stringify({ noRun: longFinished.noRun, note: longFinished.run.note }));
+    clearPulse(finPath);
+  }
+
+  // — `bugs/14`: ПОКАЗАНИЯ КАРТЫ ПРИХОДЯТ ОТ ОТДЕЛЬНОГО СЭМПЛЕРА. Владелец: «лсд дисплеи мертвые».
+  //   АДРЕСАТ: AJ. принимать протухшую пробу за показание → «ПРОТУХШАЯ ПРОБА — НЕ ПОКАЗАНИЕ».
+  {
+    const tPath = join('runs', 'dashboard-selftest-telemetry.jsonl');
+    const stamp = (iso, s) => writeFileSync(tPath, `${JSON.stringify({ at: iso, sample: s })}\n`, 'utf8');
+    stamp(new Date().toISOString(), { 'clocks.gr': 2887, 'temperature.gpu': 63, 'fan.speed': 41, 'power.draw.instant': 212.5, 'utilization.gpu': 97 });
+    const live = latestTelemetry(tPath);
+    check('ПОКАЗАНИЯ КАРТЫ читаются у отдельного сэмплера — индикаторы больше не мертвы',
+      live && live.clockMhz === 2887 && live.tempC === 63 && live.fanPct === 41 && live.powerW === 212.5 && live.underLoad === true,
+      JSON.stringify(live));
+    stamp(new Date(Date.now() - 120_000).toISOString(), { 'clocks.gr': 2887 });
+    check('ПРОТУХШАЯ ПРОБА — НЕ ПОКАЗАНИЕ: старое число на индикаторе хуже пустого',
+      latestTelemetry(tPath) === null, 'протухшая проба принята за живую');
+    check('и отсутствие сэмплера — тоже не показание, а тишина',
+      latestTelemetry(join('runs', 'нет-такого-файла.jsonl')) === null, 'придумало показание из ничего');
+    try { rmSync(tPath, { force: true }); } catch { /* ok */ }
+  }
 
   const failed = results.filter((r) => !r.ok).length;
   return { ok: failed === 0, results, failed };

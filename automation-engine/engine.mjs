@@ -4677,6 +4677,8 @@ async function mainSweep(argv, arg) {
   // rollback lives in a `finally` that a signal does not run, so the honest thing is to lean on the
   // guard that was armed BEFORE the write and is designed for exactly this — the writer dying while
   // holding the card (R9, drilled at 2.5 s). Pretending to undo here would be a second, racing undo.
+  // Set once the side-car exists; the handler is installed BEFORE it, so it asks through a ref.
+  let sideCarRef = null;
   let stopping = false;
   const onOperatorStop = (signal) => {
     if (stopping) return;
@@ -4688,6 +4690,7 @@ async function mainSweep(argv, arg) {
       console.error(`ВНИМАНИЕ: намерение закрыть не удалось (${e?.message ?? e}) — следующий запуск припишет ЗАВИС`);
     }
     console.error('');
+    try { sideCarRef?.(); } catch { /* уже мёртв */ }
     console.error(`ОСТАНОВЛЕНО ОПЕРАТОРОМ (${signal}). Закрыто незавершённых намерений: ${closed.length}.`);
     for (const o of closed) console.error(`   ${o.frequencyMhz} МГц / ${o.voltageMv} мВ — НЕ испытана, края не несёт`);
     console.error('КАРТА: её отпускает СТОРОЖ (он взведён с начала записи). Проверьте:');
@@ -4745,6 +4748,30 @@ async function mainSweep(argv, arg) {
   // «прогон оставлен» — and only later switch. The owner saw exactly that and named the rule:
   // *«визуализатор должен запускаться в АДЕКВАТНОМ СОСТОЯНИИ ОТРАЖАЮЩИМ СОСТОЯНИЕ ТЕКУЩЕГО ПРОГОНА»*.
   dash.clearPulse();
+
+  // ─── THE SIDE-CAR SAMPLER — the only thing that CAN read the card while the sweep is burning ────
+  //
+  // The owner, watching the live window: «лсд дисплеи мертвые, ничего не показывают - баг». They
+  // were, and by construction: this process blocks inside every burn (the load runs synchronously),
+  // so it cannot sample its own card for ten seconds at a stretch — the exact window in which the
+  // operator most wants to see watts and degrees. `ideas/06` §A named the remedy before the screen
+  // existed: give the readings to a process that is NOT blocked.
+  //
+  // One sampler for the WHOLE sweep, not one per rung: a per-rung sampler goes dark between rungs and
+  // leaves the readouts blinking, and it already exists for a different job (the atom's ceiling proof
+  // owns that one and keys it by rung — two consumers of one file would fight over its lifetime).
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath: toPath } = await import('node:url');
+  const samplerScript = join(dirname(toPath(import.meta.url)), 'lib', 'hardware-mon.mjs');
+  try { rmSync(dash.TELEMETRY_PATH, { force: true }); } catch { /* a stale file the server will age out anyway */ }
+  const sideCar = spawn(process.execPath, [
+    samplerScript, '--seconds', '36000', '--period', '1000', '--out', dash.TELEMETRY_PATH,
+  ], { windowsHide: true, stdio: 'ignore' });
+  sideCar.unref?.();
+  const stopSideCar = () => { try { sideCar.kill(); } catch { /* already gone */ } };
+  sideCarRef = stopSideCar;
+  console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
+
   const pulse = dash.openPulse({
     source: 'ЖИВАЯ КАРТА',
     synthetic: false,
@@ -4771,6 +4798,7 @@ async function mainSweep(argv, arg) {
     onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
   });
 
+  stopSideCar();
   pulse?.finish({ ok: report.ok, why: report.ok ? '' : report.why });
   for (const line of sweepReportLines(report)) console.log(line);
   return report.ok ? 0 : 1;
