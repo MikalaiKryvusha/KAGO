@@ -720,8 +720,17 @@ export async function runRung({
   // not a failure of the silicon — it is the instrument having measured something nobody ordered, and
   // a verdict about an unordered voltage is worse than no verdict at all.
   if (record.servingMvAfter === null) {
+    // THE EVIDENCE TRAVELS WITH THE REFUSAL (`bugs/22`). The atom MEASURED the ceiling the card
+    // actually stands at (`highestOfferedMhz`) and this message used to drop it, so the halt said
+    // what was missing and not what was there — and nothing else persists the atom's blocks, so the
+    // next session had to re-derive the whole diagnosis. A guard that cannot say WHY costs one
+    // investigation every time it fires.
+    const offered = record.atom?.undervolt?.offeredAfterMhz ?? record.atom?.highestOfferedMhz ?? null;
+    const asked = record.atom?.undervolt?.askedAtMhz ?? null;
     return close(stop('void', `ступень ${clockMhz} МГц / ${voltageMv} мВ прошла с вердиктом ${record.verdict}, но карта НЕ сказала, `
-      + 'какое напряжение обслуживало частоту после записи — отсутствие наблюдения не является наблюдением совпадения'));
+      + 'какое напряжение обслуживало частоту после записи — отсутствие наблюдения не является наблюдением совпадения'
+      + (offered === null ? ' · верх кривой после записи не измерен вовсе' : ` · кривая после записи предлагает не выше ${offered} МГц`)
+      + (asked === null ? '' : `, спрашивали о ${asked} МГц`)));
   }
   // ⚠️ WE TUNE WHAT THE CARD DELIVERS — NOW ON THE VOLTAGE AXIS TOO. The owner, 2026-08-16:
   // *«мы должны попасть в ближайшее верхнее напряжение»* · *«ближайшее верхнее из тех, которые
@@ -3316,6 +3325,21 @@ export function selfTest() {
       [aboveStockNoDepth.outcome, /ВЫШЕ СТОКА/.test(aboveStockNoDepth.why)], ['void', true]);
     const noVolt = await rungOK({ runStepFn: atom({ verdict: P, blocks: cleanUndo }) });
     ok('отсутствие наблюдения — не наблюдение совпадения', noVolt.outcome, 'void');
+    //   И ОТКАЗ НЕСЁТ УЛИКУ, А НЕ ТОЛЬКО ЖАЛОБУ (`bugs/22`). Атом ИЗМЕРИЛ верх кривой после записи, а
+    //   сообщение его выбрасывало — и поскольку блоки атома нигде не сохраняются (ни журнал, ни
+    //   live.json их не несут), каждое срабатывание стоило отдельного расследования. Утверждается
+    //   ПРИЧИНА, а не факт остановки: «встало» зелено от любого другого отказа (EXP-0075, триггер 2).
+    const noVoltWithProof = await rungOK({
+      runStepFn: atom({ verdict: P, blocks: cleanUndo,
+        undervolt: { capMhz: 2865, orderedMhz: 2872, askedAtMhz: 2865, offeredAfterMhz: 2865, after: null } }),
+    });
+    ok('ОТКАЗ НАЗЫВАЕТ ИЗМЕРЕННЫЙ ВЕРХ КРИВОЙ, а не только то, чего не хватает',
+      [noVoltWithProof.outcome,
+        /не выше 2865 МГц/.test(noVoltWithProof.why ?? 'строки отказа нет вовсе'),
+        /спрашивали о 2865 МГц/.test(noVoltWithProof.why ?? 'строки отказа нет вовсе')],
+      ['void', true, true]);
+    ok('а когда верх НЕ измерен — отказ говорит и это, вместо молчания',
+      /верх кривой после записи не измерен вовсе/.test(noVolt.why ?? 'строки отказа нет вовсе'), true);
 
     // — UNKNOWN is a STOP, and a failure is a SIGNAL rather than the edge (the owner's rule, §4.6)
     const unknown = await rungOK({ runStepFn: atom({ verdict: null, blocks: cleanUndo, reason: 'эталон просрочен' }) });

@@ -240,6 +240,34 @@ export function voltageForClock(points, clockMhz) {
 }
 
 /**
+ * WHICH CLOCK THE RE-READ ASKS ABOUT — the ordered one, or the one the card actually offers.
+ * [NOT-TESTED] at birth; the offline blocks in `--selftest` are what flip this.
+ *
+ * `bugs/22`. In the shipped shape the ceiling sits ON the frequency under test, so the raise lands
+ * the curve's top EXACTLY on it — margin 0.0 MHz, measured offline against the live factory curve at
+ * four different raises. `voltageForClock` needs a point at `mhz >= clock`; the moment the actual top
+ * comes out one grid step low, NOTHING serves the ordered clock, and a rung that PASSED is thrown
+ * away with «the card did not say which voltage served the frequency». One grid step is ≈ 4 °C of
+ * table drift (R14b), and the live log shows the table moving 23 MHz between two reads seconds apart.
+ * So the zero margin is not a tolerance that is usually enough — it is one that is never enough for
+ * long, which is why the run died at 2 frequencies of 266.
+ *
+ * The rule is the owner's, reaching its third place rather than being invented here: *«хотим заказать
+ * N, она нам выдала M — примиряемся с её выдачей и тюним то, что она нам даёт»* (`GOAL.md` → «🎚 ТЮНИМ
+ * ТО, ЧТО КАРТА ВЫДАЁТ»), already governing the document's row and the voltage axis.
+ *
+ * **It only ever asks LOWER, never higher**, and that direction is the whole safety argument: asking
+ * about a clock ABOVE the ceiling would be a verdict about a frequency the card was never allowed to
+ * reach — the `bugs/02` class. Buying the margin by raising the ceiling instead was rejected for
+ * exactly that reason. On a cold card the two numbers are equal, so no already-measured value moves.
+ */
+export function askAtClockMhz(orderedMhz, offeredAfterMhz) {
+  if (!Number.isFinite(orderedMhz) || orderedMhz <= 0) return null;
+  if (!Number.isFinite(offeredAfterMhz) || offeredAfterMhz <= 0) return orderedMhz;
+  return Math.min(orderedMhz, offeredAfterMhz);
+}
+
+/**
  * THE THREE WRITE SHAPES, NAMED — and which one a run is allowed to use.
  *
  * `bugs/02` step 1: *«The search must write the PROFILE'S OWN SHAPE… searching in the same shape the
@@ -671,12 +699,25 @@ export async function runStep({
     // the ceiling is the card's ENVELOPE (3090) while the clock under test is the LOCK (e.g. 3045).
     // Measuring at the envelope would record the voltage of a frequency nobody tested.
     const measuredAtMhz = pinMhz ?? capMhz;
-    if (measuredAtMhz && curveBefore.ok && curveAfter.ok) {
-      const vBefore = voltageForClock(curveBefore.points, measuredAtMhz);
-      const vAfter = voltageForClock(curveAfter.points, measuredAtMhz);
-      out.undervolt = { capMhz: measuredAtMhz, before: vBefore, after: vAfter,
+    // ---- WE ASK ABOUT THE CLOCK THE CARD OFFERS, NOT THE ONE WE ORDERED — `askAtClockMhz` above
+    // carries the reasoning and `bugs/22` the measurements. BOTH SIDES MOVE TOGETHER, deliberately:
+    // measuring `before` at the order and `after` at the delivered clock would compare two different
+    // frequencies and overstate the saving, because a lower clock is cheaper at stock. One clock,
+    // two readings.
+    const offeredAfterMhz = Number.isFinite(out.highestOfferedMhz) ? out.highestOfferedMhz : null;
+    const askAtMhz = askAtClockMhz(measuredAtMhz, offeredAfterMhz);
+    if (askAtMhz && curveBefore.ok && curveAfter.ok) {
+      const vBefore = voltageForClock(curveBefore.points, askAtMhz);
+      const vAfter = voltageForClock(curveAfter.points, askAtMhz);
+      const shortfallMhz = measuredAtMhz && askAtMhz < measuredAtMhz
+        ? Number((measuredAtMhz - askAtMhz).toFixed(1)) : 0;
+      out.undervolt = { capMhz: askAtMhz, orderedMhz: measuredAtMhz, askedAtMhz: askAtMhz,
+        offeredAfterMhz, shortfallMhz, before: vBefore, after: vAfter,
         savedMv: vBefore && vAfter ? Number((vBefore.mv - vAfter.mv).toFixed(3)) : null };
-      block(`АНДЕРВОЛЬТ на закреплённых ${measuredAtMhz} МГц: напряжение для этой частоты УПАЛО`,
+      const where = shortfallMhz
+        ? `${askAtMhz} МГц (заказано ${measuredAtMhz}, кривая предлагает на ${shortfallMhz} МГц меньше — спрашиваем о ВЫДАННОМ)`
+        : `${askAtMhz} МГц`;
+      block(`АНДЕРВОЛЬТ на ${where}: напряжение для этой частоты УПАЛО`,
         Boolean(vBefore && vAfter) && vAfter.mv < vBefore.mv,
         vBefore && vAfter
           ? `обслуживала точка ${vBefore.pointIndex} (${vBefore.mv} мВ) → теперь точка ${vAfter.pointIndex} (${vAfter.mv} мВ), экономия ${out.undervolt.savedMv} мВ`
@@ -1818,6 +1859,33 @@ export async function selfTest() {
     ['raise-and-cap/false', 'uniform/true']);
   ok('отказ замка не требует — требовать нечего, когда прогона не будет',
     choose(low, { pinned: false }).pinRequired, false);
+
+  // ─── О КАКОЙ ЧАСТОТЕ СПРАШИВАЕТ ПЕРЕЧИТЫВАНИЕ (`bugs/22`) ──────────────────────────────────────
+  //
+  // Живой прогон 2026-08-16 22:31 встал на 2872 МГц, закрыв 2 частоты из 266: подрезка ставит верх
+  // кривой РОВНО на потолок (замерено офлайн на живой заводской кривой при четырёх подъёмах — зазор
+  // 0,0 МГц), и одной ступени сетки хватает, чтобы обслуживающей записи не осталось вовсе.
+  //
+  // Блоки утверждают ПРИЧИНУ, а не факт остановки (EXP-0075, второй триггер): «спросили ниже» —
+  // это другое утверждение, чем «что-то вернулось».
+  ok('ХОЛОДНАЯ КАРТА: кривая отдала заказанное — спрашиваем РОВНО о заказанном, ничего не меняется',
+    askAtClockMhz(2872, 2872), 2872);
+  ok('КРИВАЯ ОТДАЛА МЕНЬШЕ ЗАКАЗАННОГО — спрашиваем о ВЫДАННОМ, иначе обслуживающей записи нет вовсе',
+    askAtClockMhz(2872, 2865), 2865);
+  ok('и ровно на одну ступень сетки — тот самый случай, что уронил прогон (7 МГц ≈ 4 °C дрейфа)',
+    [askAtClockMhz(2880, 2873), askAtClockMhz(2872, 2865)], [2873, 2865]);
+  //   НАПРАВЛЕНИЕ И ЕСТЬ ВЕСЬ ДОВОД БЕЗОПАСНОСТИ: спросить ВЫШЕ потолка значило бы вынести вердикт
+  //   о частоте, до которой карте подниматься не разрешали, — это класс `bugs/02`. Поэтому запас
+  //   куплен вопросом вниз, а НЕ поднятием потолка.
+  ok('НИКОГДА НЕ СПРАШИВАЕТ ВЫШЕ ЗАКАЗА: кривая предлагает больше — вопрос остаётся о заказанном',
+    [askAtClockMhz(2872, 2900), askAtClockMhz(2872, 3172)], [2872, 2872]);
+  //   ИЗМЕРЕНИЯ НЕТ — И ЭТО НЕ ПОВОД ПОДСТАВИТЬ ЧИСЛО. Верх не измерен → спрашиваем о заказанном,
+  //   и дальше по течению стоит штатный останов «карта не сказала». Мутация, заставляющая эту ветку
+  //   вернуть null, краснит блок ниже: тогда вопрос не задаётся вовсе и ступень гибнет молча.
+  ok('ВЕРХ НЕ ИЗМЕРЕН — вопрос о заказанном, а не выдуманное число',
+    [askAtClockMhz(2872, null), askAtClockMhz(2872, NaN), askAtClockMhz(2872, 0)], [2872, 2872, 2872]);
+  ok('ЗАКАЗА НЕТ — нет и вопроса: отсутствие частоты не подменяется верхом кривой',
+    [askAtClockMhz(null, 2865), askAtClockMhz(0, 2865)], [null, null]);
 
   return { ok: results.every((r) => r.ok), results };
 }
