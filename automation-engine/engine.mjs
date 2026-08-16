@@ -4999,6 +4999,12 @@ async function mainSweep(argv, arg) {
   sideCar.unref?.();
   const stopSideCar = () => { try { sideCar.kill(); } catch { /* already gone */ } };
   sideCarRef = stopSideCar;
+  // ВТОРОЙ СЛОЙ: гасим на ЛЮБОМ выходе процесса, а не только на предусмотренных. `finally` покрывает
+  // возврат и исключение, обработчик сигналов — Ctrl+C; `exit` ловит всё остальное, включая
+  // `process.exit()` из чужого кода и необработанное отклонение промиса. На Windows дочерний процесс
+  // НЕ умирает вместе с родителем, поэтому «мы же вышли» здесь ничего не гарантирует. Тот же приём,
+  // что у окна наблюдения выше, и по той же причине.
+  process.on('exit', stopSideCar);
   console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
 
   const pulse = dash.openPulse({
@@ -5009,7 +5015,9 @@ async function mainSweep(argv, arg) {
   });
   console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
 
-  const report = await sweepRange({
+  let report;
+  try {
+    report = await sweepRange({
     curveDoc: doc,
     points,
     fromMhz,
@@ -5030,9 +5038,16 @@ async function mainSweep(argv, arg) {
     runStepFn: (a) => vf.runStep(a),
     saveFn: async (d) => saveCurveDoc(d),
     onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
-  });
+    });
+  } finally {
+    // ⚠️ В `finally`, А НЕ ПОСЛЕ ВЫЗОВА. Раньше сэмплер гасился строкой ниже `sweepRange`, то есть
+    // ТОЛЬКО на удачном пути: любое исключение из развёртки оставляло его жить — а он опрашивает
+    // карту раз в секунду и запущен на ДЕСЯТЬ ЧАСОВ (`--seconds 36000`). Владелец увидел следы
+    // такого мусора в системе («какие-то терминалы открытыми в ОС остаются после тебя»), и это
+    // ровно тот класс: процесс, переживший то, ради чего его завели.
+    stopSideCar();
+  }
 
-  stopSideCar();
   pulse?.finish({ ok: report.ok, why: report.ok ? '' : report.why });
   for (const line of sweepReportLines(report)) console.log(line);
   return report.ok ? 0 : 1;

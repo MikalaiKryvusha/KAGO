@@ -1282,9 +1282,23 @@ async function main(argv) {
     return r.ok ? 0 : 1;
   }
 
+  // УБОРКА ЗА СОБОЙ — ОДНОЙ КОМАНДОЙ, И ОНА УБИРАЕТ ОБЕ ПОЛОВИНЫ. Прежде `--close` гасил только
+  // окно и оставлял сервер жить на порту: следующий подъём натыкался на него, а владелец видел
+  // процесс, которому нечего делать. Половинчатая уборка хуже отсутствующей — она создаёт
+  // уверенность, что убрано.
   if (argv.includes('--close')) {
     const gone = closeWindow();
-    console.log(gone.closed.length ? `ОКНО: закрыто (${gone.closed.join(', ')})` : 'ОКНО: закрывать было нечего');
+    console.log(gone.closed.length ? `ОКНО:   закрыто (${gone.closed.join(', ')})` : 'ОКНО:   закрывать было нечего');
+    const port = Number(((i) => (i >= 0 && argv[i + 1] ? argv[i + 1] : DEFAULT_PORT))(argv.indexOf('--port')));
+    const probe = await probeDashboard(port);
+    if (!probe.alive) { console.log(`СЕРВЕР: на ${port} никого — гасить нечего`); return 0; }
+    if (!probe.ours) { console.log(`СЕРВЕР: ${port} занят НЕ нашим дашбордом — не трогаю`); return 0; }
+    const pid = findListenerPid(port);
+    if (!pid) { console.log(`СЕРВЕР: наш дашборд на ${port} есть, но процесс не опознан — вслепую не снимаю`); return 1; }
+    killPid(pid);
+    console.log(await waitPortFree(port)
+      ? `СЕРВЕР: снят (pid ${pid}), порт ${port} свободен`
+      : `СЕРВЕР: pid ${pid} снят, но порт ${port} ещё занят — проверьте вручную`);
     return 0;
   }
 
@@ -1297,6 +1311,12 @@ async function main(argv) {
   console.log('         Ctrl+C — закрыть сервер И окно.');
   // A server that dies leaving its window up is the `bugs/04` shape: the picture stays on screen,
   // frozen, and looks exactly like the hang this instrument exists to report.
+  // ЛЮБОЙ ВЫХОД, А НЕ ТОЛЬКО Ctrl+C. Прежде ловились лишь сигналы, поэтому жёсткое завершение
+  // (`process.exit`, необработанное отклонение, закрытие терминала) оставляло на рабочем столе
+  // владельца ОКНО БРАУЗЕРА, которому нечего показывать: сервер мёртв, картинка застыла — форма
+  // `bugs/04` и ровно тот мусор, на который он указал («какие-то терминалы открытыми в ОС остаются
+  // после тебя»). `exit` синхронен, а `closeWindow` синхронен по построению — значит он успевает.
+  process.on('exit', () => { try { closeWindow(); } catch { /* уже закрыто */ } });
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, () => { closeWindow(); s.close(); process.exit(0); });
   }
