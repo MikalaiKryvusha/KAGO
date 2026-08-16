@@ -46,7 +46,8 @@
     "contract": "node automation-engine/lib/seam-contract.mjs",
     "measure": "node automation-engine/lib/bench-measure.mjs",
     "dashboard": "node automation-engine/lib/run-dashboard.mjs",
-    "bench": "node automation-engine/lib/bench-run.mjs"
+    "bench": "node automation-engine/lib/bench-run.mjs",
+    "tidy": "node tools/tidy.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
