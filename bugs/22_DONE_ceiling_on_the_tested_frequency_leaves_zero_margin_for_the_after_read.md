@@ -1,6 +1,6 @@
 # Bug 22 — the ceiling sits ON the tested frequency, so the AFTER re-read has ZERO margin and the sweep halts as soon as the card warms
 
-**Status:** 🔴 OPEN
+**Status:** ✅ DONE — fixed `dda17a6`, and the live run walked straight past the halt point
 **Version/build:** `main` @ `fbe0e78` · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-16 22:29–22:31 +03:00, the live sweep
 `engine --sweep --from 2887 --to 900 --max-depth 100 --dashboard`. Halted after **2 closed
@@ -126,7 +126,19 @@ mutation removes — `find(...)?.x ?? '<what was missing, in words>'`.
 
 ## Decisions made without the owner
 
-<filled at closing>
+- **The margin was bought by asking LOWER, not by raising the ceiling.** Both restore the run; only
+  one keeps the verdict about a frequency the card was allowed to reach. Raising the ceiling is the
+  `bugs/02` shape — a number recorded about 2842 while the card ran at ~3400 — and it was rejected
+  for that reason and not for cost.
+- **Both sides of the undervolt measurement move together.** Measuring `before` at the order and
+  `after` at the delivered clock would compare two different frequencies and overstate the saving,
+  because a lower clock is cheaper at stock. One clock, two readings.
+- **`voltageForClock` was NOT relaxed.** Making it return «the nearest point in either direction»
+  would answer a question nobody asked, with a voltage for a clock the card never reached. The
+  decision moved OUT of the lookup into a named function instead, so the lookup keeps its meaning.
+- **The halt still halts when the answer is genuinely absent.** The fix removes the false absences,
+  not the guard: an unmeasured ceiling falls back to the ordered clock and the stop downstream is
+  untouched (its own block, mutation c).
 
 ## Links
 
@@ -138,3 +150,25 @@ mutation removes — `find(...)?.x ?? '<what was missing, in words>'`.
 - `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` R11 (a ceiling must be held by something), R14b (the table
   slides along the frequency axis with temperature), R16c (plan and run are one computation).
 - `EXPERIENCE.md` EXP-0082 — a snapshot of something that moves is a lie that grows with the run.
+
+## ✅ STATUS: DONE (2026-08-16 23:4x +03:00)
+
+Fixed in `dda17a6`. `askAtClockMhz(ordered, offered) = min(ordered, offered)` — extracted as a pure
+exported function so the decision is provable without a card. 6 blocks in `vf-step --selftest`
+(29 → 35) and 2 in `engine --selftest` (241 → 243) for the evidence carried in the halt message.
+
+**Mutation-proved, addressees named BEFORE the run; each reddened its own block, the intact code
+reddened none:** (a) always ask about the ordered clock — the pre-fix behaviour → 3 blocks ·
+(b) always take the offered clock even when higher → «никогда не спрашивает выше» · (c) an
+unmeasured ceiling kills the question → «верх не измерен» · (d) a missing order falls back to the
+ceiling → «заказа нет — нет и вопроса» · (e) the halt message drops the evidence → both evidence
+blocks.
+
+**VERIFIED LIVE, which is what closes it rather than the suite.** The same command that halted at
+2872 MHz with 2 frequencies of 266 was re-run after the fix and walked straight past that point,
+closing 2872 → 965 mV and continuing down the band. The halt did not recur.
+
+**What this does NOT claim:** the individual mechanism that put the actual top below the ceiling
+(drift · grid snap · offset granularity) was never isolated, and does not need to be — with a
+designed margin of exactly zero any of them produces the halt, and the fix is correct under all
+three. The measurement that matters is the one in this document: **gap to cap 0.0 MHz.**

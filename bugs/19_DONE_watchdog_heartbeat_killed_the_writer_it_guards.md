@@ -1,6 +1,6 @@
 # Bug 19 — the watchdog's heartbeat killed the live sweep it was guarding (EPERM on rename, Windows)
 
-**Status:** 🔴 OPEN
+**Status:** ✅ DONE — fixed `c5f2717`, verified by reading the shipped code 2026-08-16 23:2x
 **Version/build:** `main` @ `dce8007` · driver 610.88 / VBIOS 98.03.58.40.8b · Node v24.15.0 · Windows 11 Pro 10.0.26200
 **When/context:** 2026-08-16 ≈16:5x +03:00, during the first full-range live sweep
 (`engine --sweep --from 2887 --to 900 --max-depth 50 --dashboard`). Killed the run at 41 burns of 94.
@@ -98,7 +98,16 @@ caller reads `beat()`'s return today, so no caller changes.
 
 ## Decisions made without the owner
 
-<filled at closing>
+- **`beat()` fails soft, `arm()` still throws — the two verbs were split rather than made uniform.**
+  The alternative (make everything in the module soft) would have let a risky write proceed with no
+  armed guard, which is the opposite defect. Chosen because arming is a PRECONDITION of the write
+  while renewing is a lease, and only the lease has a safe failure direction.
+- **The rename is retried rather than replaced.** A different transport (a lock-free append, a
+  separate lease file) would remove the collision entirely, but it changes the format the detached
+  guard reads — a bigger blast radius for a defect whose direction was the real fault.
+- **No new emergency stop was added for repeated beat failures.** The deadline already on disk is
+  that stop: if renewals keep failing the lease expires and the guard restores the card, which is
+  precisely the mechanism this bug had been short-circuiting.
 
 ## Links
 
@@ -106,3 +115,17 @@ caller reads `beat()`'s return today, so no caller changes.
   layers and the list-not-chain rule that made this crash land safely).
 - `bugs/03`, `bugs/07` — the two hangs the watchdog exists for. This is the inverse case.
 - `bugs/18` — found in the same session; unrelated mechanism, same session's work.
+- `bugs/20` — the SECOND defect this crash produced: the death it caused was then blamed on the card.
+- `EXPERIENCE.md` EXP-0084 — the reusable lesson (a safety mechanism's failure path must point the
+  same way as its purpose).
+
+## ✅ STATUS: DONE (2026-08-16 23:2x +03:00)
+
+Fixed in `c5f2717`. **Closed on evidence rather than on the relay's word:** the shipped
+`watchdog.mjs` was re-read at closing time and carries all three parts — `beat()` returns `false`
+inside a `catch` instead of throwing (line ~232), the reasoning sits at the definition, and `arm()`
+is untouched and still throws. 3 blocks, 3 mutations.
+
+**What is deliberately NOT claimed:** the EPERM race itself has not been re-observed in the wild
+since — it fired once in ~400 beats. What is proven is the RESPONSE to it, which is the honest thing
+to test: the race is not schedulable, the reaction is.

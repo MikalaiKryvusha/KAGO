@@ -73,10 +73,31 @@ export const CURVE_STATUS = Object.freeze({
   EDGE_FOUND: 'edge-found',
   /** Held the long burn — one minute since his amendment of 2026-08-15. */
   LONG_BURN_PROVED: 'long-burn-proved',
-  /** The ±1000 MHz lever ran out BEFORE the silicon did: no LOWER voltage can be made to serve this
-   *  frequency at all. **Not an edge**, and it must never be reported as one — measured, 45 mV of
+  /** The ±1000 MHz offset range ran out BEFORE the silicon did: no LOWER voltage can be made to serve
+   *  this frequency at all, because the entry holding it would have to be shifted further than the
+   *  driver accepts. **Not an edge**, and it must never be reported as one — measured, 45 mV of
    *  headroom at 1700 MHz against 245 at 2842 (`researches/09` §3.3). */
   LEVER_LIMITED: 'lever-limited',
+  /** THE RUN'S OWN CONDITION STOPPED THE DESCENT — `--max-depth`, the operator's ceiling — while the
+   *  offset range still had room. **A different fact about the world, and it used to be recorded as
+   *  the one above.**
+   *
+   *  Why this had to become its own status rather than stay prose: on 2026-08-17 the owner read a
+   *  finished run and asked what «предел рычага» meant, because **54 of the 54 rows closed that night
+   *  carried it and NOT ONE of them had hit the offset range** — every single one stopped at his own
+   *  −100 mV. The `provenBy` witness said so literally («остановлено НАШИМ потолком глубины 100 мВ
+   *  (… достаёт до −170 мВ)»), and the STATUS beside it said the opposite. A reader who trusts the
+   *  status concludes the card cannot go lower; the truth is that we chose not to look.
+   *
+   *  It had been noticed the day before and left alone because «the vocabulary is CLOSED». That was
+   *  the wrong reading of a good rule: the vocabulary is closed against ACCIDENTAL values — an unknown
+   *  status is refused by name — not against correcting a statement that is false. A closed vocabulary
+   *  containing a lie is worse than an open one, because the closure is what makes readers trust it.
+   *
+   *  ⚠️ NOT a third VERDICT. The owner settled that a frequency has two («край найден» / «предел
+   *  рычага», `plans/13`), and that decision is untouched: this is the DOCUMENT's record of what
+   *  stopped the descent, which is a different question from what the run concluded. */
+  DEPTH_CAPPED: 'depth-capped',
 });
 
 const STATUS_VALUES = Object.freeze(Object.values(CURVE_STATUS));
@@ -163,8 +184,13 @@ export function summarize(doc) {
   const rows = doc.frequencies ?? [];
   const by = Object.fromEntries(STATUS_VALUES.map((s) => [s, 0]));
   for (const r of rows) by[r.status] = (by[r.status] ?? 0) + 1;
+  // `depth-capped` counts as CLOSED for the same reason `lever-limited` does: the frequency carries a
+  // measured voltage that held a burn. What differs is only WHY the descent stopped, and coverage is
+  // a question about measurements, not about stopping reasons — omitting it here would have made the
+  // honesty fix cost 54 rows of coverage, i.e. punished the truth.
   const closed = rows.filter((r) => r.status === CURVE_STATUS.EDGE_FOUND
-    || r.status === CURVE_STATUS.LEVER_LIMITED || r.status === CURVE_STATUS.LONG_BURN_PROVED).length;
+    || r.status === CURVE_STATUS.LEVER_LIMITED || r.status === CURVE_STATUS.DEPTH_CAPPED
+    || r.status === CURVE_STATUS.LONG_BURN_PROVED).length;
   const savedMv = rows.reduce((n, r) => n + Math.max(0, (r.stockVoltageMv ?? 0) - (r.voltageMv ?? 0)), 0);
   const tuned = rows.filter((r) => Number.isFinite(r.stockVoltageMv) && r.voltageMv < r.stockVoltageMv);
   return {

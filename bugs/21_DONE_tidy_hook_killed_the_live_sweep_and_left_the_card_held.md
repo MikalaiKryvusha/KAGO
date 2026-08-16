@@ -1,6 +1,6 @@
 # Bug 21 — the tidy hook killed the live sweep after every agent turn and left the card under an undervolt
 
-**Status:** 🔧 fix pending live verification
+**Status:** ✅ DONE — fixed `ac861b5`; **the missing live observation was taken 2026-08-16 22:5x**
 **Version/build:** `main` @ `2fac685` · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-16 ≈17:2x +03:00. The resumed full-range sweep died a second time, with
 NO exception and NO stack — the tell that a process was killed rather than thrown.
@@ -90,12 +90,25 @@ DEAD owner is deliberately NOT «busy» — that is a wreck, not work, and it be
   ОКНА ТЕРМИНАЛА: ни одного`), which is the half that proves the fix is a discriminator and not an
   off switch.
 
-**Still open:** the fix has not yet survived a real turn boundary with a real sweep running. That is
-the observation only the next live run can give, and it is why the status is 🔧 rather than ✅.
+**~~Still open:~~ TAKEN 2026-08-16 22:5x — the observation only a live run could give.** A sweep
+(`engine --sweep --from 2887 --to 900 --max-depth 100 --dashboard`) ran for the whole of an
+interactive session while the agent took **many turns**, so the `Stop` hook fired after each one with
+the run's own dashboard server and `hardware-mon` sampler alive the entire time. The sweep kept
+closing frequencies throughout and was never touched. **This is the discriminator working on the
+exact input that used to kill it** — and it could not be obtained any other way, because the fixture
+tests prove the FUNCTION while only a real turn boundary proves the WIRING.
 
 ## Decisions made without the owner
 
-<filled at closing>
+- **The entry points are matched by a NAMED list rather than by a generic «is it one of ours»
+  heuristic.** A heuristic would have to be conservative to be safe, and a conservative cleanup tool
+  is a tool that stops cleaning — which is how the terminal-window complaint (`bugs/17`) would have
+  come back. The list is asserted by name in the suite, so deleting an entry point reddens a block.
+- **`--dry-run` is excluded from «work in flight».** It writes nothing and raises nothing, so treating
+  it as busy would block tidying for the one command that leaves no litter.
+- **An armed record with a DEAD owner is deliberately NOT «busy».** That is a wreck, not work, and
+  calling it busy would leave a held card held — the failure this whole area exists to prevent.
+  Tidy names it out loud and proceeds; clearing it belongs to `watchdog --recover`.
 
 ## Links
 
@@ -105,3 +118,17 @@ the observation only the next live run can give, and it is why the status is �
   which is exactly what that rule and R9 exist to prevent.
 - `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` R9/R10 — the four rollback layers; this incident is the
   case where the writer's `finally` never ran because the process was killed outright.
+
+## ✅ STATUS: DONE (2026-08-16 23:3x +03:00)
+
+Fixed in `ac861b5` — `runInFlight()`, a pure function checked before any destructive action, on two
+independent POSITIVE signals. 13 blocks, four mutations, each reddening its own block.
+
+**Closed only when the live observation existed**, and it did not exist at the time of the fix: the
+run described above survived many real turn boundaries with its dashboard server and telemetry
+sampler alive — the exact processes the tool used to kill. The status stayed 🔧 for that gap on
+purpose, which is the practice worth keeping: «the fixture proves the function, the boundary proves
+the wiring».
+
+**The reusable lesson is `EXPERIENCE.md` EXP-0086** — a cleanup tool must tell its own litter from
+its own WORK, and the discriminator must be POSITIVE. Second self-infection in the life of one file.

@@ -1851,7 +1851,14 @@ export async function sweepRange({
     const inheritFloorMhz = Math.min(g.bottomMhz, rowMhz.mhz);
 
     // ---- THE DOCUMENT, BEFORE THE NEXT FREQUENCY. Validated first, saved atomically second.
-    const status = outcome.verdict === 'edge-found' ? CURVE_STATUS.EDGE_FOUND : CURVE_STATUS.LEVER_LIMITED;
+    // WHAT STOPPED THE DESCENT IS RECORDED AS WHAT IT WAS. The run already knows
+    // (`plan.cappedByOperator`); until 2026-08-17 it dropped that knowledge on the way to the
+    // document and wrote «предел рычага» over a stop that was OUR condition. The owner read a
+    // finished run and asked what that meant — 54 rows of 54 carried it, none had touched the offset
+    // range. See `CURVE_STATUS.DEPTH_CAPPED` for the full account.
+    const status = outcome.verdict === 'edge-found'
+      ? CURVE_STATUS.EDGE_FOUND
+      : (outcome.plan?.cappedByOperator ? CURVE_STATUS.DEPTH_CAPPED : CURVE_STATUS.LEVER_LIMITED);
     const closed = closePoint(doc, {
       mhz: rowMhz.mhz,
       voltageMv: outcome.voltageMv,
@@ -2061,7 +2068,15 @@ export function sweepReportLines(report) {
   lines.push(`РАЗВЁРТКА${report.bandLabel ? ` «${report.bandLabel}»` : ''}: ступеней ${report.groupCount}, `
     + `частот в полосе ${report.frequenciesInBand}`);
   lines.push(`ПОКРЫТИЕ: закрыто ${report.closed} из ${report.frequenciesInBand} (${pct(report.closed, report.frequenciesInBand)})`);
-  lines.push(`ВЕРДИКТЫ: край найден ${report.verdicts['edge-found']} · предел рычага ${report.verdicts['lever-limited']}`);
+  // «ПРЕДЕЛ РЫЧАГА» РАЗДЕЛЁН НА ДВЕ РАЗНЫЕ ПРИЧИНЫ В ПЕЧАТИ (`CURVE_STATUS.DEPTH_CAPPED`). Одно
+  // число над двумя несовместимыми фактами — «карте ниже нельзя» и «мы решили не смотреть» — это
+  // ровно то, на чём владелец споткнулся 2026-08-17. Слово «рычаг» тоже убрано: это метафора агента,
+  // а не термин, и владелец сказал прямо, что она ему ничего не объясняет.
+  const cappedCount = report.cappedFrequencies ?? 0;
+  const leverCount = Math.max(0, (report.verdicts['lever-limited'] ?? 0) - cappedCount);
+  lines.push(`ВЕРДИКТЫ: край найден ${report.verdicts['edge-found']}`
+    + ` · остановлено НАШИМ потолком глубины ${cappedCount}`
+    + ` · упёрлось в предел сдвига ±1000 МГц ${leverCount}`);
   lines.push(`ЗАТРАВКА: отвергнута ${report.seedRejections} раз(а) — это ЗАМЕР монотонности на этом кремнии, а не сбой прогона`);
   // THE ORDER-vs-OBSERVATION LINE. Printed even when it is zero, because «нисколько не разошлось» is
   // itself a finding about the card — and a line that appears only on divergence teaches the reader
@@ -4521,6 +4536,16 @@ export function selfTest() {
         const l = sweepReportLines(sagged);
         return [l.some((x) => x.includes('ЗАКАЗ ↔ ВЫДАЧА: разошлись на 2')), l.some((x) => x.includes('2842→2835'))];
       })(), [true, true]);
+    // ДВЕ ПРИЧИНЫ ОСТАНОВКИ РАЗДЕЛЕНЫ В ПЕЧАТИ, И МЕТАФОРА УБРАНА (`CURVE_STATUS.DEPTH_CAPPED`).
+    // Одно число над двумя несовместимыми фактами — «карте ниже нельзя» и «мы решили не смотреть» —
+    // ввело владельца в заблуждение 2026-08-17 на готовом прогоне, где ВСЕ 54 строки несли первое,
+    // а на деле были вторым. Блок утверждает ОБА присутствия и ОТСУТСТВИЕ слова «рычаг»: проверять
+    // только появление нового текста мало — старый мог остаться рядом.
+    ok('ПЕЧАТЬ РАЗДЕЛЯЕТ ДВЕ ПРИЧИНЫ ОСТАНОВКИ и не называет ни одну «рычагом»',
+      (() => {
+        const l = sweepReportLines(sagged).join('\n');
+        return [/остановлено НАШИМ потолком глубины/.test(l), /предел сдвига ±1000 МГц/.test(l), /предел рычага/.test(l)];
+      })(), [true, true, false]);
     // THE WITNESS CARRIES BOTH NUMBERS — a row that says only its own frequency cannot be audited
     // later against what was actually asked for.
     ok('свидетель строки несёт И ЗАКАЗ, И ВЫДАЧУ',
