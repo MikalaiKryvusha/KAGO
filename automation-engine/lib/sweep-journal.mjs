@@ -81,6 +81,26 @@ export const RUNG_OUTCOME = Object.freeze({
   // The trap suite's T5 kills a real process mid-rung and demands exactly that, and it stays the
   // proof that this addition narrowed nothing.
   STOPPED: 'operator-stop',
+  // THE WRITER DIED OF ITS OWN SOFTWARE FAULT — the THIRD preimage of «no verdict was written»
+  // (`bugs/20`). The inference `hung` is built on one world: a freeze hard enough to need the reset
+  // button takes the process and the page cache with it, so no verdict CAN be written. That is true,
+  // and it is the whole content of the inference — but «no verdict» is produced by three worlds, not
+  // one, and only the FIRST of them genuinely cannot write:
+  //
+  //   the machine froze / was reset   → the process is gone with the OS   → `hung`, correct
+  //   the operator pressed stop       → alive at the handler              → `operator-stop` (bugs/14)
+  //   the writer threw and died       → ALIVE at the top-level handler    → this
+  //
+  // It fired for real on 2026-08-16: `bugs/19`'s EPERM killed the sweep, Windows kept running, the
+  // card read clean seconds later — and the next launch printed «ЗАВИС: 2542 МГц / 895 мВ», i.e. a
+  // measurement of silicon that nobody performed. Two such phantoms are on disk. The direction is
+  // conservative (the ratchet only ever raises), which is why this is a defect and not an emergency —
+  // but it is the false-`[TESTED]` class exactly, and it feeds the one emergency brake the owner left.
+  //
+  // ⚠️ WHAT MUST NOT CHANGE WITH IT, and it is the same line `operator-stop` had to hold: a process
+  // that dies WITHOUT writing this is STILL a hang. This closes an intent only where the process
+  // survived long enough to tell the truth.
+  CRASHED: 'writer-crash',
 });
 
 /**
@@ -307,6 +327,53 @@ export function closeAsOperatorStop(journal, { at = null, signal = null, io = {}
 }
 
 /**
+ * THE WRITER DIED OF ITS OWN FAULT — close what is in flight as OUR crash, not as the card hanging.
+ * `bugs/20`.
+ *
+ * The sibling of `closeAsOperatorStop` above, and it exists for the same structural reason: the
+ * journal's rule «an intent with no verdict means the card hung» is a GOOD rule, so every actor that
+ * can leave an intent open without the card being at fault must close it itself. Each preimage is
+ * shut at its own source; the inference keeps the one world it was actually built for.
+ *
+ * Called from the sweep's top-level catch AND from `uncaughtException` / `unhandledRejection`, which
+ * is why it must be idempotent: `orphanIntents` returns nothing once the intents are closed, so a
+ * second call is a no-op rather than a duplicate line.
+ *
+ * Synchronous on purpose, exactly as the operator-stop path is: a handler that awaits may never
+ * finish before the process leaves, and a half-written closure looks like a hang with extra steps.
+ *
+ * ⚠️ **It does NOT weaken the hang path**, and that is the property mutation (c) exists to hold: a
+ * process killed outright never reaches any handler, its intent stays orphaned, and the next launch
+ * closes it `ЗАВИС` exactly as before.
+ *
+ * @returns {Array} the intents closed, in the order found
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function closeAsWriterDeath(journal, { at = null, error = null, io = {} } = {}) {
+  const { records } = readJournal(journal, io);
+  const orphans = orphanIntents(records);
+  // THE EXCEPTION IS NAMED, not summarised as «an error». A future session reading this line is
+  // diagnosing OUR defect, and the class of the throw is the first thing it needs (`bugs/19` was
+  // `EPERM: operation not permitted, rename` — the whole diagnosis is in those four words).
+  const named = error === null ? 'причина не названа'
+    : (error?.stack?.split('\n')[0] ?? error?.message ?? String(error));
+  for (const o of orphans) {
+    writeVerdict(journal, {
+      seq: o.seq,
+      at,
+      outcome: RUNG_OUTCOME.CRASHED,
+      verdict: null,
+      why: `ПРОГОН УМЕР СВОЕЙ СМЕРТЬЮ, А НЕ ПО ВИНЕ КАРТЫ: ступень ${o.frequencyMhz} МГц / `
+        + `${o.voltageMv} мВ была в полёте, когда писатель упал — ${named}. Это НЕ зависание машины `
+        + 'и НЕ вердикт о напряжении: ступень не испытана, края не несёт, в аварийную остановку '
+        + '«два подряд» не считается. Дефект наш, и чинить его надо там, где он брошен',
+    }, io);
+  }
+  return orphans;
+}
+
+/**
  * WHAT HAPPENED AT EACH RUNG, IN ORDER — the join between intents and their verdicts.
  *
  * @returns {Map<string, Array<{seq, outcome, frequencyMhz, voltageMv}>>}
@@ -497,6 +564,58 @@ export function selfTest() {
     // — the journal speaks the owner's coordinates: frequency and voltage, never a table index
     ok('ключ ступени — ЧАСТОТА и НАПРЯЖЕНИЕ, а не индекс записи таблицы',
       rungKey({ frequencyMhz: 2842, voltageMv: 1000, pointIndex: 90 }), '2842/1000');
+
+    // ─── СВОЯ СМЕРТЬ ПИСАТЕЛЯ — НЕ ЗАВИСАНИЕ КАРТЫ (`bugs/20`) ────────────────────────────────
+    //
+    // Третий прообраз «вердикта не написано»: процесс ЖИВ у обработчика верхнего уровня, значит
+    // может сказать правду — и обязан. 2026-08-16 не сказал, и в документ уехали два выдуманных
+    // отказа (2542 МГц / 895 мВ и 2775 МГц / 965 мВ), то есть замер кремния, которого никто не делал.
+    //
+    // ⚠️ Всюду `?.` и проговорённая заглушка: утверждение, разыменовывающее ровно то, что убирает
+    // мутация, БРОСАЕТ вместо покраснения и уносит весь отчёт (EXP-0075, шесть страйков).
+    const j5 = openJournal({ dir: join(sandbox, 'writer-death') });
+    writeIntent(j5, { ...rung, seq: 1 });
+    const died = closeAsWriterDeath(j5, {
+      at: '2026-08-16T17:05:00+03:00',
+      error: new Error('EPERM: operation not permitted, rename'),
+    });
+    ok('СВОЯ СМЕРТЬ ЗАКРЫВАЕТ НАМЕРЕНИЕ САМА — иначе следующий запуск припишет её карте',
+      [died.length, orphanIntents(readJournal(j5).records).length], [1, 0]);
+    const dv = readJournal(j5).records.find((r) => r.state === 'verdict');
+    ok('и исход НЕ «завис»: у ступени свой класс, потому что виноват НЕ кремний',
+      dv?.outcome ?? 'строки вердикта нет вовсе', RUNG_OUTCOME.CRASHED);
+    //   ⚠️ СРАВНЕНИЕ НЕ ЧЕРЕЗ `?? заглушка`: `null ?? x` возвращает x, то есть такое утверждение не
+    //   отличает «поля нет» от «поле пустое» и зелено в обоих случаях. Заглушка нужна только на
+    //   случай отсутствия САМОЙ СТРОКИ, а пустоту поля проверяем нестрогим сравнением.
+    ok('вердикта о напряжении при этом НЕТ — ступень не испытана',
+      dv === undefined ? 'строки вердикта нет вовсе' : (dv.verdict == null), true);
+    //   ИСКЛЮЧЕНИЕ НАЗВАНО. Диагноз `bugs/19` целиком помещался в четыре слова его сообщения;
+    //   строка, говорящая «упал с ошибкой», стоила бы следующей сессии отдельного расследования.
+    ok('ПРИЧИНА НАЗВАНА ДОСЛОВНО, а не сведена к «упал с ошибкой»',
+      /EPERM: operation not permitted, rename/.test(dv?.why ?? 'строки вердикта нет вовсе'), true);
+    //   И ГЛАВНОЕ, РАДИ ЧЕГО ОТДЕЛЬНЫЙ КЛАСС: единственный аварийный тормоз владельца считает
+    //   ТОЛЬКО настоящие зависания. Кормить его нашими падениями значило бы блокировать здоровую
+    //   ступень на здоровой карте.
+    const j6 = openJournal({ dir: join(sandbox, 'crash-twice') });
+    writeIntent(j6, { ...rung, seq: 1 });
+    closeAsWriterDeath(j6, { at: '2026-08-16T17:05:00+03:00', error: new Error('раз') });
+    writeIntent(j6, { ...rung, seq: 2 });
+    closeAsWriterDeath(j6, { at: '2026-08-16T17:06:00+03:00', error: new Error('два') });
+    ok('ДВЕ СВОИ СМЕРТИ ПОДРЯД НЕ БЛОКИРУЮТ СТУПЕНЬ — тормоз только за настоящие зависания',
+      blockedRungs(readJournal(j6).records).length, 0);
+    //   ⚠️ И ТО, ЧТО ЭТА ПРАВКА НЕ ИМЕЛА ПРАВА СУЗИТЬ: процесс, убитый наотмашь, не доходит ни до
+    //   какого обработчика, его намерение остаётся сиротой, и следующий запуск закрывает его ЗАВИС.
+    const j7 = openJournal({ dir: join(sandbox, 'still-hangs') });
+    writeIntent(j7, { ...rung, seq: 1 });
+    const stillHung = closeHangs(j7, { at: '2026-08-16T17:07:00+03:00' });
+    ok('НАСТОЯЩЕЕ ЗАВИСАНИЕ ПО-ПРЕЖНЕМУ ЗАВИС: правка закрыла свой прообраз, а не чужой',
+      [stillHung.length, readJournal(j7).records.find((r) => r.state === 'verdict')?.outcome ?? 'строки нет'],
+      [1, RUNG_OUTCOME.HUNG]);
+    //   ИДЕМПОТЕНТНОСТЬ: зовётся и из catch, и из uncaughtException — второй вызов обязан быть
+    //   пустым, иначе одна смерть напишет две строки и исказит счёт.
+    const again = closeAsWriterDeath(j5, { at: '2026-08-16T17:08:00+03:00', error: new Error('снова') });
+    ok('ПОВТОРНЫЙ ВЫЗОВ ПУСТ: одна смерть — одна строка, сколько бы обработчиков её ни поймало',
+      [again.length, readJournal(j5).records.filter((r) => r.state === 'verdict').length], [0, 1]);
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });

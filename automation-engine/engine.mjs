@@ -72,7 +72,7 @@ import {
 import {
   writeIntent, writeVerdict,
   openJournal, readJournal, orphanIntents, resumeState, SWEEP_DIR,
-  closeAsOperatorStop, RUNG_OUTCOME,
+  closeAsOperatorStop, closeAsWriterDeath, RUNG_OUTCOME,
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
@@ -5097,6 +5097,34 @@ async function mainSweep(argv, arg) {
   process.once('SIGTERM', () => onOperatorStop('SIGTERM'));
   process.once('SIGBREAK', () => onOperatorStop('SIGBREAK'));
 
+  // THE PATHS THAT DO NOT PASS THROUGH THE `catch` BELOW (`bugs/20`). A throw inside a callback the
+  // sweep did not await — a timer, a stream's 'error', a detached promise — never reaches the
+  // try/catch around `sweepRange`, and Node ends the process. The intent stays orphaned and the next
+  // launch blames the card. `bugs/19` died on exactly such a path.
+  //
+  // ⚠️ THE HANDLER MUST NOT TURN A CRASH INTO A SILENT CONTINUE, which is what installing an
+  // `uncaughtException` listener does by default: it REPLACES Node's own «print the stack and exit
+  // non-zero». So this one does that job itself, out loud, and exits — the record is closed honestly,
+  // the failure is still a failure. Swallowing it would be a worse defect than the one being fixed.
+  const onWriterDeath = (err, kind) => {
+    if (stopping) return;
+    stopping = true;
+    let closed = [];
+    try { closed = closeAsWriterDeath(journal, { at: localIso(), error: err }); } catch (e2) {
+      console.error(`ВНИМАНИЕ: намерение закрыть не удалось (${e2?.message ?? e2}) — следующий запуск припишет ЗАВИС`);
+    }
+    try { sideCarRef?.(); } catch { /* уже мёртв */ }
+    console.error('');
+    console.error(`ПРОГОН УПАЛ СВОЕЙ ОШИБКОЙ (${kind}), А НЕ ПО ВИНЕ КАРТЫ. Закрыто намерений: ${closed.length}.`);
+    for (const o of closed) console.error(`   ${o.frequencyMhz} МГц / ${o.voltageMv} мВ — НЕ испытана, края не несёт`);
+    console.error(err?.stack ?? String(err));
+    console.error('КАРТА: её отпускает СТОРОЖ (взведён с начала записи). Проверьте:');
+    console.error('   npm run watchdog -- --status   ·   npm run nvapi -- --curve');
+    process.exit(1);
+  };
+  process.once('uncaughtException', (e) => onWriterDeath(e, 'uncaughtException'));
+  process.once('unhandledRejection', (e) => onWriterDeath(e, 'unhandledRejection'));
+
   // THE WATCH WINDOW, OPT-IN (`plans/20`, `ideas/06`). Off by default on purpose: the sweep must stay
   // useful with no window at all — it runs for hours and survives reboots, and an observation
   // instrument is never a condition of the work. What this flag wires is ONE direction — events out,
@@ -5232,6 +5260,19 @@ async function mainSweep(argv, arg) {
     saveFn: async (d) => saveCurveDoc(d),
     onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
     });
+  } catch (e) {
+    // OUR OWN DEATH IS NOT THE CARD'S (`bugs/20`). The process is ALIVE here — that is the entire
+    // difference from a hang, and it is what makes this closure possible at all. Leaving the intent
+    // orphaned would have the next launch print «ЗАВИС: <частота> / <напряжение>», a measurement of
+    // silicon nobody performed, against a rung that was never judged. Two such phantoms are already
+    // on disk from `bugs/19`'s crash.
+    //
+    // Rethrown, never swallowed: closing the record honestly is not the same as recovering, and a
+    // caller that stops seeing the failure is a worse defect than the one being fixed.
+    try { closeAsWriterDeath(journal, { at: localIso(), error: e }); } catch (e2) {
+      console.error(`ВНИМАНИЕ: намерение закрыть не удалось (${e2?.message ?? e2}) — следующий запуск припишет ЗАВИС`);
+    }
+    throw e;
   } finally {
     // ⚠️ В `finally`, А НЕ ПОСЛЕ ВЫЗОВА. Раньше сэмплер гасился строкой ниже `sweepRange`, то есть
     // ТОЛЬКО на удачном пути: любое исключение из развёртки оставляло его жить — а он опрашивает
