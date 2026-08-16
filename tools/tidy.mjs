@@ -83,8 +83,77 @@ function childCount(pid) {
 
 function kill(pid) { run('taskkill', ['/PID', String(pid), '/T', '/F']); }
 
+/**
+ * ПРОГОН В РАБОТЕ — И ТОГДА УБОРКА НЕ ТРОГАЕТ НИЧЕГО. `bugs/21`.
+ *
+ * Оплачено 2026-08-16: эта команда висит на хуке `Stop`, то есть отрабатывает ПОСЛЕ КАЖДОГО хода
+ * агента. Живая развёртка (`engine --sweep --dashboard`) сама поднимает сервер окна наблюдения и
+ * сам отдельный сэмплер телеметрии — то есть ровно те два процесса, которые уборка опознаёт как
+ * свой мусор. Она их сняла, `taskkill /T` унёс дерево, **и карта осталась под андервольтом**:
+ * «вся кривая +158 МГц с потолком 2775 МГц», поднятая только ручным `watchdog --recover`.
+ *
+ * Это второй раз, когда лекарство заражено болезнью: первая редакция файла звала `powershell.exe`
+ * и сама порождала окна, которые убирает. Урок один и тот же — **инструмент уборки обязан уметь
+ * отличить свой мусор от своей же работы**, и признак должен быть ПОЛОЖИТЕЛЬНЫМ, а не «кажется,
+ * это ничьё».
+ *
+ * Признаков два, и любого достаточно, потому что они закрывают разные окна времени:
+ *   · ЖИВОЙ ПРОЦЕСС ПРОГОНА — покрывает весь прогон целиком, включая паузы между ступенями;
+ *   · ВЗВЕДЁННЫЙ СТОРОЖ с живым владельцем — покрывает случай, когда прогон запущен не нами
+ *     (ярлыком, задачей, рукой владельца) и его командной строки в списке нет.
+ *
+ * Чистая функция: списки процессов и запись сторожа передаются, чтобы решение проверялось
+ * фикстурами без машины.
+ *
+ * @param {{pid:number, cmd:string}[]} nodeProcs все живые `node.exe`
+ * @param {object|null} armed запись сторожа (`watchdog.readArmed()`) или null
+ * @param {(pid:number)=>boolean} isAlive жив ли процесс с этим pid
+ * @returns {{busy:boolean, why:string}}
+ */
+export function runInFlight(nodeProcs, armed, isAlive) {
+  // Всё, что ДОЛГО ЖИВЁТ и/или ПИШЕТ В КАРТУ. Список положительный и полный: забытая здесь команда
+  // — это команда, которую уборка однажды убьёт посреди записи в GPU.
+  const MARKERS = [
+    /engine\.mjs.*--sweep/u, /engine\.mjs.*--band/u, /engine\.mjs.*--search/u,
+    /vf-step\.mjs/u, /ladder-descent\.mjs/u, /thermal-ladder\.mjs/u,
+    /fan-ladder\.mjs/u, /trap-suite\.mjs/u, /bench/u,
+  ];
+  // `--dry-run` ничего не пишет и никого не поднимает; убирать при нём законно.
+  const live = (nodeProcs ?? []).find((p) => !/--dry-run/u.test(p.cmd) && MARKERS.some((m) => m.test(p.cmd)));
+  if (live) return { busy: true, why: `идёт прогон: pid ${live.pid}` };
+
+  if (armed && Number.isInteger(armed.ownerPid) && isAlive(armed.ownerPid)) {
+    return { busy: true, why: `сторож взведён живым владельцем pid ${armed.ownerPid}: ${armed.what ?? 'не названо'}` };
+  }
+  // Взведённый сторож с МЁРТВЫМ владельцем — это не работа, это авария, и разбирает её
+  // `watchdog --recover`, а не уборка. Молчать про него нельзя, но и трогать его не наше дело.
+  return { busy: false, why: armed ? 'сторож взведён, но владелец мёртв — это работа для `watchdog --recover`' : '' };
+}
+
+/** Жив ли процесс. `process.kill(pid, 0)` не шлёт сигнала — только спрашивает у ОС. */
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
+if (process.argv.includes('--selftest')) process.exit(await selfTest());
+
 console.log(APPLY ? 'УБОРКА (--apply): закрываю найденное' : 'ОСМОТР: только показываю. Убрать — добавьте --apply');
 console.log('');
+
+// ---- 0. ПЕРВЫМ ДЕЛОМ: НЕ ИДЁТ ЛИ ПРОГОН. Раньше всего остального, потому что всё остальное —
+//         это `taskkill`, и один из его адресатов может держать карту прямо сейчас (`bugs/21`).
+{
+  const wd = await import('../automation-engine/lib/watchdog.mjs');
+  const state = runInFlight(processesNamed('node.exe'), wd.readArmed(), pidAlive);
+  if (state.busy) {
+    console.log(`ПРОГОН В РАБОТЕ — НЕ ТРОГАЮ НИЧЕГО (${state.why}).`);
+    console.log('Окно наблюдения и сэмплер телеметрии принадлежат ему, а не мусору.');
+    console.log('Брошенные окна подождут один ход: убрать их сейчас значит убить прогон.');
+    process.exit(0);
+  }
+  if (state.why) console.log(`⚠️  ${state.why}`);
+}
 
 // ---- 1. НАШИ АРТЕФАКТЫ — опознаются положительно, убираются без оговорок.
 const dash = await import('../automation-engine/lib/run-dashboard.mjs');
@@ -129,3 +198,57 @@ if (terms.length === 0) {
 
 console.log('');
 console.log(APPLY ? 'ГОТОВО.' : 'Ничего не тронуто. Убрать — `node tools/tidy.mjs --apply`');
+
+/**
+ * Самопроверка решения «трогать или не трогать» — на фикстурах, без машины и без единого `taskkill`.
+ *
+ * Проверяется ИМЕННО ЭТО решение, потому что именно оно стоило прогона: остальная часть файла
+ * перечисляет процессы и зовёт `taskkill`, и её проверяет наблюдение на живой машине.
+ */
+async function selfTest() {
+  const blocks = [];
+  const check = (name, ok, detail = '') => blocks.push({ name, ok, detail });
+  const alive = () => true;
+  const dead = () => false;
+  const P = (pid, cmd) => ({ pid, cmd });
+
+  // Каждая команда из списка маркеров обязана быть узнана — иначе однажды уборка убьёт её посреди
+  // записи в GPU. Перечислены ПОИМЁННО, а не счётчиком: счётчик остаётся зелёным, когда одну строку
+  // удалили, а другую продублировали.
+  const RUNS = [
+    ['развёртка', 'node automation-engine/engine.mjs --sweep --from 2887 --to 900 --dashboard'],
+    ['полосовой обход', 'node automation-engine/engine.mjs --band 2400,1700'],
+    ['поиск края', 'node automation-engine/engine.mjs --search --cap 2842'],
+    ['атом записи', 'node automation-engine/lib/vf-step.mjs --set --point 95'],
+    ['спуск по лестнице', 'node automation-engine/lib/ladder-descent.mjs --points 2400'],
+    ['тепловая лестница', 'node automation-engine/lib/thermal-ladder.mjs --points 2100'],
+    ['акустическая лестница', 'node automation-engine/lib/fan-ladder.mjs --period 15'],
+    ['репетиция на стенде', 'node automation-engine/lib/trap-suite.mjs --bench --from 3090'],
+  ];
+  for (const [what, cmd] of RUNS) {
+    const r = runInFlight([P(1234, cmd)], null, alive);
+    check(`узнаёт живой прогон: ${what}`, r.busy === true, r.why);
+  }
+
+  check('СУХОЙ прогон не считается работой — он ничего не пишет и никого не поднимает',
+    runInFlight([P(1, 'node automation-engine/engine.mjs --sweep --from 2887 --to 900 --dry-run')], null, alive).busy === false);
+
+  check('посторонний node не делает машину занятой',
+    runInFlight([P(2, 'node some/other/thing.mjs')], null, alive).busy === false);
+
+  check('пусто -> убирать можно', runInFlight([], null, alive).busy === false);
+
+  // Второе окно времени: прогон запущен НЕ нами, его командной строки в списке нет, но сторож взведён.
+  check('взведённый сторож с ЖИВЫМ владельцем -> не трогаем ничего',
+    runInFlight([], { ownerPid: 777, what: 'андервольт' }, alive).busy === true);
+
+  const orphan = runInFlight([], { ownerPid: 777, what: 'андервольт' }, dead);
+  check('взведённый сторож с МЁРТВЫМ владельцем -> это авария, а не работа: убирать можно, но СКАЗАТЬ',
+    orphan.busy === false && /recover/u.test(orphan.why), orphan.why);
+
+  for (const b of blocks) console.log(`  ${b.ok ? 'OK  ' : 'ПЛОХО'} ${b.name}${b.detail ? ` — ${b.detail}` : ''}`);
+  const failed = blocks.filter((b) => !b.ok).length;
+  console.log('');
+  console.log(`САМОПРОВЕРКА УБОРКИ: ${blocks.length} блоков, провалов ${failed}.`);
+  return failed === 0 ? 0 : 1;
+}
