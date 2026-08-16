@@ -82,6 +82,51 @@ export const RUN_STATE = Object.freeze({
  * @param {string} [a.band]        the band's label
  * @param {number} [a.probeSeconds] how long one stress test runs — the denominator on screen
  */
+/**
+ * IS ANYONE ACTUALLY WATCHING? — the gate a card-writing run must pass (`bugs/14`, the owner's rule
+ * *«прогоны без визуализатора ПОД СТРОГИМ ЗАПРЕТОМ»*).
+ *
+ * Answers with the number of OPEN EVENT STREAMS, which is the number of browser windows holding the
+ * page. **It deliberately does not answer «is the server up»:** on 2026-08-16 the server replied 200
+ * twice while no window had opened (an already-running Edge swallowed the request), so a server
+ * check would have waved both runs through.
+ *
+ * Read-only over loopback, and every failure mode returns `ok: false` WITH A REASON rather than
+ * throwing — a gate that crashes is a gate that stops the run for the wrong reason.
+ *
+ * @returns {Promise<{ok:boolean, viewers:number, why:string}>}
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export async function viewersWatching({ port = DEFAULT_PORT, timeoutMs = 2500, fetchFn = null } = {}) {
+  const url = `http://127.0.0.1:${port}/health`;
+  const doFetch = fetchFn ?? ((u, o) => fetch(u, o));
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await doFetch(url, { signal: ac.signal });
+    if (!r.ok) return { ok: false, viewers: 0, why: `сервер окна ответил ${r.status} на ${url}` };
+    const j = await r.json();
+    const viewers = Number(j?.viewers);
+    if (!Number.isFinite(viewers)) return { ok: false, viewers: 0, why: `сервер окна не назвал число смотрящих (${url})` };
+    return {
+      ok: true,
+      viewers,
+      why: viewers > 0
+        ? `окон на связи: ${viewers}`
+        : `сервер окна ОТВЕЧАЕТ на ${url}, но открытых окон НОЛЬ — страница ни в одном браузере не открыта`,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      viewers: 0,
+      why: `сервер окна не отвечает на ${url}: ${e?.name === 'AbortError' ? `нет ответа за ${timeoutMs} мс` : e?.message ?? e}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function openPulse({
   path = PULSE_PATH,
   source = 'прогон',
@@ -292,6 +337,20 @@ export function serve({
       const p = readPulse(pulsePath);
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(p));
+    }
+    // WHO IS ACTUALLY WATCHING — the route a run asks before it is allowed to touch the card.
+    //
+    // The owner's rule, 2026-08-16: *«прогоны без визуализатора ПОД СТРОГИМ ЗАПРЕТОМ!!! ЭТО БАГ!!!!!»*
+    // A live sweep is authorised by the operator being able to SEE it: the frozen picture is what
+    // tells him the machine hung (`ideas/06`), and without a window that signal does not exist.
+    //
+    // **`viewers` counts OPEN EVENT STREAMS, not server health**, and the difference is the whole
+    // point. Twice this day the server answered 200 while no window had opened — an already-running
+    // Edge swallowed the request — and a check on the server alone would have said «всё хорошо»
+    // both times. A browser holding `/live` is a browser with the page on screen.
+    if (url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ viewers: clients.size, pulsePath }));
     }
     if (url === '/live') {
       res.writeHead(200, {

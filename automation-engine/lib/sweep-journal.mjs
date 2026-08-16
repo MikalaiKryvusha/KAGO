@@ -68,6 +68,19 @@ export const RUNG_OUTCOME = Object.freeze({
   UNKNOWN: 'unknown',
   VOID: 'void',
   HUNG: 'hung',
+  // THE OPERATOR PRESSED STOP — and it is a SEPARATE outcome from `HUNG` for a reason the owner
+  // stated as a question the code could not answer: *«ты ни разу не протестировал твою остановку?
+  // И что это ЗАВИС напечатает!»* (2026-08-16).
+  //
+  // Until this existed, every death of the process read as «the card hung». So an operator's Ctrl+C
+  // wrote a hang into the evidence store against a rung nobody had judged — and TWO stops on one
+  // rung would have fired the single emergency brake the owner allows («две перезагрузки подряд на
+  // ОДНОЙ ступени»), blocking a rung that was never even tested.
+  //
+  // ⚠️ WHAT MUST NOT CHANGE WITH IT: a process that dies WITHOUT writing this line is still a hang.
+  // The trap suite's T5 kills a real process mid-rung and demands exactly that, and it stays the
+  // proof that this addition narrowed nothing.
+  STOPPED: 'operator-stop',
 });
 
 /**
@@ -252,6 +265,42 @@ export function closeHangs(journal, { at = null, io = {} } = {}) {
       why: `НАМЕРЕНИЕ БЕЗ ВЕРДИКТА: ступень ${o.frequencyMhz} МГц / ${o.voltageMv} мВ была в полёте, когда `
         + 'прогон перестал существовать. Значит эта ступень и повесила машину — вердикт ЗАВИС, '
         + 'первого класса наравне с SDC и CRASH (слово владельца 2026-08-15)',
+    }, io);
+  }
+  return orphans;
+}
+
+/**
+ * THE OPERATOR STOPPED THE RUN — close what is in flight as a STOP, not as a hang. `bugs/14`.
+ *
+ * Called from the sweep's signal handler, BEFORE the process leaves. That timing is the whole design:
+ * the journal's rule is «an intent with no verdict means the card hung», and it is a good rule — so
+ * the only way to keep it true is for a deliberate stop to leave a verdict behind. Nothing here
+ * infers anything; it writes what the operator did.
+ *
+ * ⚠️ **It does NOT weaken the hang path.** A process killed outright (`SIGKILL`, a real freeze, the
+ * reset button) never reaches this function, its intent stays orphaned, and the next launch closes it
+ * `ЗАВИС` exactly as before. The trap suite's T5 kills a real process and is what holds that line.
+ *
+ * Synchronous on purpose: a handler that awaits may never finish before the process exits, and a
+ * half-written stop is worse than none — it would look like a hang with extra steps.
+ *
+ * @returns {Array} the intents closed, in the order found
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function closeAsOperatorStop(journal, { at = null, signal = null, io = {} } = {}) {
+  const { records } = readJournal(journal, io);
+  const orphans = orphanIntents(records);
+  for (const o of orphans) {
+    writeVerdict(journal, {
+      seq: o.seq,
+      at,
+      outcome: RUNG_OUTCOME.STOPPED,
+      verdict: null,
+      why: `ОСТАНОВЛЕНО ОПЕРАТОРОМ${signal ? ` (${signal})` : ''}: ступень ${o.frequencyMhz} МГц / `
+        + `${o.voltageMv} мВ была в полёте, когда человек прекратил прогон. Это НЕ зависание и НЕ вердикт `
+        + 'о напряжении — ступень не испытана и края не несёт. В аварийную остановку «два подряд» не считается',
     }, io);
   }
   return orphans;
@@ -507,6 +556,6 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
 
 export default {
   SWEEP_DIR, LINE, RUNG_OUTCOME, openJournal, assertSandbox, rungKey,
-  appendLine, writeIntent, writeVerdict, readJournal, orphanIntents, closeHangs,
+  appendLine, writeIntent, writeVerdict, readJournal, orphanIntents, closeHangs, closeAsOperatorStop,
   attributions, blockedRungs, resumeState,
 };

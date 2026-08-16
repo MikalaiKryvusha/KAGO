@@ -72,6 +72,7 @@ import {
 import {
   writeIntent, writeVerdict,
   openJournal, readJournal, orphanIntents, resumeState, SWEEP_DIR,
+  closeAsOperatorStop, RUNG_OUTCOME,
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
@@ -1463,8 +1464,13 @@ export async function sweepRange({
   minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
   // THE OPERATOR'S CEILING ON DEPTH FOR THIS SITTING — `null` means «only the lever stops us».
   depthCapMv = null,
-  // THE OWNER'S ALGORITHM, STEP 7 — the card is LOCKED on the frequency under test. Default ON.
-  demandPin = true,
+  // THE WRITE SHAPE — flattened curve by default, clock lock on request. `researches/11`.
+  //
+  // ⚠️ THIS DEFAULT IS THE ONE THAT DECIDES, and it must equal `sweepDryRun`'s. It did not for one
+  // commit: `runRung` and `sweepDryRun` moved to `false` while THIS line stayed `true` and passed its
+  // value down, overriding the atom's. The live run of 2026-08-16 11:56 therefore locked the clock
+  // while the dry run the operator had read a minute earlier promised the curve — `bugs/14` defect 3.
+  demandPin = false,
   // The card's own maximum graphics clock (`frequency-grid.maxGraphicsMhz`) — the ceiling the locked
   // shape writes, so no raised point can offer above the envelope (R13, `bugs/11`).
   envelopeMhz = null,
@@ -4066,8 +4072,12 @@ export function selfTest() {
     ok('ЖИВАЯ РАЗВЁРТКА НЕ ТРЕБУЕТ ОТ СВОЕГО ЖУРНАЛА БЫТЬ ПЕСОЧНИЦЕЙ (bugs/13)',
       (() => {
         const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
-        const start = src.indexOf('async function mainSweep');
-        if (start < 0) return 'функции mainSweep в модуле НЕТ — блок потерял свой адресат';
+        // THE ANCHOR IS THE DECLARATION, newline included. Anchoring on the bare name matched THIS
+        // BLOCK'S OWN LITERAL — which sits earlier in the file — so the slice began inside the
+        // selftest and swept up every later use of the guard, including legitimate ones in fixtures.
+        // A source-reading check has to point at syntax, not at a word that also appears in itself.
+        const start = src.indexOf('\nasync function mainSweep(');
+        if (start < 0) return 'объявления mainSweep в модуле НЕТ — блок потерял свой адресат';
         const rest = src.slice(start);
         const end = rest.indexOf('\nasync function main(');
         // COMMENTS ARE STRIPPED FIRST. The paragraph above the journal line NAMES the removed call so
@@ -4099,14 +4109,33 @@ export function selfTest() {
     //   write described a shape the run would not use. `bugs/09` is exactly this, and the existing
     //   «план обещает ровно те ступени» block did not catch it because it compares RUNGS, not the
     //   holder. ADDRESSEE: give `sweepDryRun` a different `demandPin` default → this block.
+    // ⚠️ THE HOLDER ON THE RUN'S SIDE IS TAKEN FROM `sweepRange`, NOT FROM `runRung` — and that
+    // distinction is the whole reason this block exists in this form. Its first edition compared the
+    // plan against `runRung`, and it stayed GREEN through the live defect it was written to catch:
+    // the two AGREED, while `sweepRange` — the function the live command actually calls — carried a
+    // third default of its own and overrode both (`bugs/14` defect 3). A guard must interrogate the
+    // path that executes, never a neighbour that resembles it.
+    //
+    // The value is read out of the JOURNAL, because that is where the live path records what it did:
+    // same field, same writer, no second opinion.
+    const holderBox = mkdtempSync(join(tmpdir(), 'kago-holder-'));
+    let holderInRun = null;
+    try {
+      const hj = openJournal({ dir: holderBox });
+      await sweepRange({
+        curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, envelopeMhz: 3090,
+        journal: hj, buildVector: vectorCapped, runStepFn: sweepAtom(0),
+        saveFn: async () => ({ ok: true }),
+        now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      holderInRun = readJournal(hj).records.find((r) => r.state === 'intent')?.holder ?? 'намерений в журнале нет';
+    } finally {
+      rmSync(assertJournalSandbox({ dir: holderBox }), { recursive: true, force: true });
+    }
     const holderInPlan = (await sweepDryRun({
       curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, buildVector: vectorCapped,
     })).groups[0]?.holder;
-    const holderInRun = (await runRung({
-      points: tablePoints, clockMhz: 2842, voltageMv: 1000, envelopeMhz: 3090,
-      buildVector: vectorCapped, runStepFn: atom(atomPass(1000)),
-    })).holder;
-    ok('ПЛАН И ПРОГОН НАЗЫВАЮТ ОДНОГО ДЕРЖАТЕЛЯ — иначе оператор читает не тот прогон (bugs/09)',
+    ok('ПЛАН И ПРОГОН НАЗЫВАЮТ ОДНОГО ДЕРЖАТЕЛЯ — иначе оператор санкционирует не тот прогон (bugs/09, bugs/14)',
       [holderInPlan, holderInRun], ['кривая', 'кривая']);
 
     // — the resolver alone, on hostile inputs. It is the one place allowed to pick a row.
@@ -4250,6 +4279,58 @@ export function selfTest() {
       [mixed.verdict === undefined ? mixed.verdicts['edge-found'] : null,
         mixed.delivered.map((d) => [d.orderedMhz, d.rowMhz])],
       [1, [[2842, 2828]]]);
+
+    // =============================================================================================
+    // `bugs/14` — ОСТАНОВ ОПЕРАТОРА ≠ ЗАВИСАНИЕ · ОКНО НАБЛЮДЕНИЯ ЕСТЬ УСЛОВИЕ ПРОГОНА
+    //
+    // MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+    //   W. закрывать останов исходом HUNG           → «ОСТАНОВ ОПЕРАТОРА — ОТДЕЛЬНЫЙ ИСХОД»
+    //   X. считать останов в «два подряд»           → «ДВА ОСТАНОВА ПОДРЯД НЕ БЛОКИРУЮТ СТУПЕНЬ»
+    //   Y. закрывать останов только на последней    → «ЗАКРЫВАЮТСЯ ВСЕ незакрытые намерения»
+    //   Z. пропускать прогон при нуле смотрящих     → «НОЛЬ ОТКРЫТЫХ ОКОН — ЭТО ОТКАЗ»
+    //   AA. считать живой сервер за открытое окно   → «ЖИВОЙ СЕРВЕР БЕЗ ОКНА — ТОЖЕ ОТКАЗ»
+    // =============================================================================================
+    const operatorStopBox = mkdtempSync(join(tmpdir(), 'kago-stop-'));
+    try {
+      const sj = openJournal({ dir: operatorStopBox });
+      writeIntent(sj, { seq: 1, at: '2026-08-16T12:00:00+03:00', frequencyMhz: 2887, voltageMv: 960, pointIndex: 81 });
+      writeIntent(sj, { seq: 2, at: '2026-08-16T12:00:01+03:00', frequencyMhz: 2880, voltageMv: 950, pointIndex: 80 });
+      const stopped = closeAsOperatorStop(sj, { at: '2026-08-16T12:00:02+03:00', signal: 'SIGINT' });
+      const after = readJournal(sj).records.filter((r) => r.state === 'verdict');
+      ok('ОСТАНОВ ОПЕРАТОРА — ОТДЕЛЬНЫЙ ИСХОД, а не ЗАВИС (слово владельца: «и что это ЗАВИС напечатает!»)',
+        [after.map((r) => r.outcome), after.every((r) => /ОСТАНОВЛЕНО ОПЕРАТОРОМ/.test(r.why ?? ''))],
+        [[RUNG_OUTCOME.STOPPED, RUNG_OUTCOME.STOPPED], true]);
+      ok('ЗАКРЫВАЮТСЯ ВСЕ незакрытые намерения, а не только последнее',
+        stopped.map((o) => o.frequencyMhz), [2887, 2880]);
+      ok('и после останова НЕЗАКРЫТЫХ намерений не остаётся — следующий запуск ЗАВИС не припишет',
+        resumeState(sj).hung.length, 0);
+      // TWO STOPS ON ONE RUNG must not trip the emergency brake: that brake is for a rung that BROKE
+      // the machine twice, and a rung nobody tested has broken nothing.
+      writeIntent(sj, { seq: 3, at: '2026-08-16T12:01:00+03:00', frequencyMhz: 2887, voltageMv: 960, pointIndex: 81 });
+      closeAsOperatorStop(sj, { at: '2026-08-16T12:01:01+03:00', signal: 'SIGINT' });
+      ok('ДВА ОСТАНОВА ПОДРЯД НЕ БЛОКИРУЮТ СТУПЕНЬ — блокировка только за настоящие зависания',
+        resumeState(sj).blocked.length, 0);
+    } finally {
+      rmSync(assertJournalSandbox({ dir: operatorStopBox }), { recursive: true, force: true });
+    }
+
+    // — THE WINDOW GATE. Injected `fetch`, so the block proves the DECISION rather than the network.
+    {
+      const dash = await import('./lib/run-dashboard.mjs');
+      const reply = (body, ok2 = true, status = 200) => async () => ({ ok: ok2, status, json: async () => body });
+      const watching = await dash.viewersWatching({ fetchFn: reply({ viewers: 2 }) });
+      ok('ОКНО ОТКРЫТО → ворота пропускают, и число смотрящих названо',
+        [watching.ok, watching.viewers], [true, 2]);
+      // THE CASE THAT COST TWO LIVE RUNS: the server answers 200 and NOBODY is watching.
+      const noWindow = await dash.viewersWatching({ fetchFn: reply({ viewers: 0 }) });
+      ok('ЖИВОЙ СЕРВЕР БЕЗ ОКНА — ТОЖЕ ОТКАЗ: считаются открытые окна, а не здоровье сервера',
+        [noWindow.ok, noWindow.viewers, /открытых окон НОЛЬ/.test(noWindow.why)], [true, 0, true]);
+      const dead = await dash.viewersWatching({ fetchFn: async () => { throw new Error('ECONNREFUSED'); } });
+      ok('сервер не отвечает → отказ С ПРИЧИНОЙ, а не исключение наружу',
+        [dead.ok, dead.viewers, dead.why.includes('ECONNREFUSED')], [false, 0, true]);
+      ok('НОЛЬ ОТКРЫТЫХ ОКОН — ЭТО ОТКАЗ: развёртка не имеет права стартовать (слово владельца)',
+        [noWindow.viewers < 1, dead.viewers < 1], [true, true]);
+    }
 
     const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
     ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
@@ -4581,6 +4662,43 @@ async function mainSweep(argv, arg) {
   // is the one thing the owner's accepted risk depends on remembering.
   const journal = openJournal({});
 
+  // ─── A DELIBERATE STOP IS NOT A HANG, AND THE JOURNAL MUST SAY WHICH IT WAS (`bugs/14`) ─────────
+  //
+  // The owner asked the question the code could not answer: *«ты ни разу не протестировал твою
+  // остановку? И что это ЗАВИС напечатает!»* — and it would have. The journal's rule is «an intent
+  // with no verdict means the card hung», which is right for the case it exists for; the consequence
+  // nobody had covered is that an operator's Ctrl+C looked identical. Two of those on one rung would
+  // have tripped the single emergency brake the owner allows, blocking a rung never even tested.
+  //
+  // The handler is SYNCHRONOUS and short: read the journal, close whatever is in flight as a STOP,
+  // say what the card is about to do, leave. Anything awaited here may never finish.
+  //
+  // ⚠️ THE CARD IS RELEASED BY THE WATCHDOG, NOT BY THIS HANDLER, and that is deliberate. `runStep`'s
+  // rollback lives in a `finally` that a signal does not run, so the honest thing is to lean on the
+  // guard that was armed BEFORE the write and is designed for exactly this — the writer dying while
+  // holding the card (R9, drilled at 2.5 s). Pretending to undo here would be a second, racing undo.
+  let stopping = false;
+  const onOperatorStop = (signal) => {
+    if (stopping) return;
+    stopping = true;
+    let closed = [];
+    try {
+      closed = closeAsOperatorStop(journal, { at: localIso(), signal });
+    } catch (e) {
+      console.error(`ВНИМАНИЕ: намерение закрыть не удалось (${e?.message ?? e}) — следующий запуск припишет ЗАВИС`);
+    }
+    console.error('');
+    console.error(`ОСТАНОВЛЕНО ОПЕРАТОРОМ (${signal}). Закрыто незавершённых намерений: ${closed.length}.`);
+    for (const o of closed) console.error(`   ${o.frequencyMhz} МГц / ${o.voltageMv} мВ — НЕ испытана, края не несёт`);
+    console.error('КАРТА: её отпускает СТОРОЖ (он взведён с начала записи). Проверьте:');
+    console.error('   npm run watchdog -- --status   ·   npm run nvapi -- --curve');
+    console.error('ПРОДОЛЖИТЬ: та же команда — журнал знает, где остановились.');
+    process.exit(130);
+  };
+  process.once('SIGINT', () => onOperatorStop('SIGINT'));
+  process.once('SIGTERM', () => onOperatorStop('SIGTERM'));
+  process.once('SIGBREAK', () => onOperatorStop('SIGBREAK'));
+
   // THE WATCH WINDOW, OPT-IN (`plans/20`, `ideas/06`). Off by default on purpose: the sweep must stay
   // useful with no window at all — it runs for hours and survives reboots, and an observation
   // instrument is never a condition of the work. What this flag wires is ONE direction — events out,
@@ -4590,17 +4708,45 @@ async function mainSweep(argv, arg) {
   // card telemetry. On the bench the card ticks its own; here the readings must come from the
   // separate sampler process, because this one is blocked inside the burn (`ideas/06` §A). Until
   // that is wired, the four readouts on the card stay dark and the run tiles work.
-  let pulse = null;
-  if (argv.includes('--dashboard')) {
-    const dash = await import('./lib/run-dashboard.mjs');
-    pulse = dash.openPulse({
-      source: 'ЖИВАЯ КАРТА',
-      synthetic: false,
-      band: `${fromMhz}…${toMhz} МГц`,
-      probeSeconds: config.SWEEP_PROBE_SECONDS ?? 10,
-    });
-    console.log(`ДАШБОРД: прибор пишется в ${pulse.path} · окно — npm run dashboard (отдельным процессом)`);
+  // ─── THE WINDOW IS A CONDITION OF THE RUN, NOT AN OPTION (`bugs/14`, the owner's word) ──────────
+  //
+  // *«прогоны без визуализатора ПОД СТРОГИМ ЗАПРЕТОМ!!! ЭТО БАГ!!!!!»* — 2026-08-16, after a live
+  // sweep started with no window on screen for the second time that day.
+  //
+  // The reason is not comfort. When the machine hangs, the screen freezes on its last frame and the
+  // run's own output stops with it; the FROZEN PICTURE is the operator's fastest signal, and the rung
+  // it names is the point of failure (`ideas/06`). A run nobody can see removes that signal exactly
+  // when it is needed.
+  //
+  // ⚠️ THE CHECK IS «КТО-ТО СМОТРИТ», NOT «СЕРВЕР ЖИВ», and that distinction is paid for: twice this
+  // day the server answered 200 on 127.0.0.1:7311 while no window had opened at all. `/health`
+  // reports OPEN EVENT STREAMS — a browser holding one is a browser with the page on screen.
+  const dash = await import('./lib/run-dashboard.mjs');
+  const watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+  if (!watch.ok || watch.viewers < 1) {
+    console.error('ОТКАЗ: ОКНО НАБЛЮДЕНИЯ НЕ ОТКРЫТО, а развёртка пишет в карту.');
+    console.error(`       ${watch.why}`);
+    console.error('');
+    console.error('       Слово владельца 2026-08-16: «прогоны без визуализатора ПОД СТРОГИМ ЗАПРЕТОМ».');
+    console.error('       Когда машина зависает, картинка застывает — и это самый быстрый сигнал оператору,');
+    console.error('       а застывшая ступень и есть точка отказа. Без окна этого сигнала нет.');
+    console.error('');
+    console.error('       ЧТО СДЕЛАТЬ: поднять окно — `npm run dashboard` — и ДОЖДАТЬСЯ, пока страница');
+    console.error('       откроется в браузере. Проверка считает открытые окна, а не живой сервер:');
+    console.error('       сервер может отвечать, когда окна нет (так было дважды 2026-08-16).');
+    console.error('');
+    console.error('       План прогона читается без окна и карту не трогает: добавьте --dry-run.');
+    return 2;
   }
+  console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено`);
+
+  const pulse = dash.openPulse({
+    source: 'ЖИВАЯ КАРТА',
+    synthetic: false,
+    band: `${fromMhz}…${toMhz} МГц`,
+    probeSeconds: config.SWEEP_PROBE_SECONDS ?? 10,
+  });
+  console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
 
   const report = await sweepRange({
     curveDoc: doc,
