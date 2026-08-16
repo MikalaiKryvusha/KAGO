@@ -711,6 +711,110 @@ export function mulberry32(seed) {
 }
 
 // =================================================================================================
+// 2b. THE CARD'S SYNTHETIC TELEMETRY — what a monitor would read off this card (`plans/20` §4.1)
+// =================================================================================================
+//
+// WHY THIS EXISTS: the run dashboard shows four quantities on the card itself — clock, temperature,
+// fan, watts. On the owner's machine they are MEASURED by a separate sampler; on the bench there is
+// nothing to measure, and a dashboard fed with invented numbers would teach the operator to read a
+// picture that has no relation to the machine he will later watch for real.
+//
+// SO THE MODEL IS NOT INVENTED — IT IS FITTED TO THIS PROJECT'S OWN MEASUREMENTS. `STATUS.md`
+// fact 34+36 is a thermal ladder taken on the owner's card, at equilibrium (plateau detector, not a
+// transient — fact 35), four rows: 2392 MHz → 223 W / 65 °C / 54 % · 2092 → 171 / 59 / 40 ·
+// 1792 → 144 / 56 / 33 · 1492 → 128 / 55 / 30. Least squares over those four rows, with the serving
+// voltages read from the card's OWN table, gives every constant below. The selftest re-derives the
+// four rows through the whole chain and refuses a drift.
+//
+// THREE THINGS THIS MODEL IS NOT, said here so nobody quotes it as a measurement:
+//
+//  1. **It is not a prediction of the sweep's live telemetry.** The four rows were taken under
+//     Q2RTX — a game that saturates the card (fact 16) — while the sweep's stress test draws about
+//     half that envelope. The SHAPE is the owner's card; the operating point is not.
+//  2. **It is calibrated between 128 and 223 W and nowhere else.** Idle is an extrapolation, and
+//     this project has never measured its card's idle draw (EXP-0011: a value is true under the
+//     conditions it was taken). The fitted intercept `40.88 °C` happens to land on the 41…42 °C
+//     this project's runs really do start from, which is corroboration, not calibration.
+//  3. **It is not the card's failure model.** Temperature here changes no verdict: the edge is
+//     `fiction.edge` and nothing else touches it. Wiring temperature into failure would make the
+//     bench answer a question nobody has measured.
+export const TELEMETRY_MODEL = Object.freeze({
+  // P = P0 + load · k · f · V²  — the dynamic term is the physics (switching power), the intercept
+  // is everything that does not scale with it. Fitted: ±2 % on all four rows.
+  powerStaticW: 40.669,
+  powerPerMhzVolt2: 0.091223,
+  // What fraction of the dynamic term the card draws when no stress test is running. NOT MEASURED —
+  // named as a parameter rather than buried as a number, because it is the one constant here that no
+  // row of the ladder supports.
+  idleLoadFactor: 0.10,
+
+  // T∞ = T0 + c · P. The intercept is the ambient the fit lands on; the floor keeps a released card
+  // from cooling below the temperature this project's runs actually start at.
+  tempAmbientC: 40.88,
+  tempCPerWatt: 0.10733,
+  tempFloorC: 41,
+
+  // The card's own fan curve, and it IS the four rows: 55 °C → 30 % (this card's manual floor),
+  // 65 °C → 54 %, i.e. 2.4 points per degree. Nothing here is chosen.
+  fanFloorPct: 30,
+  fanAnchorC: 55,
+  fanPctPerC: 2.4,
+
+  // Inertia. A plateau took 395…753 s on the real card (fact 34+36) and a fan ramps in ~8 s
+  // (EXP-0028) — a bench that jumped straight to equilibrium would teach the operator the OPPOSITE
+  // of what he will see, and «obtained without a plateau does not count» is a rule this project pays
+  // for already (fact 35).
+  thermalTauSeconds: 120,
+  fanTauSeconds: 3,
+});
+
+/**
+ * The four rows the model is fitted to, quoted as DATA rather than folded into the constants — so a
+ * drift between `STATUS.md` fact 34+36 and this file is visible instead of silent (the shape
+ * `bench-measure.ESTIMATE` already uses for `researches/09`).
+ *
+ * Measured on the owner's card 2026-08-13/14 at EQUILIBRIUM (the plateau detector, `thermal
+ * --analyze`), stock curve, under Q2RTX. `deliveredMhz` is what the card actually ran, not what was
+ * asked of it.
+ */
+export const MEASURED_THERMAL_LADDER = Object.freeze([
+  Object.freeze({ capMhz: 2400, deliveredMhz: 2392, tempC: 65, fanPct: 54, powerW: 223, heldSeconds: 395 }),
+  Object.freeze({ capMhz: 2100, deliveredMhz: 2092, tempC: 59, fanPct: 40, powerW: 171, heldSeconds: 483 }),
+  Object.freeze({ capMhz: 1800, deliveredMhz: 1792, tempC: 56, fanPct: 33, powerW: 144, heldSeconds: 630 }),
+  Object.freeze({ capMhz: 1500, deliveredMhz: 1492, tempC: 55, fanPct: 30, powerW: 128, heldSeconds: 753 }),
+]);
+
+/**
+ * The equilibrium the card is heading for at this operating point. A pure function of clock, voltage
+ * and load — no state, so the selftest can hold it against the four measured rows directly.
+ *
+ * @param {object} a
+ * @param {number} a.clockMhz    the clock the card is delivering
+ * @param {number} a.voltageMv   the voltage SERVING that clock (read off the card, never told to it)
+ * @param {number} [a.loadFactor] 1 while a stress test runs, `idleLoadFactor` between rungs
+ * @param {number} [a.powerLimitW] the card's ceiling — a real card clamps, and so does this one
+ */
+export function telemetryEquilibrium({ clockMhz, voltageMv, loadFactor = 1, powerLimitW = null } = {}) {
+  const M = TELEMETRY_MODEL;
+  const volts = voltageMv / 1000;
+  const dynamic = M.powerPerMhzVolt2 * clockMhz * volts * volts * loadFactor;
+  const rawW = M.powerStaticW + dynamic;
+  // THE CLAMP IS NOT COSMETIC: on this card the model wants ~305 W at stock game clocks and the card
+  // is capped at 300 — which is exactly what `sw_power_cap` throttling meant when it was observed
+  // (fact 16). A model that ignored the ceiling would show the owner watts his card cannot draw.
+  const powerW = powerLimitW === null ? rawW : Math.min(rawW, powerLimitW);
+  const tempC = Math.max(M.tempFloorC, M.tempAmbientC + M.tempCPerWatt * powerW);
+  const fanPct = Math.min(100, Math.max(M.fanFloorPct, M.fanFloorPct + M.fanPctPerC * (tempC - M.fanAnchorC)));
+  return { powerW, tempC, fanPct, cappedByPowerLimit: powerLimitW !== null && rawW > powerLimitW };
+}
+
+/** One step of the first-order lag: how far `now` moves toward `target` over `dt` with constant `tau`. */
+export function approach(now, target, dtSeconds, tauSeconds) {
+  if (!(dtSeconds > 0) || !(tauSeconds > 0)) return target;
+  return now + (target - now) * (1 - Math.exp(-dtSeconds / tauSeconds));
+}
+
+// =================================================================================================
 // 3. The card itself — state, and the three behaviours it must NOT simplify away
 // =================================================================================================
 
@@ -756,6 +860,13 @@ export function virtualCard(cardProfile, {
   //
   // `burnRealSeconds: true` buys them back for a run that needs them, at their real price.
   burnRealSeconds = false,
+  // ─── THE PULSE (`plans/20` §4.3) ────────────────────────────────────────────────────────────────
+  //
+  // Called with a telemetry sample once per SIMULATED second, INCLUDING from inside a burn. That is
+  // the only place it matters: the burn is synchronous — it stands in for `spawnSync` — so the
+  // process cannot speak while it runs, and a dashboard whose animation stops for ten seconds every
+  // rung is indistinguishable from a dashboard watching a dead machine (`ideas/06` §6.2).
+  onTick = null,
 } = {}) {
   const v = validateCard(cardProfile);
   if (!v.ok) throw new Error(`виртуальная карта не поднимается на негодном профиле (поле ${v.field}): ${v.why}`);
@@ -772,6 +883,12 @@ export function virtualCard(cardProfile, {
     wanderAt: 0,
   };
   const writes = { setPowerLimit: 0, lockClocks: 0, resetClocks: 0, curveWrite: 0, curveZero: 0, curveClose: 0 };
+
+  // The card's thermal state. It starts cold — at the temperature this project's own runs start
+  // from — and it is the ONLY telemetry quantity that is remembered rather than computed: clock,
+  // voltage and watts are functions of the card's state at the instant they are asked for, while
+  // heat is a function of the state's HISTORY. That difference is the whole reason a plateau exists.
+  const thermal = { tempC: TELEMETRY_MODEL.tempFloorC, fanPct: TELEMETRY_MODEL.fanFloorPct, secondsUnderLoad: 0 };
 
   /** Where the clock is HEADED. Computed from the state, never stored beside it — two sources for
    *  one fact is how a double drifts from itself. */
@@ -1017,10 +1134,30 @@ export function virtualCard(cardProfile, {
       // The seconds, bought back on request. `Atomics.wait` and not a promise: `runBurst`'s launcher
       // is SYNCHRONOUS (it stands in for `spawnSync`), so an async sleep here would return instantly
       // and quietly lie — the shape of the seam decides the shape of the wait.
+      //
+      // SLICED INTO SECONDS, AND THAT IS THE PULSE (`plans/20` §4.3). One `Atomics.wait` of ten
+      // seconds is a process that cannot say anything for ten seconds; the same ten seconds in ten
+      // waits is a process that speaks between them. The wait is just as blocking either way — what
+      // changes is only that the telemetry a watcher needs exists at all.
       if (burnRealSeconds && seconds > 0) {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.round(seconds * 1000));
+        burning = true;
+        const sleeper = new Int32Array(new SharedArrayBuffer(4));
+        let left = seconds;
+        while (left > 0) {
+          const slice = Math.min(1, left);
+          Atomics.wait(sleeper, 0, 0, Math.round(slice * 1000));
+          left -= slice;
+          telemetry.advance(slice, { load: 1 });
+          if (onTick) onTick(telemetry.read());
+        }
+        burning = false;
       }
       const mhz = state.lock ? (targetMhz() ?? state.reportedMhz) : state.reportedMhz;
+      // THE HEAT IS SPENT WHETHER OR NOT THE SECONDS ARE. When the bench does not buy the wall clock
+      // back, the burn still happened — so the thermal model advances by the burn's own duration in
+      // one step. Otherwise a fast run would show a card that never warms up, and the operator would
+      // learn a picture the real card never shows.
+      if (!burning) telemetry.advance(seconds, { load: 1 });
       const d = this.draw({ mhz, seconds, workload });
       const launches = Math.max(1, Math.round(seconds / P.fiction.failure.perLaunchSeconds));
       const line = (checksum, distinct) => `KAGO-WORKLOAD name=${workload} checksum=${checksum} `
@@ -1055,11 +1192,87 @@ export function virtualCard(cardProfile, {
     stats: () => ({ draws, seed }),
   };
 
+  // ===============================================================================================
+  // THE TELEMETRY THE DASHBOARD IS FED FROM (`plans/20` §4.1)
+  // ===============================================================================================
+  //
+  // It reads the card the way an instrument does — from OUTSIDE, off the state that is there — and
+  // it is told nothing. Same property that makes the oracle worth having: an engine that wrote the
+  // wrong voltage is shown drawing the wrong watts, because the watts come from what the card
+  // actually serves rather than from what the caller believed it ordered.
+  let burning = false;
+
+  // THE INSTRUMENT MUST NOT PERTURB THE SYSTEM. `clockNow()` DRAINS the settle queue and advances
+  // the idle wander — that is the modelled behaviour «a read straight after a write returns the
+  // previous value», and a monitor sampling once a second would consume the very staleness the
+  // engine's next read is supposed to meet. So telemetry looks at where the clock IS HEADED, and
+  // leaves the queue for the engine.
+  const observedMhz = () => targetMhz() ?? state.reportedMhz;
+
+  const telemetry = {
+    /** One sample, as a monitor would read it. Pure with respect to the card's state. */
+    read() {
+      const clockMhz = observedMhz();
+      const voltageMv = oracle.servingVoltageMv(clockMhz);
+      const loadFactor = burning ? 1 : TELEMETRY_MODEL.idleLoadFactor;
+      const eq = telemetryEquilibrium({ clockMhz, voltageMv, loadFactor, powerLimitW: state.powerLimitW });
+      return {
+        clockMhz,
+        voltageMv,
+        // Rounded the way a card reports: whole watts and percent, tenths of a degree.
+        powerW: Math.round(eq.powerW),
+        tempC: Math.round(thermal.tempC * 10) / 10,
+        fanPct: Math.round(thermal.fanPct),
+        underLoad: burning,
+        cappedByPowerLimit: eq.cappedByPowerLimit,
+        equilibriumTempC: Math.round(eq.tempC * 10) / 10,
+        secondsUnderLoad: Math.round(thermal.secondsUnderLoad),
+        synthetic: true,      // travels WITH the sample, so nothing downstream can forget it
+      };
+    },
+
+    /** Move the card's heat forward by `dt` seconds at this load. */
+    advance(dtSeconds, { load = TELEMETRY_MODEL.idleLoadFactor } = {}) {
+      const clockMhz = observedMhz();
+      const voltageMv = oracle.servingVoltageMv(clockMhz);
+      const eq = telemetryEquilibrium({ clockMhz, voltageMv, loadFactor: load, powerLimitW: state.powerLimitW });
+      thermal.tempC = approach(thermal.tempC, eq.tempC, dtSeconds, TELEMETRY_MODEL.thermalTauSeconds);
+      // The fan chases the CARD'S CURRENT TEMPERATURE, not the equilibrium — that is what a fan
+      // curve is, and it is why a ramp is visible at all (EXP-0028: a ramping quantity has plateaus
+      // of its own, so the two lags are separate on purpose).
+      const wantPct = Math.min(100, Math.max(TELEMETRY_MODEL.fanFloorPct,
+        TELEMETRY_MODEL.fanFloorPct + TELEMETRY_MODEL.fanPctPerC * (thermal.tempC - TELEMETRY_MODEL.fanAnchorC)));
+      thermal.fanPct = approach(thermal.fanPct, wantPct, dtSeconds, TELEMETRY_MODEL.fanTauSeconds);
+      if (load >= 1) thermal.secondsUnderLoad += dtSeconds;
+      return this.read();
+    },
+
+    /**
+     * Where this operating point would settle if it were held forever — the plateau, computed.
+     *
+     * `load` is a PARAMETER and not a reading of the current state, because the useful question is
+     * usually about the other state: standing between rungs, the operator wants to know where the
+     * NEXT stress test will take the card. Defaulting it to "whatever is happening right now" made
+     * this function answer a different question depending on when it was called, and two of this
+     * file's own blocks read one answer as the other (caught 2026-08-16 03:1x).
+     */
+    equilibrium({ load = burning ? 1 : TELEMETRY_MODEL.idleLoadFactor } = {}) {
+      const clockMhz = observedMhz();
+      return telemetryEquilibrium({
+        clockMhz,
+        voltageMv: oracle.servingVoltageMv(clockMhz),
+        loadFactor: load,
+        powerLimitW: state.powerLimitW,
+      });
+    },
+  };
+
   return {
     profile: P,
     backend,
     curveBackend,
     oracle,
+    telemetry,
     seed,
     writes,
     /**
@@ -1520,6 +1733,94 @@ export async function selfTest() {
     child.died && child.finallyRan === false, JSON.stringify(child));
   check('ЗАВИС: намерение, записанное ДО обращения к карте, пережило смерть',
     child.intentSurvived, 'намерение не пережило — журнал упреждающей записи не работает');
+
+  // ---- 18b. THE SYNTHETIC TELEMETRY (`plans/20` §4.1, AC2/AC3)
+  //
+  // The load-bearing block is the first one: the model is FITTED to the owner's four measured rows,
+  // so the only honest check is to walk the whole chain — the card's own serving voltage → watts →
+  // temperature → fan — and hold the result against what the card actually did.
+  const tele = virtualCard(CARD, { settleSamples: 0, seed: 7 });
+  const ladderMiss = [];
+  for (const row of MEASURED_THERMAL_LADDER) {
+    const v = tele.oracle.servingVoltageMv(row.deliveredMhz);
+    const eq = telemetryEquilibrium({ clockMhz: row.deliveredMhz, voltageMv: v, loadFactor: 1, powerLimitW: 300 });
+    const dW = 100 * (eq.powerW - row.powerW) / row.powerW;
+    const dT = eq.tempC - row.tempC;
+    const dF = eq.fanPct - row.fanPct;
+    if (Math.abs(dW) > 3 || Math.abs(dT) > 1 || Math.abs(dF) > 2) {
+      ladderMiss.push(`${row.deliveredMhz} МГц: Вт ${eq.powerW.toFixed(1)} против ${row.powerW} (${dW.toFixed(1)} %), `
+        + `°C ${eq.tempC.toFixed(1)} против ${row.tempC} (${dT.toFixed(1)}), % ${eq.fanPct.toFixed(1)} против ${row.fanPct}`);
+    }
+  }
+  check('ТЕЛЕМЕТРИЯ: модель воспроизводит ЧЕТЫРЕ ИЗМЕРЕННЫЕ строки тепловой лестницы (факт 34+36)',
+    ladderMiss.length === 0, ladderMiss.join(' | '));
+
+  // The same property the oracle has, and for the same reason: an engine that wrote the wrong
+  // voltage must be shown drawing the wrong watts. Told a number, this would pass while measuring
+  // nothing.
+  tele.backend.lockGraphicsClocksMhz(2842, 2842);
+  const wStock = tele.telemetry.equilibrium({ load: 1 }).powerW;
+  await tele.curveBackend.writeRaiseAndCap(300, 2842, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+  const wRaised = tele.telemetry.equilibrium({ load: 1 }).powerW;
+  check('ТЕЛЕМЕТРИЯ: показания ЧИТАЮТСЯ с карты — подъём кривой удешевляет ватты на той же частоте',
+    wRaised < wStock, `со стока ${wStock.toFixed(1)} Вт, после подъёма ${wRaised.toFixed(1)} Вт`);
+
+  // The card's ceiling is real: at stock this card WANTS more than it is allowed, which is exactly
+  // what `sw_power_cap` throttling meant when it was observed live (fact 16).
+  const capped = virtualCard(CARD, { settleSamples: 0, seed: 7 });
+  capped.backend.lockGraphicsClocksMhz(2842, 2842);
+  const eqCapped = capped.telemetry.equilibrium({ load: 1 });
+  check('ТЕЛЕМЕТРИЯ: ватты упираются в потолок мощности карты, как упирается живая (факт 16)',
+    eqCapped.cappedByPowerLimit && eqCapped.powerW === 300,
+    `${eqCapped.powerW.toFixed(1)} Вт, ограничение ${eqCapped.cappedByPowerLimit}`);
+
+  // INERTIA. A plateau took 395…753 s on the real card; a bench that arrived instantly would teach
+  // the operator the opposite of what he will watch (fact 35: a transient is not an equilibrium).
+  const warm = virtualCard(CARD, { settleSamples: 0, seed: 7 });
+  warm.backend.lockGraphicsClocksMhz(2400, 2400);
+  const eqWarm = warm.telemetry.equilibrium({ load: 1 });
+  const after1s = warm.telemetry.advance(1, { load: 1 });
+  const gapAfter1s = eqWarm.tempC - after1s.tempC;
+  warm.telemetry.advance(600, { load: 1 });
+  const after10min = warm.telemetry.read();
+  check('ТЕЛЕМЕТРИЯ: плато приходит НЕ мгновенно — у карты есть тепловая инерция (факт 35)',
+    gapAfter1s > 5 && Math.abs(eqWarm.tempC - after10min.tempC) < 1,
+    `через 1 с не дошло ${gapAfter1s.toFixed(1)} °C, через 10 мин осталось ${(eqWarm.tempC - after10min.tempC).toFixed(2)} °C`);
+
+  // THE INSTRUMENT MUST NOT PERTURB THE SYSTEM: sampling telemetry must not eat the stale read the
+  // engine's next `clocks.gr` is supposed to meet (behaviour 1 of this card).
+  const quiet = virtualCard(CARD, { settleSamples: 2, seed: 7 });
+  quiet.backend.lockGraphicsClocksMhz(2400, 2400);
+  for (let i = 0; i < 5; i++) quiet.telemetry.read();
+  const staleLeft = quiet.peek().queued;
+  check('ТЕЛЕМЕТРИЯ: прибор НЕ трогает очередь чтения карты — устаревшие ответы достаются движку',
+    staleLeft === 2, `в очереди осталось ${staleLeft} из 2`);
+
+  // THE PULSE. Three real seconds are spent here on purpose — the property under test is that the
+  // process speaks WHILE it is blocked, and there is no way to observe that without blocking.
+  const ticks = [];
+  const pulsing = virtualCard(CARD, {
+    settleSamples: 0, seed: 7, burnRealSeconds: true, onTick: (s) => ticks.push(s),
+  });
+  pulsing.backend.lockGraphicsClocksMhz(2842, 2842);
+  stress.runBurst({ name: 'sdc_fma', args: [], sustainSeconds: 3, run: (b, a) => pulsing.oracle.run(b, a) });
+  check('ПУЛЬС: во время стресс-теста телеметрия приходит КАЖДУЮ СЕКУНДУ, а не после него (AC3)',
+    ticks.length >= 3 && ticks.every((t) => t.underLoad === true),
+    `тиков ${ticks.length}, под нагрузкой ${ticks.filter((t) => t.underLoad).length}`);
+  check('ПУЛЬС: тик несёт все четыре показания и метку синтетики',
+    ticks.length > 0 && ['clockMhz', 'tempC', 'fanPct', 'powerW', 'synthetic']
+      .every((k) => ticks[0][k] !== undefined && ticks[0][k] !== null),
+    JSON.stringify(ticks[0] ?? null));
+
+  // And the heat is spent even when the SECONDS are not — otherwise a fast bench run would show a
+  // card that never warms up, and the operator would learn a picture the real card never shows.
+  const fastHeat = virtualCard(CARD, { settleSamples: 0, seed: 7 });
+  fastHeat.backend.lockGraphicsClocksMhz(2842, 2842);
+  const coldC = fastHeat.telemetry.read().tempC;
+  stress.runBurst({ name: 'sdc_fma', args: [], sustainSeconds: 60, run: (b, a) => fastHeat.oracle.run(b, a) });
+  check('ПУЛЬС: без настоящих секунд прожиг всё равно НАГРЕВАЕТ карту',
+    fastHeat.telemetry.read().tempC > coldC + 1,
+    `было ${coldC} °C, стало ${fastHeat.telemetry.read().tempC} °C`);
 
   // ---- 19. nothing was written outside the sandbox (EXP-0025)
   check('ПЕСОЧНИЦА: самопроверка ничего не пишет на диск',

@@ -1,0 +1,463 @@
+// =================================================================================================
+// THE RUN DASHBOARD — the pulse a run writes, and the server a watcher reads it through
+// (`plans/20` §4.2 and §4.5, from `ideas/06`)
+// =================================================================================================
+//
+// THE OWNER'S OBSERVATION THIS EXISTS FOR: when the machine hangs, the monitor keeps showing the last
+// frame the card managed to draw, and it hangs there until Windows gives up and bugchecks. So a
+// picture that MOVES is a better hang detector than any line of console output — the operator sees
+// the movement stop, and the rung that was on screen is the rung that killed the machine.
+//
+// ─── TWO STREAMS, NEVER BLENDED ───────────────────────────────────────────────────────────────────
+//
+//   run data    — the REAL `engine.sweepRange`, through its `onEvent` seam. Not parsed from console
+//                 prose: reading a program's own printed sentences is a class this project has paid
+//                 for (EXP-0071), and the seam has existed since `plans/15` §4.5 precisely so a GUI
+//                 would never have to.
+//   card metrics— MEASURED on the owner's machine by the separate sampler; SYNTHETIC on the bench,
+//                 computed by the virtual card from its own state. The flag `synthetic` travels
+//                 INSIDE the sample, so nothing downstream can forget which it was looking at.
+//
+// ─── WHY THE SEAM IS A FILE, AND WHY THE SERVER IS ANOTHER PROCESS (`ideas/06`, variant A) ─────────
+//
+// The run BLOCKS. A stress test is a synchronous child process, so Node's event loop stands still for
+// the whole burn — a socket served from inside the run would be silent for ten seconds out of every
+// ten, i.e. exactly as silent as a dead machine. That is why the pulse is a FILE written
+// synchronously, and the server is a separate process that only reads:
+//
+//   run process ──► runs/dashboard/live.json ──► server process ──► SSE ──► the page
+//
+// A file also fails the right way. If the machine dies, the file stops changing — nobody has to
+// notice a socket has gone quiet, and no timeout has to be tuned. The gauge stops, and the page's
+// animation stops with it, because its phase is a function of the pulse and not of its own clock.
+//
+// ─── THE GAUGE IS NOT THE RECORD (R15, `ideas/06` §4) ─────────────────────────────────────────────
+//
+// This file is ONE JSON object, rewritten in place, under `runs/` and therefore never in history. It
+// has no memory and cannot acquire one. The record of what the silicon proved stays
+// `runs/sweep/journal.jsonl` — `fsync`ed before the card is touched — and a second log of the same
+// truth is exactly the shape R14a and R15 forbid. Losing a pulse costs a frame; losing a journal line
+// costs a rung.
+//
+// [TESTED: 2026-08-16 03:4x, OFFLINE · `node automation-engine/lib/run-dashboard.mjs --selftest`.
+//  The server half is exercised by the live rehearsal (`npm run bench -- --sweep --dashboard`), which
+//  is what its screenshot proves; what is NOT tested here is the LIVE sweep's `--dashboard` wiring —
+//  it has never run against a real card, and that is phase 3.]
+
+import { writeFileSync, renameSync, readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { join, dirname } from 'node:path';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+
+export const PULSE_PATH = join('runs', 'dashboard', 'live.json');
+export const PAGE_PATH = join('assets', 'dashboard', 'sweep.html');
+export const FONT_PATH = join('assets', 'fonts', 'DSEG7Classic-Regular.woff2');
+export const LOGO_PATH = join('assets', 'logo', 'kago-logo.webp');
+export const DEFAULT_PORT = 7311;
+
+/** How the run's states are NAMED to the operator. The owner's register: «прожиг» is jargon — what
+ *  actually happens is a stability stress test, and that is what the screen says (`ideas/06`). */
+export const RUN_STATE = Object.freeze({
+  STARTING: 'ПОДЪЁМ ПРОГОНА',
+  STRESS: 'ИДЁТ СТРЕСС-ТЕСТ',
+  CLOSING: 'ЗАКРЫВАЕТСЯ ЧАСТОТА',
+  DONE: 'ПРОГОН ЗАВЕРШЁН',
+  STOPPED: 'ПРОГОН ОСТАНОВЛЕН',
+});
+
+// =================================================================================================
+// 1. THE PULSE — the run's half
+// =================================================================================================
+
+/**
+ * Open the gauge for one run. Everything it writes is derived from what the engine said and what the
+ * card reported; this module invents no number of its own.
+ *
+ * @param {object} a
+ * @param {string} [a.path]        where the gauge lives
+ * @param {string} a.source        what is being tuned, in the operator's words
+ * @param {boolean} a.synthetic    are the card metrics a model? (the bench says yes, and says it out loud)
+ * @param {string} [a.band]        the band's label
+ * @param {number} [a.probeSeconds] how long one stress test runs — the denominator on screen
+ */
+export function openPulse({
+  path = PULSE_PATH,
+  source = 'прогон',
+  synthetic = false,
+  band = '',
+  probeSeconds = 10,
+  clockMs = () => Date.now(),
+  now = () => new Date().toISOString(),
+} = {}) {
+  const startedMs = clockMs();
+  const snap = {
+    kind: 'kago-run-pulse',
+    seq: 0,
+    runMs: 0,
+    at: now(),
+    run: {
+      source,
+      band,
+      state: RUN_STATE.STARTING,
+      frequencyMhz: null,
+      voltageMv: null,
+      stockVoltageMv: null,
+      depthMv: null,
+      seeded: false,
+      probe: { elapsedSeconds: 0, totalSeconds: probeSeconds },
+      coverage: { closed: 0, total: null, rungs: 0 },
+      verdicts: { 'edge-found': 0, 'lever-limited': 0 },
+      lastEvent: '',
+      note: '',
+      finished: false,
+      ok: null,
+    },
+    card: {
+      clockMhz: null, voltageMv: null, tempC: null, fanPct: null, powerW: null,
+      underLoad: false, synthetic, cappedByPowerLimit: false,
+    },
+  };
+
+  const dir = dirname(path);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const tmp = `${path}.tmp`;
+
+  const api = {
+    path,
+    snapshot: () => snap,
+
+    /**
+     * One write. SYNCHRONOUS and via a rename, and both halves matter: the run blocks, so a promise
+     * would be delivered after the hang it is meant to report; and a reader polling a half-written
+     * file would parse garbage, which a rename inside the same directory makes impossible.
+     */
+    write() {
+      snap.seq += 1;
+      snap.runMs = clockMs() - startedMs;
+      snap.at = now();
+      writeFileSync(tmp, JSON.stringify(snap), 'utf8');
+      renameSync(tmp, path);
+      return snap.seq;
+    },
+
+    /** The engine's own words. The mapping is the only interpretation this module does. */
+    event(e) {
+      if (!e || !e.kind) return;
+      const r = snap.run;
+      r.lastEvent = e.text ?? '';
+      switch (e.kind) {
+        case 'band':
+          r.coverage.total = e.frequenciesInBand ?? r.coverage.total;
+          if (e.fromMhz && e.toMhz && !r.band) r.band = `${e.fromMhz}…${e.toMhz} МГц`;
+          break;
+        case 'rung-start':
+          r.state = RUN_STATE.STRESS;
+          r.frequencyMhz = e.frequencyMhz ?? r.frequencyMhz;
+          r.voltageMv = e.voltageMv ?? r.voltageMv;
+          r.depthMv = e.depthMv ?? null;
+          r.seeded = e.seeded === true;
+          if (r.voltageMv !== null && r.depthMv !== null) r.stockVoltageMv = r.voltageMv + r.depthMv;
+          r.probe.elapsedSeconds = 0;
+          r.coverage.rungs += 1;
+          break;
+        case 'rung':
+          r.state = RUN_STATE.CLOSING;
+          break;
+        case 'closed':
+          r.coverage.closed = e.closedTotal ?? r.coverage.closed;
+          r.coverage.total = e.frequenciesInBand ?? r.coverage.total;
+          if (e.verdict && r.verdicts[e.verdict] !== undefined) r.verdicts[e.verdict] += 1;
+          break;
+        case 'seed-rejected':
+        case 'seed-accepted':
+        case 'ratchet':
+        case 'recovered':
+        case 'hang-attributed':
+          r.note = e.text ?? '';
+          break;
+        default:
+          break;
+      }
+      this.write();
+    },
+
+    /** One telemetry sample from whoever is watching the card. */
+    telemetry(sample) {
+      if (!sample) return;
+      snap.card = {
+        clockMhz: sample.clockMhz ?? null,
+        voltageMv: sample.voltageMv ?? null,
+        tempC: sample.tempC ?? null,
+        fanPct: sample.fanPct ?? null,
+        powerW: sample.powerW ?? null,
+        underLoad: sample.underLoad === true,
+        synthetic: sample.synthetic === true || synthetic,
+        cappedByPowerLimit: sample.cappedByPowerLimit === true,
+      };
+      // The stress test's own stopwatch: the sample arrives once a simulated second, and the pulse
+      // counts them rather than reading a clock — so a bench that does NOT spend the seconds still
+      // shows the progress it really made.
+      if (snap.card.underLoad) {
+        snap.run.probe.elapsedSeconds = Math.min(
+          snap.run.probe.totalSeconds,
+          Number((snap.run.probe.elapsedSeconds + 1).toFixed(1)),
+        );
+      }
+      this.write();
+    },
+
+    /** The end. A finished run must NOT look like a hung one — that is the whole point of saying so. */
+    finish({ ok = true, why = '', state = null } = {}) {
+      snap.run.finished = true;
+      snap.run.ok = ok;
+      snap.run.state = state ?? (ok ? RUN_STATE.DONE : RUN_STATE.STOPPED);
+      if (why) snap.run.note = why;
+      snap.run.probe.elapsedSeconds = 0;
+      this.write();
+    },
+  };
+
+  api.write();
+  return api;
+}
+
+/** Read the gauge. A torn or absent file is not an error — it is «no pulse», which is information. */
+export function readPulse(path = PULSE_PATH) {
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const obj = JSON.parse(raw);
+    return obj && obj.kind === 'kago-run-pulse' ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove a previous run's gauge, so a fresh watcher never shows a stale run as if it were live. */
+export function clearPulse(path = PULSE_PATH) {
+  try { if (existsSync(path)) unlinkSync(path); } catch { /* a gauge nobody can delete is still just a gauge */ }
+}
+
+// =================================================================================================
+// 2. THE SERVER — the watcher's half. It READS. It has no path to the card, the journal or the document.
+// =================================================================================================
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.woff2': 'font/woff2',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+};
+
+function sendFile(res, path, type) {
+  if (!existsSync(path)) { res.writeHead(404); res.end('нет файла: ' + path); return; }
+  const body = readFileSync(path);
+  res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+  res.end(body);
+}
+
+/**
+ * Serve the dashboard on loopback only.
+ *
+ * `127.0.0.1` is not a preference. This window watches a program that writes voltages into a graphics
+ * card; the day it grows a command channel (the owner has already asked for one — `ideas/06`), a
+ * network-reachable port would be a remote path to the card's V/F curve. The bind address is decided
+ * now, while it costs nothing.
+ */
+export function serve({
+  port = DEFAULT_PORT,
+  pulsePath = PULSE_PATH,
+  pagePath = PAGE_PATH,
+  pollMs = 200,
+  onListen = null,
+} = {}) {
+  const clients = new Set();
+  let lastSeq = -1;
+  let lastPayload = null;
+
+  const server = createServer((req, res) => {
+    const url = (req.url || '/').split('?')[0];
+    if (url === '/' || url === '/index.html') return sendFile(res, pagePath, MIME['.html']);
+    if (url === '/font.woff2') return sendFile(res, FONT_PATH, MIME['.woff2']);
+    if (url === '/logo.webp') return sendFile(res, LOGO_PATH, MIME['.webp']);
+    if (url === '/pulse') {
+      const p = readPulse(pulsePath);
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(p));
+    }
+    if (url === '/live') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+      });
+      clients.add(res);
+      // The current state immediately, so a window opened mid-run is not blank until the next tick.
+      if (lastPayload) res.write(`data: ${lastPayload}\n\n`);
+      req.on('close', () => clients.delete(res));
+      return undefined;
+    }
+    res.writeHead(404);
+    return res.end('нет такого адреса');
+  });
+
+  // POLLING, not `fs.watch`. The gauge is one small file rewritten by a rename; watching renames
+  // across platforms is a pile of special cases, and 200 ms of latency on a picture that a human
+  // watches is invisible. The simplest thing that cannot be wrong (PHILOSOPHY.md).
+  const timer = setInterval(() => {
+    const p = readPulse(pulsePath);
+    if (!p || p.seq === lastSeq) return;
+    lastSeq = p.seq;
+    lastPayload = JSON.stringify(p);
+    for (const c of clients) {
+      try { c.write(`data: ${lastPayload}\n\n`); } catch { clients.delete(c); }
+    }
+  }, pollMs);
+  timer.unref?.();
+
+  server.listen(port, '127.0.0.1', () => {
+    if (onListen) onListen(`http://127.0.0.1:${port}/`);
+  });
+
+  return {
+    server,
+    url: `http://127.0.0.1:${port}/`,
+    close() { clearInterval(timer); for (const c of clients) { try { c.end(); } catch { /* gone */ } } server.close(); },
+  };
+}
+
+/**
+ * A separate, minimalist browser window — never a tab in the owner's working browser.
+ *
+ * Lifted from the review contour (`tools/review.mjs`), including its honesty: we report the ACTION,
+ * not the outcome. Spawning the browser we found on disk does not prove the window that appears
+ * belongs to it — observed 2026-08-09, when Edge was launched and the page came up in Chrome.
+ */
+export function openWindow(url, { size = '--window-size=1180,780' } = {}) {
+  const env = process.env;
+  const candidates = [
+    ['Edge', join(env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe')],
+    ['Edge', join(env.ProgramFiles || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe')],
+    ['Chrome', join(env.ProgramFiles || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe')],
+    ['Chrome', join(env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')],
+  ];
+  for (const [name, path] of candidates) {
+    if (!path || !existsSync(path)) continue;
+    try {
+      spawn(path, [`--app=${url}`, size], { detached: true, stdio: 'ignore' }).unref();
+      return { ok: true, browser: name };
+    } catch { /* try the next one */ }
+  }
+  try {
+    spawn('cmd.exe', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    return { ok: true, browser: null };
+  } catch (e) {
+    return { ok: false, why: e?.message ?? 'окно не открылось' };
+  }
+}
+
+// =================================================================================================
+// 3. Selftest — no browser, no card, no production directories
+// =================================================================================================
+//
+// MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+//   - the gauge keeps a history instead of one object   → «ГАУГЕ: один объект, а не журнал»
+//   - `rung-start` published after the burn             → «ПУЛЬС: ступень названа ДО обращения к карте»
+//   - the sequence number stops advancing               → «ПУЛЬС: каждая запись двигает номер»
+//   - a finished run left looking live                  → «КОНЕЦ: завершённый прогон не выглядит зависшим»
+//   - the synthetic flag dropped on the way through     → «ЧЕСТНОСТЬ: метка синтетики доезжает до экрана»
+export async function selfTest() {
+  const results = [];
+  const check = (n, cond, why = '', note = '') => results.push({ n, ok: !!cond, why, note });
+
+  const dir = join('runs', 'dashboard-selftest');
+  const path = join(dir, 'live.json');
+  clearPulse(path);
+
+  let t = 0;
+  const pulse = openPulse({
+    path, source: 'самопроверка', synthetic: true, band: '2842…2800 МГц', probeSeconds: 10,
+    clockMs: () => (t += 250), now: () => '2026-08-16T03:00:00+03:00',
+  });
+
+  check('ГАУГЕ: файл появляется сразу и разбирается', readPulse(path) !== null, 'пульса нет на диске');
+
+  pulse.event({ kind: 'band', text: 'полоса', fromMhz: 2842, toMhz: 2800, frequenciesInBand: 43 });
+  pulse.event({ kind: 'rung-start', text: 'ступень', frequencyMhz: 2842, voltageMv: 995, depthMv: 50, seeded: false });
+  const afterStart = readPulse(path);
+  check('ПУЛЬС: ступень названа ДО обращения к карте — на экране частота и напряжение под тестом',
+    afterStart.run.frequencyMhz === 2842 && afterStart.run.voltageMv === 995
+    && afterStart.run.stockVoltageMv === 1045 && afterStart.run.state === RUN_STATE.STRESS,
+    JSON.stringify(afterStart.run));
+  check('ПУЛЬС: полоса даёт знаменатель покрытия', afterStart.run.coverage.total === 43,
+    `в пульсе ${afterStart.run.coverage.total}`);
+
+  const seqBefore = afterStart.seq;
+  pulse.telemetry({ clockMhz: 2842, voltageMv: 995, tempC: 61.2, fanPct: 44, powerW: 248, underLoad: true, synthetic: true });
+  pulse.telemetry({ clockMhz: 2842, voltageMv: 995, tempC: 62.0, fanPct: 45, powerW: 249, underLoad: true, synthetic: true });
+  const afterTele = readPulse(path);
+  check('ПУЛЬС: каждая запись двигает номер — по нему watcher и отличает живое от замершего',
+    afterTele.seq === seqBefore + 2, `было ${seqBefore}, стало ${afterTele.seq}`);
+  check('ПУЛЬС: секунды стресс-теста считаются по тикам карты, а не по часам',
+    afterTele.run.probe.elapsedSeconds === 2 && afterTele.run.probe.totalSeconds === 10,
+    JSON.stringify(afterTele.run.probe));
+  check('ЧЕСТНОСТЬ: метка синтетики доезжает до экрана вместе с показаниями',
+    afterTele.card.synthetic === true && afterTele.card.tempC === 62,
+    JSON.stringify(afterTele.card));
+
+  pulse.event({ kind: 'rung', text: 'ступень прошла', frequencyMhz: 2842, voltageMv: 995, outcome: 'passed' });
+  pulse.event({ kind: 'closed', text: 'частота закрыта', frequencyMhz: 2842, verdict: 'edge-found', closedTotal: 7, frequenciesInBand: 43 });
+  const afterClosed = readPulse(path);
+  check('ПОКРЫТИЕ: закрытые частоты берутся из собственного счёта прогона',
+    afterClosed.run.coverage.closed === 7 && afterClosed.run.verdicts['edge-found'] === 1,
+    JSON.stringify(afterClosed.run.coverage));
+
+  const keys = Object.keys(afterClosed);
+  check('ГАУГЕ: один объект, а не журнал — у прибора нет памяти и он не может её завести',
+    !Array.isArray(afterClosed) && !keys.includes('history') && !keys.includes('events'), keys.join(','));
+
+  pulse.finish({ ok: true });
+  const done = readPulse(path);
+  check('КОНЕЦ: завершённый прогон НЕ выглядит зависшим — он говорит, что закончился',
+    done.run.finished === true && done.run.ok === true && done.run.state === RUN_STATE.DONE,
+    JSON.stringify(done.run.state));
+
+  clearPulse(path);
+  check('ПЕСОЧНИЦА: самопроверка убирает за собой', !existsSync(path), 'файл остался');
+
+  const failed = results.filter((r) => !r.ok).length;
+  return { ok: failed === 0, results, failed };
+}
+
+// =================================================================================================
+// 4. CLI
+// =================================================================================================
+
+async function main(argv) {
+  if (argv.includes('--selftest')) {
+    const r = await selfTest();
+    for (const x of r.results) console.log(`${x.ok ? 'OK  ' : 'ПЛОХО'} ${x.n}${x.ok ? '' : `\n       причина: ${x.why}`}`);
+    console.log('');
+    console.log(r.ok ? `САМОПРОВЕРКА ДАШБОРДА: ${r.results.length} блоков, все сходятся.` : 'САМОПРОВЕРКА ДАШБОРДА: есть расхождения.');
+    return r.ok ? 0 : 1;
+  }
+
+  const arg = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+  const port = Number(arg('port', DEFAULT_PORT));
+
+  const s = serve({ port, onListen: (url) => console.log(`ДАШБОРД: ${url}`) });
+  console.log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — ни карты, ни журнала, ни документа кривой');
+  console.log(`         оно не касается. Источник — ${PULSE_PATH} (прибор, не запись).`);
+  if (!argv.includes('--no-window')) {
+    const w = openWindow(s.url);
+    console.log(w.ok
+      ? `ОКНО:    запросил отдельное окно ${w.browser ?? 'браузера по умолчанию'}. Если система открыла другим — так решила она.`
+      : `ОКНО:    не открылось (${w.why}). Адрес выше — откройте вручную.`);
+  }
+  console.log('         Ctrl+C — закрыть сервер.');
+  return new Promise(() => {});
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main(process.argv.slice(2)).then((code) => process.exit(code));
+}

@@ -1338,6 +1338,12 @@ export async function sweepRange({
 
   let doc = curveDoc;
 
+  // WHAT THE BAND IS, SAID ONCE AND UP FRONT (`plans/20` §4.2). A watcher cannot show «настроено 7 из
+  // 43» without the 43, and deriving it a second time outside this function would be a truth↔mirror
+  // pair over the very number the sweep's own coverage is counted from (R16c's lesson, cheaply).
+  say('band', `полоса ${fromMhz ?? '—'}…${toMhz ?? '—'} МГц: ступеней ${groups.length}, частот ${report.frequenciesInBand}`,
+    { fromMhz, toMhz, groupCount: groups.length, frequenciesInBand: report.frequenciesInBand });
+
   for (const g of groups) {
     // The lever's reach at THIS frequency — the wall that produces `lever-limited`, read off the
     // card's own table rather than assumed. 45 mV at 1700 MHz against 245 at 2842 is a measurement.
@@ -1353,6 +1359,12 @@ export async function sweepRange({
       minStepMv,
       onEvent,
       runRungFn: async ({ frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded }) => {
+        // THE RUNG IS ANNOUNCED BEFORE THE CARD IS TOUCHED (`ideas/06` §3, `plans/20` §4.2). A frozen
+        // screen shows the LAST thing drawn, so a rung published after its own burn would make the
+        // frozen frame accuse the PREVIOUS rung — the exact misattribution the write-ahead journal
+        // exists to prevent (§4.4). The screen is the fast signal, the journal is still the record.
+        say('rung-start', `${frequencyMhz} МГц ← ${voltageMv} мВ (глубина −${depthMv} мВ)`,
+          { frequencyMhz, voltageMv, depthMv, seeded });
         const r = await runRung({
           points, clockMhz: frequencyMhz, voltageMv,
           seconds, sustain, pinCard, canPin,
@@ -1422,7 +1434,14 @@ export async function sweepRange({
     report.closed += closed.closed;
     report.verdicts[outcome.verdict] += 1;
     report.groups.push({ ...g, ...outcome, inherited: closed.inherited.length, raised: closed.raised });
-    say('closed', closed.why, { frequencyMhz: g.topMhz });
+    say('closed', closed.why, {
+      frequencyMhz: g.topMhz,
+      verdict: outcome.verdict,
+      voltageMv: outcome.voltageMv,
+      // The coverage a watcher shows is the report's own running total, never a second count.
+      closedTotal: report.closed,
+      frequenciesInBand: report.frequenciesInBand,
+    });
   }
 
   report.doc = doc;
@@ -3921,6 +3940,27 @@ async function mainSweep(argv, arg) {
   const journal = openJournal({});
   assertJournalSandbox(journal);
 
+  // THE WATCH WINDOW, OPT-IN (`plans/20`, `ideas/06`). Off by default on purpose: the sweep must stay
+  // useful with no window at all — it runs for hours and survives reboots, and an observation
+  // instrument is never a condition of the work. What this flag wires is ONE direction — events out,
+  // to a file. It opens no port, and it gives nothing a path back to the card (R1 stands).
+  //
+  // ⚠️ WHAT IT DOES NOT DO ON THE LIVE PATH, SAID RATHER THAN LEFT TO BE DISCOVERED: it carries NO
+  // card telemetry. On the bench the card ticks its own; here the readings must come from the
+  // separate sampler process, because this one is blocked inside the burn (`ideas/06` §A). Until
+  // that is wired, the four readouts on the card stay dark and the run tiles work.
+  let pulse = null;
+  if (argv.includes('--dashboard')) {
+    const dash = await import('./lib/run-dashboard.mjs');
+    pulse = dash.openPulse({
+      source: 'ЖИВАЯ КАРТА',
+      synthetic: false,
+      band: `${fromMhz}…${toMhz} МГц`,
+      probeSeconds: config.SWEEP_PROBE_SECONDS ?? 10,
+    });
+    console.log(`ДАШБОРД: прибор пишется в ${pulse.path} · окно — npm run dashboard (отдельным процессом)`);
+  }
+
   const report = await sweepRange({
     curveDoc: doc,
     points,
@@ -3933,9 +3973,10 @@ async function mainSweep(argv, arg) {
     recover: async () => watchdog.recover(),
     runStepFn: (a) => vf.runStep(a),
     saveFn: async (d) => saveCurveDoc(d),
-    onEvent: (e) => console.log(`  ${e.text}`),
+    onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
   });
 
+  pulse?.finish({ ok: report.ok, why: report.ok ? '' : report.why });
   for (const line of sweepReportLines(report)) console.log(line);
   return report.ok ? 0 : 1;
 }

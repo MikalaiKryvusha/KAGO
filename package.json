@@ -44,7 +44,9 @@
     "vgpu": "node automation-engine/lib/virtual-gpu.mjs",
     "traps": "node automation-engine/lib/trap-suite.mjs",
     "contract": "node automation-engine/lib/seam-contract.mjs",
-    "measure": "node automation-engine/lib/bench-measure.mjs"
+    "measure": "node automation-engine/lib/bench-measure.mjs",
+    "dashboard": "node automation-engine/lib/run-dashboard.mjs",
+    "bench": "node automation-engine/lib/bench-run.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
