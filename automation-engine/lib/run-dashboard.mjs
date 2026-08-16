@@ -482,6 +482,23 @@ export function serve({
     if (url === '/' || url === '/index.html') return sendFile(res, pagePath, MIME['.html']);
     if (url === '/font.woff2') return sendFile(res, FONT_PATH, MIME['.woff2']);
     if (url === '/logo.webp') return sendFile(res, LOGO_PATH, MIME['.webp']);
+    // ⚡ ТЕЛЕМЕТРИЯ — ОТДЕЛЬНЫЙ КАНАЛ, И ЭТО СЛОВО ВЛАДЕЛЬЦА (2026-08-16): «ни анимация, ни
+    // телеметрия карточки не должны замирать ни от каких тиков» · «телеметрия всегда в реальном
+    // времени питается особым модулем телеметрии».
+    //
+    // Прежде показания ехали ВНУТРИ пульса, а пульс — это события ПРОГОНА: он молчит все десять
+    // секунд каждого прожига, потому что процесс заблокирован внутри нагрузки. То есть индикаторы
+    // застывали ровно в тот момент, ради которого их и рисовали. Источник у них другой — отдельный
+    // процесс-сэмплер, который НЕ заблокирован, — значит и канал у них должен быть свой, со своим
+    // темпом, не зависящим от хода прогона.
+    if (url === '/telemetry') {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      const live = latestTelemetry();
+      const fromPulse = readPulse(pulsePath)?.card ?? null;
+      // Один ответ, один автор: живая проба поверх того, что записал сам прогон (на стенде карту
+      // тикает виртуальная — там сэмплера нет вовсе). Страница спрашивает ОДИН адрес.
+      return res.end(JSON.stringify(live ? { ...(fromPulse ?? {}), ...live } : fromPulse));
+    }
     if (url === '/pulse') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(pulseNow(pulsePath)));
@@ -1164,6 +1181,43 @@ export async function selfTest() {
       bench.run.probe.elapsedSeconds === 3, JSON.stringify(bench.run.probe));
 
     clearPulse(livePath);
+  }
+
+  // — ТЕЛЕМЕТРИЯ ОТВЕЧАЕТ НА СВОЁМ АДРЕСЕ, НЕЗАВИСИМО ОТ ХОДА ПРОГОНА. Слово владельца: «ни
+  //   анимация, ни телеметрия карточки не должны замирать ни от каких тиков».
+  //   АДРЕСАТ: AZ. убрать маршрут /telemetry → «ПОКАЗАНИЯ КАРТЫ ОТДАЮТСЯ ОТДЕЛЬНО ОТ ПУЛЬСА».
+  {
+    const tPath = TELEMETRY_PATH;
+    const hadFile = existsSync(tPath);
+    const backup = hadFile ? readFileSync(tPath, 'utf8') : null;
+    mkdirSync(dirname(tPath), { recursive: true });
+    writeFileSync(tPath, `${JSON.stringify({
+      at: new Date().toISOString(),
+      sample: { 'clocks.gr': 2842, 'temperature.gpu': 64, 'fan.speed': 43, 'power.draw.instant': 233.5, 'utilization.gpu': 98 },
+    })}\n`, 'utf8');
+
+    const s = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
+    await new Promise((r) => { s.server.once('listening', r); });
+    const got = await new Promise((resolve) => {
+      let raw = '';
+      const req = httpRequest({ host: '127.0.0.1', port: s.server.address().port, path: '/telemetry', agent: false }, (res) => {
+        res.setEncoding('utf8');
+        res.on('data', (c) => { raw += c; });
+        res.on('end', () => resolve(raw));
+      });
+      req.on('error', () => resolve(''));
+      req.end();
+    });
+    let parsed = null;
+    try { parsed = JSON.parse(got); } catch { parsed = null; }
+    check('ПОКАЗАНИЯ КАРТЫ ОТДАЮТСЯ ОТДЕЛЬНО ОТ ПУЛЬСА — свой адрес, свой темп, ход прогона не участвует',
+      parsed && parsed.clockMhz === 2842 && parsed.tempC === 64 && parsed.fanPct === 43 && parsed.powerW === 233.5,
+      `ответ: ${got.slice(0, 160)}`);
+    s.close();
+
+    // ПЕСОЧНИЦА: продакшен-файл телеметрии возвращается как был (bugs/08 — набор не трогает улики).
+    if (backup === null) { try { rmSync(tPath, { force: true }); } catch { /* ok */ } }
+    else writeFileSync(tPath, backup, 'utf8');
   }
 
   // — ПРОСТАИВАЮЩИЙ ПОТОК ОБЯЗАН ПОДАВАТЬ ПРИЗНАКИ ЖИЗНИ. Между прогонами номер не меняется, и
