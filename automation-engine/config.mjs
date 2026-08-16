@@ -47,16 +47,40 @@ export const GUARDBAND_MIN_GRID_STEPS = 4;
 export const GUARDBAND_MIN_MILLIVOLTS = 25;
 
 /**
- * THE SHIPPED MARGIN, SETTLED BY THE OWNER 2026-08-10 21:xx — and it supersedes both numbers above as
- * the DEFAULT. His words, verbatim:
+ * 🔴 THE SHIPPED MARGIN — RE-ANCHORED BY THE OWNER 2026-08-17. THE ANCHOR IS THE LAST STABLE RUNG,
+ * NOT THE FAILURE. His words, verbatim:
+ *
+ *   *«давай исправим формулировку напряжения на котором фиксируемся — сейчас точка отказа + 10 мВ.
+ *   Переделываем на: последняя стабильная до отказа точка (соседка отказа сверху) + 5 мВ. Это
+ *   исправляет случае, где шаг был не 5 мВ, а, например, сетка позволяла только 10 мВ»*
+ *
+ * **ONE minimum grid step above the DEEPEST VOLTAGE THAT ACTUALLY PASSED.** The constant stays a STEP
+ * COUNT and the millivolts stay derived, exactly as before — on another card with another minimum
+ * step the same rule yields that card's number.
+ *
+ * ─── WHY HE IS RIGHT, AND IT IS ARITHMETIC RATHER THAN CAUTION ────────────────────────────────────
+ *
+ * This card's grid is NOT uniform: 94 intervals of 5 mV and 32 of 10 mV (measured). Where the local
+ * gap is 10 mV, the old rule collapsed to nothing:
+ *
+ *   grid … 880 · 870 · 860 …    failure at 860, last PASS at 870
+ *   old: 860 + 10 = **870** — i.e. EXACTLY the rung that passed, zero margin over proven ground
+ *   new: 870 + 5  → the next rung the card offers above 870 — a real step of cushion
+ *
+ * So the old formula silently delivered its margin only where the grid happened to be fine, and
+ * delivered NONE in the 32 places where it is coarse — and nothing in the stack said so, because the
+ * arithmetic looked identical from the failure's side. **Where the grid IS 5 mV the two rules give
+ * the SAME voltage** (last stable = failure + 5, so +5 more = failure + 10), which is why no measured
+ * number in this project moves: the edge found at 2842 MHz on 2026-08-16 ships 855 mV under both.
+ * The new rule is therefore never lower than the old one and sometimes higher — a strict correction,
+ * not a re-tuning.
+ *
+ * ─── WHAT THE PREVIOUS WORD WAS, KEPT BECAUSE THE REASONING BEHIND IT STILL BINDS ────────────────
+ *
+ * Settled 2026-08-10 21:xx, verbatim:
  *
  *   *«тогда делаем так. Если нашли шагами по 5 мВ точку отказа, то от неё вверх поднимаемся на два
  *   шага: на +10 мВ, это даст вероятностный запас стабильности.»*
- *
- * TWO measured grid steps above the observed failure. The arithmetic is not a preference: the grid
- * step is 5 mV MEASURED on the live curve (`VOLTAGE_GRID_STEP_MV`), so "two steps" is 10 mV on this
- * card and would be something else on another — which is why the constant is a STEP COUNT and the
- * millivolts are derived.
  *
  * WHY TWO AND NOT ONE, in his own reasoning: the edge is PROBABILISTIC. Measured the same evening at
  * 2842 MHz, the card both PASSED and CRASHED at the same 885 mV — so one step above a failure can sit
@@ -82,13 +106,13 @@ export const GUARDBAND_MIN_MILLIVOLTS = 25;
  *
  * ⚠️ **THEREFORE `gridStepMv` IS THE CARD'S MEASURED MINIMUM STEP (5 mV) AND NEVER A LOCAL GAP.** This
  * card's grid is not uniform — 94 intervals of 5 mV and 32 of 10 mV — and feeding a 10 mV LOCAL GAP in
- * here would silently double the owner's margin to 20 mV, which is not what he said twice. The
- * parameter exists so another CARD with a different minimum step gets its own number, not so a caller
- * can pass whatever gap happens to sit under the failure. Where the card offers no 5 mV step at all,
- * the edge is located only to the card's own resolution there — that is a limit of the hardware, to be
- * REPORTED, and it never changes the 10 mV that is added.
+ * here would silently double the owner's margin, which is not what he said. The parameter exists so
+ * another CARD with a different minimum step gets its own number, not so a caller can pass whatever
+ * gap happens to sit under the failure. Where the card offers no 5 mV step at all, the edge is located
+ * only to the card's own resolution there — that is a limit of the hardware, to be REPORTED; what the
+ * 2026-08-17 re-anchoring changed is that such a place no longer silently loses its cushion.
  */
-export const MARGIN_STEPS_ABOVE_FAILURE = 2;
+export const MARGIN_STEPS_ABOVE_LAST_STABLE = 1;
 
 /**
  * PROVISIONAL — the voltage grid step of the V/F curve.
@@ -997,29 +1021,33 @@ export function powerEnvelope(probed) {
  * millivolt figure to the owner can say honestly which half of it is an estimate.
  */
 /**
- * THE MARGIN THE OWNER SET, as millivolts on THIS card — two measured grid steps above the failure.
+ * THE MARGIN THE OWNER SET, as millivolts on THIS card — ONE measured grid step above the LAST STABLE
+ * rung (his re-anchoring of 2026-08-17; the full account is on `MARGIN_STEPS_ABOVE_LAST_STABLE`).
  *
  * Returns the number AND whether the grid step under it was measured, so a caller reporting a
  * millivolt figure can say honestly which half of it is an estimate. On this card the step is
- * measured (5 mV), so the answer is a measurement: 10 mV.
+ * measured (5 mV), so the answer is a measurement: 5 mV above the deepest voltage that passed.
  *
- * 🔴 **THE ONLY LEGAL INPUT IS A FAILURE FOUND AT 5 mV** (his binding precondition — see
- * `MARGIN_STEPS_ABOVE_FAILURE`). `gridStepMv` is the CARD'S MINIMUM step, per card, never the local
- * gap under this particular failure: passing a 10 mV gap would double his margin to 20 mV. The
- * refusal below makes that misuse impossible instead of merely discouraged.
+ * ⚠️ **THE ANCHOR IS THE CALLER'S RESPONSIBILITY AND IT IS THE PASS, NOT THE FAILURE.** This function
+ * returns only the SIZE of the cushion; adding it to the wrong number is the defect the re-anchoring
+ * removed, and the one place that adds it is `engine.refineEdge`.
+ *
+ * 🔴 `gridStepMv` is the CARD'S MINIMUM step, per card, never the local gap under this particular
+ * failure: passing a 10 mV gap would double his cushion. The refusal below makes that misuse
+ * impossible instead of merely discouraged.
  */
-export function marginAboveFailureMv(gridStepMv = VOLTAGE_GRID_STEP_MV) {
+export function marginAboveLastStableMv(gridStepMv = VOLTAGE_GRID_STEP_MV) {
   if (Number.isFinite(gridStepMv) && gridStepMv > VOLTAGE_GRID_STEP_MV) {
     throw new Error(
-      `marginAboveFailureMv: получен шаг ${gridStepMv} мВ, а минимальный измеренный шаг сетки карты — `
+      `marginAboveLastStableMv: получен шаг ${gridStepMv} мВ, а минимальный измеренный шаг сетки карты — `
       + `${VOLTAGE_GRID_STEP_MV} мВ. Похоже, сюда передали ЛОКАЛЬНЫЙ РАЗРЫВ сетки вместо шага карты: `
-      + 'это удвоило бы запас владельца до 20 мВ. Его слово — «от неё вверх поднимаемся на два шага: '
-      + 'на +10 мВ», и отказ ищется шагом 5 мВ (см. MARGIN_STEPS_ABOVE_FAILURE).',
+      + 'это удвоило бы запас владельца до 10 мВ над последней стабильной. Его слово 2026-08-17 — '
+      + '«последняя стабильная до отказа точка + 5 мВ» (см. MARGIN_STEPS_ABOVE_LAST_STABLE).',
     );
   }
   return {
-    millivolts: MARGIN_STEPS_ABOVE_FAILURE * gridStepMv,
-    steps: MARGIN_STEPS_ABOVE_FAILURE,
+    millivolts: MARGIN_STEPS_ABOVE_LAST_STABLE * gridStepMv,
+    steps: MARGIN_STEPS_ABOVE_LAST_STABLE,
     gridStepMv,
     gridStepIsMeasured: VOLTAGE_GRID_STEP_IS_MEASURED,
   };
@@ -1038,7 +1066,7 @@ export function guardbandMillivolts(gridStepMv = VOLTAGE_GRID_STEP_MV) {
 export default Object.freeze({
   GUARDBAND_MIN_GRID_STEPS,
   GUARDBAND_MIN_MILLIVOLTS,
-  MARGIN_STEPS_ABOVE_FAILURE,
+  MARGIN_STEPS_ABOVE_LAST_STABLE,
   VOLTAGE_GRID_STEP_MV,
   VOLTAGE_GRID_STEP_IS_MEASURED,
   CLOCK_OFFSET_GRANULARITY_IS_MEASURED,

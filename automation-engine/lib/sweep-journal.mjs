@@ -420,6 +420,23 @@ export function attributions(records) {
  * (`bugs/20`, `bugs/14`). Feeding them in here would ratchet a frequency upward for a reason that
  * was never measured, which is exactly the false-`[TESTED]` class this project hunts.
  *
+ * ─── TWO SOURCES, ONE MEANING: A CLOSED `ЗАВИС` AND AN INTENT NOBODY CLOSED ────────────────────────
+ *
+ * A recorded `ЗАВИС` verdict is a hang somebody has written down; an ORPHAN INTENT is the same hang
+ * before anybody has (R15b — *«an intent with no verdict IS the answer»*). Counting only the first
+ * would make the floor depend on whether a launch happened to run `closeHangs` yet — and the one
+ * reader that must NOT write is the dry run, which is precisely the artifact the operator reads
+ * BEFORE authorising the card (rail S2). A wall the plan cannot print is a wall the operator meets
+ * mid-run. So both are read here, through the SAME `orphanIntents` the closure uses — one author,
+ * never a second derivation of «what is a hang».
+ *
+ * The two sources cannot double-count: closing an orphan removes it from `orphanIntents` and adds
+ * the identical rung on the verdict side, so the answer is the same before and after the closure.
+ *
+ * ⚠️ **Read this ONCE, before the run's own intents start landing.** Inside a live sweep the rung in
+ * flight is an orphan by construction, and re-reading the journal mid-run would read it as its own
+ * hang floor. `sweepRange` calls `resumeState` exactly once, before the first rung, for this reason.
+ *
  * @returns {Map<number, {voltageMv:number, seq:number, at:string|null}>} keyed by frequency
  *
  * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
@@ -427,12 +444,17 @@ export function attributions(records) {
 export function hangFloors(records) {
   const out = new Map();
   const intents = new Map(records.filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
-  for (const v of records.filter((r) => r?.state === LINE.VERDICT && r.outcome === RUNG_OUTCOME.HUNG)) {
-    const i = intents.get(v.seq);
+  const hung = [
+    ...records
+      .filter((r) => r?.state === LINE.VERDICT && r.outcome === RUNG_OUTCOME.HUNG)
+      .map((v) => ({ rung: intents.get(v.seq), seq: v.seq, at: v.at ?? null })),
+    ...orphanIntents(records).map((i) => ({ rung: i, seq: i.seq, at: i.at ?? null })),
+  ];
+  for (const { rung: i, seq, at } of hung) {
     if (!i || !Number.isFinite(i.frequencyMhz) || !Number.isFinite(i.voltageMv)) continue;
     const seen = out.get(i.frequencyMhz);
     if (!seen || i.voltageMv > seen.voltageMv) {
-      out.set(i.frequencyMhz, { voltageMv: i.voltageMv, seq: v.seq, at: v.at ?? null });
+      out.set(i.frequencyMhz, { voltageMv: i.voltageMv, seq, at });
     }
   }
   return out;
@@ -690,6 +712,24 @@ export function selfTest() {
     ok('ВОЗОБНОВЛЕНИЕ НЕСЁТ ПОЛ: он нужен спуску, а спуск читает журнал один раз',
       resumeState(j8, { at: '2026-08-16T23:44:00+03:00' }).floors?.get(2842)?.voltageMv
         ?? 'пола в возобновлении нет вовсе', 860);
+    //   ПОЛ ВИДЕН И ДО ТОГО, КАК ЗАВИСАНИЕ ЗАКРЫТО СТРОКОЙ. Читатель, которому ПИСАТЬ НЕЛЬЗЯ, — сухой
+    //   прогон: он строит план ДО первой записи в карту (рельс S2), и стена, которой в плане нет,
+    //   встречает оператора уже посреди прогона.
+    const j10 = openJournal({ dir: join(sandbox, 'unclosed-floor') });
+    writeIntent(j10, { seq: 1, frequencyMhz: 2842, voltageMv: 845, pointIndex: 63 });
+    ok('НЕЗАКРЫТОЕ НАМЕРЕНИЕ — ТОЖЕ ПОЛ: сухой прогон видит стену, ничего не записав в журнал',
+      [hangFloors(readJournal(j10).records).get(2842)?.voltageMv ?? 'пола нет вовсе',
+        readJournal(j10).records.filter((r) => r.state === 'verdict').length],
+      [845, 0]);
+    //   И ответ НЕ МЕНЯЕТСЯ от того, закрыли зависание строкой или ещё нет — иначе пол зависел бы от
+    //   того, кто раньше запустился, а не от того, что случилось с машиной.
+    closeHangs(j10, { at: '2026-08-16T23:45:00+03:00' });
+    ok('и он ТОТ ЖЕ после закрытия — двух источников хватает на один ответ, а не на два',
+      hangFloors(readJournal(j10).records).get(2842)?.voltageMv ?? 'пола нет вовсе', 845);
+    //   ⚠️ И ЭТО НЕ РАЗМЫВАЕТ ГРАНИЦУ `bugs/20` / `bugs/14`: незакрытое намерение считается полом,
+    //   а ЗАКРЫТОЕ своей смертью или остановом оператора — нет, хотя вердикта ЗАВИС там тоже нет.
+    ok('незакрытость — не индульгенция: закрытое своей смертью намерение полом не становится',
+      hangFloors(readJournal(j9).records).size, 0);
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });
@@ -750,5 +790,5 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
 export default {
   SWEEP_DIR, LINE, RUNG_OUTCOME, openJournal, assertSandbox, rungKey,
   appendLine, writeIntent, writeVerdict, readJournal, orphanIntents, closeHangs, closeAsOperatorStop,
-  attributions, blockedRungs, resumeState,
+  closeAsWriterDeath, attributions, hangFloors, blockedRungs, resumeState,
 };

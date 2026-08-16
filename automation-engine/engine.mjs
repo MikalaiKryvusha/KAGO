@@ -56,9 +56,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import config from './config.mjs';
 // The margin helper is a NAMED export only — `config.mjs`'s default object carries constants, not
-// functions, and reaching for `config.marginAboveFailureMv` crashes the suite instead of reddening a
-// block (paid for on 2026-08-15 21:5x, EXP-0040's rule about assertions that kill the reporter).
-import { marginAboveFailureMv } from './config.mjs';
+// functions, and reaching for `config.marginAboveLastStableMv` crashes the suite instead of reddening
+// a block (paid for on 2026-08-15 21:5x, EXP-0040's rule about assertions that kill the reporter).
+import { marginAboveLastStableMv } from './config.mjs';
 // `chooseWriteShape` is imported STATICALLY and that is safe offline: `vf-step` imports `nvapi`
 // lazily, inside the functions that write, so nothing here reaches for koffi or the driver.
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
@@ -71,7 +71,7 @@ import {
 } from './lib/curve-store.mjs';
 import {
   writeIntent, writeVerdict,
-  openJournal, readJournal, orphanIntents, resumeState, SWEEP_DIR,
+  openJournal, readJournal, orphanIntents, resumeState, hangFloors, SWEEP_DIR,
   closeAsOperatorStop, closeAsWriterDeath, RUNG_OUTCOME,
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
@@ -159,6 +159,21 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
  *
  * ─── THE OPERATOR'S OWN CEILING ON DEPTH, AND WHY IT IS NOT THE SAME THING AS THE LEVER ───────────
  *
+ * ─── AND A THIRD WALL, WHICH IS NEITHER: A VOLTAGE THAT HAS ALREADY HUNG THIS MACHINE (`bugs/23`) ──
+ *
+ * `hangFloorMv` is the highest voltage a recorded `ЗАВИС` names for this frequency
+ * (`sweep-journal.hangFloors`). **No rung may ever land on it or below it again.** The owner made a
+ * hang a NORMAL path of the search (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК») — what he accepted
+ * is walking into an UNKNOWN edge, not choosing to walk back into a known one. Until this parameter
+ * existed nothing stopped that: `blockedRungs` engages only after TWO CONSECUTIVE hangs on one rung,
+ * so a resumed run rebuilt the identical ladder and ordered 845 mV at 2842 MHz a second time — the
+ * very rung that bugchecked the machine on 2026-08-16.
+ *
+ * It is kept SEPARATE from the two walls above for the same reason they are kept separate from each
+ * other: they carry different meanings and only one of them may be reported as a property of the
+ * silicon. The lever wall is OUR reach, the depth cap is OUR decision — and this one is the CARD's
+ * answer, paid for with a reboot. A run that blurred them would name the wrong thing as the edge.
+ *
  * `depthCapMv` is a bound the OPERATOR sets for one sitting — «не спускаемся ниже 150 мВ от стока»
  * (the owner's condition for the first live sweep, 2026-08-16). It is not the lever wall and it is not
  * the silicon: it is a decision, and it is kept SEPARATE from `availableDepthMv` for one reason that
@@ -173,25 +188,31 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
  * @param {number}   a.stockVoltageMv    the voltage serving this frequency at stock — depth is measured from it
  * @param {number}   a.availableDepthMv  how deep the ±1000 MHz lever can reach here; the wall, not a preference
  * @param {number}   [a.depthCapMv]      the operator's ceiling on depth from stock; `null` = no ceiling
+ * @param {number}   [a.hangFloorMv]     a voltage that already hung this frequency; no rung reaches it
  * @param {Array}    [a.zones]           the policy; defaults to `config.DESCENT_ZONES`
  * @returns {{rungs:Array<{mv:number,depthMv:number,stepMv:number,zoneStepMv:number,forcedByGrid:boolean}>,
  *            refused:boolean, why:string, forcedByGridCount:number, floorMv:number,
- *            boundDepthMv:number, cappedByOperator:boolean}}
+ *            boundDepthMv:number, cappedByOperator:boolean, hangFloorMv:number|null,
+ *            stoppedByHang:boolean}}
  *
  * [TESTED: 2026-08-15 21:4x, OFFLINE · 14 blocks in `engine --selftest`; the 2842 MHz and 2400 MHz
  *  rung counts are LITERALS measured on the card's real grid (24 and 7, not the idealized 28 — EXP-0072),
- *  mutation-proved with addressees 24–27. **NOT TESTED on a live card.**]
+ *  mutation-proved with addressees 24–27. **NOT TESTED on a live card.**
+ *  The hang floor (`bugs/23`) added 2026-08-17 with its own blocks and addressees 68–70.]
  */
 export function descentLadder({
   voltageGridMv = [],
   stockVoltageMv = null,
   availableDepthMv = 0,
   depthCapMv = null,
+  hangFloorMv = null,
   zones = config.DESCENT_ZONES,
 } = {}) {
+  const hangBound = Number.isFinite(hangFloorMv);
   const empty = (why) => ({
     rungs: [], refused: true, why, forcedByGridCount: 0, floorMv: null,
     boundDepthMv: null, cappedByOperator: false,
+    hangFloorMv: hangBound ? hangFloorMv : null, stoppedByHang: false,
   });
   if (!Array.isArray(voltageGridMv) || voltageGridMv.length === 0) return empty('сетка напряжений пуста — спускаться не по чему');
   if (!Number.isFinite(stockVoltageMv)) return empty('стоковое напряжение не названо — глубина отсчитывается от него');
@@ -208,7 +229,7 @@ export function descentLadder({
   if (boundDepthMv <= 0) {
     return {
       rungs: [], refused: false, forcedByGridCount: 0, floorMv: stockVoltageMv,
-      boundDepthMv, cappedByOperator,
+      boundDepthMv, cappedByOperator, hangFloorMv: hangBound ? hangFloorMv : null, stoppedByHang: false,
       why: cappedByOperator
         ? `потолок глубины ${depthCapMv} мВ не оставляет ни одной ступени — спуск не начинается`
         : 'рычаг не даёт снять ни милливольта — спуск не начинается',
@@ -223,6 +244,7 @@ export function descentLadder({
 
   const rungs = [];
   let current = stockVoltageMv;
+  let stoppedByHang = false;
   // The grid is finite and every iteration moves strictly downward, so this terminates; the bound is a
   // backstop against a malformed grid, not part of the algorithm.
   for (let guard = 0; guard <= grid.length; guard++) {
@@ -241,6 +263,14 @@ export function descentLadder({
       forcedByGrid = true;
     }
     if (next === null) break;                  // the bottom of the card's grid
+    // ─── THE THREE WALLS, IN THE ORDER THEY ARE ASKED, AND THE ORDER IS THE CONTENT ────────────────
+    //
+    // The rungs descend monotonically, so the SHALLOWEST wall always fires first and the order below
+    // decides only the case where two land on the SAME rung. There the hang is named, because it is
+    // the one fact among the three that belongs to the CARD: our lever and our depth cap are both
+    // statements about us, and where they coincide with a measured hang the measurement is what a
+    // future reader needs. Naming ours would hide the card's answer behind our preference.
+    if (hangBound && next <= hangFloorMv) { stoppedByHang = true; break; }
     if (next < floorMv) break;                 // the lever wall — not a refusal, just where the rungs stop
     rungs.push({
       mv: next,
@@ -256,20 +286,24 @@ export function descentLadder({
   // WHAT STOPPED THE DESCENT, NAMED RATHER THAN LEFT TO BE INFERRED. The caller turns this into the
   // `lever-limited` verdict's prose, and «предел рычага» over a stop that was OUR decision would be a
   // claim about the card nobody measured.
-  const stoppedBy = cappedByOperator
-    ? `остановлено НАШИМ потолком глубины ${depthCapMv} мВ (рычаг достаёт до −${leverDepthMv} мВ, глубже мы не идём по условию прогона)`
-    : `остановлено пределом рычага ±1000 МГц: глубже −${leverDepthMv} мВ он не достаёт`;
+  const stoppedBy = stoppedByHang
+    ? `остановлено ЗАПИСАННЫМ ЗАВИСАНИЕМ: ${hangFloorMv} мВ уже вешало эту частоту, и на него спуск не возвращается (bugs/23)`
+    : cappedByOperator
+      ? `остановлено НАШИМ потолком глубины ${depthCapMv} мВ (рычаг достаёт до −${leverDepthMv} мВ, глубже мы не идём по условию прогона)`
+      : `остановлено пределом рычага ±1000 МГц: глубже −${leverDepthMv} мВ он не достаёт`;
   if (rungs.length === 0) {
     return {
       rungs: [], refused: false, forcedByGridCount: 0, floorMv,
-      boundDepthMv, cappedByOperator,
-      why: `спускаться некуда: ближайшая ступень сетки ниже ${stockVoltageMv} мВ уже глубже разрешённых `
-        + `${boundDepthMv} мВ — ${stoppedBy}. Это не отказ, а свойство участка`,
+      boundDepthMv, cappedByOperator, hangFloorMv: hangBound ? hangFloorMv : null, stoppedByHang,
+      why: stoppedByHang
+        ? `спускаться некуда: первая же ступень сетки ниже ${stockVoltageMv} мВ упирается в ${stoppedBy}`
+        : `спускаться некуда: ближайшая ступень сетки ниже ${stockVoltageMv} мВ уже глубже разрешённых `
+          + `${boundDepthMv} мВ — ${stoppedBy}. Это не отказ, а свойство участка`,
     };
   }
   return {
     rungs, refused: false, forcedByGridCount, floorMv,
-    boundDepthMv, cappedByOperator,
+    boundDepthMv, cappedByOperator, hangFloorMv: hangBound ? hangFloorMv : null, stoppedByHang,
     why: `ступеней ${rungs.length}, первый шаг −${rungs[0].stepMv} мВ, глубже всего −${rungs[rungs.length - 1].depthMv} мВ`
       + (forcedByGridCount ? ` · сетка вынудила ${forcedByGridCount} шаг(ов) глубже политики (10 мВ там, где просили 5)` : '')
       + ` · ${stoppedBy}`,
@@ -866,13 +900,24 @@ export async function runRung({
  * In 32 of this card's 126 grid intervals the neighbouring voltages differ by 10 mV — the card offers
  * NOTHING between them, so no 5 mV step exists there to take. The refinement then walks the card's
  * minimum AVAILABLE step and the result SAYS that at this frequency the edge is located only to the
- * card's own resolution (`resolutionMv`). The margin added is still 10 mV: `marginAboveFailureMv` is
- * always asked with the card's MINIMUM step and THROWS if handed a local gap, so the «+20 mV»
- * misreading cannot be written by accident.
+ * card's own resolution (`resolutionMv`).
+ *
+ * ─── 🔴 AND THIS IS EXACTLY WHERE THE OWNER RE-ANCHORED THE MARGIN, 2026-08-17 ───────────────────
+ *
+ *   > *«Переделываем на: последняя стабильная до отказа точка (соседка отказа сверху) + 5 мВ. Это
+ *   > исправляет случае, где шаг был не 5 мВ, а, например, сетка позволяла только 10 мВ»*
+ *
+ * The cushion is added to the **last voltage that PASSED**, not to the failure. On a 10 mV interval
+ * the old form («failure + two minimum steps») produced the last passing rung ITSELF — a margin of
+ * exactly zero over proven ground, in 32 places on this card, invisible because the arithmetic looked
+ * the same from the failure's side. Where the interval is 5 mV both forms give the identical voltage,
+ * so nothing already measured moves; the new form is never lower and sometimes higher.
+ * `marginAboveLastStableMv` is still asked with the card's MINIMUM step and still THROWS if handed a
+ * local gap, so a doubled cushion cannot be written by accident either.
  *
  * ─── AND THE SHIPPED VOLTAGE IS SNAPPED UP, NEVER DOWN ───────────────────────────────────────────
  *
- * `V_fail + 10 mV` may not exist on a non-uniform grid. The shipped value is the lowest grid voltage
+ * `V_pass + 5 mV` may not exist on a non-uniform grid. The shipped value is the lowest grid voltage
  * that is at least that — rounding toward MORE margin, because the alternative is shipping a voltage
  * closer to a measured failure than the owner's policy allows.
  *
@@ -947,9 +992,13 @@ export async function refineEdge({
   const resolutionMv = nearestAbove === null ? null : nearestAbove - failMv;
 
   // THE MARGIN IS ALWAYS ASKED WITH THE CARD'S MINIMUM STEP, never with the local gap — the helper
-  // THROWS on a coarser step precisely so «+20 mV» cannot be written by accident.
-  const margin = marginAboveFailureMv(minStepMv);
-  const wanted = failMv + margin.millivolts;
+  // THROWS on a coarser step precisely so a doubled cushion cannot be written by accident.
+  //
+  // ⚠️ AND IT IS ADDED TO `pass`, NOT TO `failMv` — the owner's re-anchoring of 2026-08-17. `pass` is
+  // the deepest voltage that actually SURVIVED a burn at this frequency: after the walk above it is
+  // the failure's upper neighbour on the card's own grid, whatever the local interval happens to be.
+  const margin = marginAboveLastStableMv(minStepMv);
+  const wanted = pass + margin.millivolts;
   // Snap UP to a voltage the card can actually be asked for. Rounding toward MORE margin, because the
   // alternative is shipping closer to a measured failure than the owner's policy allows.
   const shipMv = grid.filter((v) => v >= wanted).sort((a, b) => a - b)[0] ?? null;
@@ -957,8 +1006,8 @@ export async function refineEdge({
     return {
       ok: false, refined: reproduced, failMv, lastPassMv: pass, shipMv: null,
       reproduced, resolutionMv, rungs, halted: true,
-      why: `отказ ${failMv} мВ + запас ${margin.millivolts} мВ = ${wanted} мВ, а такого напряжения (или выше) `
-        + 'в сетке карты нет — просить его не у кого',
+      why: `последняя стабильная ${pass} мВ + запас ${margin.millivolts} мВ = ${wanted} мВ, а такого напряжения `
+        + '(или выше) в сетке карты нет — просить его не у кого',
     };
   }
 
@@ -978,7 +1027,8 @@ export async function refineEdge({
         ? `отказ воспроизведён шагом сетки: ${pass} мВ прошло, ${failMv} мВ отказало`
         : `ОТКАЗ НЕ ВОСПРОИЗВЁЛСЯ ни на одной мелкой ступени (${between.length} шт., все PASS) — краем остаётся `
           + `грубый отказ ${failMv} мВ, теперь взятый в вилку одним шагом сетки от ${pass} мВ`)
-      + `. Отгружается ${shipMv} мВ = отказ + запас ${margin.millivolts} мВ (${margin.steps} шага сетки по ${margin.gridStepMv})`
+      + `. Отгружается ${shipMv} мВ = ПОСЛЕДНЯЯ СТАБИЛЬНАЯ ${pass} мВ + запас ${margin.millivolts} мВ `
+      + `(${margin.steps} шаг сетки по ${margin.gridStepMv}), подтянуто вверх к напряжению, которое у карты есть`
       + (resolutionMv !== null && resolutionMv > minStepMv
         ? `. ⚠️ На этой частоте у карты НЕТ шага ${minStepMv} мВ: ближайшее напряжение выше отказа отстоит на `
           + `${resolutionMv} мВ, значит край локализован лишь разрешением карты`
@@ -1166,13 +1216,30 @@ export function planFrequency({
   voltageGridMv = [],
   availableDepthMv = null,
   depthCapMv = null,
+  // A VOLTAGE THAT ALREADY HUNG THIS FREQUENCY (`sweep-journal.hangFloors`, `bugs/23`). Travels with
+  // the PLAN and not only with the run, because a wall the dry run does not print is a wall the
+  // operator meets mid-run — EXP-0052's rule, applied to the third wall exactly as to the second.
+  hangFloorMv = null,
   curveDoc = null,
   zones = config.DESCENT_ZONES,
   cliffMv = config.ASCENT_STEP_MAX_MV ?? 35,
 } = {}) {
+  const hangBound = Number.isFinite(hangFloorMv);
   const seed = seedFor({ frequencyMhz, curveDoc });
-  const seedMv = seed && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv ? seed.seedMv : null;
-  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, depthCapMv, zones });
+  // ─── A SEED IS A JUMP, SO IT IS THE FIRST THING THE HANG FLOOR MUST BE ABLE TO CANCEL ────────────
+  //
+  // The seed lands on the neighbour's proven voltage in ONE step (the owner's optimization, `GOAL.md`
+  // → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ СОСЕДКИ»). If that voltage sits at or below a rung this
+  // frequency has already hung the machine on, the seed would deliver us onto the fatal rung on the
+  // FIRST burn — before any ladder had a chance to stop anything. The ladder's floor cannot save us
+  // there, because the seed is not a ladder rung. So the cancellation lives here, next to the jump.
+  //
+  // Cancelled means «descend from stock on the owner's ladder», which the ladder then floors — the
+  // same fallback a rejected seed already uses, not a new path.
+  const seedBlockedByHang = Boolean(seed) && hangBound && Number.isFinite(seed.seedMv) && seed.seedMv <= hangFloorMv;
+  const seedMv = seed && !seedBlockedByHang && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv
+    ? seed.seedMv : null;
+  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, depthCapMv, hangFloorMv, zones });
 
   // TWO ladders, and both are named because the run may walk either: the expected path starts at the
   // seed, and a REJECTED seed drops the descent back to stock (§4.2, E2-AC11). A dry run that printed
@@ -1201,12 +1268,21 @@ export function planFrequency({
     depthCapMv,
     boundDepthMv: ladder.boundDepthMv,
     cappedByOperator: ladder.cappedByOperator,
+    // The third wall, carried outward by the same rule as the second: what stopped the descent is
+    // RECORDED rather than left to be inferred from the numbers (`bugs/23`).
+    hangFloorMv: ladder.hangFloorMv,
+    stoppedByHang: ladder.stoppedByHang,
+    seedBlockedByHang,
     refused: ladder.refused,
     // The `bugs/03` cliff on the FIRST step — checked here so the dry run can print the refusal too,
     // rather than the run discovering it after the operator has already said «go».
     cliffRefused: firstStepMv !== null && firstStepMv > cliffMv,
     cliffMv,
-    why: ladder.why,
+    why: ladder.why
+      + (seedBlockedByHang
+        ? ` · ЗАТРАВКА ОТМЕНЕНА ПОЛОМ ЗАВИСАНИЯ: соседка ${seed.neighbourMhz} МГц предлагает ${seed.seedMv} мВ, `
+          + `а ${hangFloorMv} мВ уже вешало эту частоту — спуск идёт от стока`
+        : ''),
   };
 }
 
@@ -1244,6 +1320,9 @@ export async function sweepFrequency({
   voltageGridMv = [],
   availableDepthMv = null,
   depthCapMv = null,
+  // WHAT ALREADY HUNG THIS FREQUENCY — the sweep reads it once from the journal and hands it down
+  // (`bugs/23`). `null` is the normal case: no reboot has ever been paid for here.
+  hangFloorMv = null,
   curveDoc = null,
   runRungFn,
   minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
@@ -1266,6 +1345,9 @@ export async function sweepFrequency({
     refinement: null,
     halted: false,
     blocked: false,
+    // STOPPED BY A RECORDED HANG rather than by anything of ours (`bugs/23`) — a field, so the report
+    // can name the reason without reading its own prose.
+    hangFloorHalt: false,
     // THE FREQUENCY THE CARD ACTUALLY RAN — the owner's rule, `GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА
     // ВЫДАЁТ»: *«хотим заказать N, она нам выдала M — примиряемся с её выдачей и тюним то, что она
     // нам даёт»*. `frequencyMhz` above is the ORDER; this is the OBSERVATION, and it is the one the
@@ -1308,8 +1390,87 @@ export async function sweepFrequency({
 
   // ---- 0. THE PLAN — and the run walks THIS, not a second computation of it (F2-AC8, `bugs/09`,
   // EXP-0052). Everything the dry run prints comes from the very object the loop below consumes.
-  const plan = planFrequency({ frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, depthCapMv, curveDoc, zones });
+  const plan = planFrequency({
+    frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, depthCapMv, hangFloorMv, curveDoc, zones,
+  });
   out.plan = plan;
+  const hangBound = Number.isFinite(plan.hangFloorMv);
+  if (plan.seedBlockedByHang) {
+    say('seed-blocked-by-hang', `${frequencyMhz} МГц: затравка ${plan.seed?.seedMv} мВ от соседки `
+      + `${plan.seed?.neighbourMhz} МГц ОТМЕНЕНА — ${plan.hangFloorMv} мВ уже вешало эту частоту, а затравка `
+      + 'попала бы на неё ОДНИМ прыжком, до всякой лестницы. Спуск идёт от стока',
+      { seedMv: plan.seed?.seedMv ?? null, hangFloorMv: plan.hangFloorMv });
+  }
+
+  // ─── A RECORDED HANG IS THIS FREQUENCY'S EDGE, AND IT CLOSES THE FREQUENCY (`bugs/23`) ────────────
+  //
+  // The owner's word, obligation 1 of three (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК»):
+  //
+  //   > *«Вердикт `ЗАВИС` — первого класса, наравне с `SDC` и `CRASH`. Он записывается в документ
+  //   > кривой как причина, по которой точка встала на своё значение, а не как сбой прогона.»*
+  //
+  // Until this existed the verdict reached the journal and stopped there: the document's row for
+  // 2842 MHz still read 1000 mV while twenty proven rungs and one located edge lived in a git-ignored
+  // file. The closure runs through the SAME `refineEdge` an oracle failure uses, and that is the whole
+  // design rather than a convenience:
+  //
+  //   · the hang is the failure's OUTER bracket, the deepest PASS is its inner one — exactly the
+  //     shape refinement was written for, so the owner's «+10 mV over the failure» is applied by the
+  //     one function that owns it (`marginAboveLastStableMv`), never by a second copy of the rule;
+  //   · his other rule — *«найденный грубым шагом отказ ОБЯЗАН быть уточнён минимальным шагом,
+  //     прежде чем к нему применят +10 мВ»* — is then obeyed for free: where the descent stopped one
+  //     grid step above the hang there is nothing to refine and the margin is honest; where it
+  //     stopped a coarse step above, refinement walks the grid points BETWEEN them, and the shipping
+  //     voltage never lands on a rung nobody burned;
+  //   · refinement CANNOT re-walk the hang: its bracket is strictly ABOVE `coarseFailMv`.
+  //
+  // And the witness distinguishes the two origins, because they are not the same evidence: an oracle
+  // verdict is a measurement of numbers, a hang is a machine that stopped existing.
+  const closeByHang = async () => {
+    const hangMv = plan.hangFloorMv;
+    if (lastPass === null) {
+      out.halted = true;
+      // The reason travels as a FIELD, never as a substring of the prose — the same rule the blocked
+      // rung obeys: a report that reads its own sentence to decide goes silent the first time the
+      // sentence is reworded. And the status line MUST NOT say «предел рычага» here (that lie about
+      // what stopped a run is what the owner caught on 2026-08-17).
+      out.hangFloorHalt = true;
+      out.why = `ЗАВИСАНИЕ НА ${hangMv} мВ ЗАКРЫВАЕТ ПУТЬ ВНИЗ на ${frequencyMhz} МГц, а прошедшего напряжения `
+        + 'выше него в этом прогоне НЕТ — уточнять не от чего, и отгрузку выдумывать нельзя. '
+        + 'Это находка о кремнии, а не вердикт: край здесь мельче одной ступени политики от стока';
+      return withDelivered();
+    }
+    const refined = await refineEdge({
+      voltageGridMv, lastPassMv: lastPass, coarseFailMv: hangMv, minStepMv,
+      runRungFn: (mv) => runRung({
+        frequencyMhz, voltageMv: mv, depthMv: stockVoltageMv - mv, zoneStepMv: minStepMv, seeded: out.seeded,
+        // The proven ground is the same one the descent carried — `lastPass` is non-null here by the
+        // guard above, so there is nothing to fall back to and nothing to re-derive (one number, one
+        // place, the rule `refineEdge`'s other call site already obeys).
+        provenMv: lastPass, maxStepFromProvenMv: plan.cliffMv,
+      }),
+    });
+    out.refinement = refined;
+    for (const rr of refined.rungs ?? []) out.rungs.push({ ...rr, refine: true });
+    if (!refined.ok) {
+      out.halted = true;
+      out.why = refined.why;
+      return withDelivered();
+    }
+    out.verdict = 'edge-found';
+    out.voltageMv = refined.shipMv;
+    out.provenBy = (refined.reproduced
+      ? `край ${refined.failMv} мВ — ВЕРДИКТ ОРАКУЛА, найденный между доказанным и ЗАВИСШИМ ${hangMv} мВ`
+      : `край ${hangMv} мВ УСТАНОВЛЕН ЗАВИСАНИЕМ МАШИНЫ (перезагрузка; ступень названа журналом упреждающей `
+        + 'записи, R15), а НЕ вердиктом оракула — на этой частоте край роняет драйвер, а чисел не портит')
+      + ` · отгружается ${refined.shipMv} мВ = отказ + запас владельца`
+      + (refined.resolutionMv !== null && refined.resolutionMv > minStepMv
+        ? ` · разрешение карты здесь ${refined.resolutionMv} мВ`
+        : '');
+    out.why = `КРАЙ НАЙДЕН на ${frequencyMhz} МГц ПО ЗАПИСАННОМУ ЗАВИСАНИЮ (${hangMv} мВ): ${refined.why}`;
+    say('hang-closed-edge', out.why, { frequencyMhz, hangFloorMv: hangMv, shipMv: refined.shipMv });
+    return withDelivered();
+  };
 
   // ---- 1. THE SEED — the owner's optimization, and its first burn is a PROOF rather than a formality.
   let lastPass = null;
@@ -1355,6 +1516,10 @@ export async function sweepFrequency({
   const startMv = seedTaken ? plan.seedMv : stockVoltageMv;
 
   if (rungs.length === 0) {
+    // A HANG got here first: the ladder has no rung because everything below us is at or under a
+    // voltage that already killed this machine. That is the CARD's wall, not ours, so it must not
+    // wear the lever's name (`bugs/23`).
+    if (plan.stoppedByHang) return closeByHang();
     // Nothing below where we stand that the lever can still reach — OUR wall, never the silicon's.
     out.verdict = 'lever-limited';
     out.voltageMv = lastPass ?? stockVoltageMv;
@@ -1402,6 +1567,18 @@ export async function sweepFrequency({
     let targetMv = rung.mv;
     let rebased = false;
     if (ground - targetMv > cliff) {
+      // ⚠️ THE REBASE PICKS A VOLTAGE THE LADDER NEVER PROPOSED — it reads the card's grid directly —
+      // so it is the second place that could walk onto a recorded hang (`bugs/23`). It CANNOT, and the
+      // reason is arithmetic rather than a guard: this branch runs only when `ground − rung.mv > cliff`,
+      // i.e. the plan's rung lies BELOW the window, so the deepest point inside `[ground − cliff, ground)`
+      // is strictly ABOVE `rung.mv` — and every ladder rung is already above the hang floor. The rebase
+      // therefore only ever moves the target UP.
+      //
+      // A filter was written here first and then removed: it could not be made to go red by any
+      // fixture, which is EXP-0073's class (a guard whose triggering condition no caller can supply).
+      // What replaced it is the property itself, asserted end to end — «спуск НЕ ВОЗВРАЩАЕТСЯ на
+      // убившую ступень» drives a descent whose ground DRIFTS UP, so the rebase fires twice under a
+      // live floor, and mutation 68 reddens it.
       const deepest = gridDesc.filter((v) => v < ground && v >= ground - cliff).pop() ?? null;
       if (deepest === null) {
         // Сетка не предлагает НИ ОДНОЙ ступени между землёй и стеной — идти некуда, и это не отказ
@@ -1499,8 +1676,12 @@ export async function sweepFrequency({
     return withDelivered();
   }
 
-  // ---- 4. THE LADDER RAN OUT AND NOTHING FAILED. Our lever or the card's grid stopped the descent,
-  // not the silicon — and calling that an edge is the false `[TESTED]` E2-AC2 exists to forbid.
+  // ---- 4. THE LADDER RAN OUT AND NOTHING FAILED **IN THIS RUN** — but a previous run's REBOOT may be
+  // exactly what the ladder stopped against, and that is a measurement, not our wall (`bugs/23`).
+  if (plan.stoppedByHang) return closeByHang();
+
+  // Our lever or the card's grid stopped the descent, not the silicon — and calling that an edge is
+  // the false `[TESTED]` E2-AC2 exists to forbid.
   out.verdict = 'lever-limited';
   out.voltageMv = lastPass ?? stockVoltageMv;
   out.provenBy = lastPass === null ? null
@@ -1678,6 +1859,19 @@ export async function sweepRange({
     for (const h of resume.hung) say('hang-attributed', h.why ?? `ЗАВИС: ${h.frequencyMhz} МГц / ${h.voltageMv} мВ`, h);
   }
   const blockedKeys = new Set((resume.blocked ?? []).map((b) => b.key));
+  // ─── WHAT ALREADY HUNG THIS MACHINE, READ ONCE AND SAID OUT LOUD (`bugs/23`) ─────────────────────
+  //
+  // `blockedKeys` above and these floors answer DIFFERENT questions, and keeping both is the point:
+  // the blocked set stops a rung that hangs UNPREDICTABLY (two in a row = a fault, the owner's single
+  // emergency brake, untouched here). The floor stops us from CHOOSING to revisit a rung already
+  // proven fatal — which the brake by construction cannot do, because it must reach the second hang
+  // first. He accepted walking into an unknown edge; he never accepted walking into a known one.
+  const hangFloorsByMhz = resume.floors instanceof Map ? resume.floors : new Map();
+  for (const [mhz, f] of hangFloorsByMhz) {
+    say('hang-floor', `ПОЛ ЗАВИСАНИЯ: ${mhz} МГц уже вешала машину на ${f.voltageMv} мВ — спуск туда больше `
+      + 'не идёт, и это напряжение становится КРАЕМ частоты, а не пропущенной ступенью',
+      { frequencyMhz: mhz, voltageMv: f.voltageMv, at: f.at ?? null });
+  }
   let seq = resume.nextSeq ?? 1;
 
   const groups = rungGroups({ rows: curveDoc.frequencies, fromMhz, toMhz });
@@ -1701,6 +1895,9 @@ export async function sweepRange({
     raised: [],
     hung: resume.hung ?? [],
     blocked: resume.blocked ?? [],
+    // Every floor this journal knows, in the report so it lands in the run's own summary rather than
+    // only in the event stream a watcher may not have been open for.
+    hangFloors: [...hangFloorsByMhz].map(([mhz, f]) => ({ frequencyMhz: mhz, voltageMv: f.voltageMv })),
     doc: curveDoc,
     elapsedMs: 0,
     estimateHours,
@@ -1730,6 +1927,10 @@ export async function sweepRange({
       voltageGridMv,
       availableDepthMv,
       depthCapMv,
+      // The floor is keyed by the ORDERED frequency, which is what the journal's intent records —
+      // the same coordinate the descent orders in. Where the measurement finally LANDS is a different
+      // question, answered downstream by the delivered clock (`resolveDeliveredRow`).
+      hangFloorMv: hangFloorsByMhz.get(g.topMhz)?.voltageMv ?? null,
       curveDoc: doc,
       minStepMv,
       onEvent,
@@ -1810,7 +2011,9 @@ export async function sweepRange({
 
     if (outcome.halted || outcome.verdict === null) {
       report.ok = false;
-      report.stoppedBy = outcome.blocked === true ? 'blocked-rung' : 'halt';
+      report.stoppedBy = outcome.blocked === true
+        ? 'blocked-rung'
+        : (outcome.hangFloorHalt === true ? 'hang-floor' : 'halt');
       report.why = outcome.why;
       report.groups.push({ ...g, ...outcome });
       break;
@@ -1955,11 +2158,17 @@ export async function sweepDryRun({
   demandPin = false,
   buildVector = null,
   chooseShape = chooseWriteShape,
+  // WHAT ALREADY HUNG EACH FREQUENCY — a `Map` from `sweep-journal.hangFloors`, read WITHOUT writing.
+  // The plan must carry the third wall for the same reason it carries the operator's depth cap: a
+  // bound the run obeys and the plan does not print is a bound the operator meets mid-run (EXP-0052,
+  // `bugs/09`). `null` means «this caller has no journal», not «there are no hangs».
+  hangFloors = null,
   zones = config.DESCENT_ZONES,
 } = {}) {
   if (!curveDoc || !Array.isArray(curveDoc.frequencies)) {
     throw new Error('sweepDryRun требует документ кривой — план строится по нему, а не по памяти процесса');
   }
+  const floors = hangFloors instanceof Map ? hangFloors : new Map();
   const build = buildVector ?? (await import('./lib/nvapi.mjs')).buildRaiseAndCapVector;
   const groups = rungGroups({ rows: curveDoc.frequencies, fromMhz, toMhz });
   const voltageGridMv = curveDoc.voltageGridMv ?? [];
@@ -1971,6 +2180,7 @@ export async function sweepDryRun({
     const plan = planFrequency({
       frequencyMhz: g.topMhz, stockVoltageMv: g.stockVoltageMv,
       voltageGridMv, availableDepthMv, depthCapMv, curveDoc, zones,
+      hangFloorMv: floors.get(g.topMhz)?.voltageMv ?? null,
     });
 
     // WHO WOULD HOLD THE CEILING at the first rung — asked of `chooseWriteShape` rather than decided
@@ -2000,6 +2210,7 @@ export async function sweepDryRun({
     refusals: out.filter((g) => g.plan.refused || g.plan.cliffRefused || g.holder === null).length,
     depthCapMv: Number.isFinite(depthCapMv) ? depthCapMv : null,
     cappedFrequencies: out.filter((g) => g.plan.cappedByOperator).length,
+    hangFloorFrequencies: out.filter((g) => g.plan.stoppedByHang).length,
   };
 }
 
@@ -2020,11 +2231,17 @@ export function sweepDryRunLines(dry) {
       + `Он связывает спуск на ${dry.cappedFrequencies} частоте(ах) из ${dry.groupCount}: там рычаг достаёт глубже, `
       + 'а мы не идём. Ни одна такая частота НЕ несёт края — её вердикт «предел» это НАША остановка.');
   }
+  if (dry.hangFloorFrequencies) {
+    lines.push(`ПОЛ ЗАВИСАНИЯ связывает ${dry.hangFloorFrequencies} частоту(ы) из ${dry.groupCount}: там спуск `
+      + 'останавливает НЕ рычаг и не наш потолок, а напряжение, которое уже вешало эту машину. '
+      + 'Такая частота закрывается КРАЕМ по слову владельца, а не «пределом» (bugs/23).');
+  }
   lines.push('В КАРТУ НЕ ЗАПИСАНО НИЧЕГО — это план, а не прогон.');
   for (const g of dry.groups) {
     const p = g.plan;
     const seed = p.seedMv === null
       ? `затравки нет (спуск от стока ${p.stockVoltageMv} мВ)`
+        + (p.seedBlockedByHang ? ` — затравку ${p.seed.seedMv} мВ ОТМЕНИЛ ПОЛ ЗАВИСАНИЯ ${p.hangFloorMv} мВ` : '')
       : `затравка ${p.seedMv} мВ от соседки ${p.seed.neighbourMhz} МГц (статус «${p.seed.neighbourStatus}»)`;
     lines.push(`${g.topMhz} МГц — ступень из ${g.count} частот(ы) до ${g.bottomMhz} МГц, сток ${g.stockVoltageMv} мВ`);
     lines.push(`   ${seed}`);
@@ -2034,7 +2251,10 @@ export function sweepDryRunLines(dry) {
       + `${p.rungs[p.rungs.length - 1].mv} мВ (−${p.rungs[p.rungs.length - 1].depthMv} мВ от стока)`);
     lines.push(`   зоны политики: ${p.zonesCrossed.map((z) => `${z} мВ`).join(' · ')}`
       + (p.forcedByGridCount ? ` · сетка вынудила ${p.forcedByGridCount} шаг(ов) глубже политики` : ''));
-    if (p.cappedByOperator) {
+    if (p.stoppedByHang) {
+      lines.push(`   🔴 спуск останавливает ЗАПИСАННОЕ ЗАВИСАНИЕ на ${p.hangFloorMv} мВ: последняя ступень плана `
+        + `${p.rungs[p.rungs.length - 1].mv} мВ, ниже него прогон не идёт. Эта частота закроется КРАЕМ`);
+    } else if (p.cappedByOperator) {
       lines.push(`   спуск останавливает НАШ потолок ${p.depthCapMv} мВ: пол ${p.floorMv} мВ. `
         + `Рычаг достал бы до ${p.stockVoltageMv - p.availableDepthMv} мВ (−${p.availableDepthMv} мВ) — туда мы не идём`);
     } else {
@@ -2102,6 +2322,10 @@ export function sweepReportLines(report) {
   }
   if (report.blocked.length) {
     lines.push(`ЗАБЛОКИРОВАНО ДВУМЯ ЗАВИСАНИЯМИ ПОДРЯД: ${report.blocked.map((b) => `${b.frequencyMhz} МГц / ${b.voltageMv} мВ`).join(', ')}`);
+  }
+  if (report.hangFloors?.length) {
+    lines.push(`ПОЛ ЗАВИСАНИЯ (спуск туда не возвращается): `
+      + report.hangFloors.map((f) => `${f.frequencyMhz} МГц ниже ${f.voltageMv} мВ`).join(', '));
   }
   const hours = report.elapsedMs / 3_600_000;
   lines.push(`ВРЕМЯ: ${(report.elapsedMs / 1000).toFixed(1)} с (${hours.toFixed(2)} ч) против оценки ${report.estimateHours} ч на весь диапазон`);
@@ -2994,6 +3218,40 @@ export function selfTest() {
       return [p.depthCapMv, p.cappedByOperator, p.floorMv];
     })(), [150, true, 1035]);
 
+  // ─── THE THIRD WALL: A VOLTAGE THAT ALREADY HUNG THIS MACHINE (`bugs/23`) ───────────────────────
+  //     MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+  //     68. drop the `next <= hangFloorMv` break        → reddens «ПОЛ ЗАВИСАНИЯ ОБРЕЗАЕТ ЛЕСТНИЦУ»
+  //     69. make the break `<` instead of `<=`          → reddens «на САМ зависший рунг тоже не встаём»
+  //     70. hard-wire `stoppedByHang` to false          → reddens «названо ЗАВИСАНИЕМ, а не рычагом»
+  const hangFloored = descentLadder({
+    voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 200, hangFloorMv: 970,
+  });
+  ok('ПОЛ ЗАВИСАНИЯ ОБРЕЗАЕТ ЛЕСТНИЦУ: ни одна ступень не уходит на зависшее напряжение или ниже',
+    [hangFloored.rungs.every((r) => r.mv > 970), hangFloored.rungs.at(-1).mv, hangFloored.stoppedByHang],
+    [true, 995, true]);
+  // `<=` and not `<`: the hung rung ITSELF is the one we must never order again, and an off-by-one
+  // here would order exactly it. This is the whole defect `bugs/23` was filed for.
+  ok('на САМ зависший рунг тоже не встаём — 970 мВ в лестнице отсутствует',
+    hangFloored.rungs.some((r) => r.mv === 970), false);
+  ok('и остановка названа ЗАВИСАНИЕМ, а не рычагом и не нашим потолком',
+    [/ЗАПИСАННЫМ ЗАВИСАНИЕМ/.test(hangFloored.why), /предел(ом)? рычага/.test(hangFloored.why)],
+    [true, false]);
+  // The lever is still allowed to be the shallower wall — the floor does not seize the report.
+  ok('рычаг мельче пола зависания → останавливает рычаг, и пол молчит',
+    (() => {
+      const l = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 30, hangFloorMv: 970 });
+      return [l.stoppedByHang, /предел(ом)? рычага/.test(l.why)];
+    })(), [false, true]);
+  // And the plan carries it outward, for the same reason it carries the depth cap (EXP-0052).
+  ok('план несёт пол зависания наружу — сухой прогон обязан печатать эту стену',
+    (() => {
+      const p = planFrequency({
+        frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: uniform5,
+        availableDepthMv: 200, hangFloorMv: 970, curveDoc: null,
+      });
+      return [p.hangFloorMv, p.stoppedByHang, p.rungs.at(-1)?.mv ?? 'ступеней нет вовсе'];
+    })(), [970, true, 995]);
+
   // — depth shallower than one grid step: an honest empty ladder, and NOT a refusal
   const tooShallow = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 3 });
   ok('глубина мельче одной ступени сетки → пустая лестница, но не отказ',
@@ -3012,14 +3270,14 @@ export function selfTest() {
       return [l.rungs.length, l.rungs.at(-1).depthMv];
     })(), [7, 125]);
 
-  // — THE OWNER'S EDGE RULE, guarded where it can be violated (his words, 2026-08-15 21:5x:
-  //   «Найти отказ нужно с шагом 5 мВ — это строгое правило… И от него на 10 мВ поднимаемся вверх»).
-  //   The coarse ladder above exists only to approach the edge; the number that SHIPS comes from a
-  //   5 mV walk plus 10 mV, and nothing else may reach `marginAboveFailureMv`.
-  ok('запас владельца на этой карте = 10 мВ (два измеренных шага сетки по 5)',
-    (() => { try { return marginAboveFailureMv().millivolts; } catch (e) { return `упало: ${e.message.slice(0, 40)}`; } })(), 10);
-  ok('ЛОКАЛЬНЫЙ РАЗРЫВ сетки в 10 мВ, поданный как шаг, ПАДАЕТ — иначе запас молча стал бы 20 мВ',
-    (() => { try { marginAboveFailureMv(10); return 'не упало'; } catch (e) { return /20 мВ/.test(e.message) ? 'упало и назвало причину' : 'упало без причины'; } })(),
+  // — THE OWNER'S EDGE RULE, guarded where it can be violated. The coarse ladder above exists only to
+  //   approach the edge; the number that SHIPS comes from the finest walk the card allows plus ONE
+  //   grid step over the LAST STABLE rung (his re-anchoring, 2026-08-17), and nothing else may reach
+  //   `marginAboveLastStableMv`.
+  ok('запас владельца на этой карте = 5 мВ (ОДИН измеренный шаг сетки) над последней стабильной',
+    (() => { try { return marginAboveLastStableMv().millivolts; } catch (e) { return `упало: ${e.message.slice(0, 40)}`; } })(), 5);
+  ok('ЛОКАЛЬНЫЙ РАЗРЫВ сетки в 10 мВ, поданный как шаг, ПАДАЕТ — иначе запас молча удвоился бы',
+    (() => { try { marginAboveLastStableMv(10); return 'не упало'; } catch (e) { return /до 10 мВ над последней стабильной/.test(e.message) ? 'упало и назвало причину' : 'упало без причины'; } })(),
     'упало и назвало причину');
 
   // =============================================================================================
@@ -3511,19 +3769,24 @@ export function selfTest() {
     });
     ok('край ищется ШАГОМ СЕТКИ от последнего прошедшего, а не грубой ступенью',
       [walked[0], fine.failMv, fine.reproduced, fine.refined], [1040, 1025, true, true]);
-    ok('и отгружается ровно отказ + 10 мВ (два шага сетки по 5, слово владельца)',
-      fine.shipMv, 1035);
+    // 🔴 THIS IS THE OWNER'S 2026-08-17 CASE, AND THE FIXTURE LANDS ON IT BY ACCIDENT OF THE REAL GRID.
+    // 1035 → 1025 is one of this card's 10 mV intervals. Under the old anchor («failure + two minimum
+    // steps») the shipped voltage was 1025 + 10 = **1035 — the last stable rung itself**, i.e. a
+    // cushion of exactly zero over proven ground. The block was green and the margin was not there.
+    // Under his anchor the cushion is added to the PASS: 1035 + 5 → 1040 on the card's own grid.
+    ok('запас кладётся на ПОСЛЕДНЮЮ СТАБИЛЬНУЮ, а не на отказ — на разрыве 10 мВ старая форма давала НОЛЬ',
+      [fine.lastPassMv, fine.failMv, fine.shipMv], [1035, 1025, 1040]);
     ok('спуск уточнения идёт СВЕРХУ ВНИЗ, ступенями сетки — ни одного прыжка',
       walked.slice(0, 3), [1040, 1035, 1025]);
 
-    // — the margin snaps UP where the grid cannot express fail + 10 exactly
-    const gapGrid = [1045, 1035, 1025, 1015];        // a 10 mV grid: fail + 10 lands on a point here
+    // — the margin snaps UP where the grid cannot express «last stable + 5» exactly
+    const gapGrid = [1045, 1035, 1025, 1015];        // a pure 10 mV grid — the owner's hard case
     const snapped = await refineEdge({
       voltageGridMv: gapGrid, lastPassMv: 1045, coarseFailMv: 1015,
       runRungFn: scriptRung(1025),
     });
     ok('отгружаемое напряжение округляется В СТОРОНУ ЗАПАСА, к напряжению, которое у карты ЕСТЬ',
-      [snapped.failMv, snapped.shipMv], [1025, 1035]);
+      [snapped.lastPassMv, snapped.failMv, snapped.shipMv], [1035, 1025, 1045]);
     ok('и там, где у карты нет шага 5 мВ, прогон ГОВОРИТ, что край локализован её разрешением',
       [snapped.resolutionMv, /разрешением карты/.test(snapped.why)], [10, true]);
 
@@ -3543,10 +3806,11 @@ export function selfTest() {
     ok('невоспроизведённый отказ НАЗВАН невоспроизведённым, а не выдан за найденный край',
       [notBack.ok, notBack.reproduced, notBack.failMv, /НЕ ВОСПРОИЗВЁЛСЯ/.test(notBack.why)],
       [true, false, 1020, true]);
-    // 1020 + 10 = 1030, and 1030 is one of this card's 10 mV gaps — the value does not exist. So the
-    // shipped voltage snaps UP to 1035: toward MORE margin, never toward the failure.
-    ok('и отгружается отказ + 10 мВ, подтянутое ВВЕРХ к существующему напряжению (1030 у карты нет)',
-      notBack.shipMv, 1035);
+    // The three fine rungs all passed, so the last stable is 1025; 1025 + 5 = 1030, and 1030 is one of
+    // this card's 10 mV gaps — the value does not exist. So the shipped voltage snaps UP to 1035:
+    // toward MORE margin, never toward the failure.
+    ok('и отгружается ПОСЛЕДНЯЯ СТАБИЛЬНАЯ + 5 мВ, подтянутое ВВЕРХ к существующему (1030 у карты нет)',
+      [notBack.lastPassMv, notBack.shipMv], [1025, 1035]);
 
     // — anything that is not PASS and not a failure STOPS the refinement
     const stopped = await refineEdge({
@@ -3558,9 +3822,9 @@ export function selfTest() {
 
     // — the margin helper is asked with the CARD'S minimum step, never with a local gap
     let marginThrew = false;
-    try { marginAboveFailureMv(10); } catch { marginThrew = true; }
-    ok('запас — ровно 10 мВ, и подсунуть ему локальный разрыв сетки НЕЛЬЗЯ',
-      [marginAboveFailureMv().millivolts, marginThrew], [10, true]);
+    try { marginAboveLastStableMv(10); } catch { marginThrew = true; }
+    ok('запас — ровно ОДИН шаг сетки (5 мВ), и подсунуть ему локальный разрыв НЕЛЬЗЯ',
+      [marginAboveLastStableMv().millivolts, marginThrew], [5, true]);
 
     // — R1 again: the refinement decides, it does not write
     let refineThrew = false;
@@ -4150,6 +4414,92 @@ export function selfTest() {
       [true, false, 1020, true]);
 
     // =============================================================================================
+    // `bugs/23` — ЗАВИСАНИЕ ЗАКРЫВАЕТ ЧАСТОТУ КРАЕМ, А СПУСК НА НЕГО НЕ ВОЗВРАЩАЕТСЯ
+    //
+    // Слово владельца (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК», обязательство 1 из трёх):
+    //   *«Вердикт ЗАВИС — первого класса… Он записывается в документ кривой как причина, по которой
+    //   точка встала на своё значение, а не как сбой прогона.»*
+    //
+    // Живой прогон 2026-08-16: 2842 МГц прошло 850 мВ и повесило машину на 845. Знание осталось в
+    // журнале и НЕ доехало до документа, а возобновлённый прогон построил бы ту же лестницу и снова
+    // заказал 845.
+    //
+    // MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016) — они же пункты фикс-плана бага:
+    //  71. `sweepFrequency` перестаёт звать `closeByHang`      → «ЗАВИСАНИЕ ЗАКРЫВАЕТ ЧАСТОТУ КРАЕМ»
+    //  72. запас кладётся на зависшее, а не на стабильную      → та же строка, по напряжению отгрузки
+    //  73. снять фильтр пола в пересчёте цели от земли         → «спуск НЕ ВОЗВРАЩАЕТСЯ на убившую ступень»
+    //  74. свидетель зависания и оракула сделан одинаковым     → «улика РАЗЛИЧАЕТ зависание и оракула»
+    //  75. `seedBlockedByHang` захардкожен в false             → «затравку на зависшее напряжение ОТМЕНЯЕТ пол»
+    // ⚠️ ЗЕМЛЯ В ЭТОЙ ФИКСТУРЕ ЕЗДИТ ВВЕРХ, И ЭТО НЕ УКРАШЕНИЕ. Карта регулярно отдаёт напряжение на
+    // ступень выше заказанной, спуск пересчитывает цель от ДОКАЗАННОГО, и пересчёт выбирает напряжение
+    // по сетке в обход лестницы — то есть это ВТОРОЕ место, которое могло бы шагнуть на убившую
+    // ступень. Здесь оно срабатывает дважды (1045 → 1010 → 975), и утверждение ниже накрывает ВЕСЬ
+    // путь, а не одну функцию.
+    const hangWalk = [];
+    const hangSaid = [];
+    const hangClosed = await freqOK({
+      hangFloorMv: 960,
+      onEvent: (e) => hangSaid.push(e.kind),
+      runRungFn: async ({ voltageMv }) => {
+        hangWalk.push(voltageMv);
+        return { outcome: 'passed', verdict: P, measuredMv: voltageMv === 1020 ? 1045 : voltageMv };
+      },
+    });
+    // Лестница от стока 1045: 1020 · 995 · 970 — и стоп, потому что следующая плановая 945 ниже пола.
+    // С уехавшей землёй прогон идёт 1020 → 1010 → 975, а дальше уточнение подходит к 960 мВ шагом
+    // сетки: 970 и 965 проходят, ниже не идём. Отгрузка = последняя стабильная 965 + шаг = 970.
+    ok('ЗАВИСАНИЕ ЗАКРЫВАЕТ ЧАСТОТУ КРАЕМ, а не «пределом рычага», и отгружает стабильную + шаг',
+      [hangClosed.verdict, hangClosed.voltageMv, hangClosed.halted], ['edge-found', 970, false]);
+    ok('спуск НЕ ВОЗВРАЩАЕТСЯ на убившую ступень — даже когда цель пересчитывается от уехавшей земли',
+      [Math.min(...hangWalk) > 960, hangWalk.includes(960), hangSaid.filter((k) => k === 'rebase').length >= 1],
+      [true, false, true]);
+    // `?.` и проговорённый запасной ответ — EXP-0075: мутация 74 убирает ровно это поле, и блок обязан
+    // ПОКРАСНЕТЬ, а не унести с собой весь отчёт.
+    ok('улика РАЗЛИЧАЕТ зависание и вердикт оракула — это не одно и то же доказательство',
+      (hangClosed.provenBy ?? 'свидетеля нет вовсе').includes('ЗАВИСАНИЕМ МАШИНЫ'), true);
+
+    // — и обратная сторона той же улики: если между стабильной и зависшей оракул НАЙДЁТ отказ, край
+    //   принадлежит ему, а зависание остаётся внешней скобкой. Иначе улика врала бы об источнике.
+    const oracleInside = await freqOK({
+      hangFloorMv: 960,
+      runRungFn: async ({ voltageMv }) => (voltageMv <= 965
+        ? { outcome: 'failed', verdict: config.VERDICT.SDC }
+        : { outcome: 'passed', verdict: P }),
+    });
+    ok('отказ ОРАКУЛА между стабильной и зависшей забирает край себе — и улика говорит именно это',
+      [oracleInside.verdict, oracleInside.voltageMv,
+        (oracleInside.provenBy ?? 'свидетеля нет вовсе').includes('ВЕРДИКТ ОРАКУЛА')],
+      ['edge-found', 975, true]);
+
+    // — прошедшего напряжения выше пола НЕТ: это СТОП, а не выдуманная отгрузка (три двери PHILOSOPHY)
+    //
+    // ⚠️ ФИКСТУРА НЕ БРОСАЕТ, А СЧИТАЕТ. Первая редакция кидала исключение «сюда звать не должны» — и
+    // мутация 68, снявшая пол из лестницы, УРОНИЛА весь набор вместо покраснения одного блока. Это
+    // EXP-0075 ровно в том месте, где урок написан: утверждение (или фикстура), разыменовывающее то,
+    // что убирает мутация, уносит с собой весь отчёт, а это хуже ложного зелёного — тот хоть доходит.
+    const nothingAboveTouched = [];
+    const nothingAbove = await freqOK({
+      hangFloorMv: 1040,
+      runRungFn: async ({ voltageMv }) => { nothingAboveTouched.push(voltageMv); return { outcome: 'passed', verdict: P }; },
+    });
+    ok('пол сразу под стоком: прогон ВСТАЁТ, карту не трогает и ничего не отгружает',
+      [nothingAbove.halted, nothingAbove.verdict, nothingAbove.voltageMv,
+        nothingAbove.hangFloorHalt, nothingAboveTouched.length],
+      [true, null, null, true, 0]);
+
+    // — затравка это ПРЫЖОК, и пол обязан уметь его отменить ДО всякой лестницы
+    const seedSaid = [];
+    const seedWalk = [];
+    const seedBlocked = await freqOK({
+      curveDoc: seededDoc, hangFloorMv: 1000,
+      onEvent: (e) => seedSaid.push(e.kind),
+      runRungFn: async ({ voltageMv }) => { seedWalk.push(voltageMv); return { outcome: 'passed', verdict: P }; },
+    });
+    ok('затравку на зависшее напряжение ОТМЕНЯЕТ пол: первый прожиг идёт от стока, а не на 1000 мВ',
+      [seedBlocked.seeded, seedWalk[0], seedWalk.includes(1000), seedSaid.includes('seed-blocked-by-hang')],
+      [false, 1020, false, true]);
+
+    // =============================================================================================
     // `plans/15` §4.5 — THE DOCUMENT'S ONLY AUTHOR (`curve-store.closePoint`, rule R14a)
     // =============================================================================================
 
@@ -4293,9 +4643,21 @@ export function selfTest() {
         now: () => at,
         clockMs: (() => { let t = 0; return () => (t += 1000); })(),
       });
-      ok('ДВА ЗАВИСАНИЯ ПОДРЯД НА ОДНОЙ СТУПЕНИ ОСТАНАВЛИВАЮТ РАЗВЁРТКУ, и карту третий раз не трогают (F2-AC5)',
+      // 🔴 THE ANSWER CHANGED WITH `bugs/23`, AND IT CHANGED IN THE SAFE DIRECTION — recorded here
+      // rather than papered over, because a block quietly re-fitted to new behaviour is how a
+      // regression ships. The card is still untouched and the sweep still refuses; what stops it is
+      // now the HANG FLOOR, which fires after ONE hang instead of two. The floor SUBSUMES the brake
+      // on this path: a rung the ladder may never order again cannot be started a third time.
+      //
+      // The brake is NOT deleted and NOT unproven — it keeps its own direct block one section above
+      // («ступень, повесившая машину ДВАЖДЫ ПОДРЯД, третий раз не начинается, и атом не зван»), which
+      // drives `runRung` itself. That is the honest split: the emergency stop the owner left guards
+      // the place where the card is touched; the floor guards the place where the rung is chosen.
+      ok('ДВА ЗАВИСАНИЯ: карту третий раз не трогают — и теперь останавливает ПОЛ, то есть РАНЬШЕ (bugs/23)',
         [stopped.ok, stopped.stoppedBy, stopped.closed, cardsUntouched.length],
-        [false, 'blocked-rung', 0, 0]);
+        [false, 'hang-floor', 0, 0]);
+      ok('и остановка НАЗЫВАЕТ зависание, а не «предел рычага» — статус не врёт про причину',
+        /ЗАВИСАНИЕ НА 1020 мВ/.test(stopped.why ?? ''), true);
       ok('и заблокированная ступень НАЗВАНА в отчёте — 2842 МГц / 1020 мВ',
         (stopped.blocked ?? []).map((b) => [b.frequencyMhz, b.voltageMv]), [[2842, 1020]]);
       ok('одно зависание — НЕ блокировка: вероятностный край стирать нельзя',
@@ -5063,7 +5425,13 @@ async function mainSweep(argv, arg) {
   // THE DRY RUN IS A SEPARATE EXIT AND IT HAPPENS BEFORE ANYTHING ELSE — no journal is opened, no
   // recovery is attempted, no watchdog is armed. Rail S2's artifact must cost the card nothing.
   if (argv.includes('--dry-run')) {
-    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz, depthCapMv });
+    // THE JOURNAL IS READ HERE, AND ONLY READ (`bugs/23`). The paragraph above says the dry run opens
+    // no journal, and the reason it gave was «rail S2's artifact must cost the card nothing» — which
+    // is about WRITING, not about knowing. A hang floor absent from the plan is a wall the operator
+    // discovers mid-run, i.e. exactly the `bugs/09` shape this whole artifact exists to prevent.
+    // `hangFloors` counts an unclosed intent too, so no closure needs to be written to see it.
+    const floors = hangFloors(readJournal(openJournal({})).records);
+    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz, depthCapMv, hangFloors: floors });
     for (const line of sweepDryRunLines(dry)) console.log(line);
     return dry.refusals ? 1 : 0;
   }

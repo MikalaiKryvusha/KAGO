@@ -371,18 +371,29 @@ export async function runTrapSuite() {
     const { golden, stampOk } = stressFor(t5card);
     const twice = await twoDeathsOnOneRung(join(TRAP_DIR, 'T5_hangs_twice_on_one_rung.json'),
       t5card.fiction.failure.hangAtOrBelowMv);
-    check('T5: обе смерти НАСТОЯЩИЕ и приписаны ОДНОЙ И ТОЙ ЖЕ ступени',
-      twice.deaths === 2 && twice.blocked.length === 1,
-      `смертей ${twice.deaths}, заблокировано ${JSON.stringify(twice.blocked)}: ${twice.why}`,
-      twice.blocked[0] ? `${twice.blocked[0].frequencyMhz} МГц / ${twice.blocked[0].voltageMv} мВ` : '');
+    // 🔴 ЭТА ЛОВУШКА ПЕРЕСТАЛА ЛОВИТЬ ВТОРУЮ СМЕРТЬ — И ЭТО НЕ ОСЛАБЛЕНИЕ, А ЕЁ ЦЕЛЬ, ДОСТИГНУТАЯ
+    // РАНЬШЕ (`bugs/23`). Пока ступень запрещал только тормоз «два зависания подряд», второй прогон
+    // ОБЯЗАН был снова дойти до смертельной ступени и убить машину второй раз — то есть цена одного
+    // защищённого рунга равнялась ДВУМ перезагрузкам на столе владельца. Пол зависания закрывает
+    // ступень после ПЕРВОЙ, поэтому вторая попытка честно доживает до конца (код 0) и просто не
+    // спускается туда.
+    //
+    // Утверждение переписано на то, что теперь ИСТИННО, а не подогнано под старое поведение: смерть
+    // одна, вторая попытка выжила, и ступень уже недостижима. Тормоз «два подряд» при этом НЕ удалён
+    // и не остался недоказанным — у него свой прямой блок в `engine --selftest`, который гоняет
+    // `runRung` с заблокированным ключом.
+    check('T5: ПЕРВАЯ смерть настоящая, а ВТОРАЯ попытка до ступени уже не доходит — цена одна перезагрузка',
+      twice.deaths === 1 && twice.codes?.[1] === 0,
+      `смертей ${twice.deaths}, коды ${JSON.stringify(twice.codes ?? null)}: ${twice.why}`,
+      `код первой попытки ${twice.codes?.[0]}, второй ${twice.codes?.[1]} — вторая не умерла`);
     const third = await runSweep(t5card, {
       seed: 41, fromMhz: twice.frequencyMhz, toMhz: twice.frequencyMhz,
       journal: openJournal({ dir: twice.dir }), stress, golden, stampOk,
     });
     check(`T5: ${mustDoOf('T5_hangs_twice_on_one_rung')} — развёртка встаёт, а не пропускает молча`,
-      third.report.ok === false && third.report.stoppedBy === 'blocked-rung',
+      third.report.ok === false && third.report.stoppedBy === 'hang-floor',
       `ok ${third.report.ok}, остановлено «${third.report.stoppedBy}»: ${third.report.why}`,
-      'ok=false → команда выходит ненулевым кодом');
+      'ok=false → команда выходит ненулевым кодом, и причина названа зависанием');
     check('T5: и ненулевой код — это ровно отображение ok=false, а не отдельное решение',
       sweepExitCode(third.report) === 1 && sweepExitCode({ ok: true }) === 0,
       `ok=false → ${sweepExitCode(third.report)}, ok=true → ${sweepExitCode({ ok: true })}`);
@@ -537,9 +548,11 @@ async function twoDeathsOnOneRung(cardPath, hangAt) {
 
   let deaths = 0;
   const notes = [];
+  const codes = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const r = await spawnSweepChild(cardPath, journalDir, dir);
     if (r.died) deaths += 1;
+    codes.push(r.status);
     notes.push(`попытка ${attempt + 1}: код ${r.status}`);
     // The re-launch is what CLOSES the orphan intent as ЗАВИС — the same call the next run makes.
     resumeState(openJournal({ dir: journalDir }), { at: `2026-08-16T0${4 + attempt}:00:00+03:00` });
@@ -547,8 +560,14 @@ async function twoDeathsOnOneRung(cardPath, hangAt) {
   const state = resumeState(openJournal({ dir: journalDir }), { at: '2026-08-16T06:00:00+03:00' });
   return {
     deaths,
+    // THE CODES OF BOTH ATTEMPTS, kept since `bugs/23`: the interesting fact is no longer «how many
+    // died» but «the second one SURVIVED». A count alone cannot tell «it did not reach the rung»
+    // from «it never ran».
+    codes,
     blocked: state.blocked,
-    frequencyMhz: state.blocked[0]?.frequencyMhz ?? 2842,
+    // The floor, which is what stops the second attempt now — read from the same resume call.
+    floors: state.floors,
+    frequencyMhz: state.blocked[0]?.frequencyMhz ?? [...(state.floors?.keys() ?? [])][0] ?? 2842,
     dir: journalDir,
     why: `${notes.join(' · ')}, порог зависания ${hangAt} мВ`,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),

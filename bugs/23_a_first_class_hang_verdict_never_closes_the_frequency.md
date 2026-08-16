@@ -1,6 +1,9 @@
 # Bug 23 — a first-class `ЗАВИС` verdict does not close the frequency, so a resumed run walks back onto the rung that killed the machine
 
-**Status:** 🔴 OPEN
+**Status:** 🔧 FIX LANDED, VERIFICATION IS OFFLINE-ONLY — 2026-08-17 00:5x. Every guard mutation-proved
+red first (8 addressees), the trap suite drives it over a REAL process kill. **The live half — a
+resumed sweep on the card at 2842 MHz — has NOT been run: the owner's machine was busy and he asked
+that the GPU not be touched.** That run is what flips this to DONE.
 **Version/build:** `main` @ `901a123` · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-17 ≈23:31 +03:00 (2026-08-16 local evening), the project's **first
 deliberate edge hunt** — `engine --sweep --from 2842 --to 2842 --max-depth 245 --dashboard`, run at
@@ -84,6 +87,77 @@ this and the first time it has earned its keep on a real hang.
        provenance block reddens.
    ⚠️ EXP-0075 at every site: `find(...)?.x ?? '<what was missing, in words>'`.
 
+## THE FIX AS BUILT — 2026-08-17
+
+**Shape:** the hang becomes a THIRD WALL on the descent, and the closure runs through the machinery an
+oracle failure already uses. Nothing about the edge is computed twice.
+
+| # | Where | What |
+|---|---|---|
+| 1 | `sweep-journal.hangFloors` | now counts an **unclosed intent** as a floor too, through the same `orphanIntents` the closure uses. Needed because the one reader that must not WRITE is the dry run, and a wall the plan cannot print is a wall the operator meets mid-run. Both sources give the same answer before and after the closure. |
+| 2 | `engine.descentLadder` | takes `hangFloorMv`; no rung lands **on or below** it. Returns `stoppedByHang`, and the `why` names the hang rather than the lever or our depth cap. Where two walls fall on the same rung the HANG is named — it is the one fact of the three that belongs to the card. |
+| 3 | `engine.planFrequency` | passes it through AND **cancels the seed** when the neighbour's voltage sits at or below the floor. The seed is a JUMP: it would deliver us onto the fatal rung on the first burn, before any ladder could stop anything. |
+| 4 | `engine.sweepFrequency` | when the ladder stopped against the floor, `closeByHang()` runs `refineEdge` with the hang as the failure's OUTER bracket and the deepest PASS as the inner one → status `edge-found`, witness naming the reboot. No PASS above the floor → **halt**, nothing shipped (`hangFloorHalt`). |
+| 5 | `engine.sweepRange` | reads `resume.floors` once, announces each (`hang-floor`), hands the per-frequency floor down, carries them into the report; `stoppedBy: 'hang-floor'` is its own reason and never wears «предел рычага». |
+| 6 | `sweepDryRun` / `mainSweep --dry-run` | the plan reads the journal **read-only** and prints the wall, the cancelled seed and the deepest planned rung. |
+
+**The rebase door, found by the twin search and then CLOSED BY PROOF rather than by a guard.**
+`sweepFrequency` re-bases a rung's target off the card's grid when the proven ground has drifted up —
+a second site that picks a voltage without asking the ladder. A filter was written there first; no
+fixture could make it go red, because the branch only runs when the plan's rung lies BELOW the window,
+so the chosen point is always ABOVE that rung and therefore above the floor. Shipping an unreachable
+guard is EXP-0073's class, so the filter was removed and the PROPERTY is asserted end to end instead:
+the block «спуск НЕ ВОЗВРАЩАЕТСЯ на убившую ступень» drives a descent whose ground drifts (1045 →
+1010 → 975), the rebase fires twice under a live floor, and mutation 68 reddens it.
+`TWINS: searched every site that chooses a voltage — `descentLadder` rungs · the rebase · `refineEdge`'s
+bracket (strictly above the failure, safe by construction) · `seedFor` — found 4, all closed. The old
+phase-5 `searchEdge`/`mainBand` path does not consult the journal at all and is out of this fix's
+scope; it is the cancelled method (`MASTER_PLAN.md` phase 5).`
+
+### The interaction nobody predicted, and it is the fix's best news
+
+**The floor SUBSUMES the owner's «two consecutive hangs» brake on the sweep path** — and in the safe
+direction. The brake had to reach the SECOND hang before it engaged, i.e. one protected rung cost
+**two reboots** on the owner's desk. The floor closes the rung after the FIRST. Measured by trap T5,
+which kills a real process: attempt 1 dies (exit 70), **attempt 2 now survives (exit 0)** because it
+never descends that far. T5's assertions were rewritten to state that, not re-fitted to the old
+behaviour; the brake itself is neither deleted nor left unproven — it keeps its own direct block in
+`engine --selftest` driving `runRung` with a blocked key.
+
+### The margin was re-anchored by the owner in the middle of this work — 2026-08-17
+
+> *«давай исправим формулировку напряжения на котором фиксируемся — сейчас точка отказа + 10 мВ.
+> Переделываем на: последняя стабильная до отказа точка (соседка отказа сверху) + 5 мВ. Это исправляет
+> случае, где шаг был не 5 мВ, а, например, сетка позволяла только 10 мВ»*
+
+He is right arithmetically, not merely cautiously. This card's grid has **32 intervals of 10 mV**;
+there `failure + 10` lands exactly ON the last passing rung — a cushion of zero over proven ground, in
+a quarter of the grid, invisible because the arithmetic looked identical from the failure's side.
+Where the interval is 5 mV both forms give the SAME voltage, so **no measured number in the project
+moves** — the edge of 2026-08-16 still ships 855 mV. `config.MARGIN_STEPS_ABOVE_FAILURE` → 
+`MARGIN_STEPS_ABOVE_LAST_STABLE = 1`, and `refineEdge` adds it to `pass`, never to `failMv`.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| `node automation-engine/engine.mjs --selftest` | **256 blocks**, 0 red (was 245) |
+| `node automation-engine/lib/sweep-journal.mjs --selftest` | **31 blocks**, 0 red |
+| `npm run traps` | 28 assertions, **0 failures**, 0 pending — T5 on a real process kill |
+| `npm run contract` · `bench --selftest` · `curve --selftest` · `npm run check` | 8/0 · 4/4 · 46/0 · 44 files, 262 texts, 0 corrupt |
+| Mutations, addressees named BEFORE the run | **68–72, 74–76 — each reddens its own block**; baseline clean and the completion line asserted (EXP-0071) |
+
+Two defects in the new blocks were found by the mutation run itself and fixed: a fixture that THREW
+where a mutation made it reachable (EXP-0075, again), and a mutation string that also matched the
+assertion's own expectation — the harness mutating both sides of its own comparison.
+
+### What is NOT done
+
+- **The live run.** `npm run engine -- --sweep --from 2842 --to 2842 --dashboard` is what writes
+  855 mV into the document and closes this bug. Not run: the owner's machine was occupied and he
+  asked for the GPU to be left alone.
+- **The 2842 MHz row still reads 1000 mV** until that run happens. The journal still holds the truth.
+
 ## What to do about the knowledge already on disk, before the fix exists
 
 The journal holds it and the journal is git-ignored, so it is one `runs/` wipe from being lost. Until
@@ -94,7 +168,25 @@ is at 845».
 
 ## Decisions made without the owner
 
-<filled at closing>
+1. **The shipping voltage is `max`-free: the closure goes through `refineEdge`, not through arithmetic.**
+   The fix plan said «hang + margin». Applied to a hang found on a COARSE rung that would ship a
+   voltage nobody burned — which his own rule forbids (*«найденный грубым шагом отказ ОБЯЗАН быть
+   уточнён минимальным шагом, прежде чем к нему применят запас»*). Routing the closure through the
+   refinement obeys both rules with one mechanism instead of two. Price: where the descent stopped a
+   coarse step above the hang, the run burns the grid points between them — that IS the search, and
+   refinement can never reach the hang itself.
+2. **Where two walls fall on the same rung, the HANG is reported.** The lever and the depth cap are
+   statements about us; the hang is the card's answer, paid for with a reboot. Naming ours would hide
+   the measurement behind our preference. Consequence: under `--max-depth` the frequency can still
+   close as `edge-found`, which is more than the workaround promised.
+3. **The rebase filter was removed rather than kept as belt-and-braces** — it could not be made red by
+   any fixture (EXP-0073). Replaced by the end-to-end property with a drifting ground.
+4. **Trap T5's assertions were rewritten, not re-fitted.** The old ones demanded two real deaths; the
+   fix makes the second impossible. Recording that as the trap's achievement is honest, silently
+   relaxing it would not be.
+5. **The dry run now READS the journal.** The paragraph forbidding it says «rail S2's artifact must
+   cost the card nothing» — that is about writing. Reading costs nothing and removes a wall the plan
+   would otherwise hide.
 
 ## Links
 
