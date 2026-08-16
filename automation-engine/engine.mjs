@@ -4724,19 +4724,46 @@ async function mainSweep(argv, arg) {
   // ⚠️ THE CHECK IS «КТО-ТО СМОТРИТ», NOT «СЕРВЕР ЖИВ», and that distinction is paid for: twice this
   // day the server answered 200 on 127.0.0.1:7311 while no window had opened at all. `/health`
   // reports OPEN EVENT STREAMS — a browser holding one is a browser with the page on screen.
+  // ─── THE RUN RAISES ITS OWN WINDOW — the owner's word, 2026-08-16 ────────────────────────────────
+  //
+  // *«было бы супер, чтобы бекенд движка сам поднимал страницу и конфигурировал. Тогда бекенд
+  // становится менеджером»* · *«и не будет ситуации, что руки не знают о том, что делают ноги, и
+  // наоборот»*.
+  //
+  // That second sentence is the engineering reason, and it was paid for the same day: the operator
+  // had a window on his monitor while this gate refused the run for not having one. Two commands in
+  // two terminals owned two halves of one state, and neither could see the other's. One owner
+  // removes the disagreement by construction — there is no second party left to disagree with.
+  //
+  // The gate itself does NOT weaken: a run still may not touch the card unless somebody is watching.
+  // What changes is who is asked to fix it. Refusal is now the LAST resort, not the first answer.
   const dash = await import('./lib/run-dashboard.mjs');
-  const watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+  let watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+  if (!watch.ok || watch.viewers < 1) {
+    console.log('ОКНО НАБЛЮДЕНИЯ: не открыто — поднимаю сам, прогон им управляет.');
+    const raised = await dash.raiseDashboard({ port: dash.DEFAULT_PORT });
+    if (raised.ok) watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+    // The server we just raised belongs to THIS process: when the sweep ends, the window goes with
+    // it. A window outliving its run is the `bugs/04` shape — a frozen picture of something that is
+    // no longer happening.
+    if (raised.ok && raised.s) {
+      const shutWindow = () => { try { dash.closeWindow(); } catch { /* уже закрыто */ } try { raised.s.close(); } catch { /* уже */ } };
+      process.on('exit', shutWindow);
+      for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { shutWindow(); process.exit(130); });
+    }
+  }
   if (!watch.ok || watch.viewers < 1) {
     console.error('ОТКАЗ: ОКНО НАБЛЮДЕНИЯ НЕ ОТКРЫТО, а развёртка пишет в карту.');
     console.error(`       ${watch.why}`);
+    console.error('       Прогон пытался поднять его сам и не смог — значит смотреть действительно нечем.');
     console.error('');
     console.error('       Слово владельца 2026-08-16: «прогоны без визуализатора ПОД СТРОГИМ ЗАПРЕТОМ».');
     console.error('       Когда машина зависает, картинка застывает — и это самый быстрый сигнал оператору,');
     console.error('       а застывшая ступень и есть точка отказа. Без окна этого сигнала нет.');
     console.error('');
-    console.error('       ЧТО СДЕЛАТЬ: поднять окно — `npm run dashboard` — и ДОЖДАТЬСЯ, пока страница');
-    console.error('       откроется в браузере. Проверка считает открытые окна, а не живой сервер:');
-    console.error('       сервер может отвечать, когда окна нет (так было дважды 2026-08-16).');
+    console.error('       ЧТО СДЕЛАТЬ: `npm run dashboard` руками и посмотреть, на чём он встанет.');
+    console.error('       Проверка считает ОТКРЫТЫЕ ОКНА, а не живой сервер: сервер может отвечать,');
+    console.error('       когда окна нет (так было дважды 2026-08-16).');
     console.error('');
     console.error('       План прогона читается без окна и карту не трогает: добавьте --dry-run.');
     return 2;

@@ -447,6 +447,7 @@ export function serve({
   pulsePath = PULSE_PATH,
   pagePath = PAGE_PATH,
   pollMs = 200,
+  heartbeatMs = 10_000,
   onListen = null,
   onError = null,
 } = {}) {
@@ -519,6 +520,23 @@ export function serve({
   }, pollMs);
   timer.unref?.();
 
+  // ⚠️ A STREAM THAT SENDS NOTHING IS INDISTINGUISHABLE FROM A DEAD ONE — for the browser, for the
+  // OS, and for us. Between runs this server has nothing to say for hours: `seq` never changes, so
+  // the broadcast loop above writes not a single byte after the first frame. On 2026-08-16 that
+  // silent stream was dropped somewhere below us and the page never came back — the window stayed
+  // on screen, painted and frozen, while `/health` counted ZERO viewers and the sweep refused to
+  // start «без окна» with a window plainly visible on the owner's monitor.
+  //
+  // An SSE comment line (`:` … ) is the protocol's own keep-alive: the client ignores it, and it
+  // proves the path is still there in both directions. This is the established pattern, not our
+  // invention — an idle EventSource without a heartbeat is a known way to lose a connection.
+  const beat = setInterval(() => {
+    for (const c of clients) {
+      try { c.write(': пульс\n\n'); } catch { clients.delete(c); }
+    }
+  }, heartbeatMs);
+  beat.unref?.();
+
   // A BIND FAILURE IS AN ANSWER, NEVER AN UNHANDLED EVENT.
   //
   // `listen` is asynchronous, so `serve()` returns while the bind is still in flight and an
@@ -546,6 +564,7 @@ export function serve({
     // handle libuv never opened — and closing that twice aborts the process from inside libuv.
     close() {
       clearInterval(timer);
+      clearInterval(beat);
       for (const c of clients) { try { c.end(); } catch { /* gone */ } }
       try { if (server.listening) server.close(); } catch { /* already down */ }
     },
@@ -1087,6 +1106,28 @@ export async function selfTest() {
     check('ПРИБОР ЗРИТЕЛЕЙ НЕ ВЫДУМЫВАЕТ: сервер жив, зрителей ноль — ответ «нет»',
       none === false, 'насчитал зрителя там, где окна нет');
     lonely.close();
+  }
+
+  // — ПРОСТАИВАЮЩИЙ ПОТОК ОБЯЗАН ПОДАВАТЬ ПРИЗНАКИ ЖИЗНИ. Между прогонами номер не меняется, и
+  //   без сердцебиения поток молчит часами — 2026-08-16 такой поток обронили, и окно осталось на
+  //   экране мёртвой картинкой при нуле зрителей.
+  //   АДРЕСАТ: AQ. убрать сердцебиение → «ПОТОК БЕЗ НОВОСТЕЙ ВСЁ РАВНО ДЫШИТ».
+  {
+    const s = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json'), heartbeatMs: 60 });
+    await new Promise((r) => { s.server.once('listening', r); });
+    const got = await new Promise((resolve) => {
+      let raw = '';
+      const req = httpRequest({ host: '127.0.0.1', port: s.server.address().port, path: '/live', agent: false }, (res) => {
+        res.setEncoding('utf8');
+        res.on('data', (c) => { raw += c; });
+      });
+      req.on('error', () => resolve(''));
+      req.end();
+      setTimeout(() => { req.destroy(); resolve(raw); }, 400);
+    });
+    check('ПОТОК БЕЗ НОВОСТЕЙ ВСЁ РАВНО ДЫШИТ — иначе простой неотличим от обрыва',
+      /:\s*пульс/.test(got), `за 400 мс сердцебиения не пришло: ${JSON.stringify(got.slice(0, 120))}`);
+    s.close();
   }
 
   // — ОПОЗНАНИЕ ДАШБОРДА ИДЁТ ПО ЕГО СОБСТВЕННОМУ МАРШРУТУ, а не по факту «порт отвечает».
