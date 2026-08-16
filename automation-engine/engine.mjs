@@ -1370,9 +1370,49 @@ export async function sweepFrequency({
   }
 
   // ---- 3. THE DESCENT.
+  // СЕТКА НАПРЯЖЕНИЙ КАРТЫ, ПО УБЫВАНИЮ — по ней пересчитывается цель, когда земля уехала.
+  const gridDesc = [...new Set((voltageGridMv ?? []).filter(Number.isFinite))].sort((a, b) => b - a);
+
   for (const rung of rungs) {
+    // ─── ЦЕЛЬ БЕРЁТСЯ ОТ ДОКАЗАННОГО, А НЕ ОТ ПЛАНА, КОГДА ЭТИ ДВА РАЗОШЛИСЬ ──────────────────────
+    //
+    // Лестница считается ОДИН РАЗ от стока — и это правильно, потому что иначе шаг мог бы углубиться
+    // без спроса. Но доказанная земля ездит: карта регулярно отдаёт напряжение на ступень ВЫШЕ
+    // заказанного (её таблица сползает по оси частот от нагрева), и тогда следующая плановая
+    // ступень оказывается дальше от земли, чем разрешает `bugs/03`.
+    //
+    // Живой прогон 2026-08-16: на 2565 МГц заказали 900 мВ, карта дала 915 (промах вверх, принят —
+    // доказано 915). Следующая плановая ступень 875 — это 40 мВ от 915 при стене 35, и прогон встал.
+    // Плана никто не нарушал: 900 → 875 это ровно 25. Разошлись план и реальность.
+    //
+    // Слово владельца, которым это и лечится: *«Ты знаешь сетку напряжений видеокарты? Если знаешь,
+    // то ты знаешь, какого размера ты шаг можешь сделать»*. Знаем — значит берём САМУЮ ГЛУБОКУЮ
+    // ступень сетки, до которой шаг от земли не превышает стену. Это НЕ ослабление: пересчёт может
+    // сделать шаг только КОРОЧЕ планового, никогда длиннее, потому что стена и есть его потолок.
+    const ground = lastPass ?? startMv;
+    let targetMv = rung.mv;
+    let rebased = false;
+    if (ground - targetMv > cliff) {
+      const deepest = gridDesc.filter((v) => v < ground && v >= ground - cliff).pop() ?? null;
+      if (deepest === null) {
+        // Сетка не предлагает НИ ОДНОЙ ступени между землёй и стеной — идти некуда, и это не отказ
+        // карты, а конец пути на этой частоте. Закрывается тем, что уже доказано.
+        say('rebase-exhausted', `${frequencyMhz} МГц: от доказанных ${ground} мВ сетка не даёт ни одной ступени `
+          + `в пределах ${cliff} мВ — спуск здесь закончен`);
+        break;
+      }
+      targetMv = deepest;
+      rebased = true;
+      say('rebase', `${frequencyMhz} МГц: план звал на ${rung.mv} мВ, но доказано ${ground} мВ — это ${ground - rung.mv} мВ `
+        + `при стене ${cliff}. Беру ближайшую достижимую ступень сетки: ${targetMv} мВ (шаг ${ground - targetMv} мВ)`);
+    }
+    // Ступень, которая не глубже уже доказанного, ничего не покупает — плановая цель осталась позади,
+    // пока карта промахивалась вверх. Пропускаем молча: это не находка и не отказ.
+    if (targetMv >= ground) continue;
+
     const r = await runRung({
-      frequencyMhz, voltageMv: rung.mv, depthMv: rung.depthMv, zoneStepMv: rung.zoneStepMv, seeded: out.seeded,
+      frequencyMhz, voltageMv: targetMv, depthMv: stockVoltageMv - targetMv,
+      zoneStepMv: rung.zoneStepMv, seeded: out.seeded, rebased,
       // THE PROVEN GROUND, HANDED DOWN (`interviews/009`). `lastPass` is the deepest voltage this
       // frequency has actually SURVIVED; before the first PASS it is the descent's start — stock, or
       // the seed, which the neighbour above already proved. The wall is the same `bugs/03` cliff the
@@ -1385,9 +1425,11 @@ export async function sweepFrequency({
     // we ASKED for; `r.measuredMv` is what the card actually served and therefore what was burned.
     // Carrying the asked-for value forward would put a voltage nobody proved into the document, and
     // would seed the neighbour below from a number that never existed.
-    const provedMv = Number.isFinite(r?.measuredMv) ? r.measuredMv : rung.mv;
+    const provedMv = Number.isFinite(r?.measuredMv) ? r.measuredMv : targetMv;
     out.rungs.push({
-      voltageMv: provedMv, orderedMv: rung.mv, seed: false,
+      // `orderedMv` — то, что ЗАКАЗАЛИ на самом деле (после пересчёта от земли), а не то, что стояло
+      // в плане: улика обязана описывать прогон, а не намерение, от которого он отступил.
+      voltageMv: provedMv, orderedMv: targetMv, plannedMv: rung.mv, rebased, seed: false,
       outcome: r?.outcome ?? null, verdict: r?.verdict ?? null,
     });
 
@@ -1398,12 +1440,12 @@ export async function sweepFrequency({
       // back to the last PASS and re-finds it at the card's own step; only THAT failure gets the margin.
       if (lastPass === null) {
         out.halted = true;
-        out.why = `ОТКАЗ НА ПЕРВОЙ ЖЕ СТУПЕНИ ${rung.mv} мВ на ${frequencyMhz} МГц, а прошедшего напряжения `
+        out.why = `ОТКАЗ НА ПЕРВОЙ ЖЕ СТУПЕНИ ${targetMv} мВ на ${frequencyMhz} МГц, а прошедшего напряжения `
           + 'ещё нет — уточнять не от чего. Край здесь ниже стока меньше, чем на один шаг политики, и это находка, а не вердикт';
         return withDelivered();
       }
       const refined = await refineEdge({
-        voltageGridMv, lastPassMv: lastPass, coarseFailMv: rung.mv, minStepMv, runRungFn: (mv) => runRung({
+        voltageGridMv, lastPassMv: lastPass, coarseFailMv: targetMv, minStepMv, runRungFn: (mv) => runRung({
           frequencyMhz, voltageMv: mv, depthMv: stockVoltageMv - mv, zoneStepMv: minStepMv, seeded: out.seeded,
           // Refinement walks back UP from the coarse failure toward `lastPass`, so the proven ground is
           // the same one the descent had — and it must not be re-derived here (one number, one place).
@@ -3970,6 +4012,41 @@ export function selfTest() {
       handed.slice(0, 3), [[1020, 1045, 35], [995, 1020, 35], [970, 995, 35]]);
     ok('и стена, которой судят приземление, — ТА ЖЕ, которой план судил заказ (одно число, не два)',
       [...new Set(handed.map((h) => h[2]))], [config.ASCENT_STEP_MAX_MV ?? 35]);
+
+    // — ЗЕМЛЯ УЕХАЛА ВВЕРХ -> ЦЕЛЬ ПЕРЕСЧИТЫВАЕТСЯ, А ПРОГОН НЕ ВСТАЁТ. Живой прогон 2026-08-16 на
+    //   2565 МГц: заказали 900, карта дала 915 (промах вверх, принят), следующая ПЛАНОВАЯ ступень 875
+    //   оказалась в 40 мВ от доказанного при стене 35 — и развёртка остановилась. Плана никто не
+    //   нарушал (900 → 875 это ровно 25); разошлись план и реальность.
+    //   Здесь карта СИСТЕМАТИЧЕСКИ отдаёт на 15 мВ выше заказа — то есть каждая плановая ступень
+    //   слишком глубока, — и проверяется ровно два свойства: прогон НЕ встаёт, и НИ ОДИН шаг от
+    //   доказанного не превышает стену. Второе важнее первого: пересчёт, который «просто едет
+    //   дальше», был бы снятием сторожа, а не его соблюдением.
+    //   ⚠️ ФИКСТУРА ПРОМАХИВАЕТСЯ ВВЕРХ РОВНО ОДИН РАЗ, и это не мелочь: первая её редакция
+    //   промахивалась на КАЖДОЙ ступени, и обе мутации («убрать пересчёт», «пересчёт берёт плановую
+    //   ступень») не покрасили НИЧЕГО. Причина в арифметике: если карта всегда отдаёт на 15 мВ выше
+    //   заказа, то и следующее приземление уезжает вверх на те же 15, и шаг от земли остаётся 25.
+    //   Живой отказ выглядел иначе — промах ОДИН, а следующая ступень легла точно, и вот тогда шаг
+    //   стал 40. Блок обязан воспроизводить тот случай, который он сторожит (EXP-0073).
+    //
+    //   И проверяется ЗАКАЗ, а не приземление: сторож глубины живёт в `runRung`, которую этот блок
+    //   подменяет, — значит наблюдаемое здесь свойство ровно одно, «какую цель выбрал спуск».
+    const orders = [];
+    let missed = false;
+    const drifted = await freqOK({
+      runRungFn: async (a) => {
+        orders.push({ ordered: a.voltageMv, proven: a.provenMv, step: a.provenMv - a.voltageMv });
+        // Один промах вверх на первой же ступени — дальше карта отдаёт ровно заказанное.
+        const delivered = missed ? a.voltageMv : a.voltageMv + 15;
+        missed = true;
+        return { outcome: 'passed', verdict: P, why: '', measuredMv: delivered };
+      },
+    });
+    ok('ЗЕМЛЯ УЕХАЛА ВВЕРХ: спуск не встал и закрылся пределом рычага',
+      [drifted.halted === true, drifted.verdict], [false, 'lever-limited']);
+    ok('и НИ ОДИН ЗАКАЗ не встал дальше стены от доказанного — пересчёт соблюдает сторожа, а не снимает его',
+      orders.filter((s) => s.step > (config.ASCENT_STEP_MAX_MV ?? 35)).map((s) => `${s.proven}→${s.ordered}`), []);
+    ok('и пересчёт РЕАЛЬНО случился: после промаха заказ отличается от плановой ступени лестницы',
+      orders.some((s, i) => i > 0 && s.step < 25), true);
 
     // — a failure is refined and only THEN shipped: the coarse rung 970 signals, the walk re-finds the
     // failure at 980, and the shipped value is 980 + 10.

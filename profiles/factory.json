@@ -6,6 +6,7 @@
     "powerLimitWatts": null,
     "graphicsClockLockMhz": null,
     "curveRaiseAndCapMhz": null,
-    "curveRef": null
+    "curveRef": null,
+    "curveCapMhz": null
   }
 }

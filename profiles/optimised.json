@@ -10,7 +10,8 @@
       "deltaMhz": 592,
       "capMhz": null
     },
-    "curveRef": null
+    "curveRef": null,
+    "curveCapMhz": null
   },
   "stamp": {
     "driver": "610.88",

@@ -7,7 +7,8 @@
     "powerLimitWatts": null,
     "graphicsClockLockMhz": null,
     "curveRaiseAndCapMhz": null,
-    "curveRef": null
+    "curveRef": null,
+    "curveCapMhz": null
   },
   "draft": {
     "что это": "ЧЕРНОВИК. Числа ниже — кандидаты как документация, применение отказывает до фазы 6. Настройки пусты честно: рычаг режима — кривая V/F, а её applier пишет только с фазы 6 (бэкенд NVAPI).",

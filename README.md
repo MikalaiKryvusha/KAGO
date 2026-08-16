@@ -6,6 +6,8 @@
 
 # KAGO — Krinik Automated GPU Orchestrator
 
+<h3 align="center">Made by a gamer, for gamers. ❤️</h3>
+
 <h3 align="center">An automated GPU optimisation tool.</h3>
 
 <p align="center">
@@ -260,6 +262,8 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 # KAGO — Криника Автоматизированный ГПУ Оркестратор
+
+<h3 align="center">Сделано геймером для геймеров. ❤️</h3>
 
 <h3 align="center">Автоматизированный инструмент оптимизации GPU.</h3>
 

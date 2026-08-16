@@ -44,7 +44,7 @@ const GPU_INFO = fileURLToPath(new URL('../../tools/gpu-info.mjs', import.meta.u
 
 /** The settings a profile may carry. An unknown key is REFUSED, never ignored — `powerLimitWats`
  *  silently ignored is a profile that does nothing while reading as if it does. */
-const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz', 'curveRef']);
+const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz', 'curveRef', 'curveCapMhz']);
 const STAMP_KEYS = Object.freeze(['driver', 'vbios', 'takenAt']);
 
 /**
@@ -336,6 +336,43 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
   // a factor of five along this curve (45 mV at 1700 MHz, 245 mV at 2842 — `STATUS.md`, arithmetic on
   // the live curve), so a single Δ cannot be the optimum, and the owner's convergence loop in
   // `GOAL.md` keeps one value PER POINT. EXP-0056 records the week that was lost shipping the scalar.
+  // ПОТОЛОК ЧАСТОТЫ — ОДНА ПРОВЕРКА НА ОБА МЕСТА, ГДЕ ЕГО МОЖНО НАЗВАТЬ.
+  //
+  // Он приходит либо ВНУТРИ встроенной кривой (`curveRaiseAndCapMhz.capMhz`), либо РЯДОМ со ссылкой
+  // на документ (`curveCapMhz`, добавлено 2026-08-16 — без него `Silent Cold` невыразим: три режима
+  // делят один документ кривой и различаются ровно двумя полями, лимитом мощности и потолком
+  // частоты, `plans/13` фаза 5). Правила у потолка одни и те же в обоих местах, и написать их дважды
+  // значило бы завести пару «правда ↔ зеркало» над числом, которое уже стоило владельцу BSOD.
+  const checkCap = (field, value) => {
+    if (value === null || value === undefined) return;
+    if (!Number.isInteger(value)) {
+      out.push(refuse(field, `ожидалось целое число МГц или null (потолка нет), получено ${JSON.stringify(value)}`));
+      return;
+    }
+    if (!card) return;
+    if (!card.ladder.ok) {
+      out.push(refuse(field, `частоту не с чем сверить: ${card.ladder.why}`));
+      return;
+    }
+    if (!card.ladder.mhz.includes(value)) {
+      const { below, above } = nearestOnLadder(value, card.ladder.mhz);
+      const near = [below, above].filter((x) => x !== null).join(' и ');
+      out.push(refuse(field,
+        `${value} МГц нет на измеренной лестнице карты (${card.ladder.mhz.length} точек ${card.ladder.mhz[0]}…${card.ladder.mhz[card.ladder.mhz.length - 1]} МГц); ближайшие: ${near || '—'}`));
+    }
+    // THE FLOOR THE CURVE CAN HOLD (R11). Derived from the card's own top clock, never a literal:
+    // another card has another top, and a hard-coded 2157 would be this card's number wearing a
+    // constant's clothes.
+    const topMhz = card.ladder.mhz[card.ladder.mhz.length - 1];
+    const floorMhz = topMhz + (CLOCK_OFFSET_MIN_MHZ ?? -1000);
+    if (value < floorMhz) {
+      out.push(refuse(field,
+        `${value} МГц ниже пола, который кривая способна удержать (${floorMhz} МГц = верх ${topMhz} − 1000): `
+        + 'потолок держится придавливанием точек вниз, а придавливание упирается в аппаратный диапазон. '
+        + 'Такой профиль применится чисто и всё равно пустит карту выше своего потолка (R11, bugs/02)'));
+    }
+  };
+
   const curve = s.curveRaiseAndCapMhz;
   if (curve !== null && curve !== undefined) {
     if (typeof curve !== 'object' || Array.isArray(curve)) {
@@ -411,11 +448,7 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
       // обслуживающая потолок, и есть та, которую грузит нагрузка. Без потолка карта уходит на
       // частоты выше, их обслуживают ДРУГИЕ точки, и эти рабочие точки не проверялись. Такой профиль
       // требует собственного приёмочного прогона; чужие улики на него не переносятся.
-      if (curve.capMhz !== null && !Number.isInteger(curve.capMhz)) {
-        out.push(refuse('settings.curveRaiseAndCapMhz.capMhz', `ожидалось целое число МГц или null (потолка нет), получено ${JSON.stringify(curve.capMhz)}`));
-        bad.push('capMhz');
-      }
-      if (curve.capMhz === null) bad.push('capMhz');   // нечего сверять с лестницей и полом
+      checkCap('settings.curveRaiseAndCapMhz.capMhz', curve.capMhz);
       if (!bad.includes('deltaMhz')) {
         const lo = CLOCK_OFFSET_MIN_MHZ ?? -1000;
         const hi = CLOCK_OFFSET_MAX_MHZ ?? 1000;
@@ -424,29 +457,34 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
             `${curve.deltaMhz} МГц вне аппаратного диапазона смещений ${lo}…${hi} МГц`));
         }
       }
-      if (!bad.includes('capMhz') && card) {
-        if (!card.ladder.ok) {
-          out.push(refuse('settings.curveRaiseAndCapMhz.capMhz', `частоту не с чем сверить: ${card.ladder.why}`));
-        } else {
-          if (!card.ladder.mhz.includes(curve.capMhz)) {
-            const { below, above } = nearestOnLadder(curve.capMhz, card.ladder.mhz);
-            const near = [below, above].filter((x) => x !== null).join(' и ');
-            out.push(refuse('settings.curveRaiseAndCapMhz.capMhz',
-              `${curve.capMhz} МГц нет на измеренной лестнице карты (${card.ladder.mhz.length} точек ${card.ladder.mhz[0]}…${card.ladder.mhz[card.ladder.mhz.length - 1]} МГц); ближайшие: ${near || '—'}`));
-          }
-          // THE FLOOR THE CURVE CAN HOLD (R11). Derived from the card's own top clock, never a literal:
-          // another card has another top, and a hard-coded 2157 would be this card's number wearing a
-          // constant's clothes.
-          const topMhz = card.ladder.mhz[card.ladder.mhz.length - 1];
-          const floorMhz = topMhz + (CLOCK_OFFSET_MIN_MHZ ?? -1000);
-          if (curve.capMhz < floorMhz) {
-            out.push(refuse('settings.curveRaiseAndCapMhz.capMhz',
-              `${curve.capMhz} МГц ниже пола, который кривая способна удержать (${floorMhz} МГц = верх ${topMhz} − 1000): `
-              + 'потолок держится придавливанием точек вниз, а придавливание упирается в аппаратный диапазон. '
-              + 'Такой профиль применится чисто и всё равно пустит карту выше своего потолка (R11, bugs/02)'));
-          }
-        }
-      }
+    }
+  }
+
+  // --- curveCapMhz — ПОТОЛОК ЧАСТОТЫ ДЛЯ КРИВОЙ ИЗ ДОКУМЕНТА (2026-08-16) ------------------------
+  //
+  // Без него `Silent Cold` невыразим. Владелец, `GOAL.md` → «⭐ ЧТО ТАКОЕ ТЮНИНГ VF-КРИВОЙ»:
+  // *«COLD SILENT — абсолютно то же самое, только вот в нём мы вводим ограничение по максимальной
+  // частоте, условных 2800, выше которых не разрешаем карточке гнаться»*. То есть три режима делят
+  // ОДИН документ кривой и различаются ровно двумя полями: лимитом мощности и этим потолком.
+  //
+  // Отдельным полем, а не внутри `curveRef`, по той же причине, по какой `curveRef` вообще заведён:
+  // потолок — это ручка РЕЖИМА, а документ — ЗАМЕР. Спрятать ручку режима внутрь ссылки на замер
+  // значило бы сделать вид, что потолок измерен, хотя его назначает владелец (`plans/14` §5).
+  //
+  // Осмысленно только вместе со ссылкой: у встроенной кривой потолок уже есть свой, и два потолка на
+  // один профиль не имеют честного прочтения — та же логика, что у запрета «кривая задана дважды».
+  {
+    const cap = s.curveCapMhz;
+    const hasCap = cap !== null && cap !== undefined;
+    // `s.curveRef` напрямую, а не через `ref` ниже: этот блок стоит ВЫШЕ объявления, и обращение к
+    // нему было бы ошибкой временной мёртвой зоны — набор поймал бы её, но лучше не заводить.
+    const hasRef = s.curveRef !== null && s.curveRef !== undefined;
+    if (hasCap && !hasRef) {
+      out.push(refuse('settings.curveCapMhz', 'потолок задан без ссылки на документ кривой (curveRef). '
+        + 'У встроенной кривой свой потолок внутри curveRaiseAndCapMhz — два потолка на один профиль '
+        + 'не имеют честного прочтения'));
+    } else {
+      checkCap('settings.curveCapMhz', cap);
     }
   }
 
@@ -731,14 +769,14 @@ const FAKE_CARD = Object.freeze({
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
 });
 
 const measuredFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 

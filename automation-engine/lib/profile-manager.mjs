@@ -445,7 +445,13 @@ export function effectiveCurveSetting(profile, { loadCurve = null, liveTable = n
     throw err;
   }
   const { offsets, clamped } = toOffsets(doc, liveTable);
-  return { deltaByPointMhz: offsets, capMhz: null, __fromRef: ref, __clamped: clamped };
+  // ПОТОЛОК РЕЖИМА ЕДЕТ ВМЕСТЕ С ВЕКТОРОМ (2026-08-16). Документ — это ЗАМЕР, потолок — ручка
+  // РЕЖИМА, поэтому он лежит в профиле отдельным полем и подставляется здесь, в одном месте, где
+  // «ссылка» превращается в ту же форму, что и встроенная кривая. Ниже по течению ничто не меняется:
+  // одна арифметика, один писатель (R1), и `buildRaiseAndCapVector` придавит всё, что торчит выше.
+  // `null` — потолка нет вовсе, и это НЕ то же самое, что «потолок на верху кривой» (EXP-0031).
+  const capMhz = profile?.settings?.curveCapMhz ?? null;
+  return { deltaByPointMhz: offsets, capMhz, __fromRef: ref, __clamped: clamped };
 }
 
 function defaultCurveLoader(name) {
@@ -1022,14 +1028,14 @@ const silentColdFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
 });
 
 /**
@@ -1262,7 +1268,7 @@ async function cmdSelftest() {
     const p = {
       name: 'max-performance', title: '🚀 Max Perfomance', mode: 'max-performance',
       qualified: false, draft: { candidate: '+180, потолок 3172', source: 'STATUS факты 24, 27' },
-      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
+      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
     };
     try {
       await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
@@ -1559,7 +1565,7 @@ async function cmdSelftest() {
     title: '⚖️ Optimised',
     mode: 'optimised',
     qualified: true,
-    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRef: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRef: null, curveCapMhz: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
     stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-15T00:30:00+03:00' },
   });
 
