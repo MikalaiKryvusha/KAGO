@@ -38,6 +38,20 @@ must(s.length < before - 6000, 'шрифт не заменился на серв
 must(s.includes('src="../assets/logo/kago-logo.webp"'), 'логотип не найден в макете');
 s = s.replace('src="../assets/logo/kago-logo.webp"', 'src="/logo.webp"');
 
+// ---- 1b. THE HEADLINE GETS A NAME, because in the mockup it is a caption and on the live page it is
+// a CLAIM. It reads «Выполняется автоматический тюнинг-прогон видеокарты» — and the owner opened the
+// window between runs and saw exactly that sentence above a panel saying «ПРОГОНА НЕТ»
+// («опять в сломанном состоянии всё поднялось», 2026-08-16). One screen, two contradicting statements,
+// and the big one at the top is the one a glance lands on first.
+//
+// The mockup is not edited: it is a mockup, and there the sentence is true by assumption. What the
+// live page needs is the ability to CHANGE it, so the wiring gets a handle.
+{
+  const cap = '<span class="what">Выполняется автоматический тюнинг-прогон видеокарты</span>';
+  must(s.includes(cap), 'подпись шапки не найдена в макете');
+  s = s.replace(cap, '<span class="what" id="head-what">Выполняется автоматический тюнинг-прогон видеокарты</span>');
+}
+
 // ---- 2. the readouts get names; their «off» underlays stay exactly as accepted
 for (const [x, id] of [['106', 'seg-clk'], ['185', 'seg-temp'], ['264', 'seg-fan'], ['343', 'seg-pwr']]) {
   const re = new RegExp(`<text class="seg on"(\\s+)x="${x}"`);
