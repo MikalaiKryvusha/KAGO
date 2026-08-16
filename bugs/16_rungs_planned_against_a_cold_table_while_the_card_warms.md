@@ -1,6 +1,7 @@
 # Bug 16 — rungs planned against a COLD table while the card warms under its own burns
 
-**Status:** 🔧 fix applied, live verification in progress (2026-08-16 14:1x +03:00)
+**Status:** 🟡 partially fixed — the first fix was REFUTED by the live run and the diagnosis corrected
+(2026-08-16 14:4x +03:00). Read «The fix that did NOT work» before anything else.
 **Version/build:** `main` @ `6f1ec41` · **When/context:** revealed by the FIRST full live sweep of the
 project — the owner's minimal smoke run, band 2887…2820 MHz, session 29.
 
@@ -77,6 +78,40 @@ stopped run instead of a poisoned artifact.**
 **An unreadable or short read is a STOP, never the old table.** Falling back to the snapshot would
 restore the very drift the seam removes, and it would do it silently, at the moment the evidence is
 missing. «НЕИЗВЕСТНО — это СТОП» is the project's standing rule and it applies here unchanged.
+
+## 🔴 THE FIX THAT DID NOT WORK — and the evidence that corrected the diagnosis
+
+**The re-read fix was shipped, run live, and the sweep stopped at EXACTLY the same rung: 2835 MHz /
+965 mV, 5 frequencies of 10.** Identical coverage to the run before it.
+
+What it DID change is what identified the real mechanism. The run reported drift SEVEN times and
+absorbed THREE one-step misses — and then this pair of lines appeared together:
+
+```
+таблица уехала: 965 мВ обслуживало 2610 МГц, теперь 2617 МГц — ступень считается по СВЕЖЕЙ таблице
+КАРТА ПОДСТАВИЛА НЕ БЛИЖАЙШЕЕ ВЕРХНЕЕ: заказано 965 … обслуживало 975
+```
+
+**The rung was planned against a table read seconds earlier, and the post-burn re-read still
+disagreed by two grid steps.** So the table does not merely drift BETWEEN rungs — it drifts DURING
+one: ten seconds of load heat the card by several degrees, and the serving entry moves while we are
+using it.
+
+**A reference that moves while you use it cannot be fixed by reading it more often.** That is the
+correction to this document's original root-cause section, which is left standing above because it
+is where the evidence pointed at the time and half of it is still true.
+
+**And the bound I had invented was wrong on its own terms.** «Exactly one grid step above» was my
+number, not the owner's word and not physics — it silently encodes today's heating rate, so tomorrow
+it needs two steps and the day after three. The meaningful bound is physical and there is only one:
+**an undervolt measurement must be BELOW the frequency's stock voltage.** A delivered voltage at or
+above stock means the write achieved nothing; everything between the order and stock is an honest,
+conservative measurement of a voltage the card actually ran.
+
+Stock is read from the TABLE (the entry serving the clock at zero offset), not from the caller's
+`depthMv`. The first version computed it from the argument, and mutation **AX** showed the hole: a
+call without `depthMv` silently DISABLED the guard. **A guard switched off by a missing argument is
+not a guard.**
 
 ## Verification
 
