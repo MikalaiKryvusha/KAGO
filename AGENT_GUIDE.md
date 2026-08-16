@@ -551,6 +551,27 @@ installing or removing software, writing outside the repository — walk these f
    consecutive samples agree, then report.
 5. **Report what you did and what the card reads NOW** — in numbers, next to the numbers from before.
 
+**A DEFECT REPORTED ON THE OWNER'S MACHINE PREEMPTS THE CURRENT TASK — it is not a drive-by note.**
+Added 2026-08-16, and it is paid for: the owner reported leftover terminal windows in his OS THREE
+times in one session, and each time the agent spent three tool calls on it and returned to what it
+considered "the main line" (a sweep, a canon edit). The misclassification had a name and the agent
+used the wrong rule for it: "owner's drive-by notes go to the backlog, not into a task switch"
+governs IDEAS and IMPROVEMENTS. **A defect on the machine the owner works and lives on is not an
+idea — by the rule above it IS the main line**, and everything else waits. The tell that you are
+making this mistake: you are about to write "fixing it now" and then continue the previous task in
+the same turn.
+
+**AND NEVER SAY «FIXED» WHERE THE OBSERVATION IS NOT AVAILABLE TO YOU.** Same incident, and it is
+what made three complaints out of one defect. The agent can verify almost everything in this project
+by running a command — and that habit made it answer "fixed" about a defect whose evidence lives on
+a surface it has NO SENSOR FOR: the owner's desktop. Three theories were stated as diagnoses and all
+three were refuted by his next message. **Where the observation is beyond your reach, the honest
+report says so and asks for the eye that can see it** — «сделал, посмотрите» is a complete answer;
+«починил» is a claim, and an unverifiable claim is the false-`[TESTED]` fraud in a place no judge can
+catch it (`TESTING_FRAMEWORK.md` → the trust contract). The mechanical half of the remedy is a hook:
+what depends on the agent's diligence should be moved into machinery that runs whether or not the
+agent remembers (`bugs/17`, the `Stop` hook running `tools/tidy.mjs --apply`).
+
 Two boundaries that keep this rule from being read narrowly:
 
 - **A permission entry is not a reason to act.** The allow-lines in `.claude/settings.local.json`

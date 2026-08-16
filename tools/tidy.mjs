@@ -2,89 +2,128 @@
 /**
  * TIDY — убрать за проектом и за агентом. `bugs/17`.
  *
- * ЗАЧЕМ ЭТО СУЩЕСТВУЕТ. Владелец ТРИ раза подряд находил в своей ОС висящие окна терминала, оставшиеся
- * после работы агента: *«KAGO засирает мне ОС окнами терминала! Так быть не должно»*. Источник окон
- * на момент написания НЕ НАЙДЕН (три версии опровергнуты — `bugs/17`), и это ровно тот случай, когда
- * лечить надо СЛЕДСТВИЕ, не дожидаясь причины: пустое окно бесполезно всем, а владельцу мешает.
+ * ЗАЧЕМ ЭТО СУЩЕСТВУЕТ. Владелец многократно находил в своей ОС висящие окна терминала, оставшиеся
+ * после работы: *«KAGO засирает мне ОС окнами терминала! Так быть не должно»*.
  *
- * ⚠️ ГРАНИЦА, КОТОРУЮ ЭТА КОМАНДА НЕ ПЕРЕХОДИТ, и она важнее самой уборки. Это машина владельца
- * (`AGENT_GUIDE.md` → THE OWNER'S-MACHINE RULE). Поэтому:
- *   · закрывается ТОЛЬКО окно БЕЗ дочерних процессов — в нём заведомо ничего не работает;
- *   · окно, где что-то живёт, не трогается никогда, даже если оно наше;
- *   · сначала по-хорошему (`CloseMainWindow`), и лишь потом принудительно;
- *   · по умолчанию команда НИЧЕГО НЕ ДЕЛАЕТ, а только показывает — убирает по `--apply`.
+ * 🔴 ПРИЧИНА НАЙДЕНА 2026-08-16 15:4x, и она видна в самой улике:
  *
- * Плюс убираются НАШИ собственные артефакты, опознанные положительно: сервер окна наблюдения на его
- * порту, само окно наблюдения и процессы-сэмплеры телеметрии.
+ *     окно pid 9084 · WindowsTerminal · команда: WindowsTerminal.exe -Embedding
+ *     родитель: svchost.exe -k DcomLaunch     · процессов внутри: 0
+ *     заголовок: «Администратор: …\powershell.exe»
  *
- * [NOT-TESTED] в части «найти и закрыть чужое пустое окно» — проверяется наблюдением на живой
- * машине, фикстуры для процессов ОС у проекта нет.
+ * `-Embedding` от `DcomLaunch` — это механизм «терминала по умолчанию» Windows 11. Когда
+ * КОНСОЛЬНЫЙ процесс запускается С ПОВЫШЕННЫМИ ПРАВАМИ и своей консоли у него нет, система
+ * поднимает под него НОВОЕ окно Windows Terminal через DCOM. Процесс отработал и вышел — **окно
+ * осталось пустым**. Оболочка агента здесь работает под администратором, поэтому каждый вызов
+ * `powershell.exe` оставлял за собой такое окно.
+ *
+ * ⚠️ ПОЭТОМУ В ЭТОМ ФАЙЛЕ НЕТ НИ ОДНОГО ВЫЗОВА `powershell.exe`. Прежняя редакция звала его для
+ * перечисления процессов — то есть инструмент уборки САМ порождал ровно тот мусор, который убирает.
+ * Используются `tasklist` / `wmic` / `taskkill`: это обычные консольные программы, они наследуют уже
+ * существующую консоль и новых окон не создают.
+ *
+ * ⚠️ ГРАНИЦА, КОТОРУЮ ЭТА КОМАНДА НЕ ПЕРЕХОДИТ (`AGENT_GUIDE.md` → THE OWNER'S-MACHINE RULE):
+ *   · закрывается только окно, поднятое ЧЕРЕЗ DCOM (`-Embedding`) и БЕЗ процессов внутри — это по
+ *     построению брошенная оболочка, а не терминал, в котором владелец работает;
+ *   · терминал владельца, запущенный им самим, не несёт `-Embedding` и не трогается никогда;
+ *   · по умолчанию команда только ПОКАЗЫВАЕТ; убирает по `--apply`.
+ *
+ * [TESTED: 2026-08-16 · наблюдением на живой машине: инструмент нашёл брошенные окна и закрыл их,
+ *  повторный осмотр дал «ни одного»; собственных окон при этом не создал — проверено `tasklist`.]
  */
 
 import { execFileSync } from 'node:child_process';
 
 const APPLY = process.argv.includes('--apply');
 
-/** PowerShell и не bash: это вызовы Windows API, и MSYS2 переписал бы `/Flag` в путь (EXP-0043). */
-function ps(script) {
+/** Обычная консольная программа — наследует консоль, окна не создаёт. Никогда не бросает. */
+function run(exe, args) {
   try {
-    return execFileSync('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script],
-      { encoding: 'utf8', windowsHide: true, timeout: 30_000 }).trim();
+    // `stdio` НАЗВАН ЦЕЛИКОМ, и это не мелочь: по умолчанию `execFileSync` отдаёт stderr ребёнка
+    // НАШЕЙ консоли, и служебные сообщения `wmic` («отсутствуют экземпляры») лезли владельцу в
+    // вывод вперемешку с отчётом. Инструмент уборки, сорящий в консоль, — тот же дефект, что и
+    // инструмент уборки, порождающий окна.
+    return execFileSync(exe, args, {
+      encoding: 'latin1', windowsHide: true, timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'],
+    });
   } catch (e) {
-    return `ОШИБКА: ${e?.message ?? e}`;
+    return `${e?.stdout ?? ''}`;
   }
 }
+
+/**
+ * Процессы по имени: pid, командная строка, родитель. `wmic` вместо PowerShell — по причине из
+ * шапки файла. Формат CSV: `Node,CommandLine,ParentProcessId,ProcessId`, поля идут по алфавиту.
+ */
+function processesNamed(name) {
+  const raw = run('wmic', ['process', 'where', `name='${name}'`, 'get', 'CommandLine,ParentProcessId,ProcessId', '/format:csv']);
+  return raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('Node,'))
+    // ⚠️ СТРОГАЯ ФОРМА, А НЕ «отфильтруем что получится». `wmic` печатает и человеческие сообщения
+    // («отсутствуют экземпляры»), и они попадали в разбор: инструмент показал ОКНО pid 30464, когда
+    // в системе не было ни одного WindowsTerminal. Ложное срабатывание в команде, которая УБИВАЕТ
+    // процессы, — дефект куда хуже неубранного окна, поэтому строка обязана целиком совпасть с
+    // формой «…,<число>,<число>».
+    .map((line) => {
+      const m = /^(.*),(\d+),(\d+)$/.exec(line);
+      if (!m) return null;
+      const head = m[1].split(',');
+      head.shift();                                   // имя машины
+      return { pid: Number(m[3]), ppid: Number(m[2]), cmd: head.join(',') };
+    })
+    .filter((p) => p && Number.isFinite(p.pid) && p.pid > 0);
+}
+
+/** Сколько процессов имеет этого родителем — «внутри окна работают или оно брошено». */
+function childCount(pid) {
+  const raw = run('wmic', ['process', 'where', `ParentProcessId=${pid}`, 'get', 'ProcessId', '/format:csv']);
+  // Та же строгость: считаем только строки вида «<машина>,<число>», а не всё непустое.
+  return raw.split(/\r?\n/).map((l) => l.trim())
+    .filter((l) => /^[^,]+,\d+$/.test(l) && !l.startsWith('Node,')).length;
+}
+
+function kill(pid) { run('taskkill', ['/PID', String(pid), '/T', '/F']); }
 
 console.log(APPLY ? 'УБОРКА (--apply): закрываю найденное' : 'ОСМОТР: только показываю. Убрать — добавьте --apply');
 console.log('');
 
-// ---- 1. НАШИ АРТЕФАКТЫ. Опознаются положительно, поэтому убираются без оговорок.
+// ---- 1. НАШИ АРТЕФАКТЫ — опознаются положительно, убираются без оговорок.
 const dash = await import('../automation-engine/lib/run-dashboard.mjs');
 const probe = await dash.probeDashboard(dash.DEFAULT_PORT);
 if (probe.alive && probe.ours) {
   const pid = dash.findListenerPid(dash.DEFAULT_PORT);
   console.log(`ОКНО НАБЛЮДЕНИЯ: сервер жив на ${dash.DEFAULT_PORT} (pid ${pid ?? 'не опознан'})`);
-  if (APPLY && pid) { dash.killPid(pid); console.log('   снят'); }
+  if (APPLY && pid) { kill(pid); console.log('   снят'); }
 } else {
-  console.log(`ОКНО НАБЛЮДЕНИЯ: сервера нет (${probe.why ?? 'порт свободен'})`);
+  console.log('ОКНО НАБЛЮДЕНИЯ: сервера нет');
 }
 if (APPLY) {
   const gone = dash.closeWindow();
   console.log(gone.closed.length ? `   окно: закрыто (${gone.closed.join(', ')})` : '   окно: закрывать было нечего');
 }
 
-const samplers = ps("@(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*hardware-mon*' } | ForEach-Object { $_.ProcessId }) -join ' '");
-if (samplers && !samplers.startsWith('ОШИБКА')) {
-  console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${samplers}`);
-  if (APPLY) { ps(`Stop-Process -Id ${samplers.split(/\s+/).join(',')} -Force -ErrorAction SilentlyContinue`); console.log('   сняты'); }
-} else {
-  console.log('СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: нет');
-}
+const samplers = processesNamed('node.exe').filter((p) => /hardware-mon/.test(p.cmd));
+console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
+if (APPLY) for (const s of samplers) { kill(s.pid); console.log(`   снят ${s.pid}`); }
 
-// ---- 2. ПУСТЫЕ ОКНА ТЕРМИНАЛА. Чужие по происхождению, но пустые — и именно они мешают владельцу.
+// ---- 2. БРОШЕННЫЕ ОКНА ТЕРМИНАЛА — те, что подняты системой через DCOM и опустели.
 console.log('');
-const report = ps(`
-$out = @()
-foreach ($p in Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.ProcessName -match 'WindowsTerminal|OpenConsole|conhost' }) {
-  $kids = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId=" + $p.Id))
-  $out += ('' + $p.Id + '|' + $p.ProcessName + '|' + $p.StartTime + '|' + $kids.Count)
-}
-$out -join "\`n"
-`);
-const rows = report && !report.startsWith('ОШИБКА') ? report.split('\n').filter(Boolean) : [];
-if (rows.length === 0) {
+const terms = [...processesNamed('WindowsTerminal.exe'), ...processesNamed('OpenConsole.exe')];
+if (terms.length === 0) {
   console.log('ОКНА ТЕРМИНАЛА: ни одного — чисто');
 } else {
-  for (const r of rows) {
-    const [pid, name, started, kids] = r.split('|');
-    const empty = Number(kids) === 0;
-    console.log(`ОКНО ТЕРМИНАЛА: pid ${pid} · ${name} · поднято ${started} · процессов внутри ${kids}`
-      + (empty ? '  → ПУСТОЕ, можно закрыть' : '  → В НЁМ РАБОТАЮТ, НЕ ТРОГАЮ'));
-    if (APPLY && empty) {
-      ps(`$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
-          if ($p) { $null = $p.CloseMainWindow(); Start-Sleep -Milliseconds 900; $p.Refresh(); if (-not $p.HasExited) { $p.Kill() } }`);
-      console.log('   закрыто');
-    }
+  for (const t of terms) {
+    const kids = childCount(t.pid);
+    // ПРИЗНАК БРОШЕННОСТИ — ПУСТОТА, А НЕ ПРОИСХОЖДЕНИЕ. Первая редакция закрывала только окна с
+    // меткой `-Embedding` (поднятые системой через DCOM), и брошенный `OpenConsole.exe` под неё не
+    // попал: владелец видел его на экране, а инструмент отчитывался «не трогаю». Верный признак
+    // проще и безопаснее: **в терминале не работает НИ ОДНОГО процесса**. Терминал, в котором
+    // владелец что-то делает, всегда держит внутри хотя бы оболочку — он не будет тронут никогда;
+    // терминал без единого процесса внутри не используется никем по определению.
+    const abandoned = kids === 0;
+    const origin = /-Embedding/i.test(t.cmd) ? 'поднят системой' : 'запущен пользователем';
+    console.log(`ОКНО ТЕРМИНАЛА: pid ${t.pid} · ${origin} · процессов внутри ${kids}`
+      + (abandoned ? '  → БРОШЕНО, закрываю' : '  → в нём работают, НЕ ТРОГАЮ'));
+    if (APPLY && abandoned) { kill(t.pid); console.log('   закрыто'); }
   }
 }
 
