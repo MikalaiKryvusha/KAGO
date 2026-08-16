@@ -431,8 +431,49 @@ export function closePoint(doc, {
 
   const stamp = at ?? localIso();
 
+  // ---- (1a) ХРАПОВИК ДЛЯ САМОЙ ЗАКРЫВАЕМОЙ СТРОКИ — та же R17, прочитанная с другой стороны.
+  //
+  // Пункт (3) ниже поднимает ЧУЖИЕ строки: те, что ВЫШЕ по частоте и оказались дешевле только что
+  // измеренной. Но бывает зеркальный случай, и живой прогон его принёс (2026-08-16, полоса
+  // 3082…3015): закрывается 3045 МГц на 1020 мВ, а уже измеренная БОЛЕЕ НИЗКАЯ 3037 требует 1025.
+  // Поднимать здесь надо ЭТУ строку, а поднимать её было некому — и документ отвергался целиком,
+  // останавливая прогон на честном замере.
+  //
+  // Направление то же, что у пункта (3), и по той же причине: Vmin не убывает с частотой (нарушение
+  // setup-времени, `researches/09` §2.3), поэтому более высокой частоте не может хватать меньшего
+  // напряжения. **Поднимать — безопасно и ничего не выдумывает**, опускать соседку было бы отгрузкой
+  // напряжения, на котором она уже провалилась. Слово владельца об этом случае: «очень редко — выше,
+  // почти не бывает такого», то есть он назван возможным, значит движок обязан уметь его встретить.
+  let effectiveMv = voltageMv;
+  let ratchetedBy = null;
+  for (let k = idx + 1; k < rows.length; k++) {          // таблица идёт высокие → низкие
+    const r = rows[k];
+    if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
+    if (!Number.isFinite(r.voltageMv) || r.voltageMv <= effectiveMv) continue;
+    effectiveMv = r.voltageMv;
+    ratchetedBy = r.mhz;
+  }
+  if (ratchetedBy !== null) {
+    if (Number.isFinite(rows[idx].stockVoltageMv) && effectiveMv > rows[idx].stockVoltageMv) {
+      return no(`храповик хотел поднять ${mhz} МГц до ${effectiveMv} мВ (столько требует более низкая `
+        + `${ratchetedBy} МГц), а её собственный сток всего ${rows[idx].stockVoltageMv} мВ. Выше стока не `
+        + 'поднимаем, и молча оставить инверсию тоже нельзя — этот замер противоречит стоковой таблице');
+    }
+    if (grid.length && !grid.includes(effectiveMv)) {
+      return no(`храповик хотел поднять ${mhz} МГц до ${effectiveMv} мВ, а такого напряжения нет на сетке карты`);
+    }
+  }
+
   // ---- the measured row itself
-  rows[idx] = { ...rows[idx], voltageMv, status, provenBy, editedAt: stamp };
+  rows[idx] = {
+    ...rows[idx],
+    voltageMv: effectiveMv,
+    status,
+    provenBy: ratchetedBy === null ? provenBy
+      : `${provenBy} · ПОДНЯТО ХРАПОВИКОМ с ${voltageMv} до ${effectiveMv} мВ: более низкая ${ratchetedBy} МГц `
+        + 'потребовала больше, а более высокой не может хватать меньшего',
+    editedAt: stamp,
+  };
 
   // ---- (2) the rest of the rung inherits, DOWNWARD ONLY. The table runs high → low, so the rows
   // that inherit are the ones AFTER this index.
@@ -447,13 +488,13 @@ export function closePoint(doc, {
       // Inside one rung every stock voltage is the same by construction; a caller that hands over a
       // range straddling rungs would silently ship a frequency ABOVE its own stock, and that is a
       // refusal rather than a clamp — a clamp would hide the caller's bug in the artifact.
-      if (Number.isFinite(rows[k].stockVoltageMv) && voltageMv > rows[k].stockVoltageMv) {
-        return no(`наследование ${voltageMv} мВ от ${mhz} МГц не годится для ${rows[k].mhz} МГц: там сток `
+      if (Number.isFinite(rows[k].stockVoltageMv) && effectiveMv > rows[k].stockVoltageMv) {
+        return no(`наследование ${effectiveMv} мВ от ${mhz} МГц не годится для ${rows[k].mhz} МГц: там сток `
           + `${rows[k].stockVoltageMv} мВ, то есть УЖЕ дешевле доказанного. Диапазон наследования пересёк ступень напряжения`);
       }
       rows[k] = {
         ...rows[k],
-        voltageMv,
+        voltageMv: effectiveMv,
         status,
         provenBy: `${provenBy ?? ''} · унаследовано ступенью от ${mhz} МГц (прожиг там): Vmin не убывает с частотой, `
           + 'значит доказанное выше по частоте не оптимистично ниже (E2-AC3 — не интерполяция, а тот же измеренный факт)',
@@ -472,16 +513,16 @@ export function closePoint(doc, {
     // it cannot be needed anyway: the factory table is monotone, so a stock row above already carries
     // at least as much as this frequency's stock, hence at least as much as anything we ship for it.
     if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
-    if (!Number.isFinite(r.voltageMv) || r.voltageMv >= voltageMv) continue;
-    if (Number.isFinite(r.stockVoltageMv) && voltageMv > r.stockVoltageMv) {
-      return no(`храповик хотел поднять ${r.mhz} МГц до ${voltageMv} мВ, а её сток всего ${r.stockVoltageMv} мВ — `
+    if (!Number.isFinite(r.voltageMv) || r.voltageMv >= effectiveMv) continue;
+    if (Number.isFinite(r.stockVoltageMv) && effectiveMv > r.stockVoltageMv) {
+      return no(`храповик хотел поднять ${r.mhz} МГц до ${effectiveMv} мВ, а её сток всего ${r.stockVoltageMv} мВ — `
         + 'выше стока не поднимаем, и молча оставить инверсию тоже нельзя. Замер противоречит стоковой таблице');
     }
-    raised.push({ mhz: r.mhz, fromMv: r.voltageMv, toMv: voltageMv });
+    raised.push({ mhz: r.mhz, fromMv: r.voltageMv, toMv: effectiveMv });
     rows[k] = {
       ...r,
-      voltageMv,
-      provenBy: `${r.provenBy ?? 'сток'} · ПОДНЯТО ХРАПОВИКОМ до ${voltageMv} мВ измерением на ${mhz} МГц: `
+      voltageMv: effectiveMv,
+      provenBy: `${r.provenBy ?? 'сток'} · ПОДНЯТО ХРАПОВИКОМ до ${effectiveMv} мВ измерением на ${mhz} МГц: `
         + 'более низкая частота потребовала больше, а более высокой не может хватать меньшего',
       editedAt: stamp,
     };
@@ -834,6 +875,49 @@ function cmdSelftest() {
     const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field.endsWith('.voltageMv'));
     return Boolean(bad) && bad.why.includes('2400') && bad.why.includes('1000');
   })());
+
+  // ХРАПОВИК ДЛЯ САМОЙ ЗАКРЫВАЕМОЙ СТРОКИ — зеркальная половина R17, и её принёс живой прогон
+  // 2026-08-16: закрывалась 3045 МГц на 1020 мВ, а уже измеренная БОЛЕЕ НИЗКАЯ 3037 требовала 1025.
+  // Поднимать надо было ЭТУ строку, а поднимать её было некому — документ отвергался целиком, и
+  // прогон вставал на ЧЕСТНОМ замере, закрыв 2 частоты из 10.
+  // АДРЕСАТЫ: BA. убрать подъём закрываемой строки → «ЗАКРЫВАЕМАЯ СТРОКА ПОДНИМАЕТСЯ ХРАПОВИКОМ» ·
+  //           BB. поднять её молча → «и подъём НАЗВАН в свидетеле».
+  console.log('\n— ХРАПОВИК ДЛЯ ЗАКРЫВАЕМОЙ СТРОКИ —');
+  {
+    const prep = () => {
+      const d = healthyDoc();
+      // 2000 МГц (индекс 5) измерена ДОРОЖЕ, чем мы сейчас закроем более высокую 2400 (индекс 4)
+      d.frequencies[5].status = CURVE_STATUS.EDGE_FOUND;
+      d.frequencies[5].provenBy = 'прожиг sdc_fma/transient';
+      d.frequencies[5].voltageMv = 850;
+      return d;
+    };
+    // Индекс 4 — 2400 МГц (сток 1000), индекс 5 — 2000 МГц: более НИЗКАЯ частота.
+    // Оба напряжения берутся С СЕТКИ фикстуры (800 · 850 · 900 …) — иначе запись отвергнется раньше
+    // храповика, и блок покраснеет по чужой причине.
+    const r = closePoint(prep(), {
+      mhz: 2400, voltageMv: 800, status: CURVE_STATUS.EDGE_FOUND,
+      provenBy: 'прожиг sdc_fma/transient', at: '2026-08-16T15:30:00+03:00',
+    });
+    ok('ЗАКРЫВАЕМАЯ СТРОКА ПОДНИМАЕТСЯ ХРАПОВИКОМ до того, что требует более НИЗКАЯ частота',
+      r.ok === true && r.doc.frequencies[4].voltageMv === 850, JSON.stringify({ ok: r.ok, why: r.why }));
+    ok('и подъём НАЗВАН в свидетеле — молча документ не правится',
+      r.ok === true && /ПОДНЯТО ХРАПОВИКОМ с 800 до 850/.test(r.doc.frequencies[4].provenBy ?? ''));
+    ok('после подъёма документ проходит СВОЙ ЖЕ сторож противоречия — прогон не встаёт',
+      r.ok === true && validateCurveDoc(r.doc, { card, frequencyGrid: FAKE_LADDER }).length === 0);
+    // И граница: выше СОБСТВЕННОГО стока не поднимаем даже ради согласованности — это уже не
+    // примирение двух замеров, а противоречие со стоковой таблицей, и оно называется вслух.
+    const tooHigh = (() => {
+      const d = prep();
+      d.frequencies[5].voltageMv = 1050;   // с сетки, и ВЫШЕ стока 2400 МГц (1000)
+      return closePoint(d, {
+        mhz: 2400, voltageMv: 800, status: CURVE_STATUS.EDGE_FOUND,
+        provenBy: 'прожиг', at: '2026-08-16T15:30:00+03:00',
+      });
+    })();
+    ok('но ВЫШЕ СВОЕГО СТОКА храповик не поднимает — отказ с названной причиной',
+      tooHigh.ok === false && /сток/.test(tooHigh.why ?? ''));
+  }
 
   console.log('\n— СВИДЕТЕЛЬ ПРОЖИГА —');
   ok('статус «доказано прожигом» без свидетеля отвергается', (() => {
