@@ -711,10 +711,46 @@ export async function runRung({
     return close(stop('void', `ступень ${clockMhz} МГц / ${voltageMv} мВ прошла с вердиктом ${record.verdict}, но карта НЕ сказала, `
       + 'какое напряжение обслуживало частоту после записи — отсутствие наблюдения не является наблюдением совпадения'));
   }
-  if (record.servingMvAfter !== voltageMv) {
-    return close(stop('void', `СТУПЕНЬ ИЗМЕРИЛА ЧУЖОЕ НАПРЯЖЕНИЕ: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
-      + `частоту обслуживало ${record.servingMvAfter} мВ по ПЕРЕЧИТАННОЙ таблице карты. Вердикт ${record.verdict} `
-      + 'относится не к заказанному напряжению и в документ кривой не идёт'));
+  // ⚠️ WE TUNE WHAT THE CARD DELIVERS — NOW ON THE VOLTAGE AXIS TOO. The owner, 2026-08-16:
+  // *«мы должны попасть в ближайшее верхнее напряжение»* · *«ближайшее верхнее из тех, которые
+  // карточка предоставляет»* — extending his own frequency rule (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА
+  // ВЫДАЁТ») one axis over, and matching what the shipped value already does («напряжением с сетки
+  // карты, ближайшим сверху к найденному минимуму»).
+  //
+  // WHY THE TWO NUMBERS DISAGREE AT ALL, because it is not a step-size quirk: the plan resolves the
+  // serving entry on the table read BEFORE the burn, and this check re-reads it AFTER. The factory
+  // table slides along the FREQUENCY axis with temperature (≈ −1.7 MHz/°C, R14b), so a card that
+  // warmed up during its own burn hands the clock to the next entry UP. Measured live 2026-08-16:
+  // ordered 1045 mV for 2887 MHz, the warmed card served it at 1050.
+  //
+  // ABOVE is the safe direction and it is the ANSWER: the burn happened at the delivered voltage,
+  // the verdict is true about THAT voltage, and recording it is both honest and conservative.
+  // BELOW is a different thing entirely — the card ran a DEEPER undervolt than anyone ordered, past
+  // the depth the step governors were sized for — and it stays a stop.
+  // «БЛИЖАЙШЕЕ» — ЭТО ОДНА СТУПЕНЬ СЕТКИ, И ГРАНИЦА ЗДЕСЬ НЕ УКРАШЕНИЕ. The owner said «ближайшее
+  // верхнее из тех, которые карточка предоставляет», and the word that does the work is «ближайшее»:
+  // a delivered voltage 240 mV above the order is not the card rounding up, it is the write having
+  // done something else entirely — and accepting it would record a rung nobody meant to test while
+  // the descent believes it made progress. So the slack is exactly ONE step of the card's own grid,
+  // which is the size of the drift a warming table can produce.
+  const measuredMv = record.servingMvAfter;
+  record.measuredMv = measuredMv;
+  record.orderedMv = voltageMv;
+  const gridMv = [...new Set(points.map((p) => p?.mv).filter(Number.isFinite))].sort((a, b) => a - b);
+  const nextAbove = gridMv.find((v) => v > voltageMv) ?? null;
+  if (measuredMv < voltageMv) {
+    return close(stop('void', `КАРТА УШЛА ГЛУБЖЕ ЗАКАЗАННОГО: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
+      + `частоту обслуживало ${measuredMv} мВ — это НИЖЕ заказа, то есть андервольт глубже того, под который считались `
+      + 'сторожа шага. Вниз мы так не соглашаемся: правило владельца — ближайшее ВЕРХНЕЕ из тех, что карта предоставляет'));
+  }
+  if (measuredMv > voltageMv && measuredMv !== nextAbove) {
+    return close(stop('void', `КАРТА ПОДСТАВИЛА НЕ БЛИЖАЙШЕЕ ВЕРХНЕЕ: заказано ${voltageMv} мВ на ${clockMhz} МГц, `
+      + `ближайшее верхнее на сетке карты ${nextAbove ?? '—'} мВ, а частоту обслуживало ${measuredMv} мВ. `
+      + 'Это не округление вверх, а другая запись таблицы — вердикт относится к ступени, которую никто не заказывал'));
+  }
+  if (measuredMv > voltageMv) {
+    console.log(`  ПОПАЛИ ВЫШЕ: заказано ${voltageMv} мВ, карта подставила ближайшее верхнее ${measuredMv} мВ `
+      + `(таблица едет с нагревом). Меряем и пишем ВЫДАННОЕ — ${measuredMv} мВ на ${clockMhz} МГц`);
   }
 
   // ---- 9. THE VERDICT, AT LAST — and a failure is a SIGNAL, never the edge (§4.6).
@@ -722,14 +758,15 @@ export async function runRung({
     return close({
       ...record,
       outcome: 'passed',
-      why: `${voltageMv} мВ обслуживает ${clockMhz} МГц и ПРОШЛО (сдвиг +${plan.deltaMhz} МГц, потолок держит ${held.heldBy}`
+      why: `${measuredMv} мВ обслуживает ${clockMhz} МГц и ПРОШЛО (сдвиг +${plan.deltaMhz} МГц, потолок держит ${held.heldBy}`
+        + `${measuredMv !== voltageMv ? `, заказано было ${voltageMv} мВ — взято ближайшее верхнее с сетки карты` : ''}`
         + `${record.decidedBy ? `, решала форма ${record.decidedBy}` : ''})`,
     });
   }
   return close({
     ...record,
     outcome: 'failed',
-    why: `ОТКАЗ ${record.verdict} на ${clockMhz} МГц / ${voltageMv} мВ${record.decidedBy ? ` (форма ${record.decidedBy})` : ''}. `
+    why: `ОТКАЗ ${record.verdict} на ${clockMhz} МГц / ${measuredMv} мВ${record.decidedBy ? ` (форма ${record.decidedBy})` : ''}. `
       + 'Это СИГНАЛ, что край рядом, а НЕ край: край ищется шагом 5 мВ, и только к нему применяется запас +10 мВ',
   });
 }
@@ -1283,9 +1320,17 @@ export async function sweepFrequency({
     const r = await runRung({
       frequencyMhz, voltageMv: rung.mv, depthMv: rung.depthMv, zoneStepMv: rung.zoneStepMv, seeded: out.seeded,
     });
-    out.rungs.push({ voltageMv: rung.mv, seed: false, outcome: r?.outcome ?? null, verdict: r?.verdict ?? null });
+    // THE DELIVERED VOLTAGE IS THE MEASUREMENT — the owner's rule on this axis too. `rung.mv` is what
+    // we ASKED for; `r.measuredMv` is what the card actually served and therefore what was burned.
+    // Carrying the asked-for value forward would put a voltage nobody proved into the document, and
+    // would seed the neighbour below from a number that never existed.
+    const provedMv = Number.isFinite(r?.measuredMv) ? r.measuredMv : rung.mv;
+    out.rungs.push({
+      voltageMv: provedMv, orderedMv: rung.mv, seed: false,
+      outcome: r?.outcome ?? null, verdict: r?.verdict ?? null,
+    });
 
-    if (r?.outcome === 'passed') { lastPass = rung.mv; continue; }
+    if (r?.outcome === 'passed') { lastPass = provedMv; continue; }
 
     if (r?.outcome === 'failed') {
       // A COARSE failure is a SIGNAL, never the edge — the owner's rule, said three times. §4.6 walks
@@ -3050,11 +3095,27 @@ export function selfTest() {
 
     // — THE RE-ASSERTION against the card's own re-read table. This is what the paper proof may not
     //   replace (R12, EXP-0057): the plan says the voltage WOULD serve; only the card says it DID.
+    //   ⚠️ AND THE DIRECTION DECIDES, by the owner's word of 2026-08-16: *«мы должны попасть в
+    //   ближайшее верхнее напряжение… из тех, которые карточка предоставляет»*. BELOW the order is a
+    //   deeper undervolt than the step governors were sized for — a stop. ABOVE the order is the
+    //   rule being obeyed by the card itself (its table slides with heat), so it is the MEASUREMENT.
     const wrongVolt = await rungOK({ runStepFn: atom(atomPass(995)) });
-    ok('ступень, измерившая ЧУЖОЕ напряжение, — НЕ PASS',
+    ok('ступень, ушедшая НИЖЕ заказанного, — НЕ PASS: это незаказанный более глубокий андервольт',
       [wrongVolt.outcome, wrongVolt.servingMvAfter], ['void', 995]);
     ok('и отказ называет ОБА напряжения — заказанное и то, что обслуживало на самом деле',
       /1000 мВ/.test(wrongVolt.why) && /995 мВ/.test(wrongVolt.why), true);
+    //   1040 мВ — это ИМЕННО ближайшее верхнее к 1000 на сетке ЭТОЙ фикстуры (она грубее живой карты).
+    const above = await rungOK({ runStepFn: atom(atomPass(1040)) });
+    ok('ПОПАЛИ ВЫШЕ — ЭТО ПОПАДАНИЕ: карта подставила ближайшее верхнее, ступень ПРОШЛА',
+      [above.outcome, above.measuredMv, above.orderedMv], ['passed', 1040, 1000]);
+    ok('и мерой становится ВЫДАННОЕ напряжение, а заказанное названо рядом',
+      /1040 мВ обслуживает/.test(above.why) && /заказано было 1000 мВ/.test(above.why), true);
+    //   «БЛИЖАЙШЕЕ» БУКВАЛЬНО: одна ступень сетки. Выше — это уже другая запись таблицы, и вердикт
+    //   был бы о ступени, которую никто не заказывал. Дыра, найденная собственным выводом набора:
+    //   без этой границы фикстура «заказано 760 → обслуживало 1000» проходила как PASS.
+    const farAbove = await rungOK({ runStepFn: atom(atomPass(1005)) });
+    ok('ВЫШЕ, НО НЕ БЛИЖАЙШЕЕ НА СЕТКЕ — НЕ PASS: это другая запись таблицы, а не округление вверх',
+      [farAbove.outcome, /не БЛИЖАЙШЕЕ ВЕРХНЕЕ/i.test(farAbove.why)], ['void', true]);
     const noVolt = await rungOK({ runStepFn: atom({ verdict: P, blocks: cleanUndo }) });
     ok('отсутствие наблюдения — не наблюдение совпадения', noVolt.outcome, 'void');
 
