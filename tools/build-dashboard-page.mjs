@@ -88,3 +88,28 @@ s = s.replace('</body>', `<script>\n${js}</script>\n</body>`);
 if (!existsSync('assets/dashboard')) mkdirSync('assets/dashboard', { recursive: true });
 writeFileSync(DST, s, 'utf8');
 console.log(`СОБРАНО: ${DST}, ${s.length} байт (из ${SRC} — принятого макета)`);
+
+// ---- 5. `--preview`: a STATIC copy for looking at the page with one's own eyes.
+//
+// It exists because a headless screenshot of the LIVE page never completes — the page holds an open
+// SSE connection, so the browser is never «done loading» and `--screenshot` never fires. The preview
+// swaps that connection for ONE pulse taken off a real run and makes the asset URLs relative, which
+// is what lets a `file://` render work at all. Markup, CSS and keyframes are untouched.
+//
+// A render is accepted by LOOKING, never by reading the code that produced it (EXP-0046) — so this is
+// the check, not a convenience. The output is a run artefact and stays out of history.
+if (process.argv.includes('--preview')) {
+  const pulsePath = join('runs', 'dashboard', 'live.json');
+  must(existsSync(pulsePath), `нет пульса ${pulsePath} — сперва прогон: npm run bench -- --from 2842 --to 2820`);
+  const pulse = readFileSync(pulsePath, 'utf8');
+  let prev = s
+    .replace('src:url(/font.woff2)', 'src:url(../fonts/DSEG7Classic-Regular.woff2)')
+    .replace('src="/logo.webp"', 'src="../logo/kago-logo.webp"');
+  must(prev.includes('connect();'), 'в проводке нет вызова connect()');
+  prev = prev.replace('connect();', `pulse = ${pulse}; pulseAt = performance.now(); paint();`);
+  const out = join('assets', 'dashboard', '_preview.html');
+  writeFileSync(out, prev, 'utf8');
+  console.log(`ПРЕВЬЮ:  ${out} — впрыснут пульс seq=${JSON.parse(pulse).seq}. Снять картинку:`);
+  console.log(`         msedge --headless=new --disable-gpu --window-size=1200,860 --virtual-time-budget=4000 \\`);
+  console.log(`           "--screenshot=<абсолютный путь>.png" "file:///${process.cwd().replace(/\\/g, '/')}/${out.replace(/\\/g, '/')}"`);
+}

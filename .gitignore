@@ -74,3 +74,8 @@ interviews/decisions/*.preview.html
 _probe.html
 *.review.html
 assets/logo/preview128.png
+
+# Static preview of the run dashboard: a page with ONE pulse baked in, produced by
+# `node tools/build-dashboard-page.mjs --preview` for a headless screenshot. It carries one run's
+# frozen numbers, so it is a run artefact and never history.
+assets/dashboard/_preview.html
