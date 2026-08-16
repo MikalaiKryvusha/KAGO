@@ -106,6 +106,8 @@ export function openPulse({
       depthMv: null,
       seeded: false,
       probe: { elapsedSeconds: 0, totalSeconds: probeSeconds },
+      bandFromMhz: null,
+      bandToMhz: null,
       coverage: { closed: 0, total: null, rungs: 0 },
       verdicts: { 'edge-found': 0, 'lever-limited': 0 },
       lastEvent: '',
@@ -149,6 +151,11 @@ export function openPulse({
       switch (e.kind) {
         case 'band':
           r.coverage.total = e.frequenciesInBand ?? r.coverage.total;
+          // The band's ENDS travel as numbers, not only inside a label: «how far down are we» is a
+          // question about position in the band, and a screen that can only print the band cannot
+          // answer it. The owner asked it within a minute of watching: «мы ещё сильно вверху».
+          r.bandFromMhz = e.fromMhz ?? r.bandFromMhz;
+          r.bandToMhz = e.toMhz ?? r.bandToMhz;
           if (e.fromMhz && e.toMhz && !r.band) r.band = `${e.fromMhz}…${e.toMhz} МГц`;
           break;
         case 'rung-start':
@@ -333,7 +340,22 @@ export function serve({
  * not the outcome. Spawning the browser we found on disk does not prove the window that appears
  * belongs to it — observed 2026-08-09, when Edge was launched and the page came up in Chrome.
  */
-export function openWindow(url, { size = '--window-size=1180,780' } = {}) {
+export const WINDOW_PROFILE_DIR = join('runs', 'dashboard', 'window-profile');
+export const WINDOW_PID_PATH = join('runs', 'dashboard', 'window.pid');
+
+/**
+ * OUR OWN WINDOW, IN OUR OWN PROFILE — and that is what makes it CLOSABLE.
+ *
+ * A plain `--app=` launch joins the browser the owner already has running: the process we spawned
+ * exits immediately, its pid means nothing, and the window that appears belongs to HIS session. So we
+ * could open windows and never close them — which is how the review contour ended up with an orphaned
+ * window that swallowed the owner's answers (`bugs/04`), and what he asked for here in one line:
+ * «старый браузер умей закрывать».
+ *
+ * `--user-data-dir` gives this window a profile of its own, so the process we spawn IS the browser
+ * instance, its pid is real, and killing it closes exactly our window and nothing of his.
+ */
+export function openWindow(url, { size = '--window-size=1200,820', profileDir = WINDOW_PROFILE_DIR } = {}) {
   const env = process.env;
   const candidates = [
     ['Edge', join(env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe')],
@@ -341,19 +363,57 @@ export function openWindow(url, { size = '--window-size=1180,780' } = {}) {
     ['Chrome', join(env.ProgramFiles || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe')],
     ['Chrome', join(env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')],
   ];
+  mkdirSync(dirname(WINDOW_PID_PATH), { recursive: true });
   for (const [name, path] of candidates) {
     if (!path || !existsSync(path)) continue;
     try {
-      spawn(path, [`--app=${url}`, size], { detached: true, stdio: 'ignore' }).unref();
-      return { ok: true, browser: name };
+      const child = spawn(path, [
+        `--app=${url}`, size,
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run', '--no-default-browser-check', '--disable-features=Translate',
+      ], { detached: true, stdio: 'ignore' });
+      child.unref();
+      writeFileSync(WINDOW_PID_PATH, String(child.pid), 'utf8');
+      return { ok: true, browser: name, pid: child.pid };
     } catch { /* try the next one */ }
   }
   try {
     spawn('cmd.exe', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-    return { ok: true, browser: null };
+    return { ok: true, browser: null, pid: null };
   } catch (e) {
     return { ok: false, why: e?.message ?? 'окно не открылось' };
   }
+}
+
+/**
+ * Close the window we opened. Two ways, in order of certainty:
+ *   1. the pid we recorded — ours by construction, killed with its children;
+ *   2. a window whose TITLE is this page's — the fallback for windows opened before the profile
+ *      existed, and the only way to reach a window that joined the owner's own browser. It sends
+ *      WM_CLOSE to that window alone, so his other tabs are not touched.
+ */
+export function closeWindow({ titleLike = 'KAGO' } = {}) {
+  const closed = [];
+  if (existsSync(WINDOW_PID_PATH)) {
+    const pid = Number(readFileSync(WINDOW_PID_PATH, 'utf8').trim());
+    if (Number.isFinite(pid) && pid > 0) {
+      try {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        closed.push(`pid ${pid}`);
+      } catch { /* already gone */ }
+    }
+    try { unlinkSync(WINDOW_PID_PATH); } catch { /* fine */ }
+  }
+  try {
+    // PowerShell and not bash: this is a Windows API call, and the project pays for that mix-up
+    // often enough to have a dossier row about it (EXP-0043).
+    spawn('powershell.exe', ['-NoProfile', '-Command',
+      `Get-Process msedge,chrome -ErrorAction SilentlyContinue | `
+      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' } | ForEach-Object { $_.CloseMainWindow() } | Out-Null`,
+    ], { stdio: 'ignore', windowsHide: true });
+    closed.push(`окна с «${titleLike}» в заголовке`);
+  } catch { /* nothing to close */ }
+  return { closed };
 }
 
 // =================================================================================================
@@ -442,19 +502,35 @@ async function main(argv) {
     return r.ok ? 0 : 1;
   }
 
+  if (argv.includes('--close')) {
+    const gone = closeWindow();
+    console.log(gone.closed.length ? `ОКНО: закрыто (${gone.closed.join(', ')})` : 'ОКНО: закрывать было нечего');
+    return 0;
+  }
+
   const arg = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
   const port = Number(arg('port', DEFAULT_PORT));
 
   const s = serve({ port, onListen: (url) => console.log(`ДАШБОРД: ${url}`) });
   console.log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — ни карты, ни журнала, ни документа кривой');
   console.log(`         оно не касается. Источник — ${PULSE_PATH} (прибор, не запись).`);
+  // THE OLD WINDOW GOES FIRST — the owner's instruction while watching the first rehearsal
+  // («старый браузер умей закрывать»). A second window on the same gauge is not a second view, it is
+  // a stale one: whoever glances at the wrong one is reading a run that no longer exists.
   if (!argv.includes('--no-window')) {
+    const gone = closeWindow();
+    if (gone.closed.length) console.log(`ОКНО:    закрыл прежнее (${gone.closed.join(', ')})`);
     const w = openWindow(s.url);
     console.log(w.ok
       ? `ОКНО:    запросил отдельное окно ${w.browser ?? 'браузера по умолчанию'}. Если система открыла другим — так решила она.`
       : `ОКНО:    не открылось (${w.why}). Адрес выше — откройте вручную.`);
   }
-  console.log('         Ctrl+C — закрыть сервер.');
+  console.log('         Ctrl+C — закрыть сервер И окно.');
+  // A server that dies leaving its window up is the `bugs/04` shape: the picture stays on screen,
+  // frozen, and looks exactly like the hang this instrument exists to report.
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => { closeWindow(); s.close(); process.exit(0); });
+  }
   return new Promise(() => {});
 }
 

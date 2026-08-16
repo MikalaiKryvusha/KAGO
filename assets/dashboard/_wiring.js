@@ -44,17 +44,26 @@ function paint() {
   $('f-volt').textContent = r.voltageMv ? `${r.voltageMv} мВ` : '—';
   $('f-depth').innerHTML = (r.stockVoltageMv && r.depthMv !== null && r.depthMv !== undefined)
     ? `сток ${r.stockVoltageMv} · андервольт <b style="display:inline;font-size:13px;color:var(--ok)">−${r.depthMv} мВ</b>`
-      + (r.seeded ? ' · спуск от соседки' : '')
     : '';
   const p = r.probe || {};
   $('f-probe').innerHTML = `${(p.elapsedSeconds ?? 0).toFixed(1).replace('.', ',')} `
     + `<span style="font-size:17px;color:var(--dim)">из ${p.totalSeconds ?? 10} с</span>`;
   $('f-band').textContent = r.band || '—';
   const cov = r.coverage || {};
+  // «Ступеней пройдено» УБРАНО словом владельца: ступень спуска по напряжению — внутренняя единица
+  // движка, и оператору она не говорит ничего, ровно как убранная раньше «ступень N из M».
+  // Осталось то, что говорит: сколько частот диапазона уже настроено.
+  // ГДЕ ИДЁТ ФРОНТ — первое, что спросил владелец, глядя на прогон. Спуск идёт СВЕРХУ ВНИЗ (его
+  // алгоритм, ideas/03 §6), поэтому положение — это доля пройденного пути от верхней частоты к нижней.
+  const front = r.frequencyMhz;
+  let walked = '';
+  if (front && r.bandFromMhz && r.bandToMhz && r.bandFromMhz > r.bandToMhz) {
+    const pct = Math.round(100 * (r.bandFromMhz - front) / (r.bandFromMhz - r.bandToMhz));
+    walked = `<span style="white-space:nowrap">спустились до <b style="display:inline;font-size:13px">${front} МГц</b> — это ${pct} % пути</span><br>`;
+  }
   $('f-cov').innerHTML = cov.total
-    ? `настроено частот <b style="display:inline;font-size:13px">${cov.closed ?? 0} из ${cov.total}</b>`
-      + ` · ступеней пройдено <b style="display:inline;font-size:13px">${cov.rungs ?? 0}</b>`
-    : '';
+    ? walked + `<span style="white-space:nowrap">настроено частот <b style="display:inline;font-size:13px">${cov.closed ?? 0} из ${cov.total}</b></span>`
+    : walked;
 
   seg('seg-clk', c.clockMhz, 4);
   seg('seg-temp', c.tempC, 2);

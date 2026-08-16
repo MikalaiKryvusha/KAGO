@@ -44,6 +44,34 @@ const CARD_PATH = join('benches', 'cards', 'rtx5070ti.json');
 const RUN_DIR = join('runs', 'bench');
 
 /**
+ * THE OWNER'S 10x ACCELERATION, AND IT IS THE BENCH'S DEFAULT RATHER THAN A FLAG.
+ *
+ * His words, `ideas/04`: *«Для тестов на виртуальной карте будем делать ускоренные в 10 раз прожиги:
+ * быстрые 1 секунда, длинные 6 секунд вместо 60»*.
+ *
+ * It is a DEFAULT because of how it failed: the first rehearsal ran at the full 10 s per rung because
+ * the agent typed `--sustain 10`, and the owner had to say the rule out loud again while watching a
+ * run crawl. A rule that only holds when somebody remembers to type it is not implemented — the same
+ * shape as EXP-0062 (a guard on one path and a printout on the other). The live path is untouched:
+ * `config.SWEEP_PROBE_SECONDS` still governs the owner's card.
+ *
+ * What the acceleration costs is already modelled and stated: exposure enters the failure model, so a
+ * 1-second stress test honestly finds LESS than a 10-second one (`virtual-gpu.mjs`, B2-AC3). The bench
+ * tells the truth about its own speed-up instead of pretending it is free.
+ */
+export const BENCH_BURN_SECONDS = Object.freeze({
+  fast: 1,
+  long: 6,
+  // THE GAP BETWEEN RUNGS IS ACCELERATED TOO, and forgetting that is a defect the SCREEN showed
+  // within a minute: with a 1-second stress test and a whole second of idle after it, the card spent
+  // half its life idling, the watts on the readouts fell to idle every other sample, and the thermal
+  // picture stopped being the one the operator will see live (where a 10 s burn sits next to ~2 s of
+  // overhead). Acceleration is a change of TIME SCALE — it applies to everything on that clock, not
+  // to the part that happens to be parameterised.
+  gap: 0.2,
+});
+
+/**
  * One rehearsal.
  *
  * @param {object} a
@@ -53,7 +81,7 @@ const RUN_DIR = join('runs', 'bench');
  * @param {boolean} [a.dashboard] feed the gauge the dashboard reads
  */
 export async function rehearse({
-  fromMhz, toMhz, sustain = 10, seed = 20260816, dashboard = true,
+  fromMhz, toMhz, sustain = BENCH_BURN_SECONDS.fast, seed = 20260816, dashboard = true,
   cardPath = CARD_PATH, pulsePath = PULSE_PATH, onLine = console.log,
 } = {}) {
   // `loadCard` answers with a VERDICT, not a card — a profile that failed its validator must not be
@@ -94,9 +122,17 @@ export async function rehearse({
   const inner = makeSweepStepFn(vc, card, stress, golden, stampOk);
   const runStepFn = async (a) => {
     const r = await inner(a);
-    // Between rungs the card COOLS, and the operator should see it cool: the run's idle is as real a
-    // part of the picture as its load.
-    pulse?.telemetry(vc.telemetry.advance(1, {}));
+    // The card cools between rungs, so the model is advanced by the gap — but the SAMPLE is only
+    // published when the gap is long enough to be worth a frame. A screen weighs every sample the
+    // same, so publishing a 0.2 s idle beside a 1 s burn made the readouts spend HALF their frames
+    // showing idle watts for a card that is idle a sixth of the time. The physics is not the thing
+    // that was wrong — the sampling was.
+    const idle = vc.telemetry.advance(BENCH_BURN_SECONDS.gap, {});
+    // The threshold is a SHARE of the cycle, not an absolute pause — the first version compared the
+    // gap against a constant, and on a run that spends no seconds at all (`sustain: 0`, the fast
+    // bench) the card then never reached the screen: no burn ticks, no idle sample, four dark
+    // readouts. Its own block caught that, which is what the block is for.
+    if (BENCH_BURN_SECONDS.gap >= sustain / 2) pulse?.telemetry(idle);
     return r;
   };
 
@@ -201,14 +237,16 @@ async function main(argv) {
     console.error('        Пример: npm run bench -- --sweep --from 2842 --to 2820 --sustain 3');
     return 2;
   }
-  const sustain = Number(arg('sustain', 10));
+  const sustain = Number(arg('sustain', BENCH_BURN_SECONDS.fast));
 
   console.log('РЕПЕТИЦИЯ ПЕРЕД ЖИВЫМ ПРОГОНОМ — настоящий движок, виртуальная карта');
   console.log('');
   console.log(`  ПОЛОСА:    ${fromMhz}…${toMhz} МГц`);
   console.log(`  КАРТА:     ${CARD_PATH} — ВЫМЫСЕЛ. Ни одной записи в настоящую видеокарту не будет`);
-  console.log(`  ТЕСТ:      ${sustain} с на ступень, и эти секунды тратятся ПО-НАСТОЯЩЕМУ —`);
-  console.log('             иначе смотреть было бы не на что');
+  console.log(`  ТЕСТ:      ${sustain} с на ступень — УСКОРЕНИЕ В 10 РАЗ, слово владельца (ideas/04:`);
+  console.log('             «быстрые 1 секунда, длинные 6 секунд вместо 60»). Секунды тратятся');
+  console.log('             ПО-НАСТОЯЩЕМУ, иначе смотреть было бы не на что; и стенд честен про цену');
+  console.log('             ускорения — короткий тест находит МЕНЬШЕ, это в его же модели отказа');
   console.log(`  ЖУРНАЛ:    ${join(RUN_DIR, 'journal.jsonl')} (песочница репетиции)`);
   console.log(`  ДАШБОРД:   ${PULSE_PATH} · окно — npm run dashboard`);
   console.log('');
