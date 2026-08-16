@@ -71,18 +71,46 @@ const column = `    <!-- СОСТОЯНИЕ ПРОГОНА СТОИТ ПЕРВЫ
          строка ниже, а где идёт фронт — видно по верхней плитке «частота под тестом». -->
     <div class="m"><span>диапазон прогона</span><b id="f-band">—</b>
       <span id="f-cov" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
-    <!-- Показания карты — МОДЕЛЬ, и это сказано на экране, а не только в коде: число, про которое
-         оператор не знает, откуда оно, он однажды процитирует как замер. -->
-    <p id="synthetic-note" style="display:none;margin:14px 0 0;color:var(--dim);font-size:12px;line-height:1.45">
-      Показания на карте — <b style="color:#c9d3df">СИНТЕТИКА</b> виртуальной карты: модель, посаженная
-      на наши же измеренные строки тепловой лестницы. Ход прогона слева и справа — настоящий.</p>`;
+    <!-- ДВОЕ ЧАСОВ, попрошены владельцем на первом полном прогоне. Они нарочно идут от РАЗНЫХ
+         часов, и эта пара стоит больше любой своей половины: таймер прогона идёт ОТ ПУЛЬСА и
+         замирает вместе с ним, стенные часы идут сами. Расстояние между ними — это «давно ли
+         встало», число, которое иначе оператор в три часа ночи вычисляет по памяти. -->
+    <div class="m clocks">
+      <div><span>идёт прогон</span><b id="c-elapsed">0:00:00</b></div>
+      <div><span>время</span><b id="c-now">--:--:--</b></div>
+    </div>`;
 s = s.slice(0, i0) + column + s.slice(i1 + to.length);
+
+// The two clocks live in a tile of their own, and the «ВИРТУАЛЬНАЯ» pill needs the stage to be a
+// positioning context. Both styles are appended to the mockup's own rule rather than overriding it.
+const TILE_STYLE = '.m span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}';
+must(s.includes(TILE_STYLE), 'стиль плиток не найден');
+s = s.replace(TILE_STYLE, `${TILE_STYLE}
+  .m.clocks{display:flex;gap:18px}
+  .m.clocks>div{flex:1}
+  .m.clocks b{font-size:24px}
+  .stage{position:relative}
+  /* Пилюля «ВИРТУАЛЬНАЯ» — вверху справа НА виджете видеокарты, место выбрал владелец. Огненный
+     цвет бренда: заметно, но это не тревога — карта не сломана, она ненастоящая. */
+  .pill{position:absolute;top:12px;right:14px;z-index:2;padding:4px 12px;border-radius:999px;
+        border:1px solid var(--fire);color:var(--fire);background:rgba(255,122,60,.10);
+        font-size:11px;font-weight:700;letter-spacing:.12em}`);
 
 // The state line is now the column's first element, so its top margin has to go — the mockup's
 // `margin:14px 0 0` was spacing it away from the tile ABOVE it, and there is no tile above it now.
 must(s.includes('.state{font-weight:700;letter-spacing:.02em;font-size:17px;margin:14px 0 0}'), 'стиль .state не найден');
 s = s.replace('.state{font-weight:700;letter-spacing:.02em;font-size:17px;margin:14px 0 0}',
   '.state{font-weight:700;letter-spacing:.02em;font-size:17px;margin:0 0 12px}');
+
+// ---- 3b. THE «ВИРТУАЛЬНАЯ» PILL, on the card widget itself — the owner's placement.
+//
+// It replaces a three-line explanation, and it is better than the paragraph in the way that matters:
+// a caption under a picture is read once, a badge ON the thing is read every time the eye lands on
+// it. What must never be lost is the fact itself — a reading whose origin the operator does not know
+// will eventually be quoted as a measurement of the owner's card.
+must(s.includes('<div class="stage">'), 'сцена не найдена');
+s = s.replace('<div class="stage">',
+  '<div class="stage"><span class="pill" id="synthetic-note" style="display:none">ВИРТУАЛЬНАЯ</span>');
 
 // ---- 4. the wiring
 const js = readFileSync(WIRING, 'utf8');

@@ -19,6 +19,11 @@ const LEASH_MS  = 1500;   // насколько анимации разреше�
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, unit, digits = 0) => (v === null || v === undefined ? '—' : `${Number(v).toFixed(digits).replace('.', ',')} ${unit}`);
+const hms = (ms) => {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${Math.floor(t / 3600)}:${p2(Math.floor(t / 60) % 60)}:${p2(t % 60)}`;
+};
 const seg = (id, v, width) => {
   const el = $(id);
   if (!el) return;
@@ -69,7 +74,11 @@ function paint() {
   seg('seg-temp', c.tempC, 2);
   seg('seg-fan', c.fanPct, 2);
   seg('seg-pwr', c.powerW, 3);
-  $('synthetic-note').style.display = c.synthetic ? 'block' : 'none';
+  $('synthetic-note').style.display = c.synthetic ? 'inline-block' : 'none';
+
+  // ДВОЕ ЧАСОВ. Таймер прогона идёт ОТ ПУЛЬСА — значит замирает вместе с прогоном и показывает,
+  // на какой секунде тот встал; стенные часы идут сами. Их расхождение и есть «давно ли встало».
+  $('c-elapsed').textContent = hms(pulse.runMs);
 
   $('state-alive').textContent = `● ${r.state || 'ПРОГОН'}`;
   document.title = r.finished
@@ -111,6 +120,16 @@ function connect() {
   // не рисуем ложного спокойствия — молчание само зажжёт тревогу через FREEZE_MS.
   es.onerror = () => {};
 }
+
+/* Стенные часы браузера — единственное на этой странице, что НЕ приходит с прогона, и это
+   намеренно: они обязаны идти, когда всё остальное встало. */
+function wallClock() {
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  $('c-now').textContent = `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
+wallClock();
+setInterval(wallClock, 1000);
 
 seizeAnimations();
 requestAnimationFrame(frame);
