@@ -1521,6 +1521,10 @@ export async function sweepRange({
   envelopeMhz = null,
   buildVector = null,
   chooseShape = chooseWriteShape,
+  // RE-READ THE CARD'S TABLE BEFORE EACH RUNG — injected, because this module never calls the card
+  // itself (R16a: the sweep composes, it does not touch hardware). `null` keeps the old behaviour of
+  // planning every rung against the table read once at the start.
+  readPointsFn = null,
   now = null,
   clockMs = () => Date.now(),
   onEvent = null,
@@ -1620,8 +1624,52 @@ export async function sweepRange({
         // exists to prevent (§4.4). The screen is the fast signal, the journal is still the record.
         say('rung-start', `${frequencyMhz} МГц ← ${voltageMv} мВ (глубина −${depthMv} мВ)`,
           { frequencyMhz, voltageMv, depthMv, seeded });
+
+        // ─── THE TABLE IS RE-READ BEFORE THIS RUNG, AND THAT IS THE FIX FOR THE 2026-08-16 STALL ────
+        //
+        // The factory table slides along the FREQUENCY axis as the card warms (≈ −1.7 MHz/°C, R14b);
+        // the VOLTAGE axis stands still. Planning every rung against the table read once, cold, at
+        // the start of a run that then heats the card for twelve minutes means the offset we compute
+        // stops producing the voltage we intended: measured live, the drift reached ONE grid step
+        // after five minutes and TWO after twelve, at which point the run stopped itself.
+        //
+        // ⚠️ WHAT IS RE-READ AND WHAT IS NOT, because the difference is the safety of this change:
+        //   · RE-READ — the table, i.e. only «which offset makes this clock land on this voltage».
+        //   · NOT re-read — the LADDER of target voltages and their depths from stock. Those are
+        //     computed once per frequency, so the `bugs/03` governors (first step ≤ 25 mV, gap ≤ 35)
+        //     keep judging a stable sequence. A ladder that moved with the table could deepen a step
+        //     without anyone asking, and a deepened step is how this project hung the machine twice.
+        //   · NOT re-read — `pinCard` (the clock ladder). That one spawns `nvidia-smi`, and doing it
+        //     per rung is what turned a healthy sixth rung into НЕИЗВЕСТНО on the first live sweep.
+        //     Reading the V/F table is an in-process NVAPI call: a different mechanism entirely.
+        let livePoints = points;
+        if (readPointsFn) {
+          let fresh = null;
+          try { fresh = await readPointsFn(); } catch { fresh = null; }
+          // A rung planned on a table nobody could read is a rung nobody can describe. The old table
+          // is NOT a fallback — using it is the very defect this seam exists to remove — so an
+          // unreadable table is НЕИЗВЕСТНО, which in this project is a STOP and never progress.
+          if (!Array.isArray(fresh) || fresh.length !== points.length) {
+            const why = 'ТАБЛИЦА КАРТЫ НЕ ПЕРЕЧИТАНА перед ступенью '
+              + `${frequencyMhz} МГц / ${voltageMv} мВ (получено ${Array.isArray(fresh) ? `${fresh.length} записей вместо ${points.length}` : 'ничего'}). `
+              + 'Планировать по старой таблице значило бы вернуть ровно тот дрейф, ради которого она перечитывается. Это СТОП';
+            say('rung', why, { frequencyMhz, voltageMv, outcome: 'unknown' });
+            return { outcome: 'unknown', why, cardTouched: false, verdict: null };
+          }
+          // `fresh?.` and not `fresh.` — EXP-0075, now for the sixth time: a mutation that removes
+          // the guard above must REDDEN the block that watches it, not kill the whole suite by
+          // dereferencing exactly what the mutation takes away.
+          const wasMhz = points.find((p) => p?.mv === voltageMv)?.mhz ?? null;
+          const nowMhz = fresh?.find((p) => p?.mv === voltageMv)?.mhz ?? null;
+          if (Number.isFinite(wasMhz) && Number.isFinite(nowMhz) && wasMhz !== nowMhz) {
+            say('rung-note', `таблица уехала: ${voltageMv} мВ обслуживало ${wasMhz} МГц, теперь ${nowMhz} МГц `
+              + '— ступень считается по СВЕЖЕЙ таблице', { frequencyMhz, voltageMv, wasMhz, nowMhz });
+          }
+          livePoints = fresh;
+        }
+
         const r = await runRung({
-          points, clockMhz: frequencyMhz, voltageMv,
+          points: livePoints, clockMhz: frequencyMhz, voltageMv,
           seconds, sustain, pinCard, canPin,
           depthMv, zoneStepMv, seeded,
           journal, seq: seq++, blockedKeys, now,
@@ -4289,6 +4337,65 @@ export function selfTest() {
         blind.doc.frequencies.every((r) => r.status === CURVE_STATUS.STOCK)],
       [false, 'delivered', 0, true]);
 
+    // — ТАБЛИЦА ПЕРЕЧИТЫВАЕТСЯ ПЕРЕД КАЖДОЙ СТУПЕНЬЮ. Живой прогон 2026-08-16 встал ровно на этом:
+    //   карта грелась 12 минут, заводская таблица уехала по оси частот, и сдвиг, посчитанный по
+    //   холодной таблице, перестал давать заказанное напряжение.
+    //   АДРЕСАТЫ, названные ДО прогона: AR. вернуть планирование по стартовой таблице →
+    //   «ПЕРЕД СТУПЕНЬЮ ТАБЛИЦА ПЕРЕЧИТАНА» · AS. подставить старую таблицу вместо непрочитанной →
+    //   «НЕПРОЧИТАННАЯ ТАБЛИЦА — СТОП, А НЕ СТАРАЯ».
+    {
+      // THE BLOCK MUST OBSERVE THAT THE FRESH TABLE *DECIDED THE WRITE*, not merely that it was read.
+      // Counting reads would stay green if the value were read and then thrown away — which is
+      // exactly the mutation this block exists to catch. So the fresh table is SHIFTED, and the
+      // offset that reaches the atom must move with it.
+      const SHIFT = 20;
+      const runWith = async (table) => {
+        const offsets = [];
+        const r = await sweepRange({
+          curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2842,
+          runStepFn: async (a) => { offsets.push(a.offsetMhz); return sweepAtom(0)(a); },
+          buildVector: vectorPinned, readPointsFn: () => table,
+          saveFn: async () => ({ ok: true }),
+          now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+        });
+        return { r, first: offsets[0] ?? null };
+      };
+      const cold = await runWith(sweepPoints);
+      // A table that slid DOWN the frequency axis (the card warmed) needs a BIGGER raise to put the
+      // same clock on the same voltage — that is the whole physics of the 2026-08-16 stall.
+      const warm = await runWith(sweepPoints.map((p) => ({ ...p, mhz: p.mhz - SHIFT })));
+      ok('ПЕРЕД СТУПЕНЬЮ ТАБЛИЦА ПЕРЕЧИТАНА, и решает ИМЕННО ОНА: уехавшая таблица двигает сдвиг',
+        [cold.r.ok, warm.r.ok, Number.isFinite(cold.first), warm.first - cold.first],
+        [true, true, true, SHIFT]);
+
+      // The card cannot be described → STOP. The OLD table is deliberately not a fallback: using it
+      // is the defect this seam removes, and a stale plan writes voltages nobody asked for.
+      const unreadable = await sweepRange({
+        curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2842,
+        runStepFn: sweepAtom(0), buildVector: vectorPinned, readPointsFn: () => null,
+        saveFn: async () => ({ ok: true }),
+        now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      // THE REASON IS PART OF THE ASSERTION. «It stopped» is not enough: with the fresh table thrown
+      // away the sweep also stops — downstream, on an empty table — and a block that only checks
+      // «stopped» would stay green while the seam was gone. So the halt must NAME the unread table.
+      ok('НЕПРОЧИТАННАЯ ТАБЛИЦА — СТОП, А НЕ СТАРАЯ: и остановка НАЗЫВАЕТ именно её',
+        [unreadable.ok, unreadable.closed,
+          unreadable.doc.frequencies.every((r) => r.status === CURVE_STATUS.STOCK),
+          /НЕ ПЕРЕЧИТАНА/.test(unreadable.why ?? '')],
+        [false, 0, true, true]);
+
+      // A table of the WRONG SHAPE is «не прочитана» too — a short read is not a small read.
+      const truncated = await sweepRange({
+        curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2842,
+        runStepFn: sweepAtom(0), buildVector: vectorPinned, readPointsFn: () => sweepPoints.slice(0, 2),
+        saveFn: async () => ({ ok: true }),
+        now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('ОБРЕЗАННАЯ ТАБЛИЦА — ТОЖЕ НЕ ПРОЧИТАНА: короткое чтение не является маленьким чтением',
+        [truncated.ok, truncated.closed, /НЕ ПЕРЕЧИТАНА/.test(truncated.why ?? '')], [false, 0, true]);
+    }
+
     // — WHICH rung's delivered clock decides the row: the LAST PASSING one, because the voltage that
     //   ships is the one a PASS proved. A descent whose clock climbs as the raise deepens must key on
     //   the end of the walk, not on its first step.
@@ -4881,6 +4988,11 @@ async function mainSweep(argv, arg) {
     // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
     // recoveries that could disagree are worse than one that cannot.
     recover: async () => watchdog.recover(),
+    // THE FRESH TABLE, READ THROUGH THE HANDLE THIS COMMAND ALREADY HOLDS. In-process NVAPI, no
+    // subprocess — the reason this is safe per rung while `probeCard()` is not (see the seam's own
+    // comment). The card is at factory at this moment: every rung's rollback zeroes the curve in a
+    // `finally`, and `runRung` refuses to continue when that rollback was not clean.
+    readPointsFn: () => nvapi.readVfCurve(nv, handle).points,
     runStepFn: (a) => vf.runStep(a),
     saveFn: async (d) => saveCurveDoc(d),
     onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
