@@ -76,8 +76,8 @@ const column = `    <!-- СОСТОЯНИЕ ПРОГОНА СТОИТ ПЕРВЫ
          замирает вместе с ним, стенные часы идут сами. Расстояние между ними — это «давно ли
          встало», число, которое иначе оператор в три часа ночи вычисляет по памяти. -->
     <div class="m clocks">
-      <div><span>идёт прогон</span><b id="c-elapsed">0:00:00</b></div>
-      <div><span>время</span><b id="c-now">--:--:--</b></div>
+      <div><span>время прогона</span><b id="c-elapsed">0:00:00</b></div>
+      <div><span>время локальное</span><b id="c-now">--:--:--</b></div>
     </div>`;
 s = s.slice(0, i0) + column + s.slice(i1 + to.length);
 
@@ -138,7 +138,17 @@ if (process.argv.includes('--preview')) {
     .replace('src:url(/font.woff2)', 'src:url(../fonts/DSEG7Classic-Regular.woff2)')
     .replace('src="/logo.webp"', 'src="../logo/kago-logo.webp"');
   must(prev.includes('connect();'), 'в проводке нет вызова connect()');
-  prev = prev.replace('connect();', `pulse = ${pulse}; pulseAt = performance.now(); paint();`);
+  // `--no-pill` снимает метку «ВИРТУАЛЬНАЯ» — снимок для README показывает ИНСТРУМЕНТ, а он один и
+  // тот же на стенде и на живой карте (слово владельца 2026-08-16 04:1x). Числа при этом остаются
+  // теми, что были в прогоне: подпись под картинкой говорит, откуда они, а сама картинка не
+  // изображает замер живой карты.
+  const noPill = process.argv.includes('--no-pill');
+  // Пульс НЕ обновляется в статике, поэтому детектор зависания зажёгся бы через три секунды и
+  // снимок вышел бы с тревогой. Здесь это ложь о картинке, а не о прогоне: держим метку времени
+  // свежей ровно для рендера.
+  prev = prev.replace('connect();',
+    `pulse = ${pulse}; ${noPill ? 'pulse.card.synthetic = false; ' : ''}pulseAt = performance.now(); paint();\n`
+    + '  setInterval(() => { pulseAt = performance.now(); }, 200);');
   const out = join('assets', 'dashboard', '_preview.html');
   writeFileSync(out, prev, 'utf8');
   console.log(`ПРЕВЬЮ:  ${out} — впрыснут пульс seq=${JSON.parse(pulse).seq}. Снять картинку:`);

@@ -47,6 +47,7 @@
 import { writeFileSync, renameSync, readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -340,7 +341,11 @@ export function serve({
  * not the outcome. Spawning the browser we found on disk does not prove the window that appears
  * belongs to it — observed 2026-08-09, when Edge was launched and the page came up in Chrome.
  */
-export const WINDOW_PROFILE_DIR = join('runs', 'dashboard', 'window-profile');
+// THE WINDOW'S PROFILE LIVES IN THE OS TEMP DIR, NOT IN THE PROJECT. A browser profile is hundreds
+// of JSON files, and the first run of it inflated `npm run check`'s encoding scan from 240 text files
+// to 594 — a guard whose input is mostly somebody else's noise is a guard nobody reads. It is also
+// not ours to keep: nothing in it describes this project.
+export const WINDOW_PROFILE_DIR = join(tmpdir(), 'kago-dashboard-window');
 export const WINDOW_PID_PATH = join('runs', 'dashboard', 'window.pid');
 
 /**

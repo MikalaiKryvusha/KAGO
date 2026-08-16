@@ -31,6 +31,17 @@
 
 **KAGO is a Node.js orchestrator that undervolts an NVIDIA GPU on Windows — automatically, with a measured safety margin, and without installing a single third-party GUI.**
 
+<p align="center">
+  <img src="assets/dashboard/sweep-dashboard.png" width="900" alt="KAGO run dashboard: the card with its live readouts on the left, the search progress on the right">
+</p>
+
+<p align="center">
+  <sub><b>The run dashboard.</b> The card carries its own readouts; the column reports the search.
+  The animation is driven by the run's pulse rather than by a timer of its own — when the machine
+  freezes, the picture freezes with it, and the rung on screen is the rung that killed it.<br>
+  Shot taken during a rehearsal on the virtual card (the bench), not on live silicon.</sub>
+</p>
+
 ---
 
 <a id="1-general"></a>
@@ -274,6 +285,17 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 **KAGO — оркестратор на Node.js, который сам подбирает андервольтинг для видеокарты NVIDIA под Windows: с измеренным запасом надёжности и без единого стороннего GUI в зависимостях.**
+
+<p align="center">
+  <img src="assets/dashboard/sweep-dashboard.png" width="900" alt="Дашборд прогона KAGO: слева видеокарта с показаниями, справа ход поиска края">
+</p>
+
+<p align="center">
+  <sub><b>Дашборд прогона.</b> Показания карты живут на самой карте, справа — ход поиска края.
+  Анимацию двигает ПУЛЬС прогона, а не собственный таймер: когда машина зависает, картинка замирает
+  вместе с ней, и та ступень, что на экране, и есть точка отказа.<br>
+  Снимок сделан на репетиции по виртуальной карте, а не на живом кремнии.</sub>
+</p>
 
 ---
 
