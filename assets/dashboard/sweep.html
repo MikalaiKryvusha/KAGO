@@ -491,8 +491,7 @@ function paint() {
     ? `сток ${r.stockVoltageMv} · андервольт <b style="display:inline;font-size:13px;color:var(--ok)">−${r.depthMv} мВ</b>`
     : '';
   const p = r.probe || {};
-  $('f-probe').innerHTML = `${(p.elapsedSeconds ?? 0).toFixed(1).replace('.', ',')} `
-    + `<span style="font-size:17px;color:var(--dim)">из ${p.totalSeconds ?? 10} с</span>`;
+  paintProbe(p.elapsedSeconds ?? 0, p.totalSeconds ?? 10);
   $('f-band').textContent = r.band || '—';
   const cov = r.coverage || {};
   // «Ступеней пройдено» УБРАНО словом владельца: ступень спуска по напряжению — внутренняя единица
@@ -524,6 +523,14 @@ function paint() {
   document.title = r.finished
     ? 'KAGO — прогон завершён'
     : 'KAGO — Выполняется автоматический тюнинг-прогон видеокарты';
+}
+
+/* ОДИН РИСОВАЛЬЩИК СЕКУНД НА ДВА МЕСТА. Плитку пишут и `paint()` (по новому кадру), и `frame()`
+   (в собственном такте страницы) — а две функции, рисующие одно поле, это пара, которая разъедется
+   на первой же правке формата. */
+function paintProbe(sec, total) {
+  $('f-probe').innerHTML = `${Number(sec).toFixed(1).replace('.', ',')} `
+    + `<span style="font-size:17px;color:var(--dim)">из ${total} с</span>`;
 }
 
 /* Кадр. Всё, что здесь считается, считается ОТ ПУЛЬСА. */
@@ -579,6 +586,17 @@ function frame() {
     // мгновения, когда прогон объявил, что уходит в тишину, — а не выдумывается.
     const sec = Math.min(since / 1000, r.probe?.totalSeconds ?? 10);
     $('state-alive').textContent = `● ${r.state || 'ПРОГОН'} — ${sec.toFixed(0)} с из ${r.probe?.totalSeconds ?? 10}`;
+  }
+
+  // СЕКУНДЫ СТРЕСС-ТЕСТА ИДУТ В ТАКТЕ СТРАНИЦЫ, а не по приходу кадров. Владелец: «циферки не тикают
+  // · стресс-тест устойчивости 0,0 из 10 с». Во время прожига номер пульса не меняется, значит новых
+  // кадров НЕТ вовсе — а именно эти десять секунд плитка и обязана показывать.
+  // Берём БОЛЬШЕЕ из пришедшего и натикавшего локально: на стенде прожиги ускорены вдесятеро, и
+  // пришедшее число больше (EXP-0078); живьём наоборот. Потолок — объявленная длительность, поэтому
+  // замерший прогон досчитает до неё и встанет, отдав сигнал сторожу молчания.
+  if (!r.finished && r.probe && Number.isFinite(r.probe.totalSeconds)) {
+    const total = r.probe.totalSeconds;
+    paintProbe(Math.min(total, Math.max(r.probe.elapsedSeconds ?? 0, since / 1000)), total);
   }
 
   const t = pulse.runMs + Math.min(since, LEASH_MS);

@@ -384,7 +384,29 @@ export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
   // NOT blocked can, so one runs alongside for the whole sweep and the server reads its last line.
   // Merged HERE rather than pushed by the run, because the run is precisely the thing that is busy.
   const card = latestTelemetry();
-  return { ...p, noRun: false, ageMs, card: card ? { ...p.card, ...card } : p.card };
+
+  // ⏱ И СЕКУНДЫ СТРЕСС-ТЕСТА — ТОЖЕ ЗДЕСЬ, ПО ТОЙ ЖЕ ПРИЧИНЕ. Владелец, глядя на живой прогон:
+  // «циферки не тикают · стресс-тест устойчивости 0,0 из 10 с».
+  //
+  // `elapsedSeconds` в ФАЙЛЕ двигает тот, кто зовёт `telemetry()` — на стенде это виртуальная карта,
+  // тикающая раз в имитируемую секунду. На живом пути звать его НЕКОМУ: развёртка заблокирована
+  // внутри прожига ровно те десять секунд, которые надо показать. Тот же класс, что и мёртвые
+  // индикаторы, и то же лекарство — вычислить у сервера, который не занят.
+  //
+  // ОДНА ФОРМУЛА НА ОБА ПУТИ, без флага «мы на стенде»: берём БОЛЬШЕЕ из «что натикало в файле» и
+  // «сколько прошло с объявления ступени». На стенде прожиги ускорены вдесятеро, поэтому тиков
+  // больше, чем настоящих секунд, и побеждает файл — стенд продолжает показывать пройденное им, а не
+  // сжатое время (EXP-0078). Живьём в файле ноль, и побеждает время. Потолок в обоих случаях —
+  // объявленная длительность, так что зависший прогон досчитает до неё и встанет, отдав сигнал
+  // сторожу молчания, а не рисуя бесконечный рост.
+  let run = p.run;
+  if (run && run.finished !== true && run.probe && Number.isFinite(run.probe.totalSeconds)) {
+    const byClock = Math.min(run.probe.totalSeconds, Math.max(0, ageMs / 1000));
+    const shown = Math.max(run.probe.elapsedSeconds ?? 0, byClock);
+    run = { ...run, probe: { ...run.probe, elapsedSeconds: Number(shown.toFixed(1)) } };
+  }
+
+  return { ...p, noRun: false, ageMs, run, card: card ? { ...p.card, ...card } : p.card };
 }
 
 /** The freshest sample the side-car sampler has written, or `null`. Read-only, never throws. */
@@ -1106,6 +1128,42 @@ export async function selfTest() {
     check('ПРИБОР ЗРИТЕЛЕЙ НЕ ВЫДУМЫВАЕТ: сервер жив, зрителей ноль — ответ «нет»',
       none === false, 'насчитал зрителя там, где окна нет');
     lonely.close();
+  }
+
+  // — СЕКУНДЫ СТРЕСС-ТЕСТА НА ЖИВОМ ПУТИ. Владелец: «циферки не тикают · 0,0 из 10 с». В файл их
+  //   двигает тот, кто зовёт telemetry(), а живьём звать некому — развёртка заблокирована внутри
+  //   прожига ровно эти секунды. Считает сервер, по возрасту записи.
+  //   АДРЕСАТЫ: AU. вернуть выдачу числа из файла как есть → «СЕКУНДЫ ИДУТ БЕЗ ТИКОВ» ·
+  //             AV. дать им расти выше объявленной длительности → «СЕКУНДЫ НЕ ПЕРЕРАСТАЮТ ПРОЖИГ».
+  {
+    const dir = join('runs', 'dashboard-selftest');
+    const livePath = join(dir, 'live-elapsed.json');
+    const g = openPulse({ path: livePath, source: 'ЖИВАЯ КАРТА', band: '2887…2820 МГц', probeSeconds: 10 });
+    g.event({ kind: 'rung-start', text: 'ступень', frequencyMhz: 2887, voltageMv: 1045, depthMv: 25, seeded: false });
+    const t0 = Date.parse(readPulse(livePath).at);
+
+    const atOnce = pulseNow(livePath, t0);
+    check('на живом пути секунды стартуют с нуля — до прожига считать нечего',
+      atOnce.run.probe.elapsedSeconds === 0, JSON.stringify(atOnce.run.probe));
+
+    const at4s = pulseNow(livePath, t0 + 4200);
+    check('СЕКУНДЫ ИДУТ БЕЗ ТИКОВ: развёртка молчит внутри прожига, а плитка всё равно растёт',
+      at4s.run.probe.elapsedSeconds === 4.2, JSON.stringify(at4s.run.probe));
+
+    const at30s = pulseNow(livePath, t0 + 30_000);
+    check('СЕКУНДЫ НЕ ПЕРЕРАСТАЮТ ПРОЖИГ: потолок — объявленная длительность, дальше говорит сторож молчания',
+      at30s.run.probe.elapsedSeconds === 10, JSON.stringify(at30s.run.probe));
+
+    // И СТЕНД НЕ ЛОМАЕТСЯ ЭТИМ: там прожиги ускорены вдесятеро, натикавшее больше настоящего
+    // времени, и побеждать обязано натикавшее (EXP-0078).
+    g.telemetry({ clockMhz: 2887, underLoad: true });
+    g.telemetry({ clockMhz: 2887, underLoad: true });
+    g.telemetry({ clockMhz: 2887, underLoad: true });
+    const bench = pulseNow(livePath, Date.parse(readPulse(livePath).at) + 500);
+    check('НА СТЕНДЕ ПОБЕЖДАЮТ ТИКИ, а не сжатое время — ускоренный прожиг показывает пройденное им',
+      bench.run.probe.elapsedSeconds === 3, JSON.stringify(bench.run.probe));
+
+    clearPulse(livePath);
   }
 
   // — ПРОСТАИВАЮЩИЙ ПОТОК ОБЯЗАН ПОДАВАТЬ ПРИЗНАКИ ЖИЗНИ. Между прогонами номер не меняется, и
