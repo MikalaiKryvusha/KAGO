@@ -49,7 +49,7 @@
 //  reporting it as a measured edge — the plan says UNKNOWN is a STOP, and now the code does too.
 //  NOT TESTED: no live search has run. The edge of this card has still never been observed.]
 
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -3900,6 +3900,27 @@ export function selfTest() {
         lines.some((l) => l.includes('против оценки 1.7 ч'))],
       [true, true, true, true]);
 
+    // — `bugs/13`: THE LIVE SWEEP'S JOURNAL IS THE PRODUCTION ONE, and the teardown guard must never
+    //   sit on that path. The check is on the SOURCE because the live path cannot be exercised
+    //   offline (it opens NVAPI) — and that unexercisability is exactly why the defect survived: the
+    //   sweep opened the production journal, then demanded it be a sandbox, and refused itself
+    //   before touching the card. Caught only by the first real launch, 2026-08-16.
+    //   ADDRESSEE: put `assertJournalSandbox(journal)` back into `mainSweep` → this block.
+    ok('ЖИВАЯ РАЗВЁРТКА НЕ ТРЕБУЕТ ОТ СВОЕГО ЖУРНАЛА БЫТЬ ПЕСОЧНИЦЕЙ (bugs/13)',
+      (() => {
+        const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+        const start = src.indexOf('async function mainSweep');
+        if (start < 0) return 'функции mainSweep в модуле НЕТ — блок потерял свой адресат';
+        const rest = src.slice(start);
+        const end = rest.indexOf('\nasync function main(');
+        // COMMENTS ARE STRIPPED FIRST. The paragraph above the journal line NAMES the removed call so
+        // a future reader knows why it is absent — and a guard that reddens at its own explanation is
+        // a guard nobody can document around. It must read CODE, not prose.
+        const code = rest.slice(0, end > 0 ? end : rest.length)
+          .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+        return /assertJournalSandbox\s*\(/.test(code);
+      })(), false);
+
     const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
     ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
     ok('ПРОДАКШЕН-ЖУРНАЛ НЕ ВЫРОС: ни одна ступень набора не писала в runs/sweep/ (EXP-0025, bugs/08)',
@@ -4213,8 +4234,19 @@ async function mainSweep(argv, arg) {
     return dry.refusals ? 1 : 0;
   }
 
+  // THE PRODUCTION JOURNAL, AND IT IS SUPPOSED TO BE THE PRODUCTION ONE (`bugs/13`).
+  //
+  // This line used to be followed by `assertJournalSandbox(journal)` — a TEARDOWN guard whose whole
+  // job is to refuse the production directory so a test cleanup cannot delete it (`bugs/08`). Called
+  // here it refused the live sweep itself, on its normal path, before a single byte reached the card.
+  // The live sweep could therefore never start, and nothing caught it because this wiring had never
+  // been run: the function's own header says `[NOT-TESTED] — the LIVE path`.
+  //
+  // The production journal is not an accident of this path, it is the POINT of it: the intent is
+  // fsynced here so a hang that kills the process still leaves a record, and the NEXT launch reads
+  // this same file to attribute the hang and resume. A sandbox journal would forget the hang — which
+  // is the one thing the owner's accepted risk depends on remembering.
   const journal = openJournal({});
-  assertJournalSandbox(journal);
 
   // THE WATCH WINDOW, OPT-IN (`plans/20`, `ideas/06`). Off by default on purpose: the sweep must stay
   // useful with no window at all — it runs for hours and survives reboots, and an observation
