@@ -727,30 +727,42 @@ export async function runRung({
   // the verdict is true about THAT voltage, and recording it is both honest and conservative.
   // BELOW is a different thing entirely — the card ran a DEEPER undervolt than anyone ordered, past
   // the depth the step governors were sized for — and it stays a stop.
-  // «БЛИЖАЙШЕЕ» — ЭТО ОДНА СТУПЕНЬ СЕТКИ, И ГРАНИЦА ЗДЕСЬ НЕ УКРАШЕНИЕ. The owner said «ближайшее
-  // верхнее из тех, которые карточка предоставляет», and the word that does the work is «ближайшее»:
-  // a delivered voltage 240 mV above the order is not the card rounding up, it is the write having
-  // done something else entirely — and accepting it would record a rung nobody meant to test while
-  // the descent believes it made progress. So the slack is exactly ONE step of the card's own grid,
-  // which is the size of the drift a warming table can produce.
+  // ГДЕ ПРОХОДИТ ГРАНИЦА ДОПУСТИМОЙ ВЫДАЧИ — и почему она НЕ в ступенях сетки.
+  //
+  // Первая редакция этой проверки требовала ровно ОДНУ ступень сетки вверх, и живой прогон её
+  // опроверг: ступень, посчитанная по СВЕЖЕПЕРЕЧИТАННОЙ таблице, всё равно промахнулась на две
+  // (2835 МГц, заказано 965, обслуживало 975). Улика в том же логе: таблица уехала МЕЖДУ планом и
+  // перечитыванием, то есть ВНУТРИ прожига — десять секунд нагрузки греют карту на несколько
+  // градусов, а таблица едет по оси частот с температурой. **Опора движется в момент пользования
+  // ею, и планированием из этого не выйти.** Считать ступени — значит подбирать допуск под сегодняшний
+  // нагрев: завтра понадобится три, послезавтра четыре.
+  //
+  // ОСМЫСЛЕННАЯ ГРАНИЦА ДРУГАЯ, И ОНА ОДНА: результат андервольта обязан быть НИЖЕ СТОКА этой
+  // частоты. Выдача на уровне стока или выше означает, что запись не добилась ничего — вот это
+  // настоящий дефект, и его стоит ловить. Всё, что между заказом и стоком, — честный замер: прожиг
+  // шёл при этом напряжении, вердикт истинен о нём, а направление консервативное (карта получила
+  // БОЛЬШЕ напряжения, чем просили).
   const measuredMv = record.servingMvAfter;
   record.measuredMv = measuredMv;
   record.orderedMv = voltageMv;
-  const gridMv = [...new Set(points.map((p) => p?.mv).filter(Number.isFinite))].sort((a, b) => a - b);
-  const nextAbove = gridMv.find((v) => v > voltageMv) ?? null;
+  // СТОК БЕРЁТСЯ ИЗ САМОЙ ТАБЛИЦЫ, А НЕ ИЗ АРГУМЕНТА ВЫЗЫВАЮЩЕГО. Первая редакция считала его как
+  // `voltageMv + depthMv` — и набор тут же показал дыру: вызов без `depthMv` молча ОТКЛЮЧАЛ проверку,
+  // то есть сторож зависел от того, что ему передадут. Сток частоты — это то напряжение, которое
+  // обслуживает её при НУЛЕВОМ сдвиге, и оно всегда есть в таблице, которая для ступени обязательна.
+  const stockMv = servingAfterRaise(points, 0, clockMhz)?.mv ?? null;
   if (measuredMv < voltageMv) {
     return close(stop('void', `КАРТА УШЛА ГЛУБЖЕ ЗАКАЗАННОГО: заказано ${voltageMv} мВ на ${clockMhz} МГц, а после записи `
       + `частоту обслуживало ${measuredMv} мВ — это НИЖЕ заказа, то есть андервольт глубже того, под который считались `
       + 'сторожа шага. Вниз мы так не соглашаемся: правило владельца — ближайшее ВЕРХНЕЕ из тех, что карта предоставляет'));
   }
-  if (measuredMv > voltageMv && measuredMv !== nextAbove) {
-    return close(stop('void', `КАРТА ПОДСТАВИЛА НЕ БЛИЖАЙШЕЕ ВЕРХНЕЕ: заказано ${voltageMv} мВ на ${clockMhz} МГц, `
-      + `ближайшее верхнее на сетке карты ${nextAbove ?? '—'} мВ, а частоту обслуживало ${measuredMv} мВ. `
-      + 'Это не округление вверх, а другая запись таблицы — вердикт относится к ступени, которую никто не заказывал'));
+  if (Number.isFinite(stockMv) && measuredMv >= stockMv) {
+    return close(stop('void', `ЗАПИСЬ НЕ ДОБИЛАСЬ НИЧЕГО: заказано ${voltageMv} мВ на ${clockMhz} МГц, а частоту `
+      + `обслуживало ${measuredMv} мВ при стоке ${stockMv} мВ. Андервольта здесь нет вовсе, и записывать `
+      + 'в документ нечего — это не измерение, а несработавшая запись'));
   }
   if (measuredMv > voltageMv) {
-    console.log(`  ПОПАЛИ ВЫШЕ: заказано ${voltageMv} мВ, карта подставила ближайшее верхнее ${measuredMv} мВ `
-      + `(таблица едет с нагревом). Меряем и пишем ВЫДАННОЕ — ${measuredMv} мВ на ${clockMhz} МГц`);
+    console.log(`  ПОПАЛИ ВЫШЕ: заказано ${voltageMv} мВ, карта подставила ${measuredMv} мВ `
+      + `(таблица едет с нагревом ПРЯМО ВО ВРЕМЯ прожига). Меряем и пишем ВЫДАННОЕ — ${measuredMv} мВ на ${clockMhz} МГц`);
   }
 
   // ---- 9. THE VERDICT, AT LAST — and a failure is a SIGNAL, never the edge (§4.6).
@@ -3152,18 +3164,26 @@ export function selfTest() {
       [wrongVolt.outcome, wrongVolt.servingMvAfter], ['void', 995]);
     ok('и отказ называет ОБА напряжения — заказанное и то, что обслуживало на самом деле',
       /1000 мВ/.test(wrongVolt.why) && /995 мВ/.test(wrongVolt.why), true);
-    //   1040 мВ — это ИМЕННО ближайшее верхнее к 1000 на сетке ЭТОЙ фикстуры (она грубее живой карты).
-    const above = await rungOK({ runStepFn: atom(atomPass(1040)) });
-    ok('ПОПАЛИ ВЫШЕ — ЭТО ПОПАДАНИЕ: карта подставила ближайшее верхнее, ступень ПРОШЛА',
-      [above.outcome, above.measuredMv, above.orderedMv], ['passed', 1040, 1000]);
+    //   ВЫШЕ ЗАКАЗА, НО НИЖЕ СТОКА — честный замер. Ступень заказана на глубине 40 мВ (сток 1040),
+    //   выдача 1005 лежит между заказом и стоком.
+    const above = await rungOK({ runStepFn: atom(atomPass(1005)), depthMv: 40 });
+    ok('ПОПАЛИ ВЫШЕ — ЭТО ПОПАДАНИЕ: выдача между заказом и стоком, ступень ПРОШЛА',
+      [above.outcome, above.measuredMv, above.orderedMv], ['passed', 1005, 1000]);
     ok('и мерой становится ВЫДАННОЕ напряжение, а заказанное названо рядом',
-      /1040 мВ обслуживает/.test(above.why) && /заказано было 1000 мВ/.test(above.why), true);
-    //   «БЛИЖАЙШЕЕ» БУКВАЛЬНО: одна ступень сетки. Выше — это уже другая запись таблицы, и вердикт
-    //   был бы о ступени, которую никто не заказывал. Дыра, найденная собственным выводом набора:
-    //   без этой границы фикстура «заказано 760 → обслуживало 1000» проходила как PASS.
-    const farAbove = await rungOK({ runStepFn: atom(atomPass(1005)) });
-    ok('ВЫШЕ, НО НЕ БЛИЖАЙШЕЕ НА СЕТКЕ — НЕ PASS: это другая запись таблицы, а не округление вверх',
-      [farAbove.outcome, /не БЛИЖАЙШЕЕ ВЕРХНЕЕ/i.test(farAbove.why)], ['void', true]);
+      /1005 мВ обслуживает/.test(above.why) && /заказано было 1000 мВ/.test(above.why), true);
+    //   ГРАНИЦА НЕ В СТУПЕНЯХ СЕТКИ, А В СТОКЕ — так решил живой прогон 2026-08-16: ступень,
+    //   посчитанная по СВЕЖЕЙ таблице, промахнулась на две ступени, потому что таблица едет ВНУТРИ
+    //   прожига. Допуск в ступенях подбирался бы под сегодняшний нагрев. Осмысленный предел один:
+    //   выдача на стоке или выше означает, что запись не добилась ничего.
+    const noGain = await rungOK({ runStepFn: atom(atomPass(1040)), depthMv: 40 });
+    ok('ВЫДАЧА НА СТОКЕ — НЕ ЗАМЕР: андервольта нет вовсе, писать в документ нечего',
+      [noGain.outcome, /НЕ ДОБИЛАСЬ НИЧЕГО/.test(noGain.why)], ['void', true]);
+    //   И СТОРОЖ НЕ ЗАВИСИТ ОТ ТОГО, ЧТО ЕМУ ПЕРЕДАЛИ. Дыру нашла мутация AX: пока сток считался как
+    //   `voltageMv + depthMv`, вызов БЕЗ глубины молча отключал проверку — сторож, который выключается
+    //   отсутствием аргумента, это не сторож. Сток читается из таблицы, которая для ступени обязательна.
+    const noGainNoDepth = await rungOK({ runStepFn: atom(atomPass(1040)) });
+    ok('и он работает БЕЗ переданной глубины: сток берётся из таблицы, а не из аргумента',
+      [noGainNoDepth.outcome, /НЕ ДОБИЛАСЬ НИЧЕГО/.test(noGainNoDepth.why)], ['void', true]);
     const noVolt = await rungOK({ runStepFn: atom({ verdict: P, blocks: cleanUndo }) });
     ok('отсутствие наблюдения — не наблюдение совпадения', noVolt.outcome, 'void');
 
