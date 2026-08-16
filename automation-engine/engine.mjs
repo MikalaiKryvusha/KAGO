@@ -156,13 +156,26 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
  * At 2400 MHz the two agree at **7** (the formula's 6.5, rounded up by a grid that lands exactly on the
  * lever wall) — which is why that number was the one that looked verified.
  *
+ * ─── THE OPERATOR'S OWN CEILING ON DEPTH, AND WHY IT IS NOT THE SAME THING AS THE LEVER ───────────
+ *
+ * `depthCapMv` is a bound the OPERATOR sets for one sitting — «не спускаемся ниже 150 мВ от стока»
+ * (the owner's condition for the first live sweep, 2026-08-16). It is not the lever wall and it is not
+ * the silicon: it is a decision, and it is kept SEPARATE from `availableDepthMv` for one reason that
+ * is the whole safety content of this parameter. Clamping the lever's reach silently would make every
+ * downstream sentence lie — the descent would stop at 1035 mV and report «ПРЕДЕЛ РЫЧАГА», while the
+ * lever on this card reaches 245 mV deeper. A run that misnames what stopped it is exactly the false
+ * `[TESTED]` class this project hunts, so the binding constraint is RECORDED (`cappedByOperator`) and
+ * SAID (`why`), and the two walls never blur into one number.
+ *
  * @param {object}   a
  * @param {number[]} a.voltageGridMv     every voltage the card offers (any order; sorted here)
  * @param {number}   a.stockVoltageMv    the voltage serving this frequency at stock — depth is measured from it
  * @param {number}   a.availableDepthMv  how deep the ±1000 MHz lever can reach here; the wall, not a preference
+ * @param {number}   [a.depthCapMv]      the operator's ceiling on depth from stock; `null` = no ceiling
  * @param {Array}    [a.zones]           the policy; defaults to `config.DESCENT_ZONES`
  * @returns {{rungs:Array<{mv:number,depthMv:number,stepMv:number,zoneStepMv:number,forcedByGrid:boolean}>,
- *            refused:boolean, why:string, forcedByGridCount:number, floorMv:number}}
+ *            refused:boolean, why:string, forcedByGridCount:number, floorMv:number,
+ *            boundDepthMv:number, cappedByOperator:boolean}}
  *
  * [TESTED: 2026-08-15 21:4x, OFFLINE · 14 blocks in `engine --selftest`; the 2842 MHz and 2400 MHz
  *  rung counts are LITERALS measured on the card's real grid (24 and 7, not the idealized 28 — EXP-0072),
@@ -172,19 +185,38 @@ export function descentLadder({
   voltageGridMv = [],
   stockVoltageMv = null,
   availableDepthMv = 0,
+  depthCapMv = null,
   zones = config.DESCENT_ZONES,
 } = {}) {
-  const empty = (why) => ({ rungs: [], refused: true, why, forcedByGridCount: 0, floorMv: null });
+  const empty = (why) => ({
+    rungs: [], refused: true, why, forcedByGridCount: 0, floorMv: null,
+    boundDepthMv: null, cappedByOperator: false,
+  });
   if (!Array.isArray(voltageGridMv) || voltageGridMv.length === 0) return empty('сетка напряжений пуста — спускаться не по чему');
   if (!Number.isFinite(stockVoltageMv)) return empty('стоковое напряжение не названо — глубина отсчитывается от него');
   if (!Array.isArray(zones) || zones.length === 0) return empty('политика шагов пуста');
-  if (!Number.isFinite(availableDepthMv) || availableDepthMv <= 0) {
-    return { rungs: [], refused: false, why: 'рычаг не даёт снять ни милливольта — спуск не начинается', forcedByGridCount: 0, floorMv: stockVoltageMv };
+
+  // THE TWO WALLS, RESOLVED HERE AND ONLY HERE. Whichever binds is the floor; WHICH one binds is a
+  // fact the caller is owed, because the two carry opposite meanings — the lever wall is the card's,
+  // the cap is ours, and only the first of them may ever be reported as a property of the silicon.
+  const capped = Number.isFinite(depthCapMv) && depthCapMv > 0;
+  const leverDepthMv = Number.isFinite(availableDepthMv) ? availableDepthMv : 0;
+  const boundDepthMv = capped ? Math.min(leverDepthMv, depthCapMv) : leverDepthMv;
+  const cappedByOperator = capped && depthCapMv < leverDepthMv;
+
+  if (boundDepthMv <= 0) {
+    return {
+      rungs: [], refused: false, forcedByGridCount: 0, floorMv: stockVoltageMv,
+      boundDepthMv, cappedByOperator,
+      why: cappedByOperator
+        ? `потолок глубины ${depthCapMv} мВ не оставляет ни одной ступени — спуск не начинается`
+        : 'рычаг не даёт снять ни милливольта — спуск не начинается',
+    };
   }
 
   // High → low, deduplicated: the grid is the card's dictionary and the descent reads it downward.
   const grid = [...new Set(voltageGridMv.filter(Number.isFinite))].sort((a, b) => b - a);
-  const floorMv = stockVoltageMv - availableDepthMv;
+  const floorMv = stockVoltageMv - boundDepthMv;
   // The policy step for a given depth: the first zone whose boundary the depth has not yet reached.
   const stepForDepth = (d) => (zones.find((z) => d < z.untilDepthMv) ?? zones[zones.length - 1]).stepMv;
 
@@ -220,17 +252,26 @@ export function descentLadder({
   }
 
   const forcedByGridCount = rungs.filter((r) => r.forcedByGrid).length;
+  // WHAT STOPPED THE DESCENT, NAMED RATHER THAN LEFT TO BE INFERRED. The caller turns this into the
+  // `lever-limited` verdict's prose, and «предел рычага» over a stop that was OUR decision would be a
+  // claim about the card nobody measured.
+  const stoppedBy = cappedByOperator
+    ? `остановлено НАШИМ потолком глубины ${depthCapMv} мВ (рычаг достаёт до −${leverDepthMv} мВ, глубже мы не идём по условию прогона)`
+    : `остановлено пределом рычага ±1000 МГц: глубже −${leverDepthMv} мВ он не достаёт`;
   if (rungs.length === 0) {
     return {
       rungs: [], refused: false, forcedByGridCount: 0, floorMv,
-      why: `рычаг даёт ${availableDepthMv} мВ, а ближайшая ступень сетки ниже ${stockVoltageMv} мВ глубже этого — `
-        + 'спускаться некуда, и это не отказ, а свойство участка',
+      boundDepthMv, cappedByOperator,
+      why: `спускаться некуда: ближайшая ступень сетки ниже ${stockVoltageMv} мВ уже глубже разрешённых `
+        + `${boundDepthMv} мВ — ${stoppedBy}. Это не отказ, а свойство участка`,
     };
   }
   return {
     rungs, refused: false, forcedByGridCount, floorMv,
+    boundDepthMv, cappedByOperator,
     why: `ступеней ${rungs.length}, первый шаг −${rungs[0].stepMv} мВ, глубже всего −${rungs[rungs.length - 1].depthMv} мВ`
-      + (forcedByGridCount ? ` · сетка вынудила ${forcedByGridCount} шаг(ов) глубже политики (10 мВ там, где просили 5)` : ''),
+      + (forcedByGridCount ? ` · сетка вынудила ${forcedByGridCount} шаг(ов) глубже политики (10 мВ там, где просили 5)` : '')
+      + ` · ${stoppedBy}`,
   };
 }
 
@@ -447,6 +488,17 @@ export async function runRung({
   // it from the card's own clock ladder: no ladder, no pin, and a rung below the curve's cap floor
   // then has no holder and is refused BEFORE any write instead of discovered mid-burn.
   canPin = true,
+  // THE OWNER'S ALGORITHM, STEP 7 — lock the card on the frequency under test, always. Default ON,
+  // because `ideas/03` is the specification this engine was written from and the sweep is the command
+  // that executes it. `false` restores the shipped-shape-when-possible behaviour, which is what the
+  // engine did between 2026-08-14 and 2026-08-16 and what `bugs/12` is about.
+  demandPin = true,
+  // THE CARD'S OWN MAXIMUM GRAPHICS CLOCK — `frequency-grid.maxGraphicsMhz`, the SAME number R13
+  // reads. It is the ceiling the locked shape writes, and it is required whenever `demandPin` is on:
+  // a uniform raise with no ceiling at all pushes the curve's tail (3172 MHz here) above the card's
+  // maximum (3090), which is the gap `bugs/11` escaped through and cost the owner a BSOD. Refused
+  // rather than guessed — an envelope invented from the V/F table would read 3172 and prove nothing.
+  envelopeMhz = null,
   // THE WRITE-AHEAD JOURNAL (§4.4), and it is wired HERE rather than in the sweep loop for one
   // reason: the intent must be durable in the instruction before the card is touched, and this is the
   // function that touches it. Anywhere else leaves a gap, and the gap is exactly where a hang lands.
@@ -509,14 +561,37 @@ export async function runRung({
   // ---- 2. WHO HOLDS THE CEILING. The vector is the REAL one the write would carry, so the decision
   // is taken on what the card would actually get rather than on an idea of it.
   const build = buildVector ?? (await import('./lib/nvapi.mjs')).buildRaiseAndCapVector;
-  const vector = build(points, plan.deltaMhz, { capMhz: clockMhz });
+
+  // ─── WHERE THE CEILING GOES, AND IT IS A DIFFERENT PLACE IN THE TWO SHAPES ──────────────────────
+  //
+  // Shipped shape: the ceiling IS the clock under test — that is what makes the search measure the
+  // thing the profile ships (`bugs/02` step 1).
+  //
+  // The owner's locked shape (`ideas/03` step 7): the ceiling is the CARD'S ENVELOPE and the clock
+  // under test is held by the LOCK. Two ceilings on one frequency is what fought on 2026-08-14, and
+  // NO ceiling at all is what R13 refuses (`bugs/11`). Putting the ceiling on the envelope satisfies
+  // both: nothing raised offers above the card's maximum, and the lock is the only thing binding the
+  // frequency. This costs no measured number — the point serving any clock BELOW the cap, and its
+  // voltage, are identical under a uniform raise and a capped one (9 of 9 on this card, fact 38).
+  const capForVector = demandPin ? envelopeMhz : clockMhz;
+  if (demandPin && !Number.isFinite(capForVector)) {
+    return stop('refused', 'АЛГОРИТМ ВЛАДЕЛЬЦА (шаг 7) требует закрепления, а максимум частоты этого экземпляра '
+      + 'не назван (frequency-grid.maxGraphicsMhz). Без него подъём кривой вынес бы её хвост за конверт карты — '
+      + 'ровно та форма, что уронила машину 2026-08-15 (bugs/11, сторож R13). Конверт не выдумывается');
+  }
+  if (demandPin && clockMhz >= capForVector) {
+    return stop('refused', `${clockMhz} МГц — это САМ конверт карты (${capForVector} МГц): потолок и закрепление `
+      + 'встали бы на одну частоту, а это ровно конфликт 2026-08-14 (карта под потолком садится ниже него, '
+      + 'а замок требует ровно его). Полосу начинают на ступень ниже максимума');
+  }
+  const vector = build(points, plan.deltaMhz, { capMhz: capForVector });
   if (!vector || vector.ok !== true) {
     return stop('refused', `вектор записи не построен: ${vector?.why ?? 'нет ответа строителя'}`);
   }
   // `pinned` is the CAPABILITY, not the preference — «a pin is available here», which is the question
   // `chooseWriteShape` answers with «then who should hold the ceiling». Its answer is obeyed in both
   // directions, including «the curve holds it, and pinning here would be harmful».
-  const held = chooseShape(vector, { pinned: canPin });
+  const held = chooseShape(vector, { pinned: canPin, demandPin });
   record.holder = held.heldBy;
   record.writeShape = held.shape;
   if (!held.ok) return stop('refused', held.why);
@@ -525,6 +600,12 @@ export async function runRung({
   // — it fought the cap for one frequency on 2026-08-14 and turned three PASSing shapes into
   // НЕИЗВЕСТНО. `pinRequired` is the field that decides it, and it belongs to `chooseWriteShape`.
   const pinMhz = held.pinRequired ? clockMhz : null;
+
+  // AND THE SAME RULE READ FROM THE OTHER END, which is the half that lives here: the ceiling handed
+  // to the atom is the one the vector was built with. Under the lock that is the ENVELOPE, never the
+  // clock under test — the clock under test travels as `pinMhz`, and the two must not name the same
+  // frequency (that is the 2026-08-14 conflict, refused above).
+  const capForAtom = capForVector;
 
   // ---- 3. THE ONE EMERGENCY STOP THE OWNER LEFT (F2-AC5). Two hangs in a row on this rung is a
   // fault, not an edge, and a third attempt buys nothing but another reboot.
@@ -561,7 +642,7 @@ export async function runRung({
     point: plan.entry.i,
     offsetMhz: plan.deltaMhz,
     writeShape: held.shape,
-    capMhz: clockMhz,
+    capMhz: capForAtom,
     pinMhz,
     pinCard,
     shapes,
@@ -973,13 +1054,14 @@ export function planFrequency({
   stockVoltageMv = null,
   voltageGridMv = [],
   availableDepthMv = null,
+  depthCapMv = null,
   curveDoc = null,
   zones = config.DESCENT_ZONES,
   cliffMv = config.ASCENT_STEP_MAX_MV ?? 35,
 } = {}) {
   const seed = seedFor({ frequencyMhz, curveDoc });
   const seedMv = seed && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv ? seed.seedMv : null;
-  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, zones });
+  const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, depthCapMv, zones });
 
   // TWO ladders, and both are named because the run may walk either: the expected path starts at the
   // seed, and a REJECTED seed drops the descent back to stock (§4.2, E2-AC11). A dry run that printed
@@ -1003,6 +1085,11 @@ export function planFrequency({
     forcedByGridCount: ladder.forcedByGridCount,
     floorMv: ladder.floorMv,
     availableDepthMv,
+    // The operator's ceiling travels WITH the plan, so the dry run can print the bound the run will
+    // obey. A bound added to the run and not to the plan is not added at all — `bugs/09`, EXP-0052.
+    depthCapMv,
+    boundDepthMv: ladder.boundDepthMv,
+    cappedByOperator: ladder.cappedByOperator,
     refused: ladder.refused,
     // The `bugs/03` cliff on the FIRST step — checked here so the dry run can print the refusal too,
     // rather than the run discovering it after the operator has already said «go».
@@ -1045,6 +1132,7 @@ export async function sweepFrequency({
   stockVoltageMv = null,
   voltageGridMv = [],
   availableDepthMv = null,
+  depthCapMv = null,
   curveDoc = null,
   runRungFn,
   minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
@@ -1072,7 +1160,7 @@ export async function sweepFrequency({
 
   // ---- 0. THE PLAN — and the run walks THIS, not a second computation of it (F2-AC8, `bugs/09`,
   // EXP-0052). Everything the dry run prints comes from the very object the loop below consumes.
-  const plan = planFrequency({ frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, curveDoc, zones });
+  const plan = planFrequency({ frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, depthCapMv, curveDoc, zones });
   out.plan = plan;
 
   // ---- 1. THE SEED — the owner's optimization, and its first burn is a PROOF rather than a formality.
@@ -1274,6 +1362,13 @@ export async function sweepRange({
   seconds = config.SWEEP_PROBE_SECONDS ?? 10,
   sustain = config.SWEEP_PROBE_SECONDS ?? 10,
   minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
+  // THE OPERATOR'S CEILING ON DEPTH FOR THIS SITTING — `null` means «only the lever stops us».
+  depthCapMv = null,
+  // THE OWNER'S ALGORITHM, STEP 7 — the card is LOCKED on the frequency under test. Default ON.
+  demandPin = true,
+  // The card's own maximum graphics clock (`frequency-grid.maxGraphicsMhz`) — the ceiling the locked
+  // shape writes, so no raised point can offer above the envelope (R13, `bugs/11`).
+  envelopeMhz = null,
   buildVector = null,
   chooseShape = chooseWriteShape,
   now = null,
@@ -1341,8 +1436,12 @@ export async function sweepRange({
   // WHAT THE BAND IS, SAID ONCE AND UP FRONT (`plans/20` §4.2). A watcher cannot show «настроено 7 из
   // 43» without the 43, and deriving it a second time outside this function would be a truth↔mirror
   // pair over the very number the sweep's own coverage is counted from (R16c's lesson, cheaply).
-  say('band', `полоса ${fromMhz ?? '—'}…${toMhz ?? '—'} МГц: ступеней ${groups.length}, частот ${report.frequenciesInBand}`,
-    { fromMhz, toMhz, groupCount: groups.length, frequenciesInBand: report.frequenciesInBand });
+  say('band', `полоса ${fromMhz ?? '—'}…${toMhz ?? '—'} МГц: частот ${report.frequenciesInBand}, прожигов ${groups.length}`
+    + (Number.isFinite(depthCapMv) ? ` · ПОТОЛОК ГЛУБИНЫ ${depthCapMv} мВ от стока — условие этого прогона` : ''),
+    {
+      fromMhz, toMhz, groupCount: groups.length, frequenciesInBand: report.frequenciesInBand,
+      depthCapMv: Number.isFinite(depthCapMv) ? depthCapMv : null,
+    });
 
   for (const g of groups) {
     // The lever's reach at THIS frequency — the wall that produces `lever-limited`, read off the
@@ -1355,6 +1454,7 @@ export async function sweepRange({
       stockVoltageMv: g.stockVoltageMv,
       voltageGridMv,
       availableDepthMv,
+      depthCapMv,
       curveDoc: doc,
       minStepMv,
       onEvent,
@@ -1370,7 +1470,7 @@ export async function sweepRange({
           seconds, sustain, pinCard, canPin,
           depthMv, zoneStepMv, seeded,
           journal, seq: seq++, blockedKeys, now,
-          runStepFn, buildVector, chooseShape,
+          runStepFn, buildVector, chooseShape, demandPin, envelopeMhz,
         });
         say('rung', r.why, { frequencyMhz, voltageMv, outcome: r.outcome });
         return r;
@@ -1476,6 +1576,8 @@ export async function sweepDryRun({
   fromMhz = null,
   toMhz = null,
   canPin = true,
+  depthCapMv = null,
+  demandPin = true,
   buildVector = null,
   chooseShape = chooseWriteShape,
   zones = config.DESCENT_ZONES,
@@ -1493,7 +1595,7 @@ export async function sweepDryRun({
     const availableDepthMv = Number.isFinite(floorMv) ? g.stockVoltageMv - floorMv : 0;
     const plan = planFrequency({
       frequencyMhz: g.topMhz, stockVoltageMv: g.stockVoltageMv,
-      voltageGridMv, availableDepthMv, curveDoc, zones,
+      voltageGridMv, availableDepthMv, depthCapMv, curveDoc, zones,
     });
 
     // WHO WOULD HOLD THE CEILING at the first rung — asked of `chooseWriteShape` rather than decided
@@ -1507,7 +1609,7 @@ export async function sweepDryRun({
       else if (!rp.ok) { holder = null; holderWhy = rp.why; }
       else {
         const vector = build(points, rp.deltaMhz, { capMhz: g.topMhz });
-        const held = vector && vector.ok === true ? chooseShape(vector, { pinned: canPin }) : null;
+        const held = vector && vector.ok === true ? chooseShape(vector, { pinned: canPin, demandPin }) : null;
         holder = held?.ok ? held.heldBy : null;
         holderWhy = held?.why ?? (vector?.why ?? 'вектор записи не построен');
       }
@@ -1521,6 +1623,8 @@ export async function sweepDryRun({
     frequenciesInBand: out.reduce((n, g) => n + g.count, 0),
     rungTotal: out.reduce((n, g) => n + g.plan.rungs.length, 0),
     refusals: out.filter((g) => g.plan.refused || g.plan.cliffRefused || g.holder === null).length,
+    depthCapMv: Number.isFinite(depthCapMv) ? depthCapMv : null,
+    cappedFrequencies: out.filter((g) => g.plan.cappedByOperator).length,
   };
 }
 
@@ -1533,8 +1637,14 @@ export async function sweepDryRun({
  */
 export function sweepDryRunLines(dry) {
   const lines = [];
-  lines.push(`СУХОЙ ПРОГОН: ступеней ${dry.groupCount}, частот в полосе ${dry.frequenciesInBand}, `
+  lines.push(`СУХОЙ ПРОГОН: частот в полосе ${dry.frequenciesInBand}, из них прожигается ${dry.groupCount} `
+    + `(остальные обслуживаются тем же напряжением и наследуют тот же ЗАМЕР), `
     + `прожигов запланировано ${dry.rungTotal}${dry.refusals ? ` · ОТКАЗОВ ${dry.refusals}` : ''}`);
+  if (Number.isFinite(dry.depthCapMv)) {
+    lines.push(`ПОТОЛОК ГЛУБИНЫ ${dry.depthCapMv} мВ от стока — УСЛОВИЕ ЭТОГО ПРОГОНА, не свойство карты. `
+      + `Он связывает спуск на ${dry.cappedFrequencies} частоте(ах) из ${dry.groupCount}: там рычаг достаёт глубже, `
+      + 'а мы не идём. Ни одна такая частота НЕ несёт края — её вердикт «предел» это НАША остановка.');
+  }
   lines.push('В КАРТУ НЕ ЗАПИСАНО НИЧЕГО — это план, а не прогон.');
   for (const g of dry.groups) {
     const p = g.plan;
@@ -1549,7 +1659,12 @@ export function sweepDryRunLines(dry) {
       + `${p.rungs[p.rungs.length - 1].mv} мВ (−${p.rungs[p.rungs.length - 1].depthMv} мВ от стока)`);
     lines.push(`   зоны политики: ${p.zonesCrossed.map((z) => `${z} мВ`).join(' · ')}`
       + (p.forcedByGridCount ? ` · сетка вынудила ${p.forcedByGridCount} шаг(ов) глубже политики` : ''));
-    lines.push(`   рычаг достаёт до ${p.floorMv} мВ (−${p.availableDepthMv} мВ) — ниже него это НАШ предел, а не кремний`);
+    if (p.cappedByOperator) {
+      lines.push(`   спуск останавливает НАШ потолок ${p.depthCapMv} мВ: пол ${p.floorMv} мВ. `
+        + `Рычаг достал бы до ${p.stockVoltageMv - p.availableDepthMv} мВ (−${p.availableDepthMv} мВ) — туда мы не идём`);
+    } else {
+      lines.push(`   рычаг достаёт до ${p.floorMv} мВ (−${p.availableDepthMv} мВ) — ниже него это НАШ предел, а не кремний`);
+    }
     lines.push(`   потолок на первой ступени держит: ${g.holder ?? 'НИКТО — ступень будет отвергнута ДО записи'}`);
     if (p.cliffRefused) {
       lines.push(`   ❌ СТОРОЖ ОБРЫВА: первый шаг ${p.firstStepMv} мВ больше разрешённых ${p.cliffMv} (bugs/03)`);
@@ -2439,6 +2554,49 @@ export function selfTest() {
   ok('ни одна ступень не уходит ЗА стену рычага',
     walled.rungs.every((r) => r.mv >= 1045 - 60), true);
 
+  // — THE OPERATOR'S CEILING ON DEPTH (the owner's condition for the first live sweep, 2026-08-16:
+  //   «не спускаемся ниже 150 мВ в каждой частоте»). Five blocks, and the load-bearing one is the
+  //   FOURTH: a run stopped by OUR decision must not report it as a property of the card.
+  //   MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016):
+  //     A. ignore `depthCapMv` outright                     → reddens «потолок обрезает», «пол ровно», «план несёт»
+  //     B. `cappedByOperator` hard-wired to false           → reddens «прогон НАЗЫВАЕТ, что его остановило»
+  //     C. `Math.max` instead of `Math.min` over the walls  → reddens «потолок обрезает», «пол ровно»
+  //     D. cap applied even when the lever is shallower     → reddens «рычаг мельче потолка»
+  //     E. drop `depthCapMv` from `planFrequency`'s return  → reddens «план несёт потолок»
+  const uncapped = descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 1185, availableDepthMv: 300 });
+  const capped150 = descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 1185, availableDepthMv: 300, depthCapMv: 150 });
+  ok('потолок глубины обрезает лестницу РОВНО по 150 мВ от стока и не глубже',
+    [capped150.rungs.at(-1).depthMv <= 150, capped150.rungs.every((r) => r.depthMv <= 150), capped150.cappedByOperator],
+    [true, true, true]);
+  ok('пол считается от СТОКА, а не от рычага: 1185 − 150 = 1035 мВ',
+    capped150.floorMv, 1035);
+  // The cap TRUNCATES the descent, it never re-routes it — otherwise the owner's 25/10/5 policy would
+  // silently become a different policy whenever a ceiling is set.
+  ok('потолок только УКОРАЧИВАЕТ путь: обрезанная лестница — точный префикс необрезанной',
+    capped150.rungs.every((r, i) => uncapped.rungs[i]
+      && uncapped.rungs[i].mv === r.mv && uncapped.rungs[i].stepMv === r.stepMv), true);
+  // THE HONESTY BLOCK. `lever-limited` is built from this prose, and «предел рычага» over a stop that
+  // was our own decision is the false-`[TESTED]` class this project hunts.
+  ok('прогон НАЗЫВАЕТ, что его остановило: наш потолок — не «предел рычага»',
+    [/потолком глубины 150/.test(capped150.why), /предел(ом)? рычага/.test(capped150.why)],
+    [true, false]);
+  // And the converse: a lever shallower than the ceiling still wins, and is still called by its name.
+  const leverBeatsCap = descentLadder({ voltageGridMv: gridLikeCard, stockVoltageMv: 1185, availableDepthMv: 60, depthCapMv: 150 });
+  ok('рычаг мельче потолка → останавливает рычаг, и это сказано его именем',
+    [leverBeatsCap.cappedByOperator, /предел(ом)? рычага/.test(leverBeatsCap.why),
+      leverBeatsCap.rungs.at(-1).depthMv <= 60],
+    [false, true, true]);
+  // THE BOUND MUST TRAVEL WITH THE PLAN — a bound the dry run cannot print is a bound the operator
+  // never agreed to (`bugs/09`, EXP-0052: added to the run is not added until the PLAN says it).
+  ok('план несёт потолок наружу, чтобы сухой прогон мог его напечатать',
+    (() => {
+      const p = planFrequency({
+        frequencyMhz: 3090, stockVoltageMv: 1185, voltageGridMv: gridLikeCard,
+        availableDepthMv: 300, depthCapMv: 150, curveDoc: null,
+      });
+      return [p.depthCapMv, p.cappedByOperator, p.floorMv];
+    })(), [150, true, 1035]);
+
   // — depth shallower than one grid step: an honest empty ladder, and NOT a refusal
   const tooShallow = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 3 });
   ok('глубина мельче одной ступени сетки → пустая лестница, но не отказ',
@@ -2626,10 +2784,19 @@ export function selfTest() {
       { i: 50, mv: 820, mhz: 1900 },
     ];
 
+    // WHAT THE ATOM WAS ACTUALLY HANDED — read through a stub rather than by dereferencing, because a
+    // mutation that makes the rung REFUSE leaves `atomLog` empty and `atomLog[0].capMhz` then KILLS
+    // the whole suite instead of reddening one block. That is EXP-0075, and this is the FIFTH time
+    // this project has paid for it: mutation G («ceiling = the clock under test») crashed the reporter
+    // on 2026-08-16 exactly here. A block must be able to go red about the case it is guarding.
+    const atomArg = (k) => (atomLog.length ? atomLog[0][k] : `АТОМ НЕ ВЫЗЫВАЛСЯ (ступень отказала до записи)`);
+
+    // `envelopeMhz` is the card's maximum graphics clock (3090 on this instance, against a V/F table
+    // whose top reads 3172). Every locked rung needs it — see the refusal block right below.
     const rungOK = async (over = {}) => {
       atomLog.length = 0;
       return runRung({
-        points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+        points: tablePoints, clockMhz: 2842, voltageMv: 1000, envelopeMhz: 3090,
         buildVector: vectorCapped, runStepFn: atom(atomPass(1000)), ...over,
       });
     };
@@ -2638,7 +2805,7 @@ export function selfTest() {
     const good = await rungOK();
     ok('исправная ступень зовёт атом РОВНО ОДИН РАЗ', atomLog.length, 1);
     ok('и передаёт ему сдвиг и запись ИЗ ПЛАНА, а не из заказа',
-      [atomLog[0].offsetMhz, atomLog[0].point, atomLog[0].capMhz], [142, 90, 2842]);
+      [atomArg('offsetMhz'), atomArg('point'), atomLog.length ? (atomLog[0].pinMhz ?? atomLog[0].capMhz) : 'АТОМ НЕ ВЫЗЫВАЛСЯ'], [142, 90, 2842]);
     ok('исход исправной ступени — PASS', [good.outcome, good.verdict, good.undoClean], ['passed', P, true]);
 
     // — a paper refusal means the card is NEVER touched. `bugs/03`'s whole lesson is that the cheapest
@@ -2656,21 +2823,67 @@ export function selfTest() {
       [atStock.outcome, atomLog.length], ['refused', 0]);
 
     // — F2-AC9: who holds the ceiling, named on every rung, and never two at once
-    ok('ДЕРЖАТЕЛЬ ПОТОЛКА НАЗВАН, и над полом кривой это КРИВАЯ',
-      [good.holder, good.writeShape], ['кривая', 'raise-and-cap']);
-    // ONE HOLDER, NEVER TWO — the 2026-08-14 lesson, asserted where it can be violated: when the curve
-    // carries the ceiling, no pin may reach the atom.
+    // — THE OWNER'S ALGORITHM, STEP 7, IS THE DEFAULT (`ideas/03`, `bugs/12`). The card is LOCKED on
+    //   the frequency under test even where the curve could carry a ceiling, because a capped card
+    //   sits 20–30 MHz UNDER its ceiling and the voltage would otherwise be recorded against a clock
+    //   the card never ran. MUTATION ADDRESSEES, NAMED BEFORE THE RUN:
+    //     F. default `demandPin` back to false            → «ЗАКРЕПЛЕНИЕ ПО УМОЛЧАНИЮ»
+    //     G. pass the cap alongside the pin               → «РОВНО ОДИН ДЕРЖАТЕЛЬ»
+    //     H. ignore `demandPin` in `chooseWriteShape`     → both of the above
+    //     I. delete the explicit shipped-shape escape     → «прежняя форма ДОСТИЖИМА явно»
+    ok('ЗАКРЕПЛЕНИЕ ПО УМОЛЧАНИЮ (алгоритм владельца, шаг 7): карта заперта на испытуемой частоте',
+      [good.holder, good.writeShape], ['закрепление частоты', 'raise-and-cap']);
+    // ONE HOLDER PER FREQUENCY — the 2026-08-14 lesson, and it survives the envelope ceiling because
+    // the ceiling and the lock now name DIFFERENT frequencies. The invariant is no longer «never both»
+    // but «never both on the SAME clock», which is what actually fought that day.
     await rungOK();
-    ok('ОДИН ДЕРЖАТЕЛЬ, НИКОГДА ДВА: под кривой закрепление НЕ запрашивается', atomLog[0].pinMhz, null);
+    ok('потолок и замок НИКОГДА не встают на одну частоту — именно это дралось 2026-08-14',
+      atomLog.length ? atomLog[0].capMhz === atomLog[0].pinMhz : 'АТОМ НЕ ВЫЗЫВАЛСЯ', false);
+
+    // THE SHIPPED SHAPE IS NOT DELETED, only dethroned — and it stays PROVED, because the profiles
+    // still ship in it and a path nothing exercises is a path that rots.
+    const shipped = await rungOK({ demandPin: false });
+    ok('прежняя форма ДОСТИЖИМА явно: без требования замка потолок держит КРИВАЯ',
+      [shipped.holder, shipped.writeShape, atomArg('capMhz'), atomArg('pinMhz')],
+      ['кривая', 'raise-and-cap', 2842, null]);
 
     const low = await rungOK({ points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky });
     ok('ниже пола кривой потолок держит ЗАКРЕПЛЕНИЕ, и оно доезжает до атома',
-      [low.holder, low.writeShape, atomLog[0].pinMhz, atomLog[0].offsetMhz],
+      [low.holder, low.writeShape, atomArg('pinMhz'), atomArg('offsetMhz')],
       ['закрепление частоты', 'uniform', 1700, 300]);
 
+    // NOTHING CAN HOLD THE FREQUENCY. Under the owner's algorithm the refusal is sharper than before —
+    // not «the ceiling has no holder» but «the card cannot be locked, so the burn would land on a
+    // frequency nobody named». Both wordings are asserted, each on its own path.
     const noHolder = await rungOK({ points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky, canPin: false });
-    ok('потолок не держит НИЧТО → отказ ДО записи, а не открытие посреди прожига',
-      [noHolder.outcome, atomLog.length, /не держит НИЧТО/.test(noHolder.why)], ['refused', 0, true]);
+    ok('нечем удержать частоту → отказ ДО записи, а не открытие посреди прожига',
+      [noHolder.outcome, atomLog.length, /ЗАКРЕПИТЬ/.test(noHolder.why)], ['refused', 0, true]);
+    const noHolderShipped = await rungOK({
+      points: lowPoints, clockMhz: 1700, voltageMv: 760, buildVector: vectorLeaky, canPin: false, demandPin: false,
+    });
+    ok('и в прежней форме тот же отказ звучит про ПОТОЛОК, который не держит ничто',
+      [noHolderShipped.outcome, /не держит НИЧТО/.test(noHolderShipped.why)], ['refused', true]);
+
+    // — THE ENVELOPE IS REQUIRED, NEVER GUESSED (R13, `bugs/11`). A locked raise with no ceiling lifts
+    //   the curve's tail (3172 here) above the card's maximum (3090) — the 82 MHz gap the BSOD escaped
+    //   through. Without the envelope the rung REFUSES; it does not fall back to «cap at the top of
+    //   the V/F table», which would read 3172 and prove nothing.
+    //   ADDRESSEES: J. default the envelope to the curve's top → this block · K. drop the same-clock
+    //   refusal → «конверт и испытуемая частота не совпадают».
+    const noEnvelope = await rungOK({ envelopeMhz: null });
+    ok('БЕЗ КОНВЕРТА КАРТЫ закреплённая ступень ОТКАЗЫВАЕТ — конверт не выдумывается (R13, bugs/11)',
+      [noEnvelope.outcome, atomLog.length, /bugs\/11|R13/.test(noEnvelope.why)], ['refused', 0, true]);
+    // AND THE DEGENERATE CASE: testing the envelope itself would put the ceiling and the lock on ONE
+    // frequency — exactly the 2026-08-14 conflict. Refused before any write, and the refusal says why.
+    const atEnvelope = await rungOK({ clockMhz: 3090, voltageMv: 1000, envelopeMhz: 3090 });
+    ok('конверт и испытуемая частота не совпадают: прогон на самом максимуме ОТКАЗЫВАЕТ до записи',
+      [atEnvelope.outcome, atomLog.length, /2026-08-14/.test(atEnvelope.why)], ['refused', 0, true]);
+    // The ceiling that actually reaches the atom under the lock is the ENVELOPE, and the clock under
+    // test reaches it as the PIN. Two different numbers, and swapping them would record the voltage
+    // of a frequency nobody burned.
+    await rungOK();
+    ok('под замком в атом едут ДВА РАЗНЫХ числа: потолок = конверт, испытуемая частота = замок',
+      [atomArg('capMhz'), atomArg('pinMhz')], [3090, 2842]);
 
     // — THE RE-ASSERTION against the card's own re-read table. This is what the paper proof may not
     //   replace (R12, EXP-0057): the plan says the voltage WOULD serve; only the card says it DID.
@@ -2709,7 +2922,8 @@ export function selfTest() {
     ok('короткий прожиг — ОДНА форма, и это транзиент',
       [SHORT_PROBE.length, SHORT_PROBE[0]?.id], [1, 'sdc_fma/transient']);
     ok('десять секунд владельца (ideas/03 шаг 9) доезжают до атома вместе с формой',
-      [atomLog[0].seconds, atomLog[0].shapes[0].id], [config.SWEEP_PROBE_SECONDS, 'sdc_fma/transient']);
+      [atomArg('seconds'), atomLog.length ? atomLog[0].shapes?.[0]?.id : 'АТОМ НЕ ВЫЗЫВАЛСЯ'],
+      [config.SWEEP_PROBE_SECONDS, 'sdc_fma/transient']);
 
     // — R1: this module decides, it does not write
     let rungThrew = false;
@@ -2739,6 +2953,7 @@ export function selfTest() {
       // there. A rung whose intent lands after the write would find nothing.
       let seenAtCardTime = null;
       const wired = await runRung({
+        envelopeMhz: 3090,
         points: tablePoints, clockMhz: 2842, voltageMv: 1000,
         buildVector: vectorCapped, journal: jrn, seq: 1, now: clock,
         depthMv: 45, zoneStepMv: 25, seeded: true,
@@ -2750,8 +2965,15 @@ export function selfTest() {
       ok('НАМЕРЕНИЕ УЖЕ НА ДИСКЕ В МОМЕНТ, КОГДА ТРОГАЮТ КАРТУ (и это F2-AC4 целиком)',
         seenAtCardTime, [['intent', 2842, 1000]]);
       ok('и оно несёт всё, чем восстанавливают спуск после перезагрузки',
-        (() => { const i = readJournal(jrn).records[0]; return [i.depthMv, i.zoneStepMv, i.seeded, i.holder, i.writeShape, i.pointIndex]; })(),
-        [45, 25, true, 'кривая', 'raise-and-cap', 90]);
+        // The stub is the EXP-0075 rule again: a mutation that makes the rung refuse on paper writes
+        // no intent at all, and dereferencing `records[0]` would kill the reporter instead of
+        // reddening this one block.
+        (() => {
+          const i = readJournal(jrn).records[0];
+          if (!i) return 'НАМЕРЕНИЯ В ЖУРНАЛЕ НЕТ (ступень отказала до записи)';
+          return [i.depthMv, i.zoneStepMv, i.seeded, i.holder, i.writeShape, i.pointIndex];
+        })(),
+        [45, 25, true, 'закрепление частоты', 'raise-and-cap', 90]);
       ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
         [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
 
@@ -2759,6 +2981,7 @@ export function selfTest() {
       // the next launch would mark ЗАВИС for a hang that never happened.
       const jrn2 = openJournal({ dir: join(journalBox, 'paper-refusal') });
       await runRung({
+        envelopeMhz: 3090,
         points: tablePoints, clockMhz: 2842, voltageMv: 745,
         buildVector: vectorCapped, journal: jrn2, seq: 1, now: clock,
         runStepFn: atom(atomPass(1000)),
@@ -2772,6 +2995,7 @@ export function selfTest() {
       let died = false;
       try {
         await runRung({
+          envelopeMhz: 3090,
           points: tablePoints, clockMhz: 2842, voltageMv: 1000,
           buildVector: vectorCapped, journal: jrn3, seq: 7, now: clock,
           runStepFn: async () => { throw new Error('машина перестала существовать'); },
@@ -2790,6 +3014,7 @@ export function selfTest() {
       // F2-AC5 at the point where the card is touched: a rung blocked by two hangs is not started.
       atomLog.length = 0;
       const blocked = await runRung({
+        envelopeMhz: 3090,
         points: tablePoints, clockMhz: 2842, voltageMv: 1000,
         buildVector: vectorCapped, runStepFn: atom(atomPass(1000)),
         blockedKeys: new Set(['2842/1000']),
@@ -3482,15 +3707,20 @@ export function selfTest() {
     // =============================================================================================
 
     const cleanUndoS = [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }];
-    const sweepAtom = (failsAtOrBelow) => async ({ offsetMhz, capMhz }) => {
+    // THE CLOCK UNDER TEST reaches the atom as the CAP in the shipped shape and as the PIN in the
+    // owner's locked shape — the fixture reads whichever one carries it, exactly as the atom does.
+    // Keying it on `capMhz` alone is what made eleven blocks red when step 7 became the default, and
+    // the redness was the fixture's, not the engine's.
+    const sweepAtom = (failsAtOrBelow) => async ({ offsetMhz, capMhz, pinMhz }) => {
+      const clockMhz = pinMhz ?? capMhz;
       // What voltage did this offset put under the clock? The same rule the card uses, run on the
       // fixture table — so the atom answers about the voltage actually ordered rather than echoing it.
-      const serving = sweepPoints.filter((p) => p.mhz + offsetMhz >= capMhz).sort((a, b) => a.mv - b.mv)[0];
+      const serving = sweepPoints.filter((p) => p.mhz + offsetMhz >= clockMhz).sort((a, b) => a.mv - b.mv)[0];
       const mv = serving?.mv ?? null;
       return {
         verdict: mv !== null && mv <= failsAtOrBelow ? config.VERDICT.SDC : P,
-        worstShape: 'sdc_fma/transient', deliveredMhz: capMhz, deliveredMaxMhz: capMhz,
-        undervolt: { capMhz, after: { mv } },
+        worstShape: 'sdc_fma/transient', deliveredMhz: clockMhz, deliveredMaxMhz: clockMhz,
+        undervolt: { capMhz: clockMhz, after: { mv } },
         blocks: cleanUndoS,
       };
     };
@@ -3500,8 +3730,12 @@ export function selfTest() {
     const order = [];
     const burned = [];
     const full = await sweepRange({
+      envelopeMhz: 3090,
       curveDoc: sweepDoc(bandRows), points: sweepPoints,
-      runStepFn: async (args) => { order.push(`ступень ${args.capMhz}`); burned.push(args.capMhz); return sweepAtom(980)(args); },
+      runStepFn: async (args) => {
+        const clock = args.pinMhz ?? args.capMhz;
+        order.push(`ступень ${clock}`); burned.push(clock); return sweepAtom(980)(args);
+      },
       buildVector: vectorPinned,
       saveFn: async (d) => { saves.push(d.frequencies.filter((r) => r.status !== CURVE_STATUS.STOCK).length); order.push('сохранение'); return { ok: true }; },
       now: () => '2026-08-16T02:00:00+03:00',
@@ -3538,6 +3772,7 @@ export function selfTest() {
       }
       const cardsUntouched = [];
       const stopped = await sweepRange({
+        envelopeMhz: 3090,
         curveDoc: sweepDoc(bandRows), points: sweepPoints,
         runStepFn: async (a) => { cardsUntouched.push(a.capMhz); return sweepAtom(-1)(a); },
         buildVector: vectorPinned, journal: jstop,
@@ -3567,6 +3802,7 @@ export function selfTest() {
     const noStamp = sweepDoc(bandRows);
     delete noStamp.stamp;
     const refusedDoc = await sweepRange({
+      envelopeMhz: 3090,
       curveDoc: noStamp, points: sweepPoints,
       runStepFn: sweepAtom(980), buildVector: vectorPinned,
       saveFn: async () => { badSaves.push(1); return { ok: true }; },
@@ -3580,6 +3816,7 @@ export function selfTest() {
     let recoverCalls = 0;
     const recoverOrder = [];
     await sweepRange({
+      envelopeMhz: 3090,
       curveDoc: sweepDoc(bandRows), points: sweepPoints,
       runStepFn: async (a) => { recoverOrder.push('ступень'); return sweepAtom(-1)(a); },
       buildVector: vectorPinned,
@@ -3590,6 +3827,7 @@ export function selfTest() {
     ok('ПОДБОР ЗАБЫТОЙ ЗАПИСИ — ОДИН РАЗ НА РАЗВЁРТКУ и ДО первой ступени',
       [recoverCalls, recoverOrder[0]], [1, 'подбор']);
     const deadRecover = await sweepRange({
+      envelopeMhz: 3090,
       curveDoc: sweepDoc(bandRows), points: sweepPoints,
       runStepFn: async () => { throw new Error('атом не должен был запуститься'); },
       buildVector: vectorPinned,
@@ -3613,6 +3851,7 @@ export function selfTest() {
       curveDoc: dryDoc, points: sweepPoints, buildVector: vectorPinned,
     });
     await sweepRange({
+      envelopeMhz: 3090,
       curveDoc: dryDoc, points: sweepPoints,
       runStepFn: sweepAtom(-1), buildVector: vectorPinned,
       onEvent: (e) => { if (e.kind === 'rung') dryWalked.push([e.frequencyMhz, e.voltageMv]); },
@@ -3911,6 +4150,16 @@ async function mainSweep(argv, arg) {
     return 2;
   }
 
+  // THE OPERATOR'S CEILING ON DEPTH — an ARGUMENT, because it is a decision about ONE sitting and not
+  // a property of the card. Absent, only the lever stops the descent. It is validated here rather than
+  // trusted: a typo that turns 150 into 1500 must not reach the card as «no ceiling at all».
+  const rawCap = arg('max-depth');
+  const depthCapMv = rawCap === null ? null : Number(rawCap);
+  if (rawCap !== null && (!Number.isFinite(depthCapMv) || depthCapMv <= 0)) {
+    console.error(`ОШИБКА: --max-depth должен быть положительным числом милливольт, получено «${rawCap}»`);
+    return 2;
+  }
+
   const nvapi = await import('./lib/nvapi.mjs');
   const vf = await import('./lib/vf-step.mjs');
   const watchdog = await import('./lib/watchdog.mjs');
@@ -3929,10 +4178,37 @@ async function mainSweep(argv, arg) {
   const handle = handles.readBigUInt64LE(0);
   const points = nvapi.readVfCurve(nv, handle).points;
 
+  // ---- THE CARD'S OWN ENVELOPE AND ITS CLOCK LADDER, PROBED ONCE FOR THE WHOLE SWEEP.
+  //
+  // Both are required by the owner's locked shape (`ideas/03` step 7): the ladder because a clock is
+  // locked to a rung the card actually offers (never to a round number a human liked), the envelope
+  // because the raise is capped there so nothing is offered above the card's maximum (R13, `bugs/11`).
+  //
+  // ONCE, not per rung — re-probing inside every rung is what turned a healthy sixth rung of the
+  // first live band sweep into НЕИЗВЕСТНО (EXP-0013).
+  const ps = await import('./lib/profile-store.mjs');
+  const pinCard = ps.probeCard();
+  if (!pinCard.ladder?.ok) {
+    console.error(`ОШИБКА: лестница частот карты недоступна — ${pinCard.ladder?.why ?? 'не прочитана'}.`);
+    console.error('        Закрепить частоту не на чем, а без закрепления прожиг попал бы не на ту частоту.');
+    return 1;
+  }
+  // ONE SOURCE FOR THE ENVELOPE — the curve document's own `card.maxGraphicsMhz`, which is the very
+  // field `curve-store`'s R13 check reads. Deriving it a second time from the clock ladder here would
+  // be a truth↔mirror pair over the number that cost the owner a BSOD.
+  const envelopeMhz = doc.card?.maxGraphicsMhz ?? null;
+  if (!Number.isFinite(envelopeMhz)) {
+    console.error('ОШИБКА: максимум частоты этого экземпляра не записан в документе кривой (card.maxGraphicsMhz) —');
+    console.error('        потолок конверта поставить не на что (R13). Пересоберите словари: npm run curve -- --grids');
+    return 1;
+  }
+  console.log(`КОНВЕРТ КАРТЫ: ${envelopeMhz} МГц — сюда подрезается верх кривой, чтобы ни одна поднятая точка`);
+  console.log('               не предлагала выше максимума экземпляра (R13, bugs/11). Частоту держит ЗАКРЕПЛЕНИЕ.');
+
   // THE DRY RUN IS A SEPARATE EXIT AND IT HAPPENS BEFORE ANYTHING ELSE — no journal is opened, no
   // recovery is attempted, no watchdog is armed. Rail S2's artifact must cost the card nothing.
   if (argv.includes('--dry-run')) {
-    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz });
+    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz, depthCapMv });
     for (const line of sweepDryRunLines(dry)) console.log(line);
     return dry.refusals ? 1 : 0;
   }
@@ -3967,6 +4243,9 @@ async function mainSweep(argv, arg) {
     fromMhz,
     toMhz,
     bandLabel: arg('label', `${fromMhz}…${toMhz} МГц`),
+    depthCapMv,
+    envelopeMhz,
+    pinCard,
     journal,
     // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
     // recoveries that could disagree are worse than one that cannot.

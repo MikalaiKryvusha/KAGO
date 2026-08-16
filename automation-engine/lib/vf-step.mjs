@@ -275,10 +275,64 @@ export function voltageForClock(points, clockMhz) {
  *
  * [NOT-TESTED] at birth — the offline blocks in `--selftest` are what flip this.
  */
-export function chooseWriteShape(vector, { pinned = false } = {}) {
+export function chooseWriteShape(vector, { pinned = false, demandPin = false } = {}) {
   if (!vector || vector.ok !== true) {
     return { ok: false, shape: null, heldBy: null, pinRequired: false, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
   }
+
+  // ─── THE OWNER'S ALGORITHM, STEP 7 — AND IT OVERRIDES EVERYTHING BELOW ──────────────────────────
+  //
+  // `ideas/03` step 7, in his own capitals: *«Ставится частота. ОНА ФИКСИРУЕТСЯ В ВИДЕОКАРТЕ.
+  // ВИДЕОКАРТА БЛОКИРУЕТСЯ РАБОТАТЬ ИМЕННО НА ЭТОЙ ЧАСТОТЕ И НИ НА КАКОЙ ДРУГОЙ НИ ПРИ КАКИХ
+  // УСЛОВИЯХ.»* The search measures «what voltage serves frequency F», and that sentence is only true
+  // if the card actually RAN at F. A ceiling does not deliver that: a capped card is free below the
+  // ceiling and measurably sits 20–30 MHz under it (cap 2887 → 2857, 2917 → 2887, 2842 → 2812), so a
+  // voltage proved that way belongs to a clock 20–30 MHz LOWER than the one it would be recorded
+  // against. That is a number nobody measured, written into the owner's curve document.
+  //
+  // ⚠️ **WHY THIS IS NOT A RE-RUN OF THE 2026-08-14 CONFLICT, which is the obvious fear.** That day
+  // the run held ONE frequency with TWO mechanisms — a curve cap at 2842 AND a pin at 2842 — and they
+  // fought: the cap sat the card at 2812 while the pin demanded exactly 2842, and the lock proof
+  // correctly refused three PASSing shapes. The fix taken then removed the PIN. It removed the wrong
+  // half. What this branch writes is the owner's shape and it has NO ceiling at all: a uniform raise
+  // plus the lock, one holder, nothing to fight. The caller must therefore write NO cap when this
+  // shape is chosen — `runRung` passes `capMhz: null`, and that is the half of the contract that
+  // lives outside this function.
+  //
+  // The cost is named rather than hidden: a uniform raise is NOT the shipped profile's shape, because
+  // its tail keeps offering `F_top + Δ` (`bugs/02`). Under a lock the card cannot reach that tail, so
+  // the measurement is sound — but the shape is a MEASUREMENT INSTRUMENT and every rung says so.
+  if (demandPin) {
+    if (!pinned) {
+      return {
+        ok: false, shape: null, heldBy: null, pinRequired: false,
+        why: 'АЛГОРИТМ ВЛАДЕЛЬЦА (ideas/03 шаг 7) требует ЗАКРЕПИТЬ карту ровно на испытуемой частоте, '
+          + 'а закрепление здесь недоступно (нет лестницы частот карты). Прожигать нечего: без закрепления '
+          + 'карта под нагрузкой уйдёт со ступени, и напряжение было бы записано против частоты, на которой она не стояла',
+      };
+    }
+    // WHICH RAISE THE LOCKED SHAPE WRITES depends on whether this vector carries an ENFORCEABLE
+    // ceiling — and under `demandPin` that ceiling is the CARD'S ENVELOPE, not the clock under test
+    // (`runRung.capForVector`). Above the curve's floor the envelope is enforceable, so the write is
+    // a capped raise whose tail cannot exceed the card's maximum — R13 satisfied without weakening it.
+    // Below the floor nothing can be capped at all and the raise is uniform, which is the case this
+    // engine already ran live in phase 5.
+    return {
+      ok: true,
+      shape: vector.capEnforced ? 'raise-and-cap' : 'uniform',
+      heldBy: 'закрепление частоты',
+      pinRequired: true,
+      why: 'ЧАСТОТА ЗАКРЕПЛЕНА (алгоритм владельца, шаг 7): карта обязана выдать ровно испытуемую частоту, '
+        + 'и это проверяется чтением ПОД НАГРУЗКОЙ. '
+        + (vector.capEnforced
+          ? `Потолок кривой стоит на КОНВЕРТЕ карты (${vector.capMhz} МГц), а не на испытуемой частоте — держатели `
+            + 'не спорят: конверт не пускает хвост кривой за максимум экземпляра (R13, bugs/11), частоту держит замок'
+          : `потолка нет вовсе — ниже пола кривой (${vector.lowestEnforceableCapMhz} МГц) его не удержать, `
+            + 'и держатель остаётся ОДИН')
+        + '. Подъём кривой — ИНСТРУМЕНТ ЗАМЕРА, а не отгружаемая форма профиля',
+    };
+  }
+
   if (vector.capEnforced) {
     return {
       ok: true,
@@ -606,12 +660,23 @@ export async function runStep({
     // Raising the curve only buys watts if the card is then HELD at a clock (researches/02 §6.2).
     // The clock we hold is the one the undervolt is measured at, and the observable is which voltage
     // point now serves it.
-    if (capMhz && curveBefore.ok && curveAfter.ok) {
-      const vBefore = voltageForClock(curveBefore.points, capMhz);
-      const vAfter = voltageForClock(curveAfter.points, capMhz);
-      out.undervolt = { capMhz, before: vBefore, after: vAfter,
+    // THE CLOCK UNDER TEST, and it is NOT the same field as «the ceiling». In the shipped shape the
+    // ceiling IS the clock under test; in the owner's locked shape (`ideas/03` step 7) there is no
+    // ceiling at all and the clock under test is the PIN. Keying this measurement on `capMhz` alone
+    // silently produced NO undervolt record for every locked rung — and `servingMvAfter` is what the
+    // sweep writes into the curve document, so the omission would have travelled all the way in.
+    // The pin is read before its snap-to-ladder, which is a no-op here: the sweep's frequencies come
+    // from that same ladder.
+    // THE PIN WINS when both are present, and that order is the whole point: under the owner's shape
+    // the ceiling is the card's ENVELOPE (3090) while the clock under test is the LOCK (e.g. 3045).
+    // Measuring at the envelope would record the voltage of a frequency nobody tested.
+    const measuredAtMhz = pinMhz ?? capMhz;
+    if (measuredAtMhz && curveBefore.ok && curveAfter.ok) {
+      const vBefore = voltageForClock(curveBefore.points, measuredAtMhz);
+      const vAfter = voltageForClock(curveAfter.points, measuredAtMhz);
+      out.undervolt = { capMhz: measuredAtMhz, before: vBefore, after: vAfter,
         savedMv: vBefore && vAfter ? Number((vBefore.mv - vAfter.mv).toFixed(3)) : null };
-      block(`АНДЕРВОЛЬТ на закреплённых ${capMhz} МГц: напряжение для этой частоты УПАЛО`,
+      block(`АНДЕРВОЛЬТ на закреплённых ${measuredAtMhz} МГц: напряжение для этой частоты УПАЛО`,
         Boolean(vBefore && vAfter) && vAfter.mv < vBefore.mv,
         vBefore && vAfter
           ? `обслуживала точка ${vBefore.pointIndex} (${vBefore.mv} мВ) → теперь точка ${vAfter.pointIndex} (${vAfter.mv} мВ), экономия ${out.undervolt.savedMv} мВ`

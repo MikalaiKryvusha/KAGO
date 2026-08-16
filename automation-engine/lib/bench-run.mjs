@@ -82,6 +82,9 @@ export const BENCH_BURN_SECONDS = Object.freeze({
  */
 export async function rehearse({
   fromMhz, toMhz, sustain = BENCH_BURN_SECONDS.fast, seed = 20260816, dashboard = true,
+  // THE OPERATOR'S CEILING ON DEPTH — the rehearsal carries it because a rehearsal of a DIFFERENT run
+  // from the one that will be executed proves nothing about the one that will.
+  depthCapMv = null,
   cardPath = CARD_PATH, pulsePath = PULSE_PATH, onLine = console.log,
 } = {}) {
   // `loadCard` answers with a VERDICT, not a card — a profile that failed its validator must not be
@@ -146,6 +149,9 @@ export async function rehearse({
     journal,
     seconds: sustain,
     sustain,
+    depthCapMv,
+    // The bench card's own maximum, so the locked shape caps the curve at the envelope (R13).
+    envelopeMhz: card.card.maxGraphicsMhz,
     runStepFn,
     // The document stays in memory: this run must not touch `curves/measured.json`, which is the
     // owner's real card's document and the memory of everything phase 3 will prove.
@@ -238,10 +244,18 @@ async function main(argv) {
     return 2;
   }
   const sustain = Number(arg('sustain', BENCH_BURN_SECONDS.fast));
+  const rawCap = arg('max-depth');
+  const depthCapMv = rawCap === null ? null : Number(rawCap);
+  if (rawCap !== null && (!Number.isFinite(depthCapMv) || depthCapMv <= 0)) {
+    console.error(`ОШИБКА: --max-depth должен быть положительным числом милливольт, получено «${rawCap}»`);
+    return 2;
+  }
 
   console.log('РЕПЕТИЦИЯ ПЕРЕД ЖИВЫМ ПРОГОНОМ — настоящий движок, виртуальная карта');
   console.log('');
   console.log(`  ПОЛОСА:    ${fromMhz}…${toMhz} МГц`);
+  console.log(`  ГЛУБИНА:   ${Number.isFinite(depthCapMv) ? `не ниже −${depthCapMv} мВ от стока на КАЖДОЙ частоте — условие прогона, не свойство карты` : 'без потолка — спуск ограничен только рычагом карты'}`);
+  console.log('  ФОРМА:     ЗАКРЕПЛЕНИЕ частоты на каждой ступени (алгоритм владельца, ideas/03 шаг 7)');
   console.log(`  КАРТА:     ${CARD_PATH} — ВЫМЫСЕЛ. Ни одной записи в настоящую видеокарту не будет`);
   console.log(`  ТЕСТ:      ${sustain} с на ступень — УСКОРЕНИЕ В 10 РАЗ, слово владельца (ideas/04:`);
   console.log('             «быстрые 1 секунда, длинные 6 секунд вместо 60»). Секунды тратятся');
@@ -251,7 +265,7 @@ async function main(argv) {
   console.log(`  ДАШБОРД:   ${PULSE_PATH} · окно — npm run dashboard`);
   console.log('');
 
-  const { report, elapsedMs } = await rehearse({ fromMhz, toMhz, sustain });
+  const { report, elapsedMs } = await rehearse({ fromMhz, toMhz, sustain, depthCapMv });
   for (const line of sweepReportLines(report)) console.log(line);
   console.log('');
   console.log(`ВРЕМЯ РЕПЕТИЦИИ: ${(elapsedMs / 1000).toFixed(1)} с`);

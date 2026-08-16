@@ -192,6 +192,9 @@ export async function runSweep(card, { seed, fromMhz, toMhz, journal = null, str
     curveDoc: curveDocForCard(card, { fromMhz, toMhz }),
     points: pointsForCard(card),
     fromMhz, toMhz,
+    // The card's OWN maximum, taken from the bench card rather than from the V/F table — the locked
+    // shape caps the curve there so no raised point offers above the envelope (R13, `bugs/11`).
+    envelopeMhz: card.card.maxGraphicsMhz,
     journal,
     runStepFn: makeSweepStepFn(vc, card, stress, golden, stampOk),
     onEvent: (e) => { said.push(e); if (onEvent) onEvent(e); },
@@ -584,6 +587,7 @@ await engine.sweepRange({
   curveDoc: suite.curveDocForCard(card, { fromMhz: 2842, toMhz: 2842 }),
   points: suite.pointsForCard(card),
   fromMhz: 2842, toMhz: 2842,
+  envelopeMhz: card.card.maxGraphicsMhz,
   journal: journal.openJournal({ dir: journalDir }),
   runStepFn: suite.makeSweepStepFn(vc, card, stress, golden, stampOk),
   now: () => '2026-08-16T03:00:00+03:00',
