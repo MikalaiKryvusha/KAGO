@@ -455,6 +455,52 @@ function defaultCurveLoader(name) {
   throw new Error(`ссылка на кривую «${name}» не разрешена: загрузчик не передан (loadCurve)`);
 }
 
+/**
+ * THE ONE RESOLVER EVERY CALLER USES — `bugs/18`.
+ *
+ * [NOT-TESTED]
+ *
+ * `effectiveCurveSetting` above is PURE and needs three things injected (the document loader, the
+ * live table, the offset arithmetic). Assembling those three is async and pulls the card probes, so
+ * it cannot live inside `apply()` — and for that reason it used to live in the CLI, which resolved
+ * the reference correctly, PRINTED it, and then handed `apply()` the raw profile to resolve a SECOND
+ * time without the injections. That second resolution threw on every `curveRef` profile, so the
+ * shipped shape of all three modes (`plans/13` phase 5 — «три файла профиля, ссылающихся на один
+ * документ кривой») could not reach the card by any path: not a shortcut, not the logon task, not
+ * the tray. The qualification gate refused earlier and with a different reason, which is what hid it.
+ *
+ * The fix is the one this project prefers: **a pair that can be REMOVED beats a pair that must be
+ * watched** (`AGENT_GUIDE.md` → the truth↔mirror registry). There is now ONE resolution per apply,
+ * performed here by whoever is about to call `apply()`, and `apply()` is TOLD the answer.
+ *
+ * `null` is a real answer — «this profile asks for no curve» — which is why `apply()` distinguishes
+ * it from `undefined` («nobody resolved it for me»).
+ *
+ * @returns {Promise<object|null>} the resolved `{deltaMhz|deltaByPointMhz, capMhz}` shape, or null.
+ */
+export async function resolveProfileCurve(profile, {
+  loadCurve = null, readLive = null, toOffsets = null,
+} = {}) {
+  const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
+  const ref = profile?.settings?.curveRef ?? null;
+  if (!inline && !ref) return null;
+  if (inline && !ref) return effectiveCurveSetting(profile);
+
+  // Only a REFERENCE needs the store and a live reading of the card's table — and each import happens
+  // only where its injection is ABSENT, so the selftest below resolves a reference with no `curves/`
+  // directory, no nvapi and no card. A profile carrying an inline curve reaches neither import.
+  let load = loadCurve;
+  let offs = toOffsets;
+  if (!load || !offs) {
+    const store = await import('./curve-store.mjs');
+    load = load ?? ((name) => store.loadCurveDoc({ name }));
+    offs = offs ?? store.offsetsFor;
+  }
+  let live = readLive;
+  if (!live) ({ readLiveCurvePoints: live } = await import('./card-grids.mjs'));
+  return effectiveCurveSetting(profile, { loadCurve: load, liveTable: await live(), toOffsets: offs });
+}
+
 export async function apply(backend, profile, {
   card, timing = {}, verifyLock = 'idle', curveBackend = null,
   // THE ONE NAMED WAY PAST THE QUALIFICATION GATE (`plans/11` §4.4, P6-AC4), and it is a PARAMETER
@@ -468,6 +514,12 @@ export async function apply(backend, profile, {
   // The tuning-curve loader, INJECTED so this module stays testable without a `curves/` directory and
   // so the selftest can drive a document that exists only in memory. Defaults to the real store.
   loadCurve = null,
+  // THE ALREADY-RESOLVED CURVE (`bugs/18`). `undefined` means «nobody resolved it for me, do it
+  // yourself» — the legacy path, which works for an INLINE curve and throws for a reference, because
+  // resolving a reference needs an async store import and a live table read that this function has no
+  // way to perform. `null` is a real answer and means «this profile asks for no curve at all», so the
+  // two must not be conflated: `curve: null` must NOT fall through to a second resolution.
+  curve = undefined,
 } = {}) {
   const before = readState(backend);
 
@@ -520,7 +572,10 @@ export async function apply(backend, profile, {
   // A profile that asks for a curve and gets NO curve backend is REFUSED, not applied without it. This
   // is the whole reason the format kept the key out until today: a profile that reads as raising the
   // curve while the applier quietly ignores it is the defect `profiles/README.md` is written against.
-  const wantCurve = effectiveCurveSetting(profile, { loadCurve });
+  // ONE RESOLUTION PER APPLY (`bugs/18`). When the caller resolved it — and every caller that can
+  // reach a `curveRef` profile MUST, because only they can `await import` the store — we use their
+  // answer verbatim. `undefined` is the only value that triggers a resolution here.
+  const wantCurve = curve === undefined ? effectiveCurveSetting(profile, { loadCurve }) : curve;
   if (wantCurve) {
     if (!curveBackend) {
       const err = new Error(`профиль «${profile.name}» задаёт кривую V/F, а бэкенд кривой не передан — `
@@ -779,13 +834,15 @@ export async function resetToFactory(backend, { knownLockMhz = null, timing = {}
  * The reset runs in a `finally`: a round trip that throws must still leave the card unlocked
  * (plan §4.5 — «Never leave the card locked at the end of a run»).
  */
-export async function roundTrip(backend, profile, { card, timing = {} } = {}) {
+export async function roundTrip(backend, profile, { card, timing = {}, curve = undefined, curveBackend = null } = {}) {
   const initial = readState(backend);
   let applied = null;
   let lockedTo = null;
   let error = null;
   try {
-    applied = await apply(backend, profile, { card, timing });
+    // `curve` / `curveBackend` are PASSED THROUGH rather than re-derived (`bugs/18`): a prover that
+    // resolves the profile differently from the applier proves the wrong thing.
+    applied = await apply(backend, profile, { card, timing, curve, curveBackend });
     lockedTo = applied.lockedTo;
   } catch (e) {
     error = e;
@@ -837,6 +894,13 @@ export async function bootApply({
   retries = BOOT_PROBE_RETRIES,
   retryIntervalMs = BOOT_PROBE_RETRY_INTERVAL_MS,
   timing = {},
+  // THE CURVE AT LOGON (`bugs/18`, the second face). This path had NO curve backend and no resolver
+  // at all, so `apply()` refused every profile that tunes the V/F curve — which by the owner's own
+  // definition is EVERY working mode (`GOAL.md`: «все режимы наши должны тюнить VF кривую»). The
+  // remembered state therefore survived a reboot only for `factory`. Both are injected so this stays
+  // provable on a machine with no card, which is what the boot blocks below run on.
+  resolveCurve = resolveProfileCurve,
+  openCurveBackend = () => nvapiCurveBackend(),
 } = {}) {
   const journal = (record) => { appendBootJournal(record, journalPath); return record; };
 
@@ -883,14 +947,26 @@ export async function bootApply({
     return { code: 0, record: journal({ verdict: 'factory-restored', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, detail: `запомнено заводское, карта была ${r.before.powerLimitW} Вт — сброшена и перечитана: ${r.after.powerLimitW} Вт` }) };
   }
 
+  // The curve is resolved BEFORE the backend is opened, and the backend is opened only when a curve
+  // is actually wanted: a power-limit-only mode must not load nvapi64.dll for nothing. A resolution
+  // that throws is caught by the same handler below and degrades to factory — the designed-in safety
+  // of this whole path (the card boots factory by physics, so «nothing happened» is always safe).
+  let curveBackend = null;
   try {
-    const r = await apply(b, profile, { card, timing });
+    const wantCurve = await resolveCurve(profile);
+    if (wantCurve) curveBackend = openCurveBackend();
+    const r = await apply(b, profile, { card, timing, curve: wantCurve, curveBackend });
     return { code: 0, record: journal({ verdict: 'applied', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, detail: `применено и перечитано: ${r.after.powerLimitW} Вт / ${r.after.clockMhz} МГц` }) };
   } catch (e) {
     if (e.refusals) {
       return { code: 1, record: journal({ verdict: 'degraded-to-factory', remembered: state.profile, probeAttempts, detail: `применитель отказал ДО записи, заводское стоит: ${e.message.split('\n').join(' · ')}` }) };
     }
     return { code: 1, record: journal({ verdict: 'apply-failed-rolled-back', remembered: state.profile, probeAttempts, detail: `применение провалилось, откат внутри применителя отработал: ${e.message.split('\n').join(' · ')}` }) };
+  } finally {
+    // Its own `try` — a close that throws must not turn a successful logon apply into a failure, and
+    // must not swallow the verdict already computed above (R10a: a rollback with more than one duty
+    // is a LIST, never a chain).
+    if (curveBackend) { try { curveBackend.close(); } catch { /* the handle dies with the process */ } }
   }
 }
 
@@ -1335,6 +1411,43 @@ async function cmdSelftest() {
     return null;
   });
 
+  block('загрузка: ВХОД В СИСТЕМУ восстанавливает режим С КРИВОЙ — вектор доезжает до карты (bugs/18)', async () => {
+    // THE SECOND FACE OF `bugs/18`, and the one nobody would have seen: this path had no curve
+    // backend and no resolver at all, so `apply()` refused every mode that tunes the V/F curve —
+    // i.e. every working mode the owner defined («все режимы наши должны тюнить VF кривую»). The
+    // remembered state survived a reboot for `factory` and for nothing else, and the only evidence
+    // was one journal line on a machine nobody was watching.
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    const cb = fakeCurve();
+    let opened = 0;
+    writeRememberedState({ profile: 'with-curve' }, sb.rem);
+    const p = { ...curveProfile(), name: 'with-curve', qualified: true };
+    delete p.draft;
+    const r = await bootApply(bootOpts(b, sb, {
+      loadProfileByName: () => ({ profile: p, refusals: [] }),
+      resolveCurve: async (prof) => resolveProfileCurve(prof),   // inline curve — no store, no card
+      openCurveBackend: () => { opened++; return cb; },
+    }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict}: ${r.record.detail}`;
+    if (opened !== 1) return `бэкенд кривой открывали ${opened} раз(а) вместо 1`;
+    if (!cb.state.offsets.every((v) => v === 592)) return `кривая на карте не та: ${cb.state.offsets[0]}…`;
+    return null;
+  });
+
+  block('загрузка: режим БЕЗ кривой не открывает бэкенд кривой вовсе (bugs/18)', async () => {
+    // The other half of the same wiring, and it is what keeps the fix from costing every logon an
+    // nvapi64.dll load: a power-limit-only mode must reach `apply()` with no curve backend at all.
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    let opened = 0;
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb, { openCurveBackend: () => { opened++; return fakeCurve(); } }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict}: ${r.record.detail}`;
+    if (opened !== 0) return 'бэкенд кривой открыт для профиля, который кривую не трогает';
+    return null;
+  });
+
   block('загрузка: запомнен ЧЕРНОВИК -> деградация к заводскому, НОЛЬ записей, причина в журнале', async () => {
     const sb = bootSandbox();
     const b = fakeBackend();
@@ -1607,6 +1720,97 @@ async function cmdSelftest() {
     return null;
   });
 
+  // --- ССЫЛКА НА ДОКУМЕНТ КРИВОЙ (`bugs/18`). МУТАЦИОННЫЕ АДРЕСАТЫ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+  //   L. `apply` игнорирует переданный `curve` и разрешает сам → «ССЫЛКА: разрешение вызывающего…»
+  //   M. `curve: null` проваливается во второе разрешение    → «ССЫЛКА: null это ОТВЕТ…»
+  //   N. `resolveProfileCurve` не зовёт `toOffsets` для ссылки → «ССЫЛКА: документ становится ВЕКТОРОМ…»
+  //   O. `bootApply` зовёт `apply` без `curve`/`curveBackend`  → «ССЫЛКА: ВХОД В СИСТЕМУ восстанавливает…»
+  //
+  // A document with four frequencies against a four-point table — small on purpose, so the expected
+  // offsets can be read by eye rather than recomputed by the same code under test.
+  const refProfile = () => {
+    const p = curveProfile();
+    p.settings.curveRaiseAndCapMhz = null;
+    p.settings.curveRef = 'measured';
+    return p;
+  };
+  // The resolution a CALLER would produce: a per-point vector, distinct at every point so a collapse
+  // into one number cannot pass unnoticed.
+  const resolvedVector = () => ({
+    deltaByPointMhz: Array.from({ length: 127 }, (_, i) => 10 + i),
+    capMhz: null,
+    __fromRef: 'measured',
+  });
+
+  block('ССЫЛКА: разрешение ВЫЗЫВАЮЩЕГО доезжает до карты — apply не разрешает второй раз (bugs/18)', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    // No `loadCurve` is passed on purpose: if `apply` re-resolved, it would reach `defaultCurveLoader`
+    // and throw — which is EXACTLY the defect this block is the regression test for.
+    const r = await apply(b, refProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb, curve: resolvedVector() });
+    if (!r.applied) return 'профиль со ссылкой не применился';
+    if (cb.state.offsets[0] !== 10) return `первая точка не 10: ${cb.state.offsets[0]}`;
+    if (cb.state.offsets[126] !== 136) return `последняя точка не 136: ${cb.state.offsets[126]}`;
+    return null;
+  });
+
+  block('ССЫЛКА: null это ОТВЕТ «кривой нет», а не «разреши сам» — карта не тронута кривой (bugs/18)', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    // The same reference profile, but the caller resolved it to «no curve». A fall-through to a second
+    // resolution would throw on the missing loader; a correct one writes no curve at all.
+    const r = await apply(b, refProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb, curve: null });
+    if (!r.applied) return 'применение провалилось, хотя кривой не запрашивалось';
+    if (cb.state.offsets.some((v) => v !== 0)) return 'кривая записана, хотя вызывающий сказал «кривой нет»';
+    // The precise assertion is «no RAISE was written», not «no curve step appears»: a profile without
+    // a curve legitimately ZEROES one a previous profile may have left, and the first draft of this
+    // block called that zeroing a defect. The block was wrong, not the code — the same over-specified
+    // assertion EXP-0075 keeps producing, caught here by the block failing on correct behaviour.
+    const wrote = cb.state.calls.filter((c) => c.startsWith('write:'));
+    if (wrote.length) return `кривая ЗАПИСАНА при curve: null: ${wrote.join(', ')}`;
+    return null;
+  });
+
+  block('ССЫЛКА: документ «частота → напряжение» становится ВЕКТОРОМ смещений, без карты и без curves/ (bugs/18)', async () => {
+    const { offsetsFor } = await import('./curve-store.mjs');
+    // Four frequencies, four table entries. The document asks for LESS voltage at the two top
+    // frequencies and leaves the two bottom ones at stock.
+    // The document's own field names, taken from `curve-store.offsetsFor` rather than guessed: rows
+    // live in `frequencies`, high → low, and the voltage field is `voltageMv`. The first draft of this
+    // fixture invented `points`/`mv` and the block DIED instead of reddening — EXP-0075 again, and the
+    // reason the fixture is now written against the reader's contract.
+    const doc = {
+      card: { maxGraphicsMhz: 3090 },
+      frequencies: [
+        { mhz: 3000, voltageMv: 1000, status: 'lever-limited' },
+        { mhz: 2000, voltageMv: 900, status: 'lever-limited' },
+        { mhz: 1000, voltageMv: 800, status: 'stock' },
+        { mhz: 500, voltageMv: 700, status: 'stock' },
+      ],
+    };
+    // A table entry needs `freqKhz > 0` to count at all — that is how `offsetsFor` skips the memory
+    // rung's dead entries.
+    const table = [
+      { i: 0, mhz: 500, mv: 700, freqKhz: 500_000 }, { i: 1, mhz: 1000, mv: 800, freqKhz: 1_000_000 },
+      { i: 2, mhz: 1800, mv: 900, freqKhz: 1_800_000 }, { i: 3, mhz: 2800, mv: 1000, freqKhz: 2_800_000 },
+    ];
+    const eff = await resolveProfileCurve(refProfile(), {
+      loadCurve: (name) => (name === 'measured' ? doc : null),
+      readLive: async () => table,
+      toOffsets: (d, t) => offsetsFor(d, t, { count: 4 }),
+    });
+    if (!eff) return 'ссылка разрешилась в «кривой нет»';
+    if (!Array.isArray(eff.deltaByPointMhz)) return `разрешилось не вектором: ${JSON.stringify(eff)}`;
+    if (eff.deltaByPointMhz.length !== 4) return `точек ${eff.deltaByPointMhz.length}, ожидалось 4`;
+    if (eff.__fromRef !== 'measured') return 'разрешённая кривая не помнит, из какого документа она';
+    // 900 mV serves 1800 MHz on the table and must serve 2000 MHz per the document → +200 MHz.
+    // 1000 mV serves 2800 and must serve 3000 → +200 MHz. The two stock rows must not move.
+    if (eff.deltaByPointMhz[2] !== 200) return `1800 МГц: смещение ${eff.deltaByPointMhz[2]}, ожидалось 200`;
+    if (eff.deltaByPointMhz[3] !== 200) return `2800 МГц: смещение ${eff.deltaByPointMhz[3]}, ожидалось 200`;
+    if (eff.deltaByPointMhz[0] !== 0 || eff.deltaByPointMhz[1] !== 0) {
+      return `стоковые строки сдвинуты: ${eff.deltaByPointMhz[0]}/${eff.deltaByPointMhz[1]}`;
+    }
+    return null;
+  });
+
   block('R13: кривая ВЫШЕ МАКСИМУМА КАРТЫ отвергнута до записи, и бомба bugs/11 краснит именно этот блок', async () => {
     // THE REGRESSION TEST OF THE BSOD, on the real backend with an injected nvapi module — the refusal
     // lives in the last line before the device write, so a fake backend would prove nothing.
@@ -1780,15 +1984,7 @@ async function main(argv) {
     // sets no curve must not load nvapi64.dll for nothing.
     // The referenced document is loaded HERE, in the CLI, because only the CLI may `await import` the
     // store (which transitively pulls the card probes). Everything below sees one resolved shape.
-    const { loadCurveDoc, offsetsFor } = await import('./curve-store.mjs');
-    const { readLiveCurvePoints } = await import('./card-grids.mjs');
-    const loadCurve = (name) => loadCurveDoc({ name });
-    const usesRef = (profile.settings?.curveRef ?? null) !== null;
-    const effCurve = effectiveCurveSetting(profile, {
-      loadCurve,
-      liveTable: usesRef ? await readLiveCurvePoints() : null,
-      toOffsets: offsetsFor,
-    });
+    const effCurve = await resolveProfileCurve(profile);
     const needsCurve = effCurve !== null;
     const curveBackend = needsCurve ? nvapiCurveBackend() : null;
 
@@ -1813,7 +2009,8 @@ async function main(argv) {
 
     let r;
     try {
-      r = await apply(backend, profile, { card, curveBackend, witness: witness && isDraft });
+      // `curve: effCurve` — the resolution above is HANDED OVER, not recomputed (`bugs/18`).
+      r = await apply(backend, profile, { card, curveBackend, curve: effCurve, witness: witness && isDraft });
     } finally {
       if (curveBackend) curveBackend.close();
     }
