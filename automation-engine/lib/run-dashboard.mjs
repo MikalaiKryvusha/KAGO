@@ -315,6 +315,56 @@ export function clearPulse(path = PULSE_PATH) {
   try { if (existsSync(path)) unlinkSync(path); } catch { /* a gauge nobody can delete is still just a gauge */ }
 }
 
+/**
+ * THE PULSE AS IT IS AT THIS MOMENT, WITH ITS REAL AGE — and this exists because a window that opens
+ * on a leftover file showed LAST run as if it were happening now.
+ *
+ * The owner, opening the window between runs: *«запустилось в состоянии прогон оставлен»* ·
+ * *«визуализатор должен запускаться в АДЕКВАТНОМ СОСТОЯНИИ ОТРАЖАЮЩИМ СОСТОЯНИЕ ТЕКУЩЕГО ПРОГОНА!!!!»*
+ *
+ * The page measures silence from the moment it RECEIVED a pulse. That is right for pulses that arrive
+ * during a run and wrong for the first one, which can be a file written an hour ago: received now,
+ * it looks a second old. So the age is computed HERE, against the stamp inside the record, and
+ * travels with it. The page adds its own waiting on top of that number instead of starting from zero.
+ *
+ * Three honest states, and «no run» is one of them — a window with nothing to show must say so
+ * rather than show the last thing it remembers.
+ *
+ * @returns {object} the pulse plus `{ageMs, noRun}`, or a `noRun` stub when there is no file
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
+  const p = readPulse(path);
+  if (!p) {
+    return {
+      kind: 'kago-run-pulse',
+      noRun: true,
+      ageMs: 0,
+      seq: -1,
+      runMs: 0,
+      at: null,
+      quietMs: 0,
+      run: {
+        source: '', band: '', state: 'ПРОГОНА НЕТ', frequencyMhz: null, voltageMv: null,
+        stockVoltageMv: null, depthMv: null, seeded: false,
+        probe: { elapsedSeconds: 0, totalSeconds: 0 },
+        bandFromMhz: null, bandToMhz: null,
+        coverage: { closed: 0, total: null, rungs: 0 },
+        verdicts: { 'edge-found': 0, 'lever-limited': 0 },
+        lastEvent: '', note: 'прибор пуст — ни один прогон сейчас не идёт', finished: false, ok: null,
+      },
+      card: {
+        clockMhz: null, voltageMv: null, tempC: null, fanPct: null, powerW: null,
+        underLoad: false, synthetic: false, cappedByPowerLimit: false,
+      },
+    };
+  }
+  const stampedMs = Date.parse(p.at);
+  const ageMs = Number.isFinite(stampedMs) ? Math.max(0, nowMs - stampedMs) : 0;
+  return { ...p, noRun: false, ageMs };
+}
+
 // =================================================================================================
 // 2. THE SERVER — the watcher's half. It READS. It has no path to the card, the journal or the document.
 // =================================================================================================
@@ -358,9 +408,8 @@ export function serve({
     if (url === '/font.woff2') return sendFile(res, FONT_PATH, MIME['.woff2']);
     if (url === '/logo.webp') return sendFile(res, LOGO_PATH, MIME['.webp']);
     if (url === '/pulse') {
-      const p = readPulse(pulsePath);
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify(p));
+      return res.end(JSON.stringify(pulseNow(pulsePath)));
     }
     // WHO IS ACTUALLY WATCHING — the route a run asks before it is allowed to touch the card.
     //
@@ -383,8 +432,12 @@ export function serve({
         connection: 'keep-alive',
       });
       clients.add(res);
-      // The current state immediately, so a window opened mid-run is not blank until the next tick.
-      if (lastPayload) res.write(`data: ${lastPayload}\n\n`);
+      // THE CURRENT STATE IMMEDIATELY — and «current» is computed AT THIS INSTANT, not replayed from
+      // whatever was last broadcast. A window opening between runs used to receive the last payload
+      // of the PREVIOUS run and, having just received it, treat it as one second old: it showed a
+      // finished run as if it were happening. Now the first frame carries the record's REAL age, or
+      // says outright that no run exists.
+      res.write(`data: ${JSON.stringify(pulseNow(pulsePath))}\n\n`);
       req.on('close', () => clients.delete(res));
       return undefined;
     }
@@ -395,9 +448,17 @@ export function serve({
   // POLLING, not `fs.watch`. The gauge is one small file rewritten by a rename; watching renames
   // across platforms is a pile of special cases, and 200 ms of latency on a picture that a human
   // watches is invisible. The simplest thing that cannot be wrong (PHILOSOPHY.md).
+  //
+  // ⚠️ THE GAUGE DISAPPEARING IS ITSELF A CHANGE, and the loop used to swallow it: `if (!p) return`
+  // meant the transition «прогон был → прибора нет» never reached an OPEN window, which then kept
+  // painting the last run forever. Same defect class as the stale first frame, one layer down —
+  // both come from treating «нет данных» as «нечего сказать» instead of as a state (`bugs/14`).
   const timer = setInterval(() => {
-    const p = readPulse(pulsePath);
-    if (!p || p.seq === lastSeq) return;
+    const p = pulseNow(pulsePath);
+    // `seq` is -1 on an empty gauge, so the vanishing IS a sequence change and broadcasts once, then
+    // stops repeating itself. The age is deliberately NOT in the trigger: it moves every tick and
+    // would turn this into a 5 Hz broadcaster.
+    if (p.seq === lastSeq) return;
     lastSeq = p.seq;
     lastPayload = JSON.stringify(p);
     for (const c of clients) {
@@ -575,6 +636,17 @@ export async function selfTest() {
     afterClosed.quietMs < 10_000 && afterClosed.quietMs > 0,
     `quietMs=${afterClosed.quietMs} после закрытия ступени`);
 
+  // — `bugs/14`: ОКНО ОТКРЫВАЕТСЯ В СОСТОЯНИИ ТЕКУЩЕГО ПРОГОНА, а не прошлого.
+  //   АДРЕСАТЫ МУТАЦИЙ: AE. отдавать возраст нулём → «ВОЗРАСТ ЗАПИСИ ЕДЕТ С НЕЙ» ·
+  //   AF. на пустом приборе отдавать null вместо состояния → «ПУСТОЙ ПРИБОР — ЭТО „ПРОГОНА НЕТ“».
+  const stampedMs = Date.parse(readPulse(path).at);
+  const aged = pulseNow(path, stampedMs + 47_000);
+  check('ВОЗРАСТ ЗАПИСИ ЕДЕТ ВМЕСТЕ С НЕЙ — иначе окно, открытое между прогонами, покажет прошлый как текущий',
+    aged.ageMs === 47_000 && aged.noRun === false, `ageMs=${aged.ageMs}`);
+  const fresh = pulseNow(path, stampedMs);
+  check('и у свежей записи возраст ноль — прибавка не выдумывается',
+    fresh.ageMs === 0, `ageMs=${fresh.ageMs}`);
+
   const keys = Object.keys(afterClosed);
   check('ГАУГЕ: один объект, а не журнал — у прибора нет памяти и он не может её завести',
     !Array.isArray(afterClosed) && !keys.includes('history') && !keys.includes('events'), keys.join(','));
@@ -587,6 +659,13 @@ export async function selfTest() {
 
   clearPulse(path);
   check('ПЕСОЧНИЦА: самопроверка убирает за собой', !existsSync(path), 'файл остался');
+
+  // THE EMPTY GAUGE, and it must be a STATE rather than an absence: a window with nothing to show
+  // says «прогона нет», it does not paint the last thing it remembers and it does not raise an alarm.
+  const empty = pulseNow(path);
+  check('ПУСТОЙ ПРИБОР — ЭТО СОСТОЯНИЕ «ПРОГОНА НЕТ», а не тишина и не тревога',
+    empty.noRun === true && empty.run.state === 'ПРОГОНА НЕТ' && empty.run.finished === false,
+    JSON.stringify({ noRun: empty.noRun, state: empty.run.state }));
 
   const failed = results.filter((r) => !r.ok).length;
   return { ok: failed === 0, results, failed };

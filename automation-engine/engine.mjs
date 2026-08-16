@@ -4740,6 +4740,11 @@ async function mainSweep(argv, arg) {
   }
   console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено`);
 
+  // THE PREVIOUS RUN'S GAUGE IS REMOVED BEFORE THIS ONE WRITES ITS FIRST. The bench has always done
+  // this; the live path had not, so a window opened now would first paint the LAST run's ending —
+  // «прогон оставлен» — and only later switch. The owner saw exactly that and named the rule:
+  // *«визуализатор должен запускаться в АДЕКВАТНОМ СОСТОЯНИИ ОТРАЖАЮЩИМ СОСТОЯНИЕ ТЕКУЩЕГО ПРОГОНА»*.
+  dash.clearPulse();
   const pulse = dash.openPulse({
     source: 'ЖИВАЯ КАРТА',
     synthetic: false,
