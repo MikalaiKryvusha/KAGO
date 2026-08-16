@@ -401,6 +401,44 @@ export function attributions(records) {
 }
 
 /**
+ * WHAT VOLTAGE HAS ALREADY HUNG THIS FREQUENCY — the floor a later descent may never step onto again.
+ * `bugs/23`.
+ *
+ * The owner made `ЗАВИС` a verdict of the FIRST CLASS (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК»),
+ * *«…записывается в документ кривой как причина, по которой точка встала на своё значение»*. Until
+ * this existed the verdict reached the journal and stopped there: `blockedRungs` engages only after
+ * **two consecutive** hangs, so a resumed run rebuilt the same ladder and walked back down onto the
+ * rung that had killed the machine. Measured on 2026-08-16: 2842 MHz hung at 845 mV, and nothing in
+ * the stack would have stopped the next launch from ordering 845 mV again.
+ *
+ * **The HIGHEST hung voltage is the binding one, and that is not arbitrary.** Voltage descends, so a
+ * rung deeper than a known hang is at least as dangerous; the shallowest failure is therefore the
+ * whole constraint. Two hangs at 860 and 845 leave a floor of 860.
+ *
+ * ⚠️ **Only genuine hangs count.** `writer-crash` and `operator-stop` are excluded by construction —
+ * they are OUR death and the operator's decision, and neither says anything about the silicon
+ * (`bugs/20`, `bugs/14`). Feeding them in here would ratchet a frequency upward for a reason that
+ * was never measured, which is exactly the false-`[TESTED]` class this project hunts.
+ *
+ * @returns {Map<number, {voltageMv:number, seq:number, at:string|null}>} keyed by frequency
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function hangFloors(records) {
+  const out = new Map();
+  const intents = new Map(records.filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
+  for (const v of records.filter((r) => r?.state === LINE.VERDICT && r.outcome === RUNG_OUTCOME.HUNG)) {
+    const i = intents.get(v.seq);
+    if (!i || !Number.isFinite(i.frequencyMhz) || !Number.isFinite(i.voltageMv)) continue;
+    const seen = out.get(i.frequencyMhz);
+    if (!seen || i.voltageMv > seen.voltageMv) {
+      out.set(i.frequencyMhz, { voltageMv: i.voltageMv, seq: v.seq, at: v.at ?? null });
+    }
+  }
+  return out;
+}
+
+/**
  * THE ONLY EMERGENCY STOP THE OWNER LEFT — two hangs in a row on ONE rung (F2-AC5).
  *
  *   > *«Единственная аварийная остановка: две перезагрузки подряд на ОДНОЙ И ТОЙ ЖЕ ступени. Это уже
@@ -450,6 +488,10 @@ export function resumeState(journal, { at = null, io = {} } = {}) {
   const seqs = records.map((r) => r?.seq).filter(Number.isFinite);
   return {
     hung,
+    // EVERY hang this journal has ever recorded, not only the ones this launch closed (`bugs/23`).
+    // `hung` above is the orphans closed a moment ago; a hang from an EARLIER launch is already
+    // closed and would be invisible here — and it constrains the descent exactly as much.
+    floors: hangFloors(records),
     blocked,
     truncated,
     nextSeq: seqs.length ? Math.max(...seqs) + 1 : 1,
@@ -616,6 +658,38 @@ export function selfTest() {
     const again = closeAsWriterDeath(j5, { at: '2026-08-16T17:08:00+03:00', error: new Error('снова') });
     ok('ПОВТОРНЫЙ ВЫЗОВ ПУСТ: одна смерть — одна строка, сколько бы обработчиков её ни поймало',
       [again.length, readJournal(j5).records.filter((r) => r.state === 'verdict').length], [0, 1]);
+
+    // ─── ПОЛ ЗАВИСАНИЯ: КАКОЕ НАПРЯЖЕНИЕ УЖЕ ВЕШАЛО ЭТУ ЧАСТОТУ (`bugs/23`) ────────────────────────
+    //
+    // 2026-08-16 живая карта повисла на 2842 МГц / 845 мВ, и НИЧТО не помешало бы следующему запуску
+    // заказать 845 мВ снова: блокировка ступени включается только после ДВУХ зависаний подряд.
+    // Эта функция — половина лечения (вторая, потребление пола спуском, — задача следующей сессии).
+    const j8 = openJournal({ dir: join(sandbox, 'hang-floor') });
+    writeIntent(j8, { seq: 1, frequencyMhz: 2842, voltageMv: 845, pointIndex: 63 });
+    closeHangs(j8, { at: '2026-08-16T23:40:00+03:00' });
+    const f1 = hangFloors(readJournal(j8).records);
+    ok('ЗАВИСШЕЕ НАПРЯЖЕНИЕ ЗАПОМНЕНО ПРОТИВ СВОЕЙ ЧАСТОТЫ',
+      f1.get(2842)?.voltageMv ?? 'частоты в полу нет вовсе', 845);
+    //   САМОЕ ВЫСОКОЕ ЗАВИСШЕЕ И ЕСТЬ ПОЛ: напряжение ниже уже известного зависания заведомо не легче,
+    //   поэтому связывает САМЫЙ МЕЛКИЙ отказ, а не самый глубокий.
+    writeIntent(j8, { seq: 2, frequencyMhz: 2842, voltageMv: 860, pointIndex: 65 });
+    closeHangs(j8, { at: '2026-08-16T23:41:00+03:00' });
+    ok('ПОЛ — САМОЕ ВЫСОКОЕ ЗАВИСШЕЕ, а не последнее и не самое глубокое',
+      hangFloors(readJournal(j8).records).get(2842)?.voltageMv ?? 'частоты в полу нет вовсе', 860);
+    //   ⚠️ И СЧИТАЮТСЯ ТОЛЬКО НАСТОЯЩИЕ ЗАВИСАНИЯ. Своя смерть писателя и останов оператора — не
+    //   свойство кремния (`bugs/20`, `bugs/14`); пустить их сюда значило бы поднять частоту храповиком
+    //   по причине, которой никто не мерил.
+    const j9 = openJournal({ dir: join(sandbox, 'not-a-hang') });
+    writeIntent(j9, { seq: 1, frequencyMhz: 2700, voltageMv: 900 });
+    closeAsWriterDeath(j9, { at: '2026-08-16T23:42:00+03:00', error: new Error('EPERM') });
+    writeIntent(j9, { seq: 2, frequencyMhz: 2700, voltageMv: 890 });
+    closeAsOperatorStop(j9, { at: '2026-08-16T23:43:00+03:00', signal: 'SIGINT' });
+    ok('НИ СВОЯ СМЕРТЬ, НИ ОСТАНОВ ОПЕРАТОРА ПОЛА НЕ СОЗДАЮТ — они не о кремнии',
+      hangFloors(readJournal(j9).records).size, 0);
+    //   И возобновление отдаёт пол вместе с остальным — одним вызовом, как и всё прочее.
+    ok('ВОЗОБНОВЛЕНИЕ НЕСЁТ ПОЛ: он нужен спуску, а спуск читает журнал один раз',
+      resumeState(j8, { at: '2026-08-16T23:44:00+03:00' }).floors?.get(2842)?.voltageMv
+        ?? 'пола в возобновлении нет вовсе', 860);
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });
