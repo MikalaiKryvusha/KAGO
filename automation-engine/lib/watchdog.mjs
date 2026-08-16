@@ -110,13 +110,48 @@ export function readArmed({ file = ARMED_FILE } = {}) {
   }
 }
 
-function writeArmed(record, { file = ARMED_FILE } = {}) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+/**
+ * How many times a rename is retried before the write is called failed, and how long the pause is.
+ *
+ * `bugs/19`: the guard polls `armed.json` once a second while the writer renames over it once per
+ * burst, and on Windows a rename onto a destination another process holds open returns EPERM. The
+ * collision is microseconds wide, so a handful of immediate retries clears it; the numbers are small
+ * on purpose, because the caller of a heartbeat is holding a GPU under load and must not be stalled.
+ */
+const RENAME_RETRIES = 5;
+const RENAME_RETRY_MS = 8;
+
+function sleepSync(ms) {
+  // A blocking sleep, deliberately: `beat()` is synchronous and called from inside an oracle's burst
+  // callback. Atomics on a throwaway buffer is the only way to pause without an event-loop turn.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Write the armed record durably. THROWS on failure — every caller that must not proceed without an
+ * armed switch (R9) depends on that. The soft-failure path belongs to `beat()` alone, below.
+ *
+ * @param {object} io injected `fs` seam, so the selftest can prove the retry and the failure
+ *                    direction without needing a real sharing race (which is not schedulable).
+ */
+function writeArmed(record, { file = ARMED_FILE, io = fs } = {}) {
+  io.mkdirSync(path.dirname(file), { recursive: true });
   // Write-then-rename: the guard polls this file continuously, and a half-written JSON must never be
   // what it reads. A torn read here would be a watchdog that fires (or fails to) on garbage.
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  io.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`);
+  let last = null;
+  for (let attempt = 0; attempt <= RENAME_RETRIES; attempt++) {
+    try { io.renameSync(tmp, file); return; } catch (e) {
+      // ONLY the sharing race is retried. A genuine permission problem, a missing directory or a
+      // read-only volume must surface immediately — retrying those would turn a clear error into a
+      // slow one and teach nobody anything.
+      if (e.code !== 'EPERM' && e.code !== 'EBUSY' && e.code !== 'EACCES') throw e;
+      last = e;
+      if (attempt < RENAME_RETRIES) sleepSync(RENAME_RETRY_MS);
+    }
+  }
+  throw last;
 }
 
 export function clearArmed({ file = ARMED_FILE } = {}) {
@@ -144,7 +179,7 @@ export function pidAlive(pid) {
  * Called BEFORE the risky write, never after: a switch armed after the write does not cover the write.
  * Returns a handle whose `beat()` renews the lease and whose `disarm()` ends it.
  */
-export function arm({ what, ttlMs = DEFAULT_TTL_MS, file = ARMED_FILE, spawnGuard = true } = {}) {
+export function arm({ what, ttlMs = DEFAULT_TTL_MS, file = ARMED_FILE, spawnGuard = true, io = fs } = {}) {
   const record = {
     armedAt: localIso(nowMs()),
     armedAtMs: nowMs(),
@@ -154,7 +189,10 @@ export function arm({ what, ttlMs = DEFAULT_TTL_MS, file = ARMED_FILE, spawnGuar
     what: what ?? 'не названо',
     undo: 'полный возврат карты к заводскому состоянию (сдвиги кривой -> 0, NVML -> 0, -rgc, потолок мощности по умолчанию)',
   };
-  writeArmed(record, { file });
+  // ARMING THROWS, AND THAT IS DELIBERATE (R9, `bugs/19` step 3). A write that could not arm must not
+  // happen at all, so this failure is fatal by design — unlike the RENEWAL below, whose failure is
+  // merely a lease not extended. The two are told apart here, in code, not in a comment downstream.
+  writeArmed(record, { file, io });
 
   let guardPid = null;
   if (spawnGuard) {
@@ -170,12 +208,30 @@ export function arm({ what, ttlMs = DEFAULT_TTL_MS, file = ARMED_FILE, spawnGuar
   return {
     record,
     guardPid,
+    // THE HEARTBEAT NEVER THROWS — `bugs/19`, and this is the whole fix.
+    //
+    // A beat is a lease RENEWAL. Its failure means «the lease was not extended», and the deadline
+    // already on disk then does its job: if beats keep failing, the lease expires and the guard
+    // restores the card. That is the SAFE direction, and it is the direction this mechanism exists
+    // to point in. On 2026-08-16 it pointed the other way — an EPERM from the rename propagated out
+    // of here, through the stability oracle, and killed a healthy sweep at 41 burns of 94, in the
+    // middle of a GPU write. **A safety mechanism that kills what it guards has inverted its own
+    // purpose**: the watchdog exists so a dead writer cannot leave the card held, and it manufactured
+    // exactly the event it was built to survive.
+    //
+    // `false` is already this function's word for «not renewed» (the disarmed case below), and no
+    // caller reads it — `vf-step.runStep` calls `watchdog.beat()` from `onBurst`/`onShape` and
+    // discards the value. So the soft failure costs nothing and changes no caller.
     beat(extraMs = ttlMs) {
-      const current = readArmed({ file });
-      if (!current) return false;             // already disarmed or fired — do not resurrect it
-      current.deadlineMs = nowMs() + extraMs;
-      writeArmed(current, { file });
-      return true;
+      try {
+        const current = readArmed({ file });
+        if (!current) return false;           // already disarmed or fired — do not resurrect it
+        current.deadlineMs = nowMs() + extraMs;
+        writeArmed(current, { file, io });
+        return true;
+      } catch {
+        return false;
+      }
     },
     disarm() { return clearArmed({ file }); },
   };
@@ -456,6 +512,69 @@ export async function selftest() {
     check('disarm() убирает запись', readArmed({ file: tmp }) === null);
     check('beat() ПОСЛЕ снятия не воскрешает запись', h.beat() === false && readArmed({ file: tmp }) === null,
       'иначе снятый сторож вернулся бы к жизни и сбросил карту посреди работы');
+
+    // --- THE HEARTBEAT'S FAILURE DIRECTION (`bugs/19`). MUTATION ADDRESSEES, NAMED BEFORE THE RUN
+    //     (EXP-0016):
+    //       a. `beat()` rethrows instead of returning false → «пульс НЕ убивает писателя»
+    //       b. `arm()` swallows the same failure           → «взведение ОБЯЗАНО упасть»
+    //       c. the rename retry loop is removed            → «переименование ПОВТОРЯЕТСЯ»
+    //
+    //     The real defect was a Windows sharing race between the writer and its own guard, and a race
+    //     is not schedulable — so what is tested is the RESPONSE to it, through an injected `fs`.
+    const epermIo = (failures) => {
+      let left = failures;
+      return {
+        mkdirSync: (...a) => fs.mkdirSync(...a),
+        writeFileSync: (...a) => fs.writeFileSync(...a),
+        renameSync: (from, to) => {
+          if (left-- > 0) { const e = new Error('EPERM: operation not permitted, rename'); e.code = 'EPERM'; throw e; }
+          return fs.renameSync(from, to);
+        },
+      };
+    };
+
+    {
+      // The rename starts working and then STOPS — exactly the shape of the real incident, where the
+      // arming succeeded and the four-hundredth beat lost the race. Arming with a broken rename would
+      // test a different thing (and is tested separately, below).
+      const io = epermIo(0);
+      const armed = io.renameSync;
+      const h2 = arm({ what: 'пульс', ttlMs: 5000, file: tmp, spawnGuard: false, io });
+      io.renameSync = (from, to) => { const e = new Error('EPERM: operation not permitted, rename'); e.code = 'EPERM'; throw e; };
+      void armed;
+      let threw = null;
+      let ret = 'не вызывалось';
+      try { ret = h2.beat(60_000); } catch (e) { threw = e; }
+      check('пульс НЕ убивает писателя: отказ переименования -> false, а не исключение',
+        threw === null && ret === false,
+        threw ? `бросил ${threw.code ?? threw.message}` : `вернул ${ret}`);
+      // …and the lease it failed to extend is STILL on disk, so the guard can still fire on it.
+      // A beat that wiped the record would disarm the switch by failing, which is the other way to
+      // get the same disaster.
+      check('неудавшийся пульс НЕ снимает аренду — сторож по-прежнему может сработать',
+        readArmed({ file: tmp }) !== null);
+      h2.disarm();
+
+      let armThrew = null;
+      try { arm({ what: 'взведение', ttlMs: 5000, file: tmp, spawnGuard: false, io }); }
+      catch (e) { armThrew = e; }
+      check('взведение ОБЯЗАНО упасть: незаведённый сторож не даёт права писать в карту (R9)',
+        armThrew !== null && armThrew.code === 'EPERM',
+        armThrew ? `упало: ${armThrew.code}` : 'arm() промолчал — писать пошли бы без сторожа');
+      try { fs.unlinkSync(tmp); } catch { /* may not exist */ }
+    }
+
+    {
+      // Exactly RENAME_RETRIES failures then success: the write must SUCCEED, not give up.
+      const io = epermIo(RENAME_RETRIES);
+      let armThrew = null;
+      try { arm({ what: 'повтор', ttlMs: 5000, file: tmp, spawnGuard: false, io }); }
+      catch (e) { armThrew = e; }
+      check('переименование ПОВТОРЯЕТСЯ: гонка совместного доступа переживается, а не роняет прогон',
+        armThrew === null && readArmed({ file: tmp }) !== null,
+        armThrew ? `упало на попытке из ${RENAME_RETRIES + 1}: ${armThrew.code}` : 'запись легла');
+      try { fs.unlinkSync(tmp); } catch { /* may not exist */ }
+    }
 
     // --- a torn or corrupt file is "nothing armed", never a crash
     fs.mkdirSync(path.dirname(tmp), { recursive: true });
