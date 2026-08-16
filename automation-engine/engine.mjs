@@ -1716,7 +1716,11 @@ export async function sweepDryRun({
   toMhz = null,
   canPin = true,
   depthCapMv = null,
-  demandPin = true,
+  // MUST MATCH `sweepRange`'S DEFAULT, and it did not for one commit — the plan printed «потолок
+  // держит закрепление» while the run had already moved to the flattened curve. A plan that
+  // describes a different shape from the run is `bugs/09` exactly, and the operator reads the plan
+  // BEFORE authorising the write (rail S2), so the disagreement lands where it does the most harm.
+  demandPin = false,
   buildVector = null,
   chooseShape = chooseWriteShape,
   zones = config.DESCENT_ZONES,
@@ -4089,6 +4093,22 @@ export function selfTest() {
     //   R. keep the delivered clock only from the LAST rung        → «СТРОКУ РЕШАЕТ ПОСЛЕДНИЙ ПРОШЕДШИЙ»
     // =============================================================================================
 
+    // — THE PLAN AND THE RUN NAME THE SAME HOLDER. Caught live 2026-08-16, one commit after the
+    //   default moved: `sweepRange` had switched to the flattened curve while `sweepDryRun` still
+    //   defaulted to the lock, so the artifact rail S2 makes the operator read BEFORE authorising a
+    //   write described a shape the run would not use. `bugs/09` is exactly this, and the existing
+    //   «план обещает ровно те ступени» block did not catch it because it compares RUNGS, not the
+    //   holder. ADDRESSEE: give `sweepDryRun` a different `demandPin` default → this block.
+    const holderInPlan = (await sweepDryRun({
+      curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, buildVector: vectorCapped,
+    })).groups[0]?.holder;
+    const holderInRun = (await runRung({
+      points: tablePoints, clockMhz: 2842, voltageMv: 1000, envelopeMhz: 3090,
+      buildVector: vectorCapped, runStepFn: atom(atomPass(1000)),
+    })).holder;
+    ok('ПЛАН И ПРОГОН НАЗЫВАЮТ ОДНОГО ДЕРЖАТЕЛЯ — иначе оператор читает не тот прогон (bugs/09)',
+      [holderInPlan, holderInRun], ['кривая', 'кривая']);
+
     // — the resolver alone, on hostile inputs. It is the one place allowed to pick a row.
     const docForRows = sweepDoc(bandRows);
     ok('ВНЕ СЕТКИ ПРИТЯГИВАЕТСЯ ВНИЗ: 2831 МГц → строка 2828, и притяжка НАЗВАНА',
@@ -4533,8 +4553,11 @@ async function mainSweep(argv, arg) {
     console.error('        потолок конверта поставить не на что (R13). Пересоберите словари: npm run curve -- --grids');
     return 1;
   }
-  console.log(`КОНВЕРТ КАРТЫ: ${envelopeMhz} МГц — сюда подрезается верх кривой, чтобы ни одна поднятая точка`);
-  console.log('               не предлагала выше максимума экземпляра (R13, bugs/11). Частоту держит ЗАКРЕПЛЕНИЕ.');
+  console.log(`КОНВЕРТ КАРТЫ: ${envelopeMhz} МГц — выше него ни одна поднятая точка кривой ничего не предлагает`);
+  console.log('               (R13, bugs/11). Частоту в прогоне держит ВЫПРЯМЛЕННАЯ КРИВАЯ: всё, что торчало бы');
+  console.log('               выше испытуемой частоты, придавлено на неё. Замок частоты НЕ ставится — замерено');
+  console.log('               2026-08-16, что он держит только вниз и карту вверх не поднимает (researches/11).');
+  console.log('               ЗАПИСЬ ИДЁТ ПРОТИВ ВЫДАННОЙ частоты, а не заказанной (GOAL.md, слово владельца).');
 
   // THE DRY RUN IS A SEPARATE EXIT AND IT HAPPENS BEFORE ANYTHING ELSE — no journal is opened, no
   // recovery is attempted, no watchdog is armed. Rail S2's artifact must cost the card nothing.
