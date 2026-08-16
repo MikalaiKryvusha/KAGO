@@ -45,10 +45,10 @@
 //  it has never run against a real card, and that is phase 3.]
 
 import { writeFileSync, renameSync, readFileSync, existsSync, mkdirSync, unlinkSync, rmSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export const PULSE_PATH = join('runs', 'dashboard', 'live.json');
@@ -448,6 +448,7 @@ export function serve({
   pagePath = PAGE_PATH,
   pollMs = 200,
   onListen = null,
+  onError = null,
 } = {}) {
   const clients = new Set();
   let lastSeq = -1;
@@ -518,6 +519,21 @@ export function serve({
   }, pollMs);
   timer.unref?.();
 
+  // A BIND FAILURE IS AN ANSWER, NEVER AN UNHANDLED EVENT.
+  //
+  // `listen` is asynchronous, so `serve()` returns while the bind is still in flight and an
+  // `'error'` with no listener becomes a raw Node stack trace — thrown AFTER the caller has already
+  // walked on and done its next thing. That is precisely what happened on 2026-08-16: the caller
+  // had closed the operator's window by the time the throw arrived, so the crash landed on a
+  // desktop with no window and an orphaned server from a previous session still holding the port.
+  // The stack trace named `net.js` and nothing the operator could act on.
+  server.on('error', (err) => {
+    if (onError) return onError(err);
+    console.error(`ДАШБОРД: не поднялся — ${err?.code ?? err?.message ?? 'причина не названа'}`);
+    process.exitCode = 1;
+    return undefined;
+  });
+
   server.listen(port, '127.0.0.1', () => {
     if (onListen) onListen(`http://127.0.0.1:${port}/`);
   });
@@ -525,8 +541,136 @@ export function serve({
   return {
     server,
     url: `http://127.0.0.1:${port}/`,
-    close() { clearInterval(timer); for (const c of clients) { try { c.end(); } catch { /* gone */ } } server.close(); },
+    // Idempotent, and safe on a server that never bound. `startServing` hands the caller its object
+    // even on EADDRINUSE (the polling timer still has to be stopped), so `close()` is reachable on a
+    // handle libuv never opened — and closing that twice aborts the process from inside libuv.
+    close() {
+      clearInterval(timer);
+      for (const c of clients) { try { c.end(); } catch { /* gone */ } }
+      try { if (server.listening) server.close(); } catch { /* already down */ }
+    },
   };
+}
+
+/**
+ * `serve()` WITH ITS BIND AWAITED — so a caller can branch on «поднялся / порт занят» instead of
+ * walking on into an outcome that has not happened yet.
+ *
+ * Everything downstream of the raise (closing the old window, opening a new one) is irreversible on
+ * the operator's screen, and an asynchronous bind means the caller reaches those lines BEFORE it
+ * knows whether it owns the port. Awaiting the bind is what lets the order be «checked, then done».
+ */
+export function startServing(opts = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const s = serve({
+      ...opts,
+      onListen: (url) => {
+        if (!settled) { settled = true; resolve({ ok: true, s, url }); }
+        opts.onListen?.(url);
+      },
+      onError: (err) => {
+        if (!settled) { settled = true; resolve({ ok: false, s, code: err?.code ?? null, why: err?.message ?? 'причина не названа' }); }
+      },
+    });
+  });
+}
+
+/**
+ * IS ANYTHING SERVING THIS PORT, AND IS IT ONE OF OURS?
+ *
+ * The port alone does not identify a program, and «kill whatever holds 7311» is not a thing this
+ * project may do on the owner's machine. `/health` is the discriminator: it is this server's own
+ * route and answers a shape nothing else does (`viewers` + `pulsePath`). A listener that cannot
+ * produce that shape is somebody else's and is never touched — it is reported and the command
+ * refuses.
+ */
+// `node:http` AND NOT `fetch`. A probe must leave NOTHING behind: `fetch` keeps its abort timer and
+// parks the socket in a keep-alive pool, and this function is called from a command that exits
+// immediately afterwards — exiting on top of those handles aborts the process from inside libuv
+// («Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)», observed 2026-08-16). A raw request we
+// own can be destroyed on every path, which is the whole reason to use the lower-level API here.
+export async function probeDashboard(port = DEFAULT_PORT, { timeoutMs = 1500 } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const req = httpRequest({
+      host: '127.0.0.1', port, path: '/health', method: 'GET', agent: false, timeout: timeoutMs,
+    }, (res) => {
+      let raw = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { raw += c; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) return finish({ alive: true, ours: false, why: `ответил ${res.statusCode}` });
+        try {
+          const body = JSON.parse(raw);
+          const ours = !!body && typeof body === 'object'
+            && typeof body.pulsePath === 'string' && typeof body.viewers === 'number';
+          return finish({ alive: true, ours, viewers: body?.viewers ?? null, pulsePath: body?.pulsePath ?? null });
+        } catch {
+          return finish({ alive: true, ours: false, why: 'ответ не разбирается как JSON' });
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); finish({ alive: false, ours: false, why: 'молчит дольше отпущенного' }); });
+    req.on('error', (e) => { finish({ alive: false, ours: false, why: e?.message ?? 'нет ответа' }); });
+    req.end();
+  });
+}
+
+/**
+ * Which process is listening on the port. PowerShell and not bash — `Get-NetTCPConnection` is a
+ * Windows API call, and MSYS2 rewrites `/Flag` arguments into paths before the program sees them
+ * (EXP-0043, dossier row «Windows slash-flags from Git Bash»).
+ */
+export function findListenerPid(port = DEFAULT_PORT) {
+  try {
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
+      `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue `
+      + '| Select-Object -First 1 -ExpandProperty OwningProcess',
+    ], { encoding: 'utf8', windowsHide: true, timeout: 15000 }).trim();
+    const pid = Number(out);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch { return null; }
+}
+
+/** Stop a process we have positively identified as ours. Same instrument the window uses. */
+export function killPid(pid) {
+  try {
+    execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 15000 });
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Poll until nothing answers on the port. A kill is asynchronous — the socket outlives the process
+ * by a moment — and rebinding into that moment is how a takeover turns into a second failure.
+ */
+export async function waitPortFree(port = DEFAULT_PORT, { tries = 20, everyMs = 250, probeFn = probeDashboard } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    if (!(await probeFn(port, { timeoutMs: 500 })).alive) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, everyMs); });
+  }
+  return false;
+}
+
+/**
+ * Poll until a browser is actually HOLDING the event stream — the only proof a window exists.
+ *
+ * A browser takes seconds to start cold, so the absence of a viewer in the first instant means
+ * nothing; the absence of one after the whole budget means the window never came up.
+ */
+export async function waitForViewer(port = DEFAULT_PORT, { tries = 40, everyMs = 250, probeFn = probeDashboard } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const p = await probeFn(port, { timeoutMs: 700 });
+    if (p.ours && (p.viewers ?? 0) >= 1) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, everyMs); });
+  }
+  return false;
 }
 
 /**
@@ -592,28 +736,138 @@ export function openWindow(url, { size = '--window-size=1200,820', profileDir = 
  *      existed, and the only way to reach a window that joined the owner's own browser. It sends
  *      WM_CLOSE to that window alone, so his other tabs are not touched.
  */
-export function closeWindow({ titleLike = 'KAGO' } = {}) {
+// ⚠️ SYNCHRONOUS ON PURPOSE, AND THAT IS THE WHOLE POINT OF THIS FUNCTION'S SHAPE.
+//
+// Both closers used to be `spawn` — fire-and-forget — so `closeWindow()` returned while nothing had
+// closed yet, and the caller opened the new window into that gap. The title sweep then arrived LATE
+// and matched the window we had just opened, because its title also says «KAGO»: the command closed
+// its own result and left the operator with a live server and no window (`viewers: 0`, observed
+// 2026-08-16 13:1x). A closer that has not finished closing has not closed anything — so every
+// child here is awaited, and the sweep waits for the windows it asked to exit.
+export function closeWindow({ titleLike = 'KAGO', waitMs = 4000 } = {}) {
   const closed = [];
   if (existsSync(WINDOW_PID_PATH)) {
     const pid = Number(readFileSync(WINDOW_PID_PATH, 'utf8').trim());
     if (Number.isFinite(pid) && pid > 0) {
       try {
-        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: waitMs + 2000 });
         closed.push(`pid ${pid}`);
-      } catch { /* already gone */ }
+      } catch { /* already gone — taskkill exits non-zero on an unknown pid */ }
     }
     try { unlinkSync(WINDOW_PID_PATH); } catch { /* fine */ }
   }
   try {
     // PowerShell and not bash: this is a Windows API call, and the project pays for that mix-up
     // often enough to have a dossier row about it (EXP-0043).
-    spawn('powershell.exe', ['-NoProfile', '-Command',
-      `Get-Process msedge,chrome -ErrorAction SilentlyContinue | `
-      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' } | ForEach-Object { $_.CloseMainWindow() } | Out-Null`,
-    ], { stdio: 'ignore', windowsHide: true });
-    closed.push(`окна с «${titleLike}» в заголовке`);
+    // `CloseMainWindow` only POSTS WM_CLOSE, so the wait is not decoration — without it the process
+    // is still alive (and still holding the browser profile directory) when we return.
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
+      `$w = @(Get-Process msedge,chrome -ErrorAction SilentlyContinue | `
+      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' }); `
+      + `$w | ForEach-Object { $_.CloseMainWindow() } | Out-Null; `
+      + `$w | ForEach-Object { $_.WaitForExit(${waitMs}) } | Out-Null; `
+      + '$w.Count',
+    ], { encoding: 'utf8', windowsHide: true, timeout: waitMs + 6000 }).trim();
+    if (Number(out) > 0) closed.push(`окна с «${titleLike}» в заголовке: ${out}`);
   } catch { /* nothing to close */ }
   return { closed };
+}
+
+/**
+ * RAISE THE WINDOW — THE WHOLE STARTUP, IN THE ONE ORDER THAT CANNOT LEAVE A BROKEN DESKTOP.
+ *
+ * ⚠️ THE ORDER IS THE FIX, and it was paid for on 2026-08-16 by the owner («ты опять поднял в
+ * сломанном состоянии»). The previous shape ran: `serve()` → close the old window → open a new one,
+ * with the bind still in flight the whole time. On a port already held by a previous session's
+ * server that sequence destroyed the operator's window, opened a fresh one pointed at the ORPHAN,
+ * and only then died on an unhandled `EADDRINUSE`. Every single one of those steps succeeded from
+ * the code's point of view; what was wrong was that the irreversible one ran BEFORE the one that
+ * could fail. This is the same law R9a states for the watchdog's undo — **the net before the jump**.
+ *
+ * So: the port is taken FIRST, and the window is touched only once this process owns it.
+ *
+ * **Why an occupied port is TAKEN OVER rather than reused.** A server answering `/health` is
+ * running the code it was started with, and this file changes. Reusing it would serve the operator
+ * yesterday's page and yesterday's logic while the terminal reports success — a stale green, which
+ * is the class this project spends most of its guards on. Killing it is the honest move, and it is
+ * only ever done to a listener that has positively identified itself as ours.
+ */
+export async function raiseDashboard({
+  port = DEFAULT_PORT,
+  withWindow = true,
+  log = console.log,
+  closeWindowFn = closeWindow,
+  openWindowFn = openWindow,
+  probeFn = probeDashboard,
+  findPidFn = findListenerPid,
+  killFn = killPid,
+  startFn = startServing,
+  waitFreeFn = waitPortFree,
+  waitViewerFn = waitForViewer,
+} = {}) {
+  let viewerSeen = null;
+  let started = await startFn({ port });
+
+  if (!started.ok && started.code === 'EADDRINUSE') {
+    const probe = await probeFn(port);
+    if (!probe.ours) {
+      log(`ПОРТ:    ${port} занят, и это НЕ наш дашборд (${probe.why ?? 'ответ чужой формы'}).`);
+      log('         Ничего не тронуто — ни окно, ни чужой процесс. Освободите порт или дайте --port N.');
+      return { ok: false, why: 'порт занят чужим слушателем', windowTouched: false };
+    }
+    const pid = findPidFn(port);
+    if (!pid) {
+      log(`ПОРТ:    ${port} держит наш прежний дашборд, но его процесс не опознан — снимать вслепую не буду.`);
+      log('         Ничего не тронуто. Закройте прежний процесс вручную и повторите.');
+      return { ok: false, why: 'слушатель не опознан', windowTouched: false };
+    }
+    log(`ПОРТ:    ${port} держит дашборд прошлой сессии (pid ${pid}) — снимаю его: он крутит СТАРЫЙ код.`);
+    killFn(pid);
+    if (!(await waitFreeFn(port, { probeFn }))) {
+      log(`ПОРТ:    ${port} так и не освободился. Ничего не тронуто.`);
+      return { ok: false, why: 'порт не освободился', windowTouched: false };
+    }
+    started = await startFn({ port });
+  }
+
+  if (!started.ok) {
+    log(`ДАШБОРД: не поднялся — ${started.code ?? started.why}. Окно не тронуто.`);
+    return { ok: false, why: started.why ?? started.code, windowTouched: false };
+  }
+
+  log(`ДАШБОРД: ${started.url ?? `http://127.0.0.1:${port}/`}`);
+  log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — ни карты, ни журнала, ни документа кривой');
+  log(`         оно не касается. Источник — ${PULSE_PATH} (прибор, не запись).`);
+
+  // THE OLD WINDOW GOES ONLY NOW — the owner's instruction while watching the first rehearsal
+  // («старый браузер умей закрывать»). A second window on the same gauge is not a second view, it
+  // is a stale one: whoever glances at the wrong one is reading a run that no longer exists.
+  let windowTouched = false;
+  if (withWindow) {
+    const gone = closeWindowFn();
+    windowTouched = true;
+    if (gone.closed.length) log(`ОКНО:    закрыл прежнее (${gone.closed.join(', ')})`);
+    const w = openWindowFn(started.url ?? `http://127.0.0.1:${port}/`);
+    log(w.ok
+      ? `ОКНО:    запросил отдельное окно ${w.browser ?? 'браузера по умолчанию'}. Если система открыла другим — так решила она.`
+      : `ОКНО:    не открылось (${w.why}). Адрес выше — откройте вручную.`);
+
+    // SPAWNING A BROWSER IS NOT A WINDOW ON SCREEN, and this command used to report the spawn as if
+    // it were. `viewers` counts OPEN EVENT STREAMS, so it is the one observation that distinguishes
+    // «окно есть» from «мы попросили». Without this the command answers «поднято» to an operator
+    // looking at nothing — which is the state the owner named «ты опять поднял в сломанном
+    // состоянии», and which a live sweep would then refuse to start against for a reason nobody
+    // could see from the terminal.
+    // The BOUND port, not the requested one — `port: 0` means «any free port», and asking the
+    // gauge about port 0 would probe nothing at all.
+    const livePort = started.s?.server?.address?.()?.port ?? port;
+    const seen = await waitViewerFn(livePort, { probeFn });
+    viewerSeen = seen;
+    log(seen
+      ? 'ОКНО:    подключилось — прибор его видит, прогон стартовать сможет.'
+      : 'ОКНО:    НЕ ПОДКЛЮЧИЛОСЬ. Сервер поднят, зрителей ноль — прогон в таком виде стартовать ОТКАЖЕТСЯ.');
+  }
+  return { ok: true, s: started.s, url: started.url, windowTouched, viewerSeen };
 }
 
 // =================================================================================================
@@ -758,6 +1012,106 @@ export async function selfTest() {
     try { rmSync(tPath, { force: true }); } catch { /* ok */ }
   }
 
+  // — ПОДЪЁМ НА ЗАНЯТОМ ПОРТУ. Владелец, 2026-08-16: «ты опять поднял в сломанном состоянии».
+  //   Порядок «необратимое ПОСЛЕ проверки» — единственное, что здесь проверяется, и он проверяется
+  //   на НАСТОЯЩЕМ сокете: порт занимается живым сервером, а не заглушкой.
+  //   АДРЕСАТЫ: AK. вернуть окно вперёд подъёма → «ОКНО НЕ ТРОГАЕТСЯ, ПОКА ПОРТ НЕ НАШ» ·
+  //             AL. снять `server.on('error')` → «ЗАНЯТЫЙ ПОРТ — ОТВЕТ, А НЕ ТРАССИРОВКА» ·
+  //             AM. считать любой ответ на порту нашим → «ЧУЖОЙ СЛУШАТЕЛЬ НЕ НАШ ДАШБОРД» ·
+  //             AN. снимать процесс, не опознав его → «НЕОПОЗНАННЫЙ СЛУШАТЕЛЬ НЕ СНИМАЕТСЯ».
+  {
+    // A real, listening socket — a stub would prove the branch, not the bind.
+    const busy = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
+    await new Promise((r) => { busy.server.once('listening', r); });
+    const busyPort = busy.server.address().port;
+
+    const taken = await startServing({ port: busyPort });
+    check('ЗАНЯТЫЙ ПОРТ — ОТВЕТ, А НЕ ТРАССИРОВКА: подъём возвращает EADDRINUSE, а не падает',
+      taken.ok === false && taken.code === 'EADDRINUSE',
+      JSON.stringify({ ok: taken.ok, code: taken.code }));
+    taken.s?.close();
+
+    // The window seams as spies. The whole defect is that these ran BEFORE the port was known.
+    let closes = 0; let opens = 0;
+    const spyClose = () => { closes += 1; return { closed: [] }; };
+    const spyOpen = () => { opens += 1; return { ok: true, browser: 'фальшивка' }; };
+    const quiet = () => {};
+
+    const foreign = await raiseDashboard({
+      port: busyPort, log: quiet, closeWindowFn: spyClose, openWindowFn: spyOpen,
+      probeFn: async () => ({ alive: true, ours: false, why: 'чужая форма ответа' }),
+      findPidFn: () => 999999, killFn: () => true,
+    });
+    check('ЧУЖОЙ СЛУШАТЕЛЬ НЕ НАШ ДАШБОРД — порт занят кем-то ещё, команда отказывает',
+      foreign.ok === false, JSON.stringify(foreign));
+    check('ОКНО НЕ ТРОГАЕТСЯ, ПОКА ПОРТ НЕ НАШ — чужой слушатель не стоит окна оператора',
+      closes === 0 && opens === 0 && foreign.windowTouched === false,
+      JSON.stringify({ closes, opens, windowTouched: foreign.windowTouched }));
+
+    let killed = 0;
+    const unidentified = await raiseDashboard({
+      port: busyPort, log: quiet, closeWindowFn: spyClose, openWindowFn: spyOpen,
+      probeFn: async () => ({ alive: true, ours: true }),
+      findPidFn: () => null, killFn: () => { killed += 1; return true; },
+    });
+    check('НЕОПОЗНАННЫЙ СЛУШАТЕЛЬ НЕ СНИМАЕТСЯ — вслепую не убиваем ничего',
+      unidentified.ok === false && killed === 0 && closes === 0 && opens === 0,
+      JSON.stringify({ ok: unidentified.ok, killed, closes, opens }));
+
+    busy.close();
+    await new Promise((r) => { setTimeout(r, 50); });
+
+    // And the green half: a free port raises, and THEN the window is opened.
+    const good = await raiseDashboard({
+      port: 0, log: quiet, closeWindowFn: spyClose, openWindowFn: spyOpen, waitViewerFn: async () => true,
+    });
+    check('СВОБОДНЫЙ ПОРТ: сервер поднят, и ТОЛЬКО ПОСЛЕ ЭТОГО открыто окно',
+      good.ok === true && closes === 1 && opens === 1,
+      JSON.stringify({ ok: good.ok, closes, opens }));
+    good.s?.close();
+
+    // — СПАВН БРАУЗЕРА — НЕ ОКНО НА ЭКРАНЕ. Владелец получил зелёное сообщение и пустой экран.
+    //   АДРЕСАТ: AP. докладывать успех, не спросив прибор → этот блок.
+    const blind = await raiseDashboard({
+      port: 0, log: quiet, closeWindowFn: spyClose, openWindowFn: spyOpen, waitViewerFn: async () => false,
+    });
+    check('ОКНО, КОТОРОЕ НЕ ПОДКЛЮЧИЛОСЬ, НАЗЫВАЕТСЯ ВСЛУХ — спавн браузера не выдаётся за окно',
+      blind.viewerSeen === false,
+      JSON.stringify({ viewerSeen: blind.viewerSeen }));
+    blind.s?.close();
+
+    // And the meter itself: a live server with nobody watching must say «нет зрителя», not hope.
+    const lonely = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
+    await new Promise((r) => { lonely.server.once('listening', r); });
+    const none = await waitForViewer(lonely.server.address().port, { tries: 2, everyMs: 50 });
+    check('ПРИБОР ЗРИТЕЛЕЙ НЕ ВЫДУМЫВАЕТ: сервер жив, зрителей ноль — ответ «нет»',
+      none === false, 'насчитал зрителя там, где окна нет');
+    lonely.close();
+  }
+
+  // — ОПОЗНАНИЕ ДАШБОРДА ИДЁТ ПО ЕГО СОБСТВЕННОМУ МАРШРУТУ, а не по факту «порт отвечает».
+  //   АДРЕСАТ: AO. признать наш дашборд чужим (или наоборот) → этот блок.
+  {
+    const mine = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
+    await new Promise((r) => { mine.server.once('listening', r); });
+    const seen = await probeDashboard(mine.server.address().port);
+    check('НАШ ДАШБОРД ОПОЗНАЁТСЯ по /health — виден и счётчик зрителей, и путь прибора',
+      seen.alive === true && seen.ours === true && typeof seen.pulsePath === 'string',
+      JSON.stringify(seen));
+    mine.close();
+
+    const stranger = createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"viewers":1}'); });
+    await new Promise((r) => { stranger.listen(0, '127.0.0.1', r); });
+    const other = await probeDashboard(stranger.address().port);
+    check('ПОХОЖИЙ ОТВЕТ — ЕЩЁ НЕ НАШ: без пути прибора слушатель чужой',
+      other.alive === true && other.ours === false, JSON.stringify(other));
+    stranger.close();
+
+    const nobody = await probeDashboard(1, { timeoutMs: 400 });
+    check('МОЛЧАЩИЙ ПОРТ — это «никого нет», а не «наш»',
+      nobody.alive === false && nobody.ours === false, JSON.stringify(nobody));
+  }
+
   const failed = results.filter((r) => !r.ok).length;
   return { ok: failed === 0, results, failed };
 }
@@ -784,20 +1138,9 @@ async function main(argv) {
   const arg = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
   const port = Number(arg('port', DEFAULT_PORT));
 
-  const s = serve({ port, onListen: (url) => console.log(`ДАШБОРД: ${url}`) });
-  console.log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — ни карты, ни журнала, ни документа кривой');
-  console.log(`         оно не касается. Источник — ${PULSE_PATH} (прибор, не запись).`);
-  // THE OLD WINDOW GOES FIRST — the owner's instruction while watching the first rehearsal
-  // («старый браузер умей закрывать»). A second window on the same gauge is not a second view, it is
-  // a stale one: whoever glances at the wrong one is reading a run that no longer exists.
-  if (!argv.includes('--no-window')) {
-    const gone = closeWindow();
-    if (gone.closed.length) console.log(`ОКНО:    закрыл прежнее (${gone.closed.join(', ')})`);
-    const w = openWindow(s.url);
-    console.log(w.ok
-      ? `ОКНО:    запросил отдельное окно ${w.browser ?? 'браузера по умолчанию'}. Если система открыла другим — так решила она.`
-      : `ОКНО:    не открылось (${w.why}). Адрес выше — откройте вручную.`);
-  }
+  const raised = await raiseDashboard({ port, withWindow: !argv.includes('--no-window') });
+  if (!raised.ok) return 1;
+  const s = raised.s;
   console.log('         Ctrl+C — закрыть сервер И окно.');
   // A server that dies leaving its window up is the `bugs/04` shape: the picture stays on screen,
   // frozen, and looks exactly like the hang this instrument exists to report.
