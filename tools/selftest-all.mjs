@@ -1,0 +1,337 @@
+#!/usr/bin/env node
+// tools/selftest-all.mjs — ВСЯ ОФЛАЙН-БАТАРЕЯ САМОПРОВЕРОК ОДНОЙ КОМАНДОЙ.
+//
+// WHY IT EXISTS, and the receipt is five days long. The `curveCapMhz` migration (commit `2d7d266`,
+// 2026-08-16 22:13) left three suites red — `descend` 7 blocks, `profile` 1, `vgpu` 1 — and STATUS
+// carried all three as green until the 2026-08-21 audit re-ran the battery by hand
+// (`reports/KAIF_AUDIT/2026-08-21_audit_01_tech.md` §3, `bugs/24`). Nobody lied: sessions 31-32
+// re-ran the suites of the modules they touched, which is the correct habit, and the table of
+// numbers in STATUS was updated from memory, which is the defect. **«Перемерено» has to be a
+// command, not a memory** — that is the whole of this tool's job.
+//
+// THE RULE THAT COMES WITH IT: the block counts in `STATUS.md` are updated ONLY from this command's
+// output. A number typed from recollection is a false `[TESTED]` at the level of the summary table
+// (`TESTING_FRAMEWORK.md` → the trust contract).
+//
+// ─── WHAT IT RUNS, AND WHAT IT REFUSES TO RUN ────────────────────────────────────────────────────
+//
+// Only suites that touch NO card: seventeen of them, exactly the battery the audit re-ran. Anything
+// that writes to the GPU stays out by construction — `nvml --verify-decode` writes and is therefore
+// absent, and so is every command whose job is a measurement rather than a check. A gate the owner
+// cannot run while his card is busy is a gate nobody runs.
+//
+// Deliberately NOT here, and each for a stated reason rather than by oversight:
+//   `nvml --verify-decode`  — it WRITES to the card (STATUS names it so).
+//   `stress --verify-baseline`, `gpu:info`, `mon`, `measure`  — they READ the live card; a battery
+//                             that needs the card present is a battery that is skipped.
+//   `shortcuts`, `fanladder`, `thermal`, `tidy`, `dashboard`, `bench` — their selftests were never
+//                             part of the audited battery, and each touches something outside the
+//                             process (the owner's desktop, a port, the fan controller, files it
+//                             tidies). They join the day someone proves the run is inert, one at a
+//                             time, with the proof written next to the entry.
+//
+// ─── HOW A SUITE IS JUDGED: TWO INDEPENDENT READINGS, AND A DISAGREEMENT IS ITSELF RED ───────────
+//
+// 1. THE EXIT CODE — the declared contract, and the only reading that cannot be reworded.
+// 2. THE SUITE'S OWN LINES — its red lines counted, and its COMPLETION LINE demanded present.
+//
+// Neither alone is enough, and this project has paid for both halves. Parsing prose for failures
+// reports on the suite's vocabulary rather than on the code (EXP-0060), and the three suites here
+// spell failure three different ways — `ПЛОХО`, `ПРОВАЛ`, `FAIL` — so a single grep would have been
+// blind to two thirds of the battery. Trusting the exit code alone is the other half: a suite whose
+// summary says «провалов 3» while it exits 0 is a suite whose exit code lies, and that is a finding,
+// not a green. Demanding the completion line is the third guard: a suite that crashes, hangs or dies
+// on an import prints no failures either, and «no failures» must never read as «all passed»
+// (EXP-0016, EXP-0029, EXP-0060 — one family, paid for four times).
+//
+// So: green ⟺ exit code 0 AND zero red lines AND the completion line present. Everything else is red
+// and says which of the three failed.
+//
+// Usage:
+//   npm run selftest:all              the whole battery, then a paste-ready line of numbers
+//   npm run selftest:all -- --only engine,vgpu     a subset, by id, for a module you just touched
+//   npm run selftest:all -- --selftest             this tool's OWN guard, four fixtures, no suites
+// Exit: 0 = every suite green · 1 = at least one red (or an unknown id was asked for)
+//
+// [TESTED: 2026-08-21 00:4x · `--selftest` → 5 blocks, 0 failed: five fixture children driven through
+//  the same `runSuite()` the battery uses — honest red (exit 1), LYING exit code (red lines, exit 0),
+//  a suite that died before its completion line, a green one as the negative control, and one mixing
+//  all three vocabularies at once (2 green / 3 red / 1 waiting). The battery itself: 17 suites, 848
+//  green blocks, 0 red, 10.9 s. RED-PROVED END TO END against the real defect it was built for:
+//  deleting `curveCapMhz` from `candidateProfile` again (the `bugs/24` mutation) turned the battery
+//  red on exactly `descend` (7) and `profile` (1), named both, quoted their summary lines and exited 1.]
+
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+// =================================================================================================
+// The battery
+// =================================================================================================
+//
+// `npm` is what the human types and what the report prints; the run itself spawns `node` directly.
+// Seventeen `npm run` launches cost more wall clock on Windows than the suites themselves, and a
+// gate that is slow is a gate that gets skipped.
+//
+// `done` is each suite's COMPLETION LINE, written out per suite rather than guessed by a shared
+// pattern. That makes it a contract: a suite that renames its summary line reddens here loudly
+// instead of being read as «nothing failed», which is the direction of failure this tool exists for.
+
+const SUITES = [
+  // `countsBlocks: false` — this one has no per-block lines at all: it reports two totals (files
+  // parsed, texts scanned) and nothing else. Printing «блоков 0» for it would put a zero in the
+  // STATUS line that reads like «nothing was checked», so its own summary is quoted instead.
+  { id: 'check', npm: 'npm run check', argv: ['tools/check.mjs'], countsBlocks: false,
+    what: 'парсинг всех .mjs + порча кодировки', done: /^checked \d+ \.mjs file/mu },
+  { id: 'engine', npm: 'npm run engine -- --selftest', argv: ['automation-engine/engine.mjs', '--selftest'],
+    what: 'движок: лестница, затравка, ступень, петля развёртки', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'journal', npm: 'npm run journal -- --selftest', argv: ['automation-engine/lib/sweep-journal.mjs', '--selftest'],
+    what: 'журнал упреждающей записи', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'curve', npm: 'npm run curve -- --selftest', argv: ['automation-engine/lib/curve-store.mjs', '--selftest'],
+    what: 'документ тюнинг-кривой', done: /^ИТОГ: /mu },
+  { id: 'contract', npm: 'npm run contract', argv: ['automation-engine/lib/seam-contract.mjs'],
+    what: 'контрактный набор над тремя швами', done: /^КОНТРАКТНЫЙ НАБОР:/mu },
+  { id: 'traps', npm: 'npm run traps', argv: ['automation-engine/lib/trap-suite.mjs'],
+    what: 'пять карт-ловушек против настоящего движка', done: /^НАБОР ЛОВУШЕК:/mu },
+  { id: 'stress', npm: 'npm run stress -- --selftest', argv: ['automation-engine/lib/stress-tester.mjs', '--selftest'],
+    what: 'оракул: вердикты PASS/SDC/CRASH', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'vfstep', npm: 'npm run vfstep -- --selftest', argv: ['automation-engine/lib/vf-step.mjs', '--selftest'],
+    what: 'атом записи: форма профиля и её сторожа', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'watchdog', npm: 'npm run watchdog -- --selftest', argv: ['automation-engine/lib/watchdog.mjs', '--selftest'],
+    what: 'сторож записей и подбор забытой аренды', done: /^САМОПРОВЕРКА СТОРОЖА:/mu },
+  { id: 'profiles', npm: 'npm run profiles -- --selftest', argv: ['automation-engine/lib/profile-store.mjs', '--selftest'],
+    what: 'ФОРМАТ профиля и его отказы', done: /^САМОПРОВЕРКА ФОРМАТА:/mu },
+  { id: 'profile', npm: 'npm run profile -- --selftest', argv: ['automation-engine/lib/profile-manager.mjs', '--selftest'],
+    what: 'ПРИМЕНИТЕЛЬ профиля, единственный писатель', done: /^САМОПРОВЕРКА ПРИМЕНЕНИЯ:/mu },
+  { id: 'power', npm: 'npm run power -- --selftest', argv: ['automation-engine/lib/power-baseline.mjs', '--selftest'],
+    what: 'эталон мощности и пол прибора', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'descend', npm: 'npm run descend -- --selftest', argv: ['automation-engine/lib/ladder-descent.mjs', '--selftest'],
+    what: 'спуск по лестнице частот, кандидат и откат', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'vgpu', npm: 'npm run vgpu -- --selftest', argv: ['automation-engine/lib/virtual-gpu.mjs', '--selftest'],
+    what: 'виртуальная видеокарта: край, шум, три исхода', done: /^САМОПРОВЕРКА ВИРТУАЛЬНОЙ КАРТЫ:/mu },
+  { id: 'gfx', npm: 'npm run gfx -- --selftest', argv: ['automation-engine/lib/graphics-load.mjs', '--selftest'],
+    what: 'игровой стенд и разбор кадров', done: /^САМОПРОВЕРКА:/mu },
+  { id: 'nvapi', npm: 'npm run nvapi -- --selftest-shape', argv: ['automation-engine/lib/nvapi.mjs', '--selftest-shape'],
+    what: 'форма профиля на мосту NVAPI', done: /^ФОРМА ПРОФИЛЯ:/mu },
+  { id: 'vmin', npm: 'npm run vmin -- --selftest', argv: ['automation-engine/lib/vmin-store.mjs', '--selftest'],
+    what: 'храповик фазы 5', done: /^САМОПРОВЕРКА:/mu },
+];
+
+// =================================================================================================
+// Reading a suite's own lines
+// =================================================================================================
+//
+// The vocabularies are MEASURED, not assumed: every suite in the battery was run and its result
+// lines counted before this parser was written (EXP-0060 — read a real failure first, then write the
+// parser against what you saw). Greens: `OK` everywhere except the curve document, which prints `✅`.
+// Reds: `ПЛОХО` (engine, descend, stress, …), `ПРОВАЛ` (the applier), `FAIL` (the virtual card, the
+// seam contract, and `check` on a file that will not parse), `❌` (the curve document). `ЖДЁТ` is the
+// trap suite's THIRD state — waiting, and it is never mixed into either of the other two.
+//
+// `\b` is deliberately absent: it is defined over ASCII word characters, so it never matches after a
+// Cyrillic letter and would silently drop every Russian token here.
+const GREEN_LINE = /^[ \t]*(?:OK|✅)(?:[ \t]|$)/u;
+const RED_LINE = /^[ \t]*(?:ПЛОХО|ПРОВАЛ|FAIL|❌)(?:[ \t]|$)/u;
+const PENDING_LINE = /^[ \t]*ЖДЁТ(?:[ \t]|$)/u;
+
+/** Local time with its offset, never UTC — a machine receipt in this project carries the owner's
+ *  clock (`AGENT_GUIDE.md`), and this line is meant to be pasted into STATUS beside the numbers. */
+function stampNow(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    + ` ${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`;
+}
+
+/**
+ * Run ONE suite and judge it by all three readings. Exported shape is deliberate: this tool's own
+ * `--selftest` drives its fixtures through THIS function, so the thing proved is the thing used.
+ *
+ * @param {{id:string, argv:string[], done:RegExp}} suite
+ * @returns {{id:string, ok:boolean, why:string, code:number, ms:number,
+ *            green:number, red:number, pending:number, summary:string|null}}
+ */
+export function runSuite(suite, { cwd = ROOT } = {}) {
+  const started = Date.now();
+  // `stdout` and `stderr` are read as ONE stream: a suite that prints its failures to stderr (which
+  // `check` does) would otherwise be counted as having none.
+  const r = spawnSync(process.execPath, suite.argv, { cwd, encoding: 'buffer', windowsHide: true });
+  const ms = Date.now() - started;
+  const text = Buffer.concat([r.stdout ?? Buffer.alloc(0), r.stderr ?? Buffer.alloc(0)]).toString('utf8');
+  const lines = text.split(/\r?\n/u);
+
+  let green = 0; let red = 0; let pending = 0;
+  for (const line of lines) {
+    if (GREEN_LINE.test(line)) green++;
+    else if (RED_LINE.test(line)) red++;
+    else if (PENDING_LINE.test(line)) pending++;
+  }
+
+  // The completion line, and it is looked for in the OUTPUT rather than inferred from the exit code:
+  // a suite killed mid-run exits non-zero AND prints no summary, and the two facts are reported
+  // separately because they fail for different reasons.
+  const summaryLine = lines.find((l) => suite.done.test(l)) ?? null;
+  const code = r.status === null ? -1 : r.status;
+
+  const reasons = [];
+  if (r.error) reasons.push(`набор не запустился: ${r.error.message}`);
+  if (code !== 0) reasons.push(code === -1 ? `набор убит сигналом ${r.signal}` : `код выхода ${code}`);
+  if (red > 0) reasons.push(`красных строк ${red}`);
+  if (summaryLine === null) reasons.push('СВОДНОЙ СТРОКИ НЕТ — набор не дошёл до конца, и «нет провалов» тут ничего не значит');
+  // The disagreement is its own finding and is named as one: a suite that reports failures and still
+  // exits 0 has a broken exit code, and a battery that quietly took the greener of the two readings
+  // would be hiding exactly the class it was built to catch.
+  if (code === 0 && red > 0) reasons.push('РАСХОЖДЕНИЕ ДВУХ ЧТЕНИЙ: код выхода 0, а набор печатает провалы — врёт код выхода');
+  if (code !== 0 && red === 0 && summaryLine !== null) reasons.push('РАСХОЖДЕНИЕ ДВУХ ЧТЕНИЙ: код выхода не ноль, а красных строк нет');
+
+  return {
+    id: suite.id, ok: reasons.length === 0, why: reasons.join(' · '),
+    code, ms, green, red, pending, summary: summaryLine,
+  };
+}
+
+// =================================================================================================
+// The battery, and the report the numbers in STATUS are copied from
+// =================================================================================================
+
+function runBattery(only) {
+  const chosen = only ? SUITES.filter((s) => only.has(s.id)) : SUITES;
+  if (only) {
+    const unknown = [...only].filter((id) => !SUITES.some((s) => s.id === id));
+    if (unknown.length) {
+      console.error(`ОШИБКА: неизвестный набор — ${unknown.join(', ')}. Известны: ${SUITES.map((s) => s.id).join(', ')}`);
+      return 1;
+    }
+  }
+
+  console.log('БАТАРЕЯ САМОПРОВЕРОК — всё офлайн, ни одной записи в видеокарту');
+  console.log(`  наборов: ${chosen.length}${only ? ` из ${SUITES.length} (по запросу --only)` : ''}`);
+  console.log('');
+
+  /** What this suite counts, in its own units — blocks for sixteen of them, its summary line for the
+   *  one that has no blocks. Never invented: a suite that counted nothing says so. */
+  const counted = (suite, r) => (suite.countsBlocks === false
+    ? (r.summary ? r.summary.trim() : 'сводки нет')
+    : `блоков ${r.green}${r.pending ? ` · ждут ${r.pending}` : ''}`);
+
+  const results = [];
+  for (const suite of chosen) {
+    process.stdout.write(`  ${suite.id.padEnd(9)} ${suite.what} … `);
+    const r = runSuite(suite);
+    r.counted = counted(suite, r);
+    r.countsBlocks = suite.countsBlocks !== false;
+    results.push(r);
+    console.log(r.ok
+      ? `ЗЕЛЁНЫЙ · ${r.counted} · ${(r.ms / 1000).toFixed(1)} с`
+      : `КРАСНЫЙ · ${r.why}`);
+  }
+
+  const redOnes = results.filter((x) => !x.ok);
+  console.log('');
+  for (const r of redOnes) {
+    console.log(`КРАСНЫЙ ${r.id}: ${r.why}`);
+    console.log(`        повторить одной командой: ${SUITES.find((s) => s.id === r.id).npm}`);
+    if (r.summary) console.log(`        сводная строка набора: ${r.summary.trim()}`);
+  }
+  if (redOnes.length) console.log('');
+
+  // THE PASTE-READY LINE. It exists so that the numbers in STATUS have exactly one origin, and the
+  // stamp travels with them: a count without the moment it was measured is the same claim STATUS
+  // carried for five days.
+  const totalMs = results.reduce((a, x) => a + x.ms, 0);
+  const blocks = results.reduce((a, x) => a + (x.countsBlocks ? x.green : 0), 0);
+  console.log(`ИТОГ: наборов ${results.length}, красных ${redOnes.length}, зелёных блоков ${blocks}, `
+    + `${(totalMs / 1000).toFixed(1)} с`);
+  console.log(`ЧИСЛА ДЛЯ STATUS (перемерено ${stampNow()}): `
+    + results.map((r) => {
+      if (!r.ok) return `${r.id} КРАСНЫЙ(${r.red})`;
+      return r.countsBlocks ? `${r.id} ${r.green}` : `${r.id} ✓`;
+    }).join(' · '));
+  if (redOnes.length === 0) {
+    console.log('Все наборы сошлись по ТРЁМ чтениям сразу: код выхода, красные строки, сводная строка на месте.');
+  }
+  return redOnes.length === 0 ? 0 : 1;
+}
+
+// =================================================================================================
+// This tool's OWN guard — because a detector nobody showed a failure to is not a detector
+// =================================================================================================
+//
+// MUTATION ADDRESSEES, NAMED BEFORE THE RUN (EXP-0016). Each fixture is a whole child process driven
+// through the same `runSuite()` the battery uses, so what is proved here is what runs there:
+//
+//   A. honest red      — prints `ПЛОХО`, exits 1        → red, and the code is named
+//   B. LYING exit code — prints `ПЛОХО`, exits 0        → red, and the disagreement is named
+//   C. died early      — prints `OK`, no summary, exit 0 → red, and the missing summary is named
+//   D. honest green    — prints `OK` and its summary     → GREEN, the negative control without which
+//                                                          a detector that reddens everything passes
+//
+// D is not ceremony: three fixtures reddening proves the alarm rings, and nothing else. It is the
+// fourth that proves it is an alarm rather than a bell stuck on.
+function toolSelftest() {
+  const fixture = (id, body, done) => ({
+    id, npm: `(фикстура ${id})`, what: `фикстура ${id}`, done,
+    argv: ['-e', body],
+  });
+  const DONE = /^ФИКСТУРА:/mu;
+  const cases = [
+    { name: 'A. честный красный: печатает ПЛОХО и выходит с кодом 1 -> КРАСНЫЙ',
+      suite: fixture('A', 'console.log("OK   раз");console.log("ПЛОХО два");console.log("ФИКСТУРА: есть расхождения.");process.exit(1)', DONE),
+      wantOk: false, wantIn: 'код выхода 1' },
+    { name: 'B. ВРЁТ КОД ВЫХОДА: печатает ПЛОХО и выходит с нулём -> КРАСНЫЙ, расхождение названо',
+      suite: fixture('B', 'console.log("ПЛОХО два");console.log("ФИКСТУРА: есть расхождения.");process.exit(0)', DONE),
+      wantOk: false, wantIn: 'РАСХОЖДЕНИЕ ДВУХ ЧТЕНИЙ' },
+    { name: 'C. набор УМЕР до сводной строки: одни OK, кода ноль -> КРАСНЫЙ, отсутствие сводки названо',
+      suite: fixture('C', 'console.log("OK   раз");process.exit(0)', DONE),
+      wantOk: false, wantIn: 'СВОДНОЙ СТРОКИ НЕТ' },
+    { name: 'D. честный зелёный -> ЗЕЛЁНЫЙ (контроль: сторож не красит всё подряд)',
+      suite: fixture('D', 'console.log("OK   раз");console.log("OK   два");console.log("ФИКСТУРА: все сходятся.");process.exit(0)', DONE),
+      wantOk: true, wantIn: '' },
+  ];
+
+  let failed = 0;
+  for (const c of cases) {
+    const r = runSuite(c.suite);
+    const okMatches = r.ok === c.wantOk;
+    const whyMatches = c.wantIn === '' ? r.why === '' : r.why.includes(c.wantIn);
+    if (okMatches && whyMatches) console.log(`OK   ${c.name}`);
+    else {
+      failed++;
+      console.log(`ПЛОХО ${c.name}`);
+      console.log(`      получено ok=${r.ok} why=«${r.why}» green=${r.green} red=${r.red} summary=${JSON.stringify(r.summary)}`);
+    }
+  }
+
+  // The counting itself, on output that mixes all three vocabularies at once — one suite never does
+  // that, so no suite in the battery could have proved it.
+  const mixed = runSuite(fixture('E',
+    'console.log("OK   один");console.log("✅ два");console.log("ПРОВАЛ три");console.log("FAIL четыре");'
+    + 'console.log("❌ пять");console.log("ЖДЁТ шесть");console.log("ФИКСТУРА: смесь.");process.exit(1)', DONE));
+  const counted = [mixed.green, mixed.red, mixed.pending];
+  if (JSON.stringify(counted) === JSON.stringify([2, 3, 1])) {
+    console.log('OK   E. три словаря разом: 2 зелёных, 3 красных (ПРОВАЛ/FAIL/❌), 1 ждёт — и они не смешались');
+  } else {
+    failed++;
+    console.log(`ПЛОХО E. три словаря разом -> получено ${JSON.stringify(counted)}, ждали [2,3,1]`);
+  }
+
+  console.log('');
+  console.log(`САМОПРОВЕРКА БАТАРЕИ: 5 блоков, провалов ${failed}.`);
+  return failed === 0 ? 0 : 1;
+}
+
+// =================================================================================================
+
+function main(argv) {
+  if (argv.includes('--selftest')) return toolSelftest();
+  const i = argv.indexOf('--only');
+  const only = i >= 0 && argv[i + 1] ? new Set(argv[i + 1].split(',').map((s) => s.trim()).filter(Boolean)) : null;
+  return runBattery(only);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(main(process.argv.slice(2)));
+}

@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "check": "node tools/check.mjs",
+    "selftest:all": "node tools/selftest-all.mjs",
     "gpu:info": "node tools/gpu-info.mjs",
     "phase1:accept": "node tools/check.mjs && node tools/build-workloads.mjs --verify && node automation-engine/lib/event-logger.mjs --fixtures && node automation-engine/lib/stress-tester.mjs --selftest && node automation-engine/lib/stress-tester.mjs --verify-baseline && node automation-engine/lib/hardware-mon.mjs --check-decode",
     "ask": "node tools/review.mjs",
