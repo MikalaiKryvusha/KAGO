@@ -114,6 +114,13 @@ export function candidateProfile(mhz, card) {
       // OMITTED setting as ambiguous: «leave as is» and «restore factory» are different instructions
       // (`plans/14` §4.3 added the reference; the rule is older than it).
       curveRef: null,
+      // The mode's frequency ceiling over a curve document (`profile-store.mjs`, 2026-08-16). An
+      // instrument holds its ceiling with the PIN above and never with a curve cap — and the cap is
+      // meaningless without `curveRef` anyway. Spelled out for the same reason as the two above, and
+      // this one has a receipt: the migration that made presence REQUIRED rewrote profiles-as-files
+      // by script, this builder is not a file, and every pinned rung below the cap floor (~2157 МГц,
+      // fact 38) refused at apply time for five days (`bugs/24`).
+      curveCapMhz: null,
     },
     stamp: {
       driver: card.driver,

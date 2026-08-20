@@ -1531,7 +1531,10 @@ export async function selfTest() {
     name: 'virtual-pl250',
     title: '🧪 Виртуальный стенд, 250 Вт',
     qualified: true,
-    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null },
+    // `curveCapMhz: null` is not decoration: presence is REQUIRED by the format since 2026-08-16, and
+    // this fixture is built in code, so the migration's file-rewriting script never reached it
+    // (`bugs/24`). Omitted, it reddens the applier block below — which is exactly what it is for.
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
     stamp: { driver: CARD.stamp.driver, vbios: CARD.stamp.vbios, takenAt: CARD.stamp.takenAt },
   };
   let applyOk = false; let applyWhy = '';
