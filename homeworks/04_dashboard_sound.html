@@ -123,6 +123,11 @@
     </div>
     <p style="margin:14px 0 0"><span class="contour" id="melcontour">—</span></p>
     <p class="sub" id="melwhat" style="margin:8px 0 0">—</p>
+    <div class="row" style="margin-top:14px">
+      <label class="sub" style="margin:0">темп: <b id="bpmlbl">75</b> BPM · доля <b id="beatlbl">0,80</b> с
+        <input id="bpm" type="range" min="55" max="95" value="75"></label>
+      <span class="sub" id="movelbl" style="margin:0;min-width:210px;color:var(--cyan)">—</span>
+    </div>
   </div>
 
   <div class="panel">
@@ -557,20 +562,59 @@ function melNote({ freq, at = 0, len = 1.8, peak = 0.10 }) {
    единственным, что запоминается. Ступени даны индексами по пентатонике, чтобы мотив можно было
    переносить, не выходя из строя. */
 const SCALE = [N.A3, N.B3, N.Cs4, N.E4, N.Fs4, N.A4, N.B4, N.Cs5, N.E5, N.Fs5, N.A5, N.B5, N.Cs6];
+
+/* =================================================================================================
+   РИТМ ТЕМЫ — ПО `researches/12`, а не на глаз
+   =================================================================================================
+   Первая редакция задавала длительности в секундах «на глаз»: 1,5 / 1,3 / 2,2 / 1,4 / 2,6 — все
+   средние, отношение крайних 2:1, промежутки случайные. Владелец услышал это как «не мелодия», и
+   разведка объяснила почему: у фразы не было РИТМИЧЕСКОЙ ИЕРАРХИИ. Источники в один голос: рисунок
+   делает не набор высот, а СООТНОШЕНИЕ ДЛИТЕЛЬНОСТЕЙ (masterclass, edmprod, speedsongwriting).
+
+   Что кодируют константы ниже — правила П1–П5 документа:
+     П1  длительности в ДОЛЯХ сетки 0,8 с (75 BPM — середина медитативного диапазона 70–80,
+         bpmcalc), а не в секундах. Каждая нота смещается на случайные ±40 мс: «свобода от сетки»,
+         без которой эмбиент перестаёт дышать (musicproductionwiki);
+     П2  ритм ЗАДАН явно, отношение крайних длительностей не меньше 4:1;
+     П3  последняя нота фразы — самая длинная И за ней пауза (arxiv: «либо…либо»; в эмбиенте, где
+         нот мало, работает сочетание);
+     П4  пауза между фразами 2–4 доли, и после «вопроса» она КОРОЧЕ: незакрытая фраза требует
+         продолжения, закрытая — тишины;
+     П5  первая нота и самая длинная начинаются на ЦЕЛОЙ доле — опора; остальные могут смещаться
+         на полдоли (iconcollective: ноты на сильных долях весомее). */
+
+let BEAT = 0.8;                   // базовая доля, 75 BPM — меняется ползунком темпа
+
 const MELODIES = [
-  { name: 'I · Маяк', contour: '↗↗  ↘↘↘  ↗',
-    what: 'Взлёт на кварту, шаг вверх, и обрыв вниз — как отмашка маяка: заметный жест, который ' +
-          'трудно спутать. Самый «зовущий» из трёх.',
-    steps: [5, 8, 9, 6, 7], lens: [1.5, 1.3, 2.2, 1.4, 2.6] },
-  { name: 'II · Дрейф', contour: '↘  ↘  ↘  ↘   ⌒',
-    what: 'Ровный спуск и одна возвращающая нота в конце — движение без цели, как медленный дрейф. ' +
-          'Самый спокойный, меньше всех обращает на себя внимание.',
-    steps: [8, 7, 6, 5, 3], lens: [2.0, 1.7, 1.7, 1.9, 3.0] },
-  { name: 'III · Позывной', contour: '↔ ↔  ↔ ↔   ↘↘',
-    what: 'Двухнотная качка дважды, потом разрешение вниз — рисунок радиопозывного. Запоминается ' +
-          'быстрее всех именно из-за повтора.',
-    steps: [7, 9, 7, 9, 6, 5], lens: [0.9, 1.1, 0.9, 1.3, 1.6, 2.8] },
+  { name: 'I · Маяк', contour: '♩♩ ♩♩♩ · ♩ · ♩♩♩♩♩♩',
+    what: 'Взлёт на кварту, шаг вверх, обрыв вниз. Ритм: две коротких — разбег, третья — первая ' +
+          'опора, последняя держится шесть долей. Отношение крайних 6:1 — именно оно и делает рисунок.',
+    steps: [5, 8, 9, 6, 7], beats: [1, 1, 3, 1, 6], strong: [0, 2] },
+  { name: 'II · Дрейф', contour: '♩ ♩♩ ♩♩ ♩♩♩ · ♩×8',
+    what: 'Ровный спуск, каждая нота длиннее предыдущей, последняя — восемь долей. Движение без ' +
+          'цели, как затухающий дрейф. Отношение крайних 8:1.',
+    steps: [8, 7, 6, 5, 3], beats: [1, 2, 2, 3, 8], strong: [0, 4] },
+  { name: 'III · Позывной', contour: '♪♩♩ ♪♩♩ ♩ · ♩×6',
+    what: 'Короткая-длинная дважды, потом разрешение вниз — рисунок радиопозывного. Качка на ' +
+          'полудолях, разрешение на целой.',
+    steps: [7, 9, 7, 9, 6, 5], beats: [0.5, 1.5, 0.5, 1.5, 1, 6], strong: [0, 5] },
 ];
+
+/* П6 — РАЗВИТИЕ МОТИВА ЦИКЛОМ ИЗ ВОСЬМИ ХОДОВ, а не случайными вариациями.
+   Источники называют условием запоминаемости АРКУ и баланс повтора с вариацией (musicradar,
+   pointblank); случайная последовательность приёмов арки не даёт. Приёмы — те, что перечисляет
+   vaia: повторение, вариация, аугментация, диминуция, ритмическое смещение, повтор контура. */
+const MOVES = [
+  { name: 'тема',           shift: 0, oct: 0,  scale: 1,   take: 0, lastX: 1,   sync: false, peak: 1 },
+  { name: 'повтор контура', shift: 2, oct: 0,  scale: 1,   take: 0, lastX: 1,   sync: false, peak: 1 },
+  { name: 'вопрос',         shift: 0, oct: 0,  scale: 1,   take: 3, lastX: 1,   sync: false, peak: 0.9, question: true },
+  { name: 'ответ',          shift: 0, oct: 0,  scale: 1,   take: 0, lastX: 2,   sync: false, peak: 1 },
+  { name: 'аугментация',    shift: 0, oct: -5, scale: 1.5, take: 0, lastX: 1,   sync: false, peak: 0.95 },
+  { name: 'смещение',       shift: 2, oct: 0,  scale: 1,   take: 0, lastX: 1,   sync: true,  peak: 1 },
+  { name: 'диминуция',      shift: 0, oct: 5,  scale: 0.6, take: 0, lastX: 1,   sync: false, peak: 0.55 },
+  { name: 'домой',          shift: 0, oct: 0,  scale: 1,   take: 0, lastX: 2.5, sync: false, peak: 1 },
+];
+let moveIdx = 0;
 
 /* Гармония под темой: открытые квинты, без терций — так «Дальний» и звучал. Меняется очень
    медленно, поэтому один и тот же мотив каждый раз окрашен иначе, хотя рисунок тот же. */
@@ -606,30 +650,51 @@ function rollChord() {
   chordStep += 1;
 }
 
-/** Одна фраза. Контур неизменен; меняются октава, длительности и ПОЛНОТА — иногда звучит только
-    первая половина, «вопрос», на который полная фраза отвечает через несколько ходов. */
+/** Одна фраза цикла. Контур неизменен ВСЕГДА — меняется всё остальное, и меняется ПО ПОРЯДКУ,
+    ходом цикла, а не случаем: восемь ходов складываются в арку, случайные вариации — нет. */
 function playPhrase() {
   if (!soundOn || melIdx < 0) { melTimer = setTimeout(playPhrase, 2000); return; }
   const m = MELODIES[melIdx];
-  const shift = pick([0, 0, 0, 2, -2]);                 // перенос по ступеням, чаще всего без переноса
-  const stretch = rnd(0.85, 1.35);
-  const half = Math.random() < 0.3;                     // «вопрос» — только начало мотива
-  const upper = Math.random() < 0.25 ? 5 : 0;           // иногда та же фраза октавой выше
-  const nn = half ? Math.ceil(m.steps.length / 2) : m.steps.length;
+  const mv = MOVES[moveIdx % MOVES.length];
+  const strong = new Set(m.strong);
+  const nn = mv.take > 0 ? Math.min(mv.take, m.steps.length) : m.steps.length;
 
-  let at = 0;
+  let cursor = 0;                                       // положение в ДОЛЯХ, не в секундах
   for (let i = 0; i < nn; i++) {
-    const idx = Math.min(SCALE.length - 1, Math.max(0, m.steps[i] + shift + upper));
-    const len = m.lens[i] * stretch;
-    melNote({ freq: SCALE[idx], at, len, peak: upper ? 0.055 : 0.095 });
-    // Тихий отзвук через несколько долей — он и «размазывает» фразу в перетекание.
-    if (Math.random() < 0.45) {
-      melNote({ freq: SCALE[Math.min(SCALE.length - 1, idx + 5)], at: at + len * 0.8, len: len * 0.7, peak: 0.028 });
+    const isLast = i === nn - 1;
+    const beats = m.beats[i] * mv.scale * (isLast ? mv.lastX : 1);
+
+    // П5: опорные ноты садятся на ЦЕЛУЮ долю. Округление ВВЕРХ, а не к ближайшей: нота никогда не
+    // должна поехать назад — это задвинуло бы её под предыдущую и съело бы паузу перед опорой,
+    // ради которой опора и существует.
+    let start = strong.has(i) ? Math.ceil(cursor - 1e-6) : cursor;
+    if (mv.sync && !strong.has(i)) start += 0.5;        // ход «смещение» — синкопа на полдоли
+
+    const idx = Math.min(SCALE.length - 1, Math.max(0, m.steps[i] + mv.shift + mv.oct));
+    // П1: дрожание ±40 мс. Без него сетка слышна как машинная.
+    const atSec = Math.max(0, start * BEAT + rnd(-0.04, 0.04));
+    const lenSec = beats * BEAT;
+    melNote({ freq: SCALE[idx], at: atSec, len: lenSec, peak: 0.095 * mv.peak });
+
+    // Отзвук квинтой выше через две трети ноты — он и размазывает фразу в перетекание (П7).
+    if (!isLast && Math.random() < 0.4) {
+      melNote({ freq: SCALE[Math.min(SCALE.length - 1, idx + 3)],
+                at: atSec + lenSec * 0.66, len: lenSec * 0.6, peak: 0.026 * mv.peak });
     }
-    at += len * rnd(0.55, 0.8);                         // ноты нарочно наезжают одна на другую
+    // П7: следующая входит, когда предыдущая прошла ~70 % — ноты физически накладываются.
+    // Последняя досчитывается ПОЛНОСТЬЮ: за ней обязана быть тишина, а не наезд.
+    cursor = start + beats * (isLast ? 1 : 0.7);
   }
-  const breath = at + rnd(1.8, 4.5) * (half ? 0.6 : 1);
-  melTimer = setTimeout(playPhrase, breath * 1000);
+
+  // П3+П4: за самой длинной последней нотой — пауза 2–4 доли; после «вопроса» короче, потому что
+  // незакрытая фраза требует продолжения, а закрытая — тишины.
+  const rest = rnd(2, 4) * (mv.question ? 0.55 : 1);
+
+  const lbl = $('movelbl');
+  if (lbl) lbl.textContent = `ход ${(moveIdx % MOVES.length) + 1} из 8 · ${mv.name}`;
+  moveIdx += 1;
+
+  melTimer = setTimeout(playPhrase, (cursor + rest) * BEAT * 1000);
 }
 
 /* =================================================================================================
@@ -885,6 +950,12 @@ $('dens').oninput = () => {
 };
 $('ov').oninput = () => { overlapPct = Number($('ov').value); $('ovlbl').textContent = overlapPct; };
 $('force').onclick = forceOverlap;
+$('bpm').oninput = () => {
+  const bpm = Number($('bpm').value);
+  BEAT = 60 / bpm;
+  $('bpmlbl').textContent = bpm;
+  $('beatlbl').textContent = BEAT.toFixed(2).replace('.', ',');
+};
 $('all').onclick = () => { SCENES.forEach((v) => { v.on = true; }); render(); };
 $('none').onclick = () => { SCENES.forEach((v) => { v.on = false; }); render(); };
 
@@ -901,8 +972,8 @@ function setMelody(i) {
     b.classList.toggle('on', Number(b.dataset.mel) === i);
   });
   if (armed && soundOn && m) {
-    chordStep = 0; rollChord();
-    chordTimer = setInterval(rollChord, 15000);
+    moveIdx = 0; chordStep = 0; rollChord();
+    chordTimer = setInterval(rollChord, 20 * BEAT * 1000);   // 20 долей, а не круглые секунды
     playPhrase();
   }
 }
