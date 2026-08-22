@@ -121,6 +121,9 @@
     <div class="row" style="margin-top:14px">
       <label class="sub" style="margin:0">пауза между сценами: в среднем <b id="denslbl">3,0</b> с
         <input id="dens" type="range" min="5" max="120" value="30"></label>
+      <label class="sub" style="margin:0">наложения: <b id="ovlbl">20</b> % · не больше трёх сразу
+        <input id="ov" type="range" min="0" max="60" value="20"></label>
+      <span class="sub" id="active" style="margin:0;min-width:120px">тихо</span>
       <button id="all" class="mini">включить все</button>
       <button id="none" class="mini">выключить все</button>
     </div>
@@ -274,6 +277,105 @@ function metal({ peak = 0.12, decay = 0.5, at = 0, partials = [520, 1170, 1810, 
     const s = ac.createGain(); s.gain.value = 0.45; g.connect(s); s.connect(verb);
   }
   src.start(t);
+}
+
+/* =================================================================================================
+   ПАЛИТРА ТЕМБРОВ — семь окрасок одного пика
+   =================================================================================================
+   Владелец: «пики у тебя не разнообразные, можно добавить разнообразия… добавить им обертонов,
+   реверберации, жужжания, искажения». Он прав: почти все пики были чистой волной, а чистая волна
+   при любой высоте звучит одинаково — разнообразие высот однообразия тембра не лечит.
+
+   Здесь семь окрасок, и КАЖДАЯ сцена выбирает себе одну ПРИ КАЖДОМ ЗАПУСКЕ. Отсюда двойной эффект:
+   внутри сцены прибор звучит как ОДИН прибор (окраска не скачет от ноты к ноте), а от запуска к
+   запуску та же сцена звучит иначе. Это разнообразие без каши.
+
+   Высоты по-прежнему из одной пентатоники — окраска меняет ТЕМБР, а не строй. */
+
+let _curveCache = null;
+/** Мягкое насыщение по tanh — то, что даёт «перегруз» без хрипа цифрового клиппинга. */
+function shaper(amount = 4) {
+  if (_curveCache && _curveCache.a === amount) return _curveCache.node;
+  const n = 1024, curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const x = (i * 2) / n - 1; curve[i] = Math.tanh(x * amount) / Math.tanh(amount); }
+  const ws = ac.createWaveShaper(); ws.curve = curve; ws.oversample = '4x';
+  _curveCache = { a: amount, node: ws };
+  return ws;
+}
+
+const COLOURS = ['чистый', 'колокол', 'стекло', 'жужжащий', 'перегруз', 'эхо', 'вауканье'];
+
+/** Один пик заданной окраски. Высота — из пентатоники, всё остальное решает окраска. */
+function beep({ freq, at = 0, len = 0.3, peak = 0.14, colour = 'чистый', send = 0.5 }) {
+  const t = now() + at;
+  const out = ac.createGain(); out.gain.value = 1; out.connect(blipBus);
+  const s = ac.createGain(); s.gain.value = send; out.connect(s); s.connect(verb);
+
+  const env = (node, p, a, d) => {
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(p, t + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+    node.connect(g); g.connect(out);
+    return g;
+  };
+  const osc = (f, type = 'sine') => { const o = ac.createOscillator(); o.type = type; o.frequency.value = f;
+                                      o.start(t); o.stop(t + len + 3.0); return o; };
+
+  if (colour === 'чистый') {
+    env(osc(freq), peak, 0.006, len);
+    env(osc(freq * 2), peak * 0.16, 0.006, len * 0.6);
+
+  } else if (colour === 'колокол') {
+    // НЕГАРМОНИЧЕСКИЕ обертоны трубчатого колокола: 1 : 2,76 : 5,40 : 8,93. Именно некратность
+    // даёт «звон», которого не бывает у чистого синуса, сколько его ни складывай с октавами.
+    [[1, 1, 1.0], [2.76, 0.42, 0.62], [5.40, 0.22, 0.4], [8.93, 0.12, 0.26]]
+      .forEach(([r, lv, dk]) => env(osc(freq * r), peak * lv, 0.004, len * dk * 2.2));
+
+  } else if (colour === 'стекло') {
+    [[1, 1, 1], [3.01, 0.34, 0.5], [5.02, 0.18, 0.3], [7.1, 0.09, 0.2]]
+      .forEach(([r, lv, dk]) => env(osc(freq * r), peak * lv, 0.002, len * dk));
+    burst({ ms: 4, peak: peak * 0.35, center: freq * 6, q: 3, at, send: 0.4 });   // призвук удара
+
+  } else if (colour === 'жужжащий') {
+    // Кольцевая модуляция: несущая умножается на низкий тон — отсюда «жужжание», а не вибрато.
+    const car = osc(freq, 'sawtooth');
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = freq * 4;
+    const ring = ac.createGain(); ring.gain.value = 0;
+    const mod = ac.createOscillator(); mod.type = 'sine'; mod.frequency.value = rnd(45, 95);
+    const ma = ac.createGain(); ma.gain.value = 1;
+    mod.connect(ma); ma.connect(ring.gain); mod.start(t); mod.stop(t + len + 0.4);
+    car.connect(lp); lp.connect(ring);
+    env(ring, peak * 1.5, 0.008, len);
+
+  } else if (colour === 'перегруз') {
+    const o = osc(freq, 'square');
+    const ws = shaper(6);
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = freq * rnd(1.6, 2.6); bp.Q.value = 2.2;
+    o.connect(ws); ws.connect(bp);
+    env(bp, peak * 0.8, 0.004, len * 0.8);
+
+  } else if (colour === 'эхо') {
+    // Слэпбэк: три быстрых повтора с затуханием — «отскок» от стены ангара, отдельно от общей
+    // реверберации, потому что он РИТМИЧЕН, а она размазана.
+    const d = ac.createDelay(1.0); d.delayTime.value = rnd(0.09, 0.16);
+    const fb = ac.createGain(); fb.gain.value = 0.42;
+    d.connect(fb); fb.connect(d); d.connect(out);
+    const g = env(osc(freq), peak, 0.005, len);
+    g.connect(d);
+    env(osc(freq * 2.01), peak * 0.2, 0.005, len * 0.5);
+
+  } else {  // вауканье
+    // Резонанс проезжает по ноте — «уау». Один голос, но слышно движение.
+    const o = osc(freq, 'sawtooth');
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 7;
+    bp.frequency.setValueAtTime(freq * 0.8, t);
+    bp.frequency.exponentialRampToValueAtTime(freq * rnd(3.2, 5.0), t + len * 0.55);
+    bp.frequency.exponentialRampToValueAtTime(freq * 1.1, t + len * 1.2);
+    o.connect(bp);
+    env(bp, peak * 1.3, 0.01, len * 1.1);
+  }
 }
 
 /** ДУГА: полосовой шум с быстрым СЛУЧАЙНЫМ трепетом амплитуды. Именно трепет отличает сварку от
@@ -506,41 +608,44 @@ const SCENES = [
     hint: 'система обходит узлы: три-четыре группы бипов и подтверждение в конце',
     what: 'Группы по 2–3 ноты пентатоники с паузами, финал — восходящая пара «готово»',
     play() {
+      // Окраска выбирается ОДИН раз на весь обход: внутри сцены это один прибор, а от запуска к
+      // запуску — каждый раз другой. Отсюда разнообразие без каши.
+      const c = pick(['чистый', 'жужжащий', 'перегруз', 'стекло', 'эхо']);
       let at = 0;
       const groups = 3 + Math.floor(Math.random() * 2);
       for (let g = 0; g < groups; g++) {
         const base = Math.floor(rnd(0, 3));
         const nn = 2 + Math.floor(Math.random() * 2);
         for (let i = 0; i < nn; i++) {
-          tone({ freq: PENTA_HI[base + i], peak: 0.15, decay: 0.22, at, send: 0.5 });
-          tone({ freq: PENTA_HI[base + i] * 2, peak: 0.03, decay: 0.14, at, send: 0.5 });
+          beep({ freq: PENTA_HI[base + i], peak: 0.14, len: 0.22, colour: c, at, send: 0.5 });
           at += rnd(0.15, 0.24);
         }
         at += rnd(0.35, 0.6);
       }
-      tone({ freq: N.Cs5, peak: 0.14, decay: 0.3, at, send: 0.6 });
-      tone({ freq: N.A5, peak: 0.14, decay: 0.6, at: at + 0.16, send: 0.6 });
-      return at + 0.8;
+      beep({ freq: N.Cs5, peak: 0.13, len: 0.3, colour: 'колокол', at, send: 0.7 });
+      beep({ freq: N.A5, peak: 0.13, len: 0.6, colour: 'колокол', at: at + 0.16, send: 0.7 });
+      return at + 0.9;
     } },
 
   { tag: 'КОНСОЛЬ', grp: 'приборы', on: true, dur: 4.2,
     hint: 'выдача данных: очередь частых чирпов, пауза, ещё очередь',
     what: 'Две-три очереди по 7–13 быстрых двухнотных чирпов, между ними паузы, в конце подтверждение',
     play() {
+      const c = pick(['перегруз', 'перегруз', 'жужжащий', 'стекло']);   // выдача данных любит грязь
       let at = 0;
       const runs = 2 + Math.floor(Math.random() * 2);
       for (let r = 0; r < runs; r++) {
         const nn = 7 + Math.floor(Math.random() * 7);
         for (let i = 0; i < nn; i++) {
           const k = Math.floor(Math.random() * 4);
-          tone({ freq: PENTA_HI[k], type: 'square', peak: 0.05, decay: 0.035, at, send: 0.25 });
-          tone({ freq: PENTA_HI[k + 1], type: 'square', peak: 0.05, decay: 0.05, at: at + 0.035, send: 0.25 });
+          beep({ freq: PENTA_HI[k], peak: 0.05, len: 0.035, colour: c, at, send: 0.25 });
+          beep({ freq: PENTA_HI[k + 1], peak: 0.05, len: 0.05, colour: c, at: at + 0.035, send: 0.25 });
           at += rnd(0.07, 0.13);
         }
         at += rnd(0.45, 0.9);
       }
-      tone({ freq: N.E5, peak: 0.12, decay: 0.4, at, send: 0.5 });
-      return at + 0.6;
+      beep({ freq: N.E5, peak: 0.12, len: 0.4, colour: 'колокол', at, send: 0.6 });
+      return at + 0.7;
     } },
 
   { tag: 'СОНАР', grp: 'приборы', on: true, dur: 7.5,
@@ -551,9 +656,17 @@ const SCENES = [
       const nn = 4 + Math.floor(Math.random() * 3);
       const gap = rnd(1.15, 1.5);
       const echoOn = 1 + Math.floor(Math.random() * (nn - 1));
+      // Два разных прибора: один со скольжением высоты (классический пинг), другой колокольный.
+      const glide = Math.random() < 0.5;
+      const c = pick(['колокол', 'стекло', 'эхо']);
       for (let i = 0; i < nn; i++) {
-        tone({ freq: N.Fs5, to: N.Cs5, peak: 0.17 * (1 - i * 0.06), decay: 0.6, at, send: 0.95 });
-        if (i === echoOn) tone({ freq: N.B4, to: N.A4, peak: 0.07, decay: 0.8, at: at + rnd(0.45, 0.75), send: 1.0 });
+        const p = 0.17 * (1 - i * 0.06);
+        if (glide) tone({ freq: N.Fs5, to: N.Cs5, peak: p, decay: 0.6, at, send: 0.95 });
+        else beep({ freq: N.Fs5, peak: p, len: 0.6, colour: c, at, send: 0.95 });
+        if (i === echoOn) {
+          if (glide) tone({ freq: N.B4, to: N.A4, peak: 0.07, decay: 0.8, at: at + rnd(0.45, 0.75), send: 1.0 });
+          else beep({ freq: N.B4, peak: 0.07, len: 0.8, colour: c, at: at + rnd(0.45, 0.75), send: 1.0 });
+        }
         at += gap;
       }
       return at;
@@ -565,9 +678,12 @@ const SCENES = [
     play() {
       let at = 0, gap = rnd(0.22, 0.3);
       const nn = 8 + Math.floor(Math.random() * 7);
+      // ДВЕ РАЗНЫЕ окраски на две ноты — «бип» и «боп» звучат разными приборами, как в переговорах.
+      const cA = pick(['чистый', 'жужжащий', 'вауканье']);
+      const cB = pick(['перегруз', 'стекло', 'эхо']);
       for (let i = 0; i < nn; i++) {
-        tone({ freq: i % 2 ? N.E5 : N.A4, type: 'triangle', peak: 0.14 * (1 - i / (nn * 1.4)),
-               decay: 0.16, at, send: 0.4 });
+        beep({ freq: i % 2 ? N.E5 : N.A4, colour: i % 2 ? cA : cB,
+               peak: 0.13 * (1 - i / (nn * 1.4)), len: 0.16, at, send: 0.4 });
         at += gap; gap *= 0.97;
       }
       return at + 0.3;
@@ -578,12 +694,14 @@ const SCENES = [
     what: 'Восходящий свип, трёхнотное арпеджио вверх и пара нот «готов»',
     play() {
       tone({ freq: 120, to: 620, type: 'sawtooth', peak: 0.05, attack: 0.15, decay: 1.1, send: 0.4 });
+      const c = pick(['стекло', 'колокол', 'вауканье']);
       let at = 1.15;
-      [0, 2, 4].forEach((k, i) => tone({ freq: PENTA_HI[k], peak: 0.11, decay: 0.3, at: at + i * 0.14, send: 0.6 }));
+      [0, 2, 4].forEach((k, i) => beep({ freq: PENTA_HI[k], peak: 0.11, len: 0.3, colour: c,
+                                         at: at + i * 0.14, send: 0.6 }));
       at += 0.75;
-      tone({ freq: N.Cs5, peak: 0.12, decay: 0.35, at, send: 0.6 });
-      tone({ freq: N.E5, peak: 0.12, decay: 0.7, at: at + 0.2, send: 0.6 });
-      return at + 1.0;
+      beep({ freq: N.Cs5, peak: 0.12, len: 0.35, colour: 'колокол', at, send: 0.7 });
+      beep({ freq: N.E5, peak: 0.12, len: 0.7, colour: 'колокол', at: at + 0.2, send: 0.7 });
+      return at + 1.1;
     } },
 
   { tag: 'РАДАР', grp: 'работа дока', on: true, dur: 7.0,
@@ -593,11 +711,12 @@ const SCENES = [
       let at = 0;
       const nn = 3 + Math.floor(Math.random() * 2);
       const hit = Math.floor(Math.random() * nn);
+      const c = pick(['стекло', 'колокол', 'перегруз', 'эхо']);
       for (let i = 0; i < nn; i++) {
         const dur = rnd(1.1, 1.5);
         wave({ at, dur, from: 300, to: 2300, level: 0.08 });
-        tone({ freq: N.Fs5, peak: 0.10, decay: 0.35, at: at + dur * 0.45, send: 0.8 });
-        if (i === hit) tone({ freq: N.A5, peak: 0.12, decay: 0.5, at: at + dur * 0.62, send: 0.9 });
+        beep({ freq: N.Fs5, peak: 0.10, len: 0.35, colour: c, at: at + dur * 0.45, send: 0.8 });
+        if (i === hit) beep({ freq: N.A5, peak: 0.12, len: 0.5, colour: 'колокол', at: at + dur * 0.62, send: 0.95 });
         at += dur + rnd(0.35, 0.7);
       }
       return at;
@@ -608,19 +727,20 @@ const SCENES = [
     what: 'Цикл «жужжание → две ноты → волна вверх», три раза, в конце длинное подтверждение',
     play() {
       let at = 0;
+      const col = pick(['жужжащий', 'перегруз', 'стекло', 'вауканье']);
       for (let c = 0; c < 3; c++) {
         const bz = rnd(0.55, 0.95);
         amBuzz({ at, dur: bz, freq: rnd(180, 250), rate: rnd(26, 42), level: 0.06 });
         at += bz + 0.12;
-        tone({ freq: PENTA_HI[c], peak: 0.10, decay: 0.12, at, send: 0.4 });
-        tone({ freq: PENTA_HI[c + 2], peak: 0.10, decay: 0.16, at: at + 0.14, send: 0.4 });
+        beep({ freq: PENTA_HI[c], peak: 0.10, len: 0.12, colour: col, at, send: 0.4 });
+        beep({ freq: PENTA_HI[c + 2], peak: 0.10, len: 0.16, colour: col, at: at + 0.14, send: 0.4 });
         at += 0.42;
         const wv = rnd(0.9, 1.3);
         wave({ at, dur: wv, from: 240, to: 2800, level: 0.07 });
         at += wv + rnd(0.15, 0.45);
       }
-      tone({ freq: N.A4, peak: 0.10, decay: 0.5, at, send: 0.7 });
-      tone({ freq: N.E5, peak: 0.10, decay: 1.0, at: at + 0.22, send: 0.7 });
+      beep({ freq: N.A4, peak: 0.10, len: 0.5, colour: 'колокол', at, send: 0.8 });
+      beep({ freq: N.E5, peak: 0.10, len: 1.0, colour: 'колокол', at: at + 0.22, send: 0.8 });
       return at + 1.2;
     } },
 
@@ -723,6 +843,7 @@ $('dens').oninput = () => {
   meanGapMs = Number($('dens').value) * 100;
   $('denslbl').textContent = (meanGapMs / 1000).toFixed(1).replace('.', ',');
 };
+$('ov').oninput = () => { overlapPct = Number($('ov').value); $('ovlbl').textContent = overlapPct; };
 $('all').onclick = () => { SCENES.forEach((v) => { v.on = true; }); render(); };
 $('none').onclick = () => { SCENES.forEach((v) => { v.on = false; }); render(); };
 
@@ -752,23 +873,49 @@ function setMelody(i) {
 // Пауза отсчитывается ОТ КОНЦА предыдущей сцены, а не от её начала: иначе длинная сварка накладывалась
 // бы на всё подряд и снова вышла бы каша. Распределение экспоненциальное — так в природе приходят
 // независимые события, и паузы получаются разной длины без длинных провалов.
+// 🔴 НАЛОЖЕНИЯ — слово владельца: «допускай наложение звуков друг на дружку. Пусть это будет
+// статистически не часто, но позволяй сразу нескольким звукам играть, но не больше трёх».
+//
+// Два ограничителя, и они разные. ВЕРОЯТНОСТЬ решает, КАК ЧАСТО следующая сцена входит, не дождавшись
+// конца предыдущей («не часто»). ПОТОЛОК в три голоса — жёсткий: он не даёт редким совпадениям
+// сложиться в кучу, даже если случай выпал трижды подряд. Одной вероятности мало: она ограничивает
+// среднее, а слышно — пик.
+const MAX_TOGETHER = 3;
+let active = 0, overlapPct = 20;
+
 function nextGap() { return Math.max(400, -Math.log(Math.max(1e-6, Math.random())) * meanGapMs); }
-function scheduleScene() {
-  clearTimeout(sceneTimer);
-  sceneTimer = setTimeout(() => {
-    let sceneMs = 0;
-    if (soundOn) {
-      const live = SCENES.filter((v) => v.on);
-      if (live.length) {
-        const v = pick(live);
-        const dur = v.play() || v.dur;
-        sceneMs = dur * 1000;
-        const tr = document.querySelector(`tr[data-v="${v.tag}"]`);
-        if (tr) { tr.classList.add('lit'); setTimeout(() => tr.classList.remove('lit'), sceneMs); }
-      }
-    }
-    sceneTimer = setTimeout(scheduleScene, sceneMs);
-  }, nextGap());
+
+function startScene() {
+  const live = SCENES.filter((v) => v.on);
+  if (!live.length) return 0;
+  const v = pick(live);
+  const ms = (v.play() || v.dur) * 1000;
+  active += 1;
+  setTimeout(() => { active = Math.max(0, active - 1); paintActive(); }, ms);
+  paintActive();
+  const tr = document.querySelector(`tr[data-v="${v.tag}"]`);
+  if (tr) { tr.classList.add('lit'); setTimeout(() => tr.classList.remove('lit'), ms); }
+  return ms;
+}
+
+function tickScene() {
+  if (!soundOn) { sceneTimer = setTimeout(tickScene, 500); return; }
+  let waitMs;
+  if (active >= MAX_TOGETHER) {
+    waitMs = 700;                                            // мест нет — ждём, пока освободится
+  } else {
+    const ms = startScene();
+    // Наложение = НЕ дожидаться конца. Иначе — конец сцены плюс обычная пауза.
+    waitMs = (Math.random() * 100 < overlapPct)
+      ? Math.max(400, ms * rnd(0.15, 0.55))
+      : ms + nextGap();
+  }
+  sceneTimer = setTimeout(tickScene, Math.max(300, waitMs));
+}
+function scheduleScene() { clearTimeout(sceneTimer); tickScene(); }
+function paintActive() {
+  const e = $('active');
+  if (e) e.textContent = active === 0 ? 'тихо' : `звучит сразу: ${active}`;
 }
 
 /* ---- имитация прогона: отдельный факт, отдельный канал ---------------------------------------------- */
