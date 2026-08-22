@@ -129,16 +129,20 @@ s = s.replace(TILE_STYLE, `${TILE_STYLE}
   .livemark i:nth-child(2){inset:9px;border-top-color:var(--fire);
               border-right-color:rgba(255,122,60,.3);animation-duration:1.6s;animation-direction:reverse}
   .livemark i:nth-child(3){inset:18px;border-top-color:#e6edf3;animation-duration:3.4s}
-  .livemark .lamp{position:absolute;inset:18px;border-radius:50%;background:#f85149;opacity:0;
+  .livemark .lamp{position:absolute;inset:11px;border-radius:50%;background:#f85149;opacity:0;
                   transition:opacity .4s}
-  /* Прогон встал: кольца ВСТАЮТ, лампа начинает пульсировать. Знак не замирает ни на секунду —
-     иначе «прогон встал» и «окно умерло» слились бы в одно неразличимое сообщение. */
-  body.hung .livemark i{animation:none;border-color:transparent;border-top-color:#5a2a28}
-  body.hung .livemark .lamp{opacity:1;animation:kagolamp 2.2s ease-in-out infinite}
-  @keyframes kagolamp{
-    0%,100%{opacity:.16;box-shadow:0 0 0 rgba(248,81,73,0)}
-    50%    {opacity:1;  box-shadow:0 0 16px 3px rgba(248,81,73,.55)}
-  }`);
+  /* ПРОГОН ВСТАЛ. Кольца ВСТАЮТ — но знак не замирает: лампа продолжает мигать, и это она
+     доказывает, что жива машина. Замри знак целиком, и «прогон встал» слилось бы с «окно умерло».
+     Облик задан владельцем 2026-08-22: «убери радиоволны, только лампочку оставь, сделай её
+     больше, окружи застывшими секторами колец в разнобой расставленными, и медленнее мерцай в два
+     раза». Поэтому: свечения нет вовсе, лампа крупнее (inset 11 против 18), кольца замирают на
+     РАЗНЫХ углах, период 4,4 с вместо 2,2. */
+  body.hung .livemark i{animation:none;border-color:transparent;border-top-color:#6b3330}
+  body.hung .livemark i:nth-child(1){transform:rotate(22deg);border-right-color:#4a2422}
+  body.hung .livemark i:nth-child(2){transform:rotate(196deg)}
+  body.hung .livemark i:nth-child(3){transform:rotate(107deg);border-right-color:#4a2422}
+  body.hung .livemark .lamp{opacity:1;animation:kagolamp 4.4s ease-in-out infinite}
+  @keyframes kagolamp{ 0%,100%{opacity:.14} 50%{opacity:1} }`);
 
 // The state line is now the column's first element, so its top margin has to go — the mockup's
 // `margin:14px 0 0` was spacing it away from the tile ABOVE it, and there is no tile above it now.
@@ -173,6 +177,53 @@ s = s.replace('<div class="stage">',
   const paused = 'body.hung .spin,body.hung .arm,body.hung .rock{animation-play-state:paused!important}';
   must(s.includes(paused), 'правило паузы кадров не найдено в макете');
   s = s.replace(paused, '/* пауза кадров снята словом владельца 2026-08-22 — кадры идут ВСЕГДА */');
+}
+
+// ---- 3d. ОРГАНЫ УПРАВЛЕНИЯ ЗВУКОМ — в шапке справа, слово владельца 2026-08-22.
+//
+// «Делаем дроп-даун меню, в котором можно выбрать одну из трёх тем, или выкл. И можно вкл/выкл
+// рабочие звуки.» Шапка макета — flex-строка с переносом, поэтому полоса с `margin-left:auto`
+// встаёт справа, ничего не сдвигая: композиция, принятая владельцем, не тронута.
+//
+// Кнопка «ЗВУК» — не украшение, а РАЗРЕШЕНИЕ: браузер не создаёт звук без действия человека, и до
+// первого щелчка `AudioContext` не существует вовсе.
+{
+  const head = '  <span class="what" id="head-what">Выполняется автоматический тюнинг-прогон видеокарты</span>';
+  must(s.includes(head), 'подпись шапки не найдена после переименования');
+  s = s.replace(head, `${head}
+  <div class="sndbar">
+    <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
+    <select id="snd-theme" title="музыкальная тема">
+      <option value="0">Тема: Маяк</option>
+      <option value="1">Тема: Дрейф</option>
+      <option value="2">Тема: Позывной</option>
+      <option value="-1">Тема: выкл</option>
+    </select>
+    <label class="sndchk"><input type="checkbox" id="snd-work" checked> рабочие звуки</label>
+    <span class="sndmove" id="snd-move"></span>
+  </div>`);
+
+  const anchor = '  .livewrap{display:flex;align-items:center;gap:14px;margin:0 0 12px}';
+  must(s.includes(anchor), 'якорь стилей живого знака не найден');
+  s = s.replace(anchor, `${anchor}
+  .sndbar{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .sndbar select,.sndbar button,.sndbar label{font:inherit;font-size:13px;border-radius:8px;
+        border:1px solid #232c38;background:#1c242e;color:#e6edf3;padding:7px 11px}
+  .sndbar select{cursor:pointer}
+  .sndbar .sndchk{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+  .sndbar .sndchk input{accent-color:var(--fire);cursor:pointer}
+  .sndbtn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
+  .sndbtn .dot{width:9px;height:9px;border-radius:50%;background:#8b98a5}
+  .sndbtn.on{border-color:var(--ok);color:#c7f0cd}
+  .sndbtn.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .sndmove{font-size:12px;color:#8b98a5;min-width:132px}`);
+}
+
+// ---- 3e. ЗВУКОВОЙ ДВИЖОК встраивается ПЕРЕД проводкой: она на него ссылается.
+{
+  const sound = readFileSync(join('assets', 'dashboard', '_sound.js'), 'utf8');
+  must(s.includes('</body>'), 'нет закрывающего body для движка звука');
+  s = s.replace('</body>', `<script>\n${sound}</script>\n</body>`);
 }
 
 // ---- 4. the wiring

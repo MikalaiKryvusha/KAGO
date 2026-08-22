@@ -224,6 +224,51 @@ function connect() {
   };
 }
 
+/* ==================================================================================================
+   ЗВУК — второй канал обратной связи (`homeworks/04`, движок в `_sound.js`)
+   ==================================================================================================
+   Звук НИЧЕМ не обусловлен: он идёт, пока открыто окно и включён, и доказывает, что жива МАШИНА.
+   Что встал прогон — говорят слова, цвет и остановка колец живого знака. Это то же правило, что и
+   у анимации, и по той же причине.
+
+   ВЫБОР ЧЕЛОВЕКА ЗАПОМИНАЕТСЯ. Окно поднимается заново на каждый прогон, а прогонов за вечер
+   бывает десяток: заставлять владельца каждый раз включать звук и выбирать тему значит гарантированно
+   довести его до того, что он выключит звук навсегда. Хранится в `localStorage` — он переживает
+   перезапуск окна и не уезжает никуда за пределы этой машины.
+   ЗВУК ПРИ ЭТОМ НЕ ПОДНИМАЕТСЯ САМ: браузер не даёт звучать без действия человека, поэтому
+   восстановленное «включено» лишь ждёт первого щелчка. */
+const SND_KEY = 'kago.sound';
+const sndLoad = () => {
+  try { return JSON.parse(localStorage.getItem(SND_KEY)) || {}; } catch (e) { return {}; }
+};
+const sndSave = (o) => { try { localStorage.setItem(SND_KEY, JSON.stringify(o)); } catch (e) { /* приватный режим */ } };
+
+function wireSound() {
+  const btn = $('snd-btn'), lbl = $('snd-lbl'), sel = $('snd-theme'), work = $('snd-work'), move = $('snd-move');
+  if (!btn || typeof KagoSound === 'undefined') return;      // страница собрана без звука — не падаем
+  const saved = sndLoad();
+  if (Number.isFinite(saved.theme)) sel.value = String(saved.theme);
+  if (typeof saved.work === 'boolean') work.checked = saved.work;
+
+  const paint = () => {
+    btn.classList.toggle('on', KagoSound.on);
+    lbl.textContent = KagoSound.on ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ';
+    if (!KagoSound.on) move.textContent = '';
+  };
+  const remember = () => sndSave({ on: KagoSound.on, theme: Number(sel.value), work: work.checked });
+
+  KagoSound.onMove((t) => { if (KagoSound.on) move.textContent = t; });
+
+  btn.addEventListener('click', () => {
+    const on = KagoSound.toggle();
+    if (on) { KagoSound.setTheme(Number(sel.value)); KagoSound.setWork(work.checked); }
+    paint(); remember();
+  });
+  sel.addEventListener('change', () => { KagoSound.setTheme(Number(sel.value)); remember(); });
+  work.addEventListener('change', () => { KagoSound.setWork(work.checked); remember(); });
+  paint();
+}
+
 /* Стенные часы браузера — единственное на этой странице, что НЕ приходит с прогона, и это
    намеренно: они обязаны идти, когда всё остальное встало. */
 function wallClock() {
@@ -234,5 +279,6 @@ function wallClock() {
 wallClock();
 setInterval(wallClock, 1000);
 
+wireSound();
 requestAnimationFrame(frame);
 connect();
