@@ -22,10 +22,12 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-phases%200%2C1%2C3%2C4%20closed%20%C2%B7%20undervolt%20measured%20%E2%88%927.71%20W-E67E22.svg?style=flat-square)](STATUS.md)
+[![Status](https://img.shields.io/badge/Status-v0.9%20%C2%B7%20burn%20reaches%20300%20W%20%C2%B7%20edge%20found%20live-E67E22.svg?style=flat-square)](STATUS.md)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
+
+<p align="center"><strong>Version 0.9 — Furnace</strong> · 2026-08-22</p>
 
 <p align="center">
   <a href="#1-general">General</a> · <a href="#2-where-the-project-actually-is">Status</a> · <a href="#3-the-method">The method</a> · <a href="#4-the-four-modes">Modes</a> · <a href="#5-requirements">Requirements</a> · <a href="#6-built-with-kaif">KAIF</a>
@@ -84,10 +86,12 @@ back on command. **The owner-facing shell is on the desktop too:** four shortcut
 pre-registered elevated tasks, the last verified apply is remembered and re-applied at logon through
 the same gates, a passive tray icon shows the live mode (kill it — nothing happens to the card),
 and the three working modes refuse honestly until phase 6 qualifies their numbers —
-an unproven undervolt cannot be applied by a double-click. The search engine exists and judges a
-candidate by three different load shapes at once, taking the worst verdict — but it has not yet
-measured this card's edge, and it refuses to report one until it can prove the write it made
-actually cheapened the clock it tested.
+an unproven undervolt cannot be applied by a double-click. The search engine exists, judges a
+candidate by three different load shapes at once and takes the worst verdict — and **it has now found
+this card's edge on live silicon**: at the top of the range the card survives 870 mV and hangs the
+machine at 865, reproduced on two adjacent frequencies in independent sittings. A hang is a planned
+path here, not an accident: the intent is written and `fsync`-ed before the first byte reaches the
+card, so the rung that killed the machine names itself on the next launch.
 
 **The undervolt is measured, not claimed.** With the whole voltage/frequency curve raised and nothing
 offered above the clock the card already delivered, it draws **7.71 W (5.6 %) less and runs 5 °C cooler at
@@ -117,9 +121,13 @@ computes. The throughput half of that figure did not survive: measured across se
 stock workload varies **4.3 %**, so performance is judged on the delivered clock, which is exact.
 
 **And the load matters more than the meter.** A real path-traced game load drives this card to **300 W,
-99 % and 77 °C**; KAGO's own compute workloads reach 137 W at the same reported utilization. So every
-stability verdict so far was earned at half the card's power envelope, and that limit is stated here
-rather than left for a reader to discover.
+99 % and 77 °C**. KAGO's original compute workload reached 137 W at the same reported utilization — half
+the envelope — and read *nothing* from VRAM, so memory faults were invisible to it by construction. That
+was the project's largest measured debt, and v0.9 pays it: the burn now holds the card at **305 W median
+with the driver reporting `sw_power_cap`**, moving **~5 TB through VRAM in ten seconds**, at 75 °C. The
+optimum turned out to be a *blend* — too little arithmetic and the cores stall on memory (207 W with more
+traffic than the winner), too much and the memory pipe drains (229 W). Every unit it loads folds its
+result into the same checksum, so a fault anywhere still moves the oracle's number.
 
 ```bash
 npm run gpu:info
@@ -175,6 +183,8 @@ So KAGO does it differently:
 | **Add the guardband** | The shipped voltage sits **at least four curve steps, and never less than 25 mV**, above the measured failure point. |
 | **Diverse workloads** | Branchy code and arithmetic-dense code fail differently, and the lowest safe voltage varies by ~100 mV between programs. A point's threshold is the **worst** result across the whole set, never the first one found. |
 | **Transients, not just load** | Supply noise matters more than temperature here, so the hard test is rapid load changes — not a flat 100 % burn. |
+| **A burn that reaches the power limit** | The trial load holds the card **at its 300 W ceiling** and moves **terabytes through VRAM** — measured 305 W median, the driver reporting `sw_power_cap`, against 233 W and *zero* memory traffic for the earlier load. A voltage proved under a third of the electrical stress a game applies is proved against the wrong load. |
+| **Burned at the frequency being tuned** | A burn that reaches the power limit also clamps the clock, so the tool **measures which frequency the card actually ran at** and re-burns the rung with a weaker load until the card sits where it is being tuned. A verdict recorded against a frequency the burn never ran at is worse than no verdict. |
 | **Bind to the driver** | Every profile records the driver and VBIOS it was proved against. A driver update invalidates it until re-validated. |
 
 The measurements behind each of these are cited in
@@ -279,10 +289,12 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Состояние](https://img.shields.io/badge/Состояние-фазы%200%2C1%2C3%2C4%20закрыты%20%C2%B7%20андервольт%20измерен%20%E2%88%927%2C71%20Вт-E67E22.svg?style=flat-square)](STATUS.md)
+[![Состояние](https://img.shields.io/badge/Состояние-v0.9%20%C2%B7%20прожиг%20берёт%20300%20Вт%20%C2%B7%20край%20найден%20живьём-E67E22.svg?style=flat-square)](STATUS.md)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
+
+<p align="center"><strong>Версия 0.9 — Furnace</strong> · 2026-08-22</p>
 
 <p align="center">
   <a href="#1-общие-сведения">Общие сведения</a> · <a href="#2-где-проект-находится-на-самом-деле">Состояние</a> · <a href="#3-методика">Методика</a> · <a href="#4-четыре-режима">Режимы</a> · <a href="#5-что-нужно">Что нужно</a> · <a href="#6-собран-на-kaif">KAIF</a>
@@ -340,9 +352,11 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 восстанавливается при входе в систему через те же ворота, пассивная иконка в трее показывает
 активный режим (убьёте её — с картой не случится ничего), а три рабочих режима честно отказывают,
 пока фаза 6 не примет их числа, — недоказанный андервольт двойным кликом не применяется. Движок
-поиска написан и судит кандидата сразу тремя разными формами нагрузки, беря худший вердикт, — но
-края этой карты он ещё не измерил и отказывается называть его, пока не докажет, что сделанная
-запись действительно удешевила проверяемую частоту.
+поиска написан, судит кандидата сразу тремя разными формами нагрузки и берёт худший вердикт — и
+**край этой карты он уже нашёл на живом кремнии**: наверху диапазона карта выдерживает 870 мВ и вешает
+машину на 865, воспроизведено на двух соседних частотах в независимых заходах. Зависание здесь —
+штатный путь, а не авария: намерение записывается и `fsync`-ится до первого байта в карту, поэтому
+ступень, убившая машину, называет себя сама на следующем запуске.
 
 **Андервольт измерен, а не заявлен.** Когда вся кривая «напряжение — частота» поднята, а выше той частоты,
 которую карта и так выдавала, не предлагается ничего, она берёт **на 7,71 Вт (5,6 %) меньше и работает на
@@ -373,9 +387,14 @@ npm run phase1:accept
 точна.
 
 **И нагрузка важнее прибора.** Настоящая игровая нагрузка с путевой трассировкой загоняет эту карту в
-**300 Вт, 99 % и 77 °C**, а собственные вычислительные нагрузки KAGO дают 137 Вт при той же заявленной
-загрузке. Значит все вердикты о стабильности пока получены при половинном конверте карты — и этот предел
-назван здесь, а не оставлен читателю на самостоятельное открытие.
+**300 Вт, 99 % и 77 °C**. Прежняя вычислительная нагрузка KAGO давала 137 Вт при той же заявленной
+загрузке — половина конверта — и **не читала из видеопамяти ни байта**, то есть отказы памяти были ей
+невидимы по построению. Это был самый крупный измеренный долг проекта, и версия 0.9 его закрывает:
+прожиг держит карту на **305 Вт медианы при `sw_power_cap` от драйвера**, прогоняя **около 5 ТБ через
+видеопамять за десять секунд**, при 75 °C. Оптимум оказался *смесью*: мало арифметики — ядра стоят в
+ожидании памяти (207 Вт при трафике БОЛЬШЕМ, чем у победителя), много — сохнет конвейер памяти
+(229 Вт). Каждый нагруженный блок складывает результат в ту же контрольную сумму, поэтому отказ любого
+из них по-прежнему двигает число оракула.
 
 ```bash
 npm run gpu:info
@@ -430,6 +449,8 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 | **Добавить запас** | Отгружаемое напряжение стоит **минимум на четыре шага сетки и не ближе 25 мВ** над измеренным порогом сбоя. |
 | **Разные нагрузки** | Ветвистый код и счётный отказывают по-разному, а самое низкое безопасное напряжение гуляет между программами на ~100 мВ. Порог ЧАСТОТЫ — **худший** результат по всему набору, а не первый найденный. |
 | **Переходы, а не просто нагрузка** | Шум питания тут значит больше температуры, поэтому тяжёлый тест — это быстрая смена нагрузки, а не ровные 100 %. |
+| **Прожиг, упирающийся в предел мощности** | Испытательная нагрузка держит карту **на её потолке в 300 Вт** и гоняет **терабайты через видеопамять** — замерено 305 Вт медианы при `sw_power_cap` от драйвера, против 233 Вт и *нулевого* трафика памяти у прежней. Напряжение, доказанное при трети той электрической нагрузки, что даёт игра, доказано не тем. |
+| **Прожиг идёт на настраиваемой частоте** | Прожиг, дошедший до предела мощности, зажимает и частоту — поэтому инструмент **измеряет, на какой частоте карта реально шла**, и переигрывает ступень ослабленной нагрузкой, пока карта не сядет туда, что настраивается. Вердикт о частоте, на которой прожиг не шёл, хуже, чем отсутствие вердикта. |
 | **Привязка к драйверу** | Профиль записывает драйвер и VBIOS, на которых был доказан. Обновление драйвера делает его недействительным до перепроверки. |
 
 Измерения под каждым пунктом названы в
