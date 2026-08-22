@@ -331,27 +331,41 @@ const KagoSound = (() => {
    *  одного движения. Без торможения получился бы обрубленный писк, а не механизм.
    *  Зубчатый призвук — вторая гармоника с лёгкой расстройкой: редуктор, а не чистый мотор.
    *  В конце хода — мягкий стук: рука пришла в позицию. */
-  function servo({ at = 0, dur = 0.55, top = 320, level = 0.075 }) {
+  function servo({ at = 0, dur = 1.0, top = 250, level = 0.06 }) {
     const t = now() + at;
-    const o = ac.createOscillator(); o.type = 'sawtooth';
-    o.frequency.setValueAtTime(top * 0.28, t);
-    o.frequency.exponentialRampToValueAtTime(top, t + dur * 0.32);
-    o.frequency.setValueAtTime(top, t + dur * 0.66);
-    o.frequency.exponentialRampToValueAtTime(top * 0.3, t + dur);
-    const gear = ac.createOscillator(); gear.type = 'square';
+
+    // ТРЕУГОЛЬНИК ВМЕСТО ПИЛЫ — та же причина, что и у турбины: пила несёт полный набор гармоник и
+    // читается как резкость. У привода это особенно слышно, потому что ход короткий и звук голый.
+    const o = ac.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(top * 0.22, t);
+    // РАЗГОН И ТОРМОЖЕНИЕ ЗАНИМАЮТ БОЛЬШЕ, ЧЕМ ПОЛКА. Прежде привод выходил на скорость за треть
+    // хода и стоял на ней две трети — это и слышалось как рывок. Тяжёлая рука разгоняется дольше,
+    // чем едет, и тормозит ещё дольше, чем разгоняется.
+    o.frequency.exponentialRampToValueAtTime(top, t + dur * 0.42);
+    o.frequency.setValueAtTime(top, t + dur * 0.55);
+    o.frequency.exponentialRampToValueAtTime(top * 0.24, t + dur);
+
+    // Редуктор вдвое тише и тоже без пилы: он призвук, а не голос.
+    const gear = ac.createOscillator(); gear.type = 'triangle';
     gear.frequency.setValueAtTime(top * 2.02, t);
-    gear.frequency.exponentialRampToValueAtTime(top * 2.02 * 1.05, t + dur);
-    const gg = ac.createGain(); gg.gain.value = 0.12;
-    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = top * 6; lp.Q.value = 1.4;
+    gear.frequency.exponentialRampToValueAtTime(top * 2.02 * 1.04, t + dur);
+    const gg = ac.createGain(); gg.gain.value = 0.055;
+
+    // Фильтр ниже и шире: было top*6 при Q 1,4 — оттуда бралась вся визгливость.
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = top * 3; lp.Q.value = 0.8;
+
     const g = ac.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(level, t + 0.04);
-    g.gain.setValueAtTime(level, t + dur * 0.7);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.05);
+    g.gain.exponentialRampToValueAtTime(level, t + dur * 0.22);   // вход мягкий, а не щелчком
+    g.gain.setValueAtTime(level, t + dur * 0.62);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
     o.connect(lp); gear.connect(gg); gg.connect(lp); lp.connect(g); g.connect(blipBus);
-    const sd = ac.createGain(); sd.gain.value = 0.3; g.connect(sd); sd.connect(verb);
-    o.start(t); gear.start(t); o.stop(t + dur + 0.1); gear.stop(t + dur + 0.1);
-    metal({ peak: 0.05, decay: 0.16, at: at + dur, partials: [380, 890, 1520] });
+    const sd = ac.createGain(); sd.gain.value = 0.4; g.connect(sd); sd.connect(verb);
+    o.start(t); gear.start(t); o.stop(t + dur + 0.2); gear.stop(t + dur + 0.2);
+
+    // Стук позиционирования приглушён и уведён вниз: рука ПРИХОДИТ в позицию, а не ударяется.
+    metal({ peak: 0.028, decay: 0.22, at: at + dur, partials: [260, 610, 1040] });
+
   }
 
   /** БОЛГАРКА — рез по металлу. Три вещи, без которых это просто шум:
@@ -360,37 +374,80 @@ const KagoSound = (() => {
    *    2. визг реза — узкий полосовой шум 3–7 кГц с быстрым трепетом: диск идёт по металлу неровно;
    *    3. ИСКРЫ — десятки крошечных уколов на 5–9 кГц вразнобой, каждый своей громкости.
    *  Без искр рез звучит стерильно, без просадки — фальшиво. */
-  function grinder({ at = 0, dur = 1.6, level = 0.085 }) {
+  function grinder({ at = 0, dur = 1.6, level = 0.05, spinUp = false }) {
     const t = now() + at;
-    const motor = ac.createOscillator(); motor.type = 'sawtooth';
-    motor.frequency.setValueAtTime(240, t);
-    motor.frequency.exponentialRampToValueAtTime(168, t + 0.10);      // просадка под нагрузкой
-    motor.frequency.setValueAtTime(168, t + dur - 0.18);
-    motor.frequency.exponentialRampToValueAtTime(255, t + dur);       // отпустило
-    const mbp = ac.createBiquadFilter(); mbp.type = 'bandpass'; mbp.frequency.value = 900; mbp.Q.value = 1.1;
-    const mg = ac.createGain(); mg.gain.value = 0.35;
 
-    const cut = noise(dur + 0.08);
-    const cbp = ac.createBiquadFilter(); cbp.type = 'bandpass';
-    cbp.frequency.value = rnd(3800, 6200); cbp.Q.value = 1.5;
-    const cg = ac.createGain();
-    cg.gain.setValueAtTime(0.0001, t);
-    cg.gain.exponentialRampToValueAtTime(level, t + 0.05);
-    let k = t + 0.06;
-    while (k < t + dur) { cg.gain.exponentialRampToValueAtTime(rnd(level * 0.3, level * 1.1), k); k += rnd(0.01, 0.045); }
-    cg.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.06);
+    /* ПОЧЕМУ ПРЕЖНЯЯ ВЕРСИЯ ЗВУЧАЛА ПАРОВОЗОМ, дословно по слуху владельца: «болгарка не похожа на
+       болгарку, а похожа на паровоз». Две причины, обе в реализации, а не в громкости:
+         1. МОТОР БЫЛ НИЗКИМ — пила 240 -> 168 Гц. У болгарки диск идёт под 11 000 об/мин, и её
+            голос это ВЫСОКИЙ ровный вой около двух килогерц, а не басовитое урчание;
+         2. ТРЕПЕТ ШУМА БЫЛ ГЛУБОКИМ И МЕДЛЕННЫМ — провалы амплитуды каждые 10–45 мс. Медленная
+            глубокая пульсация низкого тона это буквально чух-чух. Рез металла пульсирует НАМНОГО
+            быстрее и НАМНОГО мельче: диск идёт по шву неровно, но не рывками.
+       Отсюда лечение: тон поднят на порядок, пульсация переведена в быструю мелкую модуляцию
+       (70 Гц вместо 20–100 мс провалов), общий уровень опущен с 0,085 до 0,05. */
 
-    const g = ac.createGain(); g.gain.value = 1;
-    motor.connect(mbp); mbp.connect(mg); mg.connect(g);
-    cut.connect(cbp); cbp.connect(cg); cg.connect(g);
-    g.connect(blipBus);
-    const sd = ac.createGain(); sd.gain.value = 0.45; g.connect(sd); sd.connect(verb);
-    motor.start(t); cut.start(t); motor.stop(t + dur + 0.15);
-
-    const sparks = Math.floor(dur * rnd(14, 26));
-    for (let i = 0; i < sparks; i++) {
-      burst({ ms: 3, peak: rnd(0.012, 0.05), center: rnd(5000, 9000), q: 3.5, at: at + rnd(0.05, dur), send: 0.5 });
+    // ВОЙ ДИСКА — две высокие составляющие. Под нагрузкой обе слегка проседают и возвращаются на
+    // выходе из реза: именно просадка читается как «режет», а не «крутится вхолостую».
+    const f0 = spinUp ? 700 : 1950;
+    const disc = ac.createOscillator(); disc.type = 'triangle';
+    const upper = ac.createOscillator(); upper.type = 'triangle';
+    const ug = ac.createGain(); ug.gain.value = 0.3;
+    if (spinUp) {
+      disc.frequency.setValueAtTime(320, t);
+      disc.frequency.exponentialRampToValueAtTime(1950, t + dur * 0.85);
+      upper.frequency.setValueAtTime(320 * 2.7, t);
+      upper.frequency.exponentialRampToValueAtTime(1950 * 2.7, t + dur * 0.85);
+    } else {
+      disc.frequency.setValueAtTime(f0, t);
+      disc.frequency.exponentialRampToValueAtTime(f0 * 0.82, t + 0.12);   // просадка под нагрузкой
+      disc.frequency.setValueAtTime(f0 * 0.82, t + dur - 0.15);
+      disc.frequency.exponentialRampToValueAtTime(f0 * 1.02, t + dur);    // отпустило
+      upper.frequency.setValueAtTime(f0 * 2.7, t);
+      upper.frequency.exponentialRampToValueAtTime(f0 * 2.7 * 0.82, t + 0.12);
+      upper.frequency.setValueAtTime(f0 * 2.7 * 0.82, t + dur - 0.15);
+      upper.frequency.exponentialRampToValueAtTime(f0 * 2.7 * 1.02, t + dur);
     }
+    const dg = ac.createGain(); dg.gain.value = 0.30;
+
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(level, t + (spinUp ? dur * 0.6 : 0.06));
+    g.gain.setValueAtTime(level, t + dur - 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
+
+    disc.connect(dg); dg.connect(g);
+    upper.connect(ug); ug.connect(g);
+    disc.start(t); upper.start(t); disc.stop(t + dur + 0.2); upper.stop(t + dur + 0.2);
+
+    if (!spinUp) {
+      // ВИЗГ РЕЗА — узкий полосовой шум 3,5–5,5 кГц с БЫСТРОЙ МЕЛКОЙ модуляцией: диск идёт по шву
+      // неровно. Модулятор на 70 Гц, глубина малая — это шелест реза, а не пульсация пара.
+      const cut = noise(dur + 0.08);
+      const cbp = ac.createBiquadFilter(); cbp.type = 'bandpass';
+      cbp.frequency.value = rnd(3500, 5500); cbp.Q.value = 3.2;
+      const cg = ac.createGain(); cg.gain.value = 0.0001;
+      const mod = ac.createOscillator(); mod.type = 'sine'; mod.frequency.value = rnd(58, 92);
+      const ma = ac.createGain(); ma.gain.value = level * 0.22;
+      mod.connect(ma); ma.connect(cg.gain);
+      cg.gain.setValueAtTime(0.0001, t);
+      cg.gain.exponentialRampToValueAtTime(level * 0.85, t + 0.05);
+      cg.gain.setValueAtTime(level * 0.85, t + dur - 0.1);
+      cg.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.08);
+      cut.connect(cbp); cbp.connect(cg); cg.connect(g);
+      mod.start(t); mod.stop(t + dur + 0.1);
+      cut.start(t);
+
+      // ИСКРЫ — реже и тише прежнего: они приправа, а не блюдо.
+      const sparks = Math.floor(dur * rnd(7, 13));
+      for (let k = 0; k < sparks; k++) {
+        burst({ ms: 3, peak: rnd(0.006, 0.022), center: rnd(6000, 9500), q: 4, at: at + rnd(0.05, dur), send: 0.45 });
+      }
+    }
+
+    g.connect(blipBus);
+    const sd = ac.createGain(); sd.gain.value = 0.4; g.connect(sd); sd.connect(verb);
+
   }
 
   /** ГУЛ ТРАНСФОРМАТОРА. Не «низкий тон», а именно сетевой гул: 50 Гц и ЕГО ГАРМОНИКИ 100 и 150,
@@ -453,53 +510,69 @@ const KagoSound = (() => {
    *    3. ВОЗДУХ — шум через полосовой фильтр, ведомый вверх: поток, который турбина гонит;
    *    4. ВОЙ — высокая пила 280 -> 1900 Гц, придающая реактивность.
    *  Выход на полку и лёгкое покачивание в конце: машина вышла на режим и держит его. */
-  function turbine({ at = 0, dur = 2.6, level = 0.075 }) {
+  function turbine({ at = 0, dur = 5.2, level = 0.07, bright = 1 }) {
     const t = now() + at;
-    const up = dur * 0.72;
+    const up = dur * 0.82;            // разгон занимает почти всю сцену — ротор тяжёлый
 
-    const shaft = ac.createOscillator(); shaft.type = 'sawtooth';
-    shaft.frequency.setValueAtTime(38, t);
-    shaft.frequency.exponentialRampToValueAtTime(190, t + up);
-    shaft.frequency.linearRampToValueAtTime(183, t + dur);
+    // ВАЛ — ТРЕУГОЛЬНИК, А НЕ ПИЛА. Пила несёт полный набор гармоник и именно она делала звук
+    // «злым»; у треугольника нечётные и быстро спадающие, поэтому тот же разгон читается мягко.
+    const shaft = ac.createOscillator(); shaft.type = 'triangle';
+    shaft.frequency.setValueAtTime(30, t);
+    // РАЗГОН В ДВА ЭТАПА: сперва тяжело и медленно, потом легче. Один экспоненциальный подъём даёт
+    // «включили и сразу поехало»; инерцию слышно только когда начало ощутимо труднее конца.
+    shaft.frequency.exponentialRampToValueAtTime(72, t + up * 0.55);
+    shaft.frequency.exponentialRampToValueAtTime(165, t + up);
+    shaft.frequency.linearRampToValueAtTime(160, t + dur);
 
-    const whine = ac.createOscillator(); whine.type = 'sawtooth';
-    whine.frequency.setValueAtTime(280, t);
-    whine.frequency.exponentialRampToValueAtTime(1900, t + up);
-    whine.frequency.linearRampToValueAtTime(1820, t + dur);
-    const wg = ac.createGain(); wg.gain.value = 0.22;
+    // ВОЙ — тоже треугольник, и потолок опущен с 1900 до 1150 Гц: выше начинается та резкость,
+    // из-за которой звук воспринимался как агрессивный, а не как работающая машина.
+    const whine = ac.createOscillator(); whine.type = 'triangle';
+    whine.frequency.setValueAtTime(220, t);
+    whine.frequency.exponentialRampToValueAtTime(520, t + up * 0.55);
+    whine.frequency.exponentialRampToValueAtTime(1150 * bright, t + up);
+    whine.frequency.linearRampToValueAtTime(1100 * bright, t + dur);
+    const wg = ac.createGain(); wg.gain.value = 0.14 * bright;   // было 0,22 — вой отодвинут назад
 
-    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.6;
-    bp.frequency.setValueAtTime(240, t);
-    bp.frequency.exponentialRampToValueAtTime(2200, t + up);
+    // Резонанс шире (Q 1,1 против 2,6): узкая полоса звучит гнусаво и напряжённо.
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.1;
+    bp.frequency.setValueAtTime(200, t);
+    bp.frequency.exponentialRampToValueAtTime(1500 * bright, t + up);
+    // Общий низкий фильтр сверху — он и снимает остаток жёсткости.
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.value = 2300 * bright; lp.Q.value = 0.7;
 
-    // Лопатки: модулятор идёт от 9 к 46 Гц — кратно оборотам вала, потому и слышно как лопасти.
+    // ЛОПАТКИ: глубина модуляции вдвое меньше (0,16 против 0,35). Глубокая модуляция рубит звук на
+    // куски и слышится как рычание; мелкая оставляет лопастный характер, но не давит.
     const blade = ac.createOscillator(); blade.type = 'sine';
-    blade.frequency.setValueAtTime(9, t);
-    blade.frequency.exponentialRampToValueAtTime(46, t + up);
-    const bladeAmp = ac.createGain(); bladeAmp.gain.value = 0.35;
+    blade.frequency.setValueAtTime(7, t);
+    blade.frequency.exponentialRampToValueAtTime(34, t + up);
+    const bladeAmp = ac.createGain(); bladeAmp.gain.value = 0.16;
 
     const air = noise(dur + 0.1);
     const ahp = ac.createBiquadFilter(); ahp.type = 'highpass';
-    ahp.frequency.setValueAtTime(600, t);
-    ahp.frequency.exponentialRampToValueAtTime(2400, t + up);
+    ahp.frequency.setValueAtTime(400, t);
+    ahp.frequency.exponentialRampToValueAtTime(1500, t + up);
     const ag = ac.createGain();
     ag.gain.setValueAtTime(0.0001, t);
-    ag.gain.exponentialRampToValueAtTime(0.045, t + up);
-    ag.gain.exponentialRampToValueAtTime(0.02, t + dur);
+    ag.gain.exponentialRampToValueAtTime(0.028, t + up);
+    ag.gain.exponentialRampToValueAtTime(0.014, t + dur);
 
     const g = ac.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(level, t + up * 0.6);
-    g.gain.setValueAtTime(level, t + dur - 0.25);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.35);
+    // Вход втрое медленнее прежнего: машина проявляется, а не включается щелчком.
+    g.gain.exponentialRampToValueAtTime(level, t + up * 0.85);
+    g.gain.setValueAtTime(level, t + dur - 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.5);
     blade.connect(bladeAmp); bladeAmp.connect(g.gain);
 
     shaft.connect(bp); whine.connect(wg); wg.connect(bp);
+    bp.connect(lp);
     air.connect(ahp); ahp.connect(ag); ag.connect(g);
-    bp.connect(g); g.connect(blipBus);
-    const s2 = ac.createGain(); s2.gain.value = 0.4; g.connect(s2); s2.connect(verb);
+    lp.connect(g); g.connect(blipBus);
+    const s2 = ac.createGain(); s2.gain.value = 0.5; g.connect(s2); s2.connect(verb);
     shaft.start(t); whine.start(t); blade.start(t); air.start(t);
-    shaft.stop(t + dur + 0.4); whine.stop(t + dur + 0.4); blade.stop(t + dur + 0.4);
+    shaft.stop(t + dur + 0.55); whine.stop(t + dur + 0.55); blade.stop(t + dur + 0.55);
+
   }
 
   /** ОСТУЖЕНИЕ ШВА: длинное шипение, уходящее вниз. */
@@ -769,19 +842,21 @@ const KagoSound = (() => {
         return at + 0.3;
       } },
 
-    { tag: 'ЗАПУСК', grp: 'работа дока', on: true, dur: 3.9,
-      hint: 'турбина набирает обороты и выходит на режим: куллер, реактивный двигатель',
-      what: 'Тумблер, разгон вала 38->190 Гц с лопатками и потоком воздуха, выход на полку, два щелчка реле',
+    { tag: 'ЗАПУСК', grp: 'работа дока', on: true, dur: 7.5,
+      hint: 'турбина мягко и долго набирает обороты и выходит на режим: куллер, реактивный двигатель',
+      what: 'Тумблер, ДОЛГИЙ разгон вала 30->165 Гц в два этапа (тяжело, потом легче), лопатки, поток воздуха, выход на режим и два тихих щелчка реле',
       play() {
         // Ни одной ноты: запуск — это МАШИНА, а не прибор. Тумблер, разгон турбины, выход на
         // обороты и два сухих щелчка реле «вышли на режим». Колокольчика здесь больше нет вовсе.
-        burst({ ms: 9, peak: 0.09, center: 1500, q: 1.6, at: 0, send: 0.25 });     // тумблер
-        const dur = rnd(2.2, 3.4);
-        turbine({ at: 0.12, dur, level: 0.08 });
-        const at = 0.12 + dur;
-        burst({ ms: 7, peak: 0.055, center: 2400, q: 2.2, at: at + 0.10, send: 0.2 });
-        burst({ ms: 7, peak: 0.045, center: 1900, q: 2.2, at: at + 0.24, send: 0.2 });
-        return at + 0.7;
+        // Тумблер приглушён и уведён вниз: резкий щелчок на старте задавал всей сцене
+        // агрессивный тон ещё до того, как турбина скажет хоть что-то.
+        burst({ ms: 11, peak: 0.045, center: 900, q: 1.2, at: 0, send: 0.3 });     // тумблер
+        const dur = rnd(4.5, 6.5);                                                // разгон долгий
+        turbine({ at: 0.2, dur, level: 0.07 });
+        const at = 0.2 + dur;
+        burst({ ms: 8, peak: 0.032, center: 1700, q: 1.8, at: at + 0.16, send: 0.25 });
+        burst({ ms: 8, peak: 0.026, center: 1300, q: 1.8, at: at + 0.34, send: 0.25 });
+        return at + 1.1;
       } },
 
     { tag: 'РАДАР', grp: 'работа дока', on: true, dur: 7.0,
@@ -874,38 +949,43 @@ const KagoSound = (() => {
         return at + 1.0;
       } },
 
-    { tag: 'МАНИПУЛЯТОР', grp: 'работа дока', on: true, dur: 6.0,
-      hint: 'машинная рука переставляется: приводы разгоняются, тормозят, встают в позицию',
-      what: 'Четыре-шесть ходов сервоприводов разной длины и скорости, у каждого разгон, полка и торможение, в конце хода стук позиционирования',
+    { tag: 'МАНИПУЛЯТОР', grp: 'работа дока', on: true, dur: 7.5,
+      hint: 'машинная рука неспешно переставляется: приводы мягко разгоняются, долго тормозят, встают в позицию',
+      what: 'Три-четыре неспешных хода: разгон и торможение занимают больше, чем полка, редуктор приглушён, в конце хода мягкий стук позиционирования',
       play() {
         let at = 0;
-        const moves = 4 + Math.floor(Math.random() * 3);
+        // Ходов МЕНЬШЕ, каждый ДЛИННЕЕ, паузы между ними шире: рука перестаёт дёргаться и начинает
+        // переставляться. Верхняя частота приводов опущена с 430 до 300 Гц — выше начинается писк.
+        const moves = 3 + Math.floor(Math.random() * 2);
         for (let i = 0; i < moves; i++) {
-          const dur = rnd(0.3, 0.85);
-          servo({ at, dur, top: rnd(190, 430), level: rnd(0.055, 0.085) });
+          const dur = rnd(0.7, 1.5);
+          servo({ at, dur, top: rnd(150, 300), level: rnd(0.045, 0.07) });
           at += dur;
-          // Иногда рука доводит позицию вторым коротким ходом — так и работает механика.
-          if (Math.random() < 0.35) { const d2 = rnd(0.14, 0.26); servo({ at: at + 0.08, dur: d2, top: rnd(260, 380), level: 0.05 }); at += 0.08 + d2; }
-          at += rnd(0.25, 0.8);
+          // Иногда рука доводит позицию вторым, коротким и тихим ходом — так и работает механика.
+          if (Math.random() < 0.3) { const d2 = rnd(0.3, 0.5); servo({ at: at + 0.18, dur: d2, top: rnd(170, 240), level: 0.038 }); at += 0.18 + d2; }
+          at += rnd(0.6, 1.4);
         }
         return at;
       } },
 
     { tag: 'БОЛГАРКА', grp: 'работа дока', on: true, dur: 8.0,
-      hint: 'режут металл: диск раскручивается, входит в рез, летят искры',
-      what: 'Раскрутка диска, два-три реза по 1–2,5 с с просадкой оборотов под нагрузкой и снопом искр, между резами холостой ход',
+      hint: 'режут металл: диск раскручивается до высокого воя, входит в рез, редкие искры',
+      what: 'Раскрутка диска до ~2 кГц, два-три реза по 1–2,2 с: высокий ровный вой с просадкой под нагрузкой, узкий визг 3,5–5,5 кГц с быстрой мелкой модуляцией и редкие искры',
       play() {
         // Раскрутка диска — та же турбина, но короткая и высокая: это один и тот же класс машины,
         // и делать для неё второй кирпич значило бы разводить сущности (PHILOSOPHY.md, Оккам).
-        turbine({ at: 0, dur: 1.1, level: 0.055 });
-        let at = 1.0;
+        // РАСКРУТКА ТЕПЕРЬ СВОЯ, а не турбина. Прежде я переиспользовал турбину «по Оккаму» —
+        // и был неправ: Оккам действует внутри машинерии, но НЕ на том, что человек слышит
+        // (PHILOSOPHY.md). Низкий тяжёлый разгон турбины и добавлял болгарке паровоза.
+        grinder({ at: 0, dur: 0.9, level: 0.04, spinUp: true });
+        let at = 0.85;
         const cuts = 2 + Math.floor(Math.random() * 2);
         for (let i = 0; i < cuts; i++) {
-          const dur = rnd(1.0, 2.5);
-          grinder({ at, dur, level: rnd(0.075, 0.095) });
-          at += dur + rnd(0.5, 1.2);
+          const dur = rnd(1.0, 2.2);
+          grinder({ at, dur, level: rnd(0.042, 0.055) });
+          at += dur + rnd(0.6, 1.3);
         }
-        metal({ peak: 0.09, decay: 0.5, at, partials: [340, 820, 1460, 2300] });   // отрезанное упало
+        metal({ peak: 0.055, decay: 0.45, at, partials: [340, 820, 1460, 2300] });   // отрезанное упало
         return at + 0.9;
       } },
 

@@ -129,8 +129,13 @@ s = s.replace(TILE_STYLE, `${TILE_STYLE}
   .livemark i:nth-child(2){inset:9px;border-top-color:var(--fire);
               border-right-color:rgba(255,122,60,.3);animation-duration:1.6s;animation-direction:reverse}
   .livemark i:nth-child(3){inset:18px;border-top-color:#e6edf3;animation-duration:3.4s}
-  .livemark .lamp{position:absolute;inset:11px;border-radius:50%;background:#f85149;opacity:0;
-                  transition:opacity .4s}
+  /* МЯГКИЙ КРАЙ, А НЕ РЕЗАНЫЙ КРУГ — слово владельца. Заливка идёт радиальным градиентом, который
+     на внешней трети уходит в полную прозрачность: у лампы нет границы, есть свечение. Ровная
+     заливка с border-radius давала именно «наклейку», о которой он и сказал. */
+  .livemark .lamp{position:absolute;inset:6px;border-radius:50%;opacity:0;transition:opacity .5s;
+                  background:radial-gradient(circle closest-side,
+                             rgba(248,81,73,1) 0%, rgba(248,81,73,.92) 38%,
+                             rgba(248,81,73,.45) 66%, rgba(248,81,73,.12) 84%, rgba(248,81,73,0) 100%)}
   /* ПРОГОН ВСТАЛ. Кольца ВСТАЮТ — но знак не замирает: лампа продолжает мигать, и это она
      доказывает, что жива машина. Замри знак целиком, и «прогон встал» слилось бы с «окно умерло».
      Облик задан владельцем 2026-08-22: «убери радиоволны, только лампочку оставь, сделай её
@@ -141,7 +146,7 @@ s = s.replace(TILE_STYLE, `${TILE_STYLE}
   body.hung .livemark i:nth-child(1){transform:rotate(22deg);border-right-color:#4a2422}
   body.hung .livemark i:nth-child(2){transform:rotate(196deg)}
   body.hung .livemark i:nth-child(3){transform:rotate(107deg);border-right-color:#4a2422}
-  body.hung .livemark .lamp{opacity:1;animation:kagolamp 4.4s ease-in-out infinite}
+  body.hung .livemark .lamp{opacity:1;animation:kagolamp 7s ease-in-out infinite}
   @keyframes kagolamp{ 0%,100%{opacity:.14} 50%{opacity:1} }`);
 
 // The state line is now the column's first element, so its top margin has to go — the mockup's

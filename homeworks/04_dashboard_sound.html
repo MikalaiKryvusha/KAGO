@@ -53,8 +53,11 @@
   .alive-mark.stalled i:nth-child(1){transform:rotate(22deg);border-right-color:#4a2422}
   .alive-mark.stalled i:nth-child(2){transform:rotate(196deg)}
   .alive-mark.stalled i:nth-child(3){transform:rotate(107deg);border-right-color:#4a2422}
-  .alive-mark .lamp{position:absolute;inset:11px;border-radius:50%;background:var(--dead);opacity:0;transition:opacity .4s}
-  .alive-mark.stalled .lamp{opacity:1;animation:lamp 4.4s ease-in-out infinite}
+  .alive-mark .lamp{position:absolute;inset:6px;border-radius:50%;opacity:0;transition:opacity .5s;
+                    background:radial-gradient(circle closest-side,
+                               rgba(248,81,73,1) 0%, rgba(248,81,73,.92) 38%,
+                               rgba(248,81,73,.45) 66%, rgba(248,81,73,.12) 84%, rgba(248,81,73,0) 100%)}
+  .alive-mark.stalled .lamp{opacity:1;animation:lamp 7s ease-in-out infinite}
   @keyframes lamp{0%,100%{opacity:.14}50%{opacity:1}}
 
   .state{font-weight:700;font-size:17px;margin:0}
