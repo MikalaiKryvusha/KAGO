@@ -54,6 +54,19 @@
   .alive-mark i:nth-child(3){inset:20px;border-top-color:#e6edf3;animation-duration:3.4s}
   @keyframes spin{to{transform:rotate(360deg)}}
 
+  /* ВСТАВШИЙ ПРОГОН: кольца ОСТАНАВЛИВАЮТСЯ, но знак не замирает — вместо вращения медленно
+     пульсирует красная лампа. Движение не прекращается ни на секунду, меняется его ВИД: остановка
+     колец говорит «прогон встал», продолжающийся пульс — «машина жива». Замри знак целиком, и оба
+     сообщения слились бы в одно неразличимое. */
+  .alive-mark.stalled i{animation:none;border-color:transparent;border-top-color:#5a2a28}
+  .alive-mark .lamp{position:absolute;inset:20px;border-radius:50%;background:var(--dead);
+                    opacity:0;transition:opacity .4s}
+  .alive-mark.stalled .lamp{opacity:1;animation:lamp 2.2s ease-in-out infinite}
+  @keyframes lamp{
+    0%,100%{opacity:.16;box-shadow:0 0 0 rgba(248,81,73,0)}
+    50%    {opacity:1;  box-shadow:0 0 16px 3px rgba(248,81,73,.55)}
+  }
+
   .state{font-weight:700;font-size:17px;margin:0}
   .state.alive{color:var(--ok)}
   .state.stalled{color:var(--dead)}
@@ -121,9 +134,10 @@
     <div class="row" style="margin-top:14px">
       <label class="sub" style="margin:0">пауза между сценами: в среднем <b id="denslbl">3,0</b> с
         <input id="dens" type="range" min="5" max="120" value="30"></label>
-      <label class="sub" style="margin:0">наложения: <b id="ovlbl">20</b> % · не больше трёх сразу
-        <input id="ov" type="range" min="0" max="60" value="20"></label>
-      <span class="sub" id="active" style="margin:0;min-width:120px">тихо</span>
+      <label class="sub" style="margin:0">наложения: <b id="ovlbl">35</b> % · не больше трёх сразу
+        <input id="ov" type="range" min="0" max="90" value="35"></label>
+      <button id="force" class="mini">устроить наложение сейчас</button>
+      <span class="sub" id="active" style="margin:0;min-width:190px">тихо · наложений: 0</span>
       <button id="all" class="mini">включить все</button>
       <button id="none" class="mini">выключить все</button>
     </div>
@@ -132,7 +146,7 @@
   <div class="panel">
     <div class="row spread">
       <div class="row">
-        <div class="alive-mark"><i></i><i></i><i></i></div>
+        <div class="alive-mark" id="mark"><i></i><i></i><i></i><span class="lamp"></span></div>
         <div>
           <p class="state alive" id="state">● ИДЁТ СТРЕСС-ТЕСТ</p>
           <p class="statesub" id="statesub">2842 МГц · 935 мВ · ступень 5</p>
@@ -292,14 +306,23 @@ function metal({ peak = 0.12, decay = 0.5, at = 0, partials = [520, 1170, 1810, 
 
    Высоты по-прежнему из одной пентатоники — окраска меняет ТЕМБР, а не строй. */
 
+/* 🔴 КЭШИРУЕТСЯ КРИВАЯ, А НЕ УЗЕЛ — и это не микрооптимизация, а починка бага, который владелец
+   услышал как «огромное число звуков сразу, громко, искажено».
+   Первая редакция кэшировала сам `WaveShaper`. Узел в Web Audio — не функция, а ТОЧКА СХОДА: каждый
+   новый пик подключался к тому же экземпляру, и после N пиков у него N входов и N выходов, то есть
+   сигнал КАЖДОГО осциллятора уходил в КАЖДЫЙ фильтр. Рост как N², и он накапливался за сессию,
+   потому что ничего не отключалось. У «КОНСОЛИ» до 78 пиков за один проход — этого хватало с
+   запасом. Массив кривой делить между узлами можно и нужно: он данные, а не соединение. */
 let _curveCache = null;
-/** Мягкое насыщение по tanh — то, что даёт «перегруз» без хрипа цифрового клиппинга. */
-function shaper(amount = 4) {
-  if (_curveCache && _curveCache.a === amount) return _curveCache.node;
+function shaperCurve(amount = 4) {
+  if (_curveCache && _curveCache.a === amount) return _curveCache.curve;
   const n = 1024, curve = new Float32Array(n);
   for (let i = 0; i < n; i++) { const x = (i * 2) / n - 1; curve[i] = Math.tanh(x * amount) / Math.tanh(amount); }
-  const ws = ac.createWaveShaper(); ws.curve = curve; ws.oversample = '4x';
-  _curveCache = { a: amount, node: ws };
+  _curveCache = { a: amount, curve };
+  return curve;
+}
+function shaper(amount = 4) {
+  const ws = ac.createWaveShaper(); ws.curve = shaperCurve(amount); ws.oversample = '2x';
   return ws;
 }
 
@@ -329,13 +352,15 @@ function beep({ freq, at = 0, len = 0.3, peak = 0.14, colour = 'чистый', s
   } else if (colour === 'колокол') {
     // НЕГАРМОНИЧЕСКИЕ обертоны трубчатого колокола: 1 : 2,76 : 5,40 : 8,93. Именно некратность
     // даёт «звон», которого не бывает у чистого синуса, сколько его ни складывай с октавами.
+    // ⚠️ Множитель 0,58 — не вкус, а арифметика: четыре обертона складываются в сумму 1,76 от peak,
+    // и без нормировки многосоставная окраска звучит вдвое громче чистой при том же числе.
     [[1, 1, 1.0], [2.76, 0.42, 0.62], [5.40, 0.22, 0.4], [8.93, 0.12, 0.26]]
-      .forEach(([r, lv, dk]) => env(osc(freq * r), peak * lv, 0.004, len * dk * 2.2));
+      .forEach(([r, lv, dk]) => env(osc(freq * r), peak * lv * 0.58, 0.004, len * dk * 2.2));
 
   } else if (colour === 'стекло') {
     [[1, 1, 1], [3.01, 0.34, 0.5], [5.02, 0.18, 0.3], [7.1, 0.09, 0.2]]
-      .forEach(([r, lv, dk]) => env(osc(freq * r), peak * lv, 0.002, len * dk));
-    burst({ ms: 4, peak: peak * 0.35, center: freq * 6, q: 3, at, send: 0.4 });   // призвук удара
+      .forEach(([r, lv, dk]) => env(osc(freq * r), peak * lv * 0.62, 0.002, len * dk));
+    burst({ ms: 4, peak: peak * 0.25, center: freq * 6, q: 3, at, send: 0.4 });   // призвук удара
 
   } else if (colour === 'жужжащий') {
     // Кольцевая модуляция: несущая умножается на низкий тон — отсюда «жужжание», а не вибрато.
@@ -346,7 +371,7 @@ function beep({ freq, at = 0, len = 0.3, peak = 0.14, colour = 'чистый', s
     const ma = ac.createGain(); ma.gain.value = 1;
     mod.connect(ma); ma.connect(ring.gain); mod.start(t); mod.stop(t + len + 0.4);
     car.connect(lp); lp.connect(ring);
-    env(ring, peak * 1.5, 0.008, len);
+    env(ring, peak * 0.85, 0.008, len);
 
   } else if (colour === 'перегруз') {
     const o = osc(freq, 'square');
@@ -357,14 +382,19 @@ function beep({ freq, at = 0, len = 0.3, peak = 0.14, colour = 'чистый', s
     env(bp, peak * 0.8, 0.004, len * 0.8);
 
   } else if (colour === 'эхо') {
-    // Слэпбэк: три быстрых повтора с затуханием — «отскок» от стены ангара, отдельно от общей
+    // Слэпбэк: несколько быстрых повторов — «отскок» от стены ангара, отдельно от общей
     // реверберации, потому что он РИТМИЧЕН, а она размазана.
+    // ⚠️ ПЕТЛЯ ОБЯЗАНА БЫТЬ РАЗОРВАНА. Задержка с обратной связью — это цикл в графе: он не
+    // собирается сборщиком мусора, пока подключён, и каждый такой пик оставлял в графе вечный
+    // живой узел. За час их накапливались сотни. Отключаем по истечении хвоста.
     const d = ac.createDelay(1.0); d.delayTime.value = rnd(0.09, 0.16);
-    const fb = ac.createGain(); fb.gain.value = 0.42;
+    const fb = ac.createGain(); fb.gain.value = 0.38;
     d.connect(fb); fb.connect(d); d.connect(out);
-    const g = env(osc(freq), peak, 0.005, len);
+    const g = env(osc(freq), peak * 0.8, 0.005, len);
     g.connect(d);
-    env(osc(freq * 2.01), peak * 0.2, 0.005, len * 0.5);
+    env(osc(freq * 2.01), peak * 0.16, 0.005, len * 0.5);
+    const tailMs = (len + 1.6) * 1000;
+    setTimeout(() => { try { fb.disconnect(); d.disconnect(); } catch (e) { /* уже */ } }, tailMs);
 
   } else {  // вауканье
     // Резонанс проезжает по ноте — «уау». Один голос, но слышно движение.
@@ -374,7 +404,9 @@ function beep({ freq, at = 0, len = 0.3, peak = 0.14, colour = 'чистый', s
     bp.frequency.exponentialRampToValueAtTime(freq * rnd(3.2, 5.0), t + len * 0.55);
     bp.frequency.exponentialRampToValueAtTime(freq * 1.1, t + len * 1.2);
     o.connect(bp);
-    env(bp, peak * 1.3, 0.01, len * 1.1);
+    // Резонанс Q=7 сам по себе поднимает уровень в разы — поэтому здесь множитель МЕНЬШЕ единицы,
+    // а не больше, как было в первой редакции.
+    env(bp, peak * 0.55, 0.01, len * 1.1);
   }
 }
 
@@ -635,7 +667,9 @@ const SCENES = [
       let at = 0;
       const runs = 2 + Math.floor(Math.random() * 2);
       for (let r = 0; r < runs; r++) {
-        const nn = 7 + Math.floor(Math.random() * 7);
+        // Плотность урезана: было до 13 чирпов на очередь, то есть под 80 пиков за сцену. Даже
+        // после починки узла искажения это перебор — очередь читается ухом уже с пяти-девяти.
+        const nn = 5 + Math.floor(Math.random() * 5);
         for (let i = 0; i < nn; i++) {
           const k = Math.floor(Math.random() * 4);
           beep({ freq: PENTA_HI[k], peak: 0.05, len: 0.035, colour: c, at, send: 0.25 });
@@ -810,11 +844,15 @@ const SCENES = [
 /* ---- разрешение и кнопка ---------------------------------------------------------------------- */
 $('arm').onclick = () => {
   ac = new (window.AudioContext || window.webkitAudioContext)();
+  // ЛИМИТЕР СТРОЖЕ, ЧЕМ БЫЛ. Прежние −6 дБ при ratio 12 — это компрессор, а не потолок: если сумма
+  // приходит вдвое выше порога, он её пригибает, но не держит, и на пиках слышен хрип. Владелец
+  // услышал именно это («громко, искажено»). Порог ниже, отношение выше, колено почти жёсткое —
+  // громкость не падает (её добирает запас ниже порога), а перегруз перестаёт доходить до выхода.
   const lim = ac.createDynamicsCompressor();
-  lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12;
-  lim.attack.value = 0.003; lim.release.value = 0.18;
+  lim.threshold.value = -10; lim.knee.value = 2; lim.ratio.value = 20;
+  lim.attack.value = 0.002; lim.release.value = 0.14;
   lim.connect(ac.destination);
-  master = ac.createGain(); master.gain.value = 1.0; master.connect(lim);
+  master = ac.createGain(); master.gain.value = 0.95; master.connect(lim);
   verb = reverb(); const vg = ac.createGain(); vg.gain.value = 0.9;
   verb.connect(vg); vg.connect(master);
   melBus = ac.createGain(); melBus.gain.value = 1.0; melBus.connect(master);
@@ -822,7 +860,9 @@ $('arm').onclick = () => {
   blipBus = ac.createGain(); blipBus.gain.value = 1.0; blipBus.connect(master);
   armed = true; soundOn = true;
   $('arm').disabled = true;
-  paintBtn(); setMelody(melIdx); scheduleScene(); render();
+  // render() ПЕРЕД планировщиком: первая сцена стартует немедленно и ищет свою строку в таблице,
+  // а таблица до этого перерисовывалась после — первая метка не загоралась ни разу.
+  paintBtn(); render(); setMelody(melIdx); scheduleScene();
 };
 function paintBtn() {
   $('sndbtn').classList.toggle('on', soundOn);
@@ -844,6 +884,7 @@ $('dens').oninput = () => {
   $('denslbl').textContent = (meanGapMs / 1000).toFixed(1).replace('.', ',');
 };
 $('ov').oninput = () => { overlapPct = Number($('ov').value); $('ovlbl').textContent = overlapPct; };
+$('force').onclick = forceOverlap;
 $('all').onclick = () => { SCENES.forEach((v) => { v.on = true; }); render(); };
 $('none').onclick = () => { SCENES.forEach((v) => { v.on = false; }); render(); };
 
@@ -880,8 +921,15 @@ function setMelody(i) {
 // конца предыдущей («не часто»). ПОТОЛОК в три голоса — жёсткий: он не даёт редким совпадениям
 // сложиться в кучу, даже если случай выпал трижды подряд. Одной вероятности мало: она ограничивает
 // среднее, а слышно — пик.
+// ⚠️ ПОЧЕМУ ПЕРВАЯ РЕДАКЦИЯ НЕ РАБОТАЛА, хотя код был «правильный». Владелец: «наложения не
+// получились… как включались строго по одному, так и продолжают». Дефект был не в вероятности, а в
+// АРИФМЕТИКЕ ОЖИДАНИЯ: сцены длятся 3–11 с, и после каждой отсчитывалась ещё пауза ~3 с, то есть
+// старт новой сцены случался раз в 6–14 с. Двадцать процентов от этого — одно наложение в минуту с
+// лишним. Механизм исправно работал с частотой, которую невозможно заметить, — а незаметная функция
+// неотличима от сломанной. Поднята и вероятность, и глубина захода: наложение начинается в первой
+// половине сцены, поэтому оно ДЛИННОЕ и слышное, а не касание хвостами.
 const MAX_TOGETHER = 3;
-let active = 0, overlapPct = 20;
+let active = 0, overlapPct = 35, overlapCount = 0;
 
 function nextGap() { return Math.max(400, -Math.log(Math.max(1e-6, Math.random())) * meanGapMs); }
 
@@ -905,17 +953,25 @@ function tickScene() {
     waitMs = 700;                                            // мест нет — ждём, пока освободится
   } else {
     const ms = startScene();
-    // Наложение = НЕ дожидаться конца. Иначе — конец сцены плюс обычная пауза.
-    waitMs = (Math.random() * 100 < overlapPct)
-      ? Math.max(400, ms * rnd(0.15, 0.55))
-      : ms + nextGap();
+    // Наложение = войти в ПЕРВОЙ ПОЛОВИНЕ сцены, а не коснуться её хвоста. Иначе, даже когда случай
+    // выпадает, ухо слышит не два процесса разом, а стык.
+    if (Math.random() * 100 < overlapPct) { waitMs = Math.max(350, ms * rnd(0.05, 0.45)); overlapCount += 1; }
+    else waitMs = ms + nextGap();
   }
   sceneTimer = setTimeout(tickScene, Math.max(300, waitMs));
 }
 function scheduleScene() { clearTimeout(sceneTimer); tickScene(); }
 function paintActive() {
   const e = $('active');
-  if (e) e.textContent = active === 0 ? 'тихо' : `звучит сразу: ${active}`;
+  if (!e) return;
+  e.textContent = `${active === 0 ? 'тихо' : `звучит сразу: ${active}`} · наложений: ${overlapCount}`;
+  e.style.color = active > 1 ? 'var(--fire)' : 'var(--dim)';
+}
+/** Проверка руками: устроить наложение прямо сейчас, не дожидаясь случая. */
+function forceOverlap() {
+  if (!armed) { $('arm').click(); return; }
+  const nn = Math.min(MAX_TOGETHER - active, 2 + Math.floor(Math.random() * 2));
+  for (let i = 0; i < nn; i++) setTimeout(() => { if (active < MAX_TOGETHER) startScene(); }, i * rnd(150, 700));
 }
 
 /* ---- имитация прогона: отдельный факт, отдельный канал ---------------------------------------------- */
@@ -927,6 +983,9 @@ setInterval(() => {
   const stalled = since > 2500;
   const s = $('state');
   s.classList.toggle('alive', !stalled); s.classList.toggle('stalled', stalled);
+  // Кольца встают, красная лампа начинает медленно пульсировать — слово владельца. Движение не
+  // прекращается, меняется его ВИД: остановка колец = «прогон встал», пульс = «машина жива».
+  $('mark').classList.toggle('stalled', stalled);
   if (stalled) {
     s.textContent = `■ ПРОГОН ВСТАЛ ${Math.round((since - 2500) / 1000)} с назад`;
     $('statesub').textContent = 'окно и машина живы — это видно по колесу и слышно по звуку; встал именно прогон';

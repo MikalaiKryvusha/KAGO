@@ -69,8 +69,18 @@ must(i0 > 0 && i1 > i0, 'блок плиток не найден');
 const column = `    <!-- СОСТОЯНИЕ ПРОГОНА СТОИТ ПЕРВЫМ — правка владельца по первой же репетиции. И она по
          существу: оператор не читает колонку, он БРОСАЕТ на неё взгляд, а первое, что ему нужно
          знать, — идёт прогон или встал. Цифры отвечают на второй вопрос, не на первый. -->
-    <p class="state alive" id="state-alive">● ПОДЪЁМ ПРОГОНА</p>
-    <p class="state dead" id="state-dead">■ ЗАМЕРЛО</p>
+    <!-- ЖИВОЙ ЗНАК — три кольца, принят владельцем на стенде звука 2026-08-22 («анимация возле
+         "идёт стресс тест" — шикарная, забираем её в наш визуализатор»). Крутится ВСЕГДА и ни от
+         чего не зависит: он про то, что живы машина и окно. Когда прогон встаёт, кольца
+         останавливаются и начинает медленно пульсировать красная лампа — движение не прекращается,
+         меняется его ВИД (слово владельца там же). -->
+    <div class="livewrap">
+      <div class="livemark"><i></i><i></i><i></i><span class="lamp"></span></div>
+      <div style="flex:1">
+        <p class="state alive" id="state-alive">● ПОДЪЁМ ПРОГОНА</p>
+        <p class="state dead" id="state-dead">■ ЗАМЕРЛО</p>
+      </div>
+    </div>
     <div class="m"><span>частота под тестом</span><b id="f-freq">—</b></div>
     <!-- «4 из 24» убрано словом владельца: номер ступени внутри спуска не говорит оператору ничего.
          Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. -->
@@ -108,7 +118,27 @@ s = s.replace(TILE_STYLE, `${TILE_STYLE}
      цвет бренда: заметно, но это не тревога — карта не сломана, она ненастоящая. */
   .pill{position:absolute;top:12px;right:14px;z-index:2;padding:4px 12px;border-radius:999px;
         border:1px solid var(--fire);color:var(--fire);background:rgba(255,122,60,.10);
-        font-size:11px;font-weight:700;letter-spacing:.12em}`);
+        font-size:11px;font-weight:700;letter-spacing:.12em}
+  /* ЖИВОЙ ЗНАК. Собственные имена классов, чтобы не пересечься с .spin/.arm/.rock макета; на
+     @keyframes spin макета опираемся намеренно — оно там уже есть и определено ровно так же. */
+  .livewrap{display:flex;align-items:center;gap:14px;margin:0 0 12px}
+  .livemark{width:52px;height:52px;position:relative;flex:0 0 auto}
+  .livemark i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
+              border-top-color:var(--ok);border-right-color:rgba(63,185,80,.32);
+              animation:spin 2.4s linear infinite}
+  .livemark i:nth-child(2){inset:9px;border-top-color:var(--fire);
+              border-right-color:rgba(255,122,60,.3);animation-duration:1.6s;animation-direction:reverse}
+  .livemark i:nth-child(3){inset:18px;border-top-color:#e6edf3;animation-duration:3.4s}
+  .livemark .lamp{position:absolute;inset:18px;border-radius:50%;background:#f85149;opacity:0;
+                  transition:opacity .4s}
+  /* Прогон встал: кольца ВСТАЮТ, лампа начинает пульсировать. Знак не замирает ни на секунду —
+     иначе «прогон встал» и «окно умерло» слились бы в одно неразличимое сообщение. */
+  body.hung .livemark i{animation:none;border-color:transparent;border-top-color:#5a2a28}
+  body.hung .livemark .lamp{opacity:1;animation:kagolamp 2.2s ease-in-out infinite}
+  @keyframes kagolamp{
+    0%,100%{opacity:.16;box-shadow:0 0 0 rgba(248,81,73,0)}
+    50%    {opacity:1;  box-shadow:0 0 16px 3px rgba(248,81,73,.55)}
+  }`);
 
 // The state line is now the column's first element, so its top margin has to go — the mockup's
 // `margin:14px 0 0` was spacing it away from the tile ABOVE it, and there is no tile above it now.
