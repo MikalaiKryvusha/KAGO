@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>KAGO — прослушивание звука визуализатора</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --line:#232c38; --ink:#e6edf3; --dim:#8b98a5;
+    --fire:#ff7a3c; --ok:#3fb950; --dead:#f85149; --cyan:#4fd1e0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 "Segoe UI",system-ui,sans-serif;padding:28px 22px 60px}
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 22px}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         padding:18px 20px;margin-bottom:20px}
+  .row{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .spread{justify-content:space-between}
+
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+         background:#1c242e;color:var(--ink);padding:9px 16px}
+  button:hover{border-color:#3a4757}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .primary{background:var(--fire);border-color:var(--fire);color:#1a0d05;font-weight:700}
+  .danger{border-color:#5a2a28;color:#ff9d97}
+
+  /* КНОПКА ЗВУКА — та самая, что поедет в визуализатор */
+  .sndbtn{display:inline-flex;align-items:center;gap:9px;padding:9px 15px;font-weight:600}
+  .sndbtn .dot{width:9px;height:9px;border-radius:50%;background:var(--dim)}
+  .sndbtn.on{border-color:var(--cyan);color:#bdeef5}
+  .sndbtn.on .dot{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+  .tag{display:inline-block;min-width:30px;text-align:center;font-weight:800;font-size:17px;
+       background:#1c242e;border:1px solid var(--line);border-radius:7px;padding:3px 9px}
+  tr.playing{background:rgba(79,209,224,.07)}
+  tr.playing .tag{border-color:var(--cyan);color:var(--cyan)}
+
+  /* ЖИВОЙ ЗНАК — крутится ВСЕГДА, с первой секунды и до закрытия окна */
+  .alive-mark{width:64px;height:64px;position:relative;flex:0 0 auto}
+  .alive-mark i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
+                border-top-color:var(--cyan);border-right-color:rgba(79,209,224,.35);
+                animation:spin 2.4s linear infinite}
+  .alive-mark i:nth-child(2){inset:11px;border-top-color:var(--fire);
+                border-right-color:rgba(255,122,60,.3);animation-duration:1.6s;animation-direction:reverse}
+  .alive-mark i:nth-child(3){inset:22px;border-top-color:#e6edf3;animation-duration:3.4s}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .state{font-weight:700;font-size:17px;margin:0}
+  .state.alive{color:var(--ok)}
+  .state.stalled{color:var(--dead)}
+  .statesub{color:var(--dim);font-size:13px;margin:3px 0 0}
+
+  input[type=range]{width:160px;accent-color:var(--fire)}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--fire);
+        border-radius:8px;padding:14px 18px;margin:20px 0;font-size:14px}
+  .note b{color:var(--fire)}
+  .quote{border-left:3px solid var(--cyan);padding:10px 16px;margin:0 0 18px;background:var(--panel);
+         border-radius:8px;font-size:14px}
+  .quote b{color:var(--cyan)}
+  details{margin-top:24px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
+  summary{cursor:pointer;color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Звук визуализатора — прослушивание</h1>
+  <p class="sub">Пять кандидатов на одном материале. Метки слепые, расшифровка внизу — сначала ухом,
+     потом глазом.</p>
+
+  <div class="quote">
+    <b>Правило, заданное владельцем 2026-08-22, действует на всей странице:</b>
+    <i>«НИКАКОГО УМИРАНИЯ ВМЕСТЕ С ЧЕМ-ТО. НИ АНИМАЦИИ НИ ЗВУКА. ВСЁ ВОСПРОИЗВОДИТСЯ ВСЕГДА.
+    МНЕ ОНО НУЖНО ГАРАНТИРОВАННО ЖИВОЕ.»</i><br>
+    Поэтому колесо крутится и звук идёт <b>всегда</b> — они говорят «машина и окно живы».
+    А то, что прогон встал, страница <b>говорит словами и цветом</b>, а не тишиной.
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="arm" class="primary">🔊 Разрешить звук</button>
+      <span class="sub" style="margin:0">Браузер не даёт странице звучать без вашего действия —
+        кнопка не украшение, а разрешение.</span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="sndbtn" class="sndbtn"><span class="dot"></span><span id="sndlbl">ЗВУК ВЫКЛ</span></button>
+      <label class="sub" style="margin:0">громкость <input id="vol" type="range" min="0" max="100" value="40"></label>
+      <label class="sub" style="margin:0">раз в <span id="perlbl">1,0</span> с
+        <input id="per" type="range" min="4" max="40" value="10"></label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row spread">
+      <div class="row">
+        <div class="alive-mark"><i></i><i></i><i></i></div>
+        <div>
+          <p class="state alive" id="state">● ИДЁТ СТРЕСС-ТЕСТ</p>
+          <p class="statesub" id="statesub">2842 МГц · 935 мВ · ступень 5</p>
+        </div>
+      </div>
+      <div class="row">
+        <button id="kill" class="danger">✖ Убить пульс прогона</button>
+        <button id="revive">↻ Вернуть пульс</button>
+      </div>
+    </div>
+    <p class="sub" style="margin:14px 0 0">
+      <b>Нажмите «убить пульс».</b> Колесо продолжит крутиться, звук продолжит идти — они про то,
+      что жива МАШИНА. А строка состояния станет красной и скажет вслух, что прогон встал и сколько
+      секунд назад. Два разных факта — два разных канала, и ни один не молчит.
+    </p>
+  </div>
+
+  <table>
+    <thead><tr><th style="width:52px">метка</th><th style="width:120px">слушать</th><th>на что обратить внимание</th></tr></thead>
+    <tbody id="list"></tbody>
+  </table>
+
+  <div class="note">
+    <b>Что решаете именно вы.</b> Не «какой красивее в вакууме», а какой вы согласны слышать
+    <b>полтора часа подряд</b>, работая рядом. Плюс два числа: <b>частота</b> (ползунок выше — сейчас
+    раз в секунду) и <b>громкость</b>. И один вопрос, на который я сам отвечать не буду:
+    <b>должен ли звук МЕНЯТЬСЯ, когда прогон встал</b> — добавиться тревожная нота поверх ровного
+    фона, или звук остаётся ровно тем же, а красное говорит только экран?
+  </div>
+
+  <details>
+    <summary>Расшифровка меток — открывать ПОСЛЕ того, как послушали</summary>
+    <table>
+      <thead><tr><th>метка</th><th>что это</th><th>чем платим</th></tr></thead>
+      <tbody id="key"></tbody>
+    </table>
+  </details>
+</div>
+
+<script>
+/* ==================================================================================================
+   ЗВУК ВИЗУАЛИЗАТОРА — стенд прослушивания (класс вкуса, `homeworks/README.md`)
+   ==================================================================================================
+
+   🔴 ПРАВИЛО ВЛАДЕЛЬЦА, 2026-08-22, ОТМЕНЯЕТ ПРЕЖНЕЕ УСТРОЙСТВО:
+   «НИКАКОГО УМИРАНИЯ ВМЕСТЕ С ЧЕМ-ТО. НИ АНИМАЦИИ НИ ЗВУКА. ВСЁ ВОСПРОИЗВОДИТСЯ ВСЕГДА.
+    МНЕ ОНО НУЖНО ГАРАНТИРОВАНО ЖИВОЕ.»
+
+   Прежде анимация была ФУНКЦИЕЙ ПУЛЬСА и замирала вместе с прогоном — замирание и было сигналом
+   «машина зависла». Владелец это отменил, и по существу он прав: замирание — это ОТСУТСТВИЕ
+   сигнала, а отсутствие неотличимо от придушенной вкладки, свёрнутого окна или уснувшего браузера.
+   Движение, которое не прекращается НИКОГДА, — сигнал сильнее, и гаснет оно ровно в одном случае,
+   который владелец и назвал единственным: умерла ОС.
+
+   ЧТО ПРИ ЭТОМ НЕ ПОТЕРЯНО. Правда о прогоне не исчезает, она переезжает из тишины в СЛОВА:
+   встал прогон — строка краснеет и называет, сколько секунд назад. Раньше один канал нёс два
+   разных факта («окно живо» и «прогон идёт») и путал их; теперь у каждого свой, и молчащих
+   каналов нет вовсе.
+
+   СИНТЕЗ, А НЕ ФАЙЛЫ: ни одного байта ассетов, всё считает Web Audio на месте. Страницу отдаёт
+   наш собственный сервер на localhost, и внешний файл был бы ещё одним адресом, который может не
+   доехать посреди прогона.
+   ================================================================================================== */
+
+let ac = null, master = null, verb = null;
+let armed = false, soundOn = false;
+let tickTimer = null, watch = null, voice = null, current = 0;
+let beat = 0, lastPulseAt = performance.now(), pulseAlive = true;
+let periodMs = 1000;
+
+const $ = (id) => document.getElementById(id);
+const now = () => ac.currentTime;
+
+/* ---- кирпичи ------------------------------------------------------------------------------- */
+function reverb(seconds = 1.6, decay = 3.2) {
+  const n = Math.floor(ac.sampleRate * seconds);
+  const buf = ac.createBuffer(2, n, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, decay);
+  }
+  const c = ac.createConvolver(); c.buffer = buf; return c;
+}
+
+/** Одна нота. `send` — сколько уходит в ангарную реверберацию (она и делает «помещение»). */
+function tone({ freq, to = null, type = 'sine', peak = 0.3, attack = 0.005, decay = 0.25, at = 0, send = 0.35 }) {
+  const t = now() + at;
+  const o = ac.createOscillator(); o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  if (to !== null) o.frequency.exponentialRampToValueAtTime(to, t + decay);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  o.connect(g); g.connect(master);
+  if (send > 0) { const s = ac.createGain(); s.gain.value = send; g.connect(s); s.connect(verb); }
+  o.start(t); o.stop(t + attack + decay + 0.06);
+}
+
+function click({ ms = 7, peak = 0.1, center = 2600, q = 1.4, send = 0.25 }) {
+  const n = Math.max(1, Math.floor(ac.sampleRate * ms / 1000));
+  const buf = ac.createBuffer(1, n, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = center; bp.Q.value = q;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(peak, now()); g.gain.exponentialRampToValueAtTime(0.0001, now() + ms / 1000 + 0.02);
+  src.connect(bp); bp.connect(g); g.connect(master);
+  if (send > 0) { const s = ac.createGain(); s.gain.value = send; g.connect(s); s.connect(verb); }
+  src.start();
+}
+
+/** Ангарный фон: две расстроенные пилы через низкий фильтр, медленно дышащий. */
+function hangarPad({ base = 62, cutoff = 320, level = 0.055 }) {
+  const a = ac.createOscillator(), b = ac.createOscillator();
+  a.type = 'sawtooth'; b.type = 'sawtooth';
+  a.frequency.value = base; b.frequency.value = base * 1.006;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = cutoff; lp.Q.value = 0.9;
+  const g = ac.createGain(); g.gain.value = level;
+  // Медленное дыхание фильтра — то, что отличает «живой ангар» от гудящего трансформатора.
+  const lfo = ac.createOscillator(); lfo.frequency.value = 0.07;
+  const lfoAmp = ac.createGain(); lfoAmp.gain.value = cutoff * 0.45;
+  lfo.connect(lfoAmp); lfoAmp.connect(lp.frequency);
+  a.connect(lp); b.connect(lp); lp.connect(g); g.connect(master);
+  const s = ac.createGain(); s.gain.value = 0.5; g.connect(s); s.connect(verb);
+  a.start(); b.start(); lfo.start();
+  return { stop() { [a, b, lfo].forEach((o) => { try { o.stop(); } catch (e) { /* уже */ } }); } };
+}
+
+/* ---- ПЯТЬ КАНДИДАТОВ · семейство «ангар», по образцу «Космических рейнджеров 2» ------------- */
+const CANDIDATES = [
+  {
+    tag: 'А', hint: 'фон помещения плюс редкий бип · будто сидишь В ангаре, а не смотришь на него',
+    what: 'АНГАР — тёплый низкий фон (две расстроенные пилы, дышащий фильтр) + короткий бип 1180 Гц на долю',
+    cost: 'самый «атмосферный», но это постоянный фон в комнате: он есть всегда, даже когда вы о нём забыли',
+    pad: true,
+    beat() { tone({ freq: 1180, peak: 0.16, decay: 0.13, send: 0.5 }); },
+  },
+  {
+    tag: 'Б', hint: 'без фона · сухая консоль отсчитывает данные',
+    what: 'КОНСОЛЬ — двухнотный чирп вверх, 740 → 1240 Гц, прямоугольная волна с мягким спадом',
+    cost: 'ретро-компьютерный характер, читается мгновенно; но прямоугольник резче синуса и на долгом прогоне заметнее',
+    beat() { tone({ freq: 740, type: 'square', peak: 0.075, decay: 0.05, send: 0.3 });
+             tone({ freq: 1240, type: 'square', peak: 0.075, decay: 0.09, at: 0.06, send: 0.3 }); },
+  },
+  {
+    tag: 'В', hint: 'сонар · длинный хвост в пустом помещении',
+    what: 'СОНАР — чистый пинг 1320 → 990 Гц с большой реверберацией и тихим повтором',
+    cost: 'красиво и не назойливо, хвост заполняет паузу; но именно хвост может мешать, если частоту поднять',
+    beat() { tone({ freq: 1320, to: 990, peak: 0.17, decay: 0.5, send: 0.85 });
+             tone({ freq: 1320, to: 990, peak: 0.05, decay: 0.5, at: 0.24, send: 0.85 }); },
+  },
+  {
+    tag: 'Г', hint: 'бип-боп · слышно, что машина ПЕРЕБИРАЕТ, а не просто тикает',
+    what: 'ПУЛЬСАР — две ноты по очереди, 990 и 660 Гц, треугольная волна',
+    cost: 'чередование даёт ощущение работы, а не часов; но пара нот легко складывается в мелодию, и мозг начинает её ждать',
+    beat(i) { tone({ freq: i % 2 ? 990 : 660, type: 'triangle', peak: 0.14, decay: 0.16, send: 0.4 }); },
+  },
+  {
+    tag: 'Д', hint: 'машинное отделение · низкий толчок и микро-щелчок сверху',
+    what: 'РЕАКТОР — фон + низкий импульс 88 Гц на долю и тонкий щелчок 3 кГц поверх',
+    cost: 'самый «железный» и наименее музыкальный, ни во что не складывается; зато низ по-разному звучит на разных колонках',
+    pad: true, padOpts: { base: 48, cutoff: 260, level: 0.05 },
+    beat() { tone({ freq: 88, to: 66, peak: 0.3, decay: 0.16, send: 0.25 }); click({ ms: 6, peak: 0.055, center: 3000 }); },
+  },
+];
+
+/* ---- разрешение, кнопка, ползунки ---------------------------------------------------------- */
+$('arm').onclick = () => {
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = $('vol').value / 100 * 0.7;
+  verb = reverb(); const vg = ac.createGain(); vg.gain.value = 0.9;
+  verb.connect(vg); vg.connect(ac.destination);
+  master.connect(ac.destination);
+  armed = true; soundOn = true;
+  $('arm').disabled = true;
+  paintBtn(); begin(current);
+};
+function paintBtn() {
+  $('sndbtn').classList.toggle('on', soundOn);
+  $('sndlbl').textContent = soundOn ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ';
+}
+$('sndbtn').onclick = () => {
+  if (!armed) { $('arm').click(); return; }
+  soundOn = !soundOn;
+  if (soundOn) begin(current); else silence();
+  paintBtn();
+};
+$('vol').oninput = () => { if (master) master.gain.value = $('vol').value / 100 * 0.7; };
+$('per').oninput = () => {
+  periodMs = Number($('per').value) * 100;
+  $('perlbl').textContent = (periodMs / 1000).toFixed(1).replace('.', ',');
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = setInterval(tick, periodMs); }
+};
+
+/* ---- голос: идёт ВСЕГДА, пока звук включён --------------------------------------------------- */
+function silence() {
+  clearInterval(tickTimer); tickTimer = null;
+  if (voice) { voice.stop(); voice = null; }
+  render();
+}
+function begin(idx) {
+  current = idx;
+  silence();
+  if (!armed || !soundOn) { render(); return; }
+  const c = CANDIDATES[idx];
+  if (c.pad) voice = hangarPad(c.padOpts || {});
+  beat = 0; tick();
+  tickTimer = setInterval(tick, periodMs);
+  render();
+}
+/** Доля. Ничем не обусловлена — ни пульсом прогона, ни его состоянием. В этом весь смысл. */
+function tick() { beat += 1; CANDIDATES[current].beat(beat); }
+
+/* ---- имитация прогона: отдельный факт, отдельный канал --------------------------------------- */
+let runBeat = 0;
+setInterval(() => { if (pulseAlive) { lastPulseAt = performance.now(); runBeat += 1; } }, 1000);
+$('kill').onclick = () => { pulseAlive = false; };
+$('revive').onclick = () => { pulseAlive = true; lastPulseAt = performance.now(); };
+
+watch = setInterval(() => {
+  const since = performance.now() - lastPulseAt;
+  const stalled = since > 2500;
+  const s = $('state'), sub = $('statesub');
+  s.classList.toggle('alive', !stalled); s.classList.toggle('stalled', stalled);
+  if (stalled) {
+    s.textContent = `■ ПРОГОН ВСТАЛ ${Math.round((since - 2500) / 1000)} с назад`;
+    sub.textContent = 'окно и машина живы — это видно по колесу и слышно по звуку; встал именно прогон';
+  } else {
+    s.textContent = '● ИДЁТ СТРЕСС-ТЕСТ';
+    sub.textContent = `2842 МГц · ${1045 - (runBeat % 16) * 10} мВ · ступень ${runBeat % 16 + 1}`;
+  }
+}, 120);
+
+/* ---- таблицы ---------------------------------------------------------------------------------- */
+function render() {
+  $('list').innerHTML = CANDIDATES.map((c, i) => `
+    <tr class="${current === i && tickTimer ? 'playing' : ''}">
+      <td><span class="tag">${c.tag}</span></td>
+      <td><button data-i="${i}" ${armed ? '' : 'disabled'}>${current === i && tickTimer ? '▶ звучит' : 'слушать'}</button></td>
+      <td class="sub" style="margin:0">${c.hint}</td>
+    </tr>`).join('');
+  [...$('list').querySelectorAll('button')].forEach((b) => { b.onclick = () => begin(Number(b.dataset.i)); });
+}
+$('key').innerHTML = CANDIDATES.map((c) => `
+  <tr><td><span class="tag">${c.tag}</span></td><td>${c.what}</td><td class="sub" style="margin:0">${c.cost}</td></tr>`).join('');
+render();
+</script>
+</body>
+</html>

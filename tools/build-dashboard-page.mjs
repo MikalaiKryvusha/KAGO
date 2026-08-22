@@ -126,6 +126,25 @@ must(s.includes('<div class="stage">'), 'сцена не найдена');
 s = s.replace('<div class="stage">',
   '<div class="stage"><span class="pill" id="synthetic-note" style="display:none">ВИРТУАЛЬНАЯ</span>');
 
+// ---- 3c. THE LAST ENGINEERED DEATH IS REMOVED — the owner's word, 2026-08-22.
+//
+// The mockup pauses the accepted keyframes whenever the page goes into its `hung` state. That is the
+// same «dying mechanism» he banned in the wiring, one layer down in CSS:
+//
+//   «НИКАКОГО УМИРАНИЯ ВМЕСТЕ С ЧЕМ-ТО. НИ АНИМАЦИИ НИ ЗВУКА. ВСЁ ВОСПРОИЗВОДИТСЯ ВСЕГДА.»
+//   «оно само зависнет, когда зависнет комп — не нужно никаких специальных механизмов умирания»
+//
+// The mockup itself is NOT edited — it is the accepted drawing, and there the paused state is a
+// legitimate way to DEPICT a hang in a still picture. On the live page it is a mechanism, and the
+// mechanism is what he removed. `body.hung` stays alive for everything else it does: it swaps the
+// green state line for the red one, i.e. the page keeps SAYING the run stalled — in words, which is
+// the half of the rule that must not be lost.
+{
+  const paused = 'body.hung .spin,body.hung .arm,body.hung .rock{animation-play-state:paused!important}';
+  must(s.includes(paused), 'правило паузы кадров не найдено в макете');
+  s = s.replace(paused, '/* пауза кадров снята словом владельца 2026-08-22 — кадры идут ВСЕГДА */');
+}
+
 // ---- 4. the wiring
 const js = readFileSync(WIRING, 'utf8');
 must(s.includes('</body>'), 'нет закрывающего body');
