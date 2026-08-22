@@ -62,7 +62,7 @@ import { marginAboveLastStableMv } from './config.mjs';
 // `chooseWriteShape` is imported STATICALLY and that is safe offline: `vf-step` imports `nvapi`
 // lazily, inside the functions that write, so nothing here reaches for koffi or the driver.
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
-import { DIVERSE_SET } from './lib/stress-tester.mjs';
+import { DIVERSE_SET, furnaceSetAtLevel, FURNACE_LADDER } from './lib/stress-tester.mjs';
 import { localIso } from './lib/card-grids.mjs';
 // The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
 // measured; `curve-store` decides what the artifact may hold, and there is no second writer.
@@ -1377,6 +1377,10 @@ export async function sweepFrequency({
   hangFloorMv = null,
   curveDoc = null,
   runRungFn,
+  // Лестница едет НАСКВОЗЬ, не разбираясь: `sweepFrequency` про интенсивность ничего не решает,
+  // её дело — лестница НАПРЯЖЕНИЙ. Решение об интенсивности живёт в ступени, где видно, на какой
+  // частоте прожиг реально шёл.
+  shapeLadder = null,
   minStepMv = config.VOLTAGE_GRID_STEP_MV ?? 5,
   zones = config.DESCENT_ZONES,
   onEvent = null,
@@ -1705,7 +1709,14 @@ export async function sweepFrequency({
         + (refined.resolutionMv !== null && refined.resolutionMv > minStepMv
           ? ` · разрешение карты здесь ${refined.resolutionMv} мВ, шага ${minStepMv} мВ у неё нет`
           : '')
-        + ` · прожиг ${config.SWEEP_PROBE_SECONDS ?? 10} с формой ${SHORT_PROBE[0]?.id ?? 'sdc_fma/transient'}`;
+        // ФОРМА ПРОЖИГА БЕРЁТСЯ ИЗ ТОГО, ЧТО РЕАЛЬНО РЕШИЛО ИСХОД, а не из умолчания модуля. Строка
+        // `provenBy` — это подпись под измерением, и подпись, называющая форму, которой прогон не
+        // пользовался, есть пара «правда ↔ зеркало» в самом документе кривой. Она бы и разошлась:
+        // 2026-08-22 развёртка переехала на `furnace` с лестницей интенсивности, а этот литерал
+        // остался бы обещать `sdc_fma/transient` (EXP-0077).
+        + ` · прожиг ${config.SWEEP_PROBE_SECONDS ?? 10} с формой `
+        + `${(refined.rungs ?? []).map((rr) => rr.decidedBy).filter(Boolean).at(-1)
+             ?? SHORT_PROBE[0]?.id ?? 'форма не названа'}`;
       out.why = `КРАЙ НАЙДЕН на ${frequencyMhz} МГц: ${refined.why}`;
       return withDelivered();
     }
@@ -1877,6 +1888,9 @@ export async function sweepRange({
   now = null,
   clockMs = () => Date.now(),
   onEvent = null,
+  // ЛЕСТНИЦА ИНТЕНСИВНОСТИ, СИЛЬНЕЙШИЙ НАБОР ПЕРВЫМ (слово владельца 2026-08-22: прожиг обязан
+  // идти на настраиваемой частоте). `null` — прежнее поведение: одна попытка формой по умолчанию.
+  shapeLadder = null,
   estimateHours = 1.7,
 } = {}) {
   if (typeof runStepFn !== 'function') {
@@ -1986,6 +2000,7 @@ export async function sweepRange({
       curveDoc: doc,
       minStepMv,
       onEvent,
+      shapeLadder,
       // ⚠️ АРГУМЕНТЫ ПРОБРАСЫВАЮТСЯ ЦЕЛИКОМ (`rungArgs`), А НЕ ПЕРЕПИСЫВАЮТСЯ ПО ИМЕНАМ.
       // Первая редакция этой обёртки разбирала пять полей и звала `runRung` со СВОИМ списком — то
       // есть была парой «правда ↔ зеркало» между тем, что `sweepFrequency` отдаёт, и тем, что
@@ -2053,6 +2068,10 @@ export async function sweepRange({
           seconds, sustain, pinCard, canPin,
           journal, seq: seq++, blockedKeys, now,
           runStepFn, buildVector, chooseShape, demandPin, envelopeMhz,
+          // ЛЕСТНИЦА И СОБЫТИЯ — сюда, потому что решение об интенсивности принимается ЗДЕСЬ, где
+          // видно выданную частоту. `onEvent` нужен, чтобы ослабление нагрузки было видно оператору
+          // в окне, а не только в записи после прогона.
+          shapeLadder, onEvent,
         });
         say('rung', r.why, { frequencyMhz, voltageMv, outcome: r.outcome });
         return r;
@@ -2278,6 +2297,18 @@ export function sweepDryRunLines(dry) {
   lines.push(`СУХОЙ ПРОГОН: частот в полосе ${dry.frequenciesInBand}, из них прожигается ${dry.groupCount} `
     + `(остальные обслуживаются тем же напряжением и наследуют тот же ЗАМЕР), `
     + `прожигов запланировано ${dry.rungTotal}${dry.refusals ? ` · ОТКАЗОВ ${dry.refusals}` : ''}`);
+  // ЧЕМ БУДЕТ ЖЕЧЬ — ПЕЧАТАЕТСЯ ПЛАНОМ, потому что граница, добавленная в ПРОГОН и не названная
+  // ПЛАНОМ, не добавлена (EXP-0052, `bugs/09`): оператор читает сухой прогон, а не исходники.
+  // Развёртка переехала на `furnace` 2026-08-22, и эта строка — то, по чему это видно ДО записи.
+  {
+    const ladder = [0, 1, 2, 3].map((lvl) => furnaceSetAtLevel(lvl));
+    const strongest = ladder[0].filter((s) => s.bearsVerdict).map((s) => s.id).join(' + ');
+    lines.push(`ПРОЖИГ: ${strongest} по ${config.SWEEP_PROBE_SECONDS ?? 10} с. `
+      + `Если карта под ним не сядет на настраиваемую частоту — ступень ПЕРЕИГРЫВАЕТСЯ ослабленной `
+      + `нагрузкой, ступеней интенсивности ${ladder.length} `
+      + `(${FURNACE_LADDER.map((l) => `${l.wattsSeen} Вт→${l.heldMhzSeen} МГц`).join(' · ')}). `
+      + `Кончились ступени — это НАХОДКА, а не вердикт о другой частоте (bugs/28).`);
+  }
   if (Number.isFinite(dry.depthCapMv)) {
     lines.push(`ПОТОЛОК ГЛУБИНЫ ${dry.depthCapMv} мВ от стока — УСЛОВИЕ ЭТОГО ПРОГОНА, не свойство карты. `
       + `Он связывает спуск на ${dry.cappedFrequencies} частоте(ах) из ${dry.groupCount}: там рычаг достаёт глубже, `
@@ -5780,6 +5811,18 @@ async function mainSweep(argv, arg) {
     runStepFn: (a) => vf.runStep(a),
     saveFn: async (d) => saveCurveDoc(d),
     onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
+    // ─── ПРОЖИГ: `furnace` С ЛЕСТНИЦЕЙ ИНТЕНСИВНОСТИ (слово владельца 2026-08-22) ──────────────
+    //
+    // Раньше здесь молчаливо действовало умолчание `runRung` — ОДНА форма `sdc_fma/transient`,
+    // которая берёт 233 Вт и НЕ ЧИТАЕТ ПАМЯТЬ ВОВСЕ. Теперь ступень судится набором из трёх форм
+    // на `furnace` (305 Вт, трафик VRAM 4,9 ТБ за десять секунд) плюс `branchy` как форма падения,
+    // и если карта под этим прожигом не сядет на настраиваемую частоту — ступень переигрывается
+    // всё более слабой интенсивностью, пока не сядет (`bugs/28`).
+    //
+    // Лестница строится ЗДЕСЬ, а не внутри развёртки: движок про интенсивность ничего не знает и
+    // знать не должен (R16a — он композитор, а не писатель), а набор форм — это решение о том,
+    // ЧЕМ мерить, и оно принадлежит команде.
+    shapeLadder: [0, 1, 2, 3].map((lvl) => furnaceSetAtLevel(lvl)),
     });
   } catch (e) {
     // OUR OWN DEATH IS NOT THE CARD'S (`bugs/20`). The process is ALIVE here — that is the entire
