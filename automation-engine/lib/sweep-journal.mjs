@@ -55,8 +55,11 @@ const ROOT = resolve(HERE, '..', '..');
 export const SWEEP_DIR = join(ROOT, 'runs', 'sweep');
 const JOURNAL_FILE = 'journal.jsonl';
 
-/** The two line kinds. An `intent` is a promise to touch the card; a `verdict` closes it. */
-export const LINE = Object.freeze({ INTENT: 'intent', VERDICT: 'verdict' });
+/**
+ * The line kinds. An `intent` is a promise to touch the card; a `verdict` closes it; a `correction`
+ * re-attributes a hang that was never the card's — see `writeCorrection` for why the third exists.
+ */
+export const LINE = Object.freeze({ INTENT: 'intent', VERDICT: 'verdict', CORRECTION: 'correction' });
 
 /**
  * THE OUTCOME OF A RUNG AS THE JOURNAL RECORDS IT. `hung` is the one this module DERIVES rather than
@@ -374,6 +377,129 @@ export function closeAsWriterDeath(journal, { at = null, error = null, io = {} }
 }
 
 /**
+ * WHAT A HANG MAY BE RE-ATTRIBUTED TO. Never to `HUNG` — and that asymmetry is the whole safety
+ * property of the mechanism below, not a stylistic choice.
+ *
+ * A correction may only ever REMOVE a wall, because removing one costs a rung that gets burned again
+ * under the owner's eye, while ADDING one would let a document be given an edge nobody measured —
+ * the false-`[TESTED]` class this project hunts. So the vocabulary here is exactly the two outcomes
+ * that mean «this death was not the silicon».
+ */
+export const CORRECTABLE_TO = Object.freeze([RUNG_OUTCOME.CRASHED, RUNG_OUTCOME.STOPPED]);
+
+/**
+ * RE-ATTRIBUTE A RECORDED HANG THAT WAS NEVER THE CARD'S — append-only, evidence mandatory.
+ *
+ * ─── WHY THIS EXISTS: TWO CORRECT RULES THAT DISABLED EACH OTHER ──────────────────────────────────
+ *
+ * `bugs/20` (2026-08-16) found that OUR OWN death — `bugs/19`'s EPERM, `bugs/21`'s tidy hook — was
+ * being written down as «the card hung», and left two such phantoms on disk: **2542 MHz / 895 mV**
+ * and **2775 MHz / 965 mV**. It fixed the WRITER (`closeAsWriterDeath` above) and prescribed the
+ * remedy for the records already written: *«It must be re-measured rather than hand-edited —
+ * `curve-store` is the document's only author (R14a)… let the run measure that frequency again.»*
+ * That was right, and on 2542 MHz it worked: the resumed sweep re-walked it to 845 mV at 23:08 the
+ * same evening.
+ *
+ * **Then R18 arrived the next day and made a recorded hang a WALL** (`bugs/23`): no rung may land on
+ * or below a voltage a `ЗАВИС` names, and the seed is cancelled by it too. R18 is correct — it is
+ * what stops a resumed run from walking back onto the rung that bugchecked the machine. But it
+ * silently REVOKED `bugs/20`'s remedy: after R18 the phantom cannot be re-measured, because the
+ * phantom itself forbids the descent that would re-measure it. Neither document mentions the other.
+ *
+ * The consequence is not theoretical. Asked for a plan over 2887…2700 MHz on 2026-08-22, the dry run
+ * gave 2775 MHz exactly ONE rung and announced it would close as an EDGE at 990 mV — while its
+ * measured neighbours sit at 970 (2782) and 965 (2767). That edge would be an inversion, and
+ * `closePoint`'s monotonicity ratchet would then raise every frequency above it to 990 mV, deleting
+ * measurements the same run had taken minutes earlier.
+ *
+ * ─── THE SHAPE, AND WHY IT IS THIS ONE ────────────────────────────────────────────────────────────
+ *
+ * **Append-only, never an edit.** The journal is the one artifact that survives a machine death, and
+ * an agent editing evidence by hand is `bugs/08`. The original `ЗАВИС` line stays on disk, readable,
+ * forever; this adds a line that says «that one was ours, and here is how we know».
+ *
+ * **One author for «what is a hang».** `hangFloors` and `blockedRungs` both consult `corrections()`;
+ * neither derives the answer a second time. That is the same rule R14a states for the document and
+ * R16a for the sweep — a pair that can be REMOVED beats a pair that must be watched.
+ *
+ * **It can only ever remove a wall** (`CORRECTABLE_TO`), and it refuses a seq that is not a hang —
+ * so it cannot re-label a PASS, cannot invent a floor, and cannot reach a rung nobody attempted.
+ *
+ * **The evidence is a required field, not a courtesy.** A correction with no `why` would be exactly
+ * the hand-edit this shape exists to avoid, one JSON line further out.
+ *
+ * ⚠️ **The boundary, named rather than left to be discovered:** there is no un-correction. If a
+ * correction is itself wrong, the honest path is the same one `bugs/20` prescribed — let a run
+ * measure that frequency again, which a lifted wall now permits. Building an undo would give the
+ * journal two ways to say one thing.
+ *
+ * @param {object} journal from `openJournal`
+ * @param {object} c `{ seq, outcome, why, correctedBy, at }`
+ * @returns {object} the correction record as written
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function writeCorrection(journal, { seq, outcome, why = '', correctedBy = null, at = null, io = {} } = {}) {
+  if (!Number.isInteger(seq)) {
+    throw new TypeError('ПОПРАВКА БЕЗ НОМЕРА СТУПЕНИ: seq обязателен и должен быть целым — '
+      + 'поправка адресует одну конкретную запись журнала, а не «похожие»');
+  }
+  if (!CORRECTABLE_TO.includes(outcome)) {
+    throw new TypeError(`ПОПРАВКА МОЖЕТ ТОЛЬКО СНЯТЬ СТЕНУ, а не поставить: outcome «${outcome}» вне `
+      + `словаря ${CORRECTABLE_TO.join(' · ')}. Поставить полом можно только измерением, а не строкой`);
+  }
+  if (typeof why !== 'string' || why.trim() === '') {
+    throw new TypeError('ПОПРАВКА БЕЗ УЛИКИ — это правка улик руками одной строкой ниже (bugs/08): '
+      + 'поле why обязано называть, ПОЧЕМУ эта смерть была наша, а не карты');
+  }
+  // The target must BE a hang right now — both preimages, through the same two sources `hangFloors`
+  // reads. A correction aimed at a PASS, or at a rung nobody attempted, is a defect in the caller and
+  // must not reach the file: on disk it would look exactly like a legitimate one.
+  const { records } = readJournal(journal, io);
+  const isClosedHang = records.some((r) => r?.state === LINE.VERDICT && r.seq === seq
+    && r.outcome === RUNG_OUTCOME.HUNG);
+  const isOrphan = orphanIntents(records).some((o) => o.seq === seq);
+  if (!isClosedHang && !isOrphan) {
+    throw new Error(`ПОПРАВЛЯТЬ НЕЧЕГО: ступень ${seq} не является зависанием — ни закрытым вердиктом `
+      + 'ЗАВИС, ни осиротевшим намерением. Поправка снимает стену; там, где стены нет, она бы '
+      + 'молча переписала чужую запись');
+  }
+  const intent = records.find((r) => r?.state === LINE.INTENT && r.seq === seq) ?? null;
+  return appendLine(journal, {
+    state: LINE.CORRECTION,
+    seq,
+    at,
+    outcome,
+    correctedBy,
+    frequencyMhz: intent?.frequencyMhz ?? null,
+    voltageMv: intent?.voltageMv ?? null,
+    why,
+  }, io);
+}
+
+/**
+ * WHICH RECORDED HANGS HAVE BEEN RE-ATTRIBUTED — the single author of that answer.
+ *
+ * Idempotent by construction: two corrections of one `seq` mean the same thing as one, so there is no
+ * «latest wins» ordering rule to get wrong. A `Map` keyed by `seq` carries the FIRST one, because the
+ * first is the one that made the decision and the rest are noise.
+ *
+ * @returns {Map<number, object>} keyed by the corrected `seq`
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function corrections(records) {
+  const out = new Map();
+  for (const r of records) {
+    if (r?.state !== LINE.CORRECTION) continue;
+    if (!Number.isInteger(r.seq)) continue;
+    if (!CORRECTABLE_TO.includes(r.outcome)) continue;   // a malformed line decides nothing
+    if (!out.has(r.seq)) out.set(r.seq, r);
+  }
+  return out;
+}
+
+/**
  * WHAT HAPPENED AT EACH RUNG, IN ORDER — the join between intents and their verdicts.
  *
  * @returns {Map<string, Array<{seq, outcome, frequencyMhz, voltageMv}>>}
@@ -420,6 +546,11 @@ export function attributions(records) {
  * (`bugs/20`, `bugs/14`). Feeding them in here would ratchet a frequency upward for a reason that
  * was never measured, which is exactly the false-`[TESTED]` class this project hunts.
  *
+ * ⚠️ **And a hang RE-ATTRIBUTED by a correction is excluded for the same reason** (`writeCorrection`).
+ * The exclusion above protects records closed correctly at the time; a correction is how a record
+ * closed WRONGLY — before `bugs/20`'s fix existed — stops being a wall. Both preimages are filtered
+ * here, at the one place that decides what a floor is.
+ *
  * ─── TWO SOURCES, ONE MEANING: A CLOSED `ЗАВИС` AND AN INTENT NOBODY CLOSED ────────────────────────
  *
  * A recorded `ЗАВИС` verdict is a hang somebody has written down; an ORPHAN INTENT is the same hang
@@ -444,12 +575,13 @@ export function attributions(records) {
 export function hangFloors(records) {
   const out = new Map();
   const intents = new Map(records.filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
+  const fixed = corrections(records);
   const hung = [
     ...records
       .filter((r) => r?.state === LINE.VERDICT && r.outcome === RUNG_OUTCOME.HUNG)
       .map((v) => ({ rung: intents.get(v.seq), seq: v.seq, at: v.at ?? null })),
     ...orphanIntents(records).map((i) => ({ rung: i, seq: i.seq, at: i.at ?? null })),
-  ];
+  ].filter((h) => !fixed.has(h.seq));
   for (const { rung: i, seq, at } of hung) {
     if (!i || !Number.isFinite(i.frequencyMhz) || !Number.isFinite(i.voltageMv)) continue;
     const seen = out.get(i.frequencyMhz);
@@ -470,6 +602,12 @@ export function hangFloors(records) {
  * probabilistic edge — this card has shown one (fact 28) — and blocking it would delete a real
  * observation. What is a fault is the same rung killing the machine twice with nothing in between.
  *
+ * ⚠️ **A RE-ATTRIBUTED HANG IS DROPPED FROM THE SEQUENCE, not re-labelled in place** — `bugs/20`'s
+ * fix plan, item 3: our own death «must NOT count toward the two-consecutive brake. It is not a card
+ * event.» Dropping is deliberately the direction that keeps the brake STRONGER: leaving the record in
+ * place with a non-hang outcome would break the adjacency of two genuine hangs that happened to have
+ * one of our crashes between them, and a rung that really killed the machine twice would go unbraked.
+ *
  * @returns {Array<{key, frequencyMhz, voltageMv, why}>}
  *
  * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; mutation-proved — see the
@@ -477,8 +615,9 @@ export function hangFloors(records) {
  */
 export function blockedRungs(records) {
   const out = [];
+  const fixed = corrections(records);
   for (const [key, list] of attributions(records)) {
-    const tail = list.slice(-2);
+    const tail = list.filter((a) => !fixed.has(a.seq)).slice(-2);
     if (tail.length === 2 && tail.every((a) => a.outcome === RUNG_OUTCOME.HUNG)) {
       out.push({
         key,
@@ -730,6 +869,73 @@ export function selfTest() {
     //   а ЗАКРЫТОЕ своей смертью или остановом оператора — нет, хотя вердикта ЗАВИС там тоже нет.
     ok('незакрытость — не индульгенция: закрытое своей смертью намерение полом не становится',
       hangFloors(readJournal(j9).records).size, 0);
+
+    // ─── ПОПРАВКА: ЗАВИС, КОТОРЫЙ БЫЛ НАШЕЙ СМЕРТЬЮ, ПЕРЕСТАЁТ БЫТЬ СТЕНОЙ ────────────────────────
+    //   Два верных правила отменили друг друга: `bugs/20` прописал «пусть прогон перемерит частоту»,
+    //   а R18 назавтра сделал записанное зависание стеной — и перемер стал невозможен. Разбор целиком
+    //   в шапке `writeCorrection`; здесь проверяется механизм.
+    const j11 = openJournal({ dir: join(sandbox, 'correction') });
+    writeIntent(j11, { seq: 1, frequencyMhz: 2775, voltageMv: 965, pointIndex: 70 });
+    closeHangs(j11, { at: '2026-08-16T17:13:00+03:00' });
+    const beforeFix = hangFloors(readJournal(j11).records).get(2775)?.voltageMv ?? 'пола нет';
+    writeCorrection(j11, {
+      seq: 1,
+      outcome: RUNG_OUTCOME.CRASHED,
+      at: '2026-08-22T20:2x',
+      correctedBy: 'самопроверка',
+      why: 'фикстура: та же улика, что у настоящей поправки — разрыв 8 минут, машина не перезагружалась',
+    });
+    ok('ПОПРАВКА СНИМАЕТ СТЕНУ: до неё пол стоит, после — частота свободна',
+      [beforeFix, hangFloors(readJournal(j11).records).size], [965, 0]);
+    //   И ОРИГИНАЛ ОСТАЁТСЯ НА ДИСКЕ. Журнал дописываемый: правка улик руками — это `bugs/08`, а не
+    //   лечение. Поправка ДОБАВЛЯЕТ строку, читаемую вечно, и ничего не стирает.
+    const afterRecords = readJournal(j11).records;
+    ok('оригинальный ЗАВИС никуда не делся — поправка дописывает, а не переписывает',
+      [afterRecords.filter((r) => r.outcome === RUNG_OUTCOME.HUNG).length,
+        afterRecords.filter((r) => r.state === LINE.CORRECTION).length], [1, 1]);
+    //   ⚠️ ПОПРАВКА УМЕЕТ ТОЛЬКО СНИМАТЬ СТЕНУ. Поставить полом можно измерением, а не строкой:
+    //   иначе документу можно было бы выдать край, которого никто не мерил.
+    let cannotInvent = false;
+    try {
+      writeCorrection(j11, { seq: 1, outcome: RUNG_OUTCOME.HUNG, why: 'попытка поставить стену строкой' });
+    } catch { cannotInvent = true; }
+    ok('СТЕНУ СТРОКОЙ НЕ ПОСТАВИТЬ: поправка в ЗАВИС отвергается по словарю', cannotInvent, true);
+    //   И БЕЗ УЛИКИ — тоже отказ: поправка без причины и есть правка улик, одной строкой ниже.
+    let needsWhy = false;
+    try { writeCorrection(j11, { seq: 1, outcome: RUNG_OUTCOME.CRASHED, why: '   ' }); } catch { needsWhy = true; }
+    ok('ПОПРАВКА БЕЗ УЛИКИ ОТВЕРГАЕТСЯ: поле why обязательно и не может быть пустым', needsWhy, true);
+    //   И НЕЛЬЗЯ ПОПРАВИТЬ ТО, ЧТО ЗАВИСАНИЕМ НЕ БЫЛО. На диске такая строка выглядела бы законной.
+    const j12 = openJournal({ dir: join(sandbox, 'correction-target') });
+    writeIntent(j12, { seq: 1, frequencyMhz: 2700, voltageMv: 900 });
+    writeVerdict(j12, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: 'PASS', why: 'прошло' });
+    let onlyHangs = false;
+    try {
+      writeCorrection(j12, { seq: 1, outcome: RUNG_OUTCOME.CRASHED, why: 'попытка переписать PASS' });
+    } catch { onlyHangs = true; }
+    let noSuchRung = false;
+    try {
+      writeCorrection(j12, { seq: 99, outcome: RUNG_OUTCOME.CRASHED, why: 'ступени с таким номером нет' });
+    } catch { noSuchRung = true; }
+    ok('ПОПРАВЛЯЕТСЯ ТОЛЬКО ЗАВИСАНИЕ: ни PASS, ни несуществующая ступень', [onlyHangs, noSuchRung], [true, true]);
+    //   ⚠️ И ЖУРНАЛ БЕЗ ПОПРАВОК ВЕДЁТ СЕБЯ РОВНО КАК ПРЕЖДЕ. Это то, чего требует всякое добавление
+    //   к работающему механизму: доказать, что оно ничего не сдвинуло там, где его нет.
+    ok('журнал БЕЗ поправок не изменился ни в полу, ни в тормозе',
+      [hangFloors(readJournal(j8).records).get(2842)?.voltageMv ?? 'пола нет',
+        blockedRungs(readJournal(j8).records).length,
+        hangFloors(readJournal(j10).records).get(2842)?.voltageMv ?? 'пола нет'],
+      [860, 0, 845]);
+    //   ТОРМОЗ «ДВА ПОДРЯД» ТОЖЕ НЕ СЧИТАЕТ ПОПРАВЛЕННОЕ — `bugs/20`, пункт 3 плана починки: своя
+    //   смерть не событие карты, а тормоз — про карту.
+    const j13 = openJournal({ dir: join(sandbox, 'correction-brake') });
+    writeIntent(j13, { seq: 1, frequencyMhz: 2842, voltageMv: 845 });
+    writeIntent(j13, { seq: 2, frequencyMhz: 2842, voltageMv: 845 });
+    closeHangs(j13, { at: '2026-08-16T23:50:00+03:00' });
+    const brakeBefore = blockedRungs(readJournal(j13).records).length;
+    writeCorrection(j13, {
+      seq: 1, outcome: RUNG_OUTCOME.CRASHED, why: 'фикстура: первая попытка убита нашим же сторожем',
+    });
+    ok('ТОРМОЗ НЕ СЧИТАЕТ ПОПРАВЛЕННОЕ: два подряд превратились в одно настоящее',
+      [brakeBefore, blockedRungs(readJournal(j13).records).length], [1, 0]);
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });
