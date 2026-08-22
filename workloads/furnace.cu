@@ -68,6 +68,7 @@
 //   ru-RU locale would corrupt a float silently:
 //   KAGO-WORKLOAD name=furnace checksum=<16 hex> elements=<n> iters=<n> ms=<n> launches=<n>
 //                 distinct=<n> gpu_us=<n> wall_us=<n> work_per_launch=<n> table_mb=<n> read_gb=<n>
+//                 bad_launches=<n> bad_elems_max=<n> bit_dist_min=<n> first_bad_index=<n>
 // Exit:   0 ran · 2 CUDA error (the CRASH half — the harness also reads the Windows event log).
 //
 // [NOT-TESTED] at birth — flipped by `npm run workloads:build` proving ONE distinct checksum over
@@ -185,6 +186,39 @@ static uint64_t fnv1a(const void *data, size_t bytes) {
     return hash;
 }
 
+/**
+ * HOW WRONG, not merely WHETHER wrong — the graded half, identical in meaning to sdc_fma's.
+ *
+ * The checksum answers "did anything change" in one bit: one corrupted element and sixty thousand
+ * produce the same verdict. For a search walking DOWN toward the edge that is the wrong instrument.
+ * The COUNT of differing slots is the gradient — each slot is one thread's independent chain, so
+ * the count IS the per-thread fault rate.
+ *
+ * Here the count means MORE than it does in sdc_fma, and that is the point of this workload: a slot
+ * can now differ because the ALU erred, because a word came back wrong from VRAM, or because an
+ * address was computed wrong. All three are silicon faults at the voltage under test, and all three
+ * were previously invisible — sdc_fma reads no memory at all.
+ *
+ * NOT measured: the numeric MAGNITUDE of the error. The chain amplifies by design, so |got-expected|
+ * carries no information about the size of the fault. The count does; the size does not.
+ */
+static long long diff32(const void *gotv, const void *refv, size_t elems,
+                        int *bitDistMin, long long *firstIdx) {
+    const uint32_t *g = (const uint32_t *)gotv;
+    const uint32_t *r = (const uint32_t *)refv;
+    long long bad = 0;
+    for (size_t i = 0; i < elems; ++i) {
+        if (g[i] == r[i]) continue;
+        uint32_t x = g[i] ^ r[i];
+        int pc = 0;
+        while (x) { pc += (int)(x & 1u); x >>= 1; }
+        if (bad == 0) { *bitDistMin = pc; *firstIdx = (long long)i; }
+        else if (pc < *bitDistMin) { *bitDistMin = pc; }
+        bad++;
+    }
+    return bad;
+}
+
 static void no_spaces(char *dst, size_t cap, const char *src) {
     size_t i = 0;
     for (; src[i] && i + 1 < cap; ++i) dst[i] = (src[i] == ' ') ? '_' : src[i];
@@ -259,6 +293,13 @@ int main(int argc, char **argv) {
     uint64_t first = 0;
     uint64_t seen[MAX_DISTINCT];
     int ndistinct = 0;
+    // The graded half: `ref` holds launch #1, and the element-wise diff runs ONLY when the cheap
+    // checksum says something moved — a clean run never pays for it. bit_dist_min stays 0 while
+    // nothing has differed, which reads as "not applicable" rather than a suspiciously perfect zero.
+    long long bad_launches = 0;
+    long long bad_elems_max = 0;
+    int bit_dist_min = 0;
+    long long first_bad_index = -1;
 
     // Warmup: reach thermal/clock steady state before the timed window (same as sdc_fma).
     for (int w = 0; w < WARMUP_LAUNCHES; ++w) {
@@ -284,7 +325,19 @@ int main(int argc, char **argv) {
 
         CUDA_OK(cudaMemcpy(h, d_out, n * sizeof(float), cudaMemcpyDeviceToHost));
         uint64_t sum = fnv1a(h, n * sizeof(float));
-        if (launches == 0) { first = sum; memcpy(ref, h, n * sizeof(float)); }
+        if (launches == 0) {
+            first = sum;
+            memcpy(ref, h, n * sizeof(float));
+        } else if (sum != first) {
+            // Cheap detector said something moved — now pay for the diagnosis, and only now.
+            bad_launches++;
+            int bd = 0;
+            long long fi = -1;
+            const long long bad = diff32(h, ref, n, &bd, &fi);
+            if (bad > bad_elems_max) bad_elems_max = bad;
+            if (bit_dist_min == 0 || bd < bit_dist_min) bit_dist_min = bd;
+            if (first_bad_index < 0 || (fi >= 0 && fi < first_bad_index)) first_bad_index = fi;
+        }
         bool known = false;
         for (int k = 0; k < ndistinct; ++k) { if (seen[k] == sum) { known = true; break; } }
         if (!known && ndistinct < MAX_DISTINCT) seen[ndistinct++] = sum;
@@ -303,10 +356,12 @@ int main(int argc, char **argv) {
     const long long bytes_read = reads_per_launch * 4LL * launches;
 
     printf("KAGO-WORKLOAD name=furnace checksum=%016llx elements=%zu iters=%d ms=%lld launches=%lld "
-           "distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld table_mb=%lld read_gb=%lld\n",
+           "distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld table_mb=%lld read_gb=%lld "
+           "bad_launches=%lld bad_elems_max=%lld bit_dist_min=%d first_bad_index=%lld\n",
            (unsigned long long)first, n, iters, ms_total, launches,
            ndistinct, gpu_us_total, wall_us, reads_per_launch,
-           (long long)(tableWords * 4 / (1024 * 1024)), bytes_read >> 30);
+           (long long)(tableWords * 4 / (1024 * 1024)), bytes_read >> 30,
+           bad_launches, bad_elems_max, bit_dist_min, first_bad_index);
     fprintf(stderr, "furnace: %zu threads, table %lld MiB, %d outer iters x %d reads, %lld launches, "
             "%lld us GPU of %lld us wall\n",
             n, (long long)(tableWords * 4 / (1024 * 1024)), iters, INNER_READS, launches,

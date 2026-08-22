@@ -1,5 +1,10 @@
-// Prove the error gradient MEASURES, by building a deliberately corrupted copy of sdc_fma.cu and
+// Prove the error gradient MEASURES, by building a deliberately corrupted copy of a workload and
 // checking the reported numbers against exactly-known expected values.
+//
+// WHICH WORKLOAD: `--workload <name>` (default sdc_fma). The prover is workload-agnostic because
+// the graded oracle now lives in more than one kernel, and a proof that only ever ran against the
+// original would let the new one ship unproved — the exact shape of a false [TESTED].
+// Every workload it can prove must expose the same five fields and take `--sustain`.
 //
 // The injection flips ONE bit of ONE element on launch #5 — the lowest mantissa bit of element 123.
 // So the expected report is not "something non-zero" but an exact tuple:
@@ -15,10 +20,22 @@ const REPO = 'D:\\work\\ai_sandbox\\KAGO';
 const OUT = path.join(process.env.TEMP || process.env.TMP || '.', 'kago-gradient-proof');
 mkdirSync(OUT, { recursive: true });
 
-const src = readFileSync(path.join(REPO, 'workloads', 'sdc_fma.cu'), 'utf8');
+const argv = process.argv.slice(2);
+const wIdx = argv.indexOf('--workload');
+const NAME = wIdx >= 0 && argv[wIdx + 1] ? argv[wIdx + 1] : 'sdc_fma';
+const src = readFileSync(path.join(REPO, 'workloads', `${NAME}.cu`), 'utf8');
 
-const ANCHOR = '        cudaMemcpy(h, d, n * sizeof(float), cudaMemcpyDeviceToHost);';
-if (!src.includes(ANCHOR)) { console.log('SKIP: anchor not found'); process.exit(1); }
+// The injection point is "right after the results land on the host, before they are hashed". Each
+// workload spells that copy slightly differently, so the anchor is looked up per workload rather
+// than assumed — an anchor that silently fails to match would build a CLEAN binary and report a
+// passing proof of nothing.
+const ANCHORS = {
+  sdc_fma: '        cudaMemcpy(h, d, n * sizeof(float), cudaMemcpyDeviceToHost);',
+  furnace: '        CUDA_OK(cudaMemcpy(h, d_out, n * sizeof(float), cudaMemcpyDeviceToHost));',
+};
+const ANCHOR = ANCHORS[NAME];
+if (!ANCHOR) { console.log(`ОСТАНОВ: для нагрузки ${NAME} не назван якорь впрыска`); process.exit(1); }
+if (!src.includes(ANCHOR)) { console.log(`ОСТАНОВ: якорь впрыска не найден в ${NAME}.cu`); process.exit(1); }
 
 const INJECT = ANCHOR + `
         // INJECTED CORRUPTION (test copy only): flip the lowest mantissa bit of element 123 on
@@ -26,11 +43,11 @@ const INJECT = ANCHOR + `
         if (launches == 5) { uint32_t *p_ = (uint32_t *)h; p_[123] ^= 1u; }`;
 
 const mutated = src.replace(ANCHOR, INJECT);
-const cuPath = path.join(OUT, 'sdc_fma_corrupt.cu');
+const cuPath = path.join(OUT, `${NAME}_corrupt.cu`);
 writeFileSync(cuPath, mutated, 'utf8');
 
 const tc = findToolchain();
-const exePath = path.join(OUT, 'sdc_fma_corrupt.exe');
+const exePath = path.join(OUT, `${NAME}_corrupt.exe`);
 const built = buildCuda(cuPath, exePath, { toolchain: tc });
 if (!built.ok) {
   console.log('BUILD FAILED');
@@ -38,7 +55,10 @@ if (!built.ok) {
   process.exit(1);
 }
 
-const r = spawnSync(exePath, ['--sustain', '2'], { encoding: 'utf8' });
+// Sustain long enough that launch #5 actually happens: furnace's launches are ~370 ms, so two
+// seconds would end the run at launch #5 or before and the injection would never fire.
+const SUSTAIN = NAME === 'furnace' ? '8' : '2';
+const r = spawnSync(exePath, ['--sustain', SUSTAIN], { encoding: 'utf8' });
 const line = (r.stdout || '').split(/\r?\n/).find((l) => l.startsWith('KAGO-WORKLOAD')) || '';
 console.log(line);
 

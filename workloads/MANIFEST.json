@@ -1,6 +1,6 @@
 {
   "note": "Бинарники едут в репозиторий по решению владельца (интервью 001, Q3 = B). Манифест — способ проверить их, не веря байтам: пересоберите и сверьте.",
-  "built_at": "2026-08-22T18:47:15+03:00",
+  "built_at": "2026-08-22T19:01:13+03:00",
   "toolchain": "nvcc C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.3\\bin\\nvcc.exe (found by PATH) + MSVC env C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat [host x64 -> x64]",
   "gpu": {
     "name": "NVIDIA GeForce RTX 5070 Ti",
@@ -15,7 +15,7 @@
       "source": "branchy.cu",
       "binary": "branchy.exe",
       "source_sha256": "24592dbbeab7dae020108b95201b1dfc06fb744f02cfb05839cb90225efbb6dd",
-      "binary_sha256": "b6ac41c792f76b78bc476f811ec44b2f5732ec8bf62a28f136cc942dfab56c29",
+      "binary_sha256": "7a9191b3eddbaa6f1884369c9a2ad9647d827becb12112481ee4cc11a3cedc19",
       "run_checksum": "67e95c85bb6299a2",
       "repeats": 5,
       "size_bytes": 178688
@@ -24,18 +24,18 @@
       "name": "furnace",
       "source": "furnace.cu",
       "binary": "furnace.exe",
-      "source_sha256": "07a831a8e3a78b43be481897061881becb25bf6633313e33a2b2081d89182444",
-      "binary_sha256": "adc25499d1c8f9cbee03ed4e4216eb3d23071eb157ed91868fe98a193b4c5406",
+      "source_sha256": "31b3077f7e35493ab6c09bc464155a3023f5d5122ce71bf8116b0f8f1736f0da",
+      "binary_sha256": "64ae76a68a5e9caf10c97917f0dd5623f70482a863081f8b50114cf7664000de",
       "run_checksum": "2fa22073660f99b5",
       "repeats": 5,
-      "size_bytes": 192000
+      "size_bytes": 192512
     },
     {
       "name": "sdc_fma",
       "source": "sdc_fma.cu",
       "binary": "sdc_fma.exe",
       "source_sha256": "daf9dea026d83bc8366ca609194f744dda156f2bd7fe32c59d67d15427a941f7",
-      "binary_sha256": "382f81cbbd31acfbab8bccf34461c4c5394604772fbf0d65f511a2709ec48d05",
+      "binary_sha256": "40732fa3b4d955b47ea9ce174f2e4222a44211943d97a8818a51efb266694f8e",
       "run_checksum": "e27ec24a82d509d7",
       "repeats": 5,
       "size_bytes": 175616
