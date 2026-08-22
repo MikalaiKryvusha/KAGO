@@ -41,6 +41,61 @@
 
 ## Entries
 
+### EXP-0104 · 2026-08-22 · ❌→✅ · #rules #interaction #stale-remedy #cross-document #blocker
+**Context:** preparing the live sweep 2887→2700; reading the dry run for THAT band before authorising a write (rail S2).
+**Tried / did:** read the plan line by line instead of trusting «the machinery is green».
+**Result:** ❌ found that 2775 MHz would get ONE rung and close as an EDGE at 990 mV, while its measured neighbours sit at 970 and 965 — a false edge whose monotonicity ratchet would then have raised every frequency above it, deleting the same run's own measurements. Cause: `bugs/20` (a phantom hang written by OUR crash) prescribed «let the run re-measure that frequency»; **R18, added the NEXT DAY, made a recorded hang a WALL and thereby forbade the re-measurement.** Neither document mentions the other.
+**Lesson:** **two individually correct rules can disable each other, and the tell is a REMEDY that no longer executes.** Nothing goes red — the old rule's fix simply stops being reachable, and the artifact it was meant to repair sits there looking legitimate. When adding a rule that BLOCKS a path, grep the open bugs for remedies that USE that path.   → link: bugs/20 · bugs/23 · sweep-journal.writeCorrection
+**Repro:** `npm run engine -- --sweep --from <N> --to <M> --dry-run` and read the `ПОЛ ЗАВИСАНИЯ` line: every floor it names must be a hang you can defend with a timestamp gap and a STATUS entry, not merely a journal row.
+**Trigger:** adding any rule of the form «X may never happen again» → list the open remedies that require X to happen, and say what becomes of each.
+**Not for:** the real hangs. Three of the four floors on this card are genuine and none was touched; a correction may only ever REMOVE a wall, never create one.
+
+### EXP-0103 · 2026-08-22 · ❌→✅ · #javascript #derived-state #spread #guards #migration
+**Context:** epic 04 phase 1 — `status` left the stored row and became a NON-ENUMERABLE derived property, so unmigrated consumers keep working.
+**Tried / did:** attached the view in `loadCurveDoc`, then ran the suites.
+**Result:** ❌ twice. `closePoint` copies rows with `{...r}` — **a spread carries only ENUMERABLE properties**, so every internal check on `r.status` read `undefined`, and the monotonicity ratchet would have raised untouched factory rows. Separately, the «a burn-proof claim owes a witness» guard read `PROVEN_STATUSES.includes(r.status)` and therefore **never fired at all** on documents built in memory. ✅ after both were re-asked of the STORED tags (`isUnmeasured`, `claimsBurnProof`).
+**Lesson:** **a derived view exists only where someone attached it, so the module that OWNS the format reads the stored truth; the view is for consumers.** And the second failure is the sharper one: a guard whose input is a derived field is a guard that can silently never run — «green» then means «never asked».
+**Repro:** `node -e "const d={tags:['stop:untouched']}; Object.defineProperty(d,'status',{get:()=>'stock',enumerable:false}); console.log({...d}.status)"` → `undefined`.
+**Trigger:** replacing a stored field with a derived one → grep the owning module for reads of that field and re-point them at the stored source BEFORE migrating consumers.
+**Not for:** consumers outside the format's module — for them the view is the whole point and works.
+
+### EXP-0102 · 2026-08-22 · ❌→✅ · #tests #assertions #false-green #harness-signature
+**Context:** adding nine blocks for the tag cloud to `curve --selftest`.
+**Tried / did:** wrote them as `ok(name, got, want)` — the signature the neighbouring suites use.
+**Result:** ❌ `ok` in THIS suite is `(name, cond, detail)`. `want` was ignored and `got` judged by truthiness, so blocks passed for the wrong reason: `1` is truthy, and **an empty array is truthy too**. Exactly one block went red — the one expecting ZERO — and it exposed the rest. ✅ after an explicit `eq()` comparison inside each block.
+**Lesson:** **an assertion that names «got» and «want» must DO the comparison itself.** A harness helper's arity is not portable between suites of one project, and the failure mode is a green block that never tested anything — the most expensive kind, because it is indistinguishable from a passing one.
+**Repro:** before writing blocks in a suite: `grep -n "const ok = " <file>` and read the arity.
+**Trigger:** adding assertions to an unfamiliar suite → read the helper's signature first, and include at least one block whose expected value is falsy (`0`, `[]`, `false`) — that is the block that catches this.
+**Not for:** suites whose `ok` genuinely takes `(name, got, want)` — most of this project's do.
+
+### EXP-0101 · 2026-08-22 · ❌ · #process-control #windows #background #rollback
+**Context:** the owner said «стоп и чини» during the live sweep; the run had been launched in the background through `npm run … | tee`.
+**Tried / did:** stopped the background task with the harness's own stop.
+**Result:** ❌ it killed the SHELL and the `tee`, and the engine (`node`, pid 31472) **kept running and kept the card under an undervolt** — 2857 MHz, 241 W, 69 °C, watchdog record still held. ✅ after killing the writer directly and — deliberately — **WITHOUT `/T`**, so the detached watchdog survived and restored the card (verified: floors cleared, curve back at factory 1240 mV → 3172 MHz).
+**Lesson:** **stopping a wrapper is not stopping the work.** A pipeline (`| tee`) makes the shell, not the writer, the thing your stop reaches; verify by PID that the writer is gone, never by the stop tool's success message. And when a killed process must leave a rollback behind, kill it ALONE — a tree kill takes the guard with it (`bugs/21`).
+**⚠️ THE SECOND HALF, FOUND BY THE JUDGE AN HOUR LATER AND WORTH MORE THAN THE FIRST:** the hard kill left the in-flight rung's INTENT unclosed, and by R15b an unclosed intent IS a hang — so **2872 MHz silently acquired a false floor of 1000 mV**, and the next run's very first frequency would have closed as an "edge" without descending a single rung. `taskkill /F` is precisely what prevents `closeAsOperatorStop` from running: both graceful paths need the process ALIVE at the handler. **A hard stop is not finished until the journal is closed by hand** (`tools/close-operator-stop.mjs`). Generalisation beyond journals: a mechanism that infers meaning from ABSENCE will read your own emergency stop as the event it was built to detect.
+**Repro:** after any stop of a GPU-writing run: `Get-Process node | Select Id,StartTime` → `npm run watchdog -- --status` → `npm run mon -- --once` twice → **`node tools/close-operator-stop.mjs`** → and confirm with a `--dry-run` that the `ПОЛ ЗАВИСАНИЯ` line names only floors you can defend.
+**Trigger:** launching a card-writing run in the background → do NOT pipe it; on stop, verify by PID AND close the journal before reporting.
+**Not for:** read-only runs, where a surviving process costs nothing and no intent was ever written.
+
+### EXP-0100 · 2026-08-22 · ❌→✅ · #preferences #ux #intent #storage
+**Context:** the owner: «неверная музыка запустилась, я просил глубокий космос по умолчанию».
+**Tried / did:** looked for one cause; found three, stacked — the module's default contradicted its own documentation (`melIdx = 0` vs a comment saying «3 · по умолчанию»); the theme was assigned AFTER the sound was switched on, so the module's value played first; and `localStorage` held a «choice» that was really an audition.
+**Result:** ✅ all three fixed; the duplicated default (`DEFAULT_THEME` in a second file) collapsed to one source.
+**Lesson:** **«remembering a human's choice» and «a human auditioning options» are DIFFERENT intents, and a mechanism that cannot tell them apart records the experiment as the decision.** Persisting on every change is what makes an audition indistinguishable from a preference; the cheap remedy after the fact is a storage-key version bump, which clears the audition without weakening the rule.
+**Repro:** `grep -n "localStorage.setItem" assets/dashboard/_wiring.js` — check whether the write happens on every change or on a deliberate confirmation.
+**Trigger:** building a «remember the choice» control that the owner will also use to COMPARE options → decide which interactions count as a decision, before shipping.
+**Not for:** controls with no comparison mode (a simple on/off) — there every change genuinely is a decision.
+
+### EXP-0099 · 2026-08-22 · ✅ · #migration #inventory #format #bugs-24
+**Context:** migrating the curve document's `status` field to a tag cloud (epic 04 phase 1).
+**Tried / did:** wrote the inventory of every place a row is CONSTRUCTED — nine sites — into the plan BEFORE the first edit, as `bugs/24` demands.
+**Result:** ✅ the inventory itself found the trap: **three sites wrote the status as a STRING LITERAL**, not through the vocabulary constant, so the obvious migration sweep — grep the constant's name — would not have seen them. Migration landed with the battery green and both goldens byte-identical.
+**Lesson:** **grep the literal VALUES, not the constant's name.** A migration finds what is written in the vocabulary's own words and misses what was hand-typed, and hand-typed sites cluster in fixtures — which is where a broken migration hides longest, because a red fixture looks like a fixture problem.
+**Repro:** for a closed vocabulary `V`: `grep -rn "'v1'\|'v2'\|'v3'" --include="*.mjs" .` for every value of `V`, not only `grep -rn "V\."`.
+**Trigger:** any format migration of a field with a closed vocabulary → enumerate builders by VALUE first, and put the list in the plan where it can be ticked.
+**Not for:** additive fields with a default, where a missed builder gets the default and nothing breaks.
+
 ### EXP-0098 · 2026-08-22 · ❌ · #brand #naming #owner-privilege #overreach #vision
 **Context:** выпуск версии 0.9. У соседнего проекта (KAIF) релизы именованные — «2.3 Subjected KAIF», — и агент по этому образцу назвал релиз «KAGO 0.9 — Furnace», взяв имя выбранного им же файла нагрузки `workloads/furnace.cu` и подняв его на витрину: заголовок релиза, тело релиза, строка версии README в обоих языках.
 **Tried / did:** не спросил вовсе. Форма показалась подходящей, и решение прошло как оформительское, а не как продуктовое.
