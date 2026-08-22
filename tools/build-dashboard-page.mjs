@@ -160,8 +160,11 @@ if (process.argv.includes('--preview')) {
   // Пульс НЕ обновляется в статике, поэтому детектор зависания зажёгся бы через три секунды и
   // снимок вышел бы с тревогой. Здесь это ложь о картинке, а не о прогоне: держим метку времени
   // свежей ровно для рендера.
+  // Ленты в статике нет вовсе, а страница теперь честно называет её отсутствие («нет связи») —
+  // `bugs/27`. Для рендера подставляется ЗАГЛУШКА ленты в состоянии OPEN: back door в боевой код
+  // ради снимка не заводится, подменяется только то, чего в файле физически нет.
   prev = prev.replace('connect();',
-    `pulse = ${pulse}; ${noPill ? 'pulse.card.synthetic = false; ' : ''}pulseAt = performance.now(); paint();\n`
+    `es = { readyState: 1 }; pulse = ${pulse}; ${noPill ? 'pulse.card.synthetic = false; ' : ''}pulseAt = performance.now(); paint();\n`
     + '  setInterval(() => { pulseAt = performance.now(); }, 200);');
   const out = join('assets', 'dashboard', '_preview.html');
   writeFileSync(out, prev, 'utf8');

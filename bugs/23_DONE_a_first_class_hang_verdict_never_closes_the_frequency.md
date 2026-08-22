@@ -1,9 +1,17 @@
 # Bug 23 — a first-class `ЗАВИС` verdict does not close the frequency, so a resumed run walks back onto the rung that killed the machine
 
-**Status:** 🔧 FIX LANDED, VERIFICATION IS OFFLINE-ONLY — 2026-08-17 00:5x. Every guard mutation-proved
-red first (8 addressees), the trap suite drives it over a REAL process kill. **The live half — a
-resumed sweep on the card at 2842 MHz — has NOT been run: the owner's machine was busy and he asked
-that the GPU not be touched.** That run is what flips this to DONE.
+**Status:** ✅ **DONE — 2026-08-22 14:34, CLOSED BY THE LIVE RUN.** Every guard was mutation-proved red
+first (8 addressees) and the trap suite drives it over a REAL process kill; the live half is now done
+too. `engine --sweep --from 2842 --to 2842 --dashboard` on the owner's card: the run's FIRST act was
+to close the orphaned intent of 2026-08-16 as a first-class `ЗАВИС` (seq 520, «НАМЕРЕНИЕ БЕЗ
+ВЕРДИКТА»), the descent then stopped at 850 mV and **did not step onto the 845 mV rung that killed the
+machine** — the hang floor held, exactly as the dry run had printed it. Row **2835 MHz** closed
+`edge-found`. The knowledge of 2026-08-16 is in the curve document.
+**⚠️ And the second run of the same frequency 26 minutes later disagreed with the first** — 850 mV
+PASSED at 14:31 and CRASHED at 14:57, moving the shipped voltage 860 → 865 mV. Not a defect of this
+fix and not thermal (the card runs COLDER at the deep rungs — 68 °C/139 W at the top of the descent
+against 49 °C/93 W at the bottom); it is the silicon's spread at the edge. Recorded as fact 39 in
+`STATUS.md`, and it is evidence for the phase-4 gate «every edge boundary burned ≥ 60 s».
 **Version/build:** `main` @ `901a123` · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-17 ≈23:31 +03:00 (2026-08-16 local evening), the project's **first
 deliberate edge hunt** — `engine --sweep --from 2842 --to 2842 --max-depth 245 --dashboard`, run at

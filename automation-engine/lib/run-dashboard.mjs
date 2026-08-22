@@ -338,7 +338,7 @@ export function clearPulse(path = PULSE_PATH) {
  */
 export const FINISHED_GRACE_MS = 60_000;
 
-export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
+export function pulseNow(path = PULSE_PATH, nowMs = Date.now(), telemetryPath = TELEMETRY_PATH) {
   const p = readPulse(path);
   // A FINISHED RUN STOPS BEING THE CURRENT RUN. The owner, opening the window long after one ended:
   // «поднялось на ПРОГОН ОСТАНОВЛЕН - баг». He is right — his rule is «состояние ТЕКУЩЕГО прогона»,
@@ -383,7 +383,7 @@ export function pulseNow(path = PULSE_PATH, nowMs = Date.now()) {
   // blocked inside the burn and cannot sample its own card (`ideas/06` §A). Only a process that is
   // NOT blocked can, so one runs alongside for the whole sweep and the server reads its last line.
   // Merged HERE rather than pushed by the run, because the run is precisely the thing that is busy.
-  const card = latestTelemetry();
+  const card = latestTelemetry(telemetryPath);
 
   // ⏱ И СЕКУНДЫ СТРЕСС-ТЕСТА — ТОЖЕ ЗДЕСЬ, ПО ТОЙ ЖЕ ПРИЧИНЕ. Владелец, глядя на живой прогон:
   // «циферки не тикают · стресс-тест устойчивости 0,0 из 10 с».
@@ -467,6 +467,11 @@ function sendFile(res, path, type) {
 export function serve({
   port = DEFAULT_PORT,
   pulsePath = PULSE_PATH,
+  // ШОВ ДЛЯ ПЕСОЧНИЦЫ: путь телеметрии — параметр, а не константа. Без него самопроверка вынуждена
+  // была писать в БОЕВОЙ файл и класть его обратно из резервной копии; на простое это безобидно, но
+  // во время живого прогона стёрло бы его улики (`bugs/08` — набор не трогает улики) и закрывало
+  // набору дорогу в батарею, которая обещает «карту можно не освобождать». Теперь дорога открыта.
+  telemetryPath = TELEMETRY_PATH,
   pagePath = PAGE_PATH,
   pollMs = 200,
   heartbeatMs = 10_000,
@@ -476,6 +481,10 @@ export function serve({
   const clients = new Set();
   let lastSeq = -1;
   let lastPayload = null;
+  // Слепок последней РАЗОСЛАННОЙ нагрузки без возраста — по нему решается, есть ли что сказать
+  // (`bugs/27`). Отдельная переменная, а не сравнение с `lastPayload`: тот несёт возраст, который
+  // тикает сам, и сравнение с ним всегда было бы «изменилось».
+  let lastCompare = null;
 
   const server = createServer((req, res) => {
     const url = (req.url || '/').split('?')[0];
@@ -493,7 +502,7 @@ export function serve({
     // темпом, не зависящим от хода прогона.
     if (url === '/telemetry') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      const live = latestTelemetry();
+      const live = latestTelemetry(telemetryPath);
       const fromPulse = readPulse(pulsePath)?.card ?? null;
       // Один ответ, один автор: живая проба поверх того, что записал сам прогон (на стенде карту
       // тикает виртуальная — там сэмплера нет вовсе). Страница спрашивает ОДИН адрес.
@@ -501,7 +510,7 @@ export function serve({
     }
     if (url === '/pulse') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify(pulseNow(pulsePath)));
+      return res.end(JSON.stringify(pulseNow(pulsePath, Date.now(), telemetryPath)));
     }
     // WHO IS ACTUALLY WATCHING — the route a run asks before it is allowed to touch the card.
     //
@@ -529,7 +538,7 @@ export function serve({
       // of the PREVIOUS run and, having just received it, treat it as one second old: it showed a
       // finished run as if it were happening. Now the first frame carries the record's REAL age, or
       // says outright that no run exists.
-      res.write(`data: ${JSON.stringify(pulseNow(pulsePath))}\n\n`);
+      res.write(`data: ${JSON.stringify(pulseNow(pulsePath, Date.now(), telemetryPath))}\n\n`);
       req.on('close', () => clients.delete(res));
       return undefined;
     }
@@ -546,11 +555,26 @@ export function serve({
   // painting the last run forever. Same defect class as the stale first frame, one layer down —
   // both come from treating «нет данных» as «нечего сказать» instead of as a state (`bugs/14`).
   const timer = setInterval(() => {
-    const p = pulseNow(pulsePath);
-    // `seq` is -1 on an empty gauge, so the vanishing IS a sequence change and broadcasts once, then
-    // stops repeating itself. The age is deliberately NOT in the trigger: it moves every tick and
-    // would turn this into a 5 Hz broadcaster.
-    if (p.seq === lastSeq) return;
+    const p = pulseNow(pulsePath, Date.now(), telemetryPath);
+    // 🔴 ЧТО СЧИТАЕТСЯ ИЗМЕНЕНИЕМ — ПЕРЕОПРЕДЕЛЕНО `bugs/27`. Прежде здесь стояло `p.seq === lastSeq`:
+    // рассылку двигал ТОЛЬКО номер пульса, а его двигает развёртка — единственный участник, который
+    // на все десять секунд прожига перестаёт говорить. Показания карты `pulseNow` подмешивает сюда с
+    // ОТДЕЛЬНОГО сэмплера на каждом опросе, и делает это ровно потому, что «прогон занят», — но в
+    // ворота они не проходили, потому что ключ от ворот был у занятого. Замерено на живом прогоне
+    // 2026-08-22: сэмплер 260 замеров, страница 42 пульса за те же 259 с.
+    //
+    // Теперь изменением считается ЛЮБОЕ изменение нагрузки, КРОМЕ возраста: он тикает сам по себе и
+    // превратил бы это в вещателя, которому нечего сказать. `seq` при этом никуда не делся — он
+    // часть нагрузки, поэтому исчезновение прибора (`seq` = −1) по-прежнему уезжает на страницу.
+    //
+    // ЦЕНА, НАЗВАННАЯ ВСЛУХ: секунды стресс-теста считает сервер, они меняются чаще опроса — значит
+    // во время прожига рассылка идёт с частотой опроса (5/с по 200 мс). Это петля обратной связи в
+    // сотню байт на localhost, и она ровно то, ради чего всё: картинка ЖИВЁТ, пока идут данные, и
+    // замирает в тот момент, когда они кончились. Свойство «замерла = прогон встал» сохранено, а не
+    // разменяно.
+    const compare = JSON.stringify({ ...p, ageMs: 0 });
+    if (compare === lastCompare) return;
+    lastCompare = compare;
     lastSeq = p.seq;
     lastPayload = JSON.stringify(p);
     for (const c of clients) {
@@ -1187,16 +1211,18 @@ export async function selfTest() {
   //   анимация, ни телеметрия карточки не должны замирать ни от каких тиков».
   //   АДРЕСАТ: AZ. убрать маршрут /telemetry → «ПОКАЗАНИЯ КАРТЫ ОТДАЮТСЯ ОТДЕЛЬНО ОТ ПУЛЬСА».
   {
-    const tPath = TELEMETRY_PATH;
-    const hadFile = existsSync(tPath);
-    const backup = hadFile ? readFileSync(tPath, 'utf8') : null;
+    // ПЕСОЧНИЦА ПО ПОСТРОЕНИЮ, а не по уборке за собой. Здесь стоял БОЕВОЙ `TELEMETRY_PATH`: набор
+    // затирал его своей строкой и возвращал из резервной копии. На простое это безобидно, но во
+    // время живого прогона стёрло бы его улики — а батарея обещает «карту можно не освобождать».
+    // Теперь путь передаётся швом, и трогать нечего (`bugs/27`, шов `telemetryPath`).
+    const tPath = join('runs', 'dashboard-selftest', 'telemetry.jsonl');
     mkdirSync(dirname(tPath), { recursive: true });
     writeFileSync(tPath, `${JSON.stringify({
       at: new Date().toISOString(),
       sample: { 'clocks.gr': 2842, 'temperature.gpu': 64, 'fan.speed': 43, 'power.draw.instant': 233.5, 'utilization.gpu': 98 },
     })}\n`, 'utf8');
 
-    const s = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
+    const s = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json'), telemetryPath: tPath });
     await new Promise((r) => { s.server.once('listening', r); });
     const got = await new Promise((resolve) => {
       let raw = '';
@@ -1215,9 +1241,7 @@ export async function selfTest() {
       `ответ: ${got.slice(0, 160)}`);
     s.close();
 
-    // ПЕСОЧНИЦА: продакшен-файл телеметрии возвращается как был (bugs/08 — набор не трогает улики).
-    if (backup === null) { try { rmSync(tPath, { force: true }); } catch { /* ok */ } }
-    else writeFileSync(tPath, backup, 'utf8');
+    try { rmSync(tPath, { force: true }); } catch { /* ok */ }
   }
 
   // — ПРОСТАИВАЮЩИЙ ПОТОК ОБЯЗАН ПОДАВАТЬ ПРИЗНАКИ ЖИЗНИ. Между прогонами номер не меняется, и
@@ -1240,6 +1264,59 @@ export async function selfTest() {
     check('ПОТОК БЕЗ НОВОСТЕЙ ВСЁ РАВНО ДЫШИТ — иначе простой неотличим от обрыва',
       /:\s*пульс/.test(got), `за 400 мс сердцебиения не пришло: ${JSON.stringify(got.slice(0, 120))}`);
     s.close();
+  }
+
+  // — 🔴 ЖИВОЕ ДОЕЗЖАЕТ ДО СТРАНИЦЫ, ДАЖЕ КОГДА РАЗВЁРТКА МОЛЧИТ — `bugs/27`.
+  //   Рассылка была привязана к `seq`, а `seq` двигает ТОЛЬКО сама развёртка — единственный участник,
+  //   который на все десять секунд прожига перестаёт говорить. Всё, что сервер добирает САМ (показания
+  //   карты с отдельного сэмплера и секунды стресс-теста), в ворота не проходило: ключ был у занятого.
+  //   Здесь развёртка не пишет НИ ОДНОЙ новой записи — файл прибора неподвижен, `seq` неподвижен, —
+  //   и страница обязана всё равно получать кадры.
+  //   АДРЕСАТ МУТАЦИИ: BA. вернуть `if (p.seq === lastSeq) return;` → этот блок.
+  {
+    const quietPath = join('runs', 'dashboard-selftest', 'live-quiet.json');
+    mkdirSync(dirname(quietPath), { recursive: true });
+    // Прогон ИДЁТ (не `finished`) и объявил длительность пробы — значит секунды считает сервер, и
+    // они меняются САМИ, от одного лишь хода времени, без единой новой записи от развёртки.
+    writeFileSync(quietPath, JSON.stringify({
+      kind: 'kago-run-pulse', seq: 7, runMs: 1000, at: new Date().toISOString(), quietMs: 15_000,
+      run: {
+        source: 'самопроверка', band: '2842…2842 МГц', state: RUN_STATE.STRESS,
+        frequencyMhz: 2842, voltageMv: 995, stockVoltageMv: 1045, depthMv: 50, seeded: false,
+        probe: { elapsedSeconds: 0, totalSeconds: 10 },
+        bandFromMhz: 2842, bandToMhz: 2842,
+        coverage: { closed: 0, total: 1, rungs: 0 },
+        verdicts: { 'edge-found': 0, 'lever-limited': 0 },
+        lastEvent: '', note: '', finished: false, ok: null,
+      },
+      card: { clockMhz: 2842, voltageMv: 995, tempC: 61, fanPct: 44, powerW: 248, underLoad: true, synthetic: true, cappedByPowerLimit: false },
+    }), 'utf8');
+
+    const s = serve({ port: 0, pulsePath: quietPath, heartbeatMs: 60_000 });
+    await new Promise((r) => { s.server.once('listening', r); });
+    const raw = await new Promise((resolve) => {
+      let acc = '';
+      const req = httpRequest({ host: '127.0.0.1', port: s.server.address().port, path: '/live', agent: false }, (res) => {
+        res.setEncoding('utf8');
+        res.on('data', (c) => { acc += c; });
+      });
+      req.on('error', () => resolve(''));
+      req.end();
+      setTimeout(() => { req.destroy(); resolve(acc); }, 900);
+    });
+    s.close();
+    const frames = (raw.match(/^data: /gm) ?? []).length;
+    const seqs = [...raw.matchAll(/"seq":(-?\d+)/g)].map((m) => m[1]);
+    // ⚠️ СЧИТАТЬ КАДРЫ — НЕДОСТАТОЧНО, и это выяснила сама мутация BA: со старыми воротами кадра
+    // всё равно ДВА (первый отдаёт обработчик подключения, второй проходит потому, что `lastSeq`
+    // стартует с −1), поэтому «кадров ≥ 2» держалось и на дефекте. Полый блок в этом проекте уже
+    // оплачен (`bugs/16`). Судим по тому, ради чего всё затевалось: РАСТУТ ЛИ ЧИСЛА НА ЭКРАНЕ.
+    const secs = [...raw.matchAll(/"elapsedSeconds":([\d.]+)/g)].map((m) => Number(m[1]));
+    const grew = secs.length >= 2 ? secs[secs.length - 1] - secs[0] : 0;
+    check('ЖИВОЕ ДОЕЗЖАЕТ, ПОКА РАЗВЁРТКА МОЛЧИТ — прибор неподвижен, а числа на экране РАСТУТ',
+      grew >= 0.4, `за 900 мс секунды выросли на ${grew} (кадров ${frames}, значения ${JSON.stringify(secs)})`);
+    check('И ЭТО ТОТ ЖЕ ПРОГОН, А НЕ НОВЫЙ — номер не двигался ни разу',
+      seqs.length > 0 && seqs.every((x) => x === '7'), `номера в кадрах: ${JSON.stringify(seqs)}`);
   }
 
   // — ОПОЗНАНИЕ ДАШБОРДА ИДЁТ ПО ЕГО СОБСТВЕННОМУ МАРШРУТУ, а не по факту «порт отвечает».

@@ -5556,17 +5556,36 @@ async function mainSweep(argv, arg) {
   const dash = await import('./lib/run-dashboard.mjs');
   let watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
   if (!watch.ok || watch.viewers < 1) {
-    console.log('ОКНО НАБЛЮДЕНИЯ: не открыто — поднимаю сам, прогон им управляет.');
-    const raised = await dash.raiseDashboard({ port: dash.DEFAULT_PORT });
-    if (raised.ok) watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
-    // The server we just raised belongs to THIS process: when the sweep ends, the window goes with
-    // it. A window outliving its run is the `bugs/04` shape — a frozen picture of something that is
-    // no longer happening.
-    if (raised.ok && raised.s) {
-      const shutWindow = () => { try { dash.closeWindow(); } catch { /* уже закрыто */ } try { raised.s.close(); } catch { /* уже */ } };
-      process.on('exit', shutWindow);
-      for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { shutWindow(); process.exit(130); });
-    }
+    console.log('ОКНО НАБЛЮДЕНИЯ: не открыто — поднимаю сам, ОТДЕЛЬНЫМ ПРОЦЕССОМ.');
+    // 🔴 ОТДЕЛЬНЫМ ПРОЦЕССОМ, А НЕ ВНУТРИ СЕБЯ — `bugs/27`. Прежде сервер поднимался здесь же
+    // (`raiseDashboard` возвращал живой `raised.s`), и это ломало сам прибор: развёртка синхронно
+    // блокирует цикл событий на все десять секунд прожига, а заблокированный процесс не отдаёт ни
+    // HTTP, ни SSE. Замерено на живом прогоне 2026-08-22: отдельный сэмплер сделал 260 замеров, а
+    // страница получила 42 пульса за те же 259 с — картинка стояла три четверти прогона, и владелец
+    // увидел ровно тот застывший экран, которым прибор ОБЯЗАН докладывать о зависании машины.
+    //
+    // Лекарство от «прогон занят» уже было построено — `pulseNow` подмешивает показания карты с
+    // отдельного сэмплера, — но жило внутри занятого. Теперь оно живёт снаружи: тот же приём и та же
+    // причина, что у сэмплера телеметрии ниже. Модуль умеет служить сам (`main()`): он поднимает
+    // сервер, открывает окно и закрывает его на ЛЮБОМ своём выходе.
+    const { spawn: spawnDash } = await import('node:child_process');
+    const { fileURLToPath: toPathDash } = await import('node:url');
+    const dashScript = join(dirname(toPathDash(import.meta.url)), 'lib', 'run-dashboard.mjs');
+    const dashProc = spawnDash(process.execPath, [dashScript, '--port', String(dash.DEFAULT_PORT)],
+      { windowsHide: true, stdio: 'ignore' });
+    dashProc.unref?.();
+    // Окно поднимает ДОЧЕРНИЙ процесс, поэтому ждать надо его, а не себя.
+    await dash.waitForViewer(dash.DEFAULT_PORT);
+    watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+    // Сервер принадлежит ЭТОМУ прогону: кончился прогон — ушло и окно. Окно, пережившее свой прогон,
+    // это форма `bugs/04` — застывшая картинка того, чего уже не происходит. На Windows дочерний
+    // процесс НЕ умирает вместе с родителем, поэтому гасим явно и на ЛЮБОМ выходе, как сэмплер ниже.
+    const shutWindow = () => {
+      try { dashProc.kill(); } catch { /* уже мёртв */ }
+      try { dash.closeWindow(); } catch { /* уже закрыто */ }
+    };
+    process.on('exit', shutWindow);
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { shutWindow(); process.exit(130); });
   }
   if (!watch.ok || watch.viewers < 1) {
     console.error('ОТКАЗ: ОКНО НАБЛЮДЕНИЯ НЕ ОТКРЫТО, а развёртка пишет в карту.');

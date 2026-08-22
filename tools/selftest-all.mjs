@@ -24,7 +24,9 @@
 //   `nvml --verify-decode`  — it WRITES to the card (STATUS names it so).
 //   `stress --verify-baseline`, `gpu:info`, `mon`, `measure`  — they READ the live card; a battery
 //                             that needs the card present is a battery that is skipped.
-//   `shortcuts`, `fanladder`, `thermal`, `tidy`, `dashboard`, `bench` — their selftests were never
+//   `dashboard` — JOINED 2026-08-22 by this very rule; the proof of inertness is written next to its
+//                             entry in the list below (`bugs/27`).
+//   `shortcuts`, `fanladder`, `thermal`, `tidy`, `bench` — their selftests were never
 //                             part of the audited battery, and each touches something outside the
 //                             process (the owner's desktop, a port, the fan controller, files it
 //                             tidies). They join the day someone proves the run is inert, one at a
@@ -117,6 +119,19 @@ const SUITES = [
     what: 'форма профиля на мосту NVAPI', done: /^ФОРМА ПРОФИЛЯ:/mu },
   { id: 'vmin', npm: 'npm run vmin -- --selftest', argv: ['automation-engine/lib/vmin-store.mjs', '--selftest'],
     what: 'храповик фазы 5', done: /^САМОПРОВЕРКА:/mu },
+  // ВОШЁЛ 2026-08-22 ПО ПРАВИЛУ ВЫШЕ — «по одному, с доказательством инертности рядом с записью».
+  // Он был исключён как «трогающий порт», и это было верно. Инертность ДОКАЗАНА, а не заявлена:
+  //   · порт — все серверы набора поднимаются на `port: 0` (эфемерный, назначает ОС); боевой 7311
+  //     не занимается ни разу, так что открытое окно наблюдения набору не мешает и он ему;
+  //   · окно — `raiseDashboard` испытывается через подставные швы (`openWindowFn`/`closeWindowFn`),
+  //     ни один настоящий браузер не поднимается;
+  //   · файлы — всё в `runs/dashboard-selftest*`; последний боевой адрес (`TELEMETRY_PATH`) убран
+  //     швом `telemetryPath` в тот же день. Проверено наблюдением: mtime боевого файла телеметрии
+  //     до и после прогона набора совпадает.
+  // ЗАЧЕМ ВООБЩЕ: `bugs/27` пять дней жил в наборе, которого батарея не звала. Ровно находка №2
+  // аудита, только этажом ниже — набор, который никто не гоняет, зелен ровно до первого взгляда.
+  { id: 'dashboard', npm: 'npm run dashboard -- --selftest', argv: ['automation-engine/lib/run-dashboard.mjs', '--selftest'],
+    what: 'окно наблюдения: пульс, лента, обрыв связи', done: /^САМОПРОВЕРКА ДАШБОРДА:/mu },
 ];
 
 // =================================================================================================
