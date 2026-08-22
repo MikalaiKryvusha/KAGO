@@ -303,6 +303,54 @@ export function askAtClockMhz(orderedMhz, offeredAfterMhz) {
  *
  * [NOT-TESTED] at birth — the offline blocks in `--selftest` are what flip this.
  */
+/**
+ * DID THE BURN HAPPEN AT THE FREQUENCY WE ARE TUNING? — one judgement, both directions.
+ *
+ * The owner, 2026-08-22: *«прожигать карту нужно на той частоте, которую тюним»* ·
+ * *«инструмент должен видеть, прожигает ли он именно ту частоту, которую тюнит»*.
+ *
+ * Until this function existed only ONE direction was judged — the card going ABOVE the ceiling,
+ * i.e. «the ceiling did not hold». Going BELOW passed in silence, and that is the more dangerous
+ * half: the PASS is filed against the frequency we ORDERED while the burn ran LOWER, where the
+ * silicon has an easier job. The voltage recorded is then too low for the frequency whose name is
+ * on the row. That is `bugs/28`, measured as 13 rungs out of 14 burned at 2865–2872 MHz and filed
+ * as 2880.
+ *
+ * WHICH STATISTIC FOR WHICH DIRECTION, and the asymmetry is deliberate:
+ *   · UP   — judged by the MAXIMUM. A ceiling is a promise about every instant; one sample above it
+ *            means it was breached, however briefly.
+ *   · DOWN — judged by the MEDIAN. «Which frequency did the burn run at» is about where the card
+ *            SAT; a single low sample is a transient (a boost transition, a sampling artefact) and
+ *            treating it as the answer would refuse healthy rungs.
+ *
+ * Tolerance is ONE ladder step in both directions, for the same reason: the card's clock grid is
+ * 7–8 MHz and `clocks.gr` is reported on it, so one step is rounding, not a finding.
+ *
+ * [NOT-TESTED] at birth — flipped by the blocks in `--selftest` and their mutations.
+ */
+export function judgeDeliveredClock({ capMhz, median, max, samples = null,
+                                      toleranceMhz = config.CLOCK_LADDER_STEP_TOLERANCE_MHZ } = {}) {
+  const base = { capMhz, median, max, samples, shortfall: null, breached: false, short: false };
+  if (!Number.isFinite(capMhz) || !Number.isFinite(median)) {
+    return { ...base, ok: false, why: 'нечего судить: не названы ни потолок, ни выданная частота' };
+  }
+  const top = Number.isFinite(max) ? max : median;
+  const shortfall = capMhz - median;
+  const breached = top > capMhz + toleranceMhz;
+  const short = shortfall > toleranceMhz;
+  if (breached) {
+    return { ...base, shortfall, breached: true, ok: false,
+      why: `карта ушла ВЫШЕ потолка: максимум ${top} МГц при потолке ${capMhz}` };
+  }
+  if (short) {
+    return { ...base, shortfall, short: true, ok: false,
+      why: `прожиг шёл НЕ НА ТОЙ ЧАСТОТЕ: медиана ${median} МГц против настраиваемых ${capMhz} `
+        + `(недобор ${shortfall} МГц). Вердикт об этом напряжении был бы вердиктом о другой частоте` };
+  }
+  return { ...base, shortfall, ok: true,
+    why: `прожиг шёл на настраиваемой частоте: медиана ${median} МГц при потолке ${capMhz}` };
+}
+
 export function chooseWriteShape(vector, { pinned = false, demandPin = false } = {}) {
   if (!vector || vector.ok !== true) {
     return { ok: false, shape: null, heldBy: null, pinRequired: false, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
@@ -923,14 +971,17 @@ export async function runStep({
           // ONE LADDER STEP of tolerance and not a millihertz more: the card's own grid is 7–8 MHz,
           // and `clocks.gr` is reported on that grid, so a reading one step above the cap is rounding
           // rather than a breach. Anything beyond it means the ceiling did not hold.
-          const breached = max > capMhz + config.CLOCK_LADDER_STEP_TOLERANCE_MHZ;
-          out.ceilingProof = { ok: !breached, capMhz, median, max };
-          if (breached && out.verdict === config.VERDICT.PASS) {
+          const j = judgeDeliveredClock({ capMhz, median, max, samples: loaded.length });
+          out.ceilingProof = { ok: !j.breached, capMhz, median, max };
+          out.clockHeldProof = j;
+          out.deliveredShortfallMhz = j.shortfall;
+          if (!j.ok && out.verdict === config.VERDICT.PASS) {
             out.verdict = null;
-            out.pinRefused = true;
-            out.reason = `карта ушла ВЫШЕ потолка: максимум ${max} МГц при потолке ${capMhz}`;
+            if (j.breached) out.pinRefused = true;
+            if (j.short) out.clockShortfall = true;   // код отказа, по которому развёртка переигрывает
+            out.reason = j.why;
           }
-          if (breached) throw new Error(`максимум под нагрузкой ${max} МГц ВЫШЕ потолка ${capMhz}`);
+          if (!j.ok) throw new Error(j.why);
           return `выдано ${median} МГц (максимум ${max}) при потолке ${capMhz} — карта под потолком и свободна вниз, ${loaded.length} проб под нагрузкой`;
         },
       },
@@ -1886,6 +1937,45 @@ export async function selfTest() {
     [askAtClockMhz(2872, null), askAtClockMhz(2872, NaN), askAtClockMhz(2872, 0)], [2872, 2872, 2872]);
   ok('ЗАКАЗА НЕТ — нет и вопроса: отсутствие частоты не подменяется верхом кривой',
     [askAtClockMhz(null, 2865), askAtClockMhz(0, 2865)], [null, null]);
+
+  // ─── ПРОЖИГ ШЁЛ НА ТОЙ ЛИ ЧАСТОТЕ, КОТОРУЮ ТЮНИМ (слово владельца 2026-08-22) ────────────────
+  //   До этой правки судилось только направление ВВЕРХ. Направление ВНИЗ — это `bugs/28`: вердикт
+  //   пишется в строку заказанной частоты, а прожиг шёл ниже, где кремнию легче.
+  //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //     BS. убрать проверку недобора (short = false)          → «НЕДОБОР ЛОВИТСЯ»
+  //     BT. судить недобор по МИНИМУМУ вместо медианы         → «ОДНА ПРОСЕВШАЯ ПРОБА — НЕ НЕДОБОР»
+  //     BU. судить превышение по медиане вместо максимума     → «ПРЕВЫШЕНИЕ СУДИТСЯ ПО МАКСИМУМУ»
+  //     BV. расширить допуск недобора                         → «ДОПУСК — ОДНА СТУПЕНЬ СЕТКИ»
+  //     BW. считать вердикт при неназванной частоте           → «НЕЧЕГО СУДИТЬ — ЭТО ОТКАЗ»
+  {
+    const J = (o) => judgeDeliveredClock(o);
+    ok('ПРОЖИГ НА НУЖНОЙ ЧАСТОТЕ — вердикт принимается',
+      J({ capMhz: 2880, median: 2880, max: 2880 }).ok, true);
+    ok('НЕДОБОР ЛОВИТСЯ: прожиг шёл на 2865 под именем 2880 — ровно случай bugs/28',
+      [J({ capMhz: 2880, median: 2865, max: 2865 }).ok, J({ capMhz: 2880, median: 2865, max: 2865 }).short,
+       J({ capMhz: 2880, median: 2865, max: 2865 }).shortfall], [false, true, 15]);
+    ok('и отказ НАЗЫВАЕТ обе частоты, а не сообщает «что-то не так»',
+      /2865/.test(J({ capMhz: 2880, median: 2865, max: 2865 }).why)
+      && /2880/.test(J({ capMhz: 2880, median: 2865, max: 2865 }).why), true);
+    ok('ДОПУСК — ОДНА СТУПЕНЬ СЕТКИ: 8 МГц ниже это округление, 15 уже недобор',
+      [J({ capMhz: 2880, median: 2872, max: 2872 }).ok, J({ capMhz: 2880, median: 2865, max: 2865 }).ok],
+      [true, false]);
+    // Первая редакция этого блока называлась «судим медиану, а не минимум» и НЕ ПРОВЕРЯЛА ЭТОГО:
+    // функция получает уже посчитанную медиану и минимума не видит вовсе. Мутация «судить по
+    // минимуму» покраснила четыре блока разом и вскрыла обман. Здесь остаётся то, что тут
+    // действительно проверяемо: вниз судит ТОЛЬКО медиана, и высокий пик недобор не спасает.
+    ok('ВНИЗ СУДИТ ТОЛЬКО МЕДИАНА: пик у самого потолка недобор не выкупает',
+      [J({ capMhz: 2880, median: 2865, max: 2880 }).short, J({ capMhz: 2880, median: 2865, max: 2880 }).ok],
+      [true, false]);
+    ok('ПРЕВЫШЕНИЕ СУДИТСЯ ПО МАКСИМУМУ: медиана под потолком, но пик над ним — отказ',
+      [J({ capMhz: 2880, median: 2880, max: 2910 }).ok, J({ capMhz: 2880, median: 2880, max: 2910 }).breached],
+      [false, true]);
+    ok('и ПРЕВЫШЕНИЕ СИЛЬНЕЕ НЕДОБОРА: когда верно и то и то, называется потолок',
+      J({ capMhz: 2880, median: 2860, max: 2910 }).breached, true);
+    ok('НЕЧЕГО СУДИТЬ — ЭТО ОТКАЗ, а не молчаливое «сойдёт»',
+      [J({ capMhz: null, median: 2880, max: 2880 }).ok, J({ capMhz: 2880, median: null, max: null }).ok],
+      [false, false]);
+  }
 
   return { ok: results.every((r) => r.ok), results };
 }
