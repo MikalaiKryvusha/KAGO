@@ -5792,11 +5792,17 @@ async function mainSweep(argv, arg) {
   process.on('exit', stopSideCar);
   console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
 
+  // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ОБОИХ — прогон и прибор. Пара
+  // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
+  // в ступени, иначе его бюджет молчания описывает работу, которой больше нет (см. `openPulse`).
+  const sweepShapeLadder = [0, 1, 2, 3].map((lvl) => furnaceSetAtLevel(lvl));
+
   const pulse = dash.openPulse({
     source: 'ЖИВАЯ КАРТА',
     synthetic: false,
     band: `${fromMhz}…${toMhz} МГц`,
     probeSeconds: config.SWEEP_PROBE_SECONDS ?? 10,
+    shapesPerRung: sweepShapeLadder[0].length,
   });
   console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
 
@@ -5834,7 +5840,7 @@ async function mainSweep(argv, arg) {
     // Лестница строится ЗДЕСЬ, а не внутри развёртки: движок про интенсивность ничего не знает и
     // знать не должен (R16a — он композитор, а не писатель), а набор форм — это решение о том,
     // ЧЕМ мерить, и оно принадлежит команде.
-    shapeLadder: [0, 1, 2, 3].map((lvl) => furnaceSetAtLevel(lvl)),
+    shapeLadder: sweepShapeLadder,
     });
   } catch (e) {
     // OUR OWN DEATH IS NOT THE CARD'S (`bugs/20`). The process is ALIVE here — that is the entire
