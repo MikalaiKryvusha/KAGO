@@ -167,8 +167,29 @@ export function probeCard(runner = null) {
 }
 
 /** Read `runs/baseline/<name>.json`, or null when this workload has no reference yet. */
-export function loadGolden(name, { dir = BASELINE_DIR } = {}) {
-  const p = join(dir, `${name}.json`);
+/**
+ * THE GOLDEN'S FILENAME, and why it grew an argument.
+ *
+ * A golden is a checksum, and a checksum belongs to a COMPUTATION — not to a binary. Until
+ * 2026-08-22 every workload ran one way, so `<name>.json` was the whole truth. The intensity ladder
+ * broke that: `furnace 2400·8192·256·64` and `…·32` are different computations of the same binary,
+ * with different checksums, and storing both under `furnace.json` would mean each capture silently
+ * destroys the previous one and every later verdict is judged against whichever was captured last.
+ *
+ * So the DEFAULT SHAPE keeps the bare name — `sdc_fma.json` and `branchy.json` stay exactly where
+ * they are, and nothing already captured has to be re-taken — while a shape with arguments gets its
+ * arguments in the key. The suffix is the args themselves, not a hash: a directory listing should
+ * say which intensity it holds without a decoder.
+ */
+export function goldenKey(name, args = []) {
+  const list = Array.isArray(args) ? args.filter((a) => a !== null && a !== undefined).map(String) : [];
+  if (!list.length) return String(name);
+  return `${name}@${list.join('-').replace(/[^0-9A-Za-z._-]/gu, '_')}`;
+}
+
+/** Read `runs/baseline/<key>.json`, or null when this workload+shape has no reference yet. */
+export function loadGolden(name, { dir = BASELINE_DIR, args = [] } = {}) {
+  const p = join(dir, `${goldenKey(name, args)}.json`);
   if (!existsSync(p)) return null;
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
 }
@@ -329,7 +350,10 @@ export async function stressTest({
   assertOneShape({ transient, lowload });
 
   const card = probeCard();
-  const golden = loadGolden(name, { dir: baselineDir });
+  // ЭТАЛОН ИЩЕТСЯ ПО ИМЕНИ *И ПО ФОРМЕ ЗАПУСКА*. Прежде здесь стоял только `name`, и на лестнице
+  // интенсивности это означало бы, что вердикт ступени 32 судится эталоном ступени 64 — то есть
+  // сравнением с числом, которого эта нагрузка никогда не давала.
+  const golden = loadGolden(name, { dir: baselineDir, args });
   const stamp = checkGoldenStamp(golden, card, args);
 
   const from = new Date(Date.now() - 2000);   // scheduling and windowing only — never a compared value
@@ -569,12 +593,15 @@ export function worstVerdict(verdicts) {
  */
 export function preflightGoldens(shapes, { card = null, baselineDir = BASELINE_DIR, loadFn = null, args = [] } = {}) {
   const theCard = card || probeCard();
-  const load = loadFn || ((name) => loadGolden(name, { dir: baselineDir }));
+  const load = loadFn || ((name, a = []) => loadGolden(name, { dir: baselineDir, args: a }));
   const checks = shapes
     .filter((s) => s.bearsVerdict !== false)
     .map((s) => {
-      const golden = load(s.workload);
-      const stamp = checkGoldenStamp(golden, theCard, s.args ?? args);
+      // ФОРМА ЗАПУСКА ИДЁТ И В ПОИСК ЭТАЛОНА, И В СВЕРКУ ШТАМПА — иначе предполёт брал бы эталон
+      // формы по умолчанию и сверял его со ступенью лестницы, то есть отказывал бы ВСЕГДА.
+      const shapeArgs = s.args ?? args;
+      const golden = load(s.workload, shapeArgs);
+      const stamp = checkGoldenStamp(golden, theCard, shapeArgs);
       return { id: s.id, workload: s.workload, ok: stamp.ok, why: stamp.why };
     });
   const bad = checks.filter((c) => !c.ok);
@@ -752,7 +779,7 @@ export function captureBaseline({ name, args = [], dir = BASELINE_DIR, repeats =
     gpu: { name: card.name, driver: card.driver, vbios: card.vbios },
     captured_at: stampNow(),
   };
-  writeFileSync(join(dir, `${name}.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  writeFileSync(join(dir, `${goldenKey(name, args)}.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
   return record;
 }
 
@@ -1044,6 +1071,19 @@ export async function selfTest() {
         let threwLevel = false;
         try { furnaceSetAtLevel(99); } catch (e) { threwLevel = /нет такой ступени/.test(e.message); }
         check('НЕТ ТАКОЙ СТУПЕНИ — ЭТО ОТКАЗ, а не тихий возврат сильнейшей', threwLevel, true);
+
+        // ─── КЛЮЧ ЭТАЛОНА (сумма принадлежит ВЫЧИСЛЕНИЮ, а не бинарнику) ──────────────────────
+        //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+        //     CG. ключ игнорирует аргументы            → «РАЗНЫЕ СТУПЕНИ — РАЗНЫЕ ЭТАЛОНЫ»
+        //     CH. форма по умолчанию тоже получает хвост → «ФОРМА ПО УМОЛЧАНИЮ — ПРЕЖНЕЕ ИМЯ»
+        check('ФОРМА ПО УМОЛЧАНИЮ — ПРЕЖНЕЕ ИМЯ: снятое раньше не надо переснимать',
+          `${goldenKey('sdc_fma')}|${goldenKey('branchy', [])}`, 'sdc_fma|branchy');
+        check('РАЗНЫЕ СТУПЕНИ — РАЗНЫЕ ЭТАЛОНЫ, иначе один затирает другой',
+          goldenKey('furnace', [2400, 8192, 256, 64]) !== goldenKey('furnace', [2400, 8192, 256, 32]), true);
+        check('и ключ ЧИТАЕМ глазами — в каталоге видно, какая это интенсивность',
+          goldenKey('furnace', [2400, 8192, 256, 64]), 'furnace@2400-8192-256-64');
+        check('ключ БЕЗОПАСЕН ДЛЯ ИМЕНИ ФАЙЛА — аргумент с косой чертой не уводит запись в другой каталог',
+          /[\\/:]/u.test(goldenKey('furnace', ['../../etc', 'a b'])), false);
       }
       let threwShape = false;
       try { runOptionsForShape({ workload: 'x', shape: 'вымышленная' }); } catch { threwShape = true; }
