@@ -74,7 +74,7 @@ import {
 } from './lib/curve-store.mjs';
 import {
   writeIntent, writeVerdict,
-  openJournal, readJournal, orphanIntents, resumeState, hangFloors, SWEEP_DIR,
+  openJournal, readJournal, orphanIntents, resumeState, hangFloors, provenRungs, SWEEP_DIR,
   closeAsOperatorStop, closeAsWriterDeath, RUNG_OUTCOME,
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
@@ -1284,6 +1284,10 @@ export function planFrequency({
   // the PLAN and not only with the run, because a wall the dry run does not print is a wall the
   // operator meets mid-run — EXP-0052's rule, applied to the third wall exactly as to the second.
   hangFloorMv = null,
+  // САМАЯ ГЛУБОКАЯ СТУПЕНЬ, НА КОТОРОЙ ЭТА ЧАСТОТА УЖЕ ВЫСТОЯЛА (`sweep-journal.provenRungs`,
+  // `bugs/31`). Едет вместе с ПЛАНОМ по той же причине, что и пол зависания: улика, которой не
+  // печатает сухой прогон, — улика, о которой оператор узнаёт посреди прогона (EXP-0052).
+  provenPassMv = null,
   curveDoc = null,
   zones = config.DESCENT_ZONES,
   cliffMv = config.ASCENT_STEP_MAX_MV ?? 35,
@@ -1300,9 +1304,35 @@ export function planFrequency({
   //
   // Cancelled means «descend from stock on the owner's ladder», which the ladder then floors — the
   // same fallback a rejected seed already uses, not a new path.
-  const seedBlockedByHang = Boolean(seed) && hangBound && Number.isFinite(seed.seedMv) && seed.seedMv <= hangFloorMv;
-  const seedMv = seed && !seedBlockedByHang && Number.isFinite(seed.seedMv) && seed.seedMv < stockVoltageMv
-    ? seed.seedMv : null;
+  // ─── СОБСТВЕННАЯ УЛИКА ЧАСТОТЫ СИЛЬНЕЕ СОСЕДСКОЙ (`bugs/31`) ─────────────────────────────────────
+  //
+  // `provenPassMv` — самая глубокая ступень, на которой ЭТА частота уже выстояла, прочитанная из
+  // журнала (`sweep-journal.provenRungs`). До неё возобновление знало только полы зависания, то есть
+  // помнило смерти и не помнило успехов: частота с найденным краем начинала спуск от затравки соседки
+  // и заново жгла всё, что уже доказала. Владелец: «край найден у точки, какого хуя вновь с неё
+  // начинать не понимаю и злюсь». Живая цена: 2820 МГц шла 995 → 870 тринадцатью ступенями, каждая из
+  // которых уже проходила.
+  //
+  // Берётся ГЛУБОЧАЙШАЯ из двух улик. Соседская затравка доказана на БОЛЕЕ ВЫСОКОЙ частоте и потому
+  // безопасна здесь (Vmin не убывает с частотой); собственная доказана ровно здесь. Обе законны, и
+  // ниже начинает та, что глубже.
+  //
+  // ⚠️ Затравка по-прежнему ПРОЖИГАЕТСЯ первой — это проверка, а не формальность: спуск обязан
+  // убедиться, что вчерашний PASS воспроизводится сегодня, прежде чем идти глубже. Экономятся
+  // ступени между стоком и уликой, а не проверка самой улики.
+  const ownProvenMv = Number.isFinite(provenPassMv) && provenPassMv < stockVoltageMv ? provenPassMv : null;
+  const neighbourSeedMv = Number.isFinite(seed?.seedMv) ? seed.seedMv : null;
+  const candidateSeedMv = ownProvenMv === null ? neighbourSeedMv
+    : (neighbourSeedMv === null ? ownProvenMv : Math.min(ownProvenMv, neighbourSeedMv));
+  // ИСТОЧНИК ЗАТРАВКИ НАЗЫВАЕТСЯ ЧЕСТНО. Сухой прогон — документ, который оператор читает ПЕРЕД
+  // разрешением на запись (рельс S2), и «затравка 870 мВ от соседки 2835 МГц» там, где 870 пришли из
+  // собственного журнала этой частоты, а у соседки стоит 995, — это ложь в самом ответственном месте.
+  const seedFromOwnEvidence = ownProvenMv !== null && candidateSeedMv === ownProvenMv;
+
+  // Пол зависания отменяет ЛЮБУЮ затравку одинаково — и соседскую, и собственную: прыжок есть прыжок.
+  const seedBlockedByHang = Number.isFinite(candidateSeedMv) && hangBound && candidateSeedMv <= hangFloorMv;
+  const seedMv = !seedBlockedByHang && Number.isFinite(candidateSeedMv) && candidateSeedMv < stockVoltageMv
+    ? candidateSeedMv : null;
   const ladder = descentLadder({ voltageGridMv, stockVoltageMv, availableDepthMv, depthCapMv, hangFloorMv, zones });
 
   // TWO ladders, and both are named because the run may walk either: the expected path starts at the
@@ -1319,6 +1349,9 @@ export function planFrequency({
     stockVoltageMv,
     seed,
     seedMv,
+    // Откуда взялась затравка — собственная улика частоты или значение соседки (`bugs/31`). Едет в
+    // плане, потому что печатается в сухом прогоне, а он и есть документ разрешения на запись.
+    seedFromOwnEvidence,
     startMv,
     rungs,
     rungsFromStock: fromStock,
@@ -1387,6 +1420,8 @@ export async function sweepFrequency({
   // WHAT ALREADY HUNG THIS FREQUENCY — the sweep reads it once from the journal and hands it down
   // (`bugs/23`). `null` is the normal case: no reboot has ever been paid for here.
   hangFloorMv = null,
+  // Собственная улика этой частоты из журнала (`bugs/31`) — едет насквозь до плана.
+  provenPassMv = null,
   curveDoc = null,
   runRungFn,
   // Лестница едет НАСКВОЗЬ, не разбираясь: `sweepFrequency` про интенсивность ничего не решает,
@@ -1459,7 +1494,8 @@ export async function sweepFrequency({
   // ---- 0. THE PLAN — and the run walks THIS, not a second computation of it (F2-AC8, `bugs/09`,
   // EXP-0052). Everything the dry run prints comes from the very object the loop below consumes.
   const plan = planFrequency({
-    frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, depthCapMv, hangFloorMv, curveDoc, zones,
+    frequencyMhz, stockVoltageMv, voltageGridMv, availableDepthMv, depthCapMv, hangFloorMv,
+    provenPassMv, curveDoc, zones,
   });
   out.plan = plan;
   const hangBound = Number.isFinite(plan.hangFloorMv);
@@ -2052,6 +2088,8 @@ export async function sweepRange({
       // the same coordinate the descent orders in. Where the measurement finally LANDS is a different
       // question, answered downstream by the delivered clock (`resolveDeliveredRow`).
       hangFloorMv: hangFloorsByMhz.get(g.topMhz)?.voltageMv ?? null,
+      // Собственная улика этой частоты — по тому же ключу и по той же причине (`bugs/31`).
+      provenPassMv: provenByMhz.get(g.topMhz)?.voltageMv ?? null,
       curveDoc: doc,
       minStepMv,
       onEvent,
@@ -2289,12 +2327,17 @@ export async function sweepDryRun({
   // bound the run obeys and the plan does not print is a bound the operator meets mid-run (EXP-0052,
   // `bugs/09`). `null` means «this caller has no journal», not «there are no hangs».
   hangFloors = null,
+  // Что каждая частота УЖЕ ДОКАЗАЛА (`sweep-journal.provenRungs`, `bugs/31`) — вторая половина
+  // памяти журнала. Без неё сухой прогон печатал бы лестницу от стока, а прогон шёл бы от улики —
+  // то есть ровно тот расход плана и дела, за который проект заплатил `bugs/09`.
+  proven = null,
   zones = config.DESCENT_ZONES,
 } = {}) {
   if (!curveDoc || !Array.isArray(curveDoc.frequencies)) {
     throw new Error('sweepDryRun требует документ кривой — план строится по нему, а не по памяти процесса');
   }
   const floors = hangFloors instanceof Map ? hangFloors : new Map();
+  const provenMap = proven instanceof Map ? proven : new Map();
   const build = buildVector ?? (await import('./lib/nvapi.mjs')).buildRaiseAndCapVector;
   const groups = rungGroups({ rows: curveDoc.frequencies, fromMhz, toMhz });
   const voltageGridMv = curveDoc.voltageGridMv ?? [];
@@ -2307,6 +2350,7 @@ export async function sweepDryRun({
       frequencyMhz: g.topMhz, stockVoltageMv: g.stockVoltageMv,
       voltageGridMv, availableDepthMv, depthCapMv, curveDoc, zones,
       hangFloorMv: floors.get(g.topMhz)?.voltageMv ?? null,
+      provenPassMv: provenMap.get(g.topMhz)?.voltageMv ?? null,
     });
 
     // WHO WOULD HOLD THE CEILING at the first rung — asked of `chooseWriteShape` rather than decided
@@ -2380,7 +2424,9 @@ export function sweepDryRunLines(dry) {
     const seed = p.seedMv === null
       ? `затравки нет (спуск от стока ${p.stockVoltageMv} мВ)`
         + (p.seedBlockedByHang ? ` — затравку ${p.seed.seedMv} мВ ОТМЕНИЛ ПОЛ ЗАВИСАНИЯ ${p.hangFloorMv} мВ` : '')
-      : `затравка ${p.seedMv} мВ от соседки ${p.seed.neighbourMhz} МГц (статус «${p.seed.neighbourStatus}»)`;
+      : (p.seedFromOwnEvidence
+        ? `затравка ${p.seedMv} мВ — СОБСТВЕННАЯ улика этой частоты из журнала (bugs/31), а не значение соседки`
+        : `затравка ${p.seedMv} мВ от соседки ${p.seed.neighbourMhz} МГц (статус «${p.seed.neighbourStatus}»)`);
     lines.push(`${g.topMhz} МГц — ступень из ${g.count} частот(ы) до ${g.bottomMhz} МГц, сток ${g.stockVoltageMv} мВ`);
     lines.push(`   ${seed}`);
     if (p.refused) { lines.push(`   ❌ ЛЕСТНИЦА НЕ ПОСТРОЕНА: ${p.why}`); continue; }
@@ -5625,8 +5671,12 @@ async function mainSweep(argv, arg) {
     // is about WRITING, not about knowing. A hang floor absent from the plan is a wall the operator
     // discovers mid-run, i.e. exactly the `bugs/09` shape this whole artifact exists to prevent.
     // `hangFloors` counts an unclosed intent too, so no closure needs to be written to see it.
-    const floors = hangFloors(readJournal(openJournal({})).records);
-    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz, depthCapMv, hangFloors: floors });
+    const jrnRecords = readJournal(openJournal({})).records;
+    const floors = hangFloors(jrnRecords);
+    // Обе половины памяти журнала, а не одна: план обязан показывать ту же лестницу, что пройдёт
+    // прогон (`bugs/09`, R16c), а прогон теперь стартует от собственной улики частоты (`bugs/31`).
+    const proven = provenRungs(jrnRecords);
+    const dry = await sweepDryRun({ curveDoc: doc, points, fromMhz, toMhz, depthCapMv, hangFloors: floors, proven });
     for (const line of sweepDryRunLines(dry)) console.log(line);
     return dry.refusals ? 1 : 0;
   }
