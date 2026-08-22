@@ -1971,6 +1971,10 @@ export async function sweepRange({
     // it named (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ», consequence 2).
     delivered: [],
     raised: [],
+    // ЧАСТОТЫ, ПРОПУЩЕННЫЕ ПОТОМУ ЧТО ИХ КРАЙ УЖЕ ЗАЖАТ ЖУРНАЛОМ (`bugs/31`). Считаются, а не
+    // умалчиваются: пропуск это не покрытие, и следующая сессия обязана видеть, какие строки ждут
+    // закрытия скриптом.
+    preBracketed: [],
     hung: resume.hung ?? [],
     blocked: resume.blocked ?? [],
     // Every floor this journal knows, in the report so it lands in the run's own summary rather than
@@ -1993,7 +1997,46 @@ export async function sweepRange({
       depthCapMv: Number.isFinite(depthCapMv) ? depthCapMv : null,
     });
 
+  // ─── ЧТО ЧАСТОТА УЖЕ ДОКАЗАЛА (`bugs/31`) ───────────────────────────────────────────────────────
+  //
+  // Зеркало полов зависания. Журнал знает не только чем частота убилась, но и на чём выстояла; до
+  // `provenRungs` вторую половину не читал никто, и возобновлённая частота жгла заново всё, что уже
+  // прошла. Владелец, глядя на это: «край найден у точки, какого хуя вновь с неё начинать».
+  //
+  // Здесь используется САМАЯ ОСТОРОЖНАЯ половина лечения: если обе скобки края уже стоят и между
+  // ними на сетке карты не осталось непроверенных ступеней — жечь нечего, и частота ПРОПУСКАЕТСЯ.
+  // Запись такой строки в документ делает `tools/close-bracketed-edges.mjs`: у неё другой вопрос о
+  // том, какой частоте принадлежит улика (журнал ключуется ЗАКАЗАННОЙ частотой), и решать его внутри
+  // прогона, который пишет в карту, — отдельная работа с отдельными сторожами (`plans/25` шаг 1.4a).
+  const provenByMhz = resume.proven instanceof Map ? resume.proven : new Map();
+  const gridMv = Array.isArray(curveDoc.voltageGridMv) ? [...curveDoc.voltageGridMv].sort((a, b) => a - b) : [];
+  const bracketedEdge = (mhz) => {
+    const pass = provenByMhz.get(mhz);
+    const floor = hangFloorsByMhz.get(mhz);
+    if (!pass || !floor) return null;
+    if (!(floor.voltageMv < pass.voltageMv)) return null;
+    // Грубая скобка — НЕ край: между стеной и прошедшей ступенью остались ступени, которых никто не
+    // жёг, и правило владельца требует уточнить отказ минимальным шагом до применения запаса
+    // (`GOAL.md` → «ЛЕСТНИЦА ШАГОВ СПУСКА» п. 3). Такую частоту прогон обязан пройти.
+    const between = gridMv.filter((v) => v > floor.voltageMv && v < pass.voltageMv);
+    return between.length ? null : { pass, floor };
+  };
+
   for (const g of groups) {
+    const already = bracketedEdge(g.topMhz);
+    if (already) {
+      report.preBracketed.push({
+        frequencyMhz: g.topMhz,
+        passedMv: already.pass.voltageMv,
+        hungMv: already.floor.voltageMv,
+      });
+      say('pre-bracketed',
+        `${g.topMhz} МГц ПРОПУЩЕНА: край уже зажат журналом — прошло ${already.pass.voltageMv} мВ, `
+        + `повесило ${already.floor.voltageMv} мВ, непроверенных ступеней между ними нет. Жечь нечего; `
+        + 'строку закрывает `node tools/close-bracketed-edges.mjs --apply`',
+        { frequencyMhz: g.topMhz, passedMv: already.pass.voltageMv, hungMv: already.floor.voltageMv });
+      continue;
+    }
     // The lever's reach at THIS frequency — the wall that produces `lever-limited`, read off the
     // card's own table rather than assumed. 45 mV at 1700 MHz against 245 at 2842 is a measurement.
     const floorMv = leverFloorFor(g.topMhz, points);
