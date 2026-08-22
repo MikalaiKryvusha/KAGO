@@ -520,6 +520,27 @@ driver. Two rules shape it, both paid for by `researches/02`:
 > are free; writes belong to a planned step with a stated rollback. Every command in this table is
 > read-only with respect to GPU state: `stress` LOADS the card by running compute, and sets nothing.
 
+### THE NAMING RULE — a brand name is ALWAYS the owner's privilege
+
+The owner's standing law, said in chat **2026-08-22 19:5x +03:00**, after the agent shipped release
+0.9 under a name nobody had given it:
+
+> *«кто дал тебе право принимать решение о бренд имени Furnace?»* · *«бренд имя — это ВСЕГДА
+> привилегия владельца проекта»*
+
+**The agent PROPOSES a name; it never assigns or publishes one.** Covered: version and release names,
+code names, product and mode names, README and release-page headings, slogans, logo captions —
+anything an outsider reads as a *name*. Not covered: internal engineering identifiers (source file
+names, functions, fields, a `v0.9` tag), which the agent picks freely.
+
+**The boundary runs along the READER, not the format.** The moment an internal name is put on the
+shopfront it becomes a brand and needs the owner's word. That is exactly the line that was crossed:
+`workloads/furnace.cu` was legitimate, `KAGO 0.9 — Furnace` was not.
+
+**When a name is needed:** ship WITHOUT one — a version number is self-sufficient — or file an
+interview with two or three candidates and wait. Publishing under a name the owner never said is a
+defect, not initiative. Full record with the incident: `GOAL.md` → «🏷 БРЕНД-ИМЯ».
+
 ### THE OWNER'S-MACHINE RULE — stands above everything else in this guide
 
 The owner's standing law, said in chat **2026-08-10 09:1x +03:00** — typos fixed on his own

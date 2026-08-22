@@ -22,12 +22,12 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-v0.9%20%C2%B7%20burn%20reaches%20300%20W%20%C2%B7%20edge%20found%20live-E67E22.svg?style=flat-square)](STATUS.md)
+[![Version](https://img.shields.io/badge/Version-0.9-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
-<p align="center"><strong>Version 0.9 — Furnace</strong> · 2026-08-22</p>
+<p align="center"><strong>Version 0.9</strong> · 2026-08-22</p>
 
 <p align="center">
   <a href="#1-general">General</a> · <a href="#2-where-the-project-actually-is">Status</a> · <a href="#3-the-method">The method</a> · <a href="#4-the-four-modes">Modes</a> · <a href="#5-requirements">Requirements</a> · <a href="#6-built-with-kaif">KAIF</a>
@@ -42,8 +42,7 @@
 <p align="center">
   <sub><b>The run dashboard.</b> The card carries its own readouts; the column reports the search.
   The animation is driven by the run's pulse rather than by a timer of its own — when the machine
-  freezes, the picture freezes with it, and the rung on screen is the rung that killed it.<br>
-  Shot taken during a rehearsal on the virtual card (the bench), not on live silicon.</sub>
+  freezes, the picture freezes with it, and the rung on screen is the rung that killed it.</sub>
 </p>
 
 ---
@@ -201,12 +200,21 @@ mechanism serves them all — the whole voltage/frequency curve is raised, and o
 the clock ceiling differs — and none of them locks the clock: the card still boosts and still drops
 to idle speeds.
 
-| | Objective | Noise ceiling | Price |
-|---|---|---|---|
-| 🚀 **Max Perfomance** | everything into speed; temperature is not a goal | none | — |
-| ⚖️ **Optimised** | a strong cut in watts, heat and noise | fans ≤ 60 % | FPS within 5 % of Max Perfomance |
-| ❄️ **Silent Cold** | maximum cold | fans ≤ 40 % | up to 10 % of stock performance |
-| 🔄 **Stock Default** | factory state, always one click away | factory curve | — |
+**All four modes carry the SAME voltage vector.** The search produces one thing — «frequency → the
+lowest safe voltage, plus 10 mV» across the whole curve — and a mode is that one vector plus a single
+handle. Max Perfomance and Optimised are near twins: they differ by the power limit and nothing else.
+
+| | Objective | Voltage vector | Power limit | Frequency ceiling |
+|---|---|---|---|---|
+| 🚀 **Max Perfomance** | everything into speed; temperature is not a goal, fans may spin as fast as they like | the same | **300 W** | none beyond the card's own maximum |
+| ⚖️ **Optimised** | *"almost the same as Max Perfomance"* — but quiet (fans ≤ 60 %, ≈ 71 °C) and relatively cold, at FPS within 5 % | the same | **250 W** | none beyond the card's own maximum |
+| ❄️ **Silent Cold** | the MOST performance that fits under the temperature fans hold at 40 % — **59 °C, measured** | the same | 250 W | **yes, ~2800 MHz** |
+| 🔄 **Stock Default** | factory state, always one click away | factory | factory | — |
+
+Two iron rules the owner set: **never drive the card above its own maximum** (this die: 3090 MHz —
+the vendor's 2452 MHz boost figure is a floor, not a ceiling), and **a profile is a vector of
+voltages, not a number of megahertz** — it was that second confusion which let a ceiling be deleted
+without anyone seeing the consequence.
 
 The prices are the owner's budgets, not inherited promises: the numbers this table will finally
 carry are measured on this die, and they are reported next to the meter's own run-to-run spread,
@@ -254,9 +262,8 @@ assumes.
 ## 6. Built with KAIF
 
 The project runs under [KAIF 2.2](https://github.com/MikalaiKryvusha/KAIF) — the author's framework
-for AI agents: external memory, bounded autonomy, and the discipline that keeps a claim of "it
-works" attached to an observation. `AGENT_GUIDE.md`, `STATUS.md` and the two project maps are how a
-fresh session picks this project up from nothing.
+for AI agents: external memory, autonomy made wider and better, and the discipline that keeps a
+claim of "it works" attached to an observation.
 
 ## License
 
@@ -289,12 +296,12 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Состояние](https://img.shields.io/badge/Состояние-v0.9%20%C2%B7%20прожиг%20берёт%20300%20Вт%20%C2%B7%20край%20найден%20живьём-E67E22.svg?style=flat-square)](STATUS.md)
+[![Версия](https://img.shields.io/badge/Версия-0.9-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
-<p align="center"><strong>Версия 0.9 — Furnace</strong> · 2026-08-22</p>
+<p align="center"><strong>Версия 0.9</strong> · 2026-08-22</p>
 
 <p align="center">
   <a href="#1-общие-сведения">Общие сведения</a> · <a href="#2-где-проект-находится-на-самом-деле">Состояние</a> · <a href="#3-методика">Методика</a> · <a href="#4-четыре-режима">Режимы</a> · <a href="#5-что-нужно">Что нужно</a> · <a href="#6-собран-на-kaif">KAIF</a>
@@ -309,8 +316,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 <p align="center">
   <sub><b>Дашборд прогона.</b> Показания карты живут на самой карте, справа — ход поиска края.
   Анимацию двигает ПУЛЬС прогона, а не собственный таймер: когда машина зависает, картинка замирает
-  вместе с ней, и та ступень, что на экране, и есть точка отказа.<br>
-  Снимок сделан на репетиции по виртуальной карте, а не на живом кремнии.</sub>
+  вместе с ней, и та ступень, что на экране, и есть точка отказа.</sub>
 </p>
 
 ---
@@ -467,12 +473,21 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 место потолка частоты. И ни один из них не фиксирует частоту — карта по-прежнему разгоняется и
 по-прежнему сбрасывается на простое.
 
-| | Цель | Потолок шума | Цена |
-|---|---|---|---|
-| 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе | нет | — |
-| ⚖️ **Optimised** | сильно меньше ватт, градусов и шума | вентиляторы ≤ 60 % | FPS не ниже 95 % от Max Perfomance |
-| ❄️ **Silent Cold** | максимум холода | вентиляторы ≤ 40 % | до 10 % производительности |
-| 🔄 **Stock Default** | заводское состояние, всегда в одном клике | заводская кривая | — |
+**Все четыре режима несут ОДИН И ТОТ ЖЕ вектор напряжений.** Поиск даёт одну вещь — «частота →
+минимальное безопасное напряжение плюс 10 мВ» по всей кривой, — а режим это тот самый вектор плюс
+одна ручка. Max Perfomance и Optimised — почти близнецы: различает их лимит мощности и больше ничего.
+
+| | Цель | Вектор напряжений | Лимит мощности | Потолок частоты |
+|---|---|---|---|---|
+| 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе, вертушки крутятся сколько угодно | тот же | **300 Вт** | нет, кроме железного максимума карты |
+| ⚖️ **Optimised** | *«почти то же самое, что Max Perfomance»* — но тихо (вентиляторы ≤ 60 %, ≈ 71 °C) и относительно холодно, при FPS не ниже 95 % | тот же | **250 Вт** | нет, кроме железного максимума карты |
+| ❄️ **Silent Cold** | МАКСИМУМ производительности, помещающийся под температуру, которую держат вентиляторы на 40 % — **59 °C, замерено** | тот же | 250 Вт | **есть, ~2800 МГц** |
+| 🔄 **Stock Default** | заводское состояние, всегда в одном клике | заводской | заводской | — |
+
+Два железных правила владельца: **никогда не гнать карту выше её собственного максимума** (у этого
+экземпляра 3090 МГц — паспортные 2452 МГц это нижняя граница, а не потолок) и **профиль это вектор
+напряжений, а не число мегагерц** — именно вторая путаница позволила однажды молча удалить потолок,
+не увидев последствий.
 
 Цены в таблице — бюджеты владельца, а не унаследованные обещания: числа, которые она в итоге понесёт,
 измеряются на этом кристалле и приводятся рядом с собственным разбросом прибора, потому что «потери
@@ -519,9 +534,8 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 ## 6. Собран на KAIF
 
 Проект живёт под [KAIF 2.2](https://github.com/MikalaiKryvusha/KAIF) — авторским фреймворком для
-ИИ-агентов: внешняя память, ограниченная автономия и дисциплина, которая держит заявление «работает»
-привязанным к наблюдению. `AGENT_GUIDE.md`, `STATUS.md` и две карты проекта — то, чем свежая сессия
-поднимает проект с нуля.
+ИИ-агентов: внешняя память, расширенная и улучшенная автономия и дисциплина, которая держит
+заявление «работает» привязанным к наблюдению.
 
 ## Лицензия
 
