@@ -48,17 +48,35 @@
   /* ЖИВОЙ ЗНАК. Собственные имена классов, чтобы не пересечься с .spin/.arm/.rock макета; на
      @keyframes spin макета опираемся намеренно — оно там уже есть и определено ровно так же. */
   .livewrap{display:flex;align-items:center;gap:14px;margin:0 0 12px}
-  .sndbar{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .sndbar select,.sndbar button,.sndbar label{font:inherit;font-size:13px;border-radius:8px;
+  /* МЕНЮ ВИЗУАЛИЗАТОРА. `margin-left:auto` уносит его в правый угол шапки, ничего не сдвигая:
+     композиция макета, принятая владельцем, не тронута. `position:relative` — якорь для выпадения,
+     чтобы список не толкал шапку, когда раскрыт. */
+  .vizmenu{margin-left:auto;position:relative}
+  .vizbtn{font:inherit;font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;
+        border:1px solid #232c38;background:#1c242e;color:#e6edf3;padding:7px 11px;
+        display:inline-flex;align-items:center;gap:8px}
+  .vizbtn .dot{width:9px;height:9px;border-radius:50%;background:#8b98a5}
+  .vizbtn.on{border-color:var(--ok);color:#c7f0cd}
+  .vizbtn.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .vizbtn .chev{font-size:11px;color:#8b98a5}
+  .vizbtn[aria-expanded="true"] .chev{transform:rotate(180deg)}
+  /* Выпадение прижато правым краем к кнопке: она у самого угла окна, и раскрытие влево — */
+  /* единственное направление, в котором меню целиком помещается на экран. */
+  .vizpop{position:absolute;top:calc(100% + 8px);right:0;z-index:30;min-width:232px;
+        display:flex;flex-direction:column;gap:9px;padding:12px;border-radius:12px;
+        border:1px solid #232c38;background:#161d26;box-shadow:0 14px 34px rgba(0,0,0,.5)}
+  .vizpop[hidden]{display:none}
+  .vizsec{font-size:11px;font-weight:700;letter-spacing:.12em;color:#8b98a5}
+  .vizpop select,.vizpop button,.vizpop label{font:inherit;font-size:13px;border-radius:8px;
         border:1px solid #232c38;background:#1c242e;color:#e6edf3;padding:7px 11px}
-  .sndbar select{cursor:pointer}
-  .sndbar .sndchk{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
-  .sndbar .sndchk input{accent-color:var(--fire);cursor:pointer}
+  .vizpop select{cursor:pointer}
+  .vizpop .sndchk{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+  .vizpop .sndchk input{accent-color:var(--fire);cursor:pointer}
   .sndbtn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
   .sndbtn .dot{width:9px;height:9px;border-radius:50%;background:#8b98a5}
   .sndbtn.on{border-color:var(--ok);color:#c7f0cd}
   .sndbtn.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
-  .sndmove{font-size:12px;color:#8b98a5;min-width:132px}
+  .sndmove{font-size:12px;color:#8b98a5;min-height:16px}
   .livemark{width:52px;height:52px;position:relative;flex:0 0 auto}
   .livemark i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
               border-top-color:var(--ok);border-right-color:rgba(63,185,80,.32);
@@ -178,16 +196,21 @@
   <img class="logo" src="/logo.webp" alt="KAGO" width="72" height="72">
   <span class="brand">KAGO</span>
   <span class="what" id="head-what">Выполняется автоматический тюнинг-прогон видеокарты</span>
-  <div class="sndbar">
-    <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
-    <select id="snd-theme" title="музыкальная тема">
-      <option value="0">Тема: Маяк</option>
-      <option value="1">Тема: Дрейф</option>
-      <option value="2">Тема: Позывной</option>
-      <option value="-1">Тема: выкл</option>
-    </select>
-    <label class="sndchk"><input type="checkbox" id="snd-work" checked> рабочие звуки</label>
-    <span class="sndmove" id="snd-move"></span>
+  <div class="vizmenu">
+    <button id="viz-btn" class="vizbtn" type="button" aria-haspopup="true" aria-expanded="false"
+            title="управление визуализатором"><span class="dot" id="viz-dot"></span><span>ВИЗУАЛИЗАТОР</span><span class="chev">▾</span></button>
+    <div class="vizpop" id="viz-pop" hidden>
+      <div class="vizsec">ЗВУК</div>
+      <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
+      <select id="snd-theme" title="музыкальная тема">
+        <option value="0">Тема: Маяк</option>
+        <option value="1">Тема: Дрейф</option>
+        <option value="2">Тема: Позывной</option>
+        <option value="-1">Тема: выкл</option>
+      </select>
+      <label class="sndchk"><input type="checkbox" id="snd-work" checked> рабочие звуки</label>
+      <span class="sndmove" id="snd-move"></span>
+    </div><!-- /viz-pop -->
   </div>
 </div>
 
@@ -1550,6 +1573,11 @@ const KagoSound = (() => {
   /* ===============================================================================================
      ЗВУКОВОЙ ГРАФ И ВНЕШНИЙ ИНТЕРФЕЙС
      =============================================================================================== */
+
+  /* ПОЛНАЯ ГРОМКОСТЬ — одно число, а не литерал в двух местах: подача (`fadeIn`) обязана приходить
+     ровно к той величине, которую ставит сборка графа, иначе плавный подъём кончается скачком. */
+  const MASTER_GAIN = 0.95;
+
   function build() {
     ac = new (window.AudioContext || window.webkitAudioContext)();
     // ЛИМИТЕР: громкость максимальная и регулятора нет (слово владельца), значит сумма голосов
@@ -1559,7 +1587,7 @@ const KagoSound = (() => {
     lim.threshold.value = -10; lim.knee.value = 2; lim.ratio.value = 20;
     lim.attack.value = 0.002; lim.release.value = 0.14;
     lim.connect(ac.destination);
-    master = ac.createGain(); master.gain.value = 0.95; master.connect(lim);
+    master = ac.createGain(); master.gain.value = MASTER_GAIN; master.connect(lim);
     verb = reverb(); const vg = ac.createGain(); vg.gain.value = 0.9;
     verb.connect(vg); vg.connect(master);
     melBus = ac.createGain(); melBus.gain.value = 1.0; melBus.connect(master);
@@ -1587,6 +1615,43 @@ const KagoSound = (() => {
     get on() { return soundOn; },
     get theme() { return melIdx; },
     get work() { return workOn; },
+
+    /* -----------------------------------------------------------------------------------------------
+       ЗВУЧИТ ЛИ ОН НА САМОМ ДЕЛЕ — отдельный факт от «включён».
+       -----------------------------------------------------------------------------------------------
+       `on` это НАМЕРЕНИЕ страницы, а `running` — состояние железа звука. Они расходятся ровно в том
+       случае, ради которого этот геттер и заведён: окно поднято автозапуском, страница честно
+       позвала `toggle(true)`, а браузер оставил контекст усыплённым, потому что человек ещё ничего
+       не щёлкнул. Без раздельных фактов кнопка сказала бы «ЗВУК ВКЛ» в полной тишине — это
+       ровно тот класс, за который проект уже платил (`bugs/27`: связь считалась живой, пока не
+       спросили сам транспорт). */
+    get running() { return armed && !!ac && ac.state === 'running'; },
+
+    /** Разбудить усыплённый контекст. Возвращает обещание, потому что браузер отвечает не сразу. */
+    resume() {
+      if (!armed) build();
+      try { return Promise.resolve(ac.resume()).then(() => ac.state === 'running'); }
+      catch (e) { return Promise.resolve(false); }
+    },
+
+    /* ПЛАВНАЯ ПОДАЧА, слово владельца 2026-08-22: «плавно за 20 секунд нарастает по громкости от 0
+       до 100 %». Полторы минуты стоять рядом с внезапно заоравшим ремонтным доком — не то, что
+       нужно человеку, который только что запустил прогон и ещё держит руку на мыши.
+       Подача идёт по САМОМУ ГРОМКОМУ узлу (master), а не по отдельным шинам: тогда она одинаково
+       накрывает и тему, и рабочие сцены, чем бы из них ни начался цикл. */
+    fadeIn(seconds = 20) {
+      if (!armed) build();
+      const sec = Math.max(0.05, Number(seconds) || 0);
+      const t = ac.currentTime;
+      master.gain.cancelScheduledValues(t);
+      master.gain.setValueAtTime(0.0001, t);      // не ноль: экспоненте ноль запрещён, а линейной он
+      master.gain.linearRampToValueAtTime(MASTER_GAIN, t + sec);   // просто не нужен — старт неслышим
+      return sec;
+    },
+
+    /** Текущая громкость общего узла — чтобы подачу можно было ПРОВЕРИТЬ, а не обсуждать. */
+    gainNow() { return armed && master ? master.gain.value : 0; },
+    get fullGain() { return MASTER_GAIN; },
 
     /** Включить/выключить звук целиком. Первый вызов и есть то самое разрешение браузера. */
     toggle(on) {
@@ -1876,9 +1941,22 @@ function connect() {
    бывает десяток: заставлять владельца каждый раз включать звук и выбирать тему значит гарантированно
    довести его до того, что он выключит звук навсегда. Хранится в `localStorage` — он переживает
    перезапуск окна и не уезжает никуда за пределы этой машины.
-   ЗВУК ПРИ ЭТОМ НЕ ПОДНИМАЕТСЯ САМ: браузер не даёт звучать без действия человека, поэтому
-   восстановленное «включено» лишь ждёт первого щелчка. */
+
+   ПРОГОН НАЧИНАЕТСЯ СО ЗВУКОМ — слово владельца 2026-08-22: «прогон должен начинаться с включенным
+   звуком, который плавно за 20 секунд нарастает по громкости от 0 до 100 %». Раньше здесь стояло
+   обратное правило («звук не поднимается сам»), и оно было не принципом, а КАПИТУЛЯЦИЕЙ перед
+   политикой автозапуска браузера. Политика снята в самом окне: мы поднимаем СВОЙ Edge в СВОЁМ
+   профиле и передаём ему `--autoplay-policy=no-user-gesture-required` (`run-dashboard.mjs`).
+
+   ДВА ФАКТА ВМЕСТО ОДНОГО. `on` — намерение страницы, `KagoSound.running` — звучит ли оно на самом
+   деле. Если окно открыли в обычном браузере владельца, где флага нет, контекст останется усыплённым:
+   тогда страница НЕ ВРЁТ кнопкой «ЗВУК ВКЛ» в тишине, а честно говорит, что ждёт щелчка, и стартует
+   от первого же прикосновения к странице — любого, включая открытие этого самого меню.
+
+   ЯВНОЕ «ВЫКЛ» СИЛЬНЕЕ АВТОЗАПУСКА. Умолчание стало «включено», но если владелец выключил звук
+   руками, окно поднимется молча: выключатель, который сам себя возвращает, — это не выключатель. */
 const SND_KEY = 'kago.sound';
+const SND_FADE_SECONDS = 20;                 // слово владельца, дословно
 const sndLoad = () => {
   try { return JSON.parse(localStorage.getItem(SND_KEY)) || {}; } catch (e) { return {}; }
 };
@@ -1891,23 +1969,80 @@ function wireSound() {
   if (Number.isFinite(saved.theme)) sel.value = String(saved.theme);
   if (typeof saved.work === 'boolean') work.checked = saved.work;
 
+  const dot = $('viz-dot'), vizBtn = $('viz-btn');
   const paint = () => {
-    btn.classList.toggle('on', KagoSound.on);
-    lbl.textContent = KagoSound.on ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ';
+    const waiting = KagoSound.on && !KagoSound.running;
+    // Зелёный обод означает ЗВУЧИТ, а не «намерены звучать»: гореть зелёным под надписью «ждёт
+    // щелчка» значит обещать цветом то, чего нет, — а цвет читают раньше слов.
+    btn.classList.toggle('on', KagoSound.on && KagoSound.running);
+    lbl.textContent = !KagoSound.on ? 'ЗВУК ВЫКЛ' : (waiting ? 'ЗВУК ЖДЁТ ЩЕЛЧКА' : 'ЗВУК ВКЛ');
     if (!KagoSound.on) move.textContent = '';
+    // Закрытое меню обязано само говорить, звучит ли оно: иначе за ответом надо лезть внутрь.
+    if (vizBtn) vizBtn.classList.toggle('on', KagoSound.on && KagoSound.running);
+    if (dot) dot.title = lbl.textContent;
   };
   const remember = () => sndSave({ on: KagoSound.on, theme: Number(sel.value), work: work.checked });
 
   KagoSound.onMove((t) => { if (KagoSound.on) move.textContent = t; });
 
+  /** Пустить звук и подать его громкость плавно. Одна дверь для автозапуска и для щелчка. */
+  const start = (fade) => {
+    KagoSound.toggle(true);
+    KagoSound.setTheme(Number(sel.value));
+    KagoSound.setWork(work.checked);
+    if (fade) KagoSound.fadeIn(SND_FADE_SECONDS);
+    paint();
+  };
+
   btn.addEventListener('click', () => {
-    const on = KagoSound.toggle();
-    if (on) { KagoSound.setTheme(Number(sel.value)); KagoSound.setWork(work.checked); }
-    paint(); remember();
+    if (KagoSound.on && KagoSound.running) { KagoSound.toggle(false); paint(); }
+    else start(!KagoSound.running);          // подача нужна только когда звук ПОЯВЛЯЕТСЯ
+    remember();
   });
   sel.addEventListener('change', () => { KagoSound.setTheme(Number(sel.value)); remember(); });
   work.addEventListener('change', () => { KagoSound.setWork(work.checked); remember(); });
+
+  /* АВТОЗАПУСК. Умолчание — включено; выключено только если владелец сам так решил. */
+  if (saved.on !== false) {
+    start(true);
+    if (!KagoSound.running) {
+      // Контекст усыплён: просим разбудить, а если браузер откажет — ждём первого прикосновения.
+      KagoSound.resume().then((ok) => {
+        if (ok) { KagoSound.fadeIn(SND_FADE_SECONDS); }
+        paint();
+      });
+      const wake = () => {
+        if (!KagoSound.on) return;
+        KagoSound.resume().then(() => { KagoSound.fadeIn(SND_FADE_SECONDS); paint(); });
+      };
+      document.addEventListener('pointerdown', wake, { once: true });
+      document.addEventListener('keydown', wake, { once: true });
+    }
+  }
   paint();
+}
+
+/* ==================================================================================================
+   МЕНЮ ВИЗУАЛИЗАТОРА — одна кнопка в углу, слово владельца 2026-08-22
+   ==================================================================================================
+   «всё управление звука нужно поместить в меню, которое одной кнопкой сведено в том углу… Кликом
+   меню как drop-down меню раскрывается и там управление визуализатором, в частности, раздел звука».
+
+   Меню закрывается щелчком мимо и клавишей Esc. Это не вежливость: орган, который закрывается
+   только повторным попаданием в ту же кнопку, на живом прогоне остаётся раскрытым и загораживает
+   правую колонку — ровно ту, ради которой окно и открыто. */
+function wireVizMenu() {
+  const btn = $('viz-btn'), pop = $('viz-pop');
+  if (!btn || !pop) return;                                  // страница собрана без меню — не падаем
+  const setOpen = (open) => {
+    pop.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(pop.hidden); });
+  pop.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', () => setOpen(false));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+  setOpen(false);
 }
 
 /* Стенные часы браузера — единственное на этой странице, что НЕ приходит с прогона, и это
@@ -1920,6 +2055,7 @@ function wallClock() {
 wallClock();
 setInterval(wallClock, 1000);
 
+wireVizMenu();     // сначала оправа: звук при отрисовке уже красит кнопку меню
 wireSound();
 requestAnimationFrame(frame);
 connect();

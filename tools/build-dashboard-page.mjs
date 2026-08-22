@@ -184,44 +184,74 @@ s = s.replace('<div class="stage">',
   s = s.replace(paused, '/* пауза кадров снята словом владельца 2026-08-22 — кадры идут ВСЕГДА */');
 }
 
-// ---- 3d. ОРГАНЫ УПРАВЛЕНИЯ ЗВУКОМ — в шапке справа, слово владельца 2026-08-22.
+// ---- 3d. УПРАВЛЕНИЕ ВИЗУАЛИЗАТОРОМ — ОДНА КНОПКА В УГЛУ, слово владельца 2026-08-22 (вторая редакция).
 //
-// «Делаем дроп-даун меню, в котором можно выбрать одну из трёх тем, или выкл. И можно вкл/выкл
-// рабочие звуки.» Шапка макета — flex-строка с переносом, поэтому полоса с `margin-left:auto`
-// встаёт справа, ничего не сдвигая: композиция, принятая владельцем, не тронута.
+// Первая редакция вынесла в шапку четыре органа подряд — кнопку, список тем, флажок и надпись хода.
+// Владелец, посмотрев на живой прогон, свёл их в один: «всё управление звука нужно поместить в меню,
+// которое одной кнопкой сведено в том углу… Кликом меню как drop-down меню раскрывается и там
+// управление визуализатором, в частности, раздел звука».
 //
-// Кнопка «ЗВУК» — не украшение, а РАЗРЕШЕНИЕ: браузер не создаёт звук без действия человека, и до
-// первого щелчка `AudioContext` не существует вовсе.
+// «В ЧАСТНОСТИ» — это указание на устройство, а не оборот речи: меню задумано как место для ВСЕГО
+// управления окном, где звук — лишь первый раздел. Поэтому разметка несёт заголовок секции, а не
+// плоский список: следующий раздел (например, переключатель языка, `ideas/07`) встаёт рядом, ничего
+// не переписывая.
+//
+// Идентификаторы органов НЕ МЕНЯЮТСЯ (`snd-btn`, `snd-theme`, `snd-work`, `snd-move`) — переехала
+// только их оправа. Проводка звука и стенд прослушивания продолжают работать без единой правки, и
+// это осознанно: переезд облика не должен ничего стоить логике.
 {
   const head = '  <span class="what" id="head-what">Выполняется автоматический тюнинг-прогон видеокарты</span>';
   must(s.includes(head), 'подпись шапки не найдена после переименования');
   s = s.replace(head, `${head}
-  <div class="sndbar">
-    <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
-    <select id="snd-theme" title="музыкальная тема">
-      <option value="0">Тема: Маяк</option>
-      <option value="1">Тема: Дрейф</option>
-      <option value="2">Тема: Позывной</option>
-      <option value="-1">Тема: выкл</option>
-    </select>
-    <label class="sndchk"><input type="checkbox" id="snd-work" checked> рабочие звуки</label>
-    <span class="sndmove" id="snd-move"></span>
+  <div class="vizmenu">
+    <button id="viz-btn" class="vizbtn" type="button" aria-haspopup="true" aria-expanded="false"
+            title="управление визуализатором"><span class="dot" id="viz-dot"></span><span>ВИЗУАЛИЗАТОР</span><span class="chev">▾</span></button>
+    <div class="vizpop" id="viz-pop" hidden>
+      <div class="vizsec">ЗВУК</div>
+      <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
+      <select id="snd-theme" title="музыкальная тема">
+        <option value="0">Тема: Маяк</option>
+        <option value="1">Тема: Дрейф</option>
+        <option value="2">Тема: Позывной</option>
+        <option value="-1">Тема: выкл</option>
+      </select>
+      <label class="sndchk"><input type="checkbox" id="snd-work" checked> рабочие звуки</label>
+      <span class="sndmove" id="snd-move"></span>
+    </div><!-- /viz-pop -->
   </div>`);
 
   const anchor = '  .livewrap{display:flex;align-items:center;gap:14px;margin:0 0 12px}';
   must(s.includes(anchor), 'якорь стилей живого знака не найден');
   s = s.replace(anchor, `${anchor}
-  .sndbar{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .sndbar select,.sndbar button,.sndbar label{font:inherit;font-size:13px;border-radius:8px;
+  /* МЕНЮ ВИЗУАЛИЗАТОРА. \`margin-left:auto\` уносит его в правый угол шапки, ничего не сдвигая:
+     композиция макета, принятая владельцем, не тронута. \`position:relative\` — якорь для выпадения,
+     чтобы список не толкал шапку, когда раскрыт. */
+  .vizmenu{margin-left:auto;position:relative}
+  .vizbtn{font:inherit;font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;
+        border:1px solid #232c38;background:#1c242e;color:#e6edf3;padding:7px 11px;
+        display:inline-flex;align-items:center;gap:8px}
+  .vizbtn .dot{width:9px;height:9px;border-radius:50%;background:#8b98a5}
+  .vizbtn.on{border-color:var(--ok);color:#c7f0cd}
+  .vizbtn.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .vizbtn .chev{font-size:11px;color:#8b98a5}
+  .vizbtn[aria-expanded="true"] .chev{transform:rotate(180deg)}
+  /* Выпадение прижато правым краем к кнопке: она у самого угла окна, и раскрытие влево — */
+  /* единственное направление, в котором меню целиком помещается на экран. */
+  .vizpop{position:absolute;top:calc(100% + 8px);right:0;z-index:30;min-width:232px;
+        display:flex;flex-direction:column;gap:9px;padding:12px;border-radius:12px;
+        border:1px solid #232c38;background:#161d26;box-shadow:0 14px 34px rgba(0,0,0,.5)}
+  .vizpop[hidden]{display:none}
+  .vizsec{font-size:11px;font-weight:700;letter-spacing:.12em;color:#8b98a5}
+  .vizpop select,.vizpop button,.vizpop label{font:inherit;font-size:13px;border-radius:8px;
         border:1px solid #232c38;background:#1c242e;color:#e6edf3;padding:7px 11px}
-  .sndbar select{cursor:pointer}
-  .sndbar .sndchk{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
-  .sndbar .sndchk input{accent-color:var(--fire);cursor:pointer}
+  .vizpop select{cursor:pointer}
+  .vizpop .sndchk{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+  .vizpop .sndchk input{accent-color:var(--fire);cursor:pointer}
   .sndbtn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
   .sndbtn .dot{width:9px;height:9px;border-radius:50%;background:#8b98a5}
   .sndbtn.on{border-color:var(--ok);color:#c7f0cd}
   .sndbtn.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
-  .sndmove{font-size:12px;color:#8b98a5;min-width:132px}`);
+  .sndmove{font-size:12px;color:#8b98a5;min-height:16px}`);
 }
 
 // ---- 3e. ЗВУКОВОЙ ДВИЖОК встраивается ПЕРЕД проводкой: она на него ссылается.

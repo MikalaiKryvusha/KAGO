@@ -235,9 +235,22 @@ function connect() {
    бывает десяток: заставлять владельца каждый раз включать звук и выбирать тему значит гарантированно
    довести его до того, что он выключит звук навсегда. Хранится в `localStorage` — он переживает
    перезапуск окна и не уезжает никуда за пределы этой машины.
-   ЗВУК ПРИ ЭТОМ НЕ ПОДНИМАЕТСЯ САМ: браузер не даёт звучать без действия человека, поэтому
-   восстановленное «включено» лишь ждёт первого щелчка. */
+
+   ПРОГОН НАЧИНАЕТСЯ СО ЗВУКОМ — слово владельца 2026-08-22: «прогон должен начинаться с включенным
+   звуком, который плавно за 20 секунд нарастает по громкости от 0 до 100 %». Раньше здесь стояло
+   обратное правило («звук не поднимается сам»), и оно было не принципом, а КАПИТУЛЯЦИЕЙ перед
+   политикой автозапуска браузера. Политика снята в самом окне: мы поднимаем СВОЙ Edge в СВОЁМ
+   профиле и передаём ему `--autoplay-policy=no-user-gesture-required` (`run-dashboard.mjs`).
+
+   ДВА ФАКТА ВМЕСТО ОДНОГО. `on` — намерение страницы, `KagoSound.running` — звучит ли оно на самом
+   деле. Если окно открыли в обычном браузере владельца, где флага нет, контекст останется усыплённым:
+   тогда страница НЕ ВРЁТ кнопкой «ЗВУК ВКЛ» в тишине, а честно говорит, что ждёт щелчка, и стартует
+   от первого же прикосновения к странице — любого, включая открытие этого самого меню.
+
+   ЯВНОЕ «ВЫКЛ» СИЛЬНЕЕ АВТОЗАПУСКА. Умолчание стало «включено», но если владелец выключил звук
+   руками, окно поднимется молча: выключатель, который сам себя возвращает, — это не выключатель. */
 const SND_KEY = 'kago.sound';
+const SND_FADE_SECONDS = 20;                 // слово владельца, дословно
 const sndLoad = () => {
   try { return JSON.parse(localStorage.getItem(SND_KEY)) || {}; } catch (e) { return {}; }
 };
@@ -250,23 +263,80 @@ function wireSound() {
   if (Number.isFinite(saved.theme)) sel.value = String(saved.theme);
   if (typeof saved.work === 'boolean') work.checked = saved.work;
 
+  const dot = $('viz-dot'), vizBtn = $('viz-btn');
   const paint = () => {
-    btn.classList.toggle('on', KagoSound.on);
-    lbl.textContent = KagoSound.on ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ';
+    const waiting = KagoSound.on && !KagoSound.running;
+    // Зелёный обод означает ЗВУЧИТ, а не «намерены звучать»: гореть зелёным под надписью «ждёт
+    // щелчка» значит обещать цветом то, чего нет, — а цвет читают раньше слов.
+    btn.classList.toggle('on', KagoSound.on && KagoSound.running);
+    lbl.textContent = !KagoSound.on ? 'ЗВУК ВЫКЛ' : (waiting ? 'ЗВУК ЖДЁТ ЩЕЛЧКА' : 'ЗВУК ВКЛ');
     if (!KagoSound.on) move.textContent = '';
+    // Закрытое меню обязано само говорить, звучит ли оно: иначе за ответом надо лезть внутрь.
+    if (vizBtn) vizBtn.classList.toggle('on', KagoSound.on && KagoSound.running);
+    if (dot) dot.title = lbl.textContent;
   };
   const remember = () => sndSave({ on: KagoSound.on, theme: Number(sel.value), work: work.checked });
 
   KagoSound.onMove((t) => { if (KagoSound.on) move.textContent = t; });
 
+  /** Пустить звук и подать его громкость плавно. Одна дверь для автозапуска и для щелчка. */
+  const start = (fade) => {
+    KagoSound.toggle(true);
+    KagoSound.setTheme(Number(sel.value));
+    KagoSound.setWork(work.checked);
+    if (fade) KagoSound.fadeIn(SND_FADE_SECONDS);
+    paint();
+  };
+
   btn.addEventListener('click', () => {
-    const on = KagoSound.toggle();
-    if (on) { KagoSound.setTheme(Number(sel.value)); KagoSound.setWork(work.checked); }
-    paint(); remember();
+    if (KagoSound.on && KagoSound.running) { KagoSound.toggle(false); paint(); }
+    else start(!KagoSound.running);          // подача нужна только когда звук ПОЯВЛЯЕТСЯ
+    remember();
   });
   sel.addEventListener('change', () => { KagoSound.setTheme(Number(sel.value)); remember(); });
   work.addEventListener('change', () => { KagoSound.setWork(work.checked); remember(); });
+
+  /* АВТОЗАПУСК. Умолчание — включено; выключено только если владелец сам так решил. */
+  if (saved.on !== false) {
+    start(true);
+    if (!KagoSound.running) {
+      // Контекст усыплён: просим разбудить, а если браузер откажет — ждём первого прикосновения.
+      KagoSound.resume().then((ok) => {
+        if (ok) { KagoSound.fadeIn(SND_FADE_SECONDS); }
+        paint();
+      });
+      const wake = () => {
+        if (!KagoSound.on) return;
+        KagoSound.resume().then(() => { KagoSound.fadeIn(SND_FADE_SECONDS); paint(); });
+      };
+      document.addEventListener('pointerdown', wake, { once: true });
+      document.addEventListener('keydown', wake, { once: true });
+    }
+  }
   paint();
+}
+
+/* ==================================================================================================
+   МЕНЮ ВИЗУАЛИЗАТОРА — одна кнопка в углу, слово владельца 2026-08-22
+   ==================================================================================================
+   «всё управление звука нужно поместить в меню, которое одной кнопкой сведено в том углу… Кликом
+   меню как drop-down меню раскрывается и там управление визуализатором, в частности, раздел звука».
+
+   Меню закрывается щелчком мимо и клавишей Esc. Это не вежливость: орган, который закрывается
+   только повторным попаданием в ту же кнопку, на живом прогоне остаётся раскрытым и загораживает
+   правую колонку — ровно ту, ради которой окно и открыто. */
+function wireVizMenu() {
+  const btn = $('viz-btn'), pop = $('viz-pop');
+  if (!btn || !pop) return;                                  // страница собрана без меню — не падаем
+  const setOpen = (open) => {
+    pop.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(pop.hidden); });
+  pop.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', () => setOpen(false));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+  setOpen(false);
 }
 
 /* Стенные часы браузера — единственное на этой странице, что НЕ приходит с прогона, и это
@@ -279,6 +349,7 @@ function wallClock() {
 wallClock();
 setInterval(wallClock, 1000);
 
+wireVizMenu();     // сначала оправа: звук при отрисовке уже красит кнопку меню
 wireSound();
 requestAnimationFrame(frame);
 connect();

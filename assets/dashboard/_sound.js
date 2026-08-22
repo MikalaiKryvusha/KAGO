@@ -1051,6 +1051,11 @@ const KagoSound = (() => {
   /* ===============================================================================================
      ЗВУКОВОЙ ГРАФ И ВНЕШНИЙ ИНТЕРФЕЙС
      =============================================================================================== */
+
+  /* ПОЛНАЯ ГРОМКОСТЬ — одно число, а не литерал в двух местах: подача (`fadeIn`) обязана приходить
+     ровно к той величине, которую ставит сборка графа, иначе плавный подъём кончается скачком. */
+  const MASTER_GAIN = 0.95;
+
   function build() {
     ac = new (window.AudioContext || window.webkitAudioContext)();
     // ЛИМИТЕР: громкость максимальная и регулятора нет (слово владельца), значит сумма голосов
@@ -1060,7 +1065,7 @@ const KagoSound = (() => {
     lim.threshold.value = -10; lim.knee.value = 2; lim.ratio.value = 20;
     lim.attack.value = 0.002; lim.release.value = 0.14;
     lim.connect(ac.destination);
-    master = ac.createGain(); master.gain.value = 0.95; master.connect(lim);
+    master = ac.createGain(); master.gain.value = MASTER_GAIN; master.connect(lim);
     verb = reverb(); const vg = ac.createGain(); vg.gain.value = 0.9;
     verb.connect(vg); vg.connect(master);
     melBus = ac.createGain(); melBus.gain.value = 1.0; melBus.connect(master);
@@ -1088,6 +1093,43 @@ const KagoSound = (() => {
     get on() { return soundOn; },
     get theme() { return melIdx; },
     get work() { return workOn; },
+
+    /* -----------------------------------------------------------------------------------------------
+       ЗВУЧИТ ЛИ ОН НА САМОМ ДЕЛЕ — отдельный факт от «включён».
+       -----------------------------------------------------------------------------------------------
+       `on` это НАМЕРЕНИЕ страницы, а `running` — состояние железа звука. Они расходятся ровно в том
+       случае, ради которого этот геттер и заведён: окно поднято автозапуском, страница честно
+       позвала `toggle(true)`, а браузер оставил контекст усыплённым, потому что человек ещё ничего
+       не щёлкнул. Без раздельных фактов кнопка сказала бы «ЗВУК ВКЛ» в полной тишине — это
+       ровно тот класс, за который проект уже платил (`bugs/27`: связь считалась живой, пока не
+       спросили сам транспорт). */
+    get running() { return armed && !!ac && ac.state === 'running'; },
+
+    /** Разбудить усыплённый контекст. Возвращает обещание, потому что браузер отвечает не сразу. */
+    resume() {
+      if (!armed) build();
+      try { return Promise.resolve(ac.resume()).then(() => ac.state === 'running'); }
+      catch (e) { return Promise.resolve(false); }
+    },
+
+    /* ПЛАВНАЯ ПОДАЧА, слово владельца 2026-08-22: «плавно за 20 секунд нарастает по громкости от 0
+       до 100 %». Полторы минуты стоять рядом с внезапно заоравшим ремонтным доком — не то, что
+       нужно человеку, который только что запустил прогон и ещё держит руку на мыши.
+       Подача идёт по САМОМУ ГРОМКОМУ узлу (master), а не по отдельным шинам: тогда она одинаково
+       накрывает и тему, и рабочие сцены, чем бы из них ни начался цикл. */
+    fadeIn(seconds = 20) {
+      if (!armed) build();
+      const sec = Math.max(0.05, Number(seconds) || 0);
+      const t = ac.currentTime;
+      master.gain.cancelScheduledValues(t);
+      master.gain.setValueAtTime(0.0001, t);      // не ноль: экспоненте ноль запрещён, а линейной он
+      master.gain.linearRampToValueAtTime(MASTER_GAIN, t + sec);   // просто не нужен — старт неслышим
+      return sec;
+    },
+
+    /** Текущая громкость общего узла — чтобы подачу можно было ПРОВЕРИТЬ, а не обсуждать. */
+    gainNow() { return armed && master ? master.gain.value : 0; },
+    get fullGain() { return MASTER_GAIN; },
 
     /** Включить/выключить звук целиком. Первый вызов и есть то самое разрешение браузера. */
     toggle(on) {

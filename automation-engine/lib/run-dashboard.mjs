@@ -780,7 +780,29 @@ export const WINDOW_PID_PATH = join('runs', 'dashboard', 'window.pid');
  *
  * `--user-data-dir` gives this window a profile of its own, so the process we spawn IS the browser
  * instance, its pid is real, and killing it closes exactly our window and nothing of his.
+ *
+ * AND THAT SAME OWNED PROFILE IS WHY THE RUN CAN START WITH SOUND (owner, 2026-08-22: «прогон
+ * должен начинаться с включенным звуком»). A page cannot lift the autoplay policy — only the
+ * browser that hosts it can, and here we ARE that browser: `--autoplay-policy=no-user-gesture-required`
+ * applies to this window and to nothing else the owner has open. The page still checks whether sound
+ * genuinely runs and falls back to «waiting for a click» if it does not, because a flag we pass is a
+ * REQUEST, not a fact — the same rule that closed `bugs/27`: ask the transport, do not assume it.
  */
+/**
+ * The argv the window is opened with — a FUNCTION, so the selftest can read what we actually pass
+ * instead of taking the source code's word for it. A flag asserted by grepping the file is not
+ * asserted at all: the grep survives the day someone moves the spawn.
+ */
+export function windowArgs(url, { size = '--window-size=1200,820', profileDir = WINDOW_PROFILE_DIR } = {}) {
+  return [
+    `--app=${url}`, size,
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run', '--no-default-browser-check', '--disable-features=Translate',
+    // Звук на старте прогона — слово владельца 2026-08-22. Действует ТОЛЬКО на это окно: профиль наш.
+    '--autoplay-policy=no-user-gesture-required',
+  ];
+}
+
 export function openWindow(url, { size = '--window-size=1200,820', profileDir = WINDOW_PROFILE_DIR } = {}) {
   const env = process.env;
   const candidates = [
@@ -793,11 +815,7 @@ export function openWindow(url, { size = '--window-size=1200,820', profileDir = 
   for (const [name, path] of candidates) {
     if (!path || !existsSync(path)) continue;
     try {
-      const child = spawn(path, [
-        `--app=${url}`, size,
-        `--user-data-dir=${profileDir}`,
-        '--no-first-run', '--no-default-browser-check', '--disable-features=Translate',
-      ], { detached: true, stdio: 'ignore' });
+      const child = spawn(path, windowArgs(url, { size, profileDir }), { detached: true, stdio: 'ignore' });
       child.unref();
       writeFileSync(WINDOW_PID_PATH, String(child.pid), 'utf8');
       return { ok: true, browser: name, pid: child.pid };
@@ -1340,6 +1358,56 @@ export async function selfTest() {
     const nobody = await probeDashboard(1, { timeoutMs: 400 });
     check('МОЛЧАЩИЙ ПОРТ — это «никого нет», а не «наш»',
       nobody.alive === false && nobody.ours === false, JSON.stringify(nobody));
+  }
+
+  // — ЗВУК НА СТАРТЕ ПРОГОНА И ОДНА КНОПКА УПРАВЛЕНИЯ (слово владельца 2026-08-22).
+  //
+  //   Что здесь доказывается ЧЕСТНО: аргументы окна и содержимое СОБРАННОЙ страницы. Чего здесь
+  //   НЕ доказывается: что из колонок пошёл звук — на это отвечает ухо владельца, и никакой офлайн
+  //   блок такого вердикта не выдаёт. Блоки названы так, чтобы их нельзя было прочесть шире.
+  //
+  //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+  //     BB. убрать `--autoplay-policy` из `windowArgs`                → блок «ФЛАГ АВТОЗАПУСКА»
+  //     BC. вернуть в сборщик плоскую полосу `sndbar` вместо меню     → блок «ОДНА КНОПКА»
+  //     BD. вынести органы звука наружу выпадения                     → блок «ОРГАНЫ ЖИВУТ ВНУТРИ»
+  //     BE. стереть `fadeIn`/`running` из движка                      → блок «ДВИЖОК УМЕЕТ ПОДАЧУ»
+  //     BF. поменять 20 секунд подачи на другое число                 → блок «ДВАДЦАТЬ СЕКУНД»
+  {
+    const args = windowArgs('http://127.0.0.1:7777/');
+    check('ФЛАГ АВТОЗАПУСКА ЗВУКА УЕЗЖАЕТ В ОКНО — иначе «включено» на странице остаётся немым',
+      args.includes('--autoplay-policy=no-user-gesture-required'), JSON.stringify(args));
+    check('И ФЛАГ ДЕЙСТВУЕТ ТОЛЬКО НА НАШЕ ОКНО — свой профиль рядом в тех же аргументах',
+      args.some((a) => a.startsWith('--user-data-dir=')), JSON.stringify(args));
+
+    const pagePath = join('assets', 'dashboard', 'sweep.html');
+    const page = existsSync(pagePath) ? readFileSync(pagePath, 'utf8') : '';
+    check('СТРАНИЦА СОБРАНА — без неё следующие блоки судили бы пустоту',
+      page.length > 1000, `${pagePath}: ${page.length} байт`);
+    check('ОДНА КНОПКА В УГЛУ, А НЕ РОССЫПЬ ОРГАНОВ — плоской полосы на странице больше нет',
+      page.includes('id="viz-btn"') && page.includes('id="viz-pop"') && !page.includes('class="sndbar"'),
+      `viz-btn ${page.includes('id="viz-btn"')} · viz-pop ${page.includes('id="viz-pop"')} · sndbar ${page.includes('class="sndbar"')}`);
+    {
+      // Органы обязаны лежать ВНУТРИ выпадения: снаружи они снова полоса, просто с кнопкой рядом.
+      // Границу берём по МЕТКЕ КОНЦА, а не по первому попавшемуся `</div>`: срез «от метки до
+      // ближайшего закрытия» остался бы зелёным, даже если органы вынести наружу, — он резал бы
+      // текст, а не элемент. Метку ставит сам сборщик.
+      const from = page.indexOf('id="viz-pop"');
+      const to = page.indexOf('<!-- /viz-pop -->');
+      const inside = from > 0 && to > from ? page.slice(from, to) : '';
+      check('ОРГАНЫ ЗВУКА ЖИВУТ ВНУТРИ ВЫПАДЕНИЯ — кнопка, темы, рабочие звуки и ход цикла',
+        ['id="snd-btn"', 'id="snd-theme"', 'id="snd-work"', 'id="snd-move"'].every((id) => inside.includes(id)),
+        `в выпадении ${inside.length} байт`);
+      check('И У ВЫПАДЕНИЯ ЕСТЬ ЗАГОЛОВОК РАЗДЕЛА — меню задумано шире звука, «в частности, раздел звука»',
+        inside.includes('vizsec'), 'нет заголовка секции');
+    }
+    // Спрашиваем ОПРЕДЕЛЕНИЕ в движке, а не упоминание: `fadeIn(` встречается и в проводке, поэтому
+    // блок, ищущий подстроку, остался бы зелёным на движке, потерявшем метод.
+    check('ДВИЖОК УМЕЕТ ПОДАЧУ И ОТЛИЧАЕТ «ВКЛЮЧЁН» ОТ «ЗВУЧИТ»',
+      /fadeIn\(seconds\s*=/.test(page) && page.includes('get running()') && page.includes('resume()'),
+      'в движке нет подачи или нет отдельного факта о звучании');
+    check('ДВАДЦАТЬ СЕКУНД ПОДАЧИ — ровно то число, которое назвал владелец',
+      /SND_FADE_SECONDS\s*=\s*20\b/.test(page) && page.includes('KagoSound.fadeIn(SND_FADE_SECONDS)'),
+      'подача не названа числом 20 или не вызывается проводкой');
   }
 
   const failed = results.filter((r) => !r.ok).length;
