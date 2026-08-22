@@ -82,19 +82,26 @@ const column = `    <!-- СОСТОЯНИЕ ПРОГОНА СТОИТ ПЕРВЫ
       </div>
     </div>
     <div class="m"><span>частота под тестом</span><b id="f-freq">—</b></div>
+    <!-- «ПРОЙДЕНО по диапазону частот» СНЯТО как ложь: подпись обещала пройденное, а значение
+         показывало ЗАКАЗАННУЮ полосу — владелец поймал это на первой же репетиции («врет. мы еще не
+         дошли до 2157»). Подпись теперь называет ровно то, что под ней стоит; где идёт фронт —
+         видно по плитке «частота под тестом» прямо над ней.
+         ПОДНЯТА НА ВТОРОЕ МЕСТО словом владельца 2026-08-22 — рядом с фронтом, потому что «где мы»
+         и «сколько всего» читаются одним взглядом или не читаются вовсе. Строка с долей пройденного
+         УБРАНА тем же словом: осталось «настроено частот», число, которое не надо ни с чем сверять. -->
+    <div class="m"><span>диапазон прогона</span><b id="f-band">—</b>
+      <span id="f-cov" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
     <!-- «4 из 24» убрано словом владельца: номер ступени внутри спуска не говорит оператору ничего.
-         Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. -->
+         Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. А ШАГ (слово владельца
+         2026-08-22) говорит, чем именно сюда спустились: «величина напряжения, которой спустились
+         от высшего к текущему напряжению, последний выполненный шаг». Глубина отвечает «где мы»,
+         шаг — «насколько крупно мы идём», и на краю это разные вопросы. -->
     <div class="m"><span>напряжение</span><b id="f-volt">—</b>
-      <span id="f-depth" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
+      <span id="f-depth" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span>
+      <span id="f-step" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
     <!-- «прожиг» — жаргон (слово владельца 2026-08-16). На самом деле идёт СТРЕСС-ТЕСТ
          УСТОЙЧИВОСТИ, так и называем — здесь и во всём, что он читает. -->
     <div class="m"><span>стресс-тест устойчивости</span><b id="f-probe">—</b></div>
-    <!-- «ПРОЙДЕНО по диапазону частот» СНЯТО как ложь: подпись обещала пройденное, а значение
-         показывало ЗАКАЗАННУЮ полосу — владелец поймал это на первой же репетиции («врет. мы еще не
-         дошли до 2157»). Подпись теперь называет ровно то, что под ней стоит; пройденное считает
-         строка ниже, а где идёт фронт — видно по верхней плитке «частота под тестом». -->
-    <div class="m"><span>диапазон прогона</span><b id="f-band">—</b>
-      <span id="f-cov" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
     <!-- ДВОЕ ЧАСОВ, попрошены владельцем на первом полном прогоне. Они нарочно идут от РАЗНЫХ
          часов, и эта пара стоит больше любой своей половины: таймер прогона идёт ОТ ПУЛЬСА и
          замирает вместе с ним, стенные часы идут сами. Расстояние между ними — это «давно ли
@@ -205,11 +212,12 @@ s = s.replace('<div class="stage">',
   s = s.replace(head, `${head}
   <div class="vizmenu">
     <button id="viz-btn" class="vizbtn" type="button" aria-haspopup="true" aria-expanded="false"
-            title="управление визуализатором"><span class="dot" id="viz-dot"></span><span>ВИЗУАЛИЗАТОР</span><span class="chev">▾</span></button>
+            title="управление визуализатором"><span class="dot" id="viz-dot"></span><span>МЕНЮ</span><span class="chev">▾</span></button>
     <div class="vizpop" id="viz-pop" hidden>
       <div class="vizsec">ЗВУК</div>
       <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
       <select id="snd-theme" title="музыкальная тема">
+        <option value="3">Тема: Глубокий космос</option>
         <option value="0">Тема: Маяк</option>
         <option value="1">Тема: Дрейф</option>
         <option value="2">Тема: Позывной</option>
@@ -256,7 +264,15 @@ s = s.replace('<div class="stage">',
 
 // ---- 3e. ЗВУКОВОЙ ДВИЖОК встраивается ПЕРЕД проводкой: она на него ссылается.
 {
-  const sound = readFileSync(join('assets', 'dashboard', '_sound.js'), 'utf8');
+  let sound = readFileSync(join('assets', 'dashboard', '_sound.js'), 'utf8');
+  // ЗАПИСАННАЯ ТЕМА ЕДЕТ С НАШЕГО СЕРВЕРА — ровно по той же причине, что шрифт и логотип: у окна
+  // прогона нет доступа к файлам мимо своего origin, а относительный путь в движке верен для
+  // СТЕНДА, который открывают файлом. Одна правда о пути, две её формы, и обе делает сборщик.
+  const trackRel = '../assets/dashboard/themes/deep-space.mp3';
+  must(sound.includes(trackRel), 'в движке нет пути к записанной теме — переименовали файл?');
+  sound = sound.replace(trackRel, '/theme.mp3');
+  must(existsSync(join('assets', 'dashboard', 'themes', 'deep-space.mp3')),
+    'файла записанной темы нет на диске — страница получит меню с немой первой темой');
   must(s.includes('</body>'), 'нет закрывающего body для движка звука');
   s = s.replace('</body>', `<script>\n${sound}</script>\n</body>`);
 }
@@ -285,7 +301,9 @@ if (process.argv.includes('--preview')) {
   const pulse = readFileSync(pulsePath, 'utf8');
   let prev = s
     .replace('src:url(/font.woff2)', 'src:url(../fonts/DSEG7Classic-Regular.woff2)')
-    .replace('src="/logo.webp"', 'src="../logo/kago-logo.webp"');
+    .replace('src="/logo.webp"', 'src="../logo/kago-logo.webp"')
+    // Превью лежит в `assets/dashboard/`, поэтому запись у него под боком, без ведущей косой.
+    .replace("'/theme.mp3'", "'themes/deep-space.mp3'");
   must(prev.includes('connect();'), 'в проводке нет вызова connect()');
   // `--no-pill` снимает метку «ВИРТУАЛЬНАЯ» — снимок для README показывает ИНСТРУМЕНТ, а он один и
   // тот же на стенде и на живой карте (слово владельца 2026-08-16 04:1x). Числа при этом остаются

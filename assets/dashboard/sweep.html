@@ -198,11 +198,12 @@
   <span class="what" id="head-what">Выполняется автоматический тюнинг-прогон видеокарты</span>
   <div class="vizmenu">
     <button id="viz-btn" class="vizbtn" type="button" aria-haspopup="true" aria-expanded="false"
-            title="управление визуализатором"><span class="dot" id="viz-dot"></span><span>ВИЗУАЛИЗАТОР</span><span class="chev">▾</span></button>
+            title="управление визуализатором"><span class="dot" id="viz-dot"></span><span>МЕНЮ</span><span class="chev">▾</span></button>
     <div class="vizpop" id="viz-pop" hidden>
       <div class="vizsec">ЗВУК</div>
       <button id="snd-btn" class="sndbtn" type="button"><span class="dot"></span><span id="snd-lbl">ЗВУК ВЫКЛ</span></button>
       <select id="snd-theme" title="музыкальная тема">
+        <option value="3">Тема: Глубокий космос</option>
         <option value="0">Тема: Маяк</option>
         <option value="1">Тема: Дрейф</option>
         <option value="2">Тема: Позывной</option>
@@ -494,19 +495,26 @@
       </div>
     </div>
     <div class="m"><span>частота под тестом</span><b id="f-freq">—</b></div>
+    <!-- «ПРОЙДЕНО по диапазону частот» СНЯТО как ложь: подпись обещала пройденное, а значение
+         показывало ЗАКАЗАННУЮ полосу — владелец поймал это на первой же репетиции («врет. мы еще не
+         дошли до 2157»). Подпись теперь называет ровно то, что под ней стоит; где идёт фронт —
+         видно по плитке «частота под тестом» прямо над ней.
+         ПОДНЯТА НА ВТОРОЕ МЕСТО словом владельца 2026-08-22 — рядом с фронтом, потому что «где мы»
+         и «сколько всего» читаются одним взглядом или не читаются вовсе. Строка с долей пройденного
+         УБРАНА тем же словом: осталось «настроено частот», число, которое не надо ни с чем сверять. -->
+    <div class="m"><span>диапазон прогона</span><b id="f-band">—</b>
+      <span id="f-cov" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
     <!-- «4 из 24» убрано словом владельца: номер ступени внутри спуска не говорит оператору ничего.
-         Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. -->
+         Говорит ГЛУБИНА — сколько уже снято от заводского напряжения. А ШАГ (слово владельца
+         2026-08-22) говорит, чем именно сюда спустились: «величина напряжения, которой спустились
+         от высшего к текущему напряжению, последний выполненный шаг». Глубина отвечает «где мы»,
+         шаг — «насколько крупно мы идём», и на краю это разные вопросы. -->
     <div class="m"><span>напряжение</span><b id="f-volt">—</b>
-      <span id="f-depth" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
+      <span id="f-depth" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span>
+      <span id="f-step" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
     <!-- «прожиг» — жаргон (слово владельца 2026-08-16). На самом деле идёт СТРЕСС-ТЕСТ
          УСТОЙЧИВОСТИ, так и называем — здесь и во всём, что он читает. -->
     <div class="m"><span>стресс-тест устойчивости</span><b id="f-probe">—</b></div>
-    <!-- «ПРОЙДЕНО по диапазону частот» СНЯТО как ложь: подпись обещала пройденное, а значение
-         показывало ЗАКАЗАННУЮ полосу — владелец поймал это на первой же репетиции («врет. мы еще не
-         дошли до 2157»). Подпись теперь называет ровно то, что под ней стоит; пройденное считает
-         строка ниже, а где идёт фронт — видно по верхней плитке «частота под тестом». -->
-    <div class="m"><span>диапазон прогона</span><b id="f-band">—</b>
-      <span id="f-cov" style="text-transform:none;letter-spacing:0;font-size:13px;color:#c9d3df"></span></div>
     <!-- ДВОЕ ЧАСОВ, попрошены владельцем на первом полном прогоне. Они нарочно идут от РАЗНЫХ
          часов, и эта пара стоит больше любой своей половины: таймер прогона идёт ОТ ПУЛЬСА и
          замирает вместе с ним, стенные часы идут сами. Расстояние между ними — это «давно ли
@@ -1190,6 +1198,55 @@ const KagoSound = (() => {
   ];
   let moveIdx = 0;
 
+  /* ===============================================================================================
+     ЗАПИСАННАЯ ТЕМА — готовый трек владельца (слово 2026-08-22: «я тебе готовый mp3 дал, просто его
+     встрой в зоопарк готовых тем», «его не нужно разбирать»)
+     ===============================================================================================
+     Это тема ДРУГОГО РОДА, и притворяться, что она такая же, значило бы городить лишнее: у неё нет
+     ни контура, ни ходов цикла, ни аккордов под ней — она уже написана целиком. Поэтому она не
+     входит в `MELODIES`, а живёт своим индексом, и весь синтезированный аппарат при ней молчит.
+
+     Идёт ПО КРУГУ (`loop`), как заказано. Звук ведётся через общий узел графа, а не мимо него:
+     тогда её накрывает и лимитер, и двадцатисекундная подача громкости на старте, — иначе запись
+     вступала бы сразу на полной, пока синтезированные темы поднимаются плавно.
+
+     Путь относительный — он верен для стенда прослушивания, который открывают файлом. Живая
+     страница получает его переписанным на серверный `/theme.mp3` (сборщик, как со шрифтом и
+     логотипом): у окна прогона нет доступа к файлам мимо своего сервера. */
+  const TRACK_INDEX = 3;
+  const TRACK = {
+    name: 'Глубокий космос',
+    url: '/theme.mp3',
+    what: 'Записанная тема, 4 мин 10 с, играет по кругу. Космический эмбиент — выбор владельца.',
+  };
+  let trackEl = null;
+
+  function trackStart() {
+    if (!armed) return;
+    if (!trackEl) {
+      trackEl = new Audio(TRACK.url);
+      trackEl.loop = true;                       // круг даёт сам элемент — без склейки и без таймера
+      trackEl.preload = 'auto';
+      // Через граф — ради лимитера и подачи. Но ТОЛЬКО когда страница пришла по сети: у `file://`
+      // каждый файл считается чужим источником: элемент «портит» граф, и тот отдаёт ТИШИНУ —
+      // причём без единой ошибки, так что запасной путь по `catch` здесь не сработал бы. На стенде
+      // прослушивания элемент играет сам, мимо лимитера: это слышно, а молчание — нет.
+      const sameOrigin = location.protocol === 'http:' || location.protocol === 'https:';
+      if (sameOrigin) {
+        try { ac.createMediaElementSource(trackEl).connect(master); } catch (e) { /* играет напрямую */ }
+      }
+    }
+    try { trackEl.currentTime = 0; } catch (e) { /* ещё не готов — начнёт с начала сам */ }
+    const p = trackEl.play();
+    if (p && p.catch) p.catch(() => { /* автозапуск не дали — щелчок человека вернёт сюда же */ });
+  }
+
+  function trackStop() {
+    if (!trackEl) return;
+    trackEl.pause();                             // МГНОВЕННО, слово владельца: «отдавать очередь новой»
+    try { trackEl.currentTime = 0; } catch (e) { /* неважно: следующий пуск всё равно с нуля */ }
+  }
+
   /* Гармония под темой: открытые квинты, без терций — так «Дальний» и звучал. Меняется очень
      медленно, поэтому один и тот же мотив каждый раз окрашен иначе, хотя рисунок тот же. */
   const CHORDS = [[N.A1, N.E2], [N.Fs2, N.Cs3], [N.D3, N.A2], [N.E2, N.B2]];
@@ -1208,16 +1265,20 @@ const KagoSound = (() => {
     lp.connect(g); g.connect(padBus);
     const s = ac.createGain(); s.gain.value = 0.9; g.connect(s); s.connect(verb);
     g.gain.exponentialRampToValueAtTime(0.075, now() + 3.0);
-    return { stop() {
+    // Длительность ухода — параметр: смена АККОРДА внутри темы должна быть незаметной (3 с
+    // перекрёстного затухания), а смена САМОЙ ТЕМЫ — мгновенной. Ноль не берём: обрыв синуса на
+    // ненулевой амплитуде — это щелчок, а не тишина; сотая доля секунды его снимает и на слух
+    // неотличима от мгновенного.
+    return { stop(sec = 3.0) {
       const t = now();
       g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 3.0);
-      setTimeout(() => oscs.forEach((o) => { try { o.stop(); } catch (e) { /* уже */ } }), 3200);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + sec);
+      setTimeout(() => oscs.forEach((o) => { try { o.stop(); } catch (e) { /* уже */ } }), sec * 1000 + 200);
     } };
   }
 
   function rollChord() {
-    if (!soundOn || melIdx < 0) return;
+    if (!soundOn || melIdx < 0 || melIdx === TRACK_INDEX) return;   // под записью аккордов нет
     const nextPad = padOn(CHORDS[chordStep % CHORDS.length]);
     const old = padVoice; padVoice = nextPad;
     if (old) old.stop();                                  // перекрёстное затухание, а не переключение
@@ -1227,7 +1288,9 @@ const KagoSound = (() => {
   /** Одна фраза цикла. Контур неизменен ВСЕГДА — меняется всё остальное, и меняется ПО ПОРЯДКУ,
       ходом цикла, а не случаем: восемь ходов складываются в арку, случайные вариации — нет. */
   function playPhrase() {
-    if (!soundOn || melIdx < 0) { melTimer = setTimeout(playPhrase, 2000); return; }
+    // Записанная тема сюда не заходит вовсе: у неё нет фразы, и `MELODIES[3]` не существует —
+    // без этой половины условия цикл фраз разыменовал бы пустоту на первом же тике.
+    if (!soundOn || melIdx < 0 || melIdx === TRACK_INDEX) { melTimer = setTimeout(playPhrase, 2000); return; }
     const m = MELODIES[melIdx];
     const mv = MOVES[moveIdx % MOVES.length];
     const strong = new Set(m.strong);
@@ -1596,14 +1659,18 @@ const KagoSound = (() => {
     armed = true;
   }
 
-  function stopTheme() {
+  /** @param {{instant?:boolean}} [o] — `instant` при СМЕНЕ ТЕМЫ: очередь отдаётся сразу. */
+  function stopTheme(o) {
     clearTimeout(melTimer); melTimer = null;
     clearInterval(chordTimer); chordTimer = null;
-    if (padVoice) { padVoice.stop(); padVoice = null; }
+    if (padVoice) { padVoice.stop(o && o.instant ? 0.1 : 3.0); padVoice = null; }
+    trackStop();
   }
 
   function startTheme() {
     if (!armed || !soundOn || melIdx < 0) return;
+    // Записанная тема написана целиком: ни аккордов под ней, ни цикла ходов, ни фраз.
+    if (melIdx === TRACK_INDEX) { trackStart(); onMove(TRACK.name + ' · играет по кругу'); return; }
     moveIdx = 0; chordStep = 0; rollChord();
     chordTimer = setInterval(rollChord, 20 * BEAT * 1000);   // 20 ДОЛЕЙ, а не круглые секунды:
     playPhrase();                                            // иначе аккорд разъедется с фразами
@@ -1662,12 +1729,16 @@ const KagoSound = (() => {
       return soundOn;
     },
 
-    /** Тема: 0 · Маяк, 1 · Дрейф, 2 · Позывной, −1 · выключить. */
+    /** Тема: 3 · Глубокий космос (запись, по умолчанию), 0 · Маяк, 1 · Дрейф, 2 · Позывной, −1 · выкл.
+     *  СМЕНА ТЕМЫ МГНОВЕННА — слово владельца: «предыдущая должна мгновенно замолкать, отдавать
+     *  очередь новой». Поэтому здесь `instant`, а не обычный трёхсекундный уход подложки: тот
+     *  уместен между аккордами ОДНОЙ темы, но при смене темы он наложил бы старую на новую. */
     setTheme(i) {
       melIdx = Number(i);
-      stopTheme();
+      stopTheme({ instant: true });
       if (soundOn) startTheme();
     },
+    get trackIndex() { return TRACK_INDEX; },
 
     /** Рабочие звуки дока — отдельным выключателем, слово владельца. */
     setWork(on) { workOn = !!on; },
@@ -1676,6 +1747,9 @@ const KagoSound = (() => {
     onMove(fn) { onMove = typeof fn === 'function' ? fn : () => {}; },
 
     themes: MELODIES.map((m) => ({ name: m.name, contour: m.contour, what: m.what })),
+    /** Записанная тема отдаётся ОТДЕЛЬНО от `themes`: там индекс — это положение в массиве, и
+     *  дописать её туда четвёртой значило бы сказать «её индекс 3» дважды, в двух местах. */
+    track: () => ({ name: TRACK.name, what: TRACK.what, index: TRACK_INDEX, url: TRACK.url }),
 
     /* ---------------------------------------------------------------------------------------------
        СТЕНДОВЫЙ ИНТЕРФЕЙС. Он здесь не «на всякий случай»: без него стенд прослушивания вынужден
@@ -1779,22 +1853,24 @@ function paint() {
   const p = r.probe || {};
   $('f-probe').innerHTML = `${(p.elapsedSeconds ?? 0).toFixed(1).replace('.', ',')} `
     + `<span style="font-size:17px;color:var(--dim)">из ${p.totalSeconds ?? 10} с</span>`;
+  // ШАГ — «последний выполненный шаг» (слово владельца 2026-08-22). Считает его дашборд из того,
+  // что реально произошло; здесь только показ. На первой ступени частоты шаг равен глубине —
+  // спустились прямо от стока, и это не совпадение, а то же самое расстояние.
+  $('f-step').innerHTML = Number.isFinite(r.stepMv) && r.stepMv > 0
+    ? `<br>шаг <b style="display:inline;font-size:13px">−${r.stepMv} мВ</b>`
+    : '';
   $('f-band').textContent = r.band || '—';
   const cov = r.coverage || {};
   // «Ступеней пройдено» УБРАНО словом владельца: ступень спуска по напряжению — внутренняя единица
   // движка, и оператору она не говорит ничего, ровно как убранная раньше «ступень N из M».
   // Осталось то, что говорит: сколько частот диапазона уже настроено.
-  // ГДЕ ИДЁТ ФРОНТ — первое, что спросил владелец, глядя на прогон. Спуск идёт СВЕРХУ ВНИЗ (его
-  // алгоритм, ideas/03 §6), поэтому положение — это доля пройденного пути от верхней частоты к нижней.
-  const front = r.frequencyMhz;
-  let walked = '';
-  if (front && r.bandFromMhz && r.bandToMhz && r.bandFromMhz > r.bandToMhz) {
-    const pct = Math.round(100 * (r.bandFromMhz - front) / (r.bandFromMhz - r.bandToMhz));
-    walked = `<span style="white-space:nowrap">спустились до <b style="display:inline;font-size:13px">${front} МГц</b> — это ${pct} % пути</span><br>`;
-  }
+  // «% ПУТИ» УБРАНО словом владельца 2026-08-22. Доля пройденного считалась по ОСИ ЧАСТОТ, а идёт
+  // прогон по ЧАСТОТАМ, которые надо закрыть, — и эти две меры расходятся тем сильнее, чем ниже
+  // спуск: внизу диапазона одна ступень накрывает девятнадцать частот сразу. Проценту нечего было
+  // обещать честно. Осталось «настроено частот» — счёт, а не оценка.
   $('f-cov').innerHTML = cov.total
-    ? walked + `<span style="white-space:nowrap">настроено частот <b style="display:inline;font-size:13px">${cov.closed ?? 0} из ${cov.total}</b></span>`
-    : walked;
+    ? `<span style="white-space:nowrap">настроено частот <b style="display:inline;font-size:13px">${cov.closed ?? 0} из ${cov.total}</b></span>`
+    : '';
 
   seg('seg-clk', c.clockMhz, 4);
   seg('seg-temp', c.tempC, 2);
@@ -1966,7 +2042,12 @@ function wireSound() {
   const btn = $('snd-btn'), lbl = $('snd-lbl'), sel = $('snd-theme'), work = $('snd-work'), move = $('snd-move');
   if (!btn || typeof KagoSound === 'undefined') return;      // страница собрана без звука — не падаем
   const saved = sndLoad();
-  if (Number.isFinite(saved.theme)) sel.value = String(saved.theme);
+  // ТЕМА ПО УМОЛЧАНИЮ — ЗАПИСЬ (слово владельца 2026-08-22: «поставь его номером 1, он будет по
+  // умолчанию запускаться, когда запускается визуализатор»). Названа ЯВНО, а не взята из того, что
+  // она первая в списке: порядок пунктов — вопрос облика, и однажды его поменяют, а умолчание
+  // менять при этом никто не собирался. Сохранённый выбор человека сильнее умолчания.
+  const DEFAULT_THEME = 3;
+  sel.value = String(Number.isFinite(saved.theme) ? saved.theme : DEFAULT_THEME);
   if (typeof saved.work === 'boolean') work.checked = saved.work;
 
   const dot = $('viz-dot'), vizBtn = $('viz-btn');

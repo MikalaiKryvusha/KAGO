@@ -57,6 +57,8 @@ export const TELEMETRY_PATH = join('runs', 'dashboard', 'telemetry.jsonl');
 export const PAGE_PATH = join('assets', 'dashboard', 'sweep.html');
 export const FONT_PATH = join('assets', 'fonts', 'DSEG7Classic-Regular.woff2');
 export const LOGO_PATH = join('assets', 'logo', 'kago-logo.webp');
+/** ЗАПИСАННАЯ ТЕМА — готовый трек владельца, первая тема меню и тема по умолчанию. */
+export const TRACK_PATH = join('assets', 'dashboard', 'themes', 'deep-space.mp3');
 export const DEFAULT_PORT = 7311;
 
 /** How the run's states are NAMED to the operator. The owner's register: «прожиг» is jargon — what
@@ -169,6 +171,11 @@ export function openPulse({
       voltageMv: null,
       stockVoltageMv: null,
       depthMv: null,
+      // ПОСЛЕДНИЙ ВЫПОЛНЕННЫЙ ШАГ — слово владельца 2026-08-22: «величина напряжения, которой
+      // спустились от высшего к текущему напряжению, последний выполненный шаг». Считается ЗДЕСЬ,
+      // из того, что реально произошло, а не берётся из плана: план и пройденное расходятся на
+      // затравке и на ступенях, которые сетка вынудила глубже, — а спрошено про пройденное.
+      stepMv: null,
       seeded: false,
       probe: { elapsedSeconds: 0, totalSeconds: probeSeconds },
       bandFromMhz: null,
@@ -223,10 +230,20 @@ export function openPulse({
           r.bandToMhz = e.toMhz ?? r.bandToMhz;
           if (e.fromMhz && e.toMhz && !r.band) r.band = `${e.fromMhz}…${e.toMhz} МГц`;
           break;
-        case 'rung-start':
+        case 'rung-start': {
           r.state = RUN_STATE.STRESS;
+          // ШАГ СЧИТАЕТСЯ ДО ТОГО, как текущее напряжение затрёт предыдущее — иначе вычитать не из
+          // чего. Внутри одной частоты это расстояние до предыдущей ступени; на ПЕРВОЙ ступени
+          // частоты «высшее напряжение» — это сток, и шаг совпадает с глубиной. Смена частоты
+          // обнуляет счёт: шаг между ступенями РАЗНЫХ лестниц не значит ничего.
+          const sameFrequency = e.frequencyMhz != null && e.frequencyMhz === r.frequencyMhz;
+          const prevMv = r.voltageMv;
+          const nextMv = e.voltageMv ?? r.voltageMv;
+          r.stepMv = (sameFrequency && Number.isFinite(prevMv) && Number.isFinite(nextMv) && prevMv > nextMv)
+            ? prevMv - nextMv
+            : (Number.isFinite(e.depthMv) ? e.depthMv : null);
           r.frequencyMhz = e.frequencyMhz ?? r.frequencyMhz;
-          r.voltageMv = e.voltageMv ?? r.voltageMv;
+          r.voltageMv = nextMv;
           r.depthMv = e.depthMv ?? null;
           r.seeded = e.seeded === true;
           if (r.voltageMv !== null && r.depthMv !== null) r.stockVoltageMv = r.voltageMv + r.depthMv;
@@ -237,6 +254,7 @@ export function openPulse({
           // describes would already be over.
           snap.quietMs = quietForBurnMs;
           break;
+        }
         case 'rung':
           r.state = RUN_STATE.CLOSING;
           // The burn is over and the loop is free again — ordinary patience applies from here.
@@ -447,12 +465,20 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg',
 };
 
-function sendFile(res, path, type) {
+function sendFile(res, path, type, { cache = false } = {}) {
   if (!existsSync(path)) { res.writeHead(404); res.end('нет файла: ' + path); return; }
   const body = readFileSync(path);
-  res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+  res.writeHead(200, {
+    'content-type': type,
+    // ЗАПИСЬ ТЕМЫ — ЕДИНСТВЕННОЕ, ЧТО КЭШИРУЕТСЯ. Всё остальное на этом сервере обязано быть
+    // свежим: страница и прибор меняются каждую секунду прогона, и старый ответ там — это ложь.
+    // Трек не меняется никогда, а весит десять мегабайт: без кэша он ехал бы заново на каждую
+    // перезагрузку окна, и первые секунды звучания достались бы загрузке, а не музыке.
+    'cache-control': cache ? 'public, max-age=31536000, immutable' : 'no-store',
+  });
   res.end(body);
 }
 
@@ -491,6 +517,7 @@ export function serve({
     if (url === '/' || url === '/index.html') return sendFile(res, pagePath, MIME['.html']);
     if (url === '/font.woff2') return sendFile(res, FONT_PATH, MIME['.woff2']);
     if (url === '/logo.webp') return sendFile(res, LOGO_PATH, MIME['.webp']);
+    if (url === '/theme.mp3') return sendFile(res, TRACK_PATH, MIME['.mp3'], { cache: true });
     // ⚡ ТЕЛЕМЕТРИЯ — ОТДЕЛЬНЫЙ КАНАЛ, И ЭТО СЛОВО ВЛАДЕЛЬЦА (2026-08-16): «ни анимация, ни
     // телеметрия карточки не должны замирать ни от каких тиков» · «телеметрия всегда в реальном
     // времени питается особым модулем телеметрии».
@@ -1006,6 +1033,47 @@ export async function selfTest() {
   check('ПУЛЬС: полоса даёт знаменатель покрытия', afterStart.run.coverage.total === 43,
     `в пульсе ${afterStart.run.coverage.total}`);
 
+  // — ПОСЛЕДНИЙ ВЫПОЛНЕННЫЙ ШАГ (слово владельца 2026-08-22). Считается из пройденного, а не из
+  //   плана, поэтому и проверяется прогоном событий, а не чтением страницы.
+  //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //     BG. брать шаг из плана (`zoneStepMv`) вместо разности        → «ШАГ — ЭТО ПРОЙДЕННОЕ»
+  //     BH. считать шаг и через смену частоты                        → «СМЕНА ЧАСТОТЫ ОБНУЛЯЕТ СЧЁТ»
+  //     BI. затирать напряжение до вычисления разности               → «ШАГ СЧИТАЕТСЯ ДО ЗАТИРАНИЯ»
+  check('ШАГ НА ПЕРВОЙ СТУПЕНИ ЧАСТОТЫ РАВЕН ГЛУБИНЕ — спустились прямо от стока',
+    afterStart.run.stepMv === 50, `шаг ${afterStart.run.stepMv}, глубина 50`);
+  {
+    // СВОЙ ПУЛЬС, а не общий: спуск по ступеням двигает номер записи, а ниже стоит блок, который
+    // судит ИМЕННО номер («каждая запись двигает номер»). Проверка, ломающая соседнюю проверку
+    // своим побочным действием, — это не проверка, а помеха.
+    const stepPath = join(dir, 'live-step.json');
+    clearPulse(stepPath);
+    let ts = 0;
+    const pulse = openPulse({
+      path: stepPath, source: 'самопроверка шага', synthetic: true, band: '2842…2800 МГц',
+      probeSeconds: 10, clockMs: () => (ts += 250), now: () => '2026-08-16T03:00:00+03:00',
+    });
+    const readPulseStep = () => readPulse(stepPath);
+    pulse.event({ kind: 'rung-start', text: 'ступень', frequencyMhz: 2842, voltageMv: 995, depthMv: 50, seeded: false });
+    pulse.event({ kind: 'rung-start', text: 'ступень', frequencyMhz: 2842, voltageMv: 970, depthMv: 75, seeded: false });
+    const second = readPulseStep();
+    check('ШАГ — ЭТО ПРОЙДЕННОЕ: расстояние до ПРЕДЫДУЩЕЙ ступени той же частоты',
+      second.run.stepMv === 25, `995 → 970 должно дать 25, дало ${second.run.stepMv}`);
+    check('ШАГ СЧИТАЕТСЯ ДО ЗАТИРАНИЯ — иначе вычитать не из чего, и напряжение уже новое',
+      second.run.voltageMv === 970 && second.run.stepMv === 25,
+      JSON.stringify({ v: second.run.voltageMv, step: second.run.stepMv }));
+
+    pulse.event({ kind: 'rung-start', text: 'ступень', frequencyMhz: 2842, voltageMv: 965, depthMv: 80, seeded: false });
+    check('МЕЛКИЙ ШАГ У КРАЯ ВИДЕН КАК ЕСТЬ — 5 мВ не округляются и не теряются',
+      readPulseStep().run.stepMv === 5, `970 → 965 должно дать 5, дало ${readPulseStep().run.stepMv}`);
+
+    // ГЛАВНОЕ: разность между ступенями РАЗНЫХ лестниц не значит ничего. Новая частота начинает
+    // счёт заново — иначе первый шаг новой частоты показал бы расстояние до чужого спуска.
+    pulse.event({ kind: 'rung-start', text: 'ступень', frequencyMhz: 2835, voltageMv: 1015, depthMv: 25, seeded: false });
+    const moved = readPulseStep();
+    check('СМЕНА ЧАСТОТЫ ОБНУЛЯЕТ СЧЁТ — шаг новой лестницы это её глубина, а не разность с чужой',
+      moved.run.stepMv === 25, `965 → 1015 на новой частоте должно дать глубину 25, дало ${moved.run.stepMv}`);
+  }
+
   // — `bugs/14`: ПРОГОН ОБЪЯВЛЯЕТ СВОЁ МОЛЧАНИЕ, и страница из-за этого перестаёт лгать.
   //   Владелец, второй живой прогон: «почему-то написано, что замерло» — при живом и здоровом
   //   прогоне. Прожиг блокирует процесс на десять секунд, а терпение страницы было три.
@@ -1408,6 +1476,67 @@ export async function selfTest() {
     check('ДВАДЦАТЬ СЕКУНД ПОДАЧИ — ровно то число, которое назвал владелец',
       /SND_FADE_SECONDS\s*=\s*20\b/.test(page) && page.includes('KagoSound.fadeIn(SND_FADE_SECONDS)'),
       'подача не названа числом 20 или не вызывается проводкой');
+
+    // — ПОРЯДОК ПЛИТОК И ИХ СОДЕРЖИМОЕ (слово владельца 2026-08-22).
+    //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //     BJ. вернуть плитку диапазона на прежнее место       → «ДИАПАЗОН — ВТОРАЯ ПЛИТКА»
+    //     BK. вернуть строку «% пути»                         → «ПРОЦЕНТА ПУТИ НА СТРАНИЦЕ НЕТ»
+    //     BL. убрать место под шаг из плитки напряжения       → «У НАПРЯЖЕНИЯ ЕСТЬ МЕСТО ПОД ШАГ»
+    {
+      const order = ['f-freq', 'f-band', 'f-volt', 'f-probe'].map((id) => page.indexOf(`id="${id}"`));
+      check('ДИАПАЗОН — ВТОРАЯ ПЛИТКА СВЕРХУ, сразу за частотой под тестом',
+        order.every((x) => x > 0) && order[0] < order[1] && order[1] < order[2] && order[2] < order[3],
+        `положения f-freq/f-band/f-volt/f-probe: ${JSON.stringify(order)}`);
+      check('ПРОЦЕНТА ПУТИ НА СТРАНИЦЕ НЕТ — доля считалась по оси частот, а прогон идёт по частотам',
+        !page.includes('% пути'), 'строка «% пути» ещё на странице');
+      check('НАСТРОЕНО ЧАСТОТ ОСТАЛОСЬ — счёт, а не оценка',
+        page.includes('настроено частот'), 'счёт закрытых частот пропал вместе с процентом');
+      check('У НАПРЯЖЕНИЯ ЕСТЬ МЕСТО ПОД ШАГ, и проводка его заполняет',
+        page.includes('id="f-step"') && page.includes("$('f-step')"),
+        'плитка напряжения не несёт шага или он никем не заполняется');
+    }
+
+    // — ЗАПИСАННАЯ ТЕМА (слово владельца 2026-08-22). Маршрут проверяется НАСТОЯЩИМ запросом:
+    //   «сервер знает про файл» и «сервер его отдаёт» — разные утверждения, и стоит второе.
+    //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //     BM. убрать маршрут /theme.mp3 с сервера            → «СЕРВЕР ОТДАЁТ ЗАПИСЬ»
+    //     BN. поставить запись не первой в меню              → «ЗАПИСЬ — ПЕРВАЯ ТЕМА»
+    //     BO. вернуть кнопке имя ВИЗУАЛИЗАТОР                → «КНОПКА НАЗЫВАЕТСЯ МЕНЮ»
+    //     BP. сделать умолчанием синтезированную тему        → «УМОЛЧАНИЕ — ЗАПИСЬ»
+    //     BQ. снять круг у записи                            → «ЗАПИСЬ ИДЁТ ПО КРУГУ»
+    //     BR. вернуть смене темы медленный уход              → «СМЕНА ТЕМЫ МГНОВЕННА»
+    {
+      const optTrack = page.indexOf('value="3"');
+      const optFirstSynth = page.indexOf('value="0"');
+      check('ЗАПИСЬ — ПЕРВАЯ ТЕМА МЕНЮ, до всех синтезированных',
+        optTrack > 0 && optFirstSynth > optTrack, `запись на ${optTrack}, «Маяк» на ${optFirstSynth}`);
+      check('КНОПКА НАЗЫВАЕТСЯ МЕНЮ — прежнее имя со страницы ушло',
+        page.includes('<span>МЕНЮ</span>') && !page.includes('<span>ВИЗУАЛИЗАТОР</span>'),
+        'на кнопке не МЕНЮ либо старое имя ещё на странице');
+      check('УМОЛЧАНИЕ — ЗАПИСЬ, и оно названо числом, а не выведено из порядка пунктов',
+        /DEFAULT_THEME\s*=\s*3\b/.test(page), 'умолчание темы не названо явно');
+      check('ЗАПИСЬ ИДЁТ ПО КРУГУ — круг даёт сам элемент, без таймера склейки',
+        /trackEl\.loop\s*=\s*true/.test(page), 'у записи не выставлен круг');
+      check('СМЕНА ТЕМЫ МГНОВЕННА — предыдущая отдаёт очередь, а не доигрывает',
+        page.includes('stopTheme({ instant: true })') && /trackEl\.pause\(\)/.test(page),
+        'смена темы не глушит предыдущую сразу');
+
+      const srv = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
+      await new Promise((r) => { srv.server.once('listening', r); });
+      const got = await new Promise((resolve) => {
+        const req = httpRequest({ host: '127.0.0.1', port: srv.server.address().port, path: '/theme.mp3', agent: false }, (res) => {
+          let bytes = 0;
+          res.on('data', (c) => { bytes += c.length; });
+          res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], bytes }));
+        });
+        req.on('error', (e) => resolve({ status: 0, type: null, bytes: 0, why: e.message }));
+        req.end();
+      });
+      srv.close();
+      check('СЕРВЕР ОТДАЁТ ЗАПИСЬ по /theme.mp3 — и это проверено запросом, а не наличием файла',
+        got.status === 200 && got.type === 'audio/mpeg' && got.bytes > 100000,
+        JSON.stringify(got));
+    }
   }
 
   const failed = results.filter((r) => !r.ok).length;

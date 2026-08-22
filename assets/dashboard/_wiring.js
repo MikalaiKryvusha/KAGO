@@ -73,22 +73,24 @@ function paint() {
   const p = r.probe || {};
   $('f-probe').innerHTML = `${(p.elapsedSeconds ?? 0).toFixed(1).replace('.', ',')} `
     + `<span style="font-size:17px;color:var(--dim)">из ${p.totalSeconds ?? 10} с</span>`;
+  // ШАГ — «последний выполненный шаг» (слово владельца 2026-08-22). Считает его дашборд из того,
+  // что реально произошло; здесь только показ. На первой ступени частоты шаг равен глубине —
+  // спустились прямо от стока, и это не совпадение, а то же самое расстояние.
+  $('f-step').innerHTML = Number.isFinite(r.stepMv) && r.stepMv > 0
+    ? `<br>шаг <b style="display:inline;font-size:13px">−${r.stepMv} мВ</b>`
+    : '';
   $('f-band').textContent = r.band || '—';
   const cov = r.coverage || {};
   // «Ступеней пройдено» УБРАНО словом владельца: ступень спуска по напряжению — внутренняя единица
   // движка, и оператору она не говорит ничего, ровно как убранная раньше «ступень N из M».
   // Осталось то, что говорит: сколько частот диапазона уже настроено.
-  // ГДЕ ИДЁТ ФРОНТ — первое, что спросил владелец, глядя на прогон. Спуск идёт СВЕРХУ ВНИЗ (его
-  // алгоритм, ideas/03 §6), поэтому положение — это доля пройденного пути от верхней частоты к нижней.
-  const front = r.frequencyMhz;
-  let walked = '';
-  if (front && r.bandFromMhz && r.bandToMhz && r.bandFromMhz > r.bandToMhz) {
-    const pct = Math.round(100 * (r.bandFromMhz - front) / (r.bandFromMhz - r.bandToMhz));
-    walked = `<span style="white-space:nowrap">спустились до <b style="display:inline;font-size:13px">${front} МГц</b> — это ${pct} % пути</span><br>`;
-  }
+  // «% ПУТИ» УБРАНО словом владельца 2026-08-22. Доля пройденного считалась по ОСИ ЧАСТОТ, а идёт
+  // прогон по ЧАСТОТАМ, которые надо закрыть, — и эти две меры расходятся тем сильнее, чем ниже
+  // спуск: внизу диапазона одна ступень накрывает девятнадцать частот сразу. Проценту нечего было
+  // обещать честно. Осталось «настроено частот» — счёт, а не оценка.
   $('f-cov').innerHTML = cov.total
-    ? walked + `<span style="white-space:nowrap">настроено частот <b style="display:inline;font-size:13px">${cov.closed ?? 0} из ${cov.total}</b></span>`
-    : walked;
+    ? `<span style="white-space:nowrap">настроено частот <b style="display:inline;font-size:13px">${cov.closed ?? 0} из ${cov.total}</b></span>`
+    : '';
 
   seg('seg-clk', c.clockMhz, 4);
   seg('seg-temp', c.tempC, 2);
@@ -260,7 +262,12 @@ function wireSound() {
   const btn = $('snd-btn'), lbl = $('snd-lbl'), sel = $('snd-theme'), work = $('snd-work'), move = $('snd-move');
   if (!btn || typeof KagoSound === 'undefined') return;      // страница собрана без звука — не падаем
   const saved = sndLoad();
-  if (Number.isFinite(saved.theme)) sel.value = String(saved.theme);
+  // ТЕМА ПО УМОЛЧАНИЮ — ЗАПИСЬ (слово владельца 2026-08-22: «поставь его номером 1, он будет по
+  // умолчанию запускаться, когда запускается визуализатор»). Названа ЯВНО, а не взята из того, что
+  // она первая в списке: порядок пунктов — вопрос облика, и однажды его поменяют, а умолчание
+  // менять при этом никто не собирался. Сохранённый выбор человека сильнее умолчания.
+  const DEFAULT_THEME = 3;
+  sel.value = String(Number.isFinite(saved.theme) ? saved.theme : DEFAULT_THEME);
   if (typeof saved.work === 'boolean') work.checked = saved.work;
 
   const dot = $('viz-dot'), vizBtn = $('viz-btn');

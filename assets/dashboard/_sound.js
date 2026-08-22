@@ -668,6 +668,55 @@ const KagoSound = (() => {
   ];
   let moveIdx = 0;
 
+  /* ===============================================================================================
+     ЗАПИСАННАЯ ТЕМА — готовый трек владельца (слово 2026-08-22: «я тебе готовый mp3 дал, просто его
+     встрой в зоопарк готовых тем», «его не нужно разбирать»)
+     ===============================================================================================
+     Это тема ДРУГОГО РОДА, и притворяться, что она такая же, значило бы городить лишнее: у неё нет
+     ни контура, ни ходов цикла, ни аккордов под ней — она уже написана целиком. Поэтому она не
+     входит в `MELODIES`, а живёт своим индексом, и весь синтезированный аппарат при ней молчит.
+
+     Идёт ПО КРУГУ (`loop`), как заказано. Звук ведётся через общий узел графа, а не мимо него:
+     тогда её накрывает и лимитер, и двадцатисекундная подача громкости на старте, — иначе запись
+     вступала бы сразу на полной, пока синтезированные темы поднимаются плавно.
+
+     Путь относительный — он верен для стенда прослушивания, который открывают файлом. Живая
+     страница получает его переписанным на серверный `/theme.mp3` (сборщик, как со шрифтом и
+     логотипом): у окна прогона нет доступа к файлам мимо своего сервера. */
+  const TRACK_INDEX = 3;
+  const TRACK = {
+    name: 'Глубокий космос',
+    url: '../assets/dashboard/themes/deep-space.mp3',
+    what: 'Записанная тема, 4 мин 10 с, играет по кругу. Космический эмбиент — выбор владельца.',
+  };
+  let trackEl = null;
+
+  function trackStart() {
+    if (!armed) return;
+    if (!trackEl) {
+      trackEl = new Audio(TRACK.url);
+      trackEl.loop = true;                       // круг даёт сам элемент — без склейки и без таймера
+      trackEl.preload = 'auto';
+      // Через граф — ради лимитера и подачи. Но ТОЛЬКО когда страница пришла по сети: у `file://`
+      // каждый файл считается чужим источником: элемент «портит» граф, и тот отдаёт ТИШИНУ —
+      // причём без единой ошибки, так что запасной путь по `catch` здесь не сработал бы. На стенде
+      // прослушивания элемент играет сам, мимо лимитера: это слышно, а молчание — нет.
+      const sameOrigin = location.protocol === 'http:' || location.protocol === 'https:';
+      if (sameOrigin) {
+        try { ac.createMediaElementSource(trackEl).connect(master); } catch (e) { /* играет напрямую */ }
+      }
+    }
+    try { trackEl.currentTime = 0; } catch (e) { /* ещё не готов — начнёт с начала сам */ }
+    const p = trackEl.play();
+    if (p && p.catch) p.catch(() => { /* автозапуск не дали — щелчок человека вернёт сюда же */ });
+  }
+
+  function trackStop() {
+    if (!trackEl) return;
+    trackEl.pause();                             // МГНОВЕННО, слово владельца: «отдавать очередь новой»
+    try { trackEl.currentTime = 0; } catch (e) { /* неважно: следующий пуск всё равно с нуля */ }
+  }
+
   /* Гармония под темой: открытые квинты, без терций — так «Дальний» и звучал. Меняется очень
      медленно, поэтому один и тот же мотив каждый раз окрашен иначе, хотя рисунок тот же. */
   const CHORDS = [[N.A1, N.E2], [N.Fs2, N.Cs3], [N.D3, N.A2], [N.E2, N.B2]];
@@ -686,16 +735,20 @@ const KagoSound = (() => {
     lp.connect(g); g.connect(padBus);
     const s = ac.createGain(); s.gain.value = 0.9; g.connect(s); s.connect(verb);
     g.gain.exponentialRampToValueAtTime(0.075, now() + 3.0);
-    return { stop() {
+    // Длительность ухода — параметр: смена АККОРДА внутри темы должна быть незаметной (3 с
+    // перекрёстного затухания), а смена САМОЙ ТЕМЫ — мгновенной. Ноль не берём: обрыв синуса на
+    // ненулевой амплитуде — это щелчок, а не тишина; сотая доля секунды его снимает и на слух
+    // неотличима от мгновенного.
+    return { stop(sec = 3.0) {
       const t = now();
       g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 3.0);
-      setTimeout(() => oscs.forEach((o) => { try { o.stop(); } catch (e) { /* уже */ } }), 3200);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + sec);
+      setTimeout(() => oscs.forEach((o) => { try { o.stop(); } catch (e) { /* уже */ } }), sec * 1000 + 200);
     } };
   }
 
   function rollChord() {
-    if (!soundOn || melIdx < 0) return;
+    if (!soundOn || melIdx < 0 || melIdx === TRACK_INDEX) return;   // под записью аккордов нет
     const nextPad = padOn(CHORDS[chordStep % CHORDS.length]);
     const old = padVoice; padVoice = nextPad;
     if (old) old.stop();                                  // перекрёстное затухание, а не переключение
@@ -705,7 +758,9 @@ const KagoSound = (() => {
   /** Одна фраза цикла. Контур неизменен ВСЕГДА — меняется всё остальное, и меняется ПО ПОРЯДКУ,
       ходом цикла, а не случаем: восемь ходов складываются в арку, случайные вариации — нет. */
   function playPhrase() {
-    if (!soundOn || melIdx < 0) { melTimer = setTimeout(playPhrase, 2000); return; }
+    // Записанная тема сюда не заходит вовсе: у неё нет фразы, и `MELODIES[3]` не существует —
+    // без этой половины условия цикл фраз разыменовал бы пустоту на первом же тике.
+    if (!soundOn || melIdx < 0 || melIdx === TRACK_INDEX) { melTimer = setTimeout(playPhrase, 2000); return; }
     const m = MELODIES[melIdx];
     const mv = MOVES[moveIdx % MOVES.length];
     const strong = new Set(m.strong);
@@ -1074,14 +1129,18 @@ const KagoSound = (() => {
     armed = true;
   }
 
-  function stopTheme() {
+  /** @param {{instant?:boolean}} [o] — `instant` при СМЕНЕ ТЕМЫ: очередь отдаётся сразу. */
+  function stopTheme(o) {
     clearTimeout(melTimer); melTimer = null;
     clearInterval(chordTimer); chordTimer = null;
-    if (padVoice) { padVoice.stop(); padVoice = null; }
+    if (padVoice) { padVoice.stop(o && o.instant ? 0.1 : 3.0); padVoice = null; }
+    trackStop();
   }
 
   function startTheme() {
     if (!armed || !soundOn || melIdx < 0) return;
+    // Записанная тема написана целиком: ни аккордов под ней, ни цикла ходов, ни фраз.
+    if (melIdx === TRACK_INDEX) { trackStart(); onMove(TRACK.name + ' · играет по кругу'); return; }
     moveIdx = 0; chordStep = 0; rollChord();
     chordTimer = setInterval(rollChord, 20 * BEAT * 1000);   // 20 ДОЛЕЙ, а не круглые секунды:
     playPhrase();                                            // иначе аккорд разъедется с фразами
@@ -1140,12 +1199,16 @@ const KagoSound = (() => {
       return soundOn;
     },
 
-    /** Тема: 0 · Маяк, 1 · Дрейф, 2 · Позывной, −1 · выключить. */
+    /** Тема: 3 · Глубокий космос (запись, по умолчанию), 0 · Маяк, 1 · Дрейф, 2 · Позывной, −1 · выкл.
+     *  СМЕНА ТЕМЫ МГНОВЕННА — слово владельца: «предыдущая должна мгновенно замолкать, отдавать
+     *  очередь новой». Поэтому здесь `instant`, а не обычный трёхсекундный уход подложки: тот
+     *  уместен между аккордами ОДНОЙ темы, но при смене темы он наложил бы старую на новую. */
     setTheme(i) {
       melIdx = Number(i);
-      stopTheme();
+      stopTheme({ instant: true });
       if (soundOn) startTheme();
     },
+    get trackIndex() { return TRACK_INDEX; },
 
     /** Рабочие звуки дока — отдельным выключателем, слово владельца. */
     setWork(on) { workOn = !!on; },
@@ -1154,6 +1217,9 @@ const KagoSound = (() => {
     onMove(fn) { onMove = typeof fn === 'function' ? fn : () => {}; },
 
     themes: MELODIES.map((m) => ({ name: m.name, contour: m.contour, what: m.what })),
+    /** Записанная тема отдаётся ОТДЕЛЬНО от `themes`: там индекс — это положение в массиве, и
+     *  дописать её туда четвёртой значило бы сказать «её индекс 3» дважды, в двух местах. */
+    track: () => ({ name: TRACK.name, what: TRACK.what, index: TRACK_INDEX, url: TRACK.url }),
 
     /* ---------------------------------------------------------------------------------------------
        СТЕНДОВЫЙ ИНТЕРФЕЙС. Он здесь не «на всякий случай»: без него стенд прослушивания вынужден
