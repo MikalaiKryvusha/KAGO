@@ -508,6 +508,13 @@ export async function runRung({
   seconds = config.SWEEP_PROBE_SECONDS ?? 10,
   sustain = config.SWEEP_PROBE_SECONDS ?? 10,
   shapes = SHORT_PROBE,
+  // ЛЕСТНИЦА НАБОРОВ, СИЛЬНЕЙШИЙ ПЕРВЫМ. Необязательна: не передали — прежнее поведение, одна
+  // попытка тем набором, что в `shapes`. Передали — ступень переигрывается со всё более слабым
+  // прожигом, пока карта не сядет на настраиваемую частоту (см. шаг 5 ниже).
+  shapeLadder = null,
+  // Тот же объектный вид, что у развёртки: `onEvent({kind, frequencyMhz, text, ...})`. Нужен, чтобы
+  // ослабление нагрузки было ВИДНО оператору в окне, а не только в записи после прогона.
+  onEvent = null,
   pinCard = null,
   // Carried into the journal, not used by the decision: after a hang these three are what a post-mortem
   // has to reconstruct the descent from — how deep this rung sat, which policy zone produced it, and
@@ -693,19 +700,64 @@ export async function runRung({
     });
   }
 
-  // ---- 5. THE ATOM. Everything dangerous happens inside it, and all of it is already proved.
+  // ---- 5. THE ATOM, RE-RUN UNTIL THE BURN ACTUALLY HAPPENS AT THE TUNED FREQUENCY.
+  //
+  // Слово владельца 2026-08-22: *«инструмент должен видеть, прожигает ли он именно ту частоту,
+  // которую тюнит. Если видит, что не ту частоту прожигает — он должен менять настройки и тип
+  // нагрузки и ещё раз прожигать, пока не убедится, что именно нужная частота была прожжена для
+  // данного шага, тогда можно шагать дальше по напряжению или частотам»*.
+  //
+  // ПОЧЕМУ ЭТО ЦИКЛ, А НЕ ОДНА ПОПРАВКА: прожиг, дошедший до предела мощности, ЗАЖИМАЕТ ЧАСТОТУ —
+  // замерено 2026-08-22, верхняя ступень шла на 2820 МГц, когда настраивались 2887. Насколько
+  // именно надо ослабить нагрузку, заранее не знает никто: это зависит от частоты, напряжения и
+  // нагрева, то есть от состояния карты в эту секунду. Поэтому лестница проходится СВЕРХУ ВНИЗ и
+  // останавливается на первой ступени, которая частоту удержала, — самый сильный прожиг из тех,
+  // что честны о своей частоте.
+  //
+  // КАЖДАЯ ПОПЫТКА — ПОЛНЫЙ АТОМ: своя запись, свой сторож, свой откат. Дороже, чем подкрутить
+  // нагрузку на лету, и это осознанно: половинчатая попытка оставила бы карту в состоянии, которое
+  // никто не откатывал.
+  //
+  // ЛЕСТНИЦА ОГРАНИЧЕНА СПИСКОМ, а не поиском: каждая лишняя попытка — это лишний прожиг на карте
+  // владельца. Кончились ступени — это НАХОДКА («на этой частоте прожиг не держится ни на одной
+  // интенсивности»), а не повод записать вердикт о другой частоте.
   record.cardTouched = true;
-  const atom = await runStepFn({
-    point: plan.entry.i,
-    offsetMhz: plan.deltaMhz,
-    writeShape: held.shape,
-    capMhz: capForAtom,
-    pinMhz,
-    pinCard,
-    shapes,
-    seconds,
-    sustain,
-  });
+  const ladder = (Array.isArray(shapeLadder) && shapeLadder.length) ? shapeLadder : [shapes];
+  let atom = null;
+  const attempts = [];
+  for (let li = 0; li < ladder.length; li++) {
+    atom = await runStepFn({
+      point: plan.entry.i,
+      offsetMhz: plan.deltaMhz,
+      writeShape: held.shape,
+      capMhz: capForAtom,
+      pinMhz,
+      pinCard,
+      shapes: ladder[li],
+      seconds,
+      sustain,
+    });
+    attempts.push({
+      level: li,
+      deliveredMhz: atom?.deliveredMhz ?? null,
+      shortfallMhz: atom?.deliveredShortfallMhz ?? null,
+      heldTheFrequency: !atom?.clockShortfall,
+    });
+    if (!atom?.clockShortfall) break;
+    if (onEvent && li + 1 < ladder.length) {
+      onEvent({
+        kind: 'load-eased',
+        frequencyMhz: clockMhz,
+        text: `прожиг шёл на ${atom.deliveredMhz} МГц вместо ${clockMhz} — ослабляю нагрузку `
+          + `(ступень ${li + 1} из ${ladder.length - 1}) и жгу заново`,
+        deliveredMhz: atom.deliveredMhz,
+        level: li + 1,
+      });
+    }
+  }
+  record.loadAttempts = attempts;
+  record.loadLevelUsed = attempts.length ? attempts[attempts.length - 1].level : null;
+  record.burnedAtTunedFrequency = attempts.length ? attempts[attempts.length - 1].heldTheFrequency : null;
   record.atom = atom ?? null;
   record.verdict = atom?.verdict ?? null;
   record.decidedBy = atom?.worstShape ?? null;
@@ -3740,6 +3792,63 @@ export function selfTest() {
       });
       ok('ступень, повесившая машину ДВАЖДЫ ПОДРЯД, третий раз не начинается, и атом не зван',
         [blocked.outcome, atomLog.length, /не край, а поломка/.test(blocked.why)], ['refused', 0, true]);
+
+      // ─── ПРОЖИГ ПЕРЕИГРЫВАЕТСЯ, ПОКА НЕ СЯДЕТ НА НАСТРАИВАЕМУЮ ЧАСТОТУ (слово владельца) ─────
+      //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+      //     CC. не переигрывать вовсе (брать первый ответ)      → «НЕДОБОР ПЕРЕИГРЫВАЕТСЯ»
+      //     CD. продолжать спуск по лестнице после успеха       → «ОСТАНАВЛИВАЕМСЯ НА ПЕРВОЙ УДЕРЖАВШЕЙ»
+      //     CE. молча брать последнюю попытку, если все не смогли → «НИ ОДНА НЕ УДЕРЖАЛА — ЭТО ВИДНО»
+      //     CF. не записывать попытки                            → «КАЖДАЯ ПОПЫТКА ЗАПИСАНА»
+      {
+        // Атом, который «зажимает» частоту, пока нагрузка сильнее порога: ровно поведение карты,
+        // упирающейся в предел мощности. `shapes[0].id` несёт ступень, как и в боевом наборе.
+        const atomThrottling = (holdsFromLevel) => async (args) => {
+          atomLog.push(args);
+          const lvl = Number(String(args.shapes?.[0]?.id ?? '@0').split('@')[1] ?? 0);
+          const held = lvl >= holdsFromLevel;
+          return {
+            verdict: held ? P : null,
+            worstShape: 'furnace/transient',
+            deliveredMhz: held ? 2842 : 2820,
+            deliveredMaxMhz: held ? 2845 : 2825,
+            deliveredShortfallMhz: held ? 0 : 22,
+            clockShortfall: !held,
+            undervolt: { capMhz: 2842, after: { pointIndex: 90, mv: 1000 } },
+            blocks: cleanUndo,
+          };
+        };
+        const ladder4 = [0, 1, 2, 3].map((l) => [{ id: `furnace/transient@${l}`, workload: 'furnace', bearsVerdict: true }]);
+
+        atomLog.length = 0;
+        const eased = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, runStepFn: atomThrottling(2), shapeLadder: ladder4,
+        });
+        ok('НЕДОБОР ПЕРЕИГРЫВАЕТСЯ ОСЛАБЛЕННОЙ НАГРУЗКОЙ, а не записывается как вердикт',
+          [atomLog.length, eased.verdict, eased.burnedAtTunedFrequency], [3, P, true]);
+        ok('ОСТАНАВЛИВАЕМСЯ НА ПЕРВОЙ УДЕРЖАВШЕЙ СТУПЕНИ — самый сильный честный прожиг',
+          eased.loadLevelUsed, 2);
+        ok('КАЖДАЯ ПОПЫТКА ЗАПИСАНА — и видно, на какой частоте шла каждая',
+          eased.loadAttempts.map((a) => [a.level, a.deliveredMhz, a.heldTheFrequency]),
+          [[0, 2820, false], [1, 2820, false], [2, 2842, true]]);
+
+        atomLog.length = 0;
+        const neverHeld = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, runStepFn: atomThrottling(99), shapeLadder: ladder4,
+        });
+        ok('НИ ОДНА СТУПЕНЬ НЕ УДЕРЖАЛА — ЭТО ВИДНО, а не выдано за вердикт о частоте',
+          [atomLog.length, neverHeld.burnedAtTunedFrequency, neverHeld.verdict],
+          [4, false, null]);
+
+        atomLog.length = 0;
+        const noLadder = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, runStepFn: atom(atomPass(1000)),
+        });
+        ok('БЕЗ ЛЕСТНИЦЫ — ПРЕЖНЕЕ ПОВЕДЕНИЕ: одна попытка, ничего не переигрывается',
+          [atomLog.length, noLadder.verdict], [1, P]);
+      }
     } finally {
       rmSync(assertJournalSandbox({ dir: journalBox }), { recursive: true, force: true });
     }

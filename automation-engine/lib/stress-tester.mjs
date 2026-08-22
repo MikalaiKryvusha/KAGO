@@ -473,6 +473,57 @@ export const DIVERSE_SET = Object.freeze([
 ]);
 
 /**
+ * THE INTENSITY LADDER — how the burn gets weaker without getting shorter.
+ *
+ * The owner, 2026-08-22: *«прожигать карту нужно на той частоте, которую тюним. Если это значит —
+ * чуть-чуть уменьшать нагрузку — значит нужно это делать»* · *«если видит, что не ту частоту
+ * прожигает — он должен менять настройки и тип нагрузки и ещё раз прожигать»*.
+ *
+ * A burn that reaches the card's power limit CLAMPS THE CLOCK: measured 2026-08-22, the top rung
+ * ran at 2820 MHz while 2887 was being tuned. So intensity has to come down until the card sits at
+ * the frequency under test — and «down» has to be a SHORT, ORDERED, MEASURED list rather than a
+ * search, because every extra attempt costs a burn on the owner's card.
+ *
+ * EVERY NUMBER BELOW IS MEASURED, not reasoned (grid of 2026-08-22, 10 s per point, sampler and
+ * workload as two independent instruments, card at stock):
+ *
+ *   level 0 — 2400·8192·256·64 → 307 W, held 2820 MHz   (the peak; `sw_power_cap` reported)
+ *   level 1 — 2400·8192·256·48 → 303 W, held 2842 MHz
+ *   level 2 — 2400·8192·256·32 → 272 W, held 2872 MHz
+ *   level 3 — 2400·8192·256·20 → 257 W, held 2872 MHz   (no throttling reported at all)
+ *
+ * The ladder descends in POWER, and the clock it frees is what buys the tuned frequency back. It
+ * stops at level 3 on purpose: below it the burn stops being a burn (246 W and falling), and a
+ * frequency that needs less than that to hold is a finding to report, not a level to invent.
+ *
+ * Each level is a DIFFERENT COMPUTATION and therefore has its OWN checksum and its OWN golden —
+ * the args are the golden's stamp. That is why the levels are a fixed list and not a continuous
+ * knob: a continuum would need a golden per value, which is another way of saying no goldens.
+ */
+export const FURNACE_LADDER = Object.freeze([
+  Object.freeze({ level: 0, args: Object.freeze([2400, 8192, 256, 64]), wattsSeen: 307, heldMhzSeen: 2820 }),
+  Object.freeze({ level: 1, args: Object.freeze([2400, 8192, 256, 48]), wattsSeen: 303, heldMhzSeen: 2842 }),
+  Object.freeze({ level: 2, args: Object.freeze([2400, 8192, 256, 32]), wattsSeen: 272, heldMhzSeen: 2872 }),
+  Object.freeze({ level: 3, args: Object.freeze([2400, 8192, 256, 20]), wattsSeen: 257, heldMhzSeen: 2872 }),
+]);
+
+/**
+ * The verdict-bearing set at a given intensity level. `branchy` rides along unchanged: it is the
+ * CRASH shape and has no intensity knob, and weakening the SDC shape must not quietly drop the
+ * other failure mode from the judgement.
+ */
+export function furnaceSetAtLevel(level) {
+  const rung = FURNACE_LADDER.find((l) => l.level === level);
+  if (!rung) throw new Error(`нет такой ступени интенсивности: ${level} (есть 0…${FURNACE_LADDER.length - 1})`);
+  const args = [...rung.args];
+  return Object.freeze([
+    Object.freeze({ id: `furnace/transient@${level}`, workload: 'furnace', shape: 'transient', bearsVerdict: true, args }),
+    Object.freeze({ id: `furnace/sustained@${level}`, workload: 'furnace', shape: 'sustained', bearsVerdict: true, args }),
+    Object.freeze({ id: 'branchy/sustained', workload: 'branchy', shape: 'sustained', bearsVerdict: true }),
+  ]);
+}
+
+/**
  * Reduce a list of per-shape verdicts to the one that describes the candidate.
  *
  * THE ORDER IS THE DESIGN, and it is the same order `decideVerdict` already uses one level down:
@@ -548,7 +599,7 @@ export function preflightGoldens(shapes, { card = null, baselineDir = BASELINE_D
  * [TESTED: 2026-08-10 23:5x · every member of DIVERSE_SET mapped and asserted, including that the
  *  sustained members do NOT ask for a duty cycle and that the transient one does]
  */
-export function runOptionsForShape(s, { seconds = 30, sustain = 30 } = {}) {
+export function runOptionsForShape(s, { seconds = 30, sustain = 30, args = null } = {}) {
   const shape = s.shape ?? 'sustained';
   if (!['sustained', 'transient', 'lowload'].includes(shape)) {
     throw new Error(`неизвестная форма нагрузки: ${shape} (знаем sustained, transient, lowload)`);
@@ -559,6 +610,16 @@ export function runOptionsForShape(s, { seconds = 30, sustain = 30 } = {}) {
     sustain: s.sustain ?? sustain,
     transient: shape === 'transient',
     lowload: shape === 'lowload',
+    // THE SHAPE OF THE RUN CARRIES ITS OWN ARGUMENTS, because a burn's INTENSITY is now something
+    // the sweep changes between attempts: the owner's rule «прожигать карту нужно на той частоте,
+    // которую тюним» means a rung that throttled below its own frequency is re-run with a weaker
+    // burn until the card actually sits where we are tuning. The descriptor's own args win over the
+    // caller's default, so a level named in the set cannot be silently overridden from outside.
+    //
+    // These args are ALSO the golden's stamp (`checkGoldenStamp`), and that is the point rather
+    // than a side effect: a different intensity is a different computation with a different
+    // checksum, so it must be judged against a golden captured at THAT intensity or not at all.
+    args: s.args ?? args ?? [],
   };
 }
 
@@ -951,6 +1012,39 @@ export async function selfTest() {
       check('ровная форма НЕ просит скважности', `${s1.name} ${s1.transient} ${s1.lowload} ${s1.sustain}`, 'sdc_fma false false 30');
       const s2 = opt('branchy/sustained');
       check('и вторая нагрузка запускается СВОИМ бинарником', s2.name, 'branchy');
+
+      // ─── ЛЕСТНИЦА ИНТЕНСИВНОСТИ (слово владельца 2026-08-22) ────────────────────────────────
+      //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+      //     BX. дескриптор перестал нести свои аргументы   → «ФОРМА НЕСЁТ СВОИ АРГУМЕНТЫ»
+      //     BY. аргументы вызывающего перебивают форму     → «АРГУМЕНТЫ ФОРМЫ СИЛЬНЕЕ ВНЕШНИХ»
+      //     BZ. лестница перестала убывать по мощности     → «ЛЕСТНИЦА УБЫВАЕТ ПО МОЩНОСТИ»
+      //     CA. неизвестная ступень возвращает набор       → «НЕТ ТАКОЙ СТУПЕНИ — ЭТО ОТКАЗ»
+      //     CB. branchy выпал из ослабленного набора       → «ФОРМА ПАДЕНИЯ ОСТАЁТСЯ ПРИ ЛЮБОЙ»
+      {
+        const lvl0 = furnaceSetAtLevel(0);
+        const o0 = runOptionsForShape(lvl0[0], { seconds: 10, sustain: 10 });
+        check('ФОРМА НЕСЁТ СВОИ АРГУМЕНТЫ — интенсивность доезжает до запуска',
+          JSON.stringify(o0.args), JSON.stringify([2400, 8192, 256, 64]));
+        check('АРГУМЕНТЫ ФОРМЫ СИЛЬНЕЕ ВНЕШНИХ — названную ступень снаружи не подменить',
+          JSON.stringify(runOptionsForShape(lvl0[0], { seconds: 10, sustain: 10, args: [1, 1, 1, 1] }).args),
+          JSON.stringify([2400, 8192, 256, 64]));
+        check('форма БЕЗ своих аргументов берёт внешние — старый путь не сломан',
+          JSON.stringify(runOptionsForShape(set.find((s) => s.id === 'branchy/sustained'), { args: [7] }).args),
+          JSON.stringify([7]));
+        check('ЛЕСТНИЦА УБЫВАЕТ ПО МОЩНОСТИ — иначе «ослабить» ничего не значит',
+          FURNACE_LADDER.every((r, i, a) => i === 0 || a[i - 1].wattsSeen > r.wattsSeen), true);
+        check('и КАЖДАЯ ЕЁ СТУПЕНЬ НЕСЁТ ИЗМЕРЕННЫЕ ЧИСЛА, а не одно намерение',
+          FURNACE_LADDER.every((r) => Number.isFinite(r.wattsSeen) && Number.isFinite(r.heldMhzSeen)), true);
+        check('ФОРМА ПАДЕНИЯ ОСТАЁТСЯ ПРИ ЛЮБОЙ интенсивности — ослабляем SDC, а не набор',
+          furnaceSetAtLevel(3).some((s) => s.workload === 'branchy'), true);
+        check('ослабленный набор всё равно судит ТРЕМЯ формами',
+          furnaceSetAtLevel(3).filter((s) => s.bearsVerdict).length, 3);
+        check('и его формы НАЗЫВАЮТ свою ступень — вердикт нельзя спутать с другой интенсивностью',
+          furnaceSetAtLevel(2)[0].id, 'furnace/transient@2');
+        let threwLevel = false;
+        try { furnaceSetAtLevel(99); } catch (e) { threwLevel = /нет такой ступени/.test(e.message); }
+        check('НЕТ ТАКОЙ СТУПЕНИ — ЭТО ОТКАЗ, а не тихий возврат сильнейшей', threwLevel, true);
+      }
       let threwShape = false;
       try { runOptionsForShape({ workload: 'x', shape: 'вымышленная' }); } catch { threwShape = true; }
       check('незнакомая форма — отказ, а не тихий ровный прогон', threwShape, true);
