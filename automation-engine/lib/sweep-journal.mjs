@@ -572,6 +572,47 @@ export function attributions(records) {
  *
  * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
  */
+/**
+ * WHAT THIS FREQUENCY HAS ALREADY PROVEN — the deepest voltage that PASSED. `bugs/31`.
+ *
+ * The mirror of `hangFloors`, and it exists because the resume path had only the first half. Until
+ * this function the journal could answer *«what may the descent never touch again»* and could NOT
+ * answer *«what has the descent already survived»* — so a resumed frequency restarted from the
+ * neighbour's seed and re-burned every rung it had already proven. The owner watching that happen,
+ * 2026-08-22 22:2x: *«край найден у точки, какого хуя вновь с неё начинать»*. He is right: with a
+ * hang above and a PASS below, the edge is BRACKETED and nothing needs burning at all.
+ *
+ * **THE PROVEN VOLTAGE IS THE ONE THE CARD SERVED, NOT THE ONE WE ORDERED.** The factory table slides
+ * along the frequency axis as the card warms, so an ordered 860 mV can be served as 870 (measured
+ * this very evening, twice in a row). The PASS is a statement about the voltage the silicon actually
+ * ran at; taking the ordered value would claim proof of a rung nobody burned, and it would err in the
+ * OPTIMISTIC direction — the one that ships an undervolt deeper than the evidence. `servingMvAfter`
+ * is therefore preferred, and the intent's voltage is only the fallback for records written before
+ * that field existed.
+ *
+ * Deliberately NOT filtered by `corrections()`: a correction may only ever REMOVE a hang wall
+ * (see `writeCorrection`), and it never invalidates a PASS — a rung that survived a burn survived it.
+ *
+ * @returns {Map<number, {voltageMv:number, seq:number, at:string|null}>} keyed by frequency,
+ *          carrying the DEEPEST (lowest) voltage that passed at it
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function provenRungs(records) {
+  const out = new Map();
+  const intents = new Map(records.filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
+  for (const v of records) {
+    if (v?.state !== LINE.VERDICT || v.outcome !== RUNG_OUTCOME.PASSED) continue;
+    const i = intents.get(v.seq);
+    if (!i || !Number.isFinite(i.frequencyMhz)) continue;
+    const mv = Number.isFinite(v.servingMvAfter) ? v.servingMvAfter : i.voltageMv;
+    if (!Number.isFinite(mv)) continue;
+    const seen = out.get(i.frequencyMhz);
+    if (!seen || mv < seen.voltageMv) out.set(i.frequencyMhz, { voltageMv: mv, seq: v.seq, at: v.at ?? null });
+  }
+  return out;
+}
+
 export function hangFloors(records) {
   const out = new Map();
   const intents = new Map(records.filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
@@ -653,6 +694,10 @@ export function resumeState(journal, { at = null, io = {} } = {}) {
     // `hung` above is the orphans closed a moment ago; a hang from an EARLIER launch is already
     // closed and would be invisible here — and it constrains the descent exactly as much.
     floors: hangFloors(records),
+    // ЧТО ЧАСТОТА УЖЕ ДОКАЗАЛА — вторая половина памяти, которой здесь не было (`bugs/31`).
+    // Возобновление читало только смерти, поэтому частота с найденным краем начинала спуск заново
+    // от затравки соседки и заново жгла каждую уже прошедшую ступень.
+    proven: provenRungs(records),
     blocked,
     truncated,
     nextSeq: seqs.length ? Math.max(...seqs) + 1 : 1,
