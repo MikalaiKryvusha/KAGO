@@ -67,7 +67,10 @@ import { localIso } from './lib/card-grids.mjs';
 // The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
 // measured; `curve-store` decides what the artifact may hold, and there is no second writer.
 import {
-  CURVE_STATUS, closePoint, leverFloorFor, validateCurveDoc, saveCurveDoc, loadCurveDoc,
+  CURVE_STATUS, CURVE_TAGS, tagsForStatus, claimsBurnProof, statusFromTags, closePoint, leverFloorFor,
+  validateCurveDoc,
+  saveCurveDoc,
+  loadCurveDoc,
 } from './lib/curve-store.mjs';
 import {
   writeIntent, writeVerdict,
@@ -1126,18 +1129,27 @@ export async function refineEdge({
 export function seedFor({ frequencyMhz, curveDoc } = {}) {
   const rows = curveDoc?.frequencies;
   if (!Array.isArray(rows) || !Number.isFinite(frequencyMhz)) return null;
-  // Statuses that mean «a burn proved this voltage here». `lever-limited` is deliberately absent.
-  const PROVEN = new Set(['short-burn-proved', 'edge-found', 'long-burn-proved']);
+  // ⚠️ THE HAND-COPIED SUBSET IS GONE (epic 04 phase 1, `plans/24` §4.5). This used to be
+  // `new Set(['short-burn-proved', 'edge-found', 'long-burn-proved'])` — the vocabulary written out a
+  // second time, in a second file, with nothing enforcing agreement. That is the truth↔mirror shape
+  // the registry says to COLLAPSE rather than watch, and it is the shape `bugs/24` cost five days: a
+  // status added to the vocabulary would never have reached this list, and the sweep would have
+  // silently refused to seed from perfectly good evidence.
+  //
+  // Now the row is ASKED whether a burn proved it (`curve-store.claimsBurnProof`), so the vocabulary
+  // lives in exactly one place. `lever-limited` stays out for the same reason as before — our lever
+  // ran out, the silicon never spoke — and that reason is now written where the tag is defined.
   let best = null;
   for (const r of rows) {
     if (!r || !Number.isFinite(r.mhz) || !Number.isFinite(r.voltageMv)) continue;
     if (r.mhz <= frequencyMhz) continue;              // only from ABOVE
-    if (!PROVEN.has(r.status)) continue;              // only PASSED evidence
+    if (!claimsBurnProof(r)) continue;                // only PASSED evidence
     // The NEAREST higher frequency: the closest neighbour is the least extrapolation.
     if (best === null || r.mhz < best.mhz) best = r;
   }
   if (best === null) return null;
-  return { seedMv: best.voltageMv, neighbourMhz: best.mhz, neighbourStatus: best.status };
+  // The neighbour is described by the STORED tags, derived here — a fixture row has no attached view.
+  return { seedMv: best.voltageMv, neighbourMhz: best.mhz, neighbourStatus: statusFromTags(best.tags) };
 }
 
 /**
@@ -3369,11 +3381,11 @@ export function selfTest() {
 
   const seedDoc = {
     frequencies: [
-      { mhz: 3090, voltageMv: 1100, status: 'edge-found' },
-      { mhz: 2900, voltageMv: 1050, status: 'lever-limited' },   // our lever ran out — NOT evidence
-      { mhz: 2842, voltageMv: 1000, status: 'short-burn-proved' },
-      { mhz: 2400, voltageMv: 900, status: 'stock' },            // untouched — nothing proven
-      { mhz: 2000, voltageMv: 850, status: 'long-burn-proved' },
+      { mhz: 3090, voltageMv: 1100, tags: ['stop:edge-found'] },
+      { mhz: 2900, voltageMv: 1050, tags: ['stop:lever-limited'] },   // our lever ran out — NOT evidence
+      { mhz: 2842, voltageMv: 1000, tags: ['burn:short'] },
+      { mhz: 2400, voltageMv: 900, tags: ['stop:untouched'] },            // untouched — nothing proven
+      { mhz: 2000, voltageMv: 850, tags: ['burn:long'] },
     ],
   };
 
@@ -4386,7 +4398,7 @@ export function selfTest() {
       return { i: k, mv, mhz, freqKhz: mhz * 1000 };
     });
     const sweepRow = (mhz, stock, over = {}) => ({
-      mhz, voltageMv: stock, stockVoltageMv: stock, status: CURVE_STATUS.STOCK,
+      mhz, voltageMv: stock, stockVoltageMv: stock, tags: [CURVE_TAGS.STOP_UNTOUCHED],
       provenBy: null, editedAt: '2026-08-16T00:00:00+03:00', ...over,
     });
     const sweepDoc = (rows) => ({
@@ -4523,7 +4535,7 @@ export function selfTest() {
 
     // — §4.2 wired at last: the seed is taken, PROVED, and the descent continues BELOW it
     const seededDoc = sweepDoc([
-      sweepRow(2850, 1045, { voltageMv: 1000, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг' }),
+      sweepRow(2850, 1045, { voltageMv: 1000, tags: [CURVE_TAGS.STOP_EDGE_FOUND], provenBy: 'прожиг' }),
       ...bandRows,
     ]);
     const seenRungs = [];
@@ -4685,7 +4697,7 @@ export function selfTest() {
     // already-closed higher one cannot be written as an inversion, and it is not silently clamped
     // either — the higher rows come UP and every one of them is NAMED (`plans/13` §4).
     const invertedDoc = sweepDoc([
-      sweepRow(2850, 1045, { voltageMv: 990, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг' }),
+      sweepRow(2850, 1045, { voltageMv: 990, tags: [CURVE_TAGS.STOP_EDGE_FOUND], provenBy: 'прожиг' }),
       ...bandRows,
     ]);
     const ratcheted = closePoint(invertedDoc, {
@@ -4895,7 +4907,7 @@ export function selfTest() {
     // owner said happens.
     const drySeeded = await sweepDryRun({
       curveDoc: sweepDoc([
-        sweepRow(2850, 1045, { voltageMv: 1000, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'прожиг' }),
+        sweepRow(2850, 1045, { voltageMv: 1000, tags: [CURVE_TAGS.STOP_EDGE_FOUND], provenBy: 'прожиг' }),
         ...bandRows,
       ]),
       points: sweepPoints, buildVector: vectorPinned, fromMhz: 2842, toMhz: 2828,
@@ -5088,7 +5100,7 @@ export function selfTest() {
     });
     ok('БЕЗ ВЫДАННОЙ ЧАСТОТЫ РАЗВЁРТКА ВСТАЁТ и НЕ подставляет заказанную',
       [blind.ok, blind.stoppedBy, blind.closed,
-        blind.doc.frequencies.every((r) => r.status === CURVE_STATUS.STOCK)],
+        blind.doc.frequencies.every((r) => r.tags?.includes(CURVE_TAGS.STOP_UNTOUCHED))],
       [false, 'delivered', 0, true]);
 
     // — ТАБЛИЦА ПЕРЕЧИТЫВАЕТСЯ ПЕРЕД КАЖДОЙ СТУПЕНЬЮ. Живой прогон 2026-08-16 встал ровно на этом:
@@ -5135,7 +5147,7 @@ export function selfTest() {
       // «stopped» would stay green while the seam was gone. So the halt must NAME the unread table.
       ok('НЕПРОЧИТАННАЯ ТАБЛИЦА — СТОП, А НЕ СТАРАЯ: и остановка НАЗЫВАЕТ именно её',
         [unreadable.ok, unreadable.closed,
-          unreadable.doc.frequencies.every((r) => r.status === CURVE_STATUS.STOCK),
+          unreadable.doc.frequencies.every((r) => r.tags?.includes(CURVE_TAGS.STOP_UNTOUCHED)),
           /НЕ ПЕРЕЧИТАНА/.test(unreadable.why ?? '')],
         [false, 0, true, true]);
 

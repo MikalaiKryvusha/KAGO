@@ -172,7 +172,7 @@ export function curveDocForCard(card, { fromMhz, toMhz }) {
       const serving = pts.find((p) => p.mhz >= mhz) ?? pts[pts.length - 1];
       return {
         mhz, voltageMv: serving.mv, stockVoltageMv: serving.mv,
-        status: 'stock', provenBy: null, editedAt: '2026-08-16T00:00:00+03:00',
+        tags: ['stop:untouched'], provenBy: null, editedAt: '2026-08-16T00:00:00+03:00',
       };
     });
   return {

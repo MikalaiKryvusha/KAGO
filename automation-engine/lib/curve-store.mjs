@@ -106,8 +106,212 @@ export const PROVEN_STATUSES = Object.freeze([
   CURVE_STATUS.SHORT_BURN_PROVED, CURVE_STATUS.EDGE_FOUND, CURVE_STATUS.LONG_BURN_PROVED,
 ]);
 
+// =================================================================================================
+// 0a. THE TAG CLOUD — what a row is allowed to say about its own fate, history and properties
+// =================================================================================================
+
+/**
+ * THE OWNER'S MODEL, 2026-08-22: *«мнесто якобы одного свойства строкой, облаго тегов, описывающих
+ * судьбу, историю, свойства точки»* · *«чтобы код в будущем понимал, что за точка, и как с ней быть
+ * по её тегам»*. Epic `plans/23`, phase 1 `plans/24`, evidence `researches/13`.
+ *
+ * ─── WHY ONE WORD WAS NOT ENOUGH, in this project's own receipts ──────────────────────────────────
+ *
+ * Read `DEPTH_CAPPED`'s comment above before this one. It records the day the single field was caught
+ * lying to the owner: **54 of 54 rows closed that night said «предел рычага» and not one had hit the
+ * lever** — the `provenBy` witness beside them said so literally. The remedy then was to add a word.
+ * That remedy does not scale, because the distinctions are INDEPENDENT and words multiply: what
+ * stopped the descent, how deeply the row is proved, and where its number came from are three
+ * different questions, and one field can answer only one of them at a time.
+ *
+ * Worse than cramped — LOSSY. `long-burn-proved` OVERWRITES `edge-found`, so a frequency that found
+ * its edge and then held the one-minute burn cannot say both. The owner's convergence loop
+ * (`AGENT_GUIDE.md` → «THE SHIPPED POINT…») is built on accumulating exactly that evidence over time,
+ * and until now the document had nowhere to accumulate it.
+ *
+ * ─── CLASSES, AND WHY THE CLOUD IS NOT FLAT ───────────────────────────────────────────────────────
+ *
+ * Every tag is `class:value` and every class declares itself EXCLUSIVE or CUMULATIVE. This is the
+ * owner's decision (`interviews/010` Q1, answered *«по всем вопрсоам ДА на твои рекомендации»*), and
+ * it exists to answer the one real objection the industry raises against tag sets: a flat bag cannot
+ * express «exactly one of these» (`researches/13` §2.2). «What stopped the descent» IS exclusive —
+ * `край-найден` and `предел-рычага` are two answers to one question and must never sit on one row.
+ * The class buys that property back without giving up the cloud.
+ *
+ * ⚠️ **THE VOCABULARY IS CLOSED, and that is the half of the design most likely to be «improved» away.**
+ * An unknown tag is refused BY NAME, exactly as an unknown status has always been. Free-form tags are
+ * the documented failure mode of this model (`researches/13` §2.3): every session invents its own
+ * word, and within weeks nothing can enumerate the vocabulary — least of all the code the owner wants
+ * to branch on it. «Сколько хочешь много тегов» means many tags per ROW, never many words per project.
+ */
+export const TAG_CLASSES = Object.freeze({
+  /** WHAT STOPPED THE DESCENT. Exactly one per row, or none — see the note under `TAG_OF_STATUS`. */
+  STOP: Object.freeze({ name: 'stop', exclusive: true }),
+  /** HOW DEEPLY THIS ROW IS PROVED. Accumulates: a 10 s burn and a one-minute burn are both true. */
+  BURN: Object.freeze({ name: 'burn', exclusive: false }),
+  /** WHERE THE NUMBER CAME FROM. Accumulates; today this lives as PROSE inside `provenBy`, which is
+   *  why it is in the MVP at all — it is an existing fact being made machine-readable, not a new one. */
+  ORIGIN: Object.freeze({ name: 'origin', exclusive: false }),
+});
+
+export const CURVE_TAGS = Object.freeze({
+  /** Nothing tuned here yet — the factory voltage, as read. */
+  STOP_UNTOUCHED: 'stop:untouched',
+  /** A rung is IN FLIGHT: written before the card is touched, so a hang leaves a trace. */
+  STOP_IN_FLIGHT: 'stop:in-flight',
+  /** One rung lower failed; parked at the owner's margin above it. */
+  STOP_EDGE_FOUND: 'stop:edge-found',
+  /** The ±1000 MHz offset range ran out BEFORE the silicon did. **Not an edge, ever.** */
+  STOP_LEVER_LIMIT: 'stop:lever-limited',
+  /** OUR OWN condition stopped it — `--max-depth`, the operator's ceiling — with lever left to spare. */
+  STOP_OUR_CAP: 'stop:depth-capped',
+  /** Held the 10 s burn at this voltage. */
+  BURN_SHORT: 'burn:short',
+  /** Held the long burn — one minute since the owner's amendment of 2026-08-15. */
+  BURN_LONG: 'burn:long',
+  /** Burned at THIS frequency: the strongest provenance there is. */
+  ORIGIN_MEASURED: 'origin:measured',
+  /** Inherited DOWNWARD from the rung's highest frequency (R16b) — the same measured fact, not
+   *  interpolation, and safe only in that direction. */
+  ORIGIN_INHERITED: 'origin:inherited',
+  /** Raised by the monotonicity ratchet because a LOWER frequency demanded more (R17). The row's
+   *  voltage is therefore NOT the deepest this frequency reached — it is the safe direction. */
+  ORIGIN_RATCHETED: 'origin:ratcheted',
+});
+
+const TAG_VALUES = Object.freeze(Object.values(CURVE_TAGS));
+const CLASS_OF_TAG = Object.freeze(Object.fromEntries(
+  TAG_VALUES.map((t) => [t, t.slice(0, t.indexOf(':'))]),
+));
+const EXCLUSIVE_CLASSES = Object.freeze(
+  Object.values(TAG_CLASSES).filter((c) => c.exclusive).map((c) => c.name),
+);
+
+/**
+ * THE LOSSLESS MAP FROM THE OLD FIELD — one status, one tag, and the reverse recovers it exactly.
+ *
+ * ⚠️ **TWO OLD STATUSES ARE NOT ABOUT THE DESCENT AT ALL, and that is a FINDING rather than an
+ * inconvenience.** `short-burn-proved` and `long-burn-proved` say how deeply a row is proved; they
+ * never said what stopped it. Under the old field they occupied the same slot as `edge-found`, which
+ * is precisely the conflation the owner's model removes. So a row migrated from them carries a
+ * `burn:*` tag and **NO `stop:*` tag** — because nothing is known about what stopped its descent,
+ * and inventing one would be the three-doors violation this project refuses (`PHILOSOPHY.md`).
+ *
+ * Consequence for the validator: a row must carry AT MOST one tag of an exclusive class, never
+ * exactly one. «At least one `стоп`» would refuse the truth.
+ */
+export const TAG_OF_STATUS = Object.freeze({
+  [CURVE_STATUS.STOCK]: CURVE_TAGS.STOP_UNTOUCHED,
+  [CURVE_STATUS.PROBING]: CURVE_TAGS.STOP_IN_FLIGHT,
+  [CURVE_STATUS.EDGE_FOUND]: CURVE_TAGS.STOP_EDGE_FOUND,
+  [CURVE_STATUS.LEVER_LIMITED]: CURVE_TAGS.STOP_LEVER_LIMIT,
+  [CURVE_STATUS.DEPTH_CAPPED]: CURVE_TAGS.STOP_OUR_CAP,
+  [CURVE_STATUS.SHORT_BURN_PROVED]: CURVE_TAGS.BURN_SHORT,
+  [CURVE_STATUS.LONG_BURN_PROVED]: CURVE_TAGS.BURN_LONG,
+});
+
+/** The tags a legacy `status` becomes. Total over `CURVE_STATUS` — a block asserts that, so neither
+ *  side can gain a value the other does not know about. */
+export function tagsForStatus(status) {
+  const tag = TAG_OF_STATUS[status];
+  return tag === undefined ? null : [tag];
+}
+
+/**
+ * THE LEGACY VIEW, DERIVED — never stored. `status` left `ROW_KEYS` in epic 04 phase 1, and this is
+ * how six existing consumers keep working while they migrate one at a time.
+ *
+ * The shape is the project's own precedent, not an invention: R14c already derives `offsetMhz` on
+ * load rather than storing it, because a file carrying both a frequency and its offset records one
+ * fact twice — and two copies of one fact drift. A stored `status` beside stored tags would be that
+ * pair exactly, and the canon says COLLAPSE a pair rather than watch it.
+ *
+ * **The priority is stated rather than implied**, because going forward a row CAN carry both a stop
+ * tag and burn tags: the terminal reason wins, since that is what the old field meant on any row that
+ * had one. Burn depth answers only where no terminal reason exists — which is exactly the pair of
+ * statuses that never described the descent (see `TAG_OF_STATUS`).
+ */
+export function statusFromTags(tags) {
+  const has = (t) => Array.isArray(tags) && tags.includes(t);
+  if (has(CURVE_TAGS.STOP_EDGE_FOUND)) return CURVE_STATUS.EDGE_FOUND;
+  if (has(CURVE_TAGS.STOP_LEVER_LIMIT)) return CURVE_STATUS.LEVER_LIMITED;
+  if (has(CURVE_TAGS.STOP_OUR_CAP)) return CURVE_STATUS.DEPTH_CAPPED;
+  if (has(CURVE_TAGS.STOP_IN_FLIGHT)) return CURVE_STATUS.PROBING;
+  if (has(CURVE_TAGS.BURN_LONG)) return CURVE_STATUS.LONG_BURN_PROVED;
+  if (has(CURVE_TAGS.BURN_SHORT)) return CURVE_STATUS.SHORT_BURN_PROVED;
+  if (has(CURVE_TAGS.STOP_UNTOUCHED)) return CURVE_STATUS.STOCK;
+  return null;
+}
+
+/**
+ * NO BURN HAS EVER TOUCHED THIS ROW — it is at its factory value, or a rung is in flight on it.
+ *
+ * ⚠️ **Asked of the TAGS, never of the derived `status`, and the reason is a trap this migration
+ * stepped into on its first run.** `closePoint` copies rows with `{...r}`, and a spread copies only
+ * ENUMERABLE own properties — so the non-enumerable derived `status` does NOT survive it, and every
+ * check written against `r.status` silently became `undefined === 'stock'`, i.e. false. The ratchet
+ * would then have raised untouched factory rows, which is the exact thing R17 exists to forbid.
+ *
+ * The generalisation, and it is why this is a named helper rather than an inline test: a DERIVED view
+ * is only present where somebody attached it, so code inside the format's own module asks the STORED
+ * truth. The view is for consumers; the author reads the source.
+ */
+export function isUnmeasured(row) {
+  const tags = row?.tags;
+  if (!Array.isArray(tags)) return true;
+  return tags.includes(CURVE_TAGS.STOP_UNTOUCHED) || tags.includes(CURVE_TAGS.STOP_IN_FLIGHT);
+}
+
+/** The tag-model twin of `PROVEN_STATUSES`: tags that CLAIM a burn proved this voltage here, and
+ *  therefore owe a witness. Read from the stored tags for the same reason `isUnmeasured` is. */
+export const PROVEN_TAGS = Object.freeze([
+  CURVE_TAGS.BURN_SHORT, CURVE_TAGS.BURN_LONG, CURVE_TAGS.STOP_EDGE_FOUND,
+]);
+
+/** Does this row claim a burn proved it? A claim without a witness is a statement, not evidence. */
+export function claimsBurnProof(row) {
+  const tags = row?.tags;
+  return Array.isArray(tags) && tags.some((t) => PROVEN_TAGS.includes(t));
+}
+
+/**
+ * WHAT IS WRONG WITH THIS TAG SET — the vocabulary's gate, and it refuses by NAME.
+ *
+ * @returns {string[]} refusal reasons; empty means the set is well-formed
+ */
+export function tagSetRefusals(tags) {
+  if (!Array.isArray(tags)) return [`ожидался массив тегов, получено ${JSON.stringify(tags)}`];
+  if (tags.length === 0) return ['строка без единого тега ничего о себе не говорит'];
+  const out = [];
+  for (const t of tags) {
+    if (!TAG_VALUES.includes(t)) {
+      out.push(`неизвестный тег ${JSON.stringify(t)}; словарь ЗАКРЫТ: ${TAG_VALUES.join(', ')}`);
+    }
+  }
+  if (new Set(tags).size !== tags.length) out.push('один и тот же тег указан дважды');
+  // The exclusive classes — the property a flat cloud would have thrown away (`researches/13` §2.2).
+  for (const cls of EXCLUSIVE_CLASSES) {
+    const inClass = tags.filter((t) => CLASS_OF_TAG[t] === cls);
+    if (inClass.length > 1) {
+      out.push(`класс «${cls}» взаимоисключающий, а на строке ${inClass.length} его тега: `
+        + `${inClass.join(', ')} — это два ответа на один вопрос`);
+    }
+  }
+  return out;
+}
+
 export const CURVE_FILE = 'measured.json';
-const ROW_KEYS = Object.freeze(['mhz', 'voltageMv', 'stockVoltageMv', 'status', 'provenBy', 'editedAt']);
+/**
+ * THE STORED ROW. `status` LEFT this list in epic 04 phase 1 and `tags` took its place — the single
+ * field is gone from disk, and the legacy view is derived by `statusFromTags` at load time (R14c's
+ * shape, the same one `offsetMhz` has always used).
+ *
+ * ⚠️ The list is EXACT-MATCH: an unknown field is a refusal, not a warning. That is what makes a
+ * format migration visible instead of silent — and it is also why `bugs/24`'s lesson applies here in
+ * full: the FILES are the easy half, the places that BUILD a row in code are the half that gets
+ * missed (`plans/24` §1 carries the inventory of all nine).
+ */
+const ROW_KEYS = Object.freeze(['mhz', 'voltageMv', 'stockVoltageMv', 'tags', 'provenBy', 'editedAt']);
 const LOCAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/u;
 const refuse = (field, why) => ({ field, why });
 
@@ -161,7 +365,7 @@ export function initFromCard({ frequencyGrid, tablePoints, card, stamp, tempC = 
       mhz,
       voltageMv: v,
       stockVoltageMv: v,
-      status: CURVE_STATUS.STOCK,
+      tags: [CURVE_TAGS.STOP_UNTOUCHED],
       provenBy: null,
       editedAt: at,
     };
@@ -285,14 +489,19 @@ export function validateCurveDoc(doc, { card = null, frequencyGrid = null } = {}
         + 'а не поднимает; повышение — это не андервольт и оснований для него не измерено'));
     }
 
-    if (!STATUS_VALUES.includes(r.status)) {
-      out.push(refuse(`${at}.status`, `неизвестный статус ${JSON.stringify(r.status)}; словарь закрыт: ${STATUS_VALUES.join(', ')}`));
-    }
+    // THE TAG CLOUD replaces the single status (epic 04 phase 1). The vocabulary stays CLOSED and the
+    // refusal still names the offender — the property that made the old field trustworthy is the one
+    // thing the migration was not allowed to lose (`researches/13` §2.3).
+    for (const why of tagSetRefusals(r.tags)) out.push(refuse(`${at}.tags`, why));
     if (!LOCAL_ISO.test(String(r.editedAt))) {
       out.push(refuse(`${at}.editedAt`, `дата последней правки обязательна, локальный ISO со смещением; получено ${JSON.stringify(r.editedAt)}`));
     }
-    if (PROVEN_STATUSES.includes(r.status) && (typeof r.provenBy !== 'string' || r.provenBy.trim() === '')) {
-      out.push(refuse(`${at}.provenBy`, `статус «${r.status}» утверждает, что частоту доказал прожиг — тогда назови форму нагрузки и вердикт; `
+    // ⚠️ ASKED OF THE TAGS, never of the derived `status` — and this line is where that rule was PAID
+    // FOR: written as `PROVEN_STATUSES.includes(r.status)`, it read `undefined` on every document
+    // built in memory (fixtures, and anything that has not been through `attachDerivedStatus`), so the
+    // witness requirement silently never fired. A guard that cannot fire is not a guard.
+    if (claimsBurnProof(r) && (typeof r.provenBy !== 'string' || r.provenBy.trim() === '')) {
+      out.push(refuse(`${at}.provenBy`, `теги ${JSON.stringify(r.tags)} утверждают, что частоту доказал прожиг — тогда назови форму нагрузки и вердикт; `
         + 'статус без свидетеля это заявление, а не улика'));
     }
   }
@@ -351,7 +560,7 @@ export function firstInversion(rows) {
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (!Number.isFinite(r?.voltageMv)) continue;
-    if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
+    if (isUnmeasured(r)) continue;
     measured.push({ at: i, mv: r.voltageMv });
   }
   for (let k = 0; k + 1 < measured.length; k++) {
@@ -474,7 +683,7 @@ export function closePoint(doc, {
   let ratchetedBy = null;
   for (let k = idx + 1; k < rows.length; k++) {          // таблица идёт высокие → низкие
     const r = rows[k];
-    if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
+    if (isUnmeasured(r)) continue;
     if (!Number.isFinite(r.voltageMv) || r.voltageMv <= effectiveMv) continue;
     effectiveMv = r.voltageMv;
     ratchetedBy = r.mhz;
@@ -490,11 +699,16 @@ export function closePoint(doc, {
     }
   }
 
-  // ---- the measured row itself
+  // ---- the measured row itself.
+  // TAGS, not a status (epic 04 phase 1). `origin:measured` is the strongest provenance there is, and
+  // when the ratchet moved this very row it ALSO carries `origin:ratcheted` — two true facts that the
+  // single field could only have held one of, which is the whole point of the class being cumulative.
+  const measuredTags = [...tagsForStatus(status), CURVE_TAGS.ORIGIN_MEASURED];
+  if (ratchetedBy !== null) measuredTags.push(CURVE_TAGS.ORIGIN_RATCHETED);
   rows[idx] = {
     ...rows[idx],
     voltageMv: effectiveMv,
-    status,
+    tags: measuredTags,
     provenBy: ratchetedBy === null ? provenBy
       : `${provenBy} · ПОДНЯТО ХРАПОВИКОМ с ${voltageMv} до ${effectiveMv} мВ: более низкая ${ratchetedBy} МГц `
         + 'потребовала больше, а более высокой не может хватать меньшего',
@@ -521,7 +735,9 @@ export function closePoint(doc, {
       rows[k] = {
         ...rows[k],
         voltageMv: effectiveMv,
-        status,
+        // Same terminal reason, DIFFERENT provenance — and the difference is now machine-readable
+        // instead of buried in the witness prose below it.
+        tags: [...tagsForStatus(status), CURVE_TAGS.ORIGIN_INHERITED],
         provenBy: `${provenBy ?? ''} · унаследовано ступенью от ${mhz} МГц (прожиг там): Vmin не убывает с частотой, `
           + 'значит доказанное выше по частоте не оптимистично ниже (E2-AC3 — не интерполяция, а тот же измеренный факт)',
         editedAt: stamp,
@@ -538,7 +754,7 @@ export function closePoint(doc, {
     // measurements that contradict each other. Raising an untouched row would be inventing one — and
     // it cannot be needed anyway: the factory table is monotone, so a stock row above already carries
     // at least as much as this frequency's stock, hence at least as much as anything we ship for it.
-    if (r.status === CURVE_STATUS.STOCK || r.status === CURVE_STATUS.PROBING) continue;
+    if (isUnmeasured(r)) continue;
     if (!Number.isFinite(r.voltageMv) || r.voltageMv >= effectiveMv) continue;
     if (Number.isFinite(r.stockVoltageMv) && effectiveMv > r.stockVoltageMv) {
       return no(`храповик хотел поднять ${r.mhz} МГц до ${effectiveMv} мВ, а её сток всего ${r.stockVoltageMv} мВ — `
@@ -548,6 +764,11 @@ export function closePoint(doc, {
     rows[k] = {
       ...r,
       voltageMv: effectiveMv,
+      // THE ROW KEEPS ITS OWN TERMINAL REASON and gains `origin:ratcheted`. Under the single field
+      // this fact existed only as prose, so nothing could ask «is this voltage the deepest this
+      // frequency reached, or the safe direction somebody raised it to?» — and that is exactly the
+      // question the owner's outlier idea will need answered (`plans/23` phase 3).
+      tags: [...new Set([...(Array.isArray(r.tags) ? r.tags : []), CURVE_TAGS.ORIGIN_RATCHETED])],
       provenBy: `${r.provenBy ?? 'сток'} · ПОДНЯТО ХРАПОВИКОМ до ${effectiveMv} мВ измерением на ${mhz} МГц: `
         + 'более низкая частота потребовала больше, а более высокой не может хватать меньшего',
       editedAt: stamp,
@@ -557,7 +778,10 @@ export function closePoint(doc, {
   const closed = 1 + inherited.length;
   return {
     ok: true,
-    doc: { ...doc, frequencies: rows },
+    // The derived view is re-attached because `{...r}` above dropped it (see `isUnmeasured`): a caller
+    // that reads `.status` off a closePoint RESULT must see the same thing it sees off a loaded doc,
+    // or the view would be present or absent depending on which door the document came through.
+    doc: attachDerivedStatus({ ...doc, frequencies: rows }),
     closed,
     inherited,
     raised,
@@ -578,7 +802,41 @@ export function saveCurveDoc(doc, { name = 'measured', dir = CURVES_DIR, fs = nu
 export function loadCurveDoc({ name = 'measured', dir = CURVES_DIR } = {}) {
   const file = curvePath(name, dir);
   if (!existsSync(file)) return null;
-  return JSON.parse(readFileSync(file, 'utf8'));
+  return attachDerivedStatus(JSON.parse(readFileSync(file, 'utf8')));
+}
+
+/**
+ * HANG THE LEGACY `status` ON EVERY ROW AS A NON-ENUMERABLE, READ-ONLY VIEW.
+ *
+ * ─── WHY NON-ENUMERABLE, and it is the whole safety of the migration ──────────────────────────────
+ *
+ * `JSON.stringify` walks ENUMERABLE keys, and so does `Object.keys` — which is what the `ROW_KEYS`
+ * exact-match gate iterates. So a derived status declared this way is:
+ *
+ *   · readable exactly as before — `r.status` keeps working for every consumer not yet migrated;
+ *   · **impossible to save by accident** — it cannot reach the file, so the document on disk holds
+ *     ONE truth and the pair the canon forbids is not created but PREVENTED;
+ *   · invisible to the format gate, so `ROW_KEYS` needs no exception carved into it for a field that
+ *     is not really there.
+ *
+ * A plain assignment would have given the first property and neither of the other two, and the field
+ * would have drifted back into the file the first time anything round-tripped a loaded document.
+ *
+ * Idempotent: re-attaching to a row that already has the view is a no-op, because a getter defined
+ * twice with the same source is the same view.
+ */
+export function attachDerivedStatus(doc) {
+  if (!doc || !Array.isArray(doc.frequencies)) return doc;
+  for (const r of doc.frequencies) {
+    if (!r || typeof r !== 'object') continue;
+    if (Object.prototype.hasOwnProperty.call(r, 'status')) continue;
+    Object.defineProperty(r, 'status', {
+      get() { return statusFromTags(this.tags); },
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  return doc;
 }
 
 // =================================================================================================
@@ -788,7 +1046,7 @@ function healthyDoc({ maxMhz = 3090 } = {}) {
     stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: at, tempC: 44 },
     frequencies: mhzList.map((mhz, i) => ({
       mhz, voltageMv: volts[i], stockVoltageMv: volts[i],
-      status: CURVE_STATUS.STOCK, provenBy: null, editedAt: at,
+      tags: [CURVE_TAGS.STOP_UNTOUCHED], provenBy: null, editedAt: at,
     })),
   };
 }
@@ -825,7 +1083,7 @@ function cmdSelftest() {
     ['нет сетки напряжений', () => { const d = healthyDoc(); d.voltageGridMv = []; return d; }, 'voltageGridMv'],
     ['пустая таблица частот', () => { const d = healthyDoc(); d.frequencies = []; return d; }, 'frequencies'],
     ['неизвестное поле строки', () => { const d = healthyDoc(); d.frequencies[3].hz = 1; return d; }, 'frequencies[3].hz'],
-    ['статуса нет в словаре', () => { const d = healthyDoc(); d.frequencies[3].status = 'почти-хорошо'; return d; }, 'frequencies[3].status'],
+    ['тега нет в словаре', () => { const d = healthyDoc(); d.frequencies[3].tags = ['стоп:почти-хорошо']; return d; }, 'frequencies[3].tags'],
     ['нет даты правки', () => { const d = healthyDoc(); d.frequencies[3].editedAt = 'вчера'; return d; }, 'frequencies[3].editedAt'],
   ];
   for (const [name, make, expect] of cases) {
@@ -872,7 +1130,7 @@ function cmdSelftest() {
     // фикстуры правила одно напряжение и оставляла статус `stock`, то есть моделировала не инверсию,
     // а недомеренный документ — ровно то состояние, в котором развёртка находится всё время работы.
     const d = healthyDoc();
-    for (const i of [5, 6]) { d.frequencies[i].status = CURVE_STATUS.EDGE_FOUND; d.frequencies[i].provenBy = 'прожиг'; }
+    for (const i of [5, 6]) { d.frequencies[i].tags = [CURVE_TAGS.STOP_EDGE_FOUND]; d.frequencies[i].provenBy = 'прожиг'; }
     d.frequencies[5].voltageMv = 850;
     const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field.endsWith('.voltageMv'));
     return Boolean(bad) && bad.why.includes('1500') && bad.why.includes('2000');
@@ -885,7 +1143,7 @@ function cmdSelftest() {
   // at its first write — a guard causing the regression it exists to prevent.
   ok('НЕДОМЕРЕННАЯ строка инверсией НЕ считается — иначе развёртка встанет на первой же записи', (() => {
     const d = healthyDoc();
-    d.frequencies[4].status = CURVE_STATUS.EDGE_FOUND;
+    d.frequencies[4].tags = [CURVE_TAGS.STOP_EDGE_FOUND];
     d.frequencies[4].provenBy = 'прожиг';
     d.frequencies[4].voltageMv = 850;                       // 2400 МГц закрыта, 2000 и ниже ещё на стоке
     return validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).length === 0;
@@ -894,9 +1152,9 @@ function cmdSelftest() {
   // trip «not on the card's grid», and a block that greens on a neighbour's reason is a false green.
   ok('но противоречие между двумя ЗАМЕРАМИ ловится и ЧЕРЕЗ недомеренный промежуток', (() => {
     const d = healthyDoc();
-    d.frequencies[4].status = CURVE_STATUS.EDGE_FOUND; d.frequencies[4].provenBy = 'прожиг';
+    d.frequencies[4].tags = [CURVE_TAGS.STOP_EDGE_FOUND]; d.frequencies[4].provenBy = 'прожиг';
     d.frequencies[4].voltageMv = 800;                       // 2400 МГц измерена на 800
-    d.frequencies[7].status = CURVE_STATUS.EDGE_FOUND; d.frequencies[7].provenBy = 'прожиг';
+    d.frequencies[7].tags = [CURVE_TAGS.STOP_EDGE_FOUND]; d.frequencies[7].provenBy = 'прожиг';
     d.frequencies[7].voltageMv = 850;                       // 1000 МГц измерена ВЫШЕ, через две стоковые строки
     const bad = validateCurveDoc(d, { card, frequencyGrid: FAKE_LADDER }).find((b) => b.field.endsWith('.voltageMv'));
     return Boolean(bad) && bad.why.includes('2400') && bad.why.includes('1000');
@@ -913,7 +1171,7 @@ function cmdSelftest() {
     const prep = () => {
       const d = healthyDoc();
       // 2000 МГц (индекс 5) измерена ДОРОЖЕ, чем мы сейчас закроем более высокую 2400 (индекс 4)
-      d.frequencies[5].status = CURVE_STATUS.EDGE_FOUND;
+      d.frequencies[5].tags = [CURVE_TAGS.STOP_EDGE_FOUND];
       d.frequencies[5].provenBy = 'прожиг sdc_fma/transient';
       d.frequencies[5].voltageMv = 850;
       return d;
@@ -945,13 +1203,70 @@ function cmdSelftest() {
       tooHigh.ok === false && /сток/.test(tooHigh.why ?? ''));
   }
 
+  console.log('\n— ОБЛАКО ТЕГОВ: словарь, классы, накопление (эпик 04 фаза 1) —');
+  // P1-AC3 — СЛОВАРЬ ЗАКРЫТ. То же свойство, что было у статуса, и терять его было нельзя: закрытость
+  // и есть причина, по которой читатель документу верит (`researches/13` §2.3).
+  // ⚠️ `ok` ЗДЕСЬ ДВУАРГУМЕНТНЫЙ — `(name, cond, detail)`, а не `(name, got, want)`, как у соседних
+  // наборов. Первая редакция этих блоков была написана по чужой сигнатуре, и часть из них зеленела
+  // ПО НЕВЕРНОЙ ПРИЧИНЕ: `.length` со значением 1 истинно, пустой массив истинен. Покраснел ровно
+  // один — тот, где ожидался НОЛЬ, — и он вскрыл остальные. Урок общий: утверждение, сравнивающее
+  // «получено» с «ждали», обязано делать сравнение САМО, иначе оно проверяет истинность.
+  const eq = (got, want) => JSON.stringify(got) === JSON.stringify(want);
+  ok('НЕИЗВЕСТНЫЙ ТЕГ ОТВЕРГАЕТСЯ, и отказ НАЗЫВАЕТ его',
+    (() => {
+      const why = tagSetRefusals([CURVE_TAGS.STOP_EDGE_FOUND, 'выдуманный:тег']).join(' ');
+      return why.includes('выдуманный:тег') && why.includes('ЗАКРЫТ');
+    })());
+  // P1-AC4 — ВЗАИМОИСКЛЮЧАЮЩИЙ КЛАСС. Единственная претензия отрасли к модели тегов, и класс её снимает.
+  ok('ДВА ТЕГА ОДНОГО ВЗАИМОИСКЛЮЧАЮЩЕГО КЛАССА — ОТКАЗ: это два ответа на один вопрос',
+    eq(tagSetRefusals([CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.STOP_LEVER_LIMIT]).length, 1));
+  ok('а два тега НАКОПИТЕЛЬНОГО класса — норма, ради этого облако и заводилось',
+    eq(tagSetRefusals([CURVE_TAGS.BURN_SHORT, CURVE_TAGS.BURN_LONG]), []));
+  ok('пустой набор тегов — тоже отказ: строка без тегов ничего о себе не говорит',
+    eq(tagSetRefusals([]).length, 1));
+  // P1-AC5 — НАКОПЛЕНИЕ. Ровно то, чего одно поле не умело: `long-burn-proved` СТИРАЛ `edge-found`.
+  ok('СТРОКА ГОВОРИТ И «КРАЙ НАЙДЕН», И «ВЫДЕРЖАЛА МИНУТУ» ОДНОВРЕМЕННО — старое поле стирало одно другим',
+    (() => {
+      const tags = [CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.BURN_LONG, CURVE_TAGS.ORIGIN_MEASURED];
+      return eq([tagSetRefusals(tags), statusFromTags(tags)], [[], CURVE_STATUS.EDGE_FOUND]);
+    })());
+  // ⚠️ КАРТА СТАРОГО ПОЛЯ ПОЛНА И ОБРАТИМА. Блок идёт по САМОМУ словарю, поэтому значение, добавленное
+  // в `CURVE_STATUS` без пары в `TAG_OF_STATUS`, покраснит его — молча разойтись стороны не могут.
+  ok('КАЖДЫЙ старый статус имеет тег, и обратное преобразование возвращает ЕГО ЖЕ (P1-AC1 в малом)',
+    eq(Object.values(CURVE_STATUS).filter((s) => {
+      const t = tagsForStatus(s);
+      return t === null || statusFromTags(t) !== s;
+    }), []));
+  // ⚠️ ВЫВЕДЕННЫЙ ВИД НЕ ПОПАДАЕТ В ФАЙЛ. Ровно это отличает вывод от ВТОРОГО ХРАНИМОГО ПОЛЯ, то есть
+  // от пары «правда↔зеркало», которую канон велит не заводить.
+  ok('ВЫВЕДЕННЫЙ status ЧИТАЕТСЯ, но в JSON НЕ ПОПАДАЕТ — второго хранимого факта не появилось',
+    (() => {
+      const d = attachDerivedStatus({ frequencies: [{ mhz: 2842, tags: [CURVE_TAGS.STOP_EDGE_FOUND] }] });
+      return eq([d.frequencies[0].status, JSON.stringify(d).includes('status')],
+        [CURVE_STATUS.EDGE_FOUND, false]);
+    })());
+  // ⚠️ И СПРЕД ТЕРЯЕТ ЭТОТ ВИД — то, на чём миграция споткнулась живьём: `{...r}` копирует только
+  // ПЕРЕЧИСЛЯЕМЫЕ свойства, поэтому внутри `closePoint` проверки по `r.status` молча читали undefined.
+  ok('СПРЕД СТРОКИ ТЕРЯЕТ ВЫВЕДЕННЫЙ status — поэтому автор формата читает ТЕГИ, а не вид',
+    (() => {
+      const d = attachDerivedStatus({ frequencies: [{ mhz: 2842, tags: [CURVE_TAGS.STOP_UNTOUCHED] }] });
+      const copy = { ...d.frequencies[0] };
+      return eq([copy.status, isUnmeasured(copy)], [undefined, true]);
+    })());
+  // P1-AC6 — ПОДМНОЖЕСТВО СЛОВАРЯ БОЛЬШЕ НИГДЕ НЕ ПЕРЕПИСАНО РУКАМИ. `engine.seedFor` спрашивает эту
+  // функцию, а не свой список; блок краснеет, если «доказанность» перестанет включать край или прожиг.
+  ok('«ДОКАЗАНО ПРОЖИГОМ» СПРАШИВАЕТСЯ У ОДНОЙ ФУНКЦИИ — и предел рычага доказанностью НЕ является',
+    eq([CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.BURN_SHORT, CURVE_TAGS.BURN_LONG,
+      CURVE_TAGS.STOP_LEVER_LIMIT, CURVE_TAGS.STOP_UNTOUCHED].map((t) => claimsBurnProof({ tags: [t] })),
+    [true, true, true, false, false]));
+
   console.log('\n— СВИДЕТЕЛЬ ПРОЖИГА —');
   ok('статус «доказано прожигом» без свидетеля отвергается', (() => {
-    const d = healthyDoc(); d.frequencies[4].status = CURVE_STATUS.SHORT_BURN_PROVED;
+    const d = healthyDoc(); d.frequencies[4].tags = [CURVE_TAGS.BURN_SHORT];
     return fieldsOf(d).includes('frequencies[4].provenBy');
   })());
   ok('тот же статус со свидетелем принимается', (() => {
-    const d = healthyDoc(); d.frequencies[4].status = CURVE_STATUS.EDGE_FOUND;
+    const d = healthyDoc(); d.frequencies[4].tags = [CURVE_TAGS.STOP_EDGE_FOUND];
     d.frequencies[4].provenBy = 'sdc_fma/transient 10 с → SDC на 5 мВ ниже';
     return fieldsOf(d).length === 0;
   })());
