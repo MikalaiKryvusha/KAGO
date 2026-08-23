@@ -1,6 +1,8 @@
 # Bug 43 — our hangs damaged the filesystem on J:, and it happened in a single day
 
-**Status:** 🔴 OPEN — measured, not yet assessed for residual damage; the prevention is `plans/30`
+**Status:** 🟡 DAMAGE HEALED, PREVENTION OUTSTANDING — `chkdsk J: /scan` on 2026-08-23 21:5x found
+**no problems** (see «Residual damage» below). The volume is clean; what remains is stopping it from
+happening again (`plans/30`), so this stays open until the prevention ships.
 **Version/build:** `main` @ `242ad1a` · **When/context:** found 2026-08-23 21:1x by read-only probes
 while answering the owner's question about disk safety, relayed from a neighbouring agent
 
@@ -50,11 +52,32 @@ which on this machine is the FTP service on J:.
 for the CARD (`GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК») and that nobody ever priced for storage.
 That is what makes it a bug worth a document: an accepted risk with an unexamined second face.
 
+## ✅ Residual damage — MEASURED 2026-08-23 21:5x, and there is none
+
+`chkdsk J: /scan` — the online, non-destructive scan; the volume was never dismounted and nothing was
+repaired. **Exit code 0, 28.5 seconds.**
+
+```
+Windows has scanned the file system and found no problems.
+No further action is required.
+
+  124416 file records processed.        0 bad file records processed.
+  129594 index entries processed.       0 unindexed files recovered to lost and found.
+     286 reparse records processed.     0 KB in bad sectors.
+```
+
+**So NTFS's self-healing did the whole job**, and the 4996 records are what that job LOOKS like from
+the outside rather than a wound left open. Two things follow, and the second is the one that matters:
+
+- **(a)** No repair pass is needed, and the owner is not being asked to give up the volume for one.
+- **(b) The self-healing is not free, and it is not a licence.** It repaired structures broken by
+  three crashes in one day; nothing says the next set is inside its reach, and «no bad sectors today»
+  is a statement about today. The prevention below stands unchanged.
+
 ## Fix plan
 
-1. **Measure the residual damage first — read-only.** `chkdsk J: /scan` (the online, non-destructive
-   scan; it does NOT dismount and does NOT repair). If it reports outstanding corruption, that is a
-   separate finding and the owner decides about a repair pass, because a repair takes the volume.
+1. ~~**Measure the residual damage first — read-only.**~~ ✅ **DONE 2026-08-23 21:5x — clean**, see
+   above. The gate it guarded (do not run more hangs on top of an already-damaged volume) is passed.
 2. **Prevent the recurrence** — `plans/30`: silence the writers that can be silenced before the sweep
    arms anything, with a receipt written first and a gate that refuses to run half-protected.
 3. **Reduce the cause, which matters more than either** — fewer hangs. `bugs/42_DONE` closed the two
