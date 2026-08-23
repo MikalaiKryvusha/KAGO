@@ -1353,6 +1353,111 @@ export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, fre
  *  mutation 55 (burn the rung's LOWEST frequency) reddens «СТУПЕНЬ ПРОЖИГАЕТСЯ НА САМОЙ ВЫСОКОЙ
  *  СВОЕЙ ЧАСТОТЕ». **NOT TESTED: no rung has ever been grouped against a live card's document.**]
  */
+/**
+ * WHERE TO CONTINUE — the band derived from the DOCUMENT, not named by a human.
+ *
+ * ─── THE OWNER'S REQUIREMENT, VERBATIM (chat, 2026-08-23 20:5x +03:00) ───────────────────────────
+ *
+ *   > *«диапазон не буду принципиально называть, так как KAGO должен видеть сам, что оттюнено, а
+ *   > что нет»*
+ *
+ * He is right, and the reason is stronger than convenience: the band is DERIVABLE — the document
+ * already records what every one of the 389 frequencies knows about itself. A human retyping it each
+ * evening is a truth↔mirror pair with a person in the middle, and the person is the half that drifts.
+ *
+ * ─── THE RULE, AND WHY IT IS THIS ONE ────────────────────────────────────────────────────────────
+ *
+ * **Continue DOWNWARD from where tuning stopped.** The band starts at the highest untouched frequency
+ * strictly BELOW the lowest tuned one, and runs down to the deepest frequency the shipped form can
+ * still hold. Three reasons, each already paid for elsewhere in this project:
+ *
+ *   • the sweep walks top-down by construction and seeds every descent from the proven HIGHER
+ *     neighbour (`GOAL.md` → «🪜 СПУСК НАЧИНАЕТСЯ С УЖЕ ОТТЮНЕННОЙ СОСЕДКИ»), so starting immediately
+ *     below the tuned region is the one place where a seed always exists;
+ *   • Vmin does not decrease with frequency, so inheritance downward is the safe direction (E2-AC3);
+ *   • the top of the ladder is NOT chosen even though it is untouched — the card does not deliver
+ *     those clocks under a full burn at all, and tuning what the card never serves would write rows
+ *     nobody measured (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ»).
+ *
+ * **HOLES INSIDE THE TUNED REGION ARE COUNTED AND NAMED, NEVER SILENTLY SWEPT.** Single untouched
+ * frequencies scattered among closed ones are a different job with a different risk (each is a lone
+ * rung with tuned neighbours on both sides), and a band that quietly absorbed them would report
+ * progress it did not make. They are reported so the operator can ask for them explicitly.
+ *
+ * **THE FLOOR IS A PROPERTY OF THE CARD, NOT A PREFERENCE.** Below `top − 1000 MHz` the curve cannot
+ * hold a ceiling at all (R11, fact 38: measured 2157 MHz on this specimen), so the shipped form does
+ * not exist there and a sweep would be measuring something we cannot ship. The caller passes the
+ * floor it computed from the live curve; absent, the band runs to the bottom of the document.
+ *
+ * @param {object} a
+ * @param {object} a.curveDoc   the tuning-curve document
+ * @param {number} [a.floorMhz] the deepest frequency the shipped form can hold; `null` = no floor
+ * @returns {{ok:boolean, fromMhz:number|null, toMhz:number|null, why:string, count:number,
+ *            holes:number[], untouchedTotal:number}}
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function autoBand({ curveDoc = null, floorMhz = null } = {}) {
+  const no = (why) => ({ ok: false, fromMhz: null, toMhz: null, why, count: 0, holes: [], untouchedTotal: 0 });
+  const rows = Array.isArray(curveDoc?.frequencies) ? curveDoc.frequencies : null;
+  if (!rows || rows.length === 0) return no('в документе кривой нет ни одной частоты — выводить полосу не из чего');
+
+  const desc = rows.slice().sort((a, b) => b.mhz - a.mhz);
+  const untouched = (r) => (r.tags ?? []).includes(CURVE_TAGS.STOP_UNTOUCHED);
+  const untouchedTotal = desc.filter(untouched).length;
+  const tuned = desc.filter((r) => !untouched(r));
+
+  // ПЕРВЫЙ ПРОГОН НА ПУСТОМ ДОКУМЕНТЕ — ОТКАЗ, И ЭТО НЕ ПРИДИРКА. Выводить «продолжай оттуда, где
+  // остановился» не из чего: остановки не было. С какой частоты начинать САМЫЙ ПЕРВЫЙ проход — это
+  // решение оператора о том, где он согласен впервые тронуть карту, а не следствие из документа.
+  if (tuned.length === 0) {
+    return no('оттюненных частот в документе НЕТ — продолжать не от чего. Самую первую полосу называет '
+      + 'оператор: с какой частоты впервые тронуть карту — его решение, а не вывод из пустого документа');
+  }
+
+  // ⚠️ `?.` И ПРОГОВОРЁННЫЙ ОТКАЗ, А НЕ ГОЛОЕ РАЗЫМЕНОВАНИЕ (EXP-0075). Мутация DR (снять отказ выше)
+  // при `tuned[tuned.length - 1].mhz` не давала неверной полосы — она РОНЯЛА ВЕСЬ НАБОР: код выхода 1,
+  // сводной строки нет, красных блоков нет. «Умерший проверяющий читается как зелёный» — то самое
+  // семейство, за которое проект платил четырежды. Теперь отказ выше это оборона в глубину, а не
+  // единственное, что стоит между пустым документом и исключением.
+  const lowestTunedMhz = tuned.at(-1)?.mhz ?? null;
+  if (!Number.isFinite(lowestTunedMhz)) {
+    return no('в оттюненных строках нет частоты — документ повреждён, и выводить полосу из него нельзя');
+  }
+  // Дыры ВНУТРИ оттюненной области — считаем и называем, но в полосу не берём.
+  const holes = desc.filter((r) => untouched(r) && r.mhz > lowestTunedMhz).map((r) => r.mhz);
+
+  const below = desc.filter((r) => r.mhz < lowestTunedMhz);
+  if (below.length === 0 || !untouched(below[0])) {
+    return no(`ниже самой низкой оттюненной частоты (${lowestTunedMhz} МГц) нетронутого участка нет`
+      + `${holes.length ? ` · дыр внутри оттюненного: ${holes.length}` : ''}`);
+  }
+
+  // Непрерывный участок нетронутого, начиная сразу под оттюненным.
+  const band = [];
+  for (const r of below) {
+    if (!untouched(r)) break;
+    if (Number.isFinite(floorMhz) && r.mhz < floorMhz) break;
+    band.push(r.mhz);
+  }
+  if (band.length === 0) {
+    return no(`нетронутый участок под ${lowestTunedMhz} МГц начинается ниже пола отгружаемой формы `
+      + `(${floorMhz} МГц): там потолок держать нечем (R11, факт 38), и замер был бы о том, что мы не отгружаем`);
+  }
+
+  return {
+    ok: true,
+    fromMhz: band[0],
+    toMhz: band[band.length - 1],
+    count: band.length,
+    holes,
+    untouchedTotal,
+    why: `продолжаю вниз от оттюненного: самая низкая закрытая частота ${lowestTunedMhz} МГц, ниже неё `
+      + `нетронуто подряд ${band.length} частот(ы)`
+      + (Number.isFinite(floorMhz) ? ` до пола отгружаемой формы ${floorMhz} МГц` : ' до низа документа'),
+  };
+}
+
 export function rungGroups({ rows = [], fromMhz = null, toMhz = null } = {}) {
   const lo = Number.isFinite(toMhz) ? toMhz : -Infinity;
   const hi = Number.isFinite(fromMhz) ? fromMhz : Infinity;
@@ -4963,6 +5068,52 @@ export function selfTest() {
         .map((g) => [g.topMhz, g.count]),
       [[2842, 2]]);
 
+    // ─── ПОЛОСУ ВЫВОДИТ ДВИЖОК, А НЕ ЧЕЛОВЕК (`autoBand`) — слово владельца 2026-08-23 20:5x ───────
+    //
+    //   > *«диапазон не буду принципиально называть, так как KAGO должен видеть сам, что оттюнено,
+    //   > а что нет»* · *«нужно уметь и самому передавать аргументы, и чтобы он сам без аргументов
+    //   > умел запускаться с того, что ещё не протюнено»*
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА, И ПРОГНАННЫЕ:
+    //   DO. начинать от САМОЙ ВЫСОКОЙ нетронутой, игнорируя границу оттюненного
+    //       → красит ЧЕТЫРЕ блока: «ПРОДОЛЖАЕТ ВНИЗ», «ДЫРЫ НЕ ВТЯГИВАЮТСЯ», «НЕ НИЖЕ ПОЛА» и отказ
+    //   DQ. снять отсечение по полу отгружаемой формы   → «ПОЛОСА НЕ УХОДИТ НИЖЕ ПОЛА»
+    //   DR. снять отказ на документе без оттюненного    → «ПУСТОЙ ДОКУМЕНТ — ОТКАЗ, А НЕ ДОГАДКА»
+    //
+    // ⚠️ И DR СНАЧАЛА НЕ ПОКРАСИЛА НИЧЕГО — записано, потому что это находка о КОДЕ (EXP-0077).
+    // При голом `tuned[tuned.length - 1].mhz` она не выдавала неверную полосу, а РОНЯЛА ВЕСЬ НАБОР:
+    // код выхода 1, сводной строки нет, красных блоков ноль — «умерший проверяющий читается как
+    // зелёный» (EXP-0016, EXP-0075). Разыменование сделано безопасным по построению, и только после
+    // этого мутация стала красить свой блок — причём по ПРИЧИНЕ (текст отказа), а не по факту отказа.
+    {
+      const tunedRow = (mhz, mv) => sweepRow(mhz, mv, {
+        tags: [CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.BURN_SHORT], provenBy: 'прожиг',
+      });
+      // Документ той же формы, что настоящий: оттюненная верхушка, ОДНА дыра внутри неё, и
+      // непрерывный нетронутый хвост вниз.
+      const docAuto = sweepDoc([
+        tunedRow(2842, 1045), sweepRow(2835, 1040), tunedRow(2828, 1040),   // 2835 — дыра ВНУТРИ
+        sweepRow(2820, 1035), sweepRow(2813, 1035), sweepRow(2805, 1030), sweepRow(2797, 1030),
+      ]);
+      const picked = autoBand({ curveDoc: docAuto, floorMhz: 2157 });
+      ok('ПРОДОЛЖАЕТ ВНИЗ ОТ ОТТЮНЕННОГО: полоса начинается под самой низкой закрытой частотой',
+        [picked.ok, picked.fromMhz, picked.toMhz, picked.count], [true, 2820, 2797, 4]);
+      ok('ДЫРЫ ВНУТРИ ОТТЮНЕННОГО НЕ ВТЯГИВАЮТСЯ В ПОЛОСУ, но и не замалчиваются — они названы',
+        [picked.holes, picked.fromMhz > 2835], [[2835], false]);
+      // Пол отгружаемой формы обрезает полосу снизу: ниже него потолок держать нечем (R11, факт 38).
+      const floored = autoBand({ curveDoc: docAuto, floorMhz: 2810 });
+      ok('ПОЛОСА НЕ УХОДИТ НИЖЕ ПОЛА ОТГРУЖАЕМОЙ ФОРМЫ — там замер был бы о том, что мы не отгружаем',
+        [floored.ok, floored.fromMhz, floored.toMhz, floored.count], [true, 2820, 2813, 2]);
+      // Пустой документ — ОТКАЗ. «Продолжай оттуда, где остановился» не выводится, если остановки
+      // не было: с какой частоты впервые тронуть карту — решение оператора, а не следствие.
+      const virgin = autoBand({ curveDoc: sweepDoc([sweepRow(2842, 1045), sweepRow(2835, 1040)]), floorMhz: 2157 });
+      ok('ПУСТОЙ ДОКУМЕНТ — ОТКАЗ, А НЕ ДОГАДКА: первую полосу называет оператор',
+        [virgin.ok, virgin.fromMhz, /оттюненных частот в документе НЕТ/.test(virgin.why)],
+        [false, null, true]);
+      ok('и отказ приходит так же, когда под оттюненным не осталось нетронутого',
+        autoBand({ curveDoc: sweepDoc([sweepRow(2842, 1035), tunedRow(2835, 1040)]), floorMhz: 2157 }).ok, false);
+    }
+
     // A scripted rung: passes above the threshold, fails at or below it.
     const scriptSweepRung = (failsAtOrBelow, extra = () => null) => async ({ voltageMv }) => (
       extra(voltageMv) ?? {
@@ -6368,10 +6519,23 @@ async function mainBand(argv, arg) {
  * been exercised is this wiring against real NVAPI, a real watchdog and a real card.
  */
 async function mainSweep(argv, arg) {
-  const fromMhz = Number(arg('from'));
-  const toMhz = Number(arg('to'));
-  if (!Number.isFinite(fromMhz) || !Number.isFinite(toMhz) || toMhz > fromMhz) {
-    console.error('ОШИБКА: --sweep требует --from <МГц> и --to <МГц>, причём --to не выше --from');
+  // ─── ПОЛОСУ НАЗЫВАЕТ ОПЕРАТОР ИЛИ ВЫВОДИТ ДВИЖОК, И ВТОРОЕ — УМОЛЧАНИЕ ───────────────────────────
+  //
+  // Слово владельца 2026-08-23 20:5x: *«нужно уметь и самому передавать аргументы, и чтобы он сам
+  // без аргументов умел запускаться с того, что ещё не протюнено»*. То есть оба пути равноправны, а
+  // ОТСУТСТВИЕ аргументов — это не ошибка вызова, а самый обычный запуск.
+  //
+  // Полуназванная полоса (`--from` без `--to` или наоборот) — по-прежнему ОШИБКА, а не повод молча
+  // достроить вторую половину: оператор явно назвал границу, и подставить ему вторую из документа
+  // значило бы запустить не то, что он попросил.
+  let fromMhz = Number(arg('from'));
+  let toMhz = Number(arg('to'));
+  const named = arg('from') !== null || arg('to') !== null;
+  const auto = !named;
+  if (named && (!Number.isFinite(fromMhz) || !Number.isFinite(toMhz) || toMhz > fromMhz)) {
+    console.error('ОШИБКА: полоса названа наполовину. Нужны ОБА — --from <МГц> и --to <МГц>, причём --to не выше');
+    console.error('        --from. Либо не называйте её вовсе: без аргументов движок сам продолжит с того,');
+    console.error('        что ещё не оттюнено (выведет полосу из документа кривой и напечатает, почему такую).');
     return 2;
   }
 
@@ -6432,6 +6596,38 @@ async function mainSweep(argv, arg) {
   console.log('               выше испытуемой частоты, придавлено на неё. Замок частоты НЕ ставится — замерено');
   console.log('               2026-08-16, что он держит только вниз и карту вверх не поднимает (researches/11).');
   console.log('               ЗАПИСЬ ИДЁТ ПРОТИВ ВЫДАННОЙ частоты, а не заказанной (GOAL.md, слово владельца).');
+
+  // ─── ПОЛОСА, ВЫВЕДЕННАЯ ИЗ ДОКУМЕНТА, ЕСЛИ ОПЕРАТОР ЕЁ НЕ НАЗВАЛ ────────────────────────────────
+  //
+  // Считается ЗДЕСЬ, а не при разборе аргументов, ровно по одной причине: полу отгружаемой формы
+  // (R11, факт 38) нет до тех пор, пока не прочитана живая кривая карты. Вывести полосу раньше
+  // значило бы взять пол из головы — то самое выдуманное число, которое канон запрещает.
+  if (auto) {
+    const topPointMhz = Math.max(...points.map((p) => p.mhz));
+    const floorMhz = topPointMhz - config.CLOCK_OFFSET_MAX_MHZ;
+    const picked = autoBand({ curveDoc: doc, floorMhz });
+    if (!picked.ok) {
+      console.error(`ОШИБКА: полосу вывести не удалось — ${picked.why}`);
+      console.error('        Назовите её явно: --from <МГц> --to <МГц>.');
+      return 2;
+    }
+    fromMhz = picked.fromMhz;
+    toMhz = picked.toMhz;
+    console.log('');
+    console.log(`ПОЛОСУ ВЫВЕЛ ДВИЖОК (аргументов не было): ${fromMhz}…${toMhz} МГц, частот ${picked.count}`);
+    console.log(`   ПОЧЕМУ ТАКАЯ: ${picked.why}`);
+    console.log(`   Пол отгружаемой формы ${floorMhz} МГц = верх кривой ${topPointMhz} − ${config.CLOCK_OFFSET_MAX_MHZ} `
+      + '(аппаратный ход рычага): ниже него потолок держать нечем, R11 и факт 38.');
+    console.log(`   Нетронутых частот в документе всего ${picked.untouchedTotal} из ${doc.frequencies.length}.`);
+    if (picked.holes.length) {
+      const shown = picked.holes.slice(0, 12).join(', ');
+      console.log(`   ⚠️ ДЫРЫ ВНУТРИ УЖЕ ОТТЮНЕННОГО НЕ БЕРУ — их ${picked.holes.length}: ${shown}`
+        + `${picked.holes.length > 12 ? ' …' : ''} МГц.`);
+      console.log('      Это отдельная работа с другим риском: одинокая ступень между двумя закрытыми соседками.');
+      console.log('      Нужна — назовите полосу явно.');
+    }
+    console.log('');
+  }
 
   // THE DRY RUN IS A SEPARATE EXIT AND IT HAPPENS BEFORE ANYTHING ELSE — no journal is opened, no
   // recovery is attempted, no watchdog is armed. Rail S2's artifact must cost the card nothing.
