@@ -23,6 +23,18 @@
       "title": "Интервью 006 — после падения машины: возвращаем ли потолок частоты в Optimised?",
       "awaiting": 2,
       "lastShownAt": "2026-08-15T10:19:56+03:00"
+    },
+    {
+      "file": "interview_011_ambient_theme_tempo_and_cycle.md",
+      "title": "Интервью 011 — тема визуализатора: темп, предзадержка реверберации и длина цикла",
+      "awaiting": 3,
+      "lastShownAt": "2026-08-23T18:04:04+03:00"
+    },
+    {
+      "file": "interview_012_virtual_card_failure_simulation_scope.md",
+      "title": "Интервью 012 — виртуальная карта, симулирующая настоящие классы отказа: какой объём берём",
+      "awaiting": 0,
+      "lastShownAt": "2026-08-23T18:04:04+03:00"
     }
   ],
   "notices": []

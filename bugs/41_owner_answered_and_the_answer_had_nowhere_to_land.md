@@ -1,0 +1,122 @@
+# Bug 41 — the owner answered and the answer had nowhere to land: one interview had no answer FIELD, the other had no recognised QUESTION at all
+
+**Status:** 🔴 OPEN — cause MEASURED (both faces), fix not written yet
+**Version/build:** `main` @ `6ac94be` · **When/context:** found 2026-08-23 18:0x by the OWNER, while
+answering `interviews/011` and `interviews/012` through the review contour raised by `npm run ask:batch`
+
+## Symptom — reported by the owner, in his own words
+
+> *«Во втором интервью поле для ответа было не доступно для ввода. Там ответ, как рекомендуешь»*
+
+And the contour's own closing line, on the same run:
+
+```
+ИТОГ: решение записано
+      interview_011… — только комментарий, в поля не легло: 3 — перенесено в комментарий;
+      interview_012… — только комментарий · осталось ждать владельца: 2 документа
+```
+
+**Both documents were answered by the owner, and NEITHER answer reached its document.** They survive
+only because the contour also writes a decision record (`interviews/decisions/*.decision.json`) and
+appends the text as a document-level comment. The intended carrier — the answer field inside the
+question — stayed empty, and the documents kept reading «ЖДЁТ ВЛАДЕЛЬЦА» after he had answered.
+
+**Why this is worse than a cosmetic miss.** The project has already paid twice for exactly this
+divergence: a fork that lived only in a file's tail and the owner found it himself (*«Что за мной? Я
+даже не в курсе»*), and `interviews/008`, which was carried as OPEN for seven days after he had
+answered it (`STATUS.md`, session 43 item 4). Both are the same disease — **the summary and the
+document disagree because the answer did not land where the reader looks.** This defect MANUFACTURES
+that disease on every answer.
+
+## Repro (deterministic, offline, no GPU)
+
+```bash
+node -e "
+import('./tools/lib/review-core.mjs').then(core => {
+  const fs = require('fs');
+  for (const f of ['interviews/interview_011_ambient_theme_tempo_and_cycle.md',
+                   'interviews/interview_012_virtual_card_failure_simulation_scope.md']) {
+    const doc = core.parseInterview(fs.readFileSync(f,'utf8'), { file: f });
+    console.log(f, '| вопросов:', doc.questions.length,
+                '| поля Ответ:', doc.questions.map(q => q.answerLine ?? 'НЕТ').join(' '));
+  }
+});"
+```
+
+Observed 2026-08-23 18:1x:
+
+```
+interviews/interview_011_… | вопросов: 3 | поля Ответ: НЕТ НЕТ НЕТ
+interviews/interview_012_… | вопросов: 0 | поля Ответ:
+```
+
+## Forensics — two faces, two different mechanisms, one symptom
+
+**Face A — `interviews/011`: the questions are recognised, the answer field does not exist.**
+`tools/lib/review-core.mjs:94` requires a literal field line:
+
+```js
+const RE_ANSWER_FIELD = /^\s*\*\*\s*(Ответ|Answer)\s*:?\s*\*\*\s*:?\s*(.*)$/iu;
+```
+
+The document's question blocks carry a table of variants and a recommendation, and no `**Ответ:**`
+line at all. The writer therefore refuses each question by NAME — `review-core.mjs:410`, *«у вопроса
+нет поля „Ответ:“ — записывать некуда»* — and degrades to the comment. The refusal is honest and
+loud; the defect is that nothing warned anyone BEFORE the owner was standing in front of the page.
+
+**Face B — `interviews/012`: there is no recognised question, so the page had no input.**
+`review-core.mjs:105`:
+
+```js
+const RE_QUESTION_HEADING = /^#{2,4}\s*(Вопрос|Question|Q)\s*(\d+)/iu;
+```
+
+The heading is `## Вопрос: какой объём берём?` — **`Вопрос` with no NUMBER after it**, so the pattern
+does not match and the document parses to **zero questions**. Two independent readings agree: the
+parser above prints `вопросов: 0`, and the raise line printed `СОБРАНО: 2 документа, вопросов 3` —
+all three of them from 011. The owner's *«поле для ответа было не доступно для ввода»* is literally
+accurate: there was no field, because there was no question.
+
+## Root cause
+
+**The contour's document contract is real, mechanical and UNWRITTEN, and nothing checks it on the
+authoring side.** Two conditions must hold for an answer to land:
+
+1. every question's heading is NUMBERED — `## Вопрос 1.` / `## Q1.` / `## Question 3 —`;
+2. every question block carries an `**Ответ:**` field for the writer to fill.
+
+Both were violated by the agent that WROTE the documents (this session's predecessor), and both are
+invisible until the owner tries to answer. The parser is not at fault: it refuses correctly and says
+why. **The gap is that the refusal arrives at the owner instead of at the agent.**
+
+This is the shape `AGENT_GUIDE.md` already names for the whole contour — *«a tool counts as ADOPTED
+only when a ritual contains the executable command that shows violations»* — applied one level
+deeper: the place-of-questions rule got its guard (`npm run questions`), and the ANSWERABILITY of a
+question never did.
+
+## Fix plan
+
+1. **A guard, and it runs at the moment that matters — when the contour is RAISED.** `npm run ask`
+   / `ask:batch` checks every document it is about to show: questions found > 0, and every question
+   block carries an answer field. A document that fails is named with the exact reason and the exact
+   line, and the run REFUSES rather than calling the owner to a page he cannot answer on.
+2. **The same check as a block in `npm run verify:contour`**, proven RED against the two documents
+   as they stand today (they are the fixture, and they are real).
+3. **Fix both documents** — 012's heading gets a number, both get `**Ответ:**` fields — and re-run
+   the repro above: expect `вопросов: 1` for 012 and a field on every question of 011.
+   ⚠️ The owner's ALREADY GIVEN answers are recorded verbatim in both documents' status lines and
+   answer sections by hand; the repair must not overwrite or re-ask them.
+4. **The template follows the guard, never the other way round:** `interviews/README.md` and the
+   `/interview` skill state the two conditions in the same words the guard checks.
+
+## Decisions made without the owner
+
+*(to be filled at closing)*
+
+## Links
+
+`bugs/01` (the contour's 54 adversarial findings — 30 parked by the owner) · `bugs/04` (an orphaned
+contour window swallowed answers — the same class: an answer given and not kept) · `bugs/40` (the
+questions guard was written off on a false diagnosis; that guard finds questions in the wrong PLACE,
+this one is about a question in the right place that cannot be answered) · `interviews/011` ·
+`interviews/012` · `AGENT_GUIDE.md` → «The place of questions» · `.claude/skills/owner-reviews/`

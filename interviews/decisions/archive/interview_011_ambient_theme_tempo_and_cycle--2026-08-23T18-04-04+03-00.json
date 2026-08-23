@@ -1,0 +1,40 @@
+{
+  "kind": "interview",
+  "document": "interview_011_ambient_theme_tempo_and_cycle.md",
+  "by": "Mikalai Kryvusha",
+  "at": "2026-08-23T18:04:04+03:00",
+  "at_human": "23.08.2026 18:04",
+  "comment": "",
+  "answers": {
+    "Q1": {
+      "choice": null,
+      "text": "90",
+      "comment": ""
+    },
+    "Q2": {
+      "choice": null,
+      "text": "А",
+      "comment": ""
+    },
+    "Q3": {
+      "choice": null,
+      "text": "хватает",
+      "comment": ""
+    }
+  },
+  "written": [],
+  "not_written": [
+    {
+      "id": "Q1",
+      "reason": "у вопроса нет поля «Ответ:» — записывать некуда"
+    },
+    {
+      "id": "Q2",
+      "reason": "у вопроса нет поля «Ответ:» — записывать некуда"
+    },
+    {
+      "id": "Q3",
+      "reason": "у вопроса нет поля «Ответ:» — записывать некуда"
+    }
+  ]
+}
