@@ -312,10 +312,10 @@ export async function runTrapSuite() {
   }
   // ⚠️ ЧИСЛО ЗДЕСЬ ЖЁСТКОЕ НАМЕРЕННО, И ЭТО НЕ ПЕДАНТИЗМ: ловушка, тихо выпавшая с диска, — это
   // покрытие, исчезнувшее без единого красного блока. Сторож заметил появление шестой (T6,
-  // 2026-08-23) ровно так, как должен был, и число правится ВМЕСТЕ с реестром, а не вслед за
-  // прогоном.
-  check('ЛОВУШКИ: их шесть, и класс каждой назван ДО прогона (B3-AC1)',
-    TRAPS.length === 6 && cards.size === 6, `на диске ${cards.size} из ${TRAPS.length}`);
+  // 2026-08-23) и седьмой (T7, тот же день, вечер) ровно так, как должен был, и число правится
+  // ВМЕСТЕ с реестром, а не вслед за прогоном.
+  check('ЛОВУШКИ: их СЕМЬ, и класс каждой назван ДО прогона (B3-AC1)',
+    TRAPS.length === 7 && cards.size === 7, `на диске ${cards.size} из ${TRAPS.length}`);
 
   // ---- 1. T1 — the edge sits above the descent's reach (class A, judged by the REAL searchEdge)
   const t1 = cards.get('T1_edge_above_reach');
@@ -489,6 +489,69 @@ export async function runTrapSuite() {
       `строк с замером ${measured6.length}, из них с чужой выданной частотой: `
         + measured6.filter((x) => { const m = typeof x.provenBy === 'string' ? x.provenBy.match(/ВЫДАНО (\d+)/) : null; return m && Number(m[1]) !== x.mhz; }).map((x) => x.mhz).join(', '));
   } else fail('T6: карта загружена', 'карты нет на диске');
+
+  // ── T7 — КАРТА, КОТОРАЯ ОБСЛУЖИВАЕТ ЧАСТОТУ НАПРЯЖЕНИЕМ, КОТОРОГО НИКТО НЕ ЗАКАЗЫВАЛ ────────────
+  //
+  // 🔴 ЭТА ЛОВУШКА ПОСТАВЛЕНА ПОСЛЕ ЖИВОГО ВЕЧЕРА 2026-08-23, И ОНА ВОСПРОИЗВОДИТ ЕГО, А НЕ ВЫДУМКУ.
+  // Прогон на карте владельца заказал 885 мВ на 2700 МГц, прогретая карта подставила 915, движок
+  // записал 915 как ДОКАЗАННУЮ ЗЕМЛЮ, сторож шага (стена 35 мВ от доказанного) разрешил снова только
+  // 885 — и прогон крутился на месте, грея карту, пока владелец его не остановил.
+  //
+  // Утверждение ловушки — НЕ «подстановки не бывает» (она законна и правилом владельца разрешена на
+  // ОДНУ ступень сетки вверх), а «прогон обязан ПРОДВИГАТЬСЯ»: одну и ту же пару «заказано →
+  // обслуживало» дважды подряд он повторять не имеет права. Либо шаг ниже, либо честная остановка.
+  const t7card = cards.get('T7_serves_a_voltage_nobody_ordered');
+  if (t7card) {
+    const { golden, stampOk } = stressFor(t7card);
+
+    // ⚠️ СНАЧАЛА — САМ МЕХАНИЗМ, иначе зелёное ниже ничего не стоит (EXP-0016, и урок T6: мутация,
+    // не покрасившая ничего, — это находка о коде). Прогреваем карту и спрашиваем ТУ ЖЕ частоту.
+    const vc7 = virtualCard(t7card, { settleSamples: 0, seed: 31 });
+    const F = 2700;
+    const cold = vc7.oracle.servingVoltageMv(F);
+    vc7.telemetry.advance(600, { load: 1 });
+    const warm = vc7.oracle.servingVoltageMv(F);
+    check('T7: МЕХАНИЗМ — прогретая карта обслуживает ту же частоту БОЛЕЕ ВЫСОКОЙ записью',
+      warm > cold,
+      `на ${F} МГц холодная карта дала ${cold} мВ и прогретая ${warm} мВ — таблица не поехала, ловушка проверяет не то, что заявляет`,
+      `${F} МГц: холодная ${cold} мВ → прогретая ${warm} мВ (дрейф ${vc7.oracle.tableDriftMhz().toFixed(1)} МГц)`);
+
+    // БЮДЖЕТ СТУПЕНЕЙ — он здесь не украшение. Если движок зациклится, набор повиснет вместе с ним и
+    // не доложит ничего: «не напечатал провалов» и «умер» неотличимы (правило батареи). Бюджет
+    // превращает петлю в КРАСНЫЙ БЛОК с числом.
+    const BUDGET = 40;
+    let steps = 0;
+    const seen = new Map();
+    let looped = null;
+    const vcRun = virtualCard(t7card, { settleSamples: 0, seed: 31 });
+    const inner = makeSweepStepFn(vcRun, t7card, stress, golden, stampOk);
+    const countingStep = async (a) => {
+      if (++steps > BUDGET) throw new Error(`БЮДЖЕТ СТУПЕНЕЙ ИСЧЕРПАН (${BUDGET}) — прогон не продвигается`);
+      const r = await inner(a);
+      const key = `${a.clockMhz ?? a.frequencyMhz}@${a.voltageMv}`;
+      const answer = `${r?.servingVoltageMv ?? r?.measuredMv ?? '?'}`;
+      if (seen.get(key) === answer && looped === null) looped = `${key} → ${answer} мВ, повторено дважды`;
+      seen.set(key, answer);
+      return r;
+    };
+    let report7 = null;
+    let threw7 = null;
+    try {
+      report7 = await sweepRange({
+        curveDoc: curveDocForCard(t7card), points: pointsForCard(t7card),
+        fromMhz: F, toMhz: F, envelopeMhz: t7card.card.maxGraphicsMhz,
+        journal: null, runStepFn: countingStep, onEvent: () => {},
+        now: () => '2026-08-16T03:00:00+03:00',
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+    } catch (e) { threw7 = e.message; }
+
+    check(`T7: ${mustDoOf('T7_serves_a_voltage_nobody_ordered')} — прогнано, а не заявлено`,
+      threw7 === null && looped === null,
+      threw7 ? `прогон встал: ${threw7} (ступеней ${steps})`
+        : `ПЕТЛЯ: ${looped} — за ${steps} ступеней движок повторил ту же ступень с тем же ответом`,
+      `ступеней ${steps} из бюджета ${BUDGET}, повторов нет, исход «${report7?.stoppedBy ?? 'полоса закрыта'}»`);
+  } else fail('T7: карта загружена', 'карты нет на диске');
 
   // ── T4 — the edge lies DEEPER than our ±1000 MHz lever reaches. Reporting that as an edge would be
   // the false `[TESTED]` the second verdict exists to forbid.

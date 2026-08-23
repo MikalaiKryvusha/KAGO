@@ -168,6 +168,25 @@ export const VOLTAGE_GRID_STEP_MV = 5;
 export const VOLTAGE_GRID_STEP_IS_MEASURED = true;
 
 /**
+ * THE WIDEST SINGLE GAP OF THAT GRID — what «ОДНА СТУПЕНЬ ВВЕРХ» is allowed to mean.
+ *
+ * MEASURED on the same read as the step above: the 127 entries are spaced **5 mV in 94 places and
+ * 10 mV in 32**. So a card that substitutes a voltage ONE entry above the ordered one may legally
+ * hand back up to 10 mV more, and anything beyond that is a DIFFERENT entry of the table.
+ *
+ * THE RULE THIS SERVES IS THE OWNER'S, VERBATIM (`GOAL.md` → «ТО ЖЕ ПРАВИЛО НА ОСИ НАПРЯЖЕНИЯ»,
+ * 2026-08-16): «ближайшее верхнее с сетки (одна ступень) — ПОПАДАНИЕ · выше, но НЕ ближайшее — СТОП».
+ * Until 2026-08-23 the engine had no such check: it accepted ANY substitution up to stock and printed
+ * «взято ближайшее верхнее с сетки карты» — a sentence that asserted the very thing nobody measured.
+ * On the owner's card that evening it took 915 mV for an ordered 885 and looped (`bugs/42`).
+ *
+ * The LARGER of the two spacings is taken deliberately — the same reasoning as
+ * `CLOCK_LADDER_STEP_TOLERANCE_MHZ`: a tolerance that admitted the 5 mV case but not the 10 mV one
+ * would redden on which half of the grid the card happened to land.
+ */
+export const VOLTAGE_GRID_MAX_GAP_MV = 10;
+
+/**
  * The OFFSET granularity — a different quantity from the point spacing above, and STILL OPEN.
  *
  * RENAMED 2026-08-10 from `VOLTAGE_OFFSET_GRANULARITY_IS_MEASURED`, because the old name lied about
@@ -247,6 +266,25 @@ export const CURVE_GRAPHICS_POINT_COUNT = CLK_VF_POINT_COUNT - 1;
  * the 8 MHz one would redden on which half of the ladder the card happened to land.
  */
 export const CLOCK_LADDER_STEP_TOLERANCE_MHZ = 8;
+
+/**
+ * HOW FAR THE FACTORY V/F TABLE SLIDES ALONG THE FREQUENCY AXIS PER DEGREE OF HEAT.
+ *
+ * MEASURED, not chosen: −1.7 MHz per °C on this card (`PROJECT_ARCHITECTURE_INTERNAL_MAP.md` → R14b;
+ * the observation behind it is `GOAL.md` → «ТО ЖЕ ПРАВИЛО НА ОСИ НАПРЯЖЕНИЯ», where 1200 mV served
+ * 3112 MHz cold and 3105 MHz at 57 °C). The sign is negative because a warmer card OFFERS LESS
+ * frequency from the same entry.
+ *
+ * WHY A CONSTANT EXISTS AT ALL, AND IT IS PAID FOR: this number is the mechanism behind the whole
+ * class of «the card substituted a voltage nobody ordered». A rung ordered at 885 mV is served by a
+ * HIGHER entry once the card has warmed inside its own burn, so the run measures a voltage it did
+ * not ask for — and on 2026-08-23 evening that put a live sweep into an endless loop on the owner's
+ * machine (`bugs/42`). The virtual card was blind to it because this number lived only in prose.
+ *
+ * Used by the BENCH to reproduce the behaviour offline. The live path never applies it — there the
+ * card does the drifting itself and the run MEASURES the result.
+ */
+export const VF_TABLE_DRIFT_MHZ_PER_C = -1.7;
 
 /**
  * HOW FAR BELOW THE DEEPEST **PROVEN** DEPTH ONE SESSION MAY EXPLORE — the bound bought on
@@ -1100,6 +1138,7 @@ export default Object.freeze({
   GUARDBAND_MIN_MILLIVOLTS,
   MARGIN_STEPS_ABOVE_LAST_STABLE,
   VOLTAGE_GRID_STEP_MV,
+  VOLTAGE_GRID_MAX_GAP_MV,
   VOLTAGE_GRID_STEP_IS_MEASURED,
   CLOCK_OFFSET_GRANULARITY_IS_MEASURED,
   POWER_METER_SPREAD_W,
@@ -1109,6 +1148,7 @@ export default Object.freeze({
   CLK_VF_POINT_COUNT,
   CURVE_GRAPHICS_POINT_COUNT,
   CLOCK_LADDER_STEP_TOLERANCE_MHZ,
+  VF_TABLE_DRIFT_MHZ_PER_C,
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
   FAST_DESCENT_FLOOR_MV,
   DESCENT_ZONES,

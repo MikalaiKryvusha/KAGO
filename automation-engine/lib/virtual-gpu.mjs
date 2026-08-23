@@ -465,6 +465,28 @@ export const TRAPS = Object.freeze([
     // крупнее живого, чтобы недобор нельзя было списать на дрожь.
     fiction: { governorBelowCeilingMhz: 60, noiseSeed: 20260906 },
   },
+  {
+    name: 'T7_serves_a_voltage_nobody_ordered',
+    klass: 'B',
+    traps: 'таблица едет от нагрева ПРЯМО ВО ВРЕМЯ прожига, поэтому частоту начинает обслуживать '
+      + 'ЗАПИСЬ ВЫШЕ: заказали одно напряжение, карта подставила другое, выше заказанного',
+    mustDo: 'либо принять подстановку как ПОПАДАНИЕ, если она ровно на одну ступень сетки вверх, '
+      + 'либо ОСТАНОВИТЬСЯ — и в любом случае ПРОДВИНУТЬСЯ: повторить ту же ступень с тем же исходом '
+      + 'дважды подряд запрещено',
+    otherwise: 'бесконечная петля на одной частоте — движок пишет подставленное как доказанную землю, '
+      + 'сторож шага разрешает от неё только ту же ступень, и круг замыкается',
+    judgedBy: 'GOAL.md → «ТО ЖЕ ПРАВИЛО НА ОСИ НАПРЯЖЕНИЯ» (ближайшее верхнее — попадание, дальше — СТОП)',
+    // 🔴 ЭТА ЛОВУШКА РОДИЛАСЬ ИЗ ЖИВОГО ВЕЧЕРА 2026-08-23, А НЕ ИЗ ВООБРАЖЕНИЯ. Прогон на карте
+    // владельца заказал 885 мВ на 2700 МГц, прогретая карта подставила 915, движок записал 915 как
+    // доказанную землю, сторож шага (стена 35 мВ от доказанного) разрешил снова только 885 — и
+    // прогон крутился, грея карту и не двигаясь, пока владелец его не остановил. На стенде это было
+    // НЕВОСПРОИЗВОДИМО: виртуальная карта всегда обслуживала ровно то, что заказали.
+    //
+    // Число −1,7 МГц/°C ИЗМЕРЕНО на живой карте (`config.VF_TABLE_DRIFT_MHZ_PER_C`, R14b). Здесь оно
+    // взято как есть: ловушка обязана лгать в ту же сторону и с той же силой, что кремний, иначе она
+    // проверяет не тот механизм.
+    fiction: { tableDriftMhzPerC: config.VF_TABLE_DRIFT_MHZ_PER_C, noiseSeed: 20260907 },
+  },
 ]);
 
 /**
@@ -583,6 +605,12 @@ export function buildFiction(card, {
   // выдавали 2760…2805. Ловушка T6 берёт величину заведомо крупнее живой, чтобы недобор нельзя было
   // списать на дрожь края.
   governorBelowCeilingMhz = null,
+  // НА СКОЛЬКО МГц ЕДЕТ ТАБЛИЦА ЗА ГРАДУС НАГРЕВА — ловушечное, на обычной карте `null`.
+  // Живая карта делает это всегда (−1,7 МГц/°C, R14b), и именно отсюда берётся «заказали одно
+  // напряжение, обслуживало другое». Обычной карте механизм НЕ выдаётся: в отгружаемой форме
+  // десятки записей придавлены ровно на потолок, и общий дрейф отнял бы у потолка обслуживающее
+  // напряжение вовсе. Ловушка T7 несёт его адресно.
+  tableDriftMhzPerC = null,
   // The declaration the validator demands for such a card. It is a SEPARATE flag rather than being
   // implied by `inversionAt`, and deliberately so: the validator's job is to refuse a non-monotone
   // card nobody meant to build, and a flag that sets itself would refuse nothing.
@@ -685,6 +713,9 @@ export function buildFiction(card, {
     // не чтением: свойство карты живёт В ЕЁ ФАЙЛЕ, иначе его нет (`plans/19` §4.1).
     ...(Number.isFinite(governorBelowCeilingMhz) && governorBelowCeilingMhz > 0
       ? { governorBelowCeilingMhz } : {}),
+    // То же правило проводки и по той же причине (EXP-0077): свойство карты живёт В ЕЁ ФАЙЛЕ.
+    ...(Number.isFinite(tableDriftMhzPerC) && tableDriftMhzPerC !== 0
+      ? { tableDriftMhzPerC } : {}),
     note: 'ВЫМЫСЕЛ. Эти края придуманы и НЕ являются утверждением о живой карте — они существуют, '
       + 'чтобы движку было что найти.',
     edgeDefinition: 'край частоты = напряжение, на котором прожиг длиной 10 с отказывает в половине случаев. '
@@ -1158,12 +1189,45 @@ export function virtualCard(cardProfile, {
   const rng = mulberry32(seed);
   let draws = 0;
 
+  /**
+   * HOW FAR THE TABLE HAS SLID RIGHT NOW, IN MHz — negative once the card is warmer than it starts.
+   *
+   * 🔴 THE BEHAVIOUR THIS ADDS IS NOT A FAILURE MODE, AND THAT IS THE POINT. The bench simulated the
+   * card's ways of DYING and none of its ways of BEHAVING, so an engine could be green here and walk
+   * into a wall on the owner's machine — which is exactly what happened on 2026-08-23 evening: the
+   * live sweep ordered 885 mV, the warmed card served 915, the run recorded 915 as proven ground,
+   * the step guard then allowed only 885 again, and it looped until the owner stopped it (`bugs/42`).
+   * On this bench that sequence was UNREPRODUCIBLE, because a virtual card whose table never moves
+   * always serves exactly the voltage it was asked for.
+   *
+   * The number is `config.VF_TABLE_DRIFT_MHZ_PER_C` = −1.7 MHz/°C — MEASURED on the live card
+   * (R14b), never chosen here. The reference is the temperature the card starts from, i.e. the state
+   * in which its stored table was taken.
+   *
+   * ⚠️ ВЫКЛЮЧЕН ПО УМОЛЧАНИЮ, И ЭТО ИЗМЕРЕНО, А НЕ ВЫБРАНО ИЗ ОСТОРОЖНОСТИ. Включённый всем картам
+   * дрейф ломает саму репетицию: в отгружаемой форме десятки записей придавлены РОВНО на потолок,
+   * поэтому любой нагрев сбрасывает их все ниже него, и «какое напряжение обслуживает потолок»
+   * перестаёт иметь ответ — прогон встаёт на первой ступени с «выдача выше стока». На живой карте в
+   * этом случае падает ВЫДАННАЯ ЧАСТОТА, а не растёт напряжение, и моделировать это как рост
+   * напряжения значило бы выдумать физику (`PHILOSOPHY.md` → три двери).
+   *
+   * Поэтому дрейф — СВОЙСТВО КАРТЫ (`fiction.tableDriftMhzPerC`), и его несёт та карта, чья
+   * патология в нём и состоит: ловушка T7. Так стенд воспроизводит поведение адресно, а не меняет
+   * физику всем сразу.
+   */
+  const tableDriftMhz = () => (P.fiction?.tableDriftMhzPerC ?? 0) * (thermal.tempC - TELEMETRY_MODEL.tempFloorC);
+
   const oracle = {
+    /** How far the table has slid from heat, in MHz — exposed so a suite can assert the mechanism
+     *  instead of inferring it from a voltage that moved. */
+    tableDriftMhz,
+
     /** Which voltage serves `mhz` right now: the LOWEST-voltage entry whose offered frequency
-     *  reaches it, after the offsets currently written. */
+     *  reaches it, after the offsets currently written AND after the heat has moved the table. */
     servingVoltageMv(mhz) {
+      const drift = tableDriftMhz();
       for (let i = 0; i < GRAPHICS_POINTS; i++) {
-        const offered = P.vfTable[i].mhz + state.curveOffsetsMhz[i];
+        const offered = P.vfTable[i].mhz + state.curveOffsetsMhz[i] + drift;
         if (offered >= mhz) return P.vfTable[i].voltageMv;
       }
       return P.vfTable[GRAPHICS_POINTS - 1].voltageMv;
@@ -1215,8 +1279,10 @@ export function virtualCard(cardProfile, {
      * One draw. Returns the outcome and everything needed to explain it — a bench whose failures
      * cannot be explained is a bench nobody will trust at three in the morning.
      */
-    draw({ mhz, seconds, workload = 'sdc_fma' }) {
-      const voltageMv = this.servingVoltageMv(mhz);
+    draw({ mhz, seconds, workload = 'sdc_fma', voltageMv: drawnAtMv = null }) {
+      // The caller may hand in the voltage the burn STARTED at (see the burn path); without it the
+      // oracle reads the card as it stands, which is what every other caller means.
+      const voltageMv = drawnAtMv ?? this.servingVoltageMv(mhz);
       const edgeMv = this.edgeMvFor(mhz);
       const p = this.failureProbability({ mhz, voltageMv, seconds, workload });
       const r = rng();
@@ -1277,8 +1343,16 @@ export function virtualCard(cardProfile, {
       // back, the burn still happened — so the thermal model advances by the burn's own duration in
       // one step. Otherwise a fast run would show a card that never warms up, and the operator would
       // learn a picture the real card never shows.
+      // ⚠️ ВЕРДИКТ РИСУЕТСЯ ПО НАПРЯЖЕНИЮ НАЧАЛА ПРОЖИГА, А ТЕПЛО ТРАТИТСЯ ПОСЛЕ — и порядок этих
+      // двух строк есть физика, а не вкус. Пока карта греется, таблица уезжает и ту же частоту
+      // начинает обслуживать ЗАПИСЬ ВЫШЕ, то есть напряжение РАСТЁТ. Значит самый опасный момент
+      // прожига — его начало, на холодной карте и самом низком напряжении. Рисовать исход по
+      // температуре КОНЦА значило бы судить ступень по самому безопасному её мгновению и объявлять
+      // безопасным то, что на живой карте валится на первой секунде.
+      // (Найдено 2026-08-23 при добавлении дрейфа таблицы: три блока покраснели ровно на этом.)
+      const drawnAtMv = this.servingVoltageMv(mhz);
       if (!burning) telemetry.advance(seconds, { load: 1 });
-      const d = this.draw({ mhz, seconds, workload });
+      const d = this.draw({ mhz, seconds, workload, voltageMv: drawnAtMv });
       const launches = Math.max(1, Math.round(seconds / P.fiction.failure.perLaunchSeconds));
       const line = (checksum, distinct) => `KAGO-WORKLOAD name=${workload} checksum=${checksum} `
         + `distinct=${distinct} launches=${launches} gpu_us=${launches * 900} work_per_launch=100000 `
