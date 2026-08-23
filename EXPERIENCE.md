@@ -41,6 +41,33 @@
 
 ## Entries
 
+### EXP-0124 · 2026-08-23 · ❌→✅ · #signals #detectors #specificity #sensitivity #n-of-1
+**Context:** found that the GPU driver's own provider (`nvlddmkm`) logged two errors INSIDE the rung that killed the machine, seconds before the sampler pulse noticed anything. It looked like a finished detector.
+**Tried / did:** instead of proposing it, scored it against **every** machine death in the log — 12 of them — by measuring the gap to the last driver error before each.
+**Result:** ❌ the story collapsed and ✅ the finding survived in a smaller shape. Three deaths had an error within 10 minutes (92 s · 9.8 min · 130 s), but **the canonical BSOD of fact 39 had none for two days**, and lone errors on quiet days would have produced false stops.
+**Lesson:** a candidate signal is judged on the NEGATIVE cases, not the positive one that made you notice it. The positive case measures **specificity**; only the full set of failures measures **sensitivity**, and a detector missing half the failures is an input to a decision, never the decision. The tell that you are about to skip this: you can name the case that impressed you and cannot name how many cases you checked.   → link: researches/15 · ideas/10 §5.1
+**Repro:** `Get-WinEvent` the candidate provider and the death marker into ONE timeline, then print the gap from each death to the previous candidate event — the column of gaps is the verdict.
+**Trigger:** any «this signal predicts X» finding, before it reaches a plan or a threshold.
+**Not for:** signals that are DEFINITIONS rather than predictors (a bugcheck record does not predict a crash, it reports one).
+
+### EXP-0123 · 2026-08-23 · ✅ · #fix #reuse #twin-call-site #KISS
+**Context:** `\KAGO\boot-apply` flashed a console window at every logon; started designing a fix (session-0 task, S4U principal, ownership of the journal file…).
+**Tried / did:** before writing any of it, grepped the repo for the same defect at a NEIGHBOURING call site. `tray-launcher.js` carried the cure, its reason, its source (`researches/07` §3) and a `[TESTED]` marker.
+**Result:** ✅ the fix became a 20-line twin of an already-proven file, with one deliberate difference (wait + propagate the exit code, because this call site's result is a receipt). The session-0 design would have traded a solved problem for a file-ownership problem.
+**Lesson:** when a defect has a sibling call site, the project has probably already paid for the cure — **grep for the cure before designing one.** The comment on the proven file usually names the trap you were about to walk into. This is Occam applied to fixes: a twin of a proven thing beats a new mechanism, and it also keeps the class closed instead of half-closed.   → link: bugs/39 · automation-engine/tray-launcher.js
+**Repro:** before designing a fix, `grep -rn "<the symptom's mechanism>" --include=*.js --include=*.mjs .` and read the comments of whatever comes back.
+**Trigger:** any defect where a similar component in the same project already does the same kind of thing.
+**Not for:** the first occurrence of a class — there is no twin to find yet.
+
+### EXP-0122 · 2026-08-23 · ❌ · #powershell #encoding #windows #ascii-only #EXP-0067
+**Context:** wrote diagnostic `.ps1` probes with Russian text in `Write-Output` and in regex literals, using the file tool.
+**Tried / did:** ran them with the PowerShell tool. Twice.
+**Result:** ❌ both times a PARSER error, not a rendering one — «The string is missing the terminator», «Unexpected token» — with the source echoed back as mojibake. The file tool writes UTF-8 **without BOM**; PowerShell 5.1 reads a BOM-less script as windows-1251, so every Cyrillic character becomes two and the tokenizer breaks on quotes and parentheses.
+**Lesson:** the dossier already carried the OUTPUT half of this rake (`Set-Content` writes cp1251); this is the **SOURCE** half and it is worse, because the failure is a parse error in a file that looks perfect in the editor. **Keep throwaway `.ps1` sources ASCII-only.** Cyrillic in a CHILD COMMAND's output is fine — that is runtime, not source. A `.ps1` that must carry Cyrillic needs a UTF-8 BOM, which the file tool does not write.   → link: AGENT_GUIDE.md (environment dossier) · EXP-0067
+**Repro:** write `Write-Output 'привет'` to a `.ps1` with the file tool, run it with `powershell.exe -File` — parser error.
+**Trigger:** writing ANY `.ps1` this session is about to run → strip non-ASCII from the source first.
+**Not for:** `.mjs`/`.json`/`.md` — Node and the file tools read UTF-8 correctly; this is a PowerShell 5.1 property.
+
 ### EXP-0121 · 2026-08-23 · ❌ · #selftest #sandbox #production-data #EXP-0025
 **Context:** wrote four new blocks for the boot-loop breaker, passing the sandbox journal path as `sb.journal`.
 **Tried / did:** ran the suite. Two blocks failed with «строк намерения в журнале 6 вместо 1».
