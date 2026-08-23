@@ -2194,6 +2194,82 @@ export async function sweepFrequency({
 }
 
 /**
+ * WAS THIS ROW'S NUMBER MEASURED AGAINST A VOLTAGE NOBODY ORDERED — and by how much.
+ *
+ * The owner's rule, `GOAL.md` → «ТО ЖЕ ПРАВИЛО НА ОСИ НАПРЯЖЕНИЯ» (2026-08-16): exactly the ordered
+ * value → normal; ONE grid step up → **HIT**, the served value becomes the measure; higher than one
+ * step → «ДРУГАЯ запись таблицы»; below the order → STOP. His ruling for the third row was STOP;
+ * `interviews/013` Q2 (2026-08-23) changed it to **C — count the measurement, but MARK it**, once it
+ * turned out a warmed card misses upward REGULARLY and the letter of the rule would have cost most of
+ * the band.
+ *
+ * ─── IT COMPUTES NOTHING TWICE ────────────────────────────────────────────────────────────────────
+ *
+ * Both numbers are ALREADY on the rung the descent recorded: `voltageMv` is `r.measuredMv`, what the
+ * card SERVED, and `orderedMv` is what was asked for. Re-deriving the miss from anywhere else would be
+ * the truth↔mirror pair this project keeps banning — so this function only LOOKS UP the rung that gave
+ * the row its voltage.
+ *
+ * The threshold is `config.VOLTAGE_GRID_MAX_GAP_MV` — the WIDEST gap in the card's grid, the same
+ * number the in-flight print at step 8 judges «nearest step?» with. A second threshold would drift
+ * from the first, and the grid is uneven, so a typical-gap threshold would answer differently
+ * depending on which half of the grid the rung landed in.
+ *
+ * ⚠️ **THE `edge-found` HOLE, NAMED RATHER THAN LEFT TO BE DISCOVERED.** On that path the row gets
+ * `refined.shipMv` — a value WE computed (the failure plus the owner's margin), not something the card
+ * substituted in answer to an order. No rung «gave» it, the lookup finds nothing, and no mark is set.
+ * That is correct — there is no order/serve mismatch to report about a number we chose ourselves — but
+ * it is silence, and silence reads as an oversight to the next session unless it is written down.
+ *
+ * @param {{voltageMv?:number, rungs?:Array<{voltageMv?:number, orderedMv?:number}>}} outcome
+ * @param {number} maxGapMv  the widest grid gap; one step up is a HIT, not a miss
+ * @returns {{marked:boolean, overshootMv:number|null, orderedMv:number|null, servedMv:number|null}}
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function overshootMarkFor(outcome, maxGapMv = config.VOLTAGE_GRID_MAX_GAP_MV) {
+  const none = { marked: false, overshootMv: null, orderedMv: null, servedMv: null };
+  const served = outcome?.voltageMv;
+  if (!Number.isFinite(served) || !Number.isFinite(maxGapMv)) return none;
+  // The rung that GAVE the row its number. `find` on the served voltage: the descent may have walked
+  // the same voltage more than once, and the first one that produced it is the one that produced it.
+  const rung = (outcome?.rungs ?? []).find((r) => r?.voltageMv === served && Number.isFinite(r?.orderedMv));
+  if (!rung) return none;
+  const overshootMv = served - rung.orderedMv;
+  if (overshootMv <= 0) return none;                 // exact hit, or served BELOW the order — not ours
+  return {
+    marked: overshootMv > maxGapMv,                  // > one grid step: «ДРУГАЯ запись таблицы»
+    overshootMv,
+    orderedMv: rung.orderedMv,
+    servedMv: served,
+  };
+}
+
+/**
+ * THE MISS, WRITTEN OUT FOR THE HUMAN — the half of Q2 that the tag deliberately cannot carry.
+ *
+ * The vocabulary must stay ENUMERABLE, so the millivolts may never become part of the tag
+ * (`researches/13` §7.1 — the cardinality anti-pattern). They go here instead, into the row's witness,
+ * where `provenBy` already carries the signature under every measurement. Split of duties: the TAG
+ * says what KIND of fact this is and the code branches on it; the WITNESS says how much and the owner
+ * reads it.
+ *
+ * Separate from `overshootMarkFor` for one reason — a sentence built inline at the call site is a
+ * sentence no block can interrogate, which is exactly how the false «взято ближайшее верхнее с сетки
+ * карты» line survived for a week while measuring nothing (`bugs/42`).
+ *
+ * @param {{marked:boolean, overshootMv:number|null, orderedMv:number|null, servedMv:number|null}} miss
+ * @returns {string} the witness fragment, or '' when there is nothing to report
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function overshootWitness(miss) {
+  if (!miss?.marked) return '';
+  return ` · ⚠️ СНЯТО С ПРОМАХОМ ${miss.overshootMv} мВ: заказано ${miss.orderedMv} мВ, `
+    + `карта обслужила ${miss.servedMv} мВ — это ДРУГАЯ запись таблицы, а не округление вверх`;
+}
+
+/**
  * WHAT STOPPED THE DESCENT, AS THE DOCUMENT MUST RECORD IT — one pure function, because this is the
  * exact decision that has been caught lying to the owner twice.
  *
@@ -2661,12 +2737,21 @@ export async function sweepRange({
 
     // ---- THE DOCUMENT, BEFORE THE NEXT FREQUENCY. Validated first, saved atomically second.
     const status = statusForOutcome(outcome);
+    // ⚠️ ПРОМАХ ПО НАПРЯЖЕНИЮ — ДВА ЧИТАТЕЛЯ, И ЭТО НЕ ДУБЛИРОВАНИЕ. Ветка печати на ступени (§8)
+    // говорит ОПЕРАТОРУ в момент прожига и исчезает вместе с логом; тег и подпись говорят ДОКУМЕНТУ
+    // навсегда. До 2026-08-23 существовал только первый, и вечером 22-го заказ 885 мВ, обслуженный
+    // 915 (четыре ступени сетки), лёг в документ неотличимо от чистого замера (`interviews/013` Q2 = C).
+    const miss = overshootMarkFor(outcome);
     const closed = closePoint(doc, {
       mhz: rowMhz.mhz,
       voltageMv: outcome.voltageMv,
       status,
+      extraTags: miss.marked ? [CURVE_TAGS.ORIGIN_OVERSHOT] : [],
       provenBy: `${outcome.provenBy ?? 'без свидетеля'} · ЗАКАЗАНО ${orderedMhz} МГц, ВЫДАНО `
-        + `${outcome.deliveredMhz} МГц${rowMhz.snapped ? ` (притянуто к строке ${rowMhz.mhz})` : ''}`,
+        + `${outcome.deliveredMhz} МГц${rowMhz.snapped ? ` (притянуто к строке ${rowMhz.mhz})` : ''}`
+        // ЧИСЛО ПРОМАХА — В ПОДПИСИ, А НЕ В ТЕГЕ. Словарь закрыт и обязан остаться перечислимым
+        // (`researches/13` §7.1); величину читает человек, класс факта — код.
+        + overshootWitness(miss),
       inheritDownToMhz: inheritFloorMhz,
       at: now ? now() : null,
     });
@@ -5439,6 +5524,34 @@ export function selfTest() {
     ok('и документ после храповика проходит СВОЙ ЖЕ сторож (инверсии не осталось)',
       validateCurveDoc(ratcheted.doc).length, 0);
 
+    // ═══ ЭПИК 33, ФАЗА 2 — ВХОД ДОПОЛНИТЕЛЬНЫХ ТЕГОВ НЕ ДОЛЖЕН СТАТЬ ДЫРОЙ В ЗАКРЫТОМ СЛОВАРЕ ══════
+    // Риск яруса (a) из `plans/35`: словарь стоит ровно столько, сколько стоит самая слабая дверь в него.
+    {
+      const closeWith = (extraTags) => closePoint(sweepDoc(bandRows), {
+        mhz: 2842, voltageMv: 990, status: CURVE_STATUS.EDGE_FOUND, provenBy: 'x', extraTags,
+        at: '2026-08-23T23:00:00+03:00',
+      });
+      ok('ПОМЕТКА ПРОМАХА ЛОЖИТСЯ НА СТРОКУ и НАКАПЛИВАЕТСЯ с origin:measured (ради этого облако и заводилось)',
+        (() => {
+          const r = closeWith([CURVE_TAGS.ORIGIN_OVERSHOT]);
+          const tags = r.doc.frequencies.find((x) => x.mhz === 2842).tags;
+          return [r.ok, tags.includes(CURVE_TAGS.ORIGIN_OVERSHOT), tags.includes(CURVE_TAGS.ORIGIN_MEASURED),
+            tags.includes(CURVE_TAGS.STOP_EDGE_FOUND)];
+        })(),
+        [true, true, true, true]);
+      // F2-AC5 — вход НЕ пускает мимо словаря.
+      ok('F2-AC5: дополнительный тег ВНЕ словаря ОТВЕРГНУТ, и отказ его называет',
+        (() => { const r = closeWith(['origin:выдумка']); return [r.ok, r.why.includes('origin:выдумка')]; })(),
+        [false, true]);
+      // F2-AC6 — правило ИСКЛЮЧИТЕЛЬНОГО класса действует и на добавку: тег безобиден сам по себе, но
+      // рядом со `stop:*`, который подразумевает статус, даёт два ответа на один вопрос. Поэтому
+      // проверяется ОБЪЕДИНЁННЫЙ набор, а не только добавка.
+      ok('F2-AC6: добавка, дающая ВТОРОЙ stop:* рядом с тем, что подразумевает статус, — ОТКАЗ',
+        closeWith([CURVE_TAGS.STOP_NOT_SERVED]).ok, false);
+      ok('пустая добавка ничего не меняет — обычное закрытие проходит',
+        closeWith([]).ok, true);
+    }
+
     // — the closed vocabulary and the card's grid are refusals, not warnings
     ok('мутатор отвергает статус вне закрытого словаря',
       closePoint(sweepDoc(bandRows), { mhz: 2842, voltageMv: 990, status: 'почти-край', provenBy: 'x' }).ok, false);
@@ -6095,6 +6208,44 @@ export function selfTest() {
       statusForOutcome({ verdict: 'lever-limited', stoppedEarly: 'no-progress', plan: { cappedByOperator: true } }),
       CURVE_STATUS.NOT_SERVED);
 
+    // ═══ ЭПИК 33, ФАЗА 2 — ПОМЕТКА ПРОМАХА (`interviews/013` Q2 = C) ════════════════════════════════
+    // Граница — слово владельца: ОДНА ступень сетки вверх это ПОПАДАНИЕ, больше — «другая запись
+    // таблицы». Порог общий с веткой печати: `config.VOLTAGE_GRID_MAX_GAP_MV` (10 мВ).
+    const missOutcome = (servedMv, orderedMv) => ({
+      voltageMv: servedMv, rungs: [{ voltageMv: servedMv, orderedMv }],
+    });
+    // F2-AC1. Ровно случай вечера 22 августа: заказ 885, карта обслужила 915 — четыре ступени вверх.
+    ok('F2-AC1: ПРОМАХ БОЛЬШЕ ОДНОЙ СТУПЕНИ помечается, и величина названа числом',
+      (() => { const m = overshootMarkFor(missOutcome(915, 885), 10);
+        return [m.marked, m.overshootMv, m.orderedMv, m.servedMv]; })(),
+      [true, 30, 885, 915]);
+    // F2-AC2. СТОРОЖ ПРОТИВ ПОМЕТКИ ПОЛОВИНЫ ДОКУМЕНТА. По правилу владельца одна ступень — ПОПАДАНИЕ;
+    // тег на ней стоял бы почти везде и не отличал бы ничего (`researches/13` §7.3).
+    ok('F2-AC2: ПРОМАХ РОВНО В ОДНУ СТУПЕНЬ — ПОПАДАНИЕ, тега НЕТ (правило владельца)',
+      overshootMarkFor(missOutcome(895, 885), 10).marked, false);
+    ok('и на волосок за границей — уже промах: граница СТРОГАЯ, а не «около»',
+      overshootMarkFor(missOutcome(896, 885), 10).marked, true);
+    // F2-AC3. Точное попадание и выдача НИЖЕ заказа — не наш случай (второе судится своим сторожем).
+    ok('F2-AC3: точное попадание в заказ — тега нет',
+      overshootMarkFor(missOutcome(885, 885), 10).marked, false);
+    ok('выдача НИЖЕ заказа — не промах вверх, судит другой сторож',
+      overshootMarkFor(missOutcome(870, 885), 10).marked, false);
+    // ⚠️ НАЗВАННАЯ ДЫРА `edge-found`, покрытая блоком, а не оставленная на догадку: строка получает
+    // `refined.shipMv` — величину, вычисленную НАМИ, и ни одна ступень её не подставляла.
+    ok('edge-found: отгружаемое напряжение НЕ ОТ КАРТЫ — ступени, давшей его, нет, пометки нет',
+      overshootMarkFor({ voltageMv: 1000, rungs: [{ voltageMv: 990, orderedMv: 940 }] }, 10).marked, false);
+    ok('нет ступеней вовсе — пометки нет, а не падение',
+      overshootMarkFor({ voltageMv: 900, rungs: [] }, 10).marked, false);
+    // F2-AC4. ЧИСЛО В ПОДПИСИ. Тег несёт класс факта, подпись — величину; все ТРИ числа обязаны быть
+    // названы, иначе владелец читает «промахнулись» без ответа на «насколько и с чего».
+    ok('F2-AC4: подпись называет ВСЕ ТРИ числа — промах, заказ и то, что карта обслужила',
+      (() => {
+        const w = overshootWitness(overshootMarkFor(missOutcome(915, 885), 10));
+        return [w.includes('30'), w.includes('885'), w.includes('915')];
+      })(), [true, true, true]);
+    ok('а непомеченный замер подписи НЕ засоряет — пустая строка, а не «промах 0»',
+      overshootWitness(overshootMarkFor(missOutcome(885, 885), 10)), '');
+
     // — the loop, end to end, on a card that delivers 14 MHz BELOW every order. Two ladder steps, so
     //   each measurement lands two rows down and the divergence is unmistakable.
     const sagAtom = (sagMhz) => async (a) => {
@@ -6129,6 +6280,46 @@ export function selfTest() {
         const l = sweepReportLines(sagged);
         return [l.some((x) => x.includes('ЗАКАЗ ↔ ВЫДАЧА: разошлись на 2')), l.some((x) => x.includes('2842→2835'))];
       })(), [true, true]);
+
+    // ═══ ЭПИК 33 ФАЗА 2 — ПРОВОДКА, СКВОЗНАЯ. Блоки выше судят `overshootMarkFor` и `closePoint`
+    // ПОРОЗНЬ; ни один из них не доказывал, что развёртка их СОЕДИНЯЕТ. Мутация N3 («не ставить тег»)
+    // прошла зелёной именно поэтому — та же дыра, что EXP-0052: граница, добавленная в ПРОГОН, не
+    // добавлена, пока её не видно на выходе. Этот блок смотрит в СТРОКУ ДОКУМЕНТА.
+    const overshootAtom = (missMv) => async (a) => {
+      const r = await sweepAtom(0)(a);                     // 0 = ничего не падает; судим строку, не край
+      const mv = r.undervolt?.after?.mv;
+      // Карта подставляет напряжение ВЫШЕ заказанного — ровно то, что делала прогретая 22 августа.
+      return Number.isFinite(mv) ? { ...r, undervolt: { ...r.undervolt, after: { mv: mv + missMv } } } : r;
+    };
+    {
+      // 15 мВ = три ступени сетки фикстуры (шаг 5) при самом широком зазоре 10 → «ДРУГАЯ запись».
+      const missed = await sweepRange({
+        curveDoc: sweepDoc(bandRows), points: sweepPoints, envelopeMhz: 3090,
+        runStepFn: overshootAtom(15), buildVector: vectorPinned,
+        saveFn: async () => ({ ok: true }),
+        now: () => '2026-08-23T23:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      const marked = (missed.doc?.frequencies ?? []).filter((r) => (r.tags ?? []).includes(CURVE_TAGS.ORIGIN_OVERSHOT));
+      ok('СКВОЗНАЯ ПРОВОДКА: карта отдала на 15 мВ выше заказа — и СТРОКА ДОКУМЕНТА несёт origin:overshot',
+        marked.length > 0, true);
+      // ⚠️ ПОДПИСЬ ИЩЕТСЯ НЕЗАВИСИМО ОТ ТЕГА — по ВСЕМ строкам, а не в уже помеченной. Первая редакция
+      // читала `marked[0].provenBy`, то есть падала вместе с тегом и не могла отличить «тег не поехал»
+      // от «число не названо». Тег и подпись — ДВА разных обещания владельцу, и сторожа у них разные.
+      ok('и подпись строки называет промах ЧИСЛОМ, а не словом «выше» (ищется НЕЗАВИСИМО от тега)',
+        (() => {
+          const w = (missed.doc?.frequencies ?? []).map((r) => r.provenBy ?? '')
+            .find((p) => p.includes('СНЯТО С ПРОМАХОМ')) ?? '';
+          return [w !== '', /\d+ мВ/.test(w), w.includes('карта обслужила')];
+        })(), [true, true, true]);
+      // ⚠️ И ТЕГ НЕ РАСТЕКАЕТСЯ ПО НАСЛЕДНИКАМ. Строки ниже по ступени наследуют ЧИСЛО (R16b), но не
+      // обстоятельства замера: иначе одна промахнувшаяся ступень пометила бы весь диапазон.
+      ok('пометка НЕ наследуется вниз по ступени — это свойство ЗАМЕРА, а не диапазона',
+        (() => {
+          const inherited = (missed.doc?.frequencies ?? [])
+            .filter((r) => (r.tags ?? []).includes(CURVE_TAGS.ORIGIN_INHERITED));
+          return inherited.every((r) => !(r.tags ?? []).includes(CURVE_TAGS.ORIGIN_OVERSHOT));
+        })(), true);
+    }
     // ДВЕ ПРИЧИНЫ ОСТАНОВКИ РАЗДЕЛЕНЫ В ПЕЧАТИ, И МЕТАФОРА УБРАНА (`CURVE_STATUS.DEPTH_CAPPED`).
     // Одно число над двумя несовместимыми фактами — «карте ниже нельзя» и «мы решили не смотреть» —
     // ввело владельца в заблуждение 2026-08-17 на готовом прогоне, где ВСЕ 54 строки несли первое,

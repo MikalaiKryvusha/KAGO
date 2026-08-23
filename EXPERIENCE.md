@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0133 · 2026-08-23 · ❌→✅ · #mutation #wiring #unit-vs-endtoend #EXP-0052 #testing
+**Context:** epic 33 phase 2 — a new tag had to travel from a pure decision function, through `closePoint`, into the curve document's row. Unit blocks covered `overshootMarkFor` (does it mark?) and `closePoint` (does it accept the tag and refuse a fake one?). Both green, six blocks.
+**Tried / did:** ran mutation N3 — delete the one line that PASSES the tag from the engine to `closePoint`. It applied (−45 bytes, asserted per EXP-0132).
+**Result:** ❌ **nothing reddened.** Both ends were guarded and the wire between them was not. Fixed with an end-to-end block through `sweepRange` on a fixture card that serves 15 mV above every order, asserting on the DOCUMENT ROW. N3 then reddened 2 blocks. A follow-up mutation (N5, swap the tag for another valid one) exposed a second weakness: the witness block read `marked[0].provenBy`, so it fell over together with the tag and could not tell «the tag didn't travel» from «the number wasn't named» — the witness now searches all rows independently.
+**Lesson:** **guarding both ENDS of a wire is not guarding the wire.** Unit blocks on a producer and a consumer both stay green while the call between them is deleted. Every fact that must reach an artifact needs one block that reads it OFF THE ARTIFACT. This is EXP-0052 in a new costume («граница, добавленная в ПРОГОН, не добавлена, пока её не печатает ПЛАН») — the same defect keeps arriving from a different direction, which is why it is worth a second entry. Corollary: when two facts ride the same wire, assert them INDEPENDENTLY, or one mutation masks the other.   → link: plans/35_epic33_phase2_the_overshoot_mark.md · EXP-0052
+**Repro:** for any new field/tag reaching a document: delete the line that passes it at the call site → at least one block must redden. If none does, the end-to-end block is missing.
+**Trigger:** adding anything that must land in `curves/measured.json` or any other artifact → write the block that reads it back out, not only the blocks on the functions.
+**Not for:** purely internal computations that never leave the process — unit blocks are the whole story there.
+
 ### EXP-0132 · 2026-08-23 · ❌→✅ · #mutation #false-green #crlf #windows #testing
 **Context:** proving phase 1 of epic 33 — five mutations, each expected to redden only its own blocks. Four reddened. **M3 came back «63 зелёных, 0 красных», i.e. the guard did not notice its own subject being deleted.**
 **Tried / did:** almost wrote it up as a blind block. Checked instead whether the mutation had applied at all: the file has **CRLF** line terminators, my `replace()` anchor ended in `\n`, so the string never matched and `writeFileSync` wrote the file back UNCHANGED. Re-ran with `\r\n` — the block reddened immediately and alone.

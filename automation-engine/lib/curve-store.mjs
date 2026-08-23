@@ -203,6 +203,30 @@ export const CURVE_TAGS = Object.freeze({
   /** Raised by the monotonicity ratchet because a LOWER frequency demanded more (R17). The row's
    *  voltage is therefore NOT the deepest this frequency reached — it is the safe direction. */
   ORIGIN_RATCHETED: 'origin:ratcheted',
+  /** THE NUMBER WAS MEASURED AGAINST A VOLTAGE THE CARD SUBSTITUTED, and the substitution was more
+   *  than ONE grid step above the order — «другая запись таблицы», not a rounding-up.
+   *
+   *  The owner's rule (`GOAL.md` → «ТО ЖЕ ПРАВИЛО НА ОСИ НАПРЯЖЕНИЯ», 2026-08-16) reads: one grid step
+   *  up is a HIT and the served value becomes the measure; higher than that is a different table entry.
+   *  His original ruling for that third row was STOP. `interviews/013` Q2 (2026-08-23) softened it to
+   *  **C — the measurement counts, but it is MARKED** — after it turned out that a warmed card misses
+   *  upward REGULARLY rather than rarely, so the letter of the rule would have cost most of the band.
+   *
+   *  ⚠️ **CUMULATIVE, and that is the point.** A row carries `origin:measured` (the number was burned
+   *  at this frequency) AND this tag (it was burned against a voltage nobody ordered). The single
+   *  status field could hold only one of the two — which is exactly what `researches/13` was about.
+   *
+   *  ⚠️ **NOT set on a one-step miss.** By the owner's rule that is a HIT; marking it would put the tag
+   *  on half the document and leave it distinguishing nothing (`researches/13` §7.3).
+   *
+   *  ⚠️ **The SIZE of the miss is NOT in the tag** and must never be: `origin:overshot-4`,
+   *  `origin:overshot-45`… would make the vocabulary unenumerable, which is the documented
+   *  cardinality anti-pattern (`researches/13` §7.1, quoting Prometheus: *«Do not use labels to store
+   *  dimensions with high cardinality … or other unbounded sets of values»*). The tag carries the CLASS
+   *  of the fact for the code; the millivolts are named in `provenBy` for the human.
+   *
+   *  [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this. */
+  ORIGIN_OVERSHOT: 'origin:overshot',
 });
 
 const TAG_VALUES = Object.freeze(Object.values(CURVE_TAGS));
@@ -715,6 +739,11 @@ export function firstInversion(rows) {
  * @param {number} a.voltageMv      the voltage that now serves it — must be on the card's grid
  * @param {string} a.status         from `CURVE_STATUS`; the vocabulary is closed
  * @param {string} [a.provenBy]     the witness — REQUIRED for a proven status
+ * @param {string[]} [a.extraTags]  CUMULATIVE tags to add beside the ones the status implies — today
+ *   `origin:overshot` (epic `plans/33` phase 2). ⚠️ **Validated against the SAME closed vocabulary and
+ *   the SAME exclusive-class rule as any other tag set.** An entry point that accepts an arbitrary tag
+ *   would repeal `researches/13` §2.3 — the closure is the property that makes the document readable,
+ *   and a back door into it is worth more than the front door is worth keeping shut.
  * @param {number} [a.inheritDownToMhz]  the bottom of this rung; rows in [that, mhz) inherit
  * @param {string} [a.at]           the stamp; defaults to now, local ISO
  * @returns {{ok:boolean, doc:object, closed:number, inherited:Array, raised:Array, why:string}}
@@ -730,6 +759,7 @@ export function closePoint(doc, {
   voltageMv = null,
   status = null,
   provenBy = null,
+  extraTags = [],
   inheritDownToMhz = null,
   at = null,
 } = {}) {
@@ -745,6 +775,17 @@ export function closePoint(doc, {
   if (PROVEN_STATUSES.includes(status) && (typeof provenBy !== 'string' || provenBy.trim() === '')) {
     return no(`статус «${status}» утверждает, что частоту доказал прожиг — тогда назови форму нагрузки и вердикт; `
       + 'статус без свидетеля это заявление, а не улика');
+  }
+  // ⚠️ ДОПОЛНИТЕЛЬНЫЕ ТЕГИ ПРОВЕРЯЮТСЯ ТЕМ ЖЕ СТОРОЖЕМ, ЧТО И ЛЮБОЙ НАБОР (эпик `plans/33` фаза 2).
+  // Проверяется ОБЪЕДИНЁННЫЙ набор, а не только добавка: правило исключительного класса — свойство
+  // НАБОРА, и добавка, безобидная сама по себе, может дать второй `stop:*` рядом с тем, который
+  // подразумевает статус. Вход, пускающий тег мимо словаря, отменяет `researches/13` §2.3 — а закрытость
+  // и есть то, ради чего читатель документу верит.
+  const addTags = Array.isArray(extraTags) ? extraTags : [];
+  if (addTags.length) {
+    const merged = [...new Set([...(tagsForStatus(status) ?? []), ...addTags])];
+    const refusals = tagSetRefusals(merged);
+    if (refusals.length) return no(`дополнительные теги отвергнуты: ${refusals.join(' · ')}`);
   }
   const grid = Array.isArray(doc.voltageGridMv) ? doc.voltageGridMv : [];
   if (grid.length && !grid.includes(voltageMv)) {
@@ -804,6 +845,12 @@ export function closePoint(doc, {
   // single field could only have held one of, which is the whole point of the class being cumulative.
   const measuredTags = [...tagsForStatus(status), CURVE_TAGS.ORIGIN_MEASURED];
   if (ratchetedBy !== null) measuredTags.push(CURVE_TAGS.ORIGIN_RATCHETED);
+  // ⚠️ ТОЛЬКО НА ЗАМЕРЕННУЮ СТРОКУ, И НАСЛЕДНИКАМ НЕ ПЕРЕДАЁТСЯ. `origin:overshot` — свойство ТОГО
+  // САМОГО измерения: карта подставила другое напряжение в ответ на ЭТОТ заказ. Строки ниже по
+  // ступени наследуют ЧИСЛО (R16b), но не обстоятельства, при которых его сняли, — иначе одна
+  // промахнувшаяся ступень пометила бы весь диапазон наследования, и тег снова перестал бы отличать.
+  // Проверено выше на объединённом наборе, поэтому здесь только добавление.
+  for (const t of addTags) if (!measuredTags.includes(t)) measuredTags.push(t);
   rows[idx] = {
     ...rows[idx],
     voltageMv: effectiveMv,
