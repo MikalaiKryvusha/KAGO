@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0117 · 2026-08-23 · ✅ · #measurement #invented-number #cost-doubt #fallback
+**Context:** `bugs/37` — the telemetry sampler wrote without `fsync`, so the fatal run's last two minutes died in the page cache. The obvious fix was obvious; the doubt was its COST, because a sampler that becomes part of the load it measures is a broken instrument. The bug doc had pre-authorised a fallback: «if once a second is too dear, fsync every N probes, N chosen by measurement».
+**Tried / did:** measured before implementing — 300 repeats of the real 350-byte line, on this machine, into the same directory. `appendFileSync` 0,091 ms median; `open → write → fsync → close` 1,010 ms median, 1,348 p95, 3,327 max.
+**Result:** ✅ **0,1 % of the 1000 ms tick — while the `nvidia-smi` spawn the same loop already pays EVERY tick costs about 60 ms, sixty times more.** So the fallback was not taken: there was no N to choose. Implemented the simple version, and the live smoke confirmed the cadence held (median interval 1001 ms against 998 before).
+**Lesson:** **a measurement can DISSOLVE a design question instead of answering it — and that is the best outcome, because the answer would have been an invented number.** The pre-authorised fallback («tune N by measurement») felt responsible, but every N is a constant nobody can defend later; measuring first removed the need for one entirely. Second half, the calibration trick that made the number readable: **compare the new cost against a cost the system ALREADY pays in the same loop.** «1 ms» means nothing on its own; «1 ms next to the 60 ms process spawn you already pay every tick» ends the discussion in one line.   → link: `bugs/37` · `plans/27` §27.6 · R15
+**Repro:** before adding a per-iteration cost to a loop, time it against the loop's existing dominant cost, not against zero.
+**Trigger:** any «this might be too expensive» doubt that is about to be settled by a tunable constant → measure first; the constant may turn out to be unnecessary.
+**Not for:** costs that genuinely are of the same order as the loop's budget — there the tunable is real work, not avoidance.
+
 ### EXP-0114 · 2026-08-23 · ❌→✅ · #mutation #invented-number #occam #derived-quantities
 **Context:** building the pulse reader (`plans/27`). I derived THREE quantities from one interval: `missedTicks` (`round(ms/period) − 1`), `lostMs` gated on it, and a `catchUp` flag.
 **Tried / did:** before trusting the 22 green blocks, ran the named mutations. Swapped `round` for `floor`; swapped the catch-up rule for a different one.

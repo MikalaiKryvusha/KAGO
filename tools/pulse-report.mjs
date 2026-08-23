@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
-  readPulseFile, pulseIntervals, pulseSummary, parseSampleTime, archivePulseFile,
+  readPulseFile, pulseIntervals, pulseSummary, parseSampleTime, archivePulseFile, appendSampleLine,
   PULSE_BINS, PULSE_ARCHIVE_DIR,
 } from '../automation-engine/lib/hardware-mon.mjs';
 // `readJournal` and NOTHING else from this module — see the header. It needs only `.path`, so the
@@ -411,6 +411,40 @@ export function selfTest() {
       || /^(ok|healthy|clean|edge|alarm|stalled|verdict|здоров|тревог)/iu.test(k));
     ok('9. в сводке НЕТ ВЕРДИКТА — ни одного булева поля и ни одного судящего имени',
       () => (verdictish.length === 0), () => (`найдено судящее: ${verdictish.map(([k]) => k).join(', ')}`));
+  }
+
+  // ─── bugs/37 · ДОЛГОВЕЧНОСТЬ ЗАПИСИ ────────────────────────────────────────────────────────────
+  {
+    // ПОРЯДОК ДОКАЗЫВАЕТСЯ СЛЕДОМ, А НЕ ЧТЕНИЕМ — тот же приём, которым журнал упреждающей записи
+    // доказывает свой fsync (R15). Обычная запись возвращается из кэша страниц ОС; разницу создаёт
+    // ровно одно событие — внезапная смерть машины, — и его не расписать, поэтому проверяется
+    // ОТВЕТ: был ли вызван fsync, и был ли он вызван до закрытия дескриптора.
+    // Проверяется ИЗВЛЕЧЁННАЯ функция, а не весь `sampleFor`: тот зовёт `nvidia-smi` за заголовком и
+    // создаёт настоящий файл, то есть набор перестал бы быть офлайновым и инертным. Извлечение и
+    // сделано ради этого — блок, дотягивающийся только до нужного шва, сторожит вопрос, а не ответ
+    // (EXP-0108). Ни одного байта на диск, ни одного порождённого процесса.
+    const trace = [];
+    const io = {
+      openSync: (p, flag) => { trace.push(`open:${flag}`); return 7; },
+      // БЕЗ `trim()`: первая редакция обрезала здесь перевод строки — то есть ровно ту величину,
+      // наличие которой блок 18в объявляет проверенной. Мутация PR («потерять \n») не покрасила
+      // ничего именно поэтому. Подставной шов обязан отдавать сырое, иначе он судит себя.
+      writeSync: (fd, line) => { trace.push(`write:${JSON.stringify(line)}`); return 0; },
+      fsyncSync: () => { trace.push('fsync'); },
+      closeSync: () => { trace.push('close'); },
+    };
+    appendSampleLine('фикстура.jsonl', { i: 0, t: 'проба' }, io);
+    ok('18. КАЖДАЯ ПРОБА ФСИНКАЕТСЯ: порядок ровно открыть → записать → fsync → закрыть (`bugs/37`)',
+      () => trace.map((x) => x.split(':')[0]).join(' ') === 'open write fsync close',
+      () => `след: ${trace.join(' → ') || '(пусто)'}`);
+    ok('18а. fsync стоит ДО закрытия дескриптора — после закрытия он бы уже ничего не гарантировал',
+      () => trace.indexOf('fsync') >= 0 && trace.indexOf('fsync') < trace.indexOf('close'),
+      () => `след: ${trace.join(' → ')}`);
+    ok('18б. файл открыт на ДОПИСЫВАНИЕ, а не на перезапись — иначе каждая проба стирала бы прошлые',
+      () => trace[0] === 'open:a', () => `первый шаг: ${trace[0]}`);
+    ok('18в. записана ровно одна строка JSONL, и она КОНЧАЕТСЯ ПЕРЕВОДОМ СТРОКИ',
+      () => trace[1] === `write:${JSON.stringify('{"i":0,"t":"проба"}\n')}`,
+      () => `записано: ${trace[1]}`);
   }
 
   // ─── 27.1 · архив ──────────────────────────────────────────────────────────────────────────────

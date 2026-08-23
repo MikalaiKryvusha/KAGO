@@ -37,7 +37,10 @@
 // --check-decode go red and name both sides of the disagreement.
 
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, appendFileSync, mkdirSync, readFileSync, existsSync, renameSync } from 'node:fs';
+import {
+  writeFileSync, mkdirSync, readFileSync, existsSync, renameSync,
+  openSync, writeSync, fsyncSync, closeSync,
+} from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -301,8 +304,63 @@ export function runHeader({ smi = 'nvidia-smi', periodMs } = {}) {
 }
 
 /**
+ * Append ONE record to the sampler's file, and make it DURABLE before returning.
+ *
+ * 🔴 THE `fsync` IS THE POINT OF THIS FUNCTION, and it exists because its absence cost this project
+ * the only recording it has of the card strangling the system (`bugs/37`). The fatal run's file
+ * ends in 768 NUL bytes: its last readable probe is 11:52:30, the rung that killed the machine
+ * opened at 11:52:32, `Kernel-Power/41` fired at 11:54:24. Almost two minutes of probes existed
+ * only in the page cache, and the dying machine took the page cache with it.
+ *
+ * An ordinary write returns from the OS cache — it means «the OS has your bytes», never «the disk
+ * has your bytes». The difference is invisible while the machine lives and total the moment it does
+ * not. The write-ahead journal settled this long ago (R15, `sweep-journal.appendLine`); the sampler
+ * simply never got the same treatment, because it was built for the dashboard, where losing the
+ * last few seconds cost nothing. `ideas/10` changed the price: the pulse is now evidence about the
+ * edge, and its most valuable part is precisely the seconds before the machine dies.
+ *
+ * 🔬 THE COST WAS MEASURED, NOT ESTIMATED — the bug doc demanded exactly that, because a sampler
+ * that becomes part of the load it measures is a broken instrument. On this machine, 300 repeats of
+ * the real 350-byte line:
+ *
+ *   appendFileSync (before)          median 0,091 ms · p95 0,126 ms · max 0,218 ms
+ *   open → write → fsync → close     median 1,010 ms · p95 1,348 ms · max 3,327 ms
+ *
+ * That is **0,1 % of the 1000 ms tick**. For scale, the `nvidia-smi` spawn this sampler already
+ * pays every single tick costs about 60 ms — SIXTY TIMES more. So the fallback the bug doc allowed
+ * («fsync every N probes, N chosen by measurement») is NOT taken: the measurement dissolved the
+ * question rather than answering it, and no invented N enters the code.
+ *
+ * Open-per-line rather than a held descriptor, deliberately: it is the same shape
+ * `sweep-journal.appendLine` uses and has mutation-proved, it needs no descriptor lifetime across a
+ * process that gets killed by signal, and the difference is 0,09 ms a second.
+ *
+ * @param {object} [io] `{ openSync, writeSync, fsyncSync, closeSync }` — injected in tests
+ *
+ * [TESTED: 2026-08-23 13:1x · блоки 18 и 18а набора `pulse` доказывают ПОРЯДОК подставными швами
+ *  (открыть → записать → fsync → закрыть); мутация PO «убрать fsync» красит оба. Цена замерена
+ *  прогоном на этой машине, числа выше]
+ */
+export function appendSampleLine(path, record, io = {}) {
+  const open = io.openSync ?? openSync;
+  const put = io.writeSync ?? writeSync;
+  const sync = io.fsyncSync ?? fsyncSync;
+  const close = io.closeSync ?? closeSync;
+
+  const line = `${JSON.stringify(record)}\n`;
+  const fd = open(path, 'a');
+  try {
+    put(fd, line, null, 'utf8');
+    sync(fd);
+  } finally {
+    close(fd);
+  }
+  return record;
+}
+
+/**
  * Sample for `seconds`, one record per `periodMs`, appending JSONL to `out` (or returning the
- * records when no file is given).
+ * records when no file is given). Every written record is fsynced — see `appendSampleLine`.
  *
  * The clock is used for SCHEDULING only and never reaches the output. The loop is synchronous by
  * design: `nvidia-smi` costs a process spawn per sample and overlapping spawns would make the
@@ -311,12 +369,18 @@ export function runHeader({ smi = 'nvidia-smi', periodMs } = {}) {
  * [TESTED: 2026-08-10 · 30 s at idle, 60 records, every field populated; two runs differ only in
  * the `t` column and in card-reported values — never in our bookkeeping]
  */
-export async function sampleFor({ seconds, periodMs = config.TELEMETRY_SAMPLE_MS, out = null, smi = 'nvidia-smi', onSample = null } = {}) {
+export async function sampleFor({
+  seconds, periodMs = config.TELEMETRY_SAMPLE_MS, out = null, smi = 'nvidia-smi', onSample = null, io = {},
+} = {}) {
   assertFieldsSane();
   const records = [];
+
+  // Every written record is FSYNCED before this returns — `appendSampleLine` above carries the why
+  // and the measured cost (`bugs/37`). Without a file we keep records in memory and there is
+  // nothing to make durable.
   const write = (obj) => {
-    const line = `${JSON.stringify(obj)}\n`;
-    if (out) appendFileSync(out, line, 'utf8'); else records.push(obj);
+    if (!out) { records.push(obj); return; }
+    appendSampleLine(out, obj, io);
   };
 
   if (out) {
