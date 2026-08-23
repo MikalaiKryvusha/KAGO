@@ -1,6 +1,8 @@
 # Bug 26 — the rehearsal stand ignores the write shape it is handed, so the lower half of the owner's band is never rehearsed (and two claims say the sweep pins every rung, which it does not)
 
-**Status:** 🔴 OPEN — found 2026-08-21 while executing step 4 of `bugs/24`'s fix plan
+**Status:** 🟡 ЧАСТИЧНО — пункты 1 и 4 плана починки закрыты 2026-08-23 (`plans/25` шаг 1.3);
+открыты пункты 2 (пин через `profile-manager`), 3 (полоса ниже пола) и 5 (развилка `demandPin` владельцу).
+Found 2026-08-21 while executing step 4 of `bugs/24`'s fix plan
 **Version/build:** `main` @ `678ae67` + the `bugs/24` fix · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-21 00:3x +03:00. Everything below is offline — the virtual card, its own
 JSON table, and one direct call into `chooseWriteShape`. Zero writes to the live GPU.
@@ -121,3 +123,31 @@ overclaim. Same family as `bugs/25` — a claim that outlived the code it descri
 - `bugs/11` / R13 — why a raise without a ceiling is dangerous above the envelope, and why the
   `uniform` branch is nonetheless correct below the floor (the pin bounds the card, not the cap).
 - EXP-0070 — a stand that tests something other than the module under test, and reports green.
+
+---
+
+## 🟡 ЧТО ЗАКРЫТО 2026-08-23 10:4x +03:00 (`plans/25` шаг 1.3)
+
+**Пункт 1 — ИСПОЛНЕН.** `makeSweepStepFn` читает `writeShape` и слушается его: на `uniform` пишет
+равномерный подъём БЕЗ потолка (ровно то, что делает живой атом — `nvapi.writeCurve(nv, handle,
+offsetMhz)`), закрепляет ТОЛЬКО когда `pinMhz !== null`, и отпускает замок в конце ступени. Плюс
+сверх плана: выданную частоту стенд теперь СПРАШИВАЕТ у карты (`clocks.gr`), а не повторяет заказ —
+без этого расхождение заказа и выдачи было невозможно по построению.
+
+**Пункт 4 — ИСПОЛНЕН.** Заголовок репетиции больше не утверждает «ЗАКРЕПЛЕНИЕ частоты на каждой
+ступени». Он говорит то же, что и живой прогон: выше пола потолка держит выпрямленная кривая и замка
+нет, ниже пола держатель — закрепление. Строка `STATUS.md` про то же исправлена ещё раньше.
+
+**Первый симптом СНЯТ, и это проверено прогоном:** `npm run bench -- --from 2100 --to 2100
+--max-depth 30` больше не отвергается сторожем R11 («потолок кривой не удержать»). Он теперь
+отвергается R13 — и **ровно так же отказал бы живой путь**: `chooseWriteShape` отвечает `uniform`,
+а `capForVector` равен `clockMhz` только при `demandPin`, которого по умолчанию нет, поэтому
+равномерный подъём выносит хвост кривой за конверт карты. **Стенд стал верен движку в обе стороны,
+и остаток — это пункт 5, вопрос владельцу, а не дефект стенда.**
+
+**Что осталось открытым:**
+- **пункт 2** — пин по-прежнему идёт мимо `profile-manager.apply(candidateProfile(...))`, значит
+  дефект класса `bugs/24` на стенде по-прежнему не покраснеет;
+- **пункт 3** — блок «полоса ниже пола закрывается 1 из 1» невозможен, пока не решён пункт 5;
+- **пункт 5** — `demandPin` как режим развёртки: слово владельца просит закрепление (шаг 7),
+  `researches/11` измерил, почему оно не может быть умолчанием. Развилка ждёт в `interviews/`.

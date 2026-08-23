@@ -43,7 +43,33 @@
 //   - the sweep ignores the blocked-rung set      → «T5: отказаться от третьей попытки…»
 //   - a lever wall reported as an edge            → «T4: сказать „предел рычага“…»
 //
-// [TESTED: 2026-08-16 00:2x · `npm run traps` → **27 assertions, 0 failures, 0 pending**. T2's second
+// ─── ЧТО ДОБАВИЛ 2026-08-23 (`plans/25` шаг 1.3) ──────────────────────────────────────────────────
+//
+// До этого дня стенд ВСЕГДА закреплял частоту и ВСЕГДА возвращал заказ как выданное. То есть он не
+// умел разойтись с заказом ВООБЩЕ, честно печатал «ЗАКАЗ ↔ ВЫДАЧА: не разошлись ни разу» — и главный
+// путь метода владельца (строка пишется по ВЫДАННОЙ частоте) не репетировался ни разу. Слово
+// владельца, 2026-08-23: *«заказать частоту у видеокарты невозможно. Можно тюнить ту частоту,
+// которую она выдаёт»*.
+//
+// Три правки, и все три — о верности стенда живому пути, а не о новых возможностях:
+//   · `makeSweepStepFn` слушается ФОРМЫ, которую ему выдали, и закрепляет ТОЛЬКО когда держатель —
+//     закрепление (`bugs/26` п. 1); выданную частоту СПРАШИВАЕТ у карты, а не повторяет заказ;
+//   · документ строится на ВЕСЬ диапазон карты, как `loadCurveDoc({})` на живом пути, — обрезанный
+//     полосой документ ронял прогон, когда просевшая частота выпадала из него;
+//   · шестая ловушка T6: карта, чей регулятор буста никогда не подходит к потолку ближе 60 МГц.
+//
+// ЧТО ЭТО НЕМЕДЛЕННО НАШЛО, и это и есть цена вопроса: `bugs/34` — сторож глубины сравнивал
+// доказанное на ЗАКАЗАННОЙ частоте с напряжением, обслуживающим ВЫДАННУЮ, и останавливал развёртку
+// на первой же ступени законного заказа.
+//
+// ⚠️ И ОДНО УТВЕРЖДЕНИЕ T3 ПЕРЕНАЦЕЛЕНО — читать его комментарий до того, как «восстанавливать».
+//
+// [TESTED: 2026-08-23 10:3x · `npm run traps` → **35 assertions, 0 failures, 0 pending**; шесть
+//  ловушек. Мутации CV (стенд снова закрепляет всегда), CW (снова повторяет заказ), CX (у карты
+//  отняли ограничитель регулятора), CY (карта под кривой не проседает), CZ (документ снова из
+//  полосы), DA (оракул судит по последнему чтению) — каждая покраснила свои утверждения.
+//
+//  EARLIER: 2026-08-16 00:2x · `npm run traps` → **27 assertions, 0 failures, 0 pending**. T2's second
 //  half and T5's two deaths are child processes that exited 70 with no `finally`, and the re-launch
 //  named the killed rung — 2842 MHz / 995 mV — closing it ЗАВИС from the shipped journal. T3 rejected
 //  its seed and printed the rejection; T4 closed two frequencies `lever-limited` and zero as edges.
@@ -126,28 +152,57 @@ export function makeStepFn(vc, card, stress, golden, stampOk, { alwaysPass = fal
  * exactly that.
  */
 export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
-  return async ({ offsetMhz, capMhz, pinMhz = null, sustain = 10 }) => {
-    const w = await vc.curveBackend.writeRaiseAndCap(offsetMhz, capMhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
+  return async ({ offsetMhz, capMhz, pinMhz = null, writeShape = null, sustain = 10 }) => {
+    // ─── СТЕНД СЛУШАЕТСЯ ФОРМЫ, КОТОРУЮ ЕМУ ВЫДАЛИ (`bugs/26`, `plans/25` шаг 1.3) ────────────────
+    //
+    // `runRung` решает, КТО держит потолок, и передаёт решение сюда тремя полями (`writeShape`,
+    // `capMhz`, `pinMhz`). Стенд их не читал: писал ВСЕГДА потолок на испытуемой частоте и
+    // ВСЕГДА закреплял. Отсюда два расхождения сразу — нижняя половина заказа владельца отвергалась
+    // сторожем R11, которого живой путь не встречает, а наверху диапазона стенд закреплял там, где
+    // живой прогон оставляет карту свободной.
+    //
+    // Форма `uniform` — это подъём БЕЗ потолка: ниже пола потолка (≈2157 МГц на карте владельца)
+    // кривой удержать нечего, и держателем становится закрепление (факт 38, R11).
+    const uniform = writeShape === 'uniform';
+    const w = uniform
+      ? await vc.curveBackend.writeRaiseAndCap(offsetMhz, null, { cardMaxClockMhz: card.card.maxGraphicsMhz })
+      : await vc.curveBackend.writeRaiseAndCap(offsetMhz, capMhz, { cardMaxClockMhz: card.card.maxGraphicsMhz });
     if (!w.ok) {
       await vc.curveBackend.zeroCurve();
       return { verdict: null, reason: `запись отвергнута: ${w.why}`, blocks: [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }] };
     }
-    const clock = pinMhz ?? capMhz;
-    vc.backend.lockGraphicsClocksMhz(clock, clock);
-    const after = vc.oracle.servingVoltageMv(clock);
+    // ЗАКРЕПЛЯЕМ ТОЛЬКО ТОГДА, КОГДА ДЕРЖАТЕЛЬ — ЗАКРЕПЛЕНИЕ. Пин это и есть ЗАКАЗ частоты, а
+    // заказать частоту у карты нельзя (слово владельца 2026-08-23); там, где потолок держит кривая,
+    // живой прогон карту не запирает, и стенд, запиравший её всегда, репетировал другую работу.
+    if (pinMhz !== null) vc.backend.lockGraphicsClocksMhz(pinMhz, pinMhz);
+    const ordered = pinMhz ?? capMhz;
 
     const burst = stress.runBurst({
       name: 'sdc_fma', args: [], sustainSeconds: sustain, run: (b, a) => vc.oracle.run(b, a),
     });
     const v = stress.decideVerdict({ bursts: [burst], golden, stamp: stampOk, faults: { providers: [], faults: [] } });
 
+    // ─── ВЫДАННАЯ ЧАСТОТА СПРАШИВАЕТСЯ У КАРТЫ, А НЕ ПОВТОРЯЕТ ЗАКАЗ ──────────────────────────────
+    //
+    // Прежняя редакция возвращала `deliveredMhz: clock`, то есть эхо собственного заказа. При этом
+    // репетиция честно печатала «ЗАКАЗ ↔ ВЫДАЧА: не разошлись ни разу» — и не могла напечатать
+    // ничего другого ПО ПОСТРОЕНИЮ. Главный путь метода (строка пишется по ВЫДАННОЙ частоте) не
+    // репетировался вовсе. Теперь читается `clocks.gr` — то же поле, что читает живой атом.
+    const deliveredMhz = Number(vc.backend.query(['clocks.gr'])['clocks.gr']);
+    // И напряжение — то, что обслуживает ВЫДАННУЮ частоту, а не заказанную: вердикт об одной
+    // частоте при напряжении другой это ровно `bugs/28`.
+    const after = vc.oracle.servingVoltageMv(deliveredMhz);
+
     await vc.curveBackend.zeroCurve();
+    if (pinMhz !== null) vc.backend.resetGraphicsClocks();
     return {
       verdict: v.verdict,
       reason: v.reason,
       worstShape: 'sdc_fma/transient',
-      deliveredMhz: clock,
-      deliveredMaxMhz: clock,
+      deliveredMhz,
+      deliveredMaxMhz: deliveredMhz,
+      clockShortfall: Number.isFinite(ordered) && deliveredMhz < ordered,
+      deliveredShortfallMhz: Number.isFinite(ordered) ? ordered - deliveredMhz : null,
       undervolt: { capMhz, after: { mv: after } },
       blocks: [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }],
     };
@@ -161,9 +216,20 @@ export function pointsForCard(card) {
     .map((p, i) => ({ i, mv: p.voltageMv, mhz: p.mhz, freqKhz: p.mhz * 1000 }));
 }
 
-/** A tuning-curve document for a band of this card — every frequency at its factory serving voltage,
- *  which is exactly what `curve --init` produces from a live card. */
-export function curveDocForCard(card, { fromMhz, toMhz }) {
+/**
+ * Документ тюнинг-кривой этой карты — каждая частота при своём заводском обслуживающем напряжении,
+ * ровно то, что `curve --init` строит по живой карте.
+ *
+ * ⚠️ ПО УМОЛЧАНИЮ — ВЕСЬ ДИАПАЗОН, А НЕ ПОЛОСА (`plans/25` шаг 1.3). Живой прогон читает документ
+ * целиком (`loadCurveDoc({})`, 389 строк) и ограничивает полосой ГРУППЫ, а не документ. Стенд же
+ * строил документ ИЗ ПОЛОСЫ — и это стало видно, как только карта получила право проседать: при
+ * заказе 2805 МГц карта выдала 2640, строки-адресата в обрезанном документе не нашлось, и развёртка
+ * встала на «притягивать некуда». Живой путь такого края не имеет вовсе, то есть стенд репетировал
+ * остановку, которой не бывает.
+ *
+ * Полоса остаётся аргументом РАЗВЁРТКИ (`fromMhz`/`toMhz` у `sweepRange`) — там ей и место.
+ */
+export function curveDocForCard(card, { fromMhz = Infinity, toMhz = -Infinity } = {}) {
   const pts = pointsForCard(card);
   const frequencies = card.frequencyGridMhz
     .filter((mhz) => mhz >= toMhz && mhz <= fromMhz)
@@ -189,7 +255,8 @@ export async function runSweep(card, { seed, fromMhz, toMhz, journal = null, str
   const vc = virtualCard(card, { settleSamples: 0, seed });
   const said = [];
   const report = await sweepRange({
-    curveDoc: curveDocForCard(card, { fromMhz, toMhz }),
+    // Документ — ВЕСЬ диапазон карты, как на живом пути; полоса ограничивает группы ниже.
+    curveDoc: curveDocForCard(card),
     points: pointsForCard(card),
     fromMhz, toMhz,
     // The card's OWN maximum, taken from the bench card rather than from the V/F table — the locked
@@ -243,8 +310,12 @@ export async function runTrapSuite() {
       r.card.trap?.klass === t.klass && Boolean(r.card.trap?.mustDo) && Boolean(r.card.trap?.otherwise),
       `в файле ${JSON.stringify(r.card.trap ?? null)}`, `класс ${t.klass}`);
   }
-  check('ЛОВУШКИ: их пять, и класс каждой назван ДО прогона (B3-AC1)',
-    TRAPS.length === 5 && cards.size === 5, `на диске ${cards.size} из ${TRAPS.length}`);
+  // ⚠️ ЧИСЛО ЗДЕСЬ ЖЁСТКОЕ НАМЕРЕННО, И ЭТО НЕ ПЕДАНТИЗМ: ловушка, тихо выпавшая с диска, — это
+  // покрытие, исчезнувшее без единого красного блока. Сторож заметил появление шестой (T6,
+  // 2026-08-23) ровно так, как должен был, и число правится ВМЕСТЕ с реестром, а не вслед за
+  // прогоном.
+  check('ЛОВУШКИ: их шесть, и класс каждой назван ДО прогона (B3-AC1)',
+    TRAPS.length === 6 && cards.size === 6, `на диске ${cards.size} из ${TRAPS.length}`);
 
   // ---- 1. T1 — the edge sits above the descent's reach (class A, judged by the REAL searchEdge)
   const t1 = cards.get('T1_edge_above_reach');
@@ -326,27 +397,98 @@ export async function runTrapSuite() {
     const { golden, stampOk } = stressFor(t3card);
     // A band that CONTAINS the inversion: the neighbour above 2842 is tuned first and seeds it.
     const r = await runSweep(t3card, { seed: 21, fromMhz: 2857, toMhz: 2842, stress, golden, stampOk });
-    const spoken = r.said.filter((e) => e.kind === 'seed-rejected');
-    check(`T3: ${mustDoOf('T3_non_monotone_vmin')} — прогнано, а не заявлено`,
-      r.report.seedRejections >= 1 && spoken.length >= 1
-        && spoken.every((e) => typeof e.text === 'string' && e.text.includes('2842')),
-      `откатов затравки ${r.report.seedRejections}, сказано ${spoken.length}: ${JSON.stringify(spoken[0]?.text ?? null)?.slice(0, 160)}`,
-      `${r.report.seedRejections} откат(ов), и каждый напечатан`);
-    check('T3: и после отката спуск ВСЁ РАВНО закрывает частоту, а не бросает её',
-      r.report.closed >= 1,
+
+    // ─── МЕХАНИЗМ ЗАЩИТЫ СМЕНИЛСЯ КАНОНОМ, СВОЙСТВО — НЕТ (2026-08-23, `plans/25` шаг 1.3) ─────────
+    //
+    // ⚠️ ЧИТАТЬ ДО ТОГО, КАК «ВОССТАНАВЛИВАТЬ» ПРЕЖНИЕ УТВЕРЖДЕНИЯ. Здесь стояли две проверки о
+    // МЕХАНИЗМЕ: «затравка ОТВЕРГНУТА» и «спуск пошёл ОТ СТОКА». Обе описывали стенд, который
+    // ЗАКРЕПЛЯЛ частоту на каждой ступени, — то есть заказывал её. Слово владельца 2026-08-23:
+    // *«заказать частоту у видеокарты невозможно. Можно тюнить ту частоту, которую она выдаёт»*.
+    // Инверсия этой карты (37,2 мВ на 2842→2850) лежит ВЫШЕ пола потолка (2090 МГц), где потолок
+    // держит кривая и закрепления нет вовсе, — значит на этой полосе прежний механизм отменён
+    // каноном, а не сломан правкой.
+    //
+    // ЧТО ПРОИСХОДИТ ТЕПЕРЬ, ЗАМЕРЕНО: край 2857 МГц = 868,4 мВ, край 2842 МГц = 915,3 мВ. Затравка
+    // 885 мВ приходит сверху; карта не тянет на ней 2842 и ПРОСЕДАЕТ на 2835, замер ложится в строку
+    // 2835 МГц, а 2842 МГц остаётся НЕТРОНУТОЙ. Ложной строки о ней не появляется — ровно то, ради
+    // чего ловушка заведена. Цена названа вслух: инвертированная частота теперь не измеряется вовсе
+    // и остаётся заводской. По канону это ОТСУТСТВУЮЩАЯ ВЫГОДА, а не риск: заводское напряжение
+    // валидировано производителем (`GOAL.md` → «Границы метода, названные заранее»).
+    //
+    // Поэтому утверждения перенацелены с механизма на СВОЙСТВО, и новое СИЛЬНЕЕ прежнего: оно ловит
+    // не только эту карту, а весь класс `bugs/28` — «вердикт об одной частоте, снятый на другой».
+    const measured = r.report.doc.frequencies.filter((x) => !x.tags.includes('stop:untouched'));
+    const closedElsewhere = r.said.filter((e) => e.kind === 'delivered-elsewhere');
+    check(`T3: ${mustDoOf('T3_non_monotone_vmin')} — ЗАЩИТА ДЕРЖИТ, механизм сменился каноном`,
+      measured.length >= 1 && !measured.some((x) => x.mhz === 2842),
+      `строк с замером ${measured.length}: ${measured.map((x) => `${x.mhz}/${x.voltageMv}`).join(' ')} — `
+        + 'если среди них есть 2842 МГц, то инвертированная частота получила значение, которого на ней не мерили',
+      `2842 МГц осталась заводской, просадок названо ${closedElsewhere.length}`);
+    check('T3: и после инверсии развёртка ВСЁ РАВНО закрывает частоты, а не бросает полосу',
+      r.report.closed >= 1 && r.report.stoppedBy === null,
       `закрыто ${r.report.closed}, остановлено: ${r.report.stoppedBy ?? '—'} ${r.report.why}`);
-    // The `mustDo` has THREE parts — reject, fall back to STOCK, say so — and the middle one needs its
-    // own assertion: a mutation that kept the rejection and kept descending from the seed left both
-    // other checks green. What proves the fall-back is that the descent's rung right after the seed
-    // is the ladder's FIRST rung from stock, i.e. shallower than the seed rather than below it.
-    const inverted = r.report.groups.find((g) => g.seedRejected);
-    const afterSeed = inverted?.rungs?.filter((x) => !x.seed && !x.refine) ?? [];
-    check('T3: и спуск после отката идёт ОТ СТОКА — первая же ступень ВЫШЕ отвергнутой затравки',
-      Boolean(inverted) && afterSeed.length > 0
-        && afterSeed[0].voltageMv > (inverted.rungs.find((x) => x.seed)?.voltageMv ?? Infinity),
-      `затравка ${inverted?.rungs?.find((x) => x.seed)?.voltageMv ?? '—'} мВ, первая ступень после неё `
-        + `${afterSeed[0]?.voltageMv ?? '—'} мВ — если она НИЖЕ, спуск продолжился от затравки, а не от стока`);
+    // ОБЩЕЕ СВОЙСТВО, РАДИ КОТОРОГО ВСЁ И ДЕЛАЛОСЬ: каждая строка с замером обязана быть строкой ТОЙ
+    // частоты, на которой шёл прожиг. Это класс `bugs/28`, и просадка — единственный способ его
+    // воспроизвести; до 2026-08-23 стенд не умел просаживаться и потому этого не проверял НИКОГДА.
+    const misfiled = measured.filter((x) => x.tags.includes('origin:measured'))
+      .filter((x) => typeof x.provenBy === 'string' && /ЗАКАЗАНО (\d+) МГц, ВЫДАНО (\d+)/.test(x.provenBy)
+        && (() => { const m = x.provenBy.match(/ВЫДАНО (\d+)/); return Number(m[1]) !== x.mhz; })());
+    check('T3: КАЖДЫЙ ЗАМЕР ЛЕЖИТ В СТРОКЕ ТОЙ ЧАСТОТЫ, НА КОТОРОЙ ШЁЛ ПРОЖИГ (класс bugs/28)',
+      misfiled.length === 0,
+      `строк, где выданная частота не равна имени строки: ${misfiled.length} — `
+        + misfiled.map((x) => `${x.mhz}: ${x.provenBy}`).join(' · '));
   } else fail('T3: карта загружена', 'карты нет на диске');
+
+  // ── T6 — КАРТА, КОТОРАЯ НИКОГДА НЕ ДАЁТ ЗАКАЗАННУЮ ЧАСТОТУ (`plans/25` шаг 1.3) ─────────────────
+  //
+  // Ловушка на E25-AC1: «недобор частоты не роняет прогон». До 2026-08-23 стенд не мог её поставить
+  // вовсе — он ВСЕГДА закреплял частоту, то есть заказывал её, и репетиция честно печатала «ЗАКАЗ ↔
+  // ВЫДАЧА: не разошлись ни разу». Главный путь метода владельца не репетировался.
+  //
+  // Здесь регулятор буста карты не подходит к потолку ближе 60 МГц НИ ПРИ КАКОМ напряжении, значит
+  // заказ не исполняется ни разу за всю полосу. Прогон обязан довести полосу до конца, положив
+  // каждый замер в строку ВЫДАННОЙ частоты.
+  const t6card = cards.get('T6_never_delivers_the_ordered_clock');
+  if (t6card) {
+    const { golden, stampOk } = stressFor(t6card);
+    // ⚠️ СНАЧАЛА — САМ МЕХАНИЗМ ЛОВУШКИ, ПРИ НУЛЕВОМ АНДЕРВОЛЬТЕ. Первая редакция этого блока
+    // проверяла только «просадка случилась», и мутация «отнять у карты ограничитель регулятора»
+    // НЕ ПОКРАСНИЛА НИЧЕГО (замерено 2026-08-23): при глубоком спуске карта проседает и от одного
+    // лишь вымышленного края, как обычная. То есть ловушка не проверяла того, что заявляет своим
+    // именем. Здесь глубина спуска НУЛЕВАЯ — кривая только подрезана потолком, напряжение стоковое,
+    // и краю просадку дать нечем: всё, что ниже 60 МГц от потолка, может прийти ТОЛЬКО от
+    // регулятора (EXP-0077 — мутация, не покрасившая ничего, это находка о коде).
+    const govVc = virtualCard(t6card, { settleSamples: 0, seed: 31 });
+    const CAP = 2842;
+    await govVc.curveBackend.writeRaiseAndCap(0, CAP, { cardMaxClockMhz: t6card.card.maxGraphicsMhz });
+    const atZeroDepth = Number(govVc.backend.query(['clocks.gr'])['clocks.gr']);
+    await govVc.curveBackend.zeroCurve();
+    check('T6: РЕГУЛЯТОР НЕ ДОХОДИТ ДО ПОТОЛКА ДАЖЕ БЕЗ АНДЕРВОЛЬТА — это и есть механизм ловушки',
+      Number.isFinite(atZeroDepth) && CAP - atZeroDepth >= 60,
+      `при нулевой глубине карта выдала ${atZeroDepth} МГц при потолке ${CAP} — недобор `
+        + `${CAP - atZeroDepth} МГц, а ловушка заявляет не меньше 60`,
+      `${atZeroDepth} МГц при потолке ${CAP}, недобор ${CAP - atZeroDepth} МГц`);
+    const r6 = await runSweep(t6card, { seed: 31, fromMhz: 2857, toMhz: 2790, stress, golden, stampOk });
+    const diverged = r6.said.filter((e) => e.kind === 'delivered-elsewhere');
+    const measured6 = r6.report.doc.frequencies.filter((x) => !x.tags.includes('stop:untouched'));
+    check(`T6: ${mustDoOf('T6_never_delivers_the_ordered_clock')} — прогнано, а не заявлено`,
+      r6.report.stoppedBy === null && r6.report.closed > 0,
+      `остановлено «${r6.report.stoppedBy ?? '—'}» ${String(r6.report.why).slice(0, 140)}, закрыто ${r6.report.closed}`,
+      `закрыто ${r6.report.closed} строк(и), полоса доведена до конца`);
+    // И ЭТО НЕ ЗЕЛЁНОЕ ПО СОВПАДЕНИЮ: недобор обязан был случиться, иначе прогон дошёл до конца
+    // просто потому, что расходиться было нечему, и ловушка не поймала бы ничего (EXP-0016).
+    check('T6: недобор ДЕЙСТВИТЕЛЬНО случился — иначе полоса закрылась бы по неинтересной причине',
+      diverged.length > 0,
+      `просадок названо ${diverged.length} — ни одной, значит карта отдавала заказ и ловушка бессмысленна`,
+      `${diverged.length} просадок(и), первая: ${String(diverged[0]?.text ?? '').slice(0, 90)}`);
+    check('T6: и КАЖДЫЙ замер лёг в строку ВЫДАННОЙ частоты, а не заказанной',
+      measured6.length > 0 && measured6.every((x) => {
+        const m = typeof x.provenBy === 'string' ? x.provenBy.match(/ВЫДАНО (\d+)/) : null;
+        return !m || Number(m[1]) === x.mhz;
+      }),
+      `строк с замером ${measured6.length}, из них с чужой выданной частотой: `
+        + measured6.filter((x) => { const m = typeof x.provenBy === 'string' ? x.provenBy.match(/ВЫДАНО (\d+)/) : null; return m && Number(m[1]) !== x.mhz; }).map((x) => x.mhz).join(', '));
+  } else fail('T6: карта загружена', 'карты нет на диске');
 
   // ── T4 — the edge lies DEEPER than our ±1000 MHz lever reaches. Reporting that as an edge would be
   // the false `[TESTED]` the second verdict exists to forbid.

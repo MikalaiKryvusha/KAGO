@@ -41,6 +41,24 @@
 
 ## Entries
 
+### EXP-0110 · 2026-08-23 · ❌→✅ · #bench #test-double #fidelity #canon #owner-word
+**Context:** the rehearsal bench printed «ЗАКАЗ ↔ ВЫДАЧА: не разошлись ни разу» run after run, and the plan called for adding a «sag parameter» to the virtual card so the new method could be rehearsed.
+**Tried / did:** started building the parameter; the owner cut through it — *«заказать частоту у видеокарты невозможно. Можно тюнить ту частоту, которую она выдаёт»*. Re-read what the bench actually did: it PINNED the clock on every rung.
+**Result:** ❌→✅ **no parameter was needed at all.** A pin IS an order, so the double could not diverge from the order BY CONSTRUCTION; removing the unwarranted pin and asking the card for `clocks.gr` made the divergence appear on its own. The sag then fell out of the fiction the card already had (its invented edge), with no new invented number.
+**Lesson:** **when a test double cannot exhibit a behaviour, suspect a CONSTRAINT the double imposes before adding a knob that fakes the behaviour.** A knob would have produced a green rehearsal of a mechanism the real card does not have — the most expensive kind of green. The tell is structural: the double does something UNCONDITIONALLY that the production path decides per case (here: pin always, while `runRung` chooses per rung). Second half: a double that is asked what it did (`query`) is faithful in ways a double that ECHOES the order can never be, however many knobs it grows.   → link: `plans/25` §1.3 · `bugs/26` · `bugs/34` · EXP-0070
+**Repro:** grep the double's seam for calls the production caller makes conditionally; each unconditional one is a behaviour the bench can never rehearse.
+**Trigger:** about to add a parameter to a test double so it can show a real-world behaviour → first ask what the double does unconditionally that the real path decides.
+**Not for:** properties the real system genuinely has as constants.
+
+### EXP-0111 · 2026-08-23 · ❌→✅ · #guards #mutation #traps #coverage
+**Context:** a new trap card (T6) declared «the boost governor never comes within 60 MHz of the ceiling», and its assertions were green.
+**Tried / did:** ran the mutation that removes the governor limiter, expecting the trap to redden.
+**Result:** ❌→✅ **nothing reddened.** The trap sagged anyway — from the ordinary edge model — so the mechanism it is NAMED for was never exercised. Worse, the field never reached the card's JSON at all: the builder did not carry it through, so the card on disk was an ordinary one wearing a trap's name.
+**Lesson:** **a trap is only as good as the mutation that removes ITS OWN mechanism — and the first such mutation must be run before the trap is believed, not after.** The general shape: when a fixture can reach its assertion by TWO routes, the assertion tests the cheaper route and says nothing about the one in the name. The fix is an assertion aimed at a condition only that mechanism can produce (here: at ZERO undervolt depth, where the edge model cannot sag at all). Second half, the one that cost the hour: **a card's property lives in the CARD'S FILE, or it does not exist** — declaring it in the registry that BUILDS cards is not the same thing, and the difference is invisible until something asks the card.   → link: `plans/25` §1.3 · `plans/19` §4.1 · EXP-0016 · EXP-0077
+**Repro:** for each trap, mutate the ONE field its name refers to and require its own assertion red; then re-read the built artifact on disk for that field.
+**Trigger:** adding a trap/fixture with a declared mechanism → write the assertion at the condition where ONLY that mechanism can produce the effect.
+**Not for:** fixtures with a single possible route to their assertion.
+
 ### EXP-0107 · 2026-08-23 · ❌→✅ · #guards #mutation #coverage #debt #measurement
 **Context:** the guards debt named by session 38 — three engine behaviours had changed in one evening and «ни один блок не покраснел».
 **Tried / did:** before writing a single block, RESTORED each defect as a mutation and ran the whole battery, to size the debt by measurement instead of by reading the diff.
