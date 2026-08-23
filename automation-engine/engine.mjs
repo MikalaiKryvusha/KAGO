@@ -203,6 +203,79 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
  *  mutation-proved with addressees 24–27. **NOT TESTED on a live card.**
  *  The hang floor (`bugs/23`) added 2026-08-17 with its own blocks and addressees 68–70.]
  */
+
+/**
+ * ONE STEP OF THE OWNER'S LADDER — «standing at `currentMv`, which grid rung is next?»
+ * `GOAL.md` → «📐 ЛЕСТНИЦА ШАГОВ СПУСКА» · `bugs/42`.
+ *
+ * ─── WHY THIS IS A FUNCTION AND NOT TWO PLACES ───────────────────────────────────────────────────
+ *
+ * The decision existed TWICE in this module, and the second copy did not implement the policy at all.
+ * `descentLadder` walked the zones (25 / 10 / 5 mV by depth from stock); the sweep's REBASE — the code
+ * that re-aims a rung when the proven ground has drifted up — took `the deepest grid rung still inside
+ * the bugs/03 wall`, i.e. it MAXIMIZED the step to 35 mV regardless of depth. On the owner's card,
+ * 2026-08-23, that produced a 30 mV step at a depth of 110 mV, where his ladder says 10 — and he read
+ * it off the screen himself: *«шаг пишет −110 мВ — какой-то бред! Такого шага не может быть!»*
+ *
+ * **The wall is a CEILING on the step, never the step itself.** Those are different quantities: the
+ * wall (`bugs/03`) says how far we may leap into the dark, the zone says how far we INTEND to. Taking
+ * the wall as the intent is how a governor turns into a target.
+ *
+ * So the two are collapsed into one function rather than kept in agreement — the outcome the pairs
+ * registry prefers (`AGENT_GUIDE.md`: «a pair that can be REMOVED beats a pair that must be watched»).
+ * `descentLadder` calls it with no ceiling; the rebase calls it with the wall as the ceiling.
+ *
+ * ─── THE GRID MAY REFUSE THE POLICY, AND THEN THE STEP GETS LONGER — SAID OUT LOUD ───────────────
+ *
+ * In 32 of this card's 126 intervals the neighbours differ by 10 mV, so a 5 mV zone step does not
+ * exist there to take. The card's own nearest rung is taken instead and `forcedByGrid` says so — that
+ * is the pre-existing behaviour of the ladder and it is unchanged. **What is new is that a forced step
+ * is still bounded by the ceiling when one is given:** the rebase may not walk past the `bugs/03` wall
+ * merely because the grid is coarse there; it reports «nowhere to go» instead, and the caller closes
+ * the frequency with what is already proven.
+ *
+ * @param {object}   a
+ * @param {number[]} a.gridDesc        the card's voltages, DESCENDING and deduplicated
+ * @param {number}   a.currentMv       where the descent stands right now (stock, a rung, or proven ground)
+ * @param {number}   a.stockVoltageMv  depth — and therefore the zone — is measured from this
+ * @param {Array}    [a.zones]         the policy; defaults to `config.DESCENT_ZONES`
+ * @param {number}   [a.maxStepMv]     a hard ceiling on the step (the `bugs/03` wall); `Infinity` = none
+ * @returns {{mv:number, zoneStepMv:number, forcedByGrid:boolean}|null} `null` = nowhere legal to step
+ *
+ * [TESTED: 2026-08-23 20:1x, OFFLINE · `engine --selftest`; the refactor out of `descentLadder` is
+ *  proved by a BYTE-EXACT golden over 1152 ladder configurations (empty diff), and the ceiling half by
+ *  its own blocks with addressees DN–DP.]
+ */
+export function nextRungFrom({
+  gridDesc = [],
+  currentMv = null,
+  stockVoltageMv = null,
+  zones = config.DESCENT_ZONES,
+  maxStepMv = Infinity,
+} = {}) {
+  if (!Array.isArray(gridDesc) || gridDesc.length === 0) return null;
+  if (!Number.isFinite(currentMv) || !Number.isFinite(stockVoltageMv)) return null;
+  if (!Array.isArray(zones) || zones.length === 0) return null;
+  // The policy step for a given depth: the first zone whose boundary the depth has not yet reached.
+  // The depth is that of where we STAND, which is how the ladder has always read it — the target's own
+  // depth cannot be the key, because the target is what this function is computing.
+  const zoneStepMv = (zones.find((z) => stockVoltageMv - currentMv < z.untilDepthMv) ?? zones[zones.length - 1]).stepMv;
+  const allowedMv = Math.min(zoneStepMv, maxStepMv);
+  const want = currentMv - allowedMv;
+  // Candidates: strictly below where we stand, and no deeper than the policy allows.
+  let next = null;
+  for (const v of gridDesc) {
+    if (v < currentMv && v >= want) { next = v; }   // grid is descending, so the last match is the deepest
+    else if (v < want) break;
+  }
+  if (next !== null) return { mv: next, zoneStepMv, forcedByGrid: false };
+  // The grid cannot express this step — the nearest point down is already deeper than the policy.
+  next = gridDesc.find((v) => v < currentMv) ?? null;
+  if (next === null) return null;                                  // the bottom of the card's grid
+  if (currentMv - next > maxStepMv) return null;                   // …and the ceiling still binds
+  return { mv: next, zoneStepMv, forcedByGrid: true };
+}
+
 export function descentLadder({
   voltageGridMv = [],
   stockVoltageMv = null,
@@ -242,8 +315,6 @@ export function descentLadder({
   // High → low, deduplicated: the grid is the card's dictionary and the descent reads it downward.
   const grid = [...new Set(voltageGridMv.filter(Number.isFinite))].sort((a, b) => b - a);
   const floorMv = stockVoltageMv - boundDepthMv;
-  // The policy step for a given depth: the first zone whose boundary the depth has not yet reached.
-  const stepForDepth = (d) => (zones.find((z) => d < z.untilDepthMv) ?? zones[zones.length - 1]).stepMv;
 
   const rungs = [];
   let current = stockVoltageMv;
@@ -251,21 +322,9 @@ export function descentLadder({
   // The grid is finite and every iteration moves strictly downward, so this terminates; the bound is a
   // backstop against a malformed grid, not part of the algorithm.
   for (let guard = 0; guard <= grid.length; guard++) {
-    const zoneStepMv = stepForDepth(stockVoltageMv - current);
-    const want = current - zoneStepMv;
-    // Candidates: strictly below where we stand, and no deeper than the policy allows.
-    let next = null;
-    let forcedByGrid = false;
-    for (const v of grid) {
-      if (v < current && v >= want) { next = v; }   // grid is descending, so the last match is the deepest
-      else if (v < want) break;
-    }
-    if (next === null) {
-      // The grid cannot express this step — the nearest point down is already deeper than the policy.
-      next = grid.find((v) => v < current) ?? null;
-      forcedByGrid = true;
-    }
-    if (next === null) break;                  // the bottom of the card's grid
+    const pick = nextRungFrom({ gridDesc: grid, currentMv: current, stockVoltageMv, zones });
+    if (pick === null) break;                  // the bottom of the card's grid
+    const { mv: next, zoneStepMv, forcedByGrid } = pick;
     // ─── THE THREE WALLS, IN THE ORDER THEY ARE ASKED, AND THE ORDER IS THE CONTENT ────────────────
     //
     // The rungs descend monotonically, so the SHALLOWEST wall always fires first and the order below
@@ -1659,11 +1718,26 @@ export async function sweepFrequency({
 
   // ---- 1. THE SEED — the owner's optimization, and its first burn is a PROOF rather than a formality.
   let lastPass = null;
-  // Пара «что заказали → что обслужило» на ПРЕДЫДУЩЕЙ ступени. Нужна ровно для одного —
-  // увидеть отсутствие продвижения, дефект, живущий в последовательности, а не в ступени
-  // (`bugs/42`, разбор у самой проверки ниже).
+  // Последняя ЗАКАЗАННАЯ ступень — то место, где спуск стоит (в отличие от `lastPass`, доказанной
+  // земли). Пересчёт от неё отмеряет шаг зоны; разбор двух якорей — у самого пересчёта ниже.
   let lastOrderedMv = null;
-  let lastDeliveredMv = null;
+  // ВСЕ напряжения, заказанные на этой частоте. Нужны ровно для одного — увидеть отсутствие
+  // продвижения, дефект, живущий в ПОСЛЕДОВАТЕЛЬНОСТИ, а не в ступени (`bugs/42`).
+  const orderedMvHere = new Set();
+  // ⚠️ ПОЧЕМУ РАННИЙ ВЫХОД ОБЯЗАН НАЗЫВАТЬ СЕБЯ — `bugs/42`, найдено 2026-08-23 20:3x.
+  //
+  // Хвост §4 ниже открывается словами «ЛЕСТНИЦА КОНЧИЛАСЬ И НИЧЕГО НЕ ОТКАЗАЛО», и на этой посылке
+  // он делает ОДНУ дорогую вещь: если план упирался в пол зависания, зовёт `closeByHang()`, то есть
+  // УТОЧНЕНИЕ — ещё десяток заказов напряжения на карте владельца.
+  //
+  // Посылка неверна для каждого `break` из спуска: там лестница НЕ кончилась, мы ушли раньше. И для
+  // выхода по «спуск не продвигается» это не мелочь, а прямое противоречие самому сторожу: он
+  // объявил, что карта не отдаёт заказанное напряжение — а уточнение только и делает, что заказывает
+  // напряжения и читает ответ. Замерено на фикстуре дрейфа: после срабатывания сторожа уточнение
+  // прошло ЧЕТЫРНАДЦАТЬ ступеней и всё равно встало, потеряв частоту (`closed: 0`).
+  //
+  // Ранний выход поэтому оставляет своё имя, а §4 спрашивает его прежде, чем поверить своей посылке.
+  let stoppedEarly = null;
   let seedTaken = false;
   const seed = plan.seed;
   if (plan.seedMv !== null) {
@@ -1768,9 +1842,17 @@ export async function sweepFrequency({
     // Плана никто не нарушал: 900 → 875 это ровно 25. Разошлись план и реальность.
     //
     // Слово владельца, которым это и лечится: *«Ты знаешь сетку напряжений видеокарты? Если знаешь,
-    // то ты знаешь, какого размера ты шаг можешь сделать»*. Знаем — значит берём САМУЮ ГЛУБОКУЮ
-    // ступень сетки, до которой шаг от земли не превышает стену. Это НЕ ослабление: пересчёт может
-    // сделать шаг только КОРОЧЕ планового, никогда длиннее, потому что стена и есть его потолок.
+    // то ты знаешь, какого размера ты шаг можешь сделать»*. Знаем — значит шагаем от земли ЕГО ЖЕ
+    // лестницей (25 / 10 / 5 мВ по глубине от стока), а стена `bugs/03` стоит над этим шагом
+    // ПОТОЛКОМ. Это НЕ ослабление: пересчёт может сделать шаг только КОРОЧЕ планового, никогда
+    // длиннее.
+    //
+    // 🔴 ЗДЕСЬ СТОЯЛО «САМАЯ ГЛУБОКАЯ СТУПЕНЬ СЕТКИ В ПРЕДЕЛАХ СТЕНЫ», И ЭТО БЫЛ ВТОРОЙ ДЕФЕКТ
+    // ВЕЧЕРА 2026-08-23 (`bugs/42`). Пересчёт МАКСИМИЗИРОВАЛ шаг до стены вместо того, чтобы
+    // слушаться зоны: на карте владельца он выдал 30 мВ на глубине 110, где лестница говорит 10, и
+    // владелец прочёл это с экрана сам. Стена отвечает на вопрос «насколько далеко ПОЗВОЛЕНО
+    // прыгнуть в темноту», зона — на вопрос «насколько далеко мы СОБИРАЛИСЬ»; взять первое за второе
+    // значит превратить сторожа в цель. Решение теперь ОДНО на оба места — `nextRungFrom`.
     const ground = lastPass ?? startMv;
     let targetMv = rung.mv;
     let rebased = false;
@@ -1787,22 +1869,75 @@ export async function sweepFrequency({
       // What replaced it is the property itself, asserted end to end — «спуск НЕ ВОЗВРАЩАЕТСЯ на
       // убившую ступень» drives a descent whose ground DRIFTS UP, so the rebase fires twice under a
       // live floor, and mutation 68 reddens it.
-      const deepest = gridDesc.filter((v) => v < ground && v >= ground - cliff).pop() ?? null;
-      if (deepest === null) {
+      // ─── ДВА ЯКОРЯ, И ИХ НЕЛЬЗЯ ПУТАТЬ — ЭТО И ЕСТЬ СОДЕРЖАНИЕ ПОЧИНКИ ───────────────────────────
+      //
+      // ШАГ ЗОНЫ отмеряется от того места, где спуск СТОИТ, — от последней ЗАКАЗАННОЙ ступени. Он
+      // отвечает на вопрос «насколько далеко шагаем В ТЕМНОТУ», а уже прожжённая ступень темнотой
+      // не является: про неё всё известно.
+      // СТЕНА `bugs/03` отмеряется от ДОКАЗАННОЙ земли и остаётся потолком суммарного шага. Она
+      // отвечает на другой вопрос — «насколько далеко ПОЗВОЛЕНО уйти от того, что выдержало прожиг».
+      //
+      // 🔴 ПЕРВАЯ РЕДАКЦИЯ ЭТОЙ ПОЧИНКИ БРАЛА ОБА ОТ ЗЕМЛИ, и суд набора это поймал: на фикстуре
+      // `bugs/23` земля стоит на стоке 1045 (карта отдала сток в ответ на заказ 1020), шаг зоны 25 от
+      // земли снова указывал на 1020 — то есть пересчёт ПРЕДЛАГАЛ УЖЕ ПРОЖЖЁННУЮ СТУПЕНЬ, спуск
+      // объявлял себя непродвигающимся и терял край, который прежде находил (970 мВ). Ошибка была не
+      // в лестнице владельца, а в том, откуда её отмеряли.
+      const standMv = Math.min(ground, lastOrderedMv ?? ground);
+      const wallLeftMv = cliff - (ground - standMv);          // сколько стены ещё не израсходовано
+      const pick = wallLeftMv <= 0 ? null
+        : nextRungFrom({ gridDesc, currentMv: standMv, stockVoltageMv, zones, maxStepMv: wallLeftMv });
+      if (pick === null) {
         // Сетка не предлагает НИ ОДНОЙ ступени между землёй и стеной — идти некуда, и это не отказ
         // карты, а конец пути на этой частоте. Закрывается тем, что уже доказано.
         say('rebase-exhausted', `${frequencyMhz} МГц: от доказанных ${ground} мВ сетка не даёт ни одной ступени `
           + `в пределах ${cliff} мВ — спуск здесь закончен`);
+        stoppedEarly = 'rebase-exhausted';
         break;
       }
-      targetMv = deepest;
+      targetMv = pick.mv;
       rebased = true;
       say('rebase', `${frequencyMhz} МГц: план звал на ${rung.mv} мВ, но доказано ${ground} мВ — это ${ground - rung.mv} мВ `
-        + `при стене ${cliff}. Беру ближайшую достижимую ступень сетки: ${targetMv} мВ (шаг ${ground - targetMv} мВ)`);
+        + `при стене ${cliff}. Пересчитываю от доказанного по лестнице: ${targetMv} мВ `
+        + `(шаг ${ground - targetMv} мВ при шаге зоны ${pick.zoneStepMv} мВ и стене ${cliff} мВ`
+        + `${pick.forcedByGrid ? ', сетка вынудила глубже политики' : ''})`,
+      { voltageMv: targetMv, stepMv: ground - targetMv, zoneStepMv: pick.zoneStepMv, forcedByGrid: pick.forcedByGrid });
     }
     // Ступень, которая не глубже уже доказанного, ничего не покупает — плановая цель осталась позади,
     // пока карта промахивалась вверх. Пропускаем молча: это не находка и не отказ.
     if (targetMv >= ground) continue;
+
+    // ⚠️ СПУСК НИКОГДА НЕ ЗАКАЗЫВАЕТ ОДНО НАПРЯЖЕНИЕ ДВАЖДЫ — `bugs/42`.
+    //
+    // Вечером 2026-08-23 на карте владельца прогон повторял ОДНУ И ТУ ЖЕ ступень: заказ 885 мВ,
+    // прогретая карта обслуживала 915, земля (самая глубокая ПРОШЕДШАЯ, `bugs/36`) застывала на 915,
+    // стена 35 мВ от неё снова разрешала только 885 — и круг замыкался. Каждый оборот стоил ПОЛНОГО
+    // ПРОЖИГА: карта грелась, документ не прирастал ни строкой, владелец в соседней комнате считал,
+    // что идёт работа. Остановил её человек, а не машина.
+    //
+    // Ни один существующий сторож этого не ловил, и не мог: каждая отдельная ступень была ЗАКОННОЙ —
+    // законный заказ, законная подстановка вверх, законный PASS, законная земля. Дефект жил не в
+    // ступени, а в ПОСЛЕДОВАТЕЛЬНОСТИ.
+    //
+    // 🔴 ПРОВЕРКА СТОИТ ДО ПРОЖИГА, А НЕ ПОСЛЕ, И ЭТО НЕ ПЕРЕСТАНОВКА РАДИ КРАСОТЫ. Первая редакция
+    // (коммит `70bf1a0`) сравнивала пару «заказ → выдача» ПОСЛЕ прожига, то есть констатировала уже
+    // потраченную минуту на карте владельца. Повторный заказ не покупает знания ни при каком ответе
+    // карты — значит его незачем прожигать, чтобы это выяснить. Сторож подешевел на один прожиг.
+    //
+    // ЗАКРЫВАЕТСЯ ЧАСТОТА, А НЕ ПОЛОСА — тем, что уже доказано. Карта, не отдающая заказанное
+    // напряжение, это находка о кремнии (то же семейство, что «не отдаёт заказанную частоту», T6):
+    // ронять из-за неё весь прогон значило бы терять работу, за которую уже заплачено прожигами.
+    if (orderedMvHere.has(targetMv)) {
+      // Поля рядом с текстом — по образцу соседних событий (`seed-rejected`): сторож обязан быть
+      // проверяем МАШИНОЙ, а не разбором прозы. Именно на них стоит красный блок набора.
+      say('no-progress', `${frequencyMhz} МГц: ступень ${targetMv} мВ заказывается ВТОРОЙ РАЗ — спуск не `
+        + 'продвигается. Прожиг не запускается: повторный заказ не покупает знания ни при каком ответе карты. '
+        + 'Частота закрывается тем, что доказано (bugs/42)',
+      { voltageMv: targetMv });
+      stoppedEarly = 'no-progress';
+      break;
+    }
+    orderedMvHere.add(targetMv);
+    lastOrderedMv = targetMv;
 
     const r = await runRung({
       frequencyMhz, voltageMv: targetMv, depthMv: stockVoltageMv - targetMv,
@@ -1820,30 +1955,6 @@ export async function sweepFrequency({
     // Carrying the asked-for value forward would put a voltage nobody proved into the document, and
     // would seed the neighbour below from a number that never existed.
     const provedMv = Number.isFinite(r?.measuredMv) ? r.measuredMv : targetMv;
-
-    // ⚠️ СПУСК ОБЯЗАН ПРОДВИГАТЬСЯ, И ЭТО СТРУКТУРНОЕ СВОЙСТВО, А НЕ ОСТОРОЖНОСТЬ — `bugs/42`.
-    //
-    // Вечером 2026-08-23 на карте владельца прогон повторял ОДНУ И ТУ ЖЕ ступень бесконечно: заказ
-    // 885 мВ, прогретая карта обслуживала 915, земля (самая глубокая ПРОШЕДШАЯ, `bugs/36`) застывала
-    // на 915, стена 35 мВ от неё снова разрешала только 885 — и круг замыкался. Каждый оборот стоил
-    // полного прожига: карта грелась, документ не прирастал ни строкой, владелец в соседней комнате
-    // считал, что идёт работа. Остановил её человек, а не машина.
-    //
-    // Ни один существующий сторож этого не ловил, и не мог: каждая отдельная ступень была ЗАКОННОЙ —
-    // законный заказ, законная подстановка вверх, законный PASS, законная земля. Дефект жил не в
-    // ступени, а в ПОСЛЕДОВАТЕЛЬНОСТИ, и увидеть его можно только сравнив две подряд.
-    //
-    // ЗАКРЫВАЕТСЯ ЧАСТОТА, А НЕ ПОЛОСА — тем, что уже доказано. Карта, не отдающая заказанное
-    // напряжение, это находка о кремнии (то же семейство, что «не отдаёт заказанную частоту», T6):
-    // ронять из-за неё весь прогон значило бы терять работу, за которую уже заплачено прожигами.
-    if (lastOrderedMv === targetMv && lastDeliveredMv === provedMv) {
-      say('no-progress', `${frequencyMhz} МГц: ступень ${targetMv} мВ заказана ВТОРОЙ РАЗ ПОДРЯД и второй раз `
-        + `обслужена ${provedMv} мВ — спуск не продвигается. Частота закрывается тем, что доказано: карта не `
-        + 'отдаёт заказанное напряжение, и повторять прожиг с тем же исходом значит греть её впустую (bugs/42)');
-      break;
-    }
-    lastOrderedMv = targetMv;
-    lastDeliveredMv = provedMv;
 
     out.rungs.push({
       // `orderedMv` — то, что ЗАКАЗАЛИ на самом деле (после пересчёта от земли), а не то, что стояло
@@ -1934,15 +2045,41 @@ export async function sweepFrequency({
 
   // ---- 4. THE LADDER RAN OUT AND NOTHING FAILED **IN THIS RUN** — but a previous run's REBOOT may be
   // exactly what the ladder stopped against, and that is a measurement, not our wall (`bugs/23`).
-  if (plan.stoppedByHang) return closeByHang();
+  //
+  // ⚠️ ОДИН РАННИЙ ВЫХОД ОТМЕНЯЕТ УТОЧНЕНИЕ, И ТОЛЬКО ОДИН (`bugs/42`). Уточнение — это ещё десяток
+  // ЗАКАЗОВ напряжения на карте владельца. После «спуск не продвигается» звать его нельзя по
+  // существу: сторож только что установил, что карта заказы НЕ ИСПОЛНЯЕТ, а уточнение ровно тем и
+  // занято, что заказывает и читает ответ. Замер на фикстуре дрейфа: без этого вопроса уточнение
+  // проходило 14 ступеней и всё равно теряло частоту (`closed: 0`); с ним — 3 ступени и частота
+  // закрыта.
+  //
+  // 🔴 И ГРАНИЦА СУЖЕНА ПОСЛЕ КРАСНОГО, А НЕ УГАДАНА. Первая редакция отменяла уточнение при ЛЮБОМ
+  // раннем выходе — и покрасила блок R18 «ЗАВИСАНИЕ ЗАКРЫВАЕТ ЧАСТОТУ КРАЕМ»: при `rebase-exhausted`
+  // спуск встаёт нашей стеной, записанное зависание под ним остаётся ВНЕШНЕЙ скобкой края, и
+  // закрывать частоту краем там правильно (R18). То есть сторож краснел на законном состоянии
+  // машинерии, которую защищает, — ловушка, которую канон называет трижды (R12 · R13 · R17).
+  if (plan.stoppedByHang && stoppedEarly !== 'no-progress') return closeByHang();
 
   // Our lever or the card's grid stopped the descent, not the silicon — and calling that an edge is
   // the false `[TESTED]` E2-AC2 exists to forbid.
   out.verdict = 'lever-limited';
   out.voltageMv = lastPass ?? stockVoltageMv;
+  out.stoppedEarly = stoppedEarly;
+  // 🟡 ЧЕСТНАЯ ГРАНИЦА, НАЗВАННАЯ ВСЛУХ, А НЕ ЗАМАЗАННАЯ. Ранний выход по «карта не отдаёт
+  // заказанное напряжение» — это НЕ предел нашего рычага, а находка о кремнии, и словаря для неё в
+  // документе кривой пока нет: `stop:*` закрыт пятью значениями (R14d), и расширять его — правка
+  // канона владельца, а не решение агента (`PHILOSOPHY.md` → три двери). Пока причина называется в
+  // `why` и в `provenBy`, а вопрос о своём теге вынесен владельцу (`bugs/42`).
+  const earlyWhy = stoppedEarly === 'no-progress'
+    ? `КАРТА НЕ ОТДАЁТ ЗАКАЗАННОЕ НАПРЯЖЕНИЕ на ${frequencyMhz} МГц: спуск повторил ступень и получил тот же `
+      + 'ответ, поэтому закрыт тем, что доказано. Это находка о кремнии, а НЕ предел рычага'
+    : `СЕТКА КОНЧИЛАСЬ на ${frequencyMhz} МГц: от доказанного не осталось ни одной ступени в пределах стены`;
   out.provenBy = lastPass === null ? null
-    : `${lastPass} мВ прошло на ${frequencyMhz} МГц, а глубже спускаться нечем: ${plan.why}`;
-  out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${plan.why}`;
+    : `${lastPass} мВ прошло на ${frequencyMhz} МГц, а глубже спускаться нечем: `
+      + `${stoppedEarly === null ? plan.why : earlyWhy}`;
+  out.why = stoppedEarly === null
+    ? `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${plan.why}`
+    : earlyWhy;
   return withDelivered();
 }
 
@@ -5544,25 +5681,47 @@ export function selfTest() {
     // закончился бы НИКОГДА, поэтому у блока есть бюджет ступеней: без него красный блок выглядел бы
     // как повисший набор, а «не напечатал провалов» и «умер» — разные вещи (правило батареи).
     //
-    // АДРЕСАТ МУТАЦИИ, НАЗВАННЫЙ ДО ПРОГОНА:
-    //   DM. снять проверку продвижения (`lastOrderedMv`/`lastDeliveredMv`) → бюджет ступеней
-    //       исчерпывается, и блок краснеет с числом.
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА — И ОБЕ ВЗЯТЫ ИЗ ОТВЕРГНУТЫХ РЕДАКЦИЙ ЭТОЙ ЖЕ ПОЧИНКИ,
+    // а не придуманы. Мутация, повторяющая настоящую промежуточную ошибку, судит сторожа честнее
+    // выдуманной: она уже случалась.
+    //   DM. отмерять шаг зоны от ДОКАЗАННОЙ ЗЕМЛИ, а не от места, где спуск стоит
+    //       (`currentMv: ground` вместо `currentMv: standMv`) → пересчёт предлагает уже прожжённую
+    //       ступень, порядок заказов ломается (…970, потом ВВЕРХ на 975), сторож повторного заказа
+    //       срабатывает → краснеют ОБА блока ниже.
+    //   DN. снять сам сторож повторного заказа (`orderedMvHere.has`) → на этой фикстуре порядок
+    //       остаётся честным, поэтому блок НЕ покраснеет; красным его делает только связка DM+DN,
+    //       и это записано, а не умолчано: сторож здесь СТРАХОВКА над структурным свойством, а
+    //       свойство доказывается мутацией DM.
     {
-      const STUCK_MV = 915;
+      // ─── ЗАКРЕПЛЁННОЕ НАПРЯЖЕНИЕ ЛЕЖИТ ВНУТРИ СЕТКИ, И ЭТО ВСЯ РАЗНИЦА ─────────────────────────
+      //
+      // 🔴 ПРЕЖНЯЯ РЕДАКЦИЯ ЭТОЙ ФИКСТУРЫ БЫЛА ОБЫЧНОЙ КАРТОЙ, а не залипшей, и мутация DM не
+      // красила её именно поэтому. Закрепление стояло на `915 мВ`, а сетка этого набора идёт
+      // 930…1045 — то есть `max(заказ, 915)` возвращал ЗАКАЗАННОЕ на каждой из шести ступеней.
+      // Замерено пробой 2026-08-23 20:0x: `1020→1020 995→995 970→970 945→945 935→935 930→930`,
+      // повторов ноль. Долг `bugs/42` был не в мутации и не в сторожe, а в числе, которое не
+      // попадало в диапазон, где механизм вообще существует (тот же класс, что EXP-0077: мутация,
+      // не покрасившая ничего, — находка о КОДЕ, а здесь о фикстуре).
+      //
+      // ЗАКРЕПЛЕНИЕ 1000 мВ ВОСПРОИЗВОДИТ ЖИВОЙ ВЕЧЕР: пока заказ выше 1000 — попадание, ниже —
+      // карта всё равно обслуживает 1000. Земля (самая глубокая ПРОШЕДШАЯ, `bugs/36`) застывает на
+      // 1000, стена 35 мВ от неё разрешает одну и ту же ступень, и пересчёт возвращает её второй
+      // раз подряд. Ровно то, что владелец видел на 2700 МГц (заказ 885 → 915, дважды).
+      const PIN_MV = 1000;
       const BUDGET = 30;
       let calls = 0;
-      // ⚠️ КАРТА ОТДАЁТ ВЫШЕ ЗАКАЗАННОГО, А НЕ НИЖЕ — первая редакция фикстуры отдавала 915 всегда,
-      // и блок краснел ПО ЧУЖОЙ ПРИЧИНЕ: на верхних ступенях 915 оказывалось глубже заказа, срабатывал
-      // сторож глубины, и проверялся он, а не продвижение. Живая карта 2026-08-23 промахивалась
-      // ВВЕРХ: пока заказ выше 915 — попадание, ниже — упор в 915. Ровно это здесь и стоит.
+      const stuckSeq = [];
+      const stuckSaid = [];
       const stuckAtom = async ({ offsetMhz, capMhz, pinMhz }) => {
         if (++calls > BUDGET) throw new Error(`БЮДЖЕТ СТУПЕНЕЙ ИСЧЕРПАН (${BUDGET}): спуск не продвигается`);
         const clock = pinMhz ?? capMhz;
         const serving = sweepPoints.filter((p) => p.mhz + offsetMhz >= clock).sort((a, b) => a.mv - b.mv)[0];
-        const ordered = serving?.mv ?? STUCK_MV;
+        const ordered = serving?.mv ?? PIN_MV;
+        const delivered = Math.max(ordered, PIN_MV);
+        stuckSeq.push(`${ordered}→${delivered}`);
         return {
           verdict: P, worstShape: 'sdc_fma/transient', deliveredMhz: clock, deliveredMaxMhz: clock,
-          undervolt: { capMhz: clock, after: { mv: Math.max(ordered, STUCK_MV) } }, blocks: cleanUndoS,
+          undervolt: { capMhz: clock, after: { mv: delivered } }, blocks: cleanUndoS,
         };
       };
       let stuck = null;
@@ -5571,25 +5730,37 @@ export function selfTest() {
         stuck = await sweepRange({
           curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, envelopeMhz: 3090,
           fromMhz: 2842, toMhz: 2842, journal: null, runStepFn: stuckAtom, buildVector: vectorPinned,
-          saveFn: async () => ({ ok: true }),
+          saveFn: async () => ({ ok: true }), onEvent: (e) => stuckSaid.push(e),
           now: () => '2026-08-23T20:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
         });
       } catch (e) { stuckThrew = e.message; }
-      // ⚠️ ЧТО ЭТОТ БЛОК ДОКАЗЫВАЕТ, А ЧТО НЕТ — НАПИСАНО ЧЕСТНО, ПОТОМУ ЧТО МУТАЦИЯ ЕГО НЕ ПОКРАСИЛА.
-      // Снятие проверки продвижения (мутация DM) оставило блок ЗЕЛЁНЫМ и число ступеней тем же — 6.
-      // Значит на ЭТОЙ фикстуре условие «та же ступень, тот же ответ дважды подряд» не возникает, и
-      // блок доказывает не сторожа, а более слабое: карта, упирающая выдачу в одно напряжение, не
-      // роняет полосу и закрывается тем, что доказано.
+      const ordered = stuckSeq.map((s) => Number(s.split('→')[0]));
+      const strictlyDown = ordered.every((v, i) => i === 0 || v < ordered[i - 1]);
+      // ⚠️ БЛОК СУДИТ ИНВАРИАНТ, А НЕ СРАБАТЫВАНИЕ СТОРОЖА — И ЭТО СОЗНАТЕЛЬНО.
       //
-      // 🔴 И ЭТО ЖЕ ИСПРАВЛЯЕТ ДИАГНОЗ ЖИВОГО ВЕЧЕРА. Прогон 2026-08-23 был остановлен агентом со
-      // словами «зациклился»; лестница спуска КОНЕЧНА, поэтому бесконечным он не был — он тратил
-      // прожиги впустую, повторяя заказ. Разница существенная: первое требует аварийной остановки,
-      // второе — нет. Красный проход самого сторожа ОСТАЁТСЯ ДОЛГОМ, и фикстура для него названа в
-      // `bugs/42`: нужна та, где пересчёт от земли возвращает РОВНО ту же ступень второй раз.
-      ok('КАРТА, УПЁРШАЯ ВЫДАЧУ В ОДНО НАПРЯЖЕНИЕ, НЕ РОНЯЕТ ПОЛОСУ',
-        stuckThrew, null);
-      ok(`и он делает это ДЁШЕВО: ступеней потрачено ${calls}`, calls <= BUDGET, true);
-      ok('частота при этом ЗАКРЫТА тем, что доказано, а полоса НЕ уронена',
+      // На залипшей карте целый прогон обязан пройти БЕЗ ЕДИНОГО повторного заказа: пересчёт
+      // отмеряет шаг зоны от места, где спуск стоит, поэтому каждая следующая цель строго ниже
+      // предыдущей, пока не кончится стена `bugs/03` от доказанной земли. Тогда спуск закрывает
+      // частоту сам, `rebase-exhausted`. Сторож повторного заказа — страховка НАД этим свойством, и
+      // блок, требующий его срабатывания, требовал бы, чтобы свойство было нарушено.
+      //
+      // 🔴 ИМЕННО ЗДЕСЬ БЫЛА ОШИБКА ПЕРВОЙ РЕДАКЦИИ ПОЧИНКИ, и она стоила бы прогона: пересчёт брал
+      // шаг зоны от ДОКАЗАННОЙ ЗЕМЛИ (1000 мВ), а не от последней заказанной (970), и предлагал
+      // 975 — ступень ВЫШЕ той, что уже прожгли. Порядок заказов ломался, сторож срабатывал, и
+      // частота закрывалась там, где спуску оставалось ещё две ступени. Мутация DM возвращает ровно
+      // эту ошибку.
+      ok('НА ЗАЛИПШЕЙ КАРТЕ СПУСК НЕ ЗАКАЗЫВАЕТ ОДНО НАПРЯЖЕНИЕ ДВАЖДЫ И НЕ ХОДИТ ВВЕРХ',
+        [strictlyDown, new Set(ordered).size === ordered.length, stuckSaid.some((e) => e.kind === 'no-progress')],
+        [true, true, false]);
+      // Вторая половина — сама последовательность. Она показывает МЕХАНИЗМ числами: три честные
+      // ступени, затем пересчёт от 970 идёт вниз до 965 и упирается в стену от земли 1000 мВ.
+      // ⚠️ ШАГ 970 → 965 — ЭТО И ЕСТЬ ВТОРАЯ ПОЧИНКА `bugs/42`, ВИДНАЯ ЧИСЛОМ: шаг отмеряется
+      // лестницей владельца от места стояния и подрезается остатком стены (35 − 30 = 5 мВ), а не
+      // берётся максимальным до стены, как раньше.
+      ok('и последовательность заказов кончается стеной от доказанного, а не повтором',
+        stuckSeq.join(' '), '1020→1020 995→1000 970→1000 965→1000');
+      ok('прогон при этом жив: бюджет ступеней не исчерпан', [stuckThrew, calls <= BUDGET], [null, true]);
+      ok('частота ЗАКРЫТА тем, что доказано, а полоса НЕ уронена',
         [stuck?.closed, stuck?.stoppedBy], [1, null]);
     }
 
