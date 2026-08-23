@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0131 · 2026-08-23 · ❌→✅ · #stamps #EXP-0019 #two-strikes #mechanize #heartbeat
+**Context:** the guarded loop's heartbeat line is written by hand, timestamp included; in one session the agent typed `18:44` when the clock said 18:20 and `18:40` when it said 18:32 — while every OTHER number in the same session was measured by a tool.
+**Tried / did:** did not add a third reminder. The one field a reader cannot verify by looking became the one field nobody types: `tools/heartbeat.mjs` composes the line and takes the stamp from the machine's clock (`--file` for Russian text, argv is the wrong pipe for it).
+**Result:** ✅ the tool's stamp matched `new Date()` to the second on the proving run; the two wrong lines were corrected from the clock and from the commit receipts (`git log --date=format`).
+**Lesson:** **the tell for «mechanize now» is not the size of the error, it is WHERE the error lives — in the one field the writer cannot check by reading it back.** An agent re-reads its own prose and sees prose; it re-reads its own timestamp and sees a plausible number. Any field like that (a stamp, a count, a duration) is written by a tool the moment it is wrong twice.   → link: EXP-0019 · EXP-0012 · tools/heartbeat.mjs
+**Repro:** `node tools/heartbeat.mjs --file <one-line note>` — then compare the appended stamp with `node -e "console.log(new Date().toString())"`.
+**Trigger:** about to type a time, a date or a count into a document → take it from the tool that owns it (the clock, the battery's own output line, `git log`), never from the head.
+**Not for:** an approximate stamp that is HONESTLY approximate (`≈ 10:05`) — the canon allows it and the tool does not replace it.
+
 ### EXP-0130 · 2026-08-23 · ❌→✅ · #guards #reachability #neighbouring-block #do-not-delete
 **Context:** a new gate refused to raise the review page over an unanswerable document; a neighbouring QA block (B4) had asserted its property by driving the server on exactly such a document, and went red.
 **Tried / did:** did NOT delete or relax B4, and did not add a bypass for it. Asked what B4 actually guards — «the writer's report matches what landed» — and drove that property one floor down, at the library call, where it still lives.
