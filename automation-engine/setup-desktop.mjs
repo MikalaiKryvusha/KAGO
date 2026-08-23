@@ -77,23 +77,43 @@ function iconLocationFor(profileName) {
 
 const WSCRIPT = 'C:\\Windows\\System32\\wscript.exe';
 
+/**
+ * THE CONSOLE-FLASH CURE, AND IT IS ONE FILE FOR EVERY CALL SITE (`bugs/39`).
+ *
+ * node.exe and schtasks.exe are CONSOLE-subsystem binaries: Windows allocates a console at process
+ * creation, and a scheduled task with an InteractiveToken principal draws that console IN THE
+ * OWNER'S SESSION. `-WindowStyle Hidden` and a minimized `.lnk` hide a window that has ALREADY been
+ * drawn, so they still flash (PowerShell#3028; `researches/07` §3 records `WScript.Shell.Run(cmd,
+ * 0, …)` as the native cure).
+ *
+ * The owner reported the flash FOUR times (`bugs/17`, then `bugs/39`), and each time it was a new
+ * CALL SITE of one disease: the tray, then the logon task, then the desktop shortcuts and the apply
+ * tasks behind them. Hence one shared runner instead of a copy per site — «fix by form», so the
+ * class cannot drift apart again (`BUG_FIXING_FRAMEWORK.md` → close the class, not the instance).
+ *
+ * Measured, red then green, on a throwaway twin task 2026-08-23: node.exe named directly as the
+ * task action produced 2 console windows with EVER-VISIBLE **2**; through the runner, EVER-VISIBLE
+ * **0** — and the child's exit code survived both (42 in the probe). Live on `\KAGO\boot-apply`:
+ * 1 window, EVER-VISIBLE 0, `LastTaskResult` 0. Visibility was MEASURED by an `EnumWindows` sampler
+ * at 100 ms, never inferred from the flag.
+ *
+ * `RUN_HIDDEN` carries `--flags` only. `schtasks` takes `/`-flags, and WSH parses those into its
+ * Named collection before a script sees them, so the shortcut path uses its own tiny composer
+ * (`apply-shortcut.js`) that builds the `/`-flags internally and never receives them.
+ */
+const RUN_HIDDEN = fileURLToPath(new URL('./run-hidden.js', import.meta.url));
+const APPLY_SHORTCUT = fileURLToPath(new URL('./apply-shortcut.js', import.meta.url));
+// //E:JScript pins the engine so the machine's .js association (which a dev tool can rewrite) never
+// decides what wscript does with our file; //B suppresses script-error dialogs.
+const hidden = (...args) => `//B //E:JScript "${RUN_HIDDEN}" ${args.map((a) => `"${a}"`).join(' ')}`;
+
 /** §4.4: the logon task — re-applies the remembered state through the SAME applier and its gates.
  *  A stale or draft remembered state degrades to factory plus a journal line, never a blind write.
- *
- *  IT GOES THROUGH wscript, NOT THROUGH node.exe DIRECTLY, and that is a fix rather than a style:
- *  node.exe is a CONSOLE-subsystem binary, so a task with an InteractiveToken principal draws its
- *  console IN THE OWNER'S SESSION — a window flashed on every logon (bugs/38, reported by the
- *  owner 2026-08-23). Measured on a throwaway twin task the same day: node.exe named directly
- *  produced 2 console windows, BOTH ever-visible; through this launcher, 1 window, ZERO ever
- *  visible — and the child's exit code still reached LastTaskResult (42 in the probe, 0 on the
- *  live run). The cure is the same one §4.5 already used for the tray, which is why the boot task
- *  now looks like the tray task: one cure, two call sites, and neither may drift back. */
+ *  The interpreter travels as an ARGUMENT rather than being hard-coded in the runner: node's
+ *  location is a fact of this machine, and the runner ships in a repository. `process.execPath` is
+ *  the same node that is running setup, i.e. the one the task used to name directly. */
 const BOOT_TASK = 'boot-apply';
-const BOOT_LAUNCHER = fileURLToPath(new URL('./boot-apply-launcher.js', import.meta.url));
-// The interpreter travels as an ARGUMENT rather than being hard-coded in the launcher: node's
-// location is a fact of this machine, and the launcher ships in a repository. `process.execPath`
-// is the same node that is running setup, i.e. the one the task used to name directly.
-const BOOT_TASK_ARGS = `//B //E:JScript "${BOOT_LAUNCHER}" "${process.execPath}"`;
+const BOOT_TASK_ARGS = `${hidden(process.execPath, PROFILE_MANAGER)} --boot-apply`;
 
 /** §4.5: the tray task — UNELEVATED on purpose (researches/07 §2: the tray reads one JSON file and
  *  must never hold elevation; an elevated parent cannot cleanly spawn a de-elevated child, so the
@@ -251,14 +271,18 @@ async function cmdInstall() {
 
   let bad = 0;
   for (const s of surface) {
-    registerTask(taskName(s.profile), `"${PROFILE_MANAGER}" --apply ${s.profile}`);
+    // Through the hidden runner for the same reason the boot task is — this is the task a desktop
+    // double-click triggers, and node.exe named directly here flashed the SECOND of the two
+    // consoles the owner saw on every mode switch (bugs/39).
+    registerTask(taskName(s.profile), `${hidden(process.execPath, PROFILE_MANAGER)} --apply ${s.profile}`, { execute: WSCRIPT });
     const t = readTask(taskName(s.profile));
-    if (!t || t.runLevel !== 'Highest') {
+    const tWrapped = !!t && t.execute.toLowerCase().includes('wscript') && t.args.includes('run-hidden.js');
+    if (!t || t.runLevel !== 'Highest' || !tWrapped) {
       bad++;
       console.log(`ПРОВАЛ задача ${fullTaskName(s.profile)} — перечитана как ${JSON.stringify(t)}`);
       continue;
     }
-    console.log(`OK   задача ${fullTaskName(s.profile)} → ${path.basename(t.execute)} ${t.args.includes(`--apply ${s.profile}`) ? `--apply ${s.profile}` : '⚠ ЧУЖИЕ АРГУМЕНТЫ'} · RunLevel ${t.runLevel}${s.draft ? ' · профиль-ЧЕРНОВИК: клик будет честно отказывать' : ''}`);
+    console.log(`OK   задача ${fullTaskName(s.profile)} → wscript //B run-hidden.js ${t.args.includes(`--apply ${s.profile}`) ? `--apply ${s.profile}` : '⚠ ЧУЖИЕ АРГУМЕНТЫ'} · RunLevel ${t.runLevel} · окно консоли НЕ создаётся видимым${s.draft ? ' · профиль-ЧЕРНОВИК: клик будет честно отказывать' : ''}`);
   }
 
   // §4.4 — the logon re-apply. Registered like the rest, plus the trigger; read back including it.
@@ -268,12 +292,12 @@ async function cmdInstall() {
   // looked at RunLevel + trigger would stay green on a task that names node.exe directly — i.e. it
   // would be green on exactly the defect it exists to prevent (bugs/38).
   const btWrapped = !!bt && bt.execute.toLowerCase().includes('wscript')
-    && bt.args.includes('boot-apply-launcher.js');
+    && bt.args.includes('run-hidden.js') && bt.args.includes('--boot-apply');
   if (!bt || bt.runLevel !== 'Highest' || bt.trigger !== 'MSFT_TaskLogonTrigger' || !btWrapped) {
     bad++;
     console.log(`ПРОВАЛ задача ${TASK_FOLDER}${BOOT_TASK} — перечитана как ${JSON.stringify(bt)}`);
   } else {
-    console.log(`OK   задача ${TASK_FOLDER}${BOOT_TASK} → wscript //B boot-apply-launcher.js (окно консоли НЕ создаётся видимым) · RunLevel ${bt.runLevel} · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
+    console.log(`OK   задача ${TASK_FOLDER}${BOOT_TASK} → wscript //B run-hidden.js --boot-apply (окно консоли НЕ создаётся видимым) · RunLevel ${bt.runLevel} · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
   }
 
   // §4.5 — the tray. Its own logon task, UNELEVATED (Limited), no execution time limit: the tray
@@ -293,18 +317,39 @@ async function cmdInstall() {
   }
 
   console.log('');
+
+  // TRUTH↔MIRROR: the mode vocabulary now lives in TWO places — SURFACE here, and the closed list
+  // inside apply-shortcut.js, which refuses a name it does not know before triggering an ELEVATED
+  // task. The pair cannot be collapsed (a WSH script cannot import an .mjs), so it is WATCHED: a
+  // mode added here and forgotten there would ship a shortcut that silently does nothing.
+  {
+    const shortcutSrc = readFileSync(APPLY_SHORTCUT, 'utf8');
+    const missing = surface.map((s) => s.profile).filter((p) => !shortcutSrc.includes(`'${p}'`));
+    if (missing.length) {
+      bad++;
+      console.log(`ПРОВАЛ apply-shortcut.js не знает режимы: ${missing.join(', ')} — ярлык по ним откажет молча`);
+    } else {
+      console.log(`OK   словарь режимов сходится: SURFACE (${surface.length}) ⊆ apply-shortcut.js`);
+    }
+  }
+
   for (const s of surface.filter((x) => x.shortcut)) {
     const lnkPath = path.join(desktop, `${s.title}.lnk`);
     const wantIcon = iconLocationFor(s.profile);
+    // The `.lnk` names wscript, not schtasks: schtasks is a console binary, so a shortcut pointing
+    // straight at it flashed the FIRST of the two windows the owner saw on every mode switch
+    // (bugs/39). `apply-shortcut.js` composes the `/run /tn …` line internally — the `/`-flags are
+    // never carried through WSH's argument parser (EXP-0043's class).
     const got = createShortcut({
       lnkPath,
-      target: SCHTASKS,
-      args: `/run /tn "${fullTaskName(s.profile)}"`,
+      target: WSCRIPT,
+      args: `//B //E:JScript "${APPLY_SHORTCUT}" ${s.profile}`,
       workingDir: REPO_ROOT,
       description: `KAGO: применить профиль ${s.profile} через повышенную задачу (${fullTaskName(s.profile)})`,
       iconLocation: wantIcon,
     });
-    const okTarget = got.target.toLowerCase() === SCHTASKS.toLowerCase() && got.args.includes(fullTaskName(s.profile));
+    const okTarget = got.target.toLowerCase() === WSCRIPT.toLowerCase()
+      && got.args.includes('apply-shortcut.js') && got.args.includes(s.profile);
     const okIcon = !wantIcon || (got.icon ?? '').toLowerCase() === wantIcon.toLowerCase();
     if (!okTarget || !okIcon) bad++;
     console.log(`${okTarget && okIcon ? 'OK  ' : 'ПРОВАЛ'} ярлык «${path.basename(lnkPath)}» → ${path.basename(got.target)} ${got.args}${wantIcon ? (okIcon ? ` · иконка ${path.basename(wantIcon.split(',')[0])}` : ` · ⚠ иконка перечитана как «${got.icon}»`) : ' · без иконки'}`);
