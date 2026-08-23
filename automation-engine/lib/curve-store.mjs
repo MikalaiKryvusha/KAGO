@@ -98,6 +98,28 @@ export const CURVE_STATUS = Object.freeze({
    *  рычага», `plans/13`), and that decision is untouched: this is the DOCUMENT's record of what
    *  stopped the descent, which is a different question from what the run concluded. */
   DEPTH_CAPPED: 'depth-capped',
+  /** THE CARD DID NOT SERVE THE ORDERED VOLTAGE — a finding about the SILICON, and the sixth value
+   *  of a vocabulary that was closed at five.
+   *
+   *  What it means: the descent asked for a voltage, read back what the card actually served, and got
+   *  something else — repeatedly, at the same rung. The frequency is closed at what IS proved, and no
+   *  further burns are spent on a request the card will not honour.
+   *
+   *  ⚠️ **Why it is not any of the other five, and each distinction is load-bearing:**
+   *    • NOT `lever-limited` — the ±1000 MHz lever had room LEFT. That is precisely the lie this
+   *      value removes: until 2026-08-23 this case was recorded as the lever running out.
+   *    • NOT `depth-capped` — our own ceiling did not fire either. Nothing of OURS stopped it.
+   *    • NOT `edge-found` — **nobody observed a failure.** The card served a different voltage; it
+   *      did not fall over. Calling this an edge would be the false `[TESTED]` class of claim.
+   *
+   *  The owner's word, `interviews/013` Q1 = A (2026-08-23): *«Завести шестой тег `stop:not-served`»*.
+   *  Read `DEPTH_CAPPED` above for why adding a value to a CLOSED vocabulary is the right move and not
+   *  a violation of it: the closure is against ACCIDENTAL values, never against correcting a statement
+   *  that is false. This is the same operation, one axis over — and this time the owner was asked
+   *  first (`bugs/42_DONE`, `engine.mjs` carried the question in a comment until it was answered).
+   *
+   *  [NOT-TESTED] at birth — the blocks in `curve --selftest` are what flip this. */
+  NOT_SERVED: 'not-served',
 });
 
 const STATUS_VALUES = Object.freeze(Object.values(CURVE_STATUS));
@@ -165,6 +187,10 @@ export const CURVE_TAGS = Object.freeze({
   STOP_LEVER_LIMIT: 'stop:lever-limited',
   /** OUR OWN condition stopped it — `--max-depth`, the operator's ceiling — with lever left to spare. */
   STOP_OUR_CAP: 'stop:depth-capped',
+  /** THE CARD WOULD NOT SERVE THE ORDERED VOLTAGE — the silicon's answer, not our lever and not our
+   *  ceiling, and **no failure was ever observed**. Full reasoning on `CURVE_STATUS.NOT_SERVED`.
+   *  The sixth value; owner's word `interviews/013` Q1 = A. */
+  STOP_NOT_SERVED: 'stop:not-served',
   /** Held the 10 s burn at this voltage. */
   BURN_SHORT: 'burn:short',
   /** Held the long burn — one minute since the owner's amendment of 2026-08-15. */
@@ -206,6 +232,7 @@ export const TAG_OF_STATUS = Object.freeze({
   [CURVE_STATUS.EDGE_FOUND]: CURVE_TAGS.STOP_EDGE_FOUND,
   [CURVE_STATUS.LEVER_LIMITED]: CURVE_TAGS.STOP_LEVER_LIMIT,
   [CURVE_STATUS.DEPTH_CAPPED]: CURVE_TAGS.STOP_OUR_CAP,
+  [CURVE_STATUS.NOT_SERVED]: CURVE_TAGS.STOP_NOT_SERVED,
   [CURVE_STATUS.SHORT_BURN_PROVED]: CURVE_TAGS.BURN_SHORT,
   [CURVE_STATUS.LONG_BURN_PROVED]: CURVE_TAGS.BURN_LONG,
 });
@@ -236,6 +263,13 @@ export function statusFromTags(tags) {
   if (has(CURVE_TAGS.STOP_EDGE_FOUND)) return CURVE_STATUS.EDGE_FOUND;
   if (has(CURVE_TAGS.STOP_LEVER_LIMIT)) return CURVE_STATUS.LEVER_LIMITED;
   if (has(CURVE_TAGS.STOP_OUR_CAP)) return CURVE_STATUS.DEPTH_CAPPED;
+  // ⚠️ THE POSITION IS A DECISION, not an append. This list is ORDERED and the order decides which
+  // tag wins on a row carrying several. `stop:not-served` sits with its two siblings — the group
+  // «the descent stopped and NOBODY SAW A FAILURE» — and ABOVE every `burn:*`, because a `stop:*`
+  // answers what became of the frequency while a `burn:*` answers how deeply it is proved. A row that
+  // held a burn and was THEN closed by the card refusing the order must read as closed, not as
+  // «burn-proved»: the burn is still true, and it is still on the row as its own tag.
+  if (has(CURVE_TAGS.STOP_NOT_SERVED)) return CURVE_STATUS.NOT_SERVED;
   if (has(CURVE_TAGS.STOP_IN_FLIGHT)) return CURVE_STATUS.PROBING;
   if (has(CURVE_TAGS.BURN_LONG)) return CURVE_STATUS.LONG_BURN_PROVED;
   if (has(CURVE_TAGS.BURN_SHORT)) return CURVE_STATUS.SHORT_BURN_PROVED;
@@ -430,8 +464,14 @@ export function summarize(doc) {
   // measured voltage that held a burn. What differs is only WHY the descent stopped, and coverage is
   // a question about measurements, not about stopping reasons — omitting it here would have made the
   // honesty fix cost 54 rows of coverage, i.e. punished the truth.
+  //
+  // `not-served` joins them 2026-08-23 by the SAME argument, and the argument is the whole point: the
+  // descent is OVER on that frequency and its voltage is proved. Leaving it out would repeat the error
+  // this comment was written about — a second honesty fix silently paid for in coverage, and a reader
+  // would blame the card for a hole the bookkeeping made.
   const closed = rows.filter((r) => r.status === CURVE_STATUS.EDGE_FOUND
     || r.status === CURVE_STATUS.LEVER_LIMITED || r.status === CURVE_STATUS.DEPTH_CAPPED
+    || r.status === CURVE_STATUS.NOT_SERVED
     || r.status === CURVE_STATUS.LONG_BURN_PROVED).length;
   const savedMv = rows.reduce((n, r) => n + Math.max(0, (r.stockVoltageMv ?? 0) - (r.voltageMv ?? 0)), 0);
   const tuned = rows.filter((r) => Number.isFinite(r.stockVoltageMv) && r.voltageMv < r.stockVoltageMv);
@@ -1356,6 +1396,48 @@ function cmdSelftest() {
     eq([CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.BURN_SHORT, CURVE_TAGS.BURN_LONG,
       CURVE_TAGS.STOP_LEVER_LIMIT, CURVE_TAGS.STOP_UNTOUCHED].map((t) => claimsBurnProof({ tags: [t] })),
     [true, true, true, false, false]));
+
+  // ═══ ЭПИК 33, ФАЗА 1 — ШЕСТОЕ ЗНАЧЕНИЕ КЛАССА `stop` (`interviews/013` Q1 = A) ═══════════════════
+  // Блоки F1-AC3 · F1-AC4 · F1-AC5 и сторож ПОРЯДКА. Мутации M1–M4 в `plans/34`.
+  console.log('\n— stop:not-served, шестое значение (эпик 33 фаза 1) —');
+  // F1-AC3. Словарь ОСТАЛСЯ закрытым: шестое значение принято, седьмое выдуманное — отвергнуто, и
+  // отказ перечисляет словарь. Без второй половины блок зеленел бы и на распахнутом словаре.
+  ok('ШЕСТОЕ ЗНАЧЕНИЕ ПРИНЯТО, а выдуманное седьмое — отвергнуто с перечислением словаря (F1-AC3)',
+    (() => {
+      const okSix = tagSetRefusals([CURVE_TAGS.STOP_NOT_SERVED, CURVE_TAGS.ORIGIN_MEASURED]);
+      const why = tagSetRefusals([CURVE_TAGS.STOP_NOT_SERVED, 'stop:выдумка']).join(' ');
+      return eq([okSix, why.includes('stop:выдумка'), why.includes(CURVE_TAGS.STOP_NOT_SERVED)],
+        [[], true, true]);
+    })());
+  // Класс `stop` ИСКЛЮЧИТЕЛЬНЫЙ, и шестое значение обязано этому подчиняться: «карта не обслужила» и
+  // «предел рычага» — два ответа на один вопрос, и на одной строке им не место.
+  ok('«не обслужено» и «предел рычага» на одной строке — ОТКАЗ: класс stop исключительный',
+    eq(tagSetRefusals([CURVE_TAGS.STOP_NOT_SERVED, CURVE_TAGS.STOP_LEVER_LIMIT]).length, 1));
+  // ⚠️ СТОРОЖ ПОРЯДКА в `statusFromTags` — риск яруса (a) из `plans/34`. Строка, выдержавшая прожиг и
+  // ЗАТЕМ закрытая отказом карты обслужить заказ, обязана читаться как ЗАКРЫТАЯ, а не как «доказана
+  // прожигом»: `stop:*` отвечает о судьбе, `burn:*` — о глубине. Прожиг при этом НЕ теряется, он
+  // остаётся своим тегом на той же строке — ровно ради этого облако и заводилось.
+  ok('ПОРЯДОК: stop:not-served выигрывает у burn:*, но прожиг со строки НЕ пропадает',
+    (() => {
+      const tags = [CURVE_TAGS.BURN_LONG, CURVE_TAGS.STOP_NOT_SERVED, CURVE_TAGS.ORIGIN_MEASURED];
+      return eq([tagSetRefusals(tags), statusFromTags(tags), tags.includes(CURVE_TAGS.BURN_LONG)],
+        [[], CURVE_STATUS.NOT_SERVED, true]);
+    })());
+  // F1-AC5. «Карта не обслужила заказ» — НЕ доказательство прожига: отказа никто не видел.
+  ok('«НЕ ОБСЛУЖЕНО» ДОКАЗАТЕЛЬСТВОМ ПРОЖИГА НЕ ЯВЛЯЕТСЯ — отказа никто не наблюдал (F1-AC5)',
+    eq(claimsBurnProof({ tags: [CURVE_TAGS.STOP_NOT_SERVED] }), false));
+  // F1-AC4. СЧЁТЧИК ПОКРЫТИЯ. Спуск на такой частоте ОКОНЧЕН и напряжение доказано — не учесть её
+  // значит занизить покрытие молча и заставить читателя винить карту за дыру, которую сделала
+  // бухгалтерия. Считаем ДЕЛЬТУ на одном и том же документе, а не абсолют: абсолют зеленел бы от
+  // любой другой закрытой строки в фикстуре.
+  ok('ЗАКРЫТАЯ ПО «НЕ ОБСЛУЖЕНО» СТРОКА СЧИТАЕТСЯ ЗАКРЫТОЙ В ПОКРЫТИИ (F1-AC4)',
+    (() => {
+      const before = summarize(healthyDoc()).closed;
+      const d = healthyDoc();
+      d.frequencies[4].tags = [CURVE_TAGS.STOP_NOT_SERVED, CURVE_TAGS.ORIGIN_MEASURED];
+      d.frequencies[4].provenBy = '885 мВ прошло, а заказ 870 карта не обслужила';
+      return eq(summarize(attachDerivedStatus(d)).closed - before, 1);
+    })());
 
   console.log('\n— СВИДЕТЕЛЬ ПРОЖИГА —');
   ok('статус «доказано прожигом» без свидетеля отвергается', (() => {

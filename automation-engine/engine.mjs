@@ -2170,11 +2170,16 @@ export async function sweepFrequency({
   out.verdict = 'lever-limited';
   out.voltageMv = lastPass ?? stockVoltageMv;
   out.stoppedEarly = stoppedEarly;
-  // 🟡 ЧЕСТНАЯ ГРАНИЦА, НАЗВАННАЯ ВСЛУХ, А НЕ ЗАМАЗАННАЯ. Ранний выход по «карта не отдаёт
-  // заказанное напряжение» — это НЕ предел нашего рычага, а находка о кремнии, и словаря для неё в
-  // документе кривой пока нет: `stop:*` закрыт пятью значениями (R14d), и расширять его — правка
-  // канона владельца, а не решение агента (`PHILOSOPHY.md` → три двери). Пока причина называется в
-  // `why` и в `provenBy`, а вопрос о своём теге вынесен владельцу (`bugs/42`).
+  // 🟢 ЧЕСТНАЯ ГРАНИЦА, И ТЕПЕРЬ У НЕЁ ЕСТЬ ИМЯ. Ранний выход по «карта не отдаёт заказанное
+  // напряжение» — это НЕ предел нашего рычага, а находка о кремнии. Словаря для неё не было: `stop:*`
+  // был закрыт ПЯТЬЮ значениями (R14d), и расширять его — правка канона владельца, а не решение
+  // агента (`PHILOSOPHY.md` → три двери). Поэтому здесь стоял вопрос, а не догадка.
+  //
+  // Вопрос задан (`bugs/42` → `interviews/013` Q1) и ОТВЕЧЕН владельцем 2026-08-23: вариант A,
+  // шестое значение `stop:not-served`. Ставится оно НЕ здесь: вердикта у частоты по-прежнему два, а
+  // документ ветвится по `stoppedEarly` в месте записи строки (`CURVE_STATUS.NOT_SERVED`, эпик
+  // `plans/33` фаза 1). Здесь причина по-прежнему называется прозой в `why` и `provenBy` — тег её
+  // дополняет, а не заменяет: подпись под измерением читает человек, тег читает код.
   const earlyWhy = stoppedEarly === 'no-progress'
     ? `КАРТА НЕ ОТДАЁТ ЗАКАЗАННОЕ НАПРЯЖЕНИЕ на ${frequencyMhz} МГц: спуск повторил ступень и получил тот же `
       + 'ответ, поэтому закрыт тем, что доказано. Это находка о кремнии, а НЕ предел рычага'
@@ -2186,6 +2191,49 @@ export async function sweepFrequency({
     ? `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: все ${rungs.length} ступен(и) прошли, отказа нет. ${plan.why}`
     : earlyWhy;
   return withDelivered();
+}
+
+/**
+ * WHAT STOPPED THE DESCENT, AS THE DOCUMENT MUST RECORD IT — one pure function, because this is the
+ * exact decision that has been caught lying to the owner twice.
+ *
+ * ─── WHY IT IS A FUNCTION AND NOT THREE LINES INSIDE THE SWEEP ────────────────────────────────────
+ *
+ * It used to be an inline ternary in `sweepBand`, unreachable by any block: the only way to exercise
+ * it was to drive a whole sweep. So it was never exercised, and both lies below shipped. Extracted
+ * 2026-08-23 with epic `plans/33` phase 1 for the same reason `resolveDeliveredRow` is a function —
+ * a decision that a reader trusts must be one a block can interrogate.
+ *
+ * ─── THE TWO LIES THIS FUNCTION EXISTS TO PREVENT ─────────────────────────────────────────────────
+ *
+ *  1. **2026-08-17 — our own ceiling reported as the lever's limit.** The run knew
+ *     (`plan.cappedByOperator`) and dropped the knowledge on the way to the document. 54 rows of 54
+ *     said «предел рычага»; not one had touched the ±1000 MHz range. Full account on
+ *     `CURVE_STATUS.DEPTH_CAPPED`.
+ *  2. **2026-08-23 — the card's refusal reported as the lever's limit.** Same slot, same shape, one
+ *     axis over: the descent stopped because the card would not serve the ordered voltage, and the
+ *     document blamed our lever. Owner's answer `interviews/013` Q1 = A → `CURVE_STATUS.NOT_SERVED`.
+ *
+ * ⚠️ **NOT A THIRD VERDICT, and that constraint is the owner's, quoted on `CURVE_STATUS.DEPTH_CAPPED`:**
+ * *«NOT a third VERDICT. The owner settled that a frequency has two … this is the DOCUMENT's record of
+ * what stopped the descent, which is a different question from what the run concluded.»* The run still
+ * concludes «край найден» or «предел рычага»; this function answers the document's separate question.
+ *
+ * ⚠️ **THE ORDER OF THE QUESTIONS IS LOAD-BEARING.** `no-progress` is asked BEFORE `cappedByOperator`:
+ * when the card refuses the order, the descent exits early and our depth ceiling never gets the chance
+ * to fire. Asking the ceiling first would relabel a finding about SILICON as a condition of OURS —
+ * precisely the confusion these values exist to keep apart.
+ *
+ * @param {{verdict?:string, stoppedEarly?:string|null, plan?:{cappedByOperator?:boolean}}} outcome
+ * @returns {string} a value of `CURVE_STATUS`
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function statusForOutcome(outcome) {
+  if (outcome?.verdict === 'edge-found') return CURVE_STATUS.EDGE_FOUND;
+  if (outcome?.stoppedEarly === 'no-progress') return CURVE_STATUS.NOT_SERVED;
+  if (outcome?.plan?.cappedByOperator) return CURVE_STATUS.DEPTH_CAPPED;
+  return CURVE_STATUS.LEVER_LIMITED;
 }
 
 /**
@@ -2612,14 +2660,7 @@ export async function sweepRange({
     const inheritFloorMhz = Math.min(g.bottomMhz, rowMhz.mhz);
 
     // ---- THE DOCUMENT, BEFORE THE NEXT FREQUENCY. Validated first, saved atomically second.
-    // WHAT STOPPED THE DESCENT IS RECORDED AS WHAT IT WAS. The run already knows
-    // (`plan.cappedByOperator`); until 2026-08-17 it dropped that knowledge on the way to the
-    // document and wrote «предел рычага» over a stop that was OUR condition. The owner read a
-    // finished run and asked what that meant — 54 rows of 54 carried it, none had touched the offset
-    // range. See `CURVE_STATUS.DEPTH_CAPPED` for the full account.
-    const status = outcome.verdict === 'edge-found'
-      ? CURVE_STATUS.EDGE_FOUND
-      : (outcome.plan?.cappedByOperator ? CURVE_STATUS.DEPTH_CAPPED : CURVE_STATUS.LEVER_LIMITED);
+    const status = statusForOutcome(outcome);
     const closed = closePoint(doc, {
       mhz: rowMhz.mhz,
       voltageMv: outcome.voltageMv,
@@ -6025,6 +6066,34 @@ export function selfTest() {
       (() => { const r = resolveDeliveredRow(docForRows, null); return [r.ok, r.mhz]; })(), [false, null]);
     ok('выданное НИЖЕ всего документа → отказ: притягивать некуда',
       resolveDeliveredRow(docForRows, 1000).ok, false);
+
+    // ═══ ЭПИК 33, ФАЗА 1 — ЧТО ОСТАНОВИЛО СПУСК, КАК ЕГО ЗАПИШЕТ ДОКУМЕНТ ═══════════════════════════
+    // `statusForOutcome` в одиночку, на всех четырёх исходах. Эта развилка дважды врала владельцу
+    // (17 и 23 августа) и до сегодня не была покрыта НИЧЕМ — она была тернарником внутри развёртки.
+    // F1-AC1. Ранний выход «карта не отдаёт заказанное» → своё имя, а НЕ предел рычага.
+    ok('F1-AC1: РАННИЙ ВЫХОД «КАРТА НЕ ОБСЛУЖИЛА ЗАКАЗ» → not-served, а не lever-limited',
+      statusForOutcome({ verdict: 'lever-limited', stoppedEarly: 'no-progress' }),
+      CURVE_STATUS.NOT_SERVED);
+    // F1-AC2. ВТОРАЯ ветка раннего выхода НЕ тронута — сторож против того, чтобы правка расползлась.
+    ok('F1-AC2: «кончилась сетка» (rebase-exhausted) по-прежнему ПРЕДЕЛ РЫЧАГА — правка не расползлась',
+      statusForOutcome({ verdict: 'lever-limited', stoppedEarly: 'rebase-exhausted' }),
+      CURVE_STATUS.LEVER_LIMITED);
+    // Регресс двух старых значений: правка не должна была их задеть.
+    ok('регресс: наш потолок глубины по-прежнему depth-capped (починка 17 августа цела)',
+      statusForOutcome({ verdict: 'lever-limited', stoppedEarly: null, plan: { cappedByOperator: true } }),
+      CURVE_STATUS.DEPTH_CAPPED);
+    ok('регресс: чистый предел рычага остался пределом рычага',
+      statusForOutcome({ verdict: 'lever-limited', stoppedEarly: null, plan: { cappedByOperator: false } }),
+      CURVE_STATUS.LEVER_LIMITED);
+    ok('край найден выигрывает у всего — это вердикт прогона, а не причина остановки',
+      statusForOutcome({ verdict: 'edge-found', stoppedEarly: 'no-progress', plan: { cappedByOperator: true } }),
+      CURVE_STATUS.EDGE_FOUND);
+    // ⚠️ ПОРЯДОК ВОПРОСОВ — риск яруса (a) из `plans/34`. Когда карта не обслужила заказ, спуск вышел
+    // РАНО и наш потолок выстрелить не успел; спроси мы потолок первым — находка о кремнии
+    // переименовалась бы в наше собственное условие. Блок держит именно этот порядок.
+    ok('ПОРЯДОК: «не обслужено» ПЕРЕВЕШИВАЕТ наш потолок глубины, а не наоборот',
+      statusForOutcome({ verdict: 'lever-limited', stoppedEarly: 'no-progress', plan: { cappedByOperator: true } }),
+      CURVE_STATUS.NOT_SERVED);
 
     // — the loop, end to end, on a card that delivers 14 MHz BELOW every order. Two ladder steps, so
     //   each measurement lands two rows down and the divergence is unmistakable.

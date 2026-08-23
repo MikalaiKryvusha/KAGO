@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0132 · 2026-08-23 · ❌→✅ · #mutation #false-green #crlf #windows #testing
+**Context:** proving phase 1 of epic 33 — five mutations, each expected to redden only its own blocks. Four reddened. **M3 came back «63 зелёных, 0 красных», i.e. the guard did not notice its own subject being deleted.**
+**Tried / did:** almost wrote it up as a blind block. Checked instead whether the mutation had applied at all: the file has **CRLF** line terminators, my `replace()` anchor ended in `\n`, so the string never matched and `writeFileSync` wrote the file back UNCHANGED. Re-ran with `\r\n` — the block reddened immediately and alone.
+**Result:** ✅ M3 proven; the block was never blind. ❌ the harness was — for one silent minute it reported a healthy guard on a mutation that never existed.
+**Lesson:** **a mutation that fails to apply is indistinguishable from a guard that passes** — and it is the more dangerous of the two, because green is the answer you were hoping for. A mutation harness must ASSERT that the file changed (anchor found · byte count moved), never infer it from the test result. On this machine that means multi-line anchors need `\r\n`: every source file here is CRLF.   → link: plans/34_epic33_phase1_the_sixth_stop_tag.md · TESTING_FRAMEWORK.md
+**Repro:** `node -e "const s=require('fs').readFileSync(f,'utf8'); if(!s.includes(anchor)) {console.log('ЯКОРЬ НЕ НАЙДЕН'); process.exit(1)}"` before every mutation; print `before.length - after.length`.
+**Trigger:** any mutation testing on this repo → single-line anchors, or `\r\n`, and always a «did it apply» assertion first.
+**Not for:** single-line anchors with no newline in them — those matched fine (M1 · M2 · M4 · M5 all applied).
+
 ### EXP-0131 · 2026-08-23 · ❌→✅ · #stamps #EXP-0019 #two-strikes #mechanize #heartbeat
 **Context:** the guarded loop's heartbeat line is written by hand, timestamp included; in one session the agent typed `18:44` when the clock said 18:20 and `18:40` when it said 18:32 — while every OTHER number in the same session was measured by a tool.
 **Tried / did:** did not add a third reminder. The one field a reader cannot verify by looking became the one field nobody types: `tools/heartbeat.mjs` composes the line and takes the stamp from the machine's clock (`--file` for Russian text, argv is the wrong pipe for it).
