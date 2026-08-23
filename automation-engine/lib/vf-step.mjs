@@ -351,6 +351,51 @@ export function judgeDeliveredClock({ capMhz, median, max, samples = null,
     why: `прожиг шёл на настраиваемой частоте: медиана ${median} МГц при потолке ${capMhz}` };
 }
 
+/**
+ * ЧТО СТУПЕНЬ ДЕЛАЕТ С ВЕРДИКТОМ ПОТОЛКА — недобор ЗАПИСЫВАЕТСЯ, превышение ОСТАНАВЛИВАЕТ.
+ *
+ * Извлечено из тела блока «ПОТОЛОК» 2026-08-23 ради одной вещи: решение стало ПРОВЕРЯЕМЫМ без
+ * карты. До извлечения оно жило внутри замыкания `runStep`, которое тянет `nvapi`, сторожа и
+ * оракула, — то есть офлайн не вызывалось вовсе, и мутация «вернуть `throw` на недобор» оставляла
+ * все 952 блока батареи зелёными (замерено 2026-08-23 09:39, `plans/25` шаг 1.2).
+ *
+ * ⚠️ ЭТО НЕ КОПИЯ РЕШЕНИЯ, А САМО РЕШЕНИЕ. Блок `runStep` вызывает эту функцию и больше ничего о
+ * потолке не решает — иначе получилась бы пара «истина↔зеркало» внутри одного модуля, ровно тот
+ * класс, который проект уже ловил (EXP-0077: два места назвали частоту ступени, и мутация не
+ * покраснила ничего).
+ *
+ * Два исхода означают ПРОТИВОПОЛОЖНЫЕ вещи (канон 2026-08-22, `GOAL.md` → «УПРАВЛЯЕМАЯ ВЕЛИЧИНА
+ * СТУПЕНИ — НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА»):
+ *   `breached` — карта ушла ВЫШЕ потолка: отгружаемая форма не удержалась. Вердикт снимается,
+ *                функция БРОСАЕТ, ступень краснеет.
+ *   `short`    — карта не добрала до потолка: это то, что она делает всегда при сниженном
+ *                напряжении, и это и есть измеряемая величина. Вердикт не трогается, ничего не
+ *                бросается, факт остаётся в `out.clockShortfall` для отчёта.
+ *
+ * @param {object} out    запись ступени (мутируется — это её собственный отчёт)
+ * @param {object} j      вердикт `judgeDeliveredClock`
+ * @param {{capMhz:number, median:number, max:number, loadedSamples:number}} obs
+ * @returns {string} строка-подробность для зелёного блока
+ * @throws {Error} только когда потолок ПРОБИТ
+ *
+ * [NOT-TESTED] at birth — flipped by the blocks in `--selftest` and their mutations BX–BZ.
+ */
+export function applyCeilingJudgement(out, j, { capMhz, median, max, loadedSamples = null } = {}) {
+  out.ceilingProof = { ok: !j.breached, capMhz, median, max };
+  out.clockHeldProof = j;
+  out.deliveredShortfallMhz = j.shortfall;
+  if (j.short) out.clockShortfall = true;
+  if (j.breached) {
+    if (out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; }
+    out.reason = j.why;
+    throw new Error(j.why);
+  }
+  const tail = j.short
+    ? ` — НЕДОБОР ${j.shortfall} МГц до потолка, это замер: строка уйдёт в выданную частоту`
+    : ' — карта под потолком и свободна вниз';
+  return `выдано ${median} МГц (максимум ${max}) при потолке ${capMhz}${tail}, ${loadedSamples} проб под нагрузкой`;
+}
+
 export function chooseWriteShape(vector, { pinned = false, demandPin = false } = {}) {
   if (!vector || vector.ok !== true) {
     return { ok: false, shape: null, heldBy: null, pinRequired: false, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
@@ -972,9 +1017,6 @@ export async function runStep({
           // and `clocks.gr` is reported on that grid, so a reading one step above the cap is rounding
           // rather than a breach. Anything beyond it means the ceiling did not hold.
           const j = judgeDeliveredClock({ capMhz, median, max, samples: loaded.length });
-          out.ceilingProof = { ok: !j.breached, capMhz, median, max };
-          out.clockHeldProof = j;
-          out.deliveredShortfallMhz = j.shortfall;
           // 🪜 НЕДОБОР ЧАСТОТЫ — ЭТО ЗАМЕР, А НЕ ОТКАЗ (канон 2026-08-22, `GOAL.md` →
           // «УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ — НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА»).
           //
@@ -992,16 +1034,11 @@ export async function runStep({
           // `out.deliveredMhz`, а развёртка кладёт замер в строку выданной частоты
           // (`resolveDeliveredRow`, притяжение ВНИЗ). `clockShortfall` остаётся как ФАКТ ступени —
           // его читает отчёт, а не тормоз.
-          if (j.short) out.clockShortfall = true;
-          if (j.breached) {
-            if (out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; }
-            out.reason = j.why;
-            throw new Error(j.why);
-          }
-          const tail = j.short
-            ? ` — НЕДОБОР ${j.shortfall} МГц до потолка, это замер: строка уйдёт в выданную частоту`
-            : ' — карта под потолком и свободна вниз';
-          return `выдано ${median} МГц (максимум ${max}) при потолке ${capMhz}${tail}, ${loaded.length} проб под нагрузкой`;
+          //
+          // Само решение живёт в `applyCeilingJudgement` — она вызывается ЗДЕСЬ и проверяется
+          // офлайн блоками набора. Здесь не остаётся ни одной ветки о потолке, иначе появилась бы
+          // вторая правда о том же (EXP-0077).
+          return applyCeilingJudgement(out, j, { capMhz, median, max, loadedSamples: loaded.length });
         },
       },
       {
@@ -1994,6 +2031,60 @@ export async function selfTest() {
     ok('НЕЧЕГО СУДИТЬ — ЭТО ОТКАЗ, а не молчаливое «сойдёт»',
       [J({ capMhz: null, median: 2880, max: 2880 }).ok, J({ capMhz: 2880, median: null, max: null }).ok],
       [false, false]);
+  }
+
+  // ─── ЧТО СТУПЕНЬ ДЕЛАЕТ С ЭТИМ ВЕРДИКТОМ (`plans/25` шаг 1.2, долг сессии 38) ─────────────────
+  //
+  // Блоки выше судят ФУНКЦИЮ-СУДЬЮ. Они зеленели и тогда, когда недобор ронял ступень: судья и до
+  // правки, и после неё возвращает `short: true` — менялось то, что ступень с этим делала.
+  // Замерено 2026-08-23 09:39: мутация «вернуть `throw` на недобор» оставила ВСЮ батарею зелёной,
+  // 952 блока из 952. То есть поведение, ради которого канон переписан, не сторожил никто.
+  //
+  // Здесь судится САМО ДЕЙСТВИЕ — `applyCeilingJudgement`, ровно та функция, которую зовёт блок
+  // «ПОТОЛОК» в `runStep`, а не её пересказ.
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   BX. вернуть `throw` на недобор                        → «НЕДОБОР НЕ РОНЯЕТ СТУПЕНЬ»
+  //   BY. снимать вердикт при недоборе (verdict = null)     → «НЕДОБОР НЕ ТРОГАЕТ ВЕРДИКТ»
+  //   BZ. перестать бросать на пробитом потолке             → «ПРОБИТЫЙ ПОТОЛОК ОСТАНАВЛИВАЕТ»
+  //   CA. не помечать факт недобора (`clockShortfall`)      → «НЕДОБОР ОСТАЁТСЯ ФАКТОМ СТУПЕНИ»
+  console.log('\n— НЕДОБОР ЧАСТОТЫ: ЗАМЕР, А НЕ ОТКАЗ (канон 2026-08-22) —');
+  {
+    const J = (o) => judgeDeliveredClock(o);
+    // Ступень, дошедшая до проверки потолка, уже несёт вердикт оракула — именно его нельзя терять.
+    const stepWithPass = () => ({ verdict: config.VERDICT.PASS, deliveredMhz: 2865 });
+    const run = (out, j, obs) => {
+      try { return { threw: false, detail: applyCeilingJudgement(out, j, obs), out }; }
+      catch (e) { return { threw: true, detail: e?.message ?? '', out }; }
+    };
+
+    // НЕДОБОР 15 МГц — ровно случай живого прогона: карта под сниженным напряжением села ниже заказа.
+    const short = run(stepWithPass(), J({ capMhz: 2880, median: 2865, max: 2865 }),
+      { capMhz: 2880, median: 2865, max: 2865, loadedSamples: 40 });
+    ok('НЕДОБОР НЕ РОНЯЕТ СТУПЕНЬ: карта села ниже заказа — исключения нет, блок остаётся зелёным',
+      short.threw, false);
+    ok('НЕДОБОР НЕ ТРОГАЕТ ВЕРДИКТ: PASS оракула остаётся PASS, отказа замка не объявляется',
+      [short.out.verdict, short.out.pinRefused ?? false], [config.VERDICT.PASS, false]);
+    ok('НЕДОБОР ОСТАЁТСЯ ФАКТОМ СТУПЕНИ: отчёт получает и признак, и ЧИСЛО недобора',
+      [short.out.clockShortfall, short.out.deliveredShortfallMhz], [true, 15]);
+    ok('и подробность блока НАЗЫВАЕТ недобор числом, а не молчит о нём',
+      /НЕДОБОР 15 МГц/.test(short.detail), true);
+
+    // ПРОБИТЫЙ ПОТОЛОК — противоположный исход той же проверки, и он обязан остаться отказом.
+    // Без этого блока мутация «перестать бросать» превратила бы правку в «потолок больше не держим».
+    const over = run(stepWithPass(), J({ capMhz: 2880, median: 2880, max: 2910 }),
+      { capMhz: 2880, median: 2880, max: 2910, loadedSamples: 40 });
+    ok('ПРОБИТЫЙ ПОТОЛОК ОСТАНАВЛИВАЕТ: исключение брошено, вердикт снят, замок объявлен отказавшим',
+      [over.threw, over.out.verdict, over.out.pinRefused], [true, null, true]);
+    ok('и причина остановки НАЗЫВАЕТ потолок, а не сообщает «что-то не так»',
+      /ВЫШЕ потолка/.test(over.out.reason ?? ''), true);
+
+    // ЧИСТАЯ СТУПЕНЬ — контроль, что зелёный путь не задет ни одной из мутаций.
+    const clean = run(stepWithPass(), J({ capMhz: 2880, median: 2880, max: 2880 }),
+      { capMhz: 2880, median: 2880, max: 2880, loadedSamples: 40 });
+    ok('КАРТА ДЕРЖИТ ЗАКАЗ: ни исключения, ни признака недобора, вердикт цел',
+      [clean.threw, clean.out.clockShortfall ?? false, clean.out.verdict],
+      [false, false, config.VERDICT.PASS]);
   }
 
   return { ok: results.every((r) => r.ok), results };

@@ -1176,14 +1176,21 @@ export function seedFor({ frequencyMhz, curveDoc } = {}) {
  *  mutation 31 (continue seeded after a rejected seed) reddens its block, and trap T3 now drives the
  *  whole path over a card whose Vmin really is non-monotone. **NOT TESTED on a live card.**]
  */
-export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, frequencyMhz } = {}) {
+export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, frequencyMhz,
+                              fromOwnEvidence = false } = {}) {
   const depth = Number.isFinite(stockVoltageMv) && Number.isFinite(seedMv) ? stockVoltageMv - seedMv : 0;
+  // ОТКУДА ЗАТРАВКА — ЧАСТЬ УТВЕРЖДЕНИЯ, А НЕ УКРАШЕНИЕ (`bugs/32`). Собственная улика доказана
+  // РОВНО на этой частоте, соседкина — на более высокой; читатель свидетеля обязан их различать,
+  // а «от соседки undefined МГц» это ещё и просто ложь в документе.
+  const source = fromOwnEvidence || !Number.isFinite(neighbourMhz)
+    ? 'из СОБСТВЕННОЙ улики этой частоты (журнал упреждающей записи)'
+    : `от соседки ${neighbourMhz} МГц`;
   if (isPass(verdict)) {
     return {
       seeded: true,
       restartFromStock: false,
       provenSavedMv: depth > 0 ? depth : 0,
-      note: `затравка ${seedMv} мВ от соседки ${neighbourMhz} МГц прошла — монотонность здесь держится, `
+      note: `затравка ${seedMv} мВ ${source} прошла — монотонность здесь держится, `
         + `спуск продолжается от неё (доказанная глубина −${depth} мВ)`,
     };
   }
@@ -1191,7 +1198,7 @@ export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, fre
     seeded: false,
     restartFromStock: true,
     provenSavedMv: 0,
-    note: `ЗАТРАВКА ОТВЕРГНУТА на ${frequencyMhz} МГц: ${seedMv} мВ от соседки ${neighbourMhz} МГц дало `
+    note: `ЗАТРАВКА ОТВЕРГНУТА на ${frequencyMhz} МГц: ${seedMv} мВ ${source} дало `
       + `вердикт ${verdict ?? 'НЕИЗВЕСТНО'}, а не PASS. Монотонность на этом кремнии здесь НАРУШЕНА — `
       + `это находка о карте, а не сбой прогона. Спуск начинается заново от стока ${stockVoltageMv} мВ `
       + 'по лестнице шагов владельца.',
@@ -1375,9 +1382,15 @@ export function planFrequency({
     // rather than the run discovering it after the operator has already said «go».
     cliffRefused: firstStepMv !== null && firstStepMv > cliffMv,
     cliffMv,
+    // ⚠️ ОТМЕНЁННАЯ ЗАТРАВКА НАЗЫВАЕТСЯ СВОИМ ЧИСЛОМ И СВОИМ ИСТОЧНИКОМ (`bugs/32`). Прежняя
+    // редакция брала их у `seed`, то есть у соседки, — а отменить пол зависания мог и прыжок из
+    // СОБСТВЕННОЙ улики частоты, и тогда соседки могло не быть вовсе (`seed === null` → падение).
+    cancelledSeedMv: seedBlockedByHang ? candidateSeedMv : null,
     why: ladder.why
       + (seedBlockedByHang
-        ? ` · ЗАТРАВКА ОТМЕНЕНА ПОЛОМ ЗАВИСАНИЯ: соседка ${seed.neighbourMhz} МГц предлагает ${seed.seedMv} мВ, `
+        ? ` · ЗАТРАВКА ОТМЕНЕНА ПОЛОМ ЗАВИСАНИЯ: ${seedFromOwnEvidence || !seed
+          ? 'собственная улика этой частоты предлагает'
+          : `соседка ${seed.neighbourMhz} МГц предлагает`} ${candidateSeedMv} мВ, `
           + `а ${hangFloorMv} мВ уже вешало эту частоту — спуск идёт от стока`
         : ''),
   };
@@ -1444,6 +1457,9 @@ export async function sweepFrequency({
     seeded: false,
     seedRejected: false,
     seedFrom: null,
+    // ОТКУДА ПРИШЛА ЗАТРАВКА — поле, а не проза (`bugs/32`): свидетель строки и события окна читают
+    // его, вместо того чтобы по умолчанию приписывать число соседке, которой могло и не быть.
+    seedFromOwnEvidence: false,
     rungs: [],
     refinement: null,
     halted: false,
@@ -1581,30 +1597,43 @@ export async function sweepFrequency({
   let seedTaken = false;
   const seed = plan.seed;
   if (plan.seedMv !== null) {
+    // ⚠️ НАПРЯЖЕНИЕ ЗАТРАВКИ БЕРЁТСЯ ИЗ `plan.seedMv`, А НЕ ИЗ `plan.seed` (`bugs/32`).
+    //
+    // `plan.seed` — это СЫРОЙ ответ соседки. Решение о том, откуда начать спуск, план принимает сам:
+    // глубочайшая из двух улик — собственной (журнал этой частоты) и соседкиной (`bugs/31`). Читая
+    // `plan.seed.seedMv`, прогон переспрашивал уже решённое, и это была пара «истина↔зеркало» внутри
+    // одной функции (EXP-0077). Цена, замеренная пробой 2026-08-23: план печатал 870 мВ, а прогон
+    // заказывал соседкины 990 — то есть починка `bugs/31` не доезжала до карты ВОВСЕ, а сухой прогон
+    // (документ разрешения на запись, рельс S2) обещал не то, что произойдёт — это `bugs/09`.
+    // И второе лицо того же: без оттюненной соседки `plan.seed` равен `null`, а собственная улика
+    // есть — развёртка падала `TypeError`-ом на первой же частоте полосы.
+    const seedMv = plan.seedMv;
     out.seedFrom = seed;
+    out.seedFromOwnEvidence = plan.seedFromOwnEvidence === true;
     // `frequencyMhz` is handed DOWN rather than known by the caller: naming the rung's frequency in
     // two places would be a truth↔mirror pair inside one function, and it hid a mutation — burning
     // the rung's lowest frequency instead of its highest reddened nothing, because the caller's
     // hard-coded clock kept the burn where it belonged while the decision moved.
     const sr = await runRung({
-      frequencyMhz, voltageMv: seed.seedMv, depthMv: stockVoltageMv - seed.seedMv, zoneStepMv: null, seeded: true,
+      frequencyMhz, voltageMv: seedMv, depthMv: stockVoltageMv - seedMv, zoneStepMv: null, seeded: true,
     });
-    out.rungs.push({ voltageMv: seed.seedMv, seed: true, outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null });
+    out.rungs.push({ voltageMv: seedMv, seed: true, outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null });
     const decision = seedOutcome({
       verdict: sr?.outcome === 'passed' ? sr?.verdict : null,
-      seedMv: seed.seedMv, stockVoltageMv, neighbourMhz: seed.neighbourMhz, frequencyMhz,
+      seedMv, stockVoltageMv, neighbourMhz: seed?.neighbourMhz ?? null, frequencyMhz,
+      fromOwnEvidence: plan.seedFromOwnEvidence === true,
     });
     if (decision.seeded) {
       out.seeded = true;
       seedTaken = true;
-      lastPass = seed.seedMv;
+      lastPass = seedMv;
       say('seed-accepted', decision.note);
     } else {
       // E2-AC11: the rejection is a FINDING about the silicon, and it is counted as one. The seed is
       // never retried at this frequency — repeating a jump that was not safe is `bugs/03` with extra
       // steps.
       out.seedRejected = true;
-      say('seed-rejected', decision.note, { seedMv: seed.seedMv, neighbourMhz: seed.neighbourMhz });
+      say('seed-rejected', decision.note, { seedMv, neighbourMhz: seed?.neighbourMhz ?? null });
     }
   }
 
@@ -1627,9 +1656,14 @@ export async function sweepFrequency({
     // Nothing below where we stand that the lever can still reach — OUR wall, never the silicon's.
     out.verdict = 'lever-limited';
     out.voltageMv = lastPass ?? stockVoltageMv;
+    // Свидетель называет ИСТОЧНИК улики, а не «соседку» по умолчанию (`bugs/32`): затравка могла
+    // прийти из собственного журнала этой частоты, и приписать её соседке значит завести в документ
+    // ложную родословную числа.
     out.provenBy = lastPass === null
       ? null
-      : `затравка ${lastPass} мВ от соседки ${out.seedFrom?.neighbourMhz} МГц прошла, а глубже рычаг не достаёт`;
+      : `затравка ${lastPass} мВ ${out.seedFromOwnEvidence || !Number.isFinite(out.seedFrom?.neighbourMhz)
+        ? 'из СОБСТВЕННОЙ улики этой частоты'
+        : `от соседки ${out.seedFrom.neighbourMhz} МГц`} прошла, а глубже рычаг не достаёт`;
     out.why = `ПРЕДЕЛ РЫЧАГА на ${frequencyMhz} МГц: ${plan.why}`;
     return withDelivered();
   }
@@ -2391,6 +2425,28 @@ export async function sweepDryRun({
  * [TESTED: 2026-08-16 01:0x, OFFLINE · 2 blocks; mutations 65 (drop the first step's depth) and 66
  *  (print only the seeded ladder) each redden their own block.]
  */
+/**
+ * ЧЕМ РАЗВЁРТКА ЖЖЁТ — ОДИН ИСТОЧНИК ДЛЯ ПЛАНА И ДЛЯ ПРОГОНА (`bugs/33`).
+ *
+ * Пара «истина↔зеркало», которую реестр велит СХЛОПЫВАТЬ, а не сторожить: команда передавала в
+ * прогон один набор форм, а печать плана строила себе лестницу из четырёх уровней заново и обещала
+ * оператору переигрывание, которого не будет. Сухой прогон — документ рельса S2, который читают
+ * ПЕРЕД разрешением записи в карту владельца, поэтому расхождение здесь дороже всего.
+ *
+ * ЛЕСТНИЦА ИНТЕНСИВНОСТИ — ОДИН УРОВЕНЬ, и это следствие канона, а не экономия. Лестница (`bugs/28`)
+ * существовала ровно для того, чтобы принудить карту сесть на ЗАКАЗАННУЮ частоту; канон 2026-08-22
+ * (`GOAL.md` → «УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ — НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА») отменил саму цель —
+ * строка пишется по ВЫДАННОЙ частоте, принуждать стало нечего. Побочно это чинит и измерение:
+ * ослабленный прожиг доказывал напряжение под НЕ ТОЙ нагрузкой, под которой владелец играет.
+ *
+ * @returns {Array<Array<object>>} лестница наборов форм; её длина И ЕСТЬ число попыток на ступень
+ *
+ * [NOT-TESTED] at birth — flipped by the block «ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ» in `--selftest`.
+ */
+export function sweepBurnLadder() {
+  return [furnaceSetAtLevel(0)];
+}
+
 export function sweepDryRunLines(dry) {
   const lines = [];
   lines.push(`СУХОЙ ПРОГОН: частот в полосе ${dry.frequenciesInBand}, из них прожигается ${dry.groupCount} `
@@ -2400,13 +2456,19 @@ export function sweepDryRunLines(dry) {
   // ПЛАНОМ, не добавлена (EXP-0052, `bugs/09`): оператор читает сухой прогон, а не исходники.
   // Развёртка переехала на `furnace` 2026-08-22, и эта строка — то, по чему это видно ДО записи.
   {
-    const ladder = [0, 1, 2, 3].map((lvl) => furnaceSetAtLevel(lvl));
+    // ЛЕСТНИЦА БЕРЁТСЯ ИЗ ОДНОГО ИСТОЧНИКА С ПРОГОНОМ (`sweepBurnLadder`, `bugs/33`) — иначе план
+    // описывает работу, которой не будет, а читает его оператор перед разрешением записи в карту.
+    const ladder = sweepBurnLadder();
     const strongest = ladder[0].filter((s) => s.bearsVerdict).map((s) => s.id).join(' + ');
-    lines.push(`ПРОЖИГ: ${strongest} по ${config.SWEEP_PROBE_SECONDS ?? 10} с. `
-      + `Если карта под ним не сядет на настраиваемую частоту — ступень ПЕРЕИГРЫВАЕТСЯ ослабленной `
-      + `нагрузкой, ступеней интенсивности ${ladder.length} `
-      + `(${FURNACE_LADDER.map((l) => `${l.wattsSeen} Вт→${l.heldMhzSeen} МГц`).join(' · ')}). `
-      + `Кончились ступени — это НАХОДКА, а не вердикт о другой частоте (bugs/28).`);
+    lines.push(`ПРОЖИГ: ${strongest} по ${config.SWEEP_PROBE_SECONDS ?? 10} с, `
+      + `ОДНИМ полным набором — попытка на ступень ${ladder.length}. `
+      + (ladder.length > 1
+        ? `Если карта под ним не сядет на настраиваемую частоту — ступень ПЕРЕИГРЫВАЕТСЯ ослабленной `
+          + `нагрузкой (${FURNACE_LADDER.map((l) => `${l.wattsSeen} Вт→${l.heldMhzSeen} МГц`).join(' · ')}). `
+          + `Кончились ступени — это НАХОДКА, а не вердикт о другой частоте (bugs/28).`
+        : 'ПЕРЕИГРЫВАНИЯ НЕТ: недобор частоты — это ЗАМЕР, а не отказ, и строка уйдёт в ВЫДАННУЮ '
+          + 'частоту (канон 2026-08-22, «УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ — НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА»). '
+          + 'Все строки полосы сняты в ОДНОМ режиме прожига и потому сопоставимы между собой.'));
   }
   if (Number.isFinite(dry.depthCapMv)) {
     lines.push(`ПОТОЛОК ГЛУБИНЫ ${dry.depthCapMv} мВ от стока — УСЛОВИЕ ЭТОГО ПРОГОНА, не свойство карты. `
@@ -2421,12 +2483,14 @@ export function sweepDryRunLines(dry) {
   lines.push('В КАРТУ НЕ ЗАПИСАНО НИЧЕГО — это план, а не прогон.');
   for (const g of dry.groups) {
     const p = g.plan;
+    // Числа отменённой затравки берутся из ПЛАНА (`cancelledSeedMv`), а не у соседки: отменить могли
+    // и собственную улику частоты, и соседки при этом может не быть вовсе (`bugs/32`).
     const seed = p.seedMv === null
       ? `затравки нет (спуск от стока ${p.stockVoltageMv} мВ)`
-        + (p.seedBlockedByHang ? ` — затравку ${p.seed.seedMv} мВ ОТМЕНИЛ ПОЛ ЗАВИСАНИЯ ${p.hangFloorMv} мВ` : '')
+        + (p.seedBlockedByHang ? ` — затравку ${p.cancelledSeedMv} мВ ОТМЕНИЛ ПОЛ ЗАВИСАНИЯ ${p.hangFloorMv} мВ` : '')
       : (p.seedFromOwnEvidence
         ? `затравка ${p.seedMv} мВ — СОБСТВЕННАЯ улика этой частоты из журнала (bugs/31), а не значение соседки`
-        : `затравка ${p.seedMv} мВ от соседки ${p.seed.neighbourMhz} МГц (статус «${p.seed.neighbourStatus}»)`);
+        : `затравка ${p.seedMv} мВ от соседки ${p.seed?.neighbourMhz} МГц (статус «${p.seed?.neighbourStatus}»)`);
     lines.push(`${g.topMhz} МГц — ступень из ${g.count} частот(ы) до ${g.bottomMhz} МГц, сток ${g.stockVoltageMv} мВ`);
     lines.push(`   ${seed}`);
     if (p.refused) { lines.push(`   ❌ ЛЕСТНИЦА НЕ ПОСТРОЕНА: ${p.why}`); continue; }
@@ -3435,6 +3499,63 @@ export function selfTest() {
       });
       return [p.hangFloorMv, p.stoppedByHang, p.rungs.at(-1)?.mv ?? 'ступеней нет вовсе'];
     })(), [970, true, 995]);
+
+  // ─── СОБСТВЕННАЯ УЛИКА ЧАСТОТЫ СИЛЬНЕЕ СОСЕДСКОЙ ЗАТРАВКИ (`bugs/31`, `plans/25` шаг 1.2) ───────
+  //
+  // Зеркало стены выше: пол зависания помнит, чем частота убилась, доказанная земля — на чём она
+  // выстояла. Вторая половина вышла в бой без единого блока, и это замерено, а не предположено:
+  // 2026-08-23 мутация «не читать собственную улику» оставила батарею зелёной, 959 блоков из 959.
+  // Цена дефекта названа живым прогоном — 2820 МГц шла 995 → 870 тринадцатью ступенями, каждая из
+  // которых уже проходила; владелец: «край найден у точки, какого хуя вновь с неё начинать».
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   CI. не читать `provenPassMv`                        → «СПУСК СТАРТУЕТ ОТ СОБСТВЕННОЙ УЛИКИ»
+  //   CJ. брать соседскую затравку вместо глубочайшей     → «БЕРЁТСЯ ГЛУБОЧАЙШАЯ ИЗ ДВУХ УЛИК»
+  //   CK. врать об источнике (`seedFromOwnEvidence`)      → «ИСТОЧНИК ЗАТРАВКИ НАЗВАН ЧЕСТНО»
+  //   CL. пропустить улику мимо пола зависания            → «ПОЛ ОТМЕНЯЕТ И СОБСТВЕННУЮ УЛИКУ»
+  {
+    // Соседка 2850 МГц оттюнена до 990 мВ — это и есть затравка, которую даёт `seedFor`.
+    const docWithNeighbour = {
+      kind: 'tuning-curve', voltageGridMv: uniform5,
+      frequencies: [
+        { mhz: 2850, voltageMv: 990, stockVoltageMv: 1045, tags: [CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.BURN_SHORT], provenBy: 'прожиг' },
+        { mhz: 2842, voltageMv: 1045, stockVoltageMv: 1045, tags: [CURVE_TAGS.STOP_UNTOUCHED], provenBy: null },
+      ],
+    };
+    const plan = (over = {}) => planFrequency({
+      frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: uniform5,
+      availableDepthMv: 200, curveDoc: docWithNeighbour, ...over,
+    });
+    const neighbourOnly = plan();
+    ok('без собственной улики затравка приходит от соседки — прежнее поведение цело',
+      [neighbourOnly.seedMv, neighbourOnly.seedFromOwnEvidence], [990, false]);
+    // Улика ГЛУБЖЕ соседкиной — и решает она: 870 доказаны РОВНО на этой частоте.
+    const own = plan({ provenPassMv: 870 });
+    ok('СПУСК СТАРТУЕТ ОТ СОБСТВЕННОЙ УЛИКИ: доказанные 870 мВ, а не соседкины 990',
+      [own.seedMv, own.startMv], [870, 870]);
+    // ⚠️ ЧИСЛО СЭКОНОМЛЕННЫХ СТУПЕНЕЙ БЛОК СЧИТАЕТ САМ, а не сверяется с числом из головы: первая
+    // редакция этой строки ждала 24 (прикидка на равномерной сетке), прогон дал 12 — лестница идёт
+    // по зонам 25/10/5 от ГЛУБИНЫ, а не по сетке. Утверждение, сравнивающее «получено» с «ждали»,
+    // обязано делать сравнение само (EXP-0016 и урок блоков облака тегов).
+    ok('и ступеней остаётся ровно столько, сколько НЕ пройдено — сэкономленные не жгутся заново',
+      [own.rungs.every((r) => r.mv < 870),
+        neighbourOnly.rungs.length - own.rungs.length === neighbourOnly.rungs.filter((r) => r.mv >= 870).length,
+        own.rungs.length < neighbourOnly.rungs.length],
+      [true, true, true]);
+    ok('ИСТОЧНИК ЗАТРАВКИ НАЗВАН ЧЕСТНО: сухой прогон не выдаёт свою улику за соседкину',
+      [own.seedFromOwnEvidence, neighbourOnly.seedFromOwnEvidence], [true, false]);
+    // БЕРЁТСЯ ГЛУБОЧАЙШАЯ ИЗ ДВУХ. Обе улики законны: соседкина доказана ВЫШЕ по частоте (Vmin не
+    // убывает с частотой), собственная — ровно здесь. Мельче — значит лишние прожиги.
+    ok('БЕРЁТСЯ ГЛУБОЧАЙШАЯ ИЗ ДВУХ УЛИК: соседка глубже собственной — стартуем от соседки',
+      plan({ provenPassMv: 1010 }).seedMv, 990);
+    ok('и мельче стока улика не считается вовсе — «доказано на стоке» это не доказательство спуска',
+      [plan({ provenPassMv: 1045 }).seedMv, plan({ provenPassMv: 1200 }).seedFromOwnEvidence], [990, false]);
+    // ПОЛ ОТМЕНЯЕТ И СОБСТВЕННУЮ УЛИКУ. Прыжок есть прыжок: затравка не ступень лестницы, и пол
+    // лестницы её не спасёт — она доставила бы нас на убившее напряжение ПЕРВЫМ же прожигом.
+    const blocked = plan({ provenPassMv: 870, hangFloorMv: 880 });
+    ok('ПОЛ ОТМЕНЯЕТ И СОБСТВЕННУЮ УЛИКУ: 870 мВ ниже стены 880 — спуск идёт от стока',
+      [blocked.seedMv, blocked.seedBlockedByHang, blocked.startMv], [null, true, 1045]);
+  }
 
   // — depth shallower than one grid step: an honest empty ladder, and NOT a refusal
   const tooShallow = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 3 });
@@ -5092,6 +5213,166 @@ export function selfTest() {
     ok('ПЛАН И ПРОГОН НАЗЫВАЮТ ОДНОГО ДЕРЖАТЕЛЯ — иначе оператор санкционирует не тот прогон (bugs/09, bugs/14)',
       [holderInPlan, holderInRun], ['кривая', 'кривая']);
 
+    // ─── ЗАЖАТЫЙ КРАЙ ПРОПУСКАЕТСЯ, ГРУБАЯ СКОБКА — НЕТ (`bugs/31`, `plans/25` шаг 1.2) ────────────
+    //
+    // Ещё один шов, вышедший в бой без сторожа: замерено 2026-08-23, мутация «убрать пропуск»
+    // оставила батарею зелёной, 959 блоков из 959. Оба исхода стоят денег в разные стороны —
+    // пропустить незажатую частоту значит не измерить её вовсе, а жечь зажатую значит платить
+    // прожигами за то, что журнал уже знает.
+    //
+    // Блок судит ЧТО СДЕЛАЛА РАЗВЁРТКА (список прожжённых частот и `report.preBracketed`), а не что
+    // она сказала: сообщение можно напечатать и всё равно пойти жечь.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   CM. убрать пропуск (`already = null`)              → «ЗАЖАТЫЙ КРАЙ НЕ ЖГЁТСЯ ЗАНОВО»
+    //   CN. считать краем ЛЮБУЮ пару стены и прошедшей     → «ГРУБАЯ СКОБКА ПРОХОДИТСЯ ПРОГОНОМ»
+    //   CO. не заполнять `report.preBracketed`             → «ПРОПУСК НАЗВАН В ОТЧЁТЕ ЧИСЛАМИ»
+    //   CP. принять скобку, где стена ВЫШЕ прошедшей       → «СКОБКА ОБЯЗАНА БЫТЬ СКОБКОЙ»
+    {
+      // Сетка развёртки — 930…1045 с шагом 5 мВ, поэтому «соседние ступени» это ровно 5 мВ.
+      // Падение развёртки превращается в ответ, а не в мёртвый отчёт (EXP-0040) — здесь это не
+      // предосторожность впрок: мутация «разыменовать `plan.seed` без проверки» роняла набор именно
+      // на этих прогонах, и «набор не дошёл до конца» читается как «ничего не нашли».
+      const bracketRun = async (label, { passedMv, hungMv }) => {
+        const box = mkdtempSync(join(tmpdir(), `kago-bracket-${label}-`));
+        try {
+          const bj = openJournal({ dir: box });
+          writeIntent(bj, { seq: 1, at: '2026-08-22T23:00:00+03:00', frequencyMhz: 2842, voltageMv: passedMv });
+          writeVerdict(bj, { seq: 1, at: '2026-08-22T23:00:10+03:00', outcome: RUNG_OUTCOME.PASSED, verdict: P, servingMvAfter: passedMv });
+          writeIntent(bj, { seq: 2, at: '2026-08-22T23:05:00+03:00', frequencyMhz: 2842, voltageMv: hungMv });
+          writeVerdict(bj, { seq: 2, at: '2026-08-22T23:20:00+03:00', outcome: RUNG_OUTCOME.HUNG, verdict: config.VERDICT.HUNG, why: 'фикстура: машина ушла в перезагрузку' });
+          const burned = [];
+          const r = await sweepRange({
+            curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, envelopeMhz: 3090,
+            journal: bj, buildVector: vectorPinned,
+            runStepFn: async (a) => { burned.push(a.pinMhz ?? a.capMhz); return sweepAtom(0)(a); },
+            saveFn: async () => ({ ok: true }),
+            now: () => '2026-08-23T09:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+          });
+          return { r, burned };
+        } catch (e) {
+          return { r: { ok: false, preBracketed: [`развёртка УПАЛА: ${e?.message ?? e}`] }, burned: [] };
+        } finally {
+          rmSync(assertJournalSandbox({ dir: box }), { recursive: true, force: true });
+        }
+      };
+      // ТОНКАЯ СКОБКА: прошло 1000, повесило 995 — соседние ступени сетки, жечь между ними нечего.
+      const tight = await bracketRun('tight', { passedMv: 1000, hungMv: 995 });
+      ok('ЗАЖАТЫЙ КРАЙ НЕ ЖГЁТСЯ ЗАНОВО: между стеной и прошедшей ступенью пусто — ни одного прожига',
+        [tight.burned.length, tight.r.preBracketed.length], [0, 1]);
+      ok('ПРОПУСК НАЗВАН В ОТЧЁТЕ ЧИСЛАМИ: частота, что прошло и что повесило',
+        tight.r.preBracketed[0] ?? 'пропуска в отчёте нет вовсе',
+        { frequencyMhz: 2842, passedMv: 1000, hungMv: 995 });
+      // ГРУБАЯ СКОБКА: прошло 1000, повесило 985 — ступени 990 и 995 не жёг никто. Правило владельца
+      // об уточнении грубого отказа минимальным шагом сильнее экономии прожигов.
+      const coarse = await bracketRun('coarse', { passedMv: 1000, hungMv: 985 });
+      ok('ГРУБАЯ СКОБКА ПРОХОДИТСЯ ПРОГОНОМ: между 985 и 1000 остались неиспытанные ступени',
+        [coarse.burned.length > 0, coarse.r.preBracketed.length], [true, 0]);
+      // СКОБКА ОБЯЗАНА БЫТЬ СКОБКОЙ: стена ВЫШЕ прошедшей ступени ничего не зажимает — там ещё
+      // весь спуск ниже прошедшей, и пропуск был бы отказом от измерения.
+      const inverted = await bracketRun('inverted', { passedMv: 990, hungMv: 1000 });
+      ok('СКОБКА ОБЯЗАНА БЫТЬ СКОБКОЙ: стена выше прошедшей — это не край, частота идёт в прогон',
+        [inverted.r.preBracketed.length, inverted.burned.length > 0], [0, true]);
+    }
+
+    // ─── ПРОГОН ЗАКАЗЫВАЕТ РОВНО ТУ ЗАТРАВКУ, ЧТО НАПЕЧАТАЛ ПЛАН (`bugs/32`) ──────────────────────
+    //
+    // Дефект, найденный блоками выше в момент их написания, 2026-08-23: план выбирал глубочайшую из
+    // двух улик и клал решение в `plan.seedMv`, а `sweepFrequency` брал `plan.seed.seedMv` — сырой
+    // ответ соседки. Замерено пробой: план 870 мВ, прогон заказал бы 990. То есть починка `bugs/31`
+    // не доезжала до карты, а сухой прогон — документ разрешения на запись (рельс S2) — обещал не то,
+    // что произойдёт. Второе лицо: без оттюненной соседки `plan.seed` равен `null`, и развёртка
+    // падала `TypeError`-ом на первой же частоте полосы.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   CQ. вернуть заказ по `plan.seed.seedMv`           → «ПРОГОН ЗАКАЗЫВАЕТ ЗАТРАВКУ ПЛАНА»
+    //   CR. разыменовать `plan.seed` без проверки         → «БЕЗ СОСЕДКИ РАЗВЁРТКА НЕ ПАДАЕТ»
+    //   CS. приписать собственную улику соседке в свидетеле → «СВИДЕТЕЛЬ НАЗЫВАЕТ ИСТОЧНИК УЛИКИ»
+    {
+      // ⚠️ ПАДЕНИЕ ЗДЕСЬ ОБЯЗАНО СТАТЬ КРАСНЫМ БЛОКОМ, А НЕ МЁРТВЫМ ОТЧЁТОМ (EXP-0040). Именно этот
+      // прогон и падал `TypeError`-ом до починки `bugs/32`, унося весь набор — а «набор не дошёл до
+      // конца» читается как «ничего не нашли». Исключение ловится и превращается в ответ, который
+      // блок сравнит и покраснит с названной причиной.
+      const seedRun = async (label, { rows, provenMv }) => {
+        const box = mkdtempSync(join(tmpdir(), `kago-seed-${label}-`));
+        try {
+          const sj = openJournal({ dir: box });
+          writeIntent(sj, { seq: 1, at: '2026-08-22T23:00:00+03:00', frequencyMhz: 2842, voltageMv: provenMv });
+          writeVerdict(sj, { seq: 1, at: '2026-08-22T23:00:10+03:00', outcome: RUNG_OUTCOME.PASSED, verdict: P, servingMvAfter: provenMv });
+          const ordered = [];
+          const events = [];
+          const r = await sweepRange({
+            curveDoc: sweepDoc(rows), points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2842,
+            journal: sj, buildVector: vectorPinned,
+            runStepFn: async (a) => { ordered.push(a.offsetMhz); return sweepAtom(0)(a); },
+            saveFn: async () => ({ ok: true }), onEvent: (e) => events.push(e),
+            now: () => '2026-08-23T09:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+          });
+          // Прогон заказывает СДВИГ, а не милливольты. Обратный перевод — та же таблица, тем же
+          // правилом, что и у атома: какое напряжение этот сдвиг подставляет под частоту.
+          const mvOf = (offsetMhz) => sweepPoints.filter((p) => p.mhz + offsetMhz >= 2842).sort((a, b) => a.mv - b.mv)[0]?.mv ?? null;
+          return { r, firstOrderedMv: ordered.length ? mvOf(ordered[0]) : null, events };
+        } catch (e) {
+          return { r: { ok: `развёртка УПАЛА: ${e?.message ?? e}` }, firstOrderedMv: null, events: [] };
+        } finally {
+          rmSync(assertJournalSandbox({ dir: box }), { recursive: true, force: true });
+        }
+      };
+      // Соседка 2850 МГц оттюнена до 1000 мВ, а СВОЯ улика частоты глубже — 970 мВ.
+      const withNeighbour = [
+        sweepRow(2850, 1045, { voltageMv: 1000, tags: [CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.BURN_SHORT], provenBy: 'прожиг' }),
+        sweepRow(2842, 1045),
+      ];
+      const planned = planFrequency({
+        frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: sweepGrid,
+        availableDepthMv: 200, curveDoc: sweepDoc(withNeighbour), provenPassMv: 970,
+      });
+      const ran = await seedRun('deeper-own', { rows: withNeighbour, provenMv: 970 });
+      ok('ПРОГОН ЗАКАЗЫВАЕТ ЗАТРАВКУ ПЛАНА, а не сырой ответ соседки (bugs/32)',
+        [planned.seedMv, ran.firstOrderedMv, planned.seedMv === ran.firstOrderedMv], [970, 970, true]);
+      // БЕЗ СОСЕДКИ — документ из одной строки. Здесь `plan.seed` равен `null`, и до починки этот
+      // прогон падал `TypeError`-ом, унося весь набор (блок ловит ПРИЧИНУ: он дошёл до конца).
+      const alone = await seedRun('no-neighbour', { rows: [sweepRow(2842, 1045)], provenMv: 970 });
+      ok('БЕЗ СОСЕДКИ РАЗВЁРТКА НЕ ПАДАЕТ: собственная улика стартует спуск сама',
+        [alone.r.ok, alone.firstOrderedMv], [true, 970]);
+      // СВИДЕТЕЛЬ НАЗЫВАЕТ ИСТОЧНИК. «от соседки undefined МГц» — это ложь в документе, который
+      // читает следующая сессия, и она хуже отсутствующей строки.
+      const note = (alone.events.find((e) => e.kind === 'seed-accepted')?.text ?? '');
+      ok('СВИДЕТЕЛЬ НАЗЫВАЕТ ИСТОЧНИК УЛИКИ: собственная улика не приписывается соседке',
+        [/СОБСТВЕННОЙ улики/.test(note), /соседки undefined/.test(note), /соседки null/.test(note)],
+        [true, false, false]);
+    }
+
+    // ─── ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ (`bugs/33`) ───────────────────────────────────────────
+    //
+    // Найдено живым сухим прогоном 2026-08-23: команда передавала в развёртку ОДИН набор форм, а
+    // печать плана строила себе лестницу из четырёх уровней заново и обещала оператору
+    // переигрывание ослабленной нагрузкой, которого не будет. Сухой прогон — документ рельса S2,
+    // который читают ПЕРЕД разрешением записи в карту владельца; ложь именно там дороже всего
+    // (`bugs/09`, EXP-0052).
+    //
+    // Пара СХЛОПНУТА (`sweepBurnLadder`), а не поставлена под наблюдение — реестр пар предпочитает
+    // именно это. Блок — то, что держит её схлопнутой.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   CT. вернуть плану собственный расчёт из 4 уровней  → «ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ»
+    //   CU. пообещать переигрывание при одной попытке      → «ПЛАН НЕ ОБЕЩАЕТ ПЕРЕИГРЫВАНИЯ»
+    {
+      const ladder = sweepBurnLadder();
+      const dryForBurn = await sweepDryRun({
+        curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, buildVector: vectorPinned,
+      });
+      const burnLine = sweepDryRunLines(dryForBurn).find((l) => l.startsWith('ПРОЖИГ:')) ?? 'строки ПРОЖИГ нет вовсе';
+      // Число попыток на ступень в плане обязано совпасть с длиной лестницы, которую получит прогон.
+      ok('ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ: план называет ровно столько попыток, сколько их будет',
+        [/попытка на ступень 1\b/.test(burnLine), ladder.length], [true, 1]);
+      // И не обещает того, чего при одной попытке произойти не может.
+      ok('ПЛАН НЕ ОБЕЩАЕТ ПЕРЕИГРЫВАНИЯ, которого при одной попытке не будет — и говорит ПОЧЕМУ',
+        [/ПЕРЕИГРЫВАНИЯ НЕТ/.test(burnLine), /ПЕРЕИГРЫВАЕТСЯ/.test(burnLine),
+          /ВЫДАННУЮ\s+частоту/.test(burnLine)],
+        [true, false, true]);
+    }
+
     // — the resolver alone, on hostile inputs. It is the one place allowed to pick a row.
     const docForRows = sweepDoc(bandRows);
     ok('ВНЕ СЕТКИ ПРИТЯГИВАЕТСЯ ВНИЗ: 2831 МГц → строка 2828, и притяжка НАЗВАНА',
@@ -5885,10 +6166,12 @@ async function mainSweep(argv, arg) {
   process.on('exit', stopSideCar);
   console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
 
-  // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ОБОИХ — прогон и прибор. Пара
+  // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
-  // в ступени, иначе его бюджет молчания описывает работу, которой больше нет (см. `openPulse`).
-  const sweepShapeLadder = [0, 1, 2, 3].map((lvl) => furnaceSetAtLevel(lvl));
+  // в ступени, иначе его бюджет молчания описывает работу, которой больше нет (см. `openPulse`), а
+  // сухому прогону — сколько будет ПОПЫТОК, иначе он обещает оператору переигрывание, которого не
+  // произойдёт (`bugs/33`). Источник один — `sweepBurnLadder()`.
+  const sweepShapeLadder = sweepBurnLadder();
 
   const pulse = dash.openPulse({
     source: 'ЖИВАЯ КАРТА',
@@ -5943,7 +6226,7 @@ async function mainSweep(argv, arg) {
     // И это ещё и чинит измерение: ослабленный прожиг доказывал напряжение под НЕ ТОЙ нагрузкой,
     // под которой владелец играет. Одна ступень — один полный прожиг — один замер, все строки
     // сняты в одном режиме и потому сопоставимы между собой.
-    shapeLadder: [sweepShapeLadder[0]],
+    shapeLadder: sweepShapeLadder,
     });
   } catch (e) {
     // OUR OWN DEATH IS NOT THE CARD'S (`bugs/20`). The process is ALIVE here — that is the entire

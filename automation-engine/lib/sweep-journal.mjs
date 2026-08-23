@@ -981,6 +981,64 @@ export function selfTest() {
     });
     ok('ТОРМОЗ НЕ СЧИТАЕТ ПОПРАВЛЕННОЕ: два подряд превратились в одно настоящее',
       [brakeBefore, blockedRungs(readJournal(j13).records).length], [1, 0]);
+
+    // ─── ЧТО ЧАСТОТА УЖЕ ДОКАЗАЛА — ВТОРАЯ ПОЛОВИНА ПАМЯТИ (`bugs/31`, `plans/25` шаг 1.2) ─────────
+    //
+    // `provenRungs` родилась 2026-08-22 и вышла в бой БЕЗ ЕДИНОГО БЛОКА: замерено 2026-08-23 —
+    // мутация, стирающая её чтение в развёртке, оставляла всю батарею зелёной (959 из 959).
+    // Функция при этом решает, откуда начнётся спуск на карте владельца, то есть сколько прожигов
+    // он оплатит и на какой ступени окажется первый.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   CE. брать любой исход, не только PASSED      → «СЧИТАЮТСЯ ТОЛЬКО ПРОШЕДШИЕ»
+    //   CF. брать ПЕРВУЮ прошедшую вместо глубочайшей → «ХРАНИТСЯ ГЛУБОЧАЙШАЯ»
+    //   CG. читать заказанное вместо подставленного   → «УЛИКА — НАПРЯЖЕНИЕ, КОТОРОЕ КАРТА ПОДСТАВИЛА»
+    //   CH. отвечать по вердикту без намерения        → «БЕЗ НАМЕРЕНИЯ УЛИКИ НЕТ»
+    const j14 = openJournal({ dir: join(sandbox, 'proven') });
+    // 2820 МГц: три прошедшие ступени вниз, затем зависание. Ровно форма живого журнала 2026-08-22.
+    writeIntent(j14, { seq: 1, frequencyMhz: 2820, voltageMv: 900 });
+    writeVerdict(j14, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 900 });
+    writeIntent(j14, { seq: 2, frequencyMhz: 2820, voltageMv: 870 });
+    writeVerdict(j14, { seq: 2, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 870 });
+    writeIntent(j14, { seq: 3, frequencyMhz: 2820, voltageMv: 880 });   // ПОЗЖЕ, но ВЫШЕ — не глубже
+    writeVerdict(j14, { seq: 3, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 880 });
+    writeIntent(j14, { seq: 4, frequencyMhz: 2820, voltageMv: 850 });
+    writeVerdict(j14, { seq: 4, at: null, outcome: RUNG_OUTCOME.HUNG, verdict: config.VERDICT.HUNG, why: 'машина ушла в перезагрузку' });
+    // И соседняя частота — чтобы блок утверждал ключевание, а не «в карте одна запись».
+    writeIntent(j14, { seq: 5, frequencyMhz: 2842, voltageMv: 940 });
+    writeVerdict(j14, { seq: 5, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 940 });
+    const proven = provenRungs(readJournal(j14).records);
+    ok('ХРАНИТСЯ ГЛУБОЧАЙШАЯ ПРОШЕДШАЯ СТУПЕНЬ, а не последняя по времени',
+      proven.get(2820)?.voltageMv ?? 'улики по 2820 нет вовсе', 870);
+    ok('СЧИТАЮТСЯ ТОЛЬКО ПРОШЕДШИЕ: убившая ступень 850 мВ уликой не становится',
+      (proven.get(2820)?.voltageMv ?? 0) > 850, true);
+    ok('улика КЛЮЧУЕТСЯ ЧАСТОТОЙ: соседка отвечает своим числом, а не чужим',
+      [proven.get(2842)?.voltageMv ?? 'нет', proven.size], [940, 2]);
+    // Ось напряжения: владелец, 2026-08-16 — «мы должны попасть в ближайшее верхнее напряжение».
+    // Улика обязана нести то, что карта ПОДСТАВИЛА, иначе она утверждает о напряжении, которого не было.
+    const j15 = openJournal({ dir: join(sandbox, 'proven-serving') });
+    writeIntent(j15, { seq: 1, frequencyMhz: 2820, voltageMv: 866 });   // заказано
+    writeVerdict(j15, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 870 });
+    ok('УЛИКА — НАПРЯЖЕНИЕ, КОТОРОЕ КАРТА ПОДСТАВИЛА, а не то, что мы заказали',
+      provenRungs(readJournal(j15).records).get(2820)?.voltageMv ?? 'улики нет', 870);
+    // ...а когда карта его не назвала — заказанное остаётся единственным, что известно, и берётся оно.
+    const j16 = openJournal({ dir: join(sandbox, 'proven-fallback') });
+    writeIntent(j16, { seq: 1, frequencyMhz: 2820, voltageMv: 875 });
+    writeVerdict(j16, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS });
+    ok('карта не назвала напряжение → уликой остаётся заказанное, но улика ЕСТЬ',
+      provenRungs(readJournal(j16).records).get(2820)?.voltageMv ?? 'улики нет', 875);
+    // БЕЗ НАМЕРЕНИЯ УЛИКИ НЕТ. Вердикт сам по себе не называет ни частоты, ни напряжения — принять
+    // его значило бы завести улику без координат, а по ней потом начался бы спуск.
+    const j17 = openJournal({ dir: join(sandbox, 'proven-orphan-verdict') });
+    writeVerdict(j17, { seq: 7, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 800 });
+    ok('БЕЗ НАМЕРЕНИЯ УЛИКИ НЕТ: вердикт без своей ступени не заводит доказанной земли',
+      provenRungs(readJournal(j17).records).size, 0);
+    // И обе половины памяти читаются ОДНИМ вызовом возобновления — иначе развёртка получила бы
+    // смерти без успехов, ровно как до `bugs/31`.
+    const resumed = resumeState(j14, { at: '2026-08-23T09:00:00+03:00' });
+    ok('ВОЗОБНОВЛЕНИЕ ОТДАЁТ ОБЕ ПОЛОВИНЫ: и пол зависания, и доказанную землю',
+      [resumed.floors?.get(2820)?.voltageMv ?? 'пола нет', resumed.proven?.get(2820)?.voltageMv ?? 'улики нет'],
+      [850, 870]);
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });

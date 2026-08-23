@@ -41,6 +41,33 @@
 
 ## Entries
 
+### EXP-0107 · 2026-08-23 · ❌→✅ · #guards #mutation #coverage #debt #measurement
+**Context:** the guards debt named by session 38 — three engine behaviours had changed in one evening and «ни один блок не покраснел».
+**Tried / did:** before writing a single block, RESTORED each defect as a mutation and ran the whole battery, to size the debt by measurement instead of by reading the diff.
+**Result:** ❌→✅ every mutation left the battery **fully green** — 952/952 for the undershoot, 959/959 for both the pre-bracketed skip and the own-evidence seed. The debt was not «thin coverage», it was ZERO coverage, and no amount of reading the diff would have said which of the three was worst.
+**Lesson:** **size a coverage debt by re-introducing the defect, not by reading the code — «what would go red» is a question only the suite can answer.** The measurement is cheap (one mutation per behaviour, one battery run each) and it converts «we should add tests» into a ranked list with numbers. Second half, and it is the one that pays: a mutation that reddens NOTHING is a finding about the CODE, not about the mutation (EXP-0077) — so run the scan BEFORE writing blocks, and let it choose what you write.   → link: `plans/25` §1.2 · EXP-0016 · EXP-0077
+**Repro:** apply one mutation per changed behaviour, run `npm run selftest:all`, and require a RED suite with its summary line present. All-green = that behaviour has no guard at all.
+**Trigger:** a commit message or STATUS entry says «поведение изменилось, но ничего не покраснело» → do not start writing blocks; start by measuring which behaviours are uncovered.
+**Not for:** brand-new code with no prior behaviour to restore — there the mutation has nothing to undo.
+
+### EXP-0108 · 2026-08-23 · ❌→✅ · #guards #seams #testability #truth-mirror
+**Context:** guarding «an undershot clock is a MEASUREMENT, not a failure» — the decision lived inside a block closure of `vf-step.runStep`, which pulls in NVAPI, the watchdog and the oracle.
+**Tried / did:** noticed the decision could not be reached offline at all, so the neighbouring pure judge (`judgeDeliveredClock`) was the only thing any block could test — and it returns the same answer before and after the fix.
+**Result:** ❌→✅ extracted the ACTION into `applyCeilingJudgement(out, j, obs)` and made the block CALL it, rather than writing a block that re-states the rule. Four mutations then reddened their own blocks.
+**Lesson:** **a suite that can only reach the JUDGE is guarding the question, not the answer.** Where a decision splits into «what is true» (pure, testable) and «what we do about it» (buried in I/O), the second half is where behaviour changes live — and it is invisible to every block until it is extracted. Extract it as the SAME function the run calls, never a copy: a re-stated rule is a truth↔mirror pair inside one module, and this project has already paid for one (EXP-0077).
+**Repro:** grep a changed behaviour's `if` for the module it sits in; if that module's `--selftest` cannot construct its inputs without a GPU, the behaviour has no guard and the extraction is the fix.
+**Trigger:** about to write a block for a behaviour whose only offline reachable neighbour is a pure predicate → check whether the predicate changed at all. If it did not, you are about to guard the wrong thing.
+**Not for:** decisions already expressed by a pure function the caller merely forwards.
+
+### EXP-0109 · 2026-08-23 · ❌→✅ · #guards #defects #plan-vs-run #truth-mirror #dividend
+**Context:** writing the first blocks for two seams that had shipped with no coverage (`provenRungs`, the pre-bracketed skip).
+**Tried / did:** wrote the fixtures the seams' own documentation described, and ran them.
+**Result:** ❌→✅ the FIRST run crashed the whole suite, and the crash was a real defect: the run ordered the neighbour's seed instead of the plan's chosen one, and died outright when there was no neighbour (`bugs/32`). Verifying that fix on the live dry run then exposed a SECOND one — the plan promised an intensity ladder the run no longer walks (`bugs/33`). Both are the `bugs/09` class: the plan and the run disagreeing in the artifact the owner reads BEFORE authorising a write to his card.
+**Lesson:** **an unguarded seam does not merely lack a test — it is where the next defect already is, and the first honest fixture finds it.** Two defects surfaced within twenty minutes of writing blocks for code that had been «verified green» for a day. The mechanism is specific and worth naming: when one decision is computed in one place and RE-DERIVED in another, only a fixture that drives BOTH will notice, because reading either side alone looks correct. So a coverage debt on a decision seam is a defect report waiting to be written — schedule it as such, not as tidying.   → link: `bugs/32` · `bugs/33` · `bugs/09` · R16c
+**Repro:** for any decision the plan prints and the run executes, assert them against EACH OTHER in one block (`planned.seedMv === firstOrdered`), never separately.
+**Trigger:** a seam shipped without blocks and «works, it was run live» → write the fixture before trusting it; budget for finding a defect, not for writing a test.
+**Not for:** pairs already collapsed to one computation — there the block only keeps them collapsed.
+
 ### EXP-0104 · 2026-08-22 · ❌→✅ · #rules #interaction #stale-remedy #cross-document #blocker
 **Context:** preparing the live sweep 2887→2700; reading the dry run for THAT band before authorising a write (rail S2).
 **Tried / did:** read the plan line by line instead of trusting «the machinery is green».
