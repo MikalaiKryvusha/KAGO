@@ -47,5 +47,27 @@
     "timeCreated": "2026-08-06T17:35:10.1586898Z",
     "fault": true,
     "means": "CRASH"
+  },
+  "nvlddmkm_153_inside_the_fatal_rung__captured.xml": {
+    "provenance": "CAPTURED on this machine — the 11:52:04 event itself, the one researches/15 §0 is built on",
+    "what": "the display driver's own error, logged INSIDE the 845 mV rung, 3 s before the sampler pulse noticed anything",
+    "provider": "nvlddmkm",
+    "eventId": 153,
+    "level": 2,
+    "timeCreated": "2026-08-23T08:52:04.6123824Z",
+    "fault": false,
+    "signal": true,
+    "means": "SIGNAL"
+  },
+  "nvlddmkm_14_recovery_action_changed__captured.xml": {
+    "provenance": "CAPTURED on this machine — 6 events of this id exist over 34 days, all on days the machine died or hung",
+    "what": "GPU recovery action changed 0x0 (None) -> 0x1 (PF FLR) — a different payload from id 153, and matched by an EMPTY id list",
+    "provider": "nvlddmkm",
+    "eventId": 14,
+    "level": 2,
+    "timeCreated": "2026-08-23T08:35:58.0605244Z",
+    "fault": false,
+    "signal": true,
+    "means": "SIGNAL"
   }
 }

@@ -546,12 +546,44 @@ export const TELEMETRY_SAMPLE_MS = 500;
  *   'history' — this machine has real events of this kind to prove the reader against;
  *   'fixture' — it does not, so the parser is proven on captured event XML instead.
  * That difference must reach the code's [TESTED] markers rather than being blurred.
+ *
+ * `means` NAMES THE CLASS, AND THERE ARE TWO OF THEM — added 2026-08-23 with `plans/29`:
+ *   'CRASH'  — a fault. `verdictFor()` turns it into the CRASH verdict, i.e. it STOPS things.
+ *   'SIGNAL' — an OBSERVATION that must never vote. It is read, carried and printed beside the
+ *              verdict, and `verdictFor()` is structurally incapable of counting it.
+ *
+ * WHY THE SECOND CLASS HAD TO EXIST BEFORE THE FIFTH ROW COULD BE WRITTEN. `researches/15` §2
+ * scored the driver's channel against ALL TWELVE deaths of this machine: it is SPECIFIC but NOT
+ * SENSITIVE — three deaths carried a driver error within 10 minutes (92 s · 9.8 min · 130 s), the
+ * canonical BSOD of fact 39 carried none for two days, and lone errors on quiet days would have
+ * produced false stops. `ideas/10` §5.5 forbids shipping a mechanism with false stops at all. So
+ * the naive row — `{ provider: 'nvlddmkm', means: 'CRASH' }` — would have converted 123 historical
+ * driver complaints into 123 stops, and it is the defect that plan exists to not commit.
+ *
+ * AN EMPTY `ids` MEANS «THE WHOLE PROVIDER», on BOTH sides. The Windows query already worked this
+ * way (`QUERY_PS1`: the ID filter is added only for a non-empty list); only `classifyEvent`
+ * disagreed, because `[].includes(x)` is false. Making the two agree removes a disagreement rather
+ * than adding a feature — and for `nvlddmkm` an allow-list would repeat the very defect this row
+ * fixes: `Display` is watched at 4101, this card has only ever emitted 4107, and that row has been
+ * decorative for the project's whole life.
  */
 export const FAULT_PROVIDERS = Object.freeze([
   { provider: 'Display', ids: [4101], means: 'CRASH', what: 'display driver reset (TDR)', provable: 'fixture' },
   { provider: 'Microsoft-Windows-WHEA-Logger', ids: [17, 18, 19, 47], means: 'CRASH', what: 'machine check / hardware error', provable: 'fixture' },
   { provider: 'Microsoft-Windows-Kernel-Power', ids: [41], means: 'CRASH', what: 'unexpected shutdown or power loss', provable: 'history' },
   { provider: 'Microsoft-Windows-WER-SystemErrorReporting', ids: [1001], means: 'CRASH', what: 'bugcheck (BSOD)', provable: 'fixture' },
+  // THE FIFTH INPUT — the display driver's OWN error channel, which R4's «Windows event log»
+  // observation was blind to for the project's whole life (`researches/15` §0).
+  //
+  // MEASURED ON THIS MACHINE 2026-08-23 16:3x, not remembered — 129 events over 34 days, EVERY ONE
+  // at level 2 (Error); exactly two ids exist, and their payloads are different things:
+  //   153 (123 events) — `\Device\Video3` · `Error occurred on GPUID: 100`
+  //    14 (6 events)   — `\Device\Video3` · `GPU recovery action changed from 0x0 (None) to 0x1 (PF FLR)`
+  // Re-probe: Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='nvlddmkm'} | Group-Object Id
+  //
+  // Because every event here is an Error, there is no informational traffic an id list could filter
+  // out — so the list is empty on purpose and a driver id we have never seen still reaches us.
+  { provider: 'nvlddmkm', ids: [], means: 'SIGNAL', what: "display driver's own error channel — an INPUT to the edge decision, never a verdict", provable: 'history' },
 ]);
 
 // =============================================================================================

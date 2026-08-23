@@ -1,14 +1,30 @@
 #!/usr/bin/env node
-// event-logger.mjs — the CRASH half of the stability oracle.
+// event-logger.mjs — the CRASH half of the stability oracle, and (since 2026-08-23) the FIFTH INPUT.
 //
 // Plan anchor (plans/02_epic01_phase1_harness_and_baseline.md §3.5): "Query four providers over a
 // time window: Display (id 4101), Microsoft-Windows-WHEA-Logger (17, 18, 19, 47),
 // Microsoft-Windows-Kernel-Power (41), Microsoft-Windows-WER-SystemErrorReporting (1001)."
 // Upward: epic §4, phase-1 exit gate — "the fault watcher goes red against a real historical event".
+// EXTENDED by plans/29 §4: a FIFTH provider and a SECOND class — see below.
 //
 // WHY A WHOLE MODULE FOR FOUR QUERIES. R4 of the internal map: a stability verdict needs BOTH the
 // checksum comparison and this. A profile that corrupts one float and a profile that reboots the
 // machine are different failures, and only one of them leaves a checksum behind to compare.
+//
+// THE MODULE NOW CARRIES TWO CLASSES, AND MIXING THEM IS THE DEFECT IT GUARDS AGAINST.
+// `config.FAULT_PROVIDERS` rows are `means: 'CRASH'` (a fault — it votes, through `verdictFor`) or
+// `means: 'SIGNAL'` (an observation — read, carried, printed, and structurally unable to vote).
+// The fifth row is `nvlddmkm`, the display driver's OWN error channel, which the four original
+// providers were blind to for the project's whole life: this card emits `Display` 4107 and never
+// 4101, `WHEA-Logger` is empty over its entire history, and `nvlddmkm` holds 129 events over 34
+// days — two of them INSIDE the rung that killed the machine on 2026-08-23, each seconds before the
+// sampler pulse noticed (researches/15 §0).
+// It is an INPUT and not a verdict because the same research scored it against ALL TWELVE deaths of
+// this machine and found it SPECIFIC but NOT SENSITIVE (§2): three deaths carried a driver error
+// within 10 minutes, the canonical BSOD of fact 39 carried none for two days, and lone errors on
+// quiet days would have produced false stops — which `ideas/10` §5.5 forbids shipping at all. The
+// same shape R4a-pulse holds in the internal map: an observation whose promotion to a verdict is a
+// separate, gated act.
 //
 // THE PROPERTY THIS MODULE IS BUILT AROUND — "found nothing" and "could not look" are DIFFERENT
 // ANSWERS, and conflating them is how a watcher becomes a rubber stamp. Every provider carries its
@@ -19,6 +35,9 @@
 //
 // PROOF STATUS IS SPLIT AND STAYS SPLIT (config.FAULT_PROVIDERS `provable`):
 //   · Kernel-Power 41 is RED-PROVABLE ON THIS MACHINE — three real events (29.07, 05.08, 06.08.2026);
+//   · `nvlddmkm` is RED-PROVABLE TOO, and it is the only row that arrives with a HISTORY instead of
+//     a promise: 129 real events over 34 days, of which both fixtures are CAPTURED — including the
+//     11:52:04 event `researches/15` is built on. That is what makes it worth doing first;
 //   · Display 4101 (TDR), WHEA-Logger and WER 1001 are FIXTURE-PROVABLE ONLY — this machine has no
 //     such history, and `__fixtures__/README.md` says which fixtures are CAPTURED and which are
 //     CONSTRUCTED. A fixture proves the PARSER handles a shape; it never proves the shape is what
@@ -120,17 +139,37 @@ export function parseEvents(xmlBlob) {
 }
 
 /**
- * Is this event one of the faults we watch? The rule set is `config.FAULT_PROVIDERS` and nothing
- * else — a second copy of the id list here is the mirror that drifts.
+ * Is this event one of the ones we watch, and IN WHICH CLASS? The rule set is
+ * `config.FAULT_PROVIDERS` and nothing else — a second copy of the id list here is the mirror that
+ * drifts.
+ *
+ * TWO CLASSES, and the separation is the whole point (`plans/29`, added 2026-08-23):
+ *   · `means: 'CRASH'`  → `{ fault: true,  signal: false }` — it votes, through `verdictFor`.
+ *   · `means: 'SIGNAL'` → `{ fault: false, signal: true  }` — it is OBSERVED and never votes.
+ *
+ * `fault` stays strictly boolean and stays FALSE for a signal, which is what makes every existing
+ * consumer safe by construction: `queryFaults` filters on `.fault`, `stress-tester` and
+ * `graphics-load` read only `verdictFor()`, so none of them can see a signal even by accident. That
+ * is deliberate — `researches/15` §2 measured this channel as specific but NOT sensitive, and
+ * `ideas/10` §5.5 forbids shipping a mechanism that produces false stops.
+ *
+ * AN EMPTY `ids` MATCHES ANY ID OF THAT PROVIDER — the same meaning the Windows query has always
+ * given it (`QUERY_PS1` adds the ID filter only for a non-empty list). Before this, the two halves
+ * disagreed silently, because `[].includes(x)` is false.
  *
  * [TESTED: 2026-08-10 · the fixture suite includes a REAL Display 4107 event, a provider we watch
  * at an id we do not, and asserts it is NOT a fault]
+ * [TESTED: 2026-08-23 · the suite gained two CAPTURED `nvlddmkm` events — id 153 from inside the
+ * rung that killed the machine, and id 14 — and asserts both are signals and NEITHER is a fault;
+ * mutation-proved three ways, see `runFixtureSuite`]
  */
 export function classifyEvent(ev, providers = config.FAULT_PROVIDERS) {
-  if (!ev) return { fault: false };
-  const rule = providers.find((p) => p.provider === ev.provider && p.ids.includes(ev.eventId));
-  if (!rule) return { fault: false };
-  return { fault: true, means: rule.means, what: rule.what, provable: rule.provable };
+  if (!ev) return { fault: false, signal: false };
+  const rule = providers.find((p) => p.provider === ev.provider
+    && (p.ids.length === 0 || p.ids.includes(ev.eventId)));
+  if (!rule) return { fault: false, signal: false };
+  const isSignal = rule.means === 'SIGNAL';
+  return { fault: !isSignal, signal: isSignal, means: rule.means, what: rule.what, provable: rule.provable };
 }
 
 // =================================================================================================
@@ -238,13 +277,18 @@ export function queryFaults({ from, to, providers = config.FAULT_PROVIDERS, powe
   for (const s of sections) {
     for (const ev of parseEvents(s.xml.join('\n'))) events.push(ev);
   }
-  const faults = events.map((ev) => ({ ...ev, ...classifyEvent(ev, providers) })).filter((e) => e.fault);
+  // ONE pass, TWO lists. `faults` keeps exactly the meaning every existing consumer already relies
+  // on; `signals` is new and nobody votes with it (`plans/29` §3).
+  const classified = events.map((ev) => ({ ...ev, ...classifyEvent(ev, providers) }));
+  const faults = classified.filter((e) => e.fault);
+  const signals = classified.filter((e) => e.signal);
 
   return {
     window,
     providers: sections.map(({ provider, status, count, detail }) => ({ provider, status, count, detail })),
     events,
     faults,
+    signals,
   };
 }
 
@@ -255,14 +299,26 @@ export function queryFaults({ from, to, providers = config.FAULT_PROVIDERS, powe
  * never "clean" over a failed query · `undefined`-free by construction. The caller (stress-tester,
  * step 3.6) combines this with the checksum comparison for the three-way verdict.
  *
+ * SIGNALS RIDE ALONG AND DO NOT VOTE. `signals` is attached to the returned object so a caller can
+ * RECORD what the driver said in the same window, and the verdict computation below does not
+ * mention it — the fifth input is an input to a DECISION, not a decision (`researches/15` §2 (в),
+ * `plans/29` §0). This is the same shape R4a-pulse holds in the internal map: an observation whose
+ * promotion to a verdict is a separate, gated act needing data this project does not have yet.
+ *
  * [TESTED: 2026-08-10 · CRASH over the real 06.08 window; UNKNOWN when a provider status is forced
  * to `error`; clean over a window with no events and every provider answering]
+ * [TESTED: 2026-08-23 · run over the window holding the two real `nvlddmkm` errors of the fatal
+ * rung: signals 2, verdict NOT CRASH; mutation «let signals vote» reddens its own block]
  */
 export function verdictFor(result) {
+  // Carried on EVERY return path, including the two early ones: a caller that reads `signals` must
+  // never find it missing because the query happened to fail or a fault happened to fire.
+  const signals = result.signals || [];
   const broken = (result.providers || []).filter((p) => p.status === 'error');
   if (broken.length) {
     return {
       verdict: null,
+      signals,
       reason: `не смог опросить ${broken.length} провайдер(ов): ` +
         broken.map((p) => `${p.provider} — ${p.detail || 'без пояснения'}`).join('; '),
     };
@@ -270,10 +326,16 @@ export function verdictFor(result) {
   if (result.faults.length) {
     return {
       verdict: config.VERDICT.CRASH,
+      signals,
       reason: result.faults.map((f) => `${f.provider}/${f.eventId} (${f.what}) в ${f.timeCreated}`).join('; '),
     };
   }
-  return { verdict: null, reason: 'сбоев в окне нет — но вердикт PASS даёт не этот модуль, а сверка с эталоном (R4)', clean: true };
+  return {
+    verdict: null,
+    signals,
+    reason: 'сбоев в окне нет — но вердикт PASS даёт не этот модуль, а сверка с эталоном (R4)',
+    clean: true,
+  };
 }
 
 /**
@@ -354,7 +416,11 @@ export function runFixtureSuite({ dir = FIXTURES_DIR } = {}) {
       ['level', ev.level, exp.level],
       ['timeCreated', ev.timeCreated, exp.timeCreated],
       ['fault', cls.fault, exp.fault],
-      ['means', cls.fault ? cls.means : null, exp.fault ? exp.means : null],
+      // `signal` is normalised to a strict boolean on BOTH sides, so an expectation that simply
+      // omits the field (every pre-2026-08-23 fixture) reads as `false` instead of `undefined` —
+      // otherwise adding the class would have reddened five fixtures that are perfectly correct.
+      ['signal', cls.signal === true, exp.signal === true],
+      ['means', (cls.fault || cls.signal) ? cls.means : null, (exp.fault || exp.signal) ? exp.means : null],
     ];
     const bad = checks.filter(([, got, want]) => JSON.stringify(got) !== JSON.stringify(want));
     results.push(bad.length === 0
@@ -362,7 +428,91 @@ export function runFixtureSuite({ dir = FIXTURES_DIR } = {}) {
       : { file, ok: false, why: bad.map(([k, got, want]) => `${k}: ${JSON.stringify(got)} != ${JSON.stringify(want)}`).join(' · ') });
   }
 
+  for (const r of runClassInvariants()) results.push(r);
+
   return { ok: results.every((r) => r.ok), results };
+}
+
+/**
+ * THE CLASS INVARIANTS — what the fixtures above CANNOT catch, and therefore what would otherwise
+ * be guarded by nobody.
+ *
+ * The fixture loop only exercises `classifyEvent`. The property this whole change exists to hold is
+ * one level up: **a SIGNAL must never reach a verdict.** Between `classifyEvent` and `verdictFor`
+ * sit two filters and three return paths, and every one of them is a place where a signal could
+ * start voting without a single fixture noticing. So the invariants are asserted on constructed
+ * results, offline, with no event log and no card involved.
+ *
+ * Why this is the shape rather than a comment saying «be careful»: `researches/15` §2 measured this
+ * channel across ALL twelve deaths of this machine and found it misses half of them while firing on
+ * quiet days. A signal that quietly became a stop would halt the owner's sweep on evidence that has
+ * already been shown insufficient — and `ideas/10` §5.5 forbids shipping that at all.
+ *
+ * [TESTED: 2026-08-23 · mutation-proved three ways, each reddening its own block and the intact
+ * module reddening none: (a) `classifyEvent` returning `fault: true` for a SIGNAL rule;
+ * (b) an empty `ids` matching nothing; (c) `verdictFor` counting `signals` alongside `faults`]
+ */
+export function runClassInvariants() {
+  const out = [];
+  const ok = (name) => out.push({ file: name, ok: true, provenance: 'CONSTRUCTED', what: 'инвариант класса' });
+  const bad = (name, why) => out.push({ file: name, ok: false, why });
+
+  const answering = [{ provider: 'nvlddmkm', status: 'ok', count: 1, detail: '' }];
+  const signalEvent = { provider: 'nvlddmkm', eventId: 153, timeCreated: 'T', fault: false, signal: true, what: 'x' };
+  const faultEvent = { provider: 'Microsoft-Windows-Kernel-Power', eventId: 41, timeCreated: 'T', fault: true, signal: false, what: 'y' };
+
+  // A — the invariant this change exists for. Signals present, no fault: the window is CLEAN.
+  {
+    const v = verdictFor({ providers: answering, faults: [], signals: [signalEvent] });
+    if (v.verdict === config.VERDICT.CRASH) bad('инвариант A: СИГНАЛ НЕ ДАЁТ ВЕРДИКТА', 'сигнал превратился в CRASH — это и есть запрещённый ложный стоп');
+    else if (!v.clean) bad('инвариант A: СИГНАЛ НЕ ДАЁТ ВЕРДИКТА', `окно должно быть чистым, а clean=${v.clean}`);
+    else if (!Array.isArray(v.signals) || v.signals.length !== 1) bad('инвариант A: СИГНАЛ НЕ ДАЁТ ВЕРДИКТА', 'сигнал не доехал до вызывающего — наблюдение потеряно');
+    else ok('инвариант A: СИГНАЛ НЕ ДАЁТ ВЕРДИКТА, но доезжает до вызывающего');
+  }
+
+  // B — the signals must survive the OTHER two return paths as well, or a caller finds them missing
+  // exactly when something interesting happened.
+  {
+    const onFault = verdictFor({ providers: answering, faults: [faultEvent], signals: [signalEvent] });
+    const onBroken = verdictFor({ providers: [{ provider: 'x', status: 'error', count: 0, detail: 'd' }], faults: [], signals: [signalEvent] });
+    if (onFault.verdict !== config.VERDICT.CRASH) bad('инвариант B: СИГНАЛЫ ЕДУТ ПО ВСЕМ ТРЁМ ВЫХОДАМ', 'настоящий сбой перестал давать CRASH');
+    else if (onFault.signals.length !== 1 || onBroken.signals.length !== 1) bad('инвариант B: СИГНАЛЫ ЕДУТ ПО ВСЕМ ТРЁМ ВЫХОДАМ', 'на выходе со сбоем или с неопрошенным провайдером сигналы потерялись');
+    else ok('инвариант B: СИГНАЛЫ ЕДУТ ПО ВСЕМ ТРЁМ ВЫХОДАМ verdictFor');
+  }
+
+  // C — an empty `ids` means «the whole provider», on the classifier's side too. This is the half
+  // that used to disagree with the Windows query, and an id the driver has never emitted before is
+  // exactly the case the empty list exists for.
+  //
+  // THE ORDER OF THESE CHECKS IS THE DIAGNOSIS, and it was rewritten after the mutation run caught
+  // the first version LYING. Asking «is it a signal?» first made a misclassification (mutation a)
+  // report «the empty list stopped catching events» — which is false: the list caught it fine and
+  // then filed it wrong. A guard whose red line names the wrong cause sends the next session down
+  // the wrong corridor, and that is worse than a guard that merely goes red. So MATCHING is asked
+  // before CLASS: `means` is present iff a rule matched at all.
+  {
+    const rules = [{ provider: 'nvlddmkm', ids: [], means: 'SIGNAL', what: 'w', provable: 'history' }];
+    const seen = classifyEvent({ provider: 'nvlddmkm', eventId: 153 }, rules);
+    const unseen = classifyEvent({ provider: 'nvlddmkm', eventId: 999999 }, rules);
+    const other = classifyEvent({ provider: 'Display', eventId: 4107 }, rules);
+    const NAME = 'инвариант C: ПУСТОЙ СПИСОК ID = ВЕСЬ ПРОВАЙДЕР';
+    if (!seen.means || !unseen.means) bad(NAME, 'СОПОСТАВЛЕНИЕ: пустой список перестал ловить события своего провайдера — новый идентификатор драйвера стал бы невидим');
+    else if (!seen.signal || !unseen.signal || seen.fault || unseen.fault) bad(NAME, `КЛАССИФИКАЦИЯ: правило нашлось (means=${seen.means}), но событие отнесено к сбоям — жалоба драйвера стала бы остановкой`);
+    else if (other.means || other.signal || other.fault) bad(NAME, 'ОБЛАСТЬ: пустой список захватил ЧУЖОГО провайдера');
+    else ok(`${NAME}, и только он`);
+  }
+
+  // D — the roster itself. A future edit that quietly reclassifies the driver channel as CRASH is
+  // the one-line defect `plans/29` §0 exists to prevent, and it must not pass silently.
+  {
+    const rule = config.FAULT_PROVIDERS.find((p) => p.provider === 'nvlddmkm');
+    if (!rule) bad('инвариант D: КАНАЛ ДРАЙВЕРА ЧИСЛИТСЯ СИГНАЛОМ', 'провайдера nvlddmkm нет в списке — пятое наблюдение исчезло');
+    else if (rule.means !== 'SIGNAL') bad('инвариант D: КАНАЛ ДРАЙВЕРА ЧИСЛИТСЯ СИГНАЛОМ', `means=${rule.means}: 123 исторические жалобы драйвера стали бы 123 остановками`);
+    else if (rule.ids.length !== 0) bad('инвариант D: КАНАЛ ДРАЙВЕРА ЧИСЛИТСЯ СИГНАЛОМ', 'появился список id — новый идентификатор драйвера станет невидимым');
+    else ok('инвариант D: КАНАЛ ДРАЙВЕРА ЧИСЛИТСЯ СИГНАЛОМ, без списка id');
+  }
+
+  return out;
 }
 
 // =================================================================================================
@@ -429,10 +579,22 @@ function main(argv) {
       console.log(`СБОИ (${r.faults.length}):`);
       for (const f of r.faults) console.log(`  · ${f.timeCreated}  ${f.provider}/${f.eventId} — ${f.what}`);
     }
+    // Its own section, and the wording is load-bearing: this is what the driver SAID, and it is an
+    // input to the edge decision. A reader who takes it for a verdict would be taking a signal that
+    // missed half of this machine's deaths for a stop condition (`researches/15` §2).
+    if (r.signals.length) {
+      console.log('');
+      console.log(`СИГНАЛЫ (${r.signals.length}) — наблюдение, вердикта не дают:`);
+      for (const s of r.signals) {
+        const said = [...(s.unnamedData || []), ...Object.values(s.data || {})]
+          .map((x) => String(x).trim()).filter(Boolean).join(' · ');
+        console.log(`  · ${s.timeCreated}  ${s.provider}/${s.eventId}${said ? ` — ${said}` : ''}`);
+      }
+    }
     console.log('');
     console.log(`ВЕРДИКТ: ${v.verdict ?? (v.clean ? 'сбоев нет' : 'НЕИЗВЕСТНО')}`);
     console.log(`         ${v.reason}`);
-    if (o.json) console.log(JSON.stringify({ window: r.window, providers: r.providers, faults: r.faults, verdict: v }, null, 2));
+    if (o.json) console.log(JSON.stringify({ window: r.window, providers: r.providers, faults: r.faults, signals: r.signals, verdict: v }, null, 2));
 
     // Exit 0 means the QUESTION was answered, not that the answer was good. A caller reads the
     // verdict; conflating "a fault was found" with "the tool failed" would make both unreadable.

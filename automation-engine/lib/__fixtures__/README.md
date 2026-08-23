@@ -16,6 +16,17 @@ at:** `__captured` = pulled off this machine's own event log with `Get-WinEvent 
 | `display_4101_tdr__constructed.xml` | **CONSTRUCTED** from the captured 4107 above | The TDR id is recognised and classified CRASH |
 | `whea_logger_17__constructed.xml` | **CONSTRUCTED** | A machine-check event is recognised and classified CRASH |
 | `wer_1001_bugcheck__constructed.xml` | **CONSTRUCTED** | A bugcheck report is recognised and classified CRASH |
+| `nvlddmkm_153_inside_the_fatal_rung__captured.xml` | **CAPTURED** — the real 2026-08-23 11:52:04 event | The FIFTH INPUT, and the strongest fixture in this directory: it is the very event `researches/15` §0 is built on, logged INSIDE the 845 mV rung, 3 s before the sampler pulse noticed anything. Asserts `fault: false · signal: true` — a signal that classified as a fault would be a false stop |
+| `nvlddmkm_14_recovery_action_changed__captured.xml` | **CAPTURED** — the real 2026-08-23 11:35:58 event | A DIFFERENT payload from the same provider (`GPU recovery action changed 0x0 (None) -> 0x1 (PF FLR)`), and the reason its expectation matters: this row is watched with an EMPTY id list, so the fixture is what proves «the whole provider» actually reaches the classifier |
+
+## The two classes — added 2026-08-23 with `plans/29`
+
+`means` is `CRASH` or `SIGNAL`, and the difference is not decorative: a `CRASH` row votes through
+`verdictFor()`, a `SIGNAL` row is read, carried and printed and CANNOT vote. Four blocks beyond the
+per-fixture checks assert that boundary on constructed data (`runClassInvariants`), because the
+fixture loop only ever exercises `classifyEvent` and the property lives one level up. All four were
+mutation-proved on 2026-08-23; two of the mutations reddened the same block and the block's
+DIAGNOSIS was rewritten so they no longer share a message.
 
 ## The boundary, stated plainly
 
@@ -34,9 +45,12 @@ ones are still waiting for it.
 1. Capture: `Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='X';ID=N} -MaxEvents 1 |
    ForEach-Object { $_.ToXml() } | Out-File -FilePath out.xml -Encoding utf8` (strip the BOM).
 2. Name it `<provider>_<id>[_note]__captured.xml` or `__constructed.xml`.
-3. Add a row to `expectations.json` — provider, id, level, `timeCreated`, `fault`, and `means` when
-   it is a fault. **A fixture with no expectation, or an expectation with no fixture, fails the
-   suite**: the first is a file nobody checks, the second is a check that silently never runs.
+3. Add a row to `expectations.json` — provider, id, level, `timeCreated`, `fault`, `signal` when it
+   is a signal, and `means` when it is either. **A fixture with no expectation, or an expectation
+   with no fixture, fails the suite**: the first is a file nobody checks, the second is a check that
+   silently never runs. `signal` is normalised to a strict boolean on both sides, so an expectation
+   that omits it reads as `false` — which is why adding the class in 2026-08 did not redden the five
+   fixtures that predate it.
 
 ---
 
