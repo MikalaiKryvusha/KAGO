@@ -44,6 +44,30 @@ decision (his words, verbatim, in `GOAL.md`):
    shortcut: the elevated `\KAGO\apply-<mode>` task) and a «close the tray» item. Closing the
    tray REMOVES it from autostart; any mode apply puts it BACK into autostart and raises it.
    (Supersedes the 2026-08-09 «passive tray, no menu» decision — owner's word, `GOAL.md`.)
+
+   🆕 **THE EXIT ITEM WAS DEFINED BY THE OWNER 2026-08-23 ~15:3x +03:00, AND IT SUPERSEDES A
+   STANDING DESIGN DECISION.** His words, verbatim:
+
+   > *«пункт Exit в контекстном меню KAGO должен сбрасывать карту до завода, и закрывать
+   > трей-приложение KAGO.»*
+
+   **So Exit is TWO actions in one item, in this order:** reset the card to factory (the same path
+   as the `🔄 Stock Default` shortcut — the elevated `\KAGO\apply-factory` task, so R1 holds and
+   `profile-manager` stays the only writer), THEN remove the tray from autostart and exit the
+   process. A failed reset must NOT be followed by a silent exit: the tray reports it and stays.
+
+   ⚠️ **What this supersedes, stated plainly rather than dropped.**
+   `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4 currently reads *«A killed tray now means the owner
+   loses the indicator, not the profile»*, and the tray was deliberately given no state-changing
+   power. That decision stands for a tray that is KILLED; it no longer describes Exit.
+
+   **And the distinction is the whole point, so it is written down before anyone "simplifies" it
+   back:** an explicit Exit is a HUMAN ACTION with a human behind it — a reset is exactly what he
+   is asking for. A process killed from Task Manager runs no exit handler, so detecting it would
+   need a heartbeat, a watchdog or a Job Object — a second moving part whose failure mode is
+   *resetting the GPU when nothing was wrong*, which is the reason §4 rejected it in the first
+   place. **Exit resets. Being killed does not, and still must not.** The safety property is
+   unchanged either way: profiles are volatile, so a reboot returns the card to factory anyway.
 3. **Achieve:** re-launching the mode that is already on the card writes NOTHING to the GPU —
    it only re-enables the tray autostart (and raises the tray).
 

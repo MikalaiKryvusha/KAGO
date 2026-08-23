@@ -23,7 +23,16 @@
 // interpreter is REFUSED with a distinct exit code instead of silently doing nothing: a boot task
 // that quietly stops re-applying the owner's profile is exactly the failure that must be loud.
 //
-// [NOT-TESTED]
+// [TESTED: 2026-08-23 15:0x-15:14 · red/green on a throwaway twin task, then end-to-end on the
+//  live task, both watched by an EnumWindows sampler at 100 ms. RED (node.exe named directly):
+//  2 new console windows, EVER-VISIBLE 2, exit code 42 propagated. GREEN (this wrapper): 2 new
+//  console windows, EVER-VISIBLE 0, exit code 42 propagated. LIVE (\KAGO\boot-apply through this
+//  file): 1 new console window, EVER-VISIBLE 0, LastTaskResult 0, journal gained the intent and
+//  the `applied` verdict at 250 W. Visibility is MEASURED here, not inferred from the flag.]
+//
+// What this does NOT prove, stated because the difference matters: the owner's eye on his own
+// screen at a real logon. The sampler sees window visibility state, which is the mechanism — but
+// a logon also runs a dozen other tasks, and only he can say the screen is finally clean.
 
 var EXIT_NO_ARG = 64;      // no interpreter argument was passed
 var EXIT_NO_NODE = 65;     // the argument names a file that is not on disk

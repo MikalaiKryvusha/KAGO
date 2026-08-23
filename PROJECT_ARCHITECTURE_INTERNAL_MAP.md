@@ -120,6 +120,20 @@ The owner's later instruction is the more specific one and governs. **A killed t
 owner loses the indicator, not the profile**, and the deliberate way back to stock is the third
 shortcut.
 
+> 🆕 **AMENDED 2026-08-23 ~15:3x +03:00 BY THE OWNER, AND THE AMENDMENT SPLITS THE CASE IN TWO.**
+> His words: *«пункт Exit в контекстном меню KAGO должен сбрасывать карту до завода, и закрывать
+> трей-приложение KAGO»*. So the tray gains ONE state-changing action, and only one.
+>
+> | how the tray ends | resets the card? | why |
+> |---|---|---|
+> | **Exit from the right-click menu** | **YES** — through `\KAGO\apply-factory`, i.e. the same elevated task the `🔄 Stock Default` shortcut uses, so R1 is untouched | a human chose it, and he says that is what he wants |
+> | killed from Task Manager / crashed / logged off | **NO — unchanged** | no exit handler runs, so detection would need a heartbeat or a Job Object: a second moving part whose failure mode is resetting the GPU when nothing was wrong. That is precisely why the paragraph above exists, and it still holds |
+>
+> The tray therefore remains an INDICATOR that owns no state — with one exception that is an
+> explicit human command and is executed through the existing writer, never by the tray itself.
+> Design detail and the ordering rule (reset first, exit only if the reset succeeded) live in
+> `plans/10` §1.2.
+
 **Why this is the better design, and not merely the easier one:** a process killed by Task Manager
 runs no exit handler, so kill-detection would have needed a heartbeat, a watchdog, or a Job Object —
 a second moving part whose failure mode is *resetting the GPU when nothing was wrong*. An explicit
