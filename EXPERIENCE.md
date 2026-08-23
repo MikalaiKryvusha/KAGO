@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0128 · 2026-08-23 · ❌→✅ · #guards #trust #false-diagnosis #retired-tool #verify-the-verdict
+**Context:** `STATUS.md` had carried, for six weeks, the sentence that a mechanical guard «краснеет всегда, все находки ложные» — so the rule it enforces was left to the agent's attention instead, and had already been broken once.
+**Tried / did:** ran the tool and OPENED all nine of its findings one by one instead of trusting either the tool or the sentence about it.
+**Result:** ❌ the sentence was false — eight findings were false positives but ONE WAS REAL: three unanswered questions to the owner, in a research document, since the previous day, on a taste-class subject only his ear can settle. ✅ closed that one (they now live in `interviews/`), then fixed the largest mechanical false class; the guard went 9 → 8 → 6, each step witnessed by re-running it. And the ratio was never even bad: the canon's own expectation for a text-rule guard is «~10 false hits per real one», so at 8:1 the tool was INSIDE spec when it was written off.
+**Lesson:** **a verdict ABOUT an instrument is a claim like any other, and it decays faster than the instrument does.** «It always cries wolf» is the cheapest sentence in a project and the most expensive: it costs nothing to write, it is never re-measured, and from the moment it is written every true finding the tool produces is invisible. The test that catches it takes minutes — open every finding, classify each by hand, count. Second half, about method: **a noisy guard is fixed by SCOPE, not by suppression.** The chronicle of the closed past was scoped out (a question recorded there is a fact, not a queue, and the one action the guard could provoke is the one the chronicle forbids) — the same shape this project already used for stamps: scope needs no list to keep up to date, a suppression file does.
+**Repro:** for any tool the project calls «broken», run it and classify EVERY finding by hand before believing the label; compare the false:real ratio against the canon's stated expectation for that kind of guard.
+**Trigger:** meeting a sentence like «this check is unreliable / always red / all its findings are false» in the project's own documents.
+**Not for:** a tool measured broken WITH the classification attached — there the work is done and the verdict is evidence, not hearsay.
+
 ### EXP-0127 · 2026-08-23 · ❌→✅ · #guards #mutation #diagnosis #red-line
 **Context:** wrote four invariant blocks for a new event class, then mutation-proved them three ways as the canon requires.
 **Tried / did:** ran the mutations one at a time and read not just WHICH blocks went red but WHAT THEY SAID.
