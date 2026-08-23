@@ -791,6 +791,13 @@ export async function runRung({
     atom = await runStepFn({
       point: plan.entry.i,
       offsetMhz: plan.deltaMhz,
+      // ⚠️ ЦЕЛЬ НАЗЫВАЕТСЯ ЯВНО (`bugs/47`), и без неё починка мертва на машине. `plan.deltaMhz`
+      // посчитан по таблице, которую прочитал МЫ; вектор строится по таблице, которую атом читает
+      // заново. Между чтениями карта греется, ось частот проседает (R14b) — и 2026-08-23 точка не
+      // дотянулась до 2355 МГц, отчего заказ 845 мВ обслужило 910 при стоке 895. Получив цель, атом
+      // пересчитывает сдвиг по СВОЕЙ таблице, и пара «правда ↔ зеркало» схлопывается.
+      // `capMhz` сюда не годится: под замком он несёт КОНВЕРТ, а не испытуемую частоту.
+      targetClockMhz: clockMhz,
       writeShape: held.shape,
       capMhz: capForAtom,
       pinMhz,
@@ -6337,6 +6344,23 @@ export function selfTest() {
     ok('ПОРЯДОК: «не обслужено» ПЕРЕВЕШИВАЕТ наш потолок глубины, а не наоборот',
       statusForOutcome({ verdict: 'lever-limited', stoppedEarly: 'no-progress', plan: { cappedByOperator: true } }),
       CURVE_STATUS.NOT_SERVED);
+
+    // ═══ `bugs/47` — БОЕВОЙ ВЫЗОВ АТОМА НАЗЫВАЕТ ЦЕЛЬ ══════════════════════════════════════════════
+    // Починка живёт в `vf-step.offsetForTarget` и включается ТОЛЬКО когда вызывающий передал
+    // `targetClockMhz`. Не передал — атом молча применяет готовое число, то есть дефект на месте, а
+    // блоки `vf-step` при этом зелёные: ровно дыра N3 из эпика 33 (EXP-0133).
+    // Ключ собран из частей и берётся `lastIndexOf` — блок читает СВОЙ ЖЕ файл, и обе прошлые
+    // редакции такого сторожа находили сами себя (EXP-0134).
+    ok('bugs/47: БОЕВОЙ вызов атома ПЕРЕДАЁТ цель — иначе пересчёт сдвига мёртв на машине',
+      (() => {
+        const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+        const key = `atom = await ${'runStepFn'}({`;
+        const at = src.lastIndexOf(key);
+        if (at < 0) return 'боевой вызов атома в исходнике не найден';
+        const win = src.slice(at, at + 900);
+        if (win.includes('ok(')) return 'якорь уехал в набор — блок читает сам себя';
+        return [win.includes('targetClockMhz:'), win.includes('offsetMhz: plan.deltaMhz')];
+      })(), [true, true]);
 
     // ═══ ЭПИК 33, ФАЗА 2 — ПОМЕТКА ПРОМАХА (`interviews/013` Q2 = C) ════════════════════════════════
     // Граница — слово владельца: ОДНА ступень сетки вверх это ПОПАДАНИЕ, больше — «другая запись
