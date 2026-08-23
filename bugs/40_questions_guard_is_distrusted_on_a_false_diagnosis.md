@@ -1,7 +1,7 @@
 # Bug 40 — the questions guard is written off as «all findings false», and the write-off is itself wrong: 1 of its 9 is REAL
 
 **Status:** 🟡 OPEN — **the real finding is CLOSED and class B is FIXED: 9 → 8 → 6 findings, each
-step witnessed by the guard itself.** Classes A, C and D are named with their mechanical
+step witnessed by the guard itself; a further 6 → 4 came from the bonsai trim and is NOT a fix.** Classes A, C and D are named with their mechanical
 discriminators and remain. The instrument is no longer «broken» or «working»: every line of its
 output is now accounted for.
 **Version/build:** `main` @ `1cd5163` · **When/context:** found 2026-08-23 17:1x while taking the
@@ -103,6 +103,22 @@ Q1 that 0.8 s is a number ASSIGNED from the middle of the sources' range rather 
 | at the start of the pass | **9** | yes | yes |
 | after step 2 (the real finding closed) | **8** | **no** | yes |
 | after step 4 (class B scoped out) | **6** | no | **no** |
+| after the session's bonsai trim of `STATUS.md` | **4** | no | no |
+
+⚠️ **The last row is NOT a fix, and it is listed separately for exactly that reason.** The trim moved
+the session-41/40 blocks out of `STATUS.md` into the chronicle, and the chronicle is now out of scope
+— so two class-A instances RELOCATED; the class itself is untouched. Caught by the judge pass before
+the push, which was about to hand the next session the number 6 while the tool showed 4.
+
+**The four that remain are one live instance per class, named so a later session verifies a fix by
+watching exactly the right one disappear:**
+
+| finding | class |
+|---|---|
+| `bugs/14…:28` — `Владелец: «ты ни разу не протестировал…»` | **A** — a quote OF the owner |
+| `AGENT_GUIDE.md:537` — the canon text that states the rule | **C** — a reference to a question |
+| `assets/logo/README.md:32` — `владельцу, история выбора.` | **C** |
+| `researches/10…:356` — `## 5. Open forks for the owner`, body «None.» | **D** — a heading without its body |
 
 That 9 → 8 is the whole proof this pass needed: the finding that disappeared is the one that was
 real, and the eight that remain are exactly the four false classes below. **The guard is now a tool
