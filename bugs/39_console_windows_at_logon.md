@@ -99,12 +99,29 @@ change (authorised by the owner in chat, *«разрешаю всё»*):
    `gpu-watch.ps1`. **A neighbouring deployment is read-only evidence and is never edited from
    here** (`AGENT_GUIDE.md`). The cure for them is the same shape: either a `wscript //B` launcher,
    or the task set to "run whether the user is logged on or not" (session 0, no window can exist).
-2. **🔴 THE SAME DEFECT CLASS IS STILL LIVE ON THE MODE SHORTCUTS, and it was left alone on
-   purpose.** Every desktop `.lnk` targets `C:\Windows\System32\schtasks.exe` — a console binary —
-   and the `\KAGO\apply-*` task it triggers runs `node.exe` directly. **So switching a mode by
-   double-click flashes two consoles in a row.** The owner reported the BOOT case, and re-writing
-   his Desktop shortcuts without asking is a wider blast radius than the report justifies. The cure
-   is known and identical; it needs one sentence from him.
+2. ✅ **THE MODE SHORTCUTS — CLOSED THE SAME DAY, on the owner's word «Да, почини».** Every desktop
+   `.lnk` targeted `C:\Windows\System32\schtasks.exe` (a console binary) and the `\KAGO\apply-*`
+   task it triggered ran `node.exe` directly, so a double-click flashed **two** consoles in a row.
+
+   **The cure was collapsed into ONE file for every call site rather than copied**, because this was
+   the FOURTH report of the same disease and each time it was a new call site:
+   `automation-engine/run-hidden.js` runs anything with the console created already hidden, waits,
+   and propagates the exit code. `boot-apply-launcher.js` was folded into it and deleted — two
+   mechanisms for one disease is the drift this project keeps a pair registry against.
+
+   `apply-shortcut.js` stays separate on purpose: `schtasks` takes `/`-flags, and WSH parses those
+   into its Named collection before a script sees them (EXP-0043's class), so the `.lnk` passes only
+   a MODE NAME and the schtasks line is composed inside. Its mode vocabulary is CLOSED and refuses an
+   unknown name before triggering an elevated task; the setup pass watches it against `SURFACE`,
+   since a WSH script cannot import an `.mjs` and the pair cannot be collapsed.
+
+   **Measured end-to-end on the real Desktop shortcut, 2026-08-23 16:11:** double-click on
+   «⚖️ Optimised» → **1 new console window, EVER-VISIBLE 0**, `LastTaskResult = 0`, journal gained
+   its line, card unchanged at 250 W. Names and 3D icons survived the rewrite.
+
+   **A guard reddened correctly during this work and it is worth recording:** the boot task's
+   read-back still demanded the OLD launcher's filename and failed on the first install after the
+   collapse. A check that had looked only at `RunLevel` and the trigger would have stayed green.
 3. **The owner's own eye on a real logon.** The sampler measures window visibility, which is the
    mechanism; a logon also runs a dozen other tasks. `AGENT_GUIDE.md` is explicit that where the
    observation is beyond the agent's reach, the honest report says so.
