@@ -69,7 +69,11 @@ function paint() {
   $('f-freq').textContent = r.frequencyMhz ? `${r.frequencyMhz} МГц` : '—';
   $('f-volt').textContent = r.voltageMv ? `${r.voltageMv} мВ` : '—';
   $('f-depth').innerHTML = (r.stockVoltageMv && r.depthMv !== null && r.depthMv !== undefined)
-    ? `сток ${r.stockVoltageMv} · андервольт <b style="display:inline;font-size:13px;color:var(--ok)">−${r.depthMv} мВ</b>`
+    // ⚠️ ЕДИНИЦЫ У КАЖДОЙ ВЕЛИЧИНЫ, А НЕ У ПОСЛЕДНЕЙ В СТРОКЕ (`bugs/42`). Здесь стояло «сток 995»
+    // без «мВ»: единица была только у андервольта в конце, и владелец прочёл голое число на странице,
+    // где рядом печатаются и мегагерцы, и ватты. Число без единицы на приборе — это не экономия
+    // места, а предложение читателю догадаться.
+    ? `сток ${r.stockVoltageMv} мВ · андервольт <b style="display:inline;font-size:13px;color:var(--ok)">−${r.depthMv} мВ</b>`
     : '';
   const p = r.probe || {};
   $('f-probe').innerHTML = `${(p.elapsedSeconds ?? 0).toFixed(1).replace('.', ',')} `

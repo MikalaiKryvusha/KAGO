@@ -6570,6 +6570,30 @@ async function mainSweep(argv, arg) {
   // What changes is who is asked to fix it. Refusal is now the LAST resort, not the first answer.
   const dash = await import('./lib/run-dashboard.mjs');
   let watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+
+  // ─── ОКНО ГАСИТ САМА ОСТАНОВКА ПРОГОНА, А НЕ ПАМЯТЬ АГЕНТА — `bugs/42`, четвёртый случай класса ──
+  //
+  // 🔴 ВЕЧЕР 2026-08-23. Прогон был остановлен, а окно визуализатора осталось на экране И ПРОДОЛЖАЛО
+  // ЗВУЧАТЬ. Владелец из другой комнаты слышал звук и считал, что прогон идёт. Это четвёртый случай
+  // одного класса («забытое окно»: `bugs/17`, `bugs/39`), и лекарство канон называет прямо: то, что
+  // зависит от старательности агента, переносится в машинерию, которая срабатывает независимо от
+  // того, вспомнил агент или нет.
+  //
+  // ГДЕ БЫЛА ДЫРА: гашение регистрировалось ВНУТРИ ветки «окна нет — поднимаю сам». Если окно к
+  // началу прогона уже было открыто — а так и бывает, оператор смотрит предыдущий прогон, — ветка не
+  // исполнялась, и НИ ОДНОГО обработчика выхода не появлялось вовсе. Прогон кончался, окно жило.
+  //
+  // Теперь ответственность безусловна: чей бы ни был процесс сервера, окно принадлежит ПРОГОНУ, и
+  // прогон уносит его с собой на любом своём выходе. `closeWindow` идемпотентен и молча переживает
+  // «уже закрыто», поэтому лишний вызов ничего не стоит; звук живёт в странице и уходит вместе с ней.
+  let dashProc = null;
+  const shutWindow = () => {
+    try { dashProc?.kill(); } catch { /* уже мёртв */ }
+    try { dash.closeWindow(); } catch { /* уже закрыто */ }
+  };
+  process.on('exit', shutWindow);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { shutWindow(); process.exit(130); });
+
   if (!watch.ok || watch.viewers < 1) {
     console.log('ОКНО НАБЛЮДЕНИЯ: не открыто — поднимаю сам, ОТДЕЛЬНЫМ ПРОЦЕССОМ.');
     // 🔴 ОТДЕЛЬНЫМ ПРОЦЕССОМ, А НЕ ВНУТРИ СЕБЯ — `bugs/27`. Прежде сервер поднимался здесь же
@@ -6586,21 +6610,16 @@ async function mainSweep(argv, arg) {
     const { spawn: spawnDash } = await import('node:child_process');
     const { fileURLToPath: toPathDash } = await import('node:url');
     const dashScript = join(dirname(toPathDash(import.meta.url)), 'lib', 'run-dashboard.mjs');
-    const dashProc = spawnDash(process.execPath, [dashScript, '--port', String(dash.DEFAULT_PORT)],
+    // Сервер принадлежит ЭТОМУ прогону: кончился прогон — ушло и окно. Окно, пережившее свой прогон,
+    // это форма `bugs/04` — застывшая картинка того, чего уже не происходит. На Windows дочерний
+    // процесс НЕ умирает вместе с родителем, поэтому гасим явно и на ЛЮБОМ выходе, как сэмплер ниже;
+    // обработчики уже стоят выше и накрывают ОБА случая, а не только этот.
+    dashProc = spawnDash(process.execPath, [dashScript, '--port', String(dash.DEFAULT_PORT)],
       { windowsHide: true, stdio: 'ignore' });
     dashProc.unref?.();
     // Окно поднимает ДОЧЕРНИЙ процесс, поэтому ждать надо его, а не себя.
     await dash.waitForViewer(dash.DEFAULT_PORT);
     watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
-    // Сервер принадлежит ЭТОМУ прогону: кончился прогон — ушло и окно. Окно, пережившее свой прогон,
-    // это форма `bugs/04` — застывшая картинка того, чего уже не происходит. На Windows дочерний
-    // процесс НЕ умирает вместе с родителем, поэтому гасим явно и на ЛЮБОМ выходе, как сэмплер ниже.
-    const shutWindow = () => {
-      try { dashProc.kill(); } catch { /* уже мёртв */ }
-      try { dash.closeWindow(); } catch { /* уже закрыто */ }
-    };
-    process.on('exit', shutWindow);
-    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { shutWindow(); process.exit(130); });
   }
   if (!watch.ok || watch.viewers < 1) {
     console.error('ОТКАЗ: ОКНО НАБЛЮДЕНИЯ НЕ ОТКРЫТО, а развёртка пишет в карту.');
