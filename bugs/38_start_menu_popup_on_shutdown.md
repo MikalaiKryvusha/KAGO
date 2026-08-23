@@ -1,7 +1,10 @@
 # Bug 38 — the Start Menu faults inside explorer.exe on every shutdown
 
-**Status:** 🔬 RESEARCH-ONLY — cause is a LEADING HYPOTHESIS, not a diagnosis; the deciding
-observation belongs to the owner
+**Status:** 🟡 OPEN, remedy applied and **1 clean restart observed of the several this needs**
+(2026-08-23 16:2x, the owner's eye — see the ladder below). The cause remains a LEADING HYPOTHESIS
+and not a diagnosis: the faulting module was never recorded by Windows, and one silent restart
+cannot promote a hypothesis that fired on «essentially every» restart before. The deciding
+observation belongs to the owner and is collected one restart at a time.
 **Version/build:** Windows 11 Pro 25H2, build 10.0.26200.8875 · **When/context:** reported by the
 OWNER 2026-08-23 in chat, during the session that also fixed `bugs/39`
 
@@ -100,9 +103,22 @@ owner in one session (`bugs/17`, EXP-0083); the rule learned there applies here.
       measurement rather than by the installer's word: files on disk are 3.9.24, and the freshly
       restarted `explorer.exe` (pid 22520, started 15:09:12) has **3.9.24 loaded**, not the old copy
       still resident in memory. The owner confirmed his licence is active.
-- [ ] **Watch across several restarts.** The popup fired on essentially every restart before the
-      update; if it stops, the hypothesis is confirmed by the only observation that can confirm it.
-      Re-read with the `Get-WinEvent` line above — no need to remember what was on screen.
+- [ ] **Watch across several restarts. 🟡 ONE CLEAN, AND ONE IS NOT ENOUGH — the count is written
+      down so a later session does not read a single success as a fix.** The popup fired on
+      essentially every restart before the update; if it stops, the hypothesis is confirmed by the
+      only observation that can confirm it. Re-read with the `Get-WinEvent` line above — no need to
+      remember what was on screen.
+
+      | restart | shutdown popup? | witness |
+      |---|---|---|
+      | 2026-08-23 16:2x → boot 16:27:51 — **the first shutdown after the 15:08 update** | **NO** | the owner, verbatim: *«ошибки от explorer.exe не было при выключении компа»* |
+
+      **Why the owner is the only possible witness, restated because it is easy to forget:** this
+      popup leaves NO record. Re-checked 2026-08-23 16:3x — `Application` log id 1000 over the last
+      7 days holds **zero** `explorer.exe` records, exactly as §2 of the forensics predicted: the
+      hard-error dialog blocks, the machine restarts under it, and WER never finalises the report.
+      An agent reading the log after the fact cannot tell a clean shutdown from a dirty one. So the
+      column above can only ever be filled by his eye, and it is filled one row at a time.
 - [ ] **If it still fires: `OldNewExplorer` 1.1.9 is the remaining suspect** and the only one left
       that is provably unsupported on this build. Ask the owner whether he still uses it —
       StartAllBack 3.9.x covers most of what it did on Windows 11. Removing it is his call.

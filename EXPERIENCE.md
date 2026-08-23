@@ -41,6 +41,33 @@
 
 ## Entries
 
+### EXP-0127 · 2026-08-23 · ❌→✅ · #guards #mutation #diagnosis #red-line
+**Context:** wrote four invariant blocks for a new event class, then mutation-proved them three ways as the canon requires.
+**Tried / did:** ran the mutations one at a time and read not just WHICH blocks went red but WHAT THEY SAID.
+**Result:** ❌ two different mutations — «the class is computed wrong» and «the id list stopped matching» — reddened the same block with the SAME message, and that message was FALSE for the first one: it said the list had stopped catching events when the list had caught the event and merely filed it wrong. ✅ reordered the checks so MATCHING is asked before CLASS (the `means` field is present iff a rule matched at all); the two now produce different, accurate red lines.
+**Lesson:** **a mutation run proves the block goes red; it does not prove the block is RIGHT about why — and only reading the red LINE catches the difference.** A guard whose diagnosis misnames the cause is worse than one that merely goes red: it goes red at the right moment and then sends the next session down the wrong corridor, with the authority of a passing test suite behind it. The cheap discipline: when two mutations redden one block, read both messages; if they are identical, the block is asserting a conjunction and its check order is the diagnosis.   → link: plans/29 §8 · `event-logger.runClassInvariants` · EXP-0016
+**Repro:** apply each mutation separately and diff the red LINES, not just the red block names.
+**Trigger:** a mutation proof where two different mutations redden the same block → read both messages before calling it proved.
+**Not for:** blocks that genuinely assert one atomic property — there one message is the whole truth.
+
+### EXP-0126 · 2026-08-23 · ❌→✅ · #guards #suites #false-green #bugs27 #battery
+**Context:** needed to add a guard for a new class to the `events` fixture suite.
+**Tried / did:** before writing it, checked which battery entry would run it. There is none — the suite has existed since phase 1 and `selftest:all` never called it; it lived only inside `npm run phase1:accept`, a command nobody runs routinely.
+**Result:** ✅ the guard was written AND the suite was brought into the battery in the same change, with the inertness proof written beside the entry. Without that check the new guard would have been born into a set nobody runs — green forever, proving nothing.
+**Lesson:** **before adding a guard, ask which command actually RUNS the suite you are adding it to.** This project already paid for the general form (`bugs/27` lived five days inside a suite the battery did not call) and wrote the rule into the battery's own comment — and the rake came back one floor down, on an OLDER suite that predates the rule. A guard's value is (does it go red) × (does anyone run it), and a session that verifies only the first half has verified half a guard.
+**Repro:** `grep -n "<suite id>" tools/selftest-all.mjs` before writing the block; no hit means the suite is not in the battery.
+**Trigger:** adding any check to an existing suite → confirm the suite is in the battery first.
+**Not for:** suites deliberately excluded with a written reason — read the reason before overriding it.
+
+### EXP-0125 · 2026-08-23 · ✅ · #owner-machine #observation #two-witnesses #no-sensor
+**Context:** the owner reported three things after a reboot («no terminal windows», «no explorer error», «login screen was ENG»), each on a surface the agent has no sensor for.
+**Tried / did:** did not stop at his word and did not substitute my own instruments for it. For each claim, found the half a MACHINE can see and measured it: the registry for the layout, `EnumWindows` for the desktop, the event log for the crash record — then stated which half each witness covered.
+**Result:** ✅ the instrument found MORE than the eye on one of them (13 console windows exist, 0 visible — including the neighbouring project's two, which the eye could not have counted), and found NOTHING on another (the explorer popup leaves no WER record at all, so only the eye can ever witness it — and one clean restart was recorded as one, not as a fix).
+**Lesson:** **when the owner reports an observation the agent cannot make, the answer is not «I believe you» and not «let me re-measure» — it is to find the half a machine CAN see and say explicitly which half each witness covers.** Two witnesses blind to each other's half close a defect properly; one witness stretched over both halves is a claim. The corollary that keeps it honest: where NO instrument exists (the explorer popup), the count of the owner's observations is the evidence, and it is written down as a count so a later session cannot read one success as a proof.   → link: bugs/39 · bugs/38 · AGENT_GUIDE.md → the owner's-machine rule
+**Repro:** for any owner-reported symptom, ask «what does this leave behind that I can read?» — a registry value, a window handle, a log record — and measure that, naming what it does NOT cover.
+**Trigger:** the owner reports a symptom on his screen or his desktop.
+**Not for:** the taste class — there the eye is not half the evidence, it is all of it.
+
 ### EXP-0124 · 2026-08-23 · ❌→✅ · #signals #detectors #specificity #sensitivity #n-of-1
 **Context:** found that the GPU driver's own provider (`nvlddmkm`) logged two errors INSIDE the rung that killed the machine, seconds before the sampler pulse noticed anything. It looked like a finished detector.
 **Tried / did:** instead of proposing it, scored it against **every** machine death in the log — 12 of them — by measuring the gap to the last driver error before each.

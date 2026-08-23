@@ -1,8 +1,9 @@
 # Bug 39 — console windows appear at logon, and two of them are KAGO's
 
-**Status:** 🟡 PARTIAL — KAGO's own offender is FIXED and measured; the rest is an inventory with
-one item awaiting the owner and one belonging to a neighbouring project
-**Version/build:** `main` @ `c9b9012` · **When/context:** reported by the OWNER 2026-08-23 in chat
+**Status:** ✅ **DONE 2026-08-23 16:4x** — closed by TWO independent witnesses, each covering the half
+the other cannot see: the OWNER's own eye on a real logon (the flash), and an `EnumWindows` sweep of
+the live desktop (the persistence). Details in «The closing observation» below.
+**Version/build:** `main` @ `05ee2cf` · **When/context:** reported by the OWNER 2026-08-23 in chat
 
 The owner, verbatim:
 
@@ -122,9 +123,41 @@ change (authorised by the owner in chat, *«разрешаю всё»*):
    **A guard reddened correctly during this work and it is worth recording:** the boot task's
    read-back still demanded the OLD launcher's filename and failed on the first install after the
    collapse. A check that had looked only at `RunLevel` and the trigger would have stayed green.
-3. **The owner's own eye on a real logon.** The sampler measures window visibility, which is the
-   mechanism; a logon also runs a dozen other tasks. `AGENT_GUIDE.md` is explicit that where the
-   observation is beyond the agent's reach, the honest report says so.
+3. ✅ **The owner's own eye on a real logon — GIVEN 2026-08-23 16:3x.** See below.
+
+## ✅ The closing observation — two witnesses, each blind to the other's half
+
+The defect has two halves and no single observer can see both. The FLASH at logon lasts a fraction
+of a second and is gone before any tool can be started; the PERSISTENCE is a property of the desktop
+minutes later, which the owner does not sit and audit. So both were taken.
+
+**Witness 1 — the owner, after the reboot of 2026-08-23 16:27:51 (boot id 12, `Kernel-General`).**
+His words: *«окон терминалов на запуске не было»*. That covers the flash, and it is the observation
+`AGENT_GUIDE.md` says to ask for rather than claim: the agent has no sensor on his screen.
+
+**Witness 2 — `EnumWindows` over the live desktop, 2026-08-23 16:3x, ~6 minutes after that boot.**
+Every top-level window enumerated, filtered to `ConsoleWindowClass` / `CASCADIA_*`, each asked
+`IsWindowVisible`:
+
+| console-class windows found | **13** |
+|---|---|
+| **of them EVER-VISIBLE** | **0** |
+| among them | KAGO's tray (pid 16684) · **both KLAS windows** — `klas.ps1 -Action tray` (11800) and `gpu-watch.ps1` (17660) · `openclaw-gateway` (23496) · 8 × `wslhost` · `llama-swap` |
+
+**So the windows still EXIST — they simply no longer DRAW.** That is the correct outcome and not a
+weaker one: a console-subsystem process gets a console allocated by Windows whether or not anyone
+sees it, and the whole cure this document ships is about the window never being PAINTED.
+
+⚠️ **The KLAS half of item 1 is therefore SYMPTOM-FREE, and the mechanism by which it became so is
+NOT established.** The leading hypothesis is the one machine-wide change this session made: the
+default terminal moved from «Let Windows decide» (which resolves to Windows Terminal) to **Windows
+Console Host**, and `bugs/17` had already recorded that Windows Terminal windows OUTLIVE the process
+that caused them, leaving empty VISIBLE windows behind. That is a hypothesis and is written as one —
+KLAS was never edited for this defect, by the read-only-neighbour rule, so no claim is made about
+its own code.
+
+**What would re-open this document:** the owner seeing a console window at logon again. The
+instrument to re-run first is the sweep above — 13/0 is the number to compare against.
 
 ## Decisions made without the owner
 

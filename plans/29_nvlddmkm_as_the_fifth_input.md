@@ -1,7 +1,7 @@
 # Plan 29 — `nvlddmkm` as the FIFTH INPUT: the driver's own error channel enters the oracle as an observation, never as a verdict
 
 > **Created:** 2026-08-23 16:4x +03:00 · **Parent:** `researches/15` §5 rank 1 («делать первым») ·
-> **Status:** 🟡 IN WORK — opened 2026-08-23 16:4x · **Outbound:** the internal map gains a rule row
+> **Status:** ✅ **DONE 2026-08-23 17:0x** — all six acceptance criteria met by observation; commit `c69373f`. Opened 16:4x, closed 17:0x, zero GPU writes · **Outbound:** the internal map gains a rule row
 > beside R4a-pulse; `AGENT_GUIDE.md` harness table gains the battery's new member
 
 ---
@@ -82,30 +82,30 @@ rule (`PHILOSOPHY.md` → the three doors; `ideas/10` §5.1).
 
 ## 4. Steps
 
-- [ ] **4.1 — the SIGNAL class in `config.mjs`.** A fifth row in `FAULT_PROVIDERS`:
+- [x] **4.1 — the SIGNAL class in `config.mjs`.** A fifth row in `FAULT_PROVIDERS`:
       `{ provider: 'nvlddmkm', ids: [], means: 'SIGNAL', what: …, provable: 'history' }`, with the
       comment naming what was measured, when, and the re-probe command. State in the comment that an
       empty `ids` means «the whole provider».
-- [ ] **4.2 — `classifyEvent` learns the two classes.** Returns `{ fault, signal, means, what,
+- [x] **4.2 — `classifyEvent` learns the two classes.** Returns `{ fault, signal, means, what,
       provable }`. A `SIGNAL` rule yields `fault: false, signal: true` — so every existing consumer
       that filters on `fault` is untouched by construction. An empty `ids` matches any id of that
       provider.
-- [ ] **4.3 — `queryFaults` returns `signals` beside `faults`.** Same parse, separate list.
-- [ ] **4.4 — `verdictFor` carries the signals WITHOUT letting them vote.** The verdict logic is not
+- [x] **4.3 — `queryFaults` returns `signals` beside `faults`.** Same parse, separate list.
+- [x] **4.4 — `verdictFor` carries the signals WITHOUT letting them vote.** The verdict logic is not
       touched; the returned object gains `signals`, and the reason line for a clean window says the
       driver channel is an input, not a verdict.
-- [ ] **4.5 — the CLI prints a СИГНАЛЫ section**, labelled as an input, never as a fault.
-- [ ] **4.6 — the captured fixture + its expectation.** `nvlddmkm_153_inside_the_fatal_rung__captured.xml`
+- [x] **4.5 — the CLI prints a СИГНАЛЫ section**, labelled as an input, never as a fault.
+- [x] **4.6 — the captured fixture + its expectation.** `nvlddmkm_153_inside_the_fatal_rung__captured.xml`
       (already taken, 2026-08-23 16:3x — the 11:52:04 event itself) and a second one for id 14, so the
       recovery-action shape is parsed too. `expectations.json` gains `signal`; `runFixtureSuite`
       checks it.
-- [ ] **4.7 — mutation proof (AC3).** Break it three ways, one at a time: (a) make `SIGNAL` fall
+- [x] **4.7 — mutation proof (AC3).** Break it three ways, one at a time: (a) make `SIGNAL` fall
       through into `faults`; (b) make an empty `ids` match nothing; (c) let `verdictFor` count
       signals. Each must redden its own block; the intact module must redden none.
-- [ ] **4.8 — `events` enters `selftest:all`.** With the inertness proof written NEXT to the entry, as
+- [x] **4.8 — `events` enters `selftest:all`.** With the inertness proof written NEXT to the entry, as
       the list's own rule (paid for by `bugs/27`) requires: the suite reads two fixed fixture
       directories and touches neither the card, nor `runs/`, nor a port.
-- [ ] **4.9 — documents.** `researches/15` gains the id-14 finding and a closing status; the internal
+- [x] **4.9 — documents.** `researches/15` gains the id-14 finding and a closing status; the internal
       map gains the rule row; `AGENT_GUIDE.md`'s harness table and truth↔mirror registry are updated;
       `STATUS.md` gains the session block.
 
@@ -135,3 +135,48 @@ rule (`PHILOSOPHY.md` → the three doors; `ideas/10` §5.1).
 - **It does not change the pulse, the oracle's three observations, or any verdict.**
 - **It does not touch TDR registry settings** (`researches/15` §4 records them as untouched defaults;
   they are the fourth layer of the safety net).
+
+---
+
+## 8. Result — what was OBSERVED, closed 2026-08-23 17:0x
+
+| AC | observed |
+|---|---|
+| **AC1** | `npm run events -- --since 2026-08-23T11:45 --until 2026-08-23T12:00` → `nvlddmkm [history] — ok, событий 2` ✅ |
+| **AC2** | narrowed to `11:52:00..11:53:00` — the minute inside the fatal rung, holding signals and no fault: **СИГНАЛЫ (2), ВЕРДИКТ «сбоев нет»** ✅. Before this change the same window returned nothing at all |
+| **AC3** | three mutations, one at a time: (a) SIGNAL classified as a fault · (b) an empty `ids` matching nothing · (c) `verdictFor` counting signals. Each reddened its own blocks with exit code 1; the intact module reddened none (11/11 green) ✅ |
+| **AC4** | both fixtures `CAPTURED on this machine` — the 11:52:04 event itself, and an id-14 event ✅ |
+| **AC5** | `npm run selftest:all` → **20 suites, 1057 green blocks, 0 red** (was 19 / 1046); `events … ЗЕЛЁНЫЙ · блоков 11` ✅ |
+| **AC6** | every command used is read-only; **zero GPU writes** ✅ |
+
+**A defect in my own guard, found by the mutation run and fixed:** mutations (a) and (b) reddened the
+same block with the SAME message, and that message misdiagnosed (a) — it said «the empty list stopped
+catching events» when the list had caught the event and merely filed it wrong. Invariant C now asks
+MATCHING before CLASS (`means` is present iff a rule matched), so the two produce different red lines.
+A guard whose red line names the wrong cause is worse than one that merely goes red: it sends the next
+session down the wrong corridor.
+
+**One finding outside this plan's scope, acted on because it would have swallowed the work:** the
+`events` fixture suite has existed since phase 1 and the `selftest:all` battery **never called it** —
+it lived only inside `npm run phase1:accept`. A guard added to a suite nobody runs is a guard nobody
+has. That is the `bugs/27` class named in the battery's own comment, one floor down. It is in now,
+with the inertness proof written beside the entry as that list's rule requires.
+
+## 9. Decisions made without the owner
+
+- **The whole provider is watched, with no id list** (§3). The alternative — listing `153, 14` — is
+  what made the `Display` row decorative for the project's whole life, and 129 of 129 events here are
+  Errors, so a filter would remove nothing and could only go stale.
+- **`means` gained a second value rather than the module gaining a second roster.** One list with a
+  class column beats two lists that must be kept in step (`AGENT_GUIDE.md` → the truth↔mirror
+  registry: a pair that can be removed beats a pair that must be watched).
+- **`signal` is normalised to a strict boolean on both sides of the fixture check**, so the five
+  expectations written before the class existed keep passing without being edited. Touching five
+  correct fixtures to add a field they do not need would have been noise in the diff.
+- **The id-14 finding was NOT turned into a rule** (§2 of `researches/15` §8). Six events, four of the
+  twelve deaths — that is data, and a threshold drawn from it would be an invented number.
+- **`npm run phase1:accept` was left alone.** It still calls `--fixtures` directly; the battery now
+  calls it too. Two callers of an idempotent read-only suite cost nothing, and rewriting the phase-1
+  acceptance command is a change to a closed phase's artifact.
+- **No `PENDING:` assumptions are outstanding.** The one open question this work touches — the
+  threshold — is not an assumption but a named absence, recorded in §7 and owned by `ideas/10` §5.1.
