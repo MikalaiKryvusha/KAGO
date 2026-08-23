@@ -41,6 +41,24 @@
 
 ## Entries
 
+### EXP-0130 · 2026-08-23 · ❌→✅ · #guards #reachability #neighbouring-block #do-not-delete
+**Context:** a new gate refused to raise the review page over an unanswerable document; a neighbouring QA block (B4) had asserted its property by driving the server on exactly such a document, and went red.
+**Tried / did:** did NOT delete or relax B4, and did not add a bypass for it. Asked what B4 actually guards — «the writer's report matches what landed» — and drove that property one floor down, at the library call, where it still lives.
+**Result:** ✅ both guarantees kept: the gate protects the HUMAN from an unanswerable page, B4 protects a LIBRARY CALLER from a lying report. 19 blocks, 0 failed.
+**Lesson:** **a new guard that reddens a neighbouring block is a reachability question, not a correctness one.** Ask which layer the old block's property actually lives on; a property whose front door you just closed usually still holds one floor down. Deleting the block loses a guarantee nobody decided to give up, and a bypass flag for the suite is the hatch through which the closed class returns.   → link: bugs/41 · tools/verify-review-contour.mjs
+**Repro:** `npm run verify:contour` — blocks `ANSWERABLE` and `B4` must BOTH be green; force `answerabilityRefusals` to return `[]` and only `ANSWERABLE` reddens.
+**Trigger:** a new gate makes an existing test's scenario unreachable → move the assertion to the layer that still owns the property, never delete it and never add a test-only bypass.
+**Not for:** a block whose property genuinely ceased to exist (the feature was removed) — that one is deleted, with the reason written in the commit.
+
+### EXP-0129 · 2026-08-23 · ❌→✅ · #owner #guards #truthful-refusal #wrong-addressee
+**Context:** the owner answered two interviews through the review contour and NEITHER answer reached its document — one had no `**Ответ:**` fields, the other no NUMBERED question heading, so the page gave him no input at all («поле для ответа было не доступно для ввода»).
+**Tried / did:** the machinery was already honest — it refused by name and said exactly why, and had done so since `bugs/01` → B4. The fix was not more honesty but a change of ADDRESSEE: the same two checks now run when the page is RAISED, so the refusal reaches the agent before the owner is called, with exit code 2 and no `--force`.
+**Result:** ✅ guard red on both real documents, then green after repair; a mutation reddens its own block.
+**Lesson:** **a truthful refusal delivered to the wrong person is still a defect.** When a tool reports «I could not do X» to a HUMAN who is standing in front of it, ask what would have had to run EARLIER for that same sentence to reach the person who can fix it. Honesty of a message and usefulness of a message are different properties, and a project that has fixed the first can still be failing the second for years.   → link: bugs/41 · interviews/011 · interviews/012
+**Repro:** `node tools/review.mjs <interview.md> --no-serve --no-signal --no-open` on a document whose question heading carries no number → exit 2 and «СТРАНИЦА НЕ ПОДНЯТА».
+**Trigger:** writing any tool that reports «could not» at the moment a human is already waiting → move the check to the moment the human is INVITED.
+**Not for:** checks that genuinely cannot run early (they depend on what the human types) — those stay where they are and keep reporting honestly.
+
 ### EXP-0128 · 2026-08-23 · ❌→✅ · #guards #trust #false-diagnosis #retired-tool #verify-the-verdict
 **Context:** `STATUS.md` had carried, for six weeks, the sentence that a mechanical guard «краснеет всегда, все находки ложные» — so the rule it enforces was left to the agent's attention instead, and had already been broken once.
 **Tried / did:** ran the tool and OPENED all nine of its findings one by one instead of trusting either the tool or the sentence about it.

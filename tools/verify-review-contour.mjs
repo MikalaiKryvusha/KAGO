@@ -329,28 +329,32 @@ block('A3', 'a fenced block indented inside a list item renders as code, and no 
     `the fenced block was not rendered as code; what precedes it: ${tail(around, 160)}`);
 });
 
-block('B4', 'the success summary counts what LANDED in the document, not what was posted', async () => {
+block('B4', 'the writer reports what LANDED in the document, not what was posted', async () => {
+  // 🔴 THIS BLOCK WAS DRIVEN THROUGH THE SERVER UNTIL 2026-08-23 18:3x, AND THE `bugs/41` GATE MADE
+  // THAT PATH UNREACHABLE — deliberately: the contour now REFUSES to raise a page over a document
+  // whose questions have no `**Ответ:**` field, which is precisely this fixture. The property B4
+  // guards did not become less true, it moved one floor down, so the block moved with it: it now
+  // drives `applyAnswersToDocument` directly, which is where the report is actually built.
+  //
+  // Why the block is kept at all when the front door is closed: the gate stops a HUMAN being called
+  // to an unanswerable page; it does not stop a caller using the library (`--no-serve` renders,
+  // future tooling, a document that loses its field between the raise and the answer). A truthful
+  // report of one's own writing is the last line, and `bugs/01` → B4 is what it costs when it lies.
   const dir = freshDir('b4');
   const docPath = join(dir, 'interview_902_noanswerfield.md');
   writeFileSync(docPath, docWithoutAnswerField(), 'utf8');
   const before = readFileSync(docPath, 'utf8');
 
-  const run = startContour([docPath, '--no-signal', '--no-open']);
-  try {
-    const url = await run.url;
-    const res = await postSave(url, { documents: { interview_902_noanswerfield: { comment: '', noticeRead: false, answers: { Q1: { choice: 'A', text: '', comment: '' } } } } });
-    const after = readFileSync(docPath, 'utf8');
-    const wrote = after !== before;
-    const claimed = /ответов:\s*(\d+)/u.exec(res.json && res.json.summary ? res.json.summary : '');
+  const report = core.applyAnswersToDocument(docPath, { Q1: { choice: 'A', text: '', comment: '' } },
+    { by: 'Mikalai Kryvusha', at: core.isoLocal(new Date()) });
+  const after = readFileSync(docPath, 'utf8');
 
-    must(!(claimed && Number(claimed[1]) > 0 && !wrote),
-      `the contour reported "${res.json && res.json.summary}" while the document is byte-for-byte unchanged — a report of a write that did not happen`);
-    must(wrote || !(res.json && res.json.ok),
-      `nothing was written and the contour still answered ok:true (${res.text})`);
-  } finally {
-    run.kill();
-    await run.exit;
-  }
+  must(report.written.length === 0,
+    `the writer claims it wrote ${JSON.stringify(report.written)} while the question has no answer field`);
+  must(after === before,
+    'the document changed even though there was nowhere to write — the answer landed on a line that is not an answer field');
+  must(report.skipped.length === 1 && report.skipped[0].id === 'Q1' && /Ответ/u.test(report.skipped[0].reason),
+    `the skip is not reported by name and reason: ${JSON.stringify(report.skipped)}`);
 });
 
 block('B5', 'a document whose questions are all answered stops being "waiting" by itself', async () => {
@@ -563,6 +567,59 @@ block('G1d', 'the guard still stays quiet on the forms that are NOT a question t
   ];
   const fired = mustStaySilent.filter((l) => guardCatches(l));
   must(fired.length === 0, `${fired.length} ordinary line(s) raised a false alarm: ${fired.join(' | ')}`);
+});
+
+block('ANSWERABLE', 'the page is refused over a document the owner could not answer on (bugs/41)', async () => {
+  // THE FIXTURES ARE THE INCIDENT, not an invention. On 2026-08-23 the owner answered two real
+  // interviews and NEITHER answer reached its document: one had numbered questions with no
+  // `**Ответ:**` field, the other a heading without a NUMBER — so the parser saw no question and
+  // the page offered no input at all («поле для ответа было не доступно для ввода»). Both shapes
+  // are reproduced below.
+  const numberless = [
+    '# Интервью 904 — заголовок вопроса без номера',
+    '', '**Status:** 🔴 ждёт владельца', '',
+    '## Вопрос: какой объём берём?', '',
+    'Тело вопроса.', '',
+    '- **A** — первый вариант',
+    '- **B** — второй вариант', '',
+    '**Ответ:**', '',
+  ].join('\n');
+  const fieldless = [
+    '# Интервью 905 — вопрос есть, поля ответа нет',
+    '', '**Status:** 🔴 ждёт владельца', '',
+    '## Вопрос 1. Первый', '', 'Тело.', '', '- **A** — раз', '- **B** — два', '',
+    '## Вопрос 2. Второй', '', 'Тело.', '', '- **A** — раз', '- **B** — два', '',
+  ].join('\n');
+
+  // 1 — the good shape passes: a guard that reddens on the normal case is the trap R17 names.
+  must(core.answerabilityRefusals(core.parseInterview(docWithOneAnswerableQuestion(), { file: 'ok.md' })).length === 0,
+    'the answerable fixture was refused — the guard fires on the state the machinery works in');
+
+  // 2 — no NUMBER in the heading = no question at all, and the refusal says exactly that
+  const r1 = core.answerabilityRefusals(core.parseInterview(numberless, { file: 'numberless.md' }));
+  must(r1.length === 1 && /ни одного распознанного вопроса/u.test(r1[0].what),
+    `a heading without a number was accepted: ${JSON.stringify(r1)}`);
+  must(/НОМЕР/u.test(r1[0].fix), 'the refusal does not tell the agent what to repair');
+
+  // 3 — one refusal PER question, addressed by id: «fix the document» is not an address
+  const r2 = core.answerabilityRefusals(core.parseInterview(fieldless, { file: 'fieldless.md' }));
+  must(r2.length === 2 && r2.every((r) => /Ответ/u.test(r.what)), `expected 2 field refusals, got ${r2.length}`);
+  must(r2[0].where.endsWith('Q1') && r2[1].where.endsWith('Q2'), `refusals are not addressed by question id: ${r2.map((r) => r.where).join(' | ')}`);
+
+  // 4 — END TO END, and this is the half that matters: the RAISE refuses, before any beep.
+  // The contour is started exactly as a caller starts it; a page must not appear, and the exit
+  // code must say so to a machine (the incident's own miss was a truthful message nobody could act on).
+  const dir = freshDir('answerable');
+  const badPath = join(dir, 'interview_904_numberless.md');
+  writeFileSync(badPath, numberless, 'utf8');
+  const proc = spawn(process.execPath, [join(HERE, 'review.mjs'), badPath, '--no-signal', '--no-open'], { encoding: 'utf8' });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d; });
+  proc.stderr.on('data', (d) => { out += d; });
+  const code = await new Promise((res) => proc.on('exit', res));
+  must(code === 2, `the raise did not refuse: exit ${code} · ${tail(out)}`);
+  must(/СТРАНИЦА НЕ ПОДНЯТА/u.test(out), `the refusal is not the one we mean: ${tail(out)}`);
+  must(!/СТРАНИЦА: http/u.test(out), `a page was raised anyway: ${tail(out)}`);
 });
 
 block('GATE', 'an artifact approval survives the owner\'s next answer, and the refusal names the truth', async () => {

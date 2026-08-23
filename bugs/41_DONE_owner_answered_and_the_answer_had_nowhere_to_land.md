@@ -1,6 +1,8 @@
 # Bug 41 — the owner answered and the answer had nowhere to land: one interview had no answer FIELD, the other had no recognised QUESTION at all
 
-**Status:** 🔴 OPEN — cause MEASURED (both faces), fix not written yet
+**Status:** ✅ **DONE 2026-08-23 18:4x +03:00** — guard written, proven RED on the two real documents
+before the repair and by a mutation after it; both documents repaired and re-measured answerable.
+See «✅ STATUS: DONE» at the foot.
 **Version/build:** `main` @ `6ac94be` · **When/context:** found 2026-08-23 18:0x by the OWNER, while
 answering `interviews/011` and `interviews/012` through the review contour raised by `npm run ask:batch`
 
@@ -109,9 +111,56 @@ question never did.
 4. **The template follows the guard, never the other way round:** `interviews/README.md` and the
    `/interview` skill state the two conditions in the same words the guard checks.
 
+## ✅ STATUS: DONE (2026-08-23 18:4x +03:00)
+
+**What was built — the refusal now arrives at the AGENT, before the owner is called.**
+
+1. **`review-core.answerabilityRefusals(doc)`** — the two conditions in ONE place, beside the parser
+   that defines them (C1): at least one recognised question, and an `**Ответ:**` field in every
+   question block. Each refusal carries the ADDRESS (`file → Q2`), the consequence, and the exact
+   repair — «fix the document» is not an address.
+2. **`review.mjs → refuseUnanswerable()`** runs on both collection paths (single and `--batch`) and
+   the run STOPS with exit **2**. No `--force`: a hatch here is the hole through which the class
+   returns. Notices (I37) carry no questions by definition and are exempt — the exemption is a named
+   class, not a guess.
+3. **Both documents repaired** — `interviews/012`'s heading became `## Вопрос 1.`, and every question
+   of `011` and `012` received the `**Ответ:**` field carrying the owner's already-given words. His
+   answers were NOT re-asked and not re-worded.
+
+**Proof, in the order it was taken:**
+
+| what | observation |
+|---|---|
+| guard RED on the real 012 | `СТРАНИЦА НЕ ПОДНЯТА … ни одного распознанного вопроса`, exit **2** |
+| guard RED on the real 011 | three refusals, one per question, addressed `→ Q1` `→ Q2` `→ Q3`, exit **2** |
+| documents after repair | `011` — вопросов 3, отвечено 3, отказов 0 · `012` — вопросов 1, отвечено 1, отказов 0 |
+| the raise proceeds again | `--no-serve` run on 012: `СОБРАНО: 1 документ, вопросов 1, без ответа 0`, exit 0 |
+| the new block | `npm run verify:contour` → **19 blocks, 0 failed** (block `ANSWERABLE`) |
+| mutation | `answerabilityRefusals` forced to return `[]` → `ANSWERABLE` reddens with `a heading without a number was accepted: []`; reverted → green |
+
+🔴 **AND THE FIX BROKE A NEIGHBOURING BLOCK, WHICH IS RECORDED RATHER THAN QUIETLY REPAIRED.**
+Block **B4** («the success summary counts what LANDED») drove its assertion THROUGH the server on a
+document with no answer field — the very shape the new gate refuses to raise. So B4 started failing
+with the gate's own message: the guard made its scenario unreachable through the front door. The
+property was not weakened, it moved one floor down, and the block moved with it — B4 now calls
+`applyAnswersToDocument` directly and asserts the same three facts (nothing written · document
+byte-identical · the skip reported by name and reason). **The block was NOT deleted and NOT relaxed:
+the gate protects the human from an unanswerable page, and it does not protect a library caller from
+a lying report — those are two different guarantees and both are kept.**
+
 ## Decisions made without the owner
 
-*(to be filled at closing)*
+- **The run REFUSES instead of warning, and there is no `--force`.** A warning is read by the agent
+  that is already about to call the owner; the cost of being wrong is one extra chat message, while
+  the cost of the hatch is the owner's time in front of a page that cannot take his answer.
+- **The two conditions live in `review-core`, not in `review.mjs`.** They are properties of the
+  document format, and the format has one parser — a second copy is the drift this contour already
+  paid for (C1, `bugs/01` → A1).
+- **The repaired documents carry the owner's answers verbatim in the new fields**, with his own
+  wording quoted in brackets. Nothing was re-asked and no answer was re-interpreted; where his word
+  was a bare «90» / «А» / «хватает», the variant letter it maps to is stated NEXT to the quote, not
+  instead of it.
+- **B4 moved rather than being deleted** — reasoning in full above.
 
 ## Links
 

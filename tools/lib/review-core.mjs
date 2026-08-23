@@ -274,6 +274,51 @@ export function parseQuestionBlock(blockLines, index) {
   return q;
 }
 
+/**
+ * CAN THE OWNER ACTUALLY ANSWER THIS DOCUMENT? — the guard of `bugs/41`, and it exists because the
+ * REPORT was already honest and that was not enough.
+ *
+ * `applyAnswersToDocument` above has said, since `bugs/01` → B4, exactly what it could not write
+ * («у вопроса нет поля „Ответ:“ — записывать некуда»). On 2026-08-23 the owner answered two
+ * interviews and NEITHER answer reached its document: one had no answer fields, the other had no
+ * recognised question at all — its heading read «## Вопрос: какой объём берём?», and
+ * `RE_QUESTION_HEADING` requires a NUMBER, so the page offered him no input. His words: *«поле для
+ * ответа было не доступно для ввода»*. The refusal was truthful and it arrived at the OWNER,
+ * standing in front of a page he could not use.
+ *
+ * So the same two conditions are checked BEFORE the page is raised, and they are checked here —
+ * one parser, one place (C1). Returns `[]` for an answerable document; otherwise one refusal per
+ * reason, each naming the address and the exact repair.
+ *
+ * [TESTED: 2026-08-23 18:2x · red against `interviews/011` (three questions, no answer field) and
+ *  `interviews/012` (zero recognised questions) as they stood at the moment of the incident; green
+ *  after both were repaired. Block «отвечаемость» in tools/verify-review-contour.mjs.]
+ */
+export function answerabilityRefusals(doc) {
+  const out = [];
+  if (!doc.questions.length) {
+    out.push({
+      where: doc.file,
+      what: 'ни одного распознанного вопроса',
+      why: 'на странице не появится ни одного поля ввода — владельцу нечем ответить',
+      fix: 'заголовок вопроса обязан нести НОМЕР: «## Вопрос 1.» · «## Q1.» · «## Question 2 —». '
+        + 'Без номера заголовок не совпадает с RE_QUESTION_HEADING и вопроса для контура не существует',
+    });
+    return out;
+  }
+  for (const q of doc.questions) {
+    if (q.answerLine === null || q.answerLine === undefined) {
+      out.push({
+        where: `${doc.file} → ${q.id}`,
+        what: 'нет поля «Ответ:»',
+        why: 'ответ владельца записывать некуда — он уедет в комментарий, а документ останется «ждёт владельца»',
+        fix: 'добавить в блок вопроса строку «**Ответ:**» (пустую) — контур впишет ответ ровно в неё',
+      });
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------------------------
 // 4. Decision records (I2, C6)
 // ---------------------------------------------------------------------------------------------

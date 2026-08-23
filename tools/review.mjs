@@ -1582,7 +1582,9 @@ function collectDocs(opts) {
     if (isDir) throw new Error('без --batch нужен путь к .md-документу, а не к папке: ' + targetPath);
     if (!existsSync(targetPath)) throw new Error('документа нет: ' + targetPath);
     const queue = core.readQueue(dir);
-    return { dir, docs: [loadDoc(targetPath, queue)] };
+    const one = [loadDoc(targetPath, queue)];
+    refuseUnanswerable(one);
+    return { dir, docs: one };
   }
 
   const queue = core.readQueue(dir);
@@ -1596,7 +1598,41 @@ function collectDocs(opts) {
   const all = files.map((f) => loadDoc(f, queue));
   const waiting = all.filter(isWaiting);
   if (!waiting.length) throw new Error('в ' + dir + ' нет документов, которые ждут владельца');
+  refuseUnanswerable(waiting);
   return { dir, docs: waiting };
+}
+
+/**
+ * THE GATE OF `bugs/41` — the page is not raised over a document the owner cannot answer on.
+ *
+ * On 2026-08-23 the contour called the owner to a page carrying two documents, and BOTH of his
+ * answers had nowhere to land: one interview had no `**Ответ:**` fields, the other no numbered
+ * question heading and therefore no input at all. Every refusal was truthful and every one of them
+ * arrived AFTER the call, at the human. This turns the same two checks around: they run before the
+ * beep, they name the document, the address and the repair, and the run STOPS.
+ *
+ * No `--force`. A hatch here is the hole through which this class returns — and the cost of being
+ * wrong is one more chat message to the owner, while the cost of the hatch is his time in front of
+ * a page that cannot take his answer.
+ *
+ * Notices (I37) carry no questions BY DEFINITION and are exempt — the class is named, not guessed.
+ */
+function refuseUnanswerable(docs) {
+  const refusals = [];
+  for (const d of docs) {
+    if (d.isNotice) continue;
+    for (const r of core.answerabilityRefusals(d.doc)) refusals.push({ name: d.name, ...r });
+  }
+  if (!refusals.length) return;
+  const lines = ['СТРАНИЦА НЕ ПОДНЯТА: владельцу нечем было бы ответить (bugs/41).', ''];
+  for (const r of refusals) {
+    lines.push('  ' + (r.where && r.where.includes('→') ? r.name + ' ' + r.where.slice(r.where.indexOf('→')) : r.name) + ' — ' + r.what);
+    lines.push('    почему: ' + r.why);
+    lines.push('    чинить: ' + r.fix);
+  }
+  lines.push('');
+  lines.push('Отказ пришёл АГЕНТУ и до звонка владельцу — в этом весь смысл сторожа.');
+  throw new Error(lines.join('\n'));
 }
 
 function main(argv) {
