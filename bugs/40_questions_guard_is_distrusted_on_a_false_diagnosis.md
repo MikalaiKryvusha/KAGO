@@ -1,8 +1,8 @@
 # Bug 40 — the questions guard is written off as «all findings false», and the write-off is itself wrong: 1 of its 9 is REAL
 
-**Status:** 🔬 RESEARCH-ONLY — diagnosed by running it and OPENING every finding by hand; the four
-false-positive classes are named with their mechanical discriminators, and the one REAL finding is
-named with its address. No code changed yet.
+**Status:** 🟡 OPEN — **the real finding is CLOSED (step 2, witnessed 9 → 8)**; the four
+false-positive classes are named with their mechanical discriminators and remain to be patched. No
+code changed yet: this pass was diagnosis plus acting on what the guard actually found.
 **Version/build:** `main` @ `1cd5163` · **When/context:** found 2026-08-23 17:1x while taking the
 backlog item `STATUS.md` records as *«починить сторож или снять его — сторож, которому не верят,
 хуже отсутствующего»*
@@ -88,12 +88,31 @@ closed, answered interview as fully unanswered. That is not a false positive of 
 instrument contradicting itself inside one printed line, which is precisely what teaches a reader to
 stop believing it.
 
-## Fix plan (not started — the diagnosis is the deliverable of this pass)
+## ✅ Step 2 is DONE, and the guard itself witnessed it
+
+The one real finding was closed the same hour: the three questions of `researches/12` §7 now live in
+**`interviews/interview_011_ambient_theme_tempo_and_cycle.md`**, with the §5 context QUOTED INTO them
+so the question is self-sufficient, with options and a price per option, and with an honest note on
+Q1 that 0.8 s is a number ASSIGNED from the middle of the sources' range rather than measured.
+
+**Observed, not claimed** — the same command, before and after:
+
+| | `[G1]` findings | `researches/12` in the list |
+|---|---|---|
+| before | **9** | yes |
+| after | **8** | **no** |
+
+That 9 → 8 is the whole proof this pass needed: the finding that disappeared is the one that was
+real, and the eight that remain are exactly the four false classes below. **The guard is now a tool
+whose entire output is understood, one line at a time** — which is a different state from both
+«works» and «broken», and it is the state a fix can start from.
+
+## Fix plan — step 2 done; the four classes remain
 
 - [ ] **1. Correct `STATUS.md` first, before any code.** The line «все находки ложные» is what
       retired the tool, and it is wrong. Correcting a belief costs one sentence; the real finding
       went unseen for as long as the sentence stood.
-- [ ] **2. Close finding 9 as the rule requires** — the three questions of `researches/12` §7 go into
+- [x] **2. ✅ DONE 2026-08-23 17:2x — finding 9 closed as the rule requires** — the three questions of `researches/12` §7 go into
       `interviews/`, QUOTED INTO the question (the self-sufficiency rule), because two of the three
       are taste-class and only the owner's ear can answer them. **This is the guard's actual output
       and it is real**; fixing the tool without acting on what it found would repeat the original
