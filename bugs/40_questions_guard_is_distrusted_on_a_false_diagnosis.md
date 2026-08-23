@@ -1,8 +1,8 @@
-# Bug 40 — the questions guard is written off as «all findings false», and the write-off is itself wrong: 2 of its 9 are REAL
+# Bug 40 — the questions guard is written off as «all findings false», and the write-off is itself wrong: 1 of its 9 is REAL
 
-**Status:** 🔬 RESEARCH-ONLY — diagnosed by running it and classifying every finding by hand; the
-three defect classes are named with their discriminators, and the two REAL findings are named with
-their addresses. No code changed yet.
+**Status:** 🔬 RESEARCH-ONLY — diagnosed by running it and OPENING every finding by hand; the four
+false-positive classes are named with their mechanical discriminators, and the one REAL finding is
+named with its address. No code changed yet.
 **Version/build:** `main` @ `1cd5163` · **When/context:** found 2026-08-23 17:1x while taking the
 backlog item `STATUS.md` records as *«починить сторож или снять его — сторож, которому не верят,
 хуже отсутствующего»*
@@ -15,13 +15,22 @@ backlog item `STATUS.md` records as *«починить сторож или сн
 > (`bugs/01`: краснеет всегда, все находки ложные), то есть правило держится на внимательности
 > агента»*
 
-**Measured 2026-08-23 17:1x by running it and reading all nine findings: «все находки ложные» is
-FALSE. Seven are false, TWO ARE REAL** — and the project has been ignoring a guard that was pointing
-at two genuine violations of a rule its own canon calls hard.
+**Measured 2026-08-23 17:1x by running it and OPENING every one of the nine findings: «все находки
+ложные» is FALSE. Eight are false, ONE IS REAL** — three unanswered questions to the owner, sitting
+since 2026-08-22 in a research document where the rule says they may not sit, and which he has never
+been shown.
 
-Worse, the ratio is not even bad. `AGENT_GUIDE.md` states the expectation for exactly this kind of
-tool: *«a guard of a text rule runs ~10 false hits per real one»*. **This one runs 3.5 to 1** — four
-times better than the canon's own bar — and was retired as broken.
+**The ratio is not even bad.** `AGENT_GUIDE.md` states the expectation for exactly this kind of tool:
+*«a guard of a text rule runs ~10 false hits per real one»*. **This one runs 8 to 1 — inside the
+canon's own bar**, and it was retired as broken.
+
+⚠️ **AND THE FIRST PASS OF THIS VERY DOCUMENT GOT THE COUNT WRONG — recorded rather than quietly
+edited, because it is the same mistake one level up.** It listed `researches/10` §5 as a second real
+finding on the strength of its HEADING, «Open forks for the owner». Opening the section shows its
+entire body is the word **«None.»** — the heading DECLARES the absence of forks. A document whose
+whole subject is «a wrong count retired a working instrument» carried, for ten minutes, a wrong count
+of its own, arrived at exactly the way the guard arrives at its: by matching a heading instead of
+reading what is under it (`BUG_FIXING_FRAMEWORK.md` → «a finding is not a finding until verified»).
 
 ## Forensics — every finding of axis G1, classified by hand
 
@@ -36,16 +45,19 @@ times better than the canon's own bar — and was retired as broken.
 | 5 | `STATUS.md:936` | question outside `interviews/` | ❌ false | a REFERENCE to a question: `вопрос владельцу о demandPin (bugs/26 п. 5), а не дефект стенда` |
 | 6 | `assets/logo/README.md:32` | «Владелец, …» address | ❌ false | a prose fragment: `владельцу, история выбора.` |
 | 7 | `bugs/14…:28` | «Владелец, …» address | ❌ false | **a QUOTE**: `Владелец: «ты ни разу не протестировал твою остановку?»` |
-| 8 | `researches/10_virtual_gpu_test_bench.md:356` | heading «forks for the owner» | ✅ **REAL** | `## 5. Open forks for the owner` — owner-level forks living in a research doc |
-| 9 | `researches/12_ambient_melody_phrasing_and_rhythm.md:145` | heading «открытые вопросы» | ✅ **REAL** | `## 7. Открытые вопросы к владельцу` — same |
+| 8 | `researches/10_virtual_gpu_test_bench.md:356` | heading «forks for the owner» | ❌ false | the heading is `## 5. Open forks for the owner` and **the section's whole body is «None.»** — it DECLARES the absence |
+| 9 | `researches/12_ambient_melody_phrasing_and_rhythm.md:145` | heading «открытые вопросы» | ✅ **REAL** | `## 7. Открытые вопросы к владельцу` holding **three unanswered questions** — the base note length (0.8 s at 75 BPM), whether the reverb needs a pre-delay, and whether an eight-move cycle carries an hour and a half |
 
-**Findings 8 and 9 are the exact defect the rule exists to catch**, and the project's own record shows
-what it costs: `STATUS.md` carries the incident where a fork lived a day and a half in the tail of a
-file and nowhere else, and the owner found it himself — *«Что за мной? Я даже не в курсе»*.
+**Finding 9 is the exact defect the rule exists to catch**, and the project's own record shows what it
+costs: `STATUS.md` carries the incident where a fork lived a day and a half in the tail of a file and
+nowhere else, and the owner found it himself — *«Что за мной? Я даже не в курсе»*. These three have
+been sitting since 2026-08-22, and their parent is `homeworks/04_dashboard_sound_taste.md` —
+i.e. **the taste class, where the owner's ear is not one witness among several but the only one**, so
+they are exactly the kind of question that cannot be decided by the agent and must not be parked.
 
-## Root cause — THREE classes, each with a discriminator that is mechanical
+## Root cause — FOUR classes, each with a discriminator that is mechanical
 
-Not one bug. Three, and none needs an LLM to decide:
+Not one bug. Four, and not one of them needs an LLM to decide:
 
 - **A. A QUOTE OF the owner is read as an address TO him** (findings 4, 7 — the largest class).
   The discriminator is present in the line: the owner's own words follow in quotation marks
@@ -60,8 +72,14 @@ Not one bug. Three, and none needs an LLM to decide:
   the rule, and prose that MENTIONS a question, both trip it. Cheapest correct discriminator: the
   line must not itself be a citation — findings 1 and 5 both name a document (`bugs/26 п. 5`) or are
   the rule's own text.
+- **D. A HEADING IS MATCHED WITHOUT READING WHAT IS UNDER IT** (finding 8 — and the class that fooled
+  this document's own first pass). `## 5. Open forks for the owner` followed by the body «None.» is a
+  section that OBEYS the rule, not one that breaks it. The discriminator is not subtle: read the
+  section's body and require at least one question-shaped line in it. **This is the most expensive of
+  the four**, because a heading match is what makes the tool look like it is reading documents when
+  it is only matching titles.
 
-## A FOURTH defect, in the reporting rather than in the detection
+## A FIFTH defect, and this one is in the REPORTING rather than in the detection
 
 The «ОБА ПЛЕЧА» section reports three interviews as *«2 из 2 без ответа (Q1, Q2)»* — and then prints,
 on the same line, each one's own status: **✅ ЗАКРЫТО**, with the owner's verbatim answer beside it.
@@ -73,26 +91,30 @@ stop believing it.
 ## Fix plan (not started — the diagnosis is the deliverable of this pass)
 
 - [ ] **1. Correct `STATUS.md` first, before any code.** The line «все находки ложные» is what
-      retired the tool, and it is wrong. Correcting a belief costs one sentence; the two real
-      findings have been ignored for as long as the sentence stood.
-- [ ] **2. Close findings 8 and 9 as the rule requires** — move the forks of `researches/10` §5 and
-      `researches/12` §7 into `interviews/`, or record them as already-decided with the decision.
-      **These are real and they are the guard's actual output**; fixing the tool without acting on
-      what it found would repeat the original mistake.
+      retired the tool, and it is wrong. Correcting a belief costs one sentence; the real finding
+      went unseen for as long as the sentence stood.
+- [ ] **2. Close finding 9 as the rule requires** — the three questions of `researches/12` §7 go into
+      `interviews/`, QUOTED INTO the question (the self-sufficiency rule), because two of the three
+      are taste-class and only the owner's ear can answer them. **This is the guard's actual output
+      and it is real**; fixing the tool without acting on what it found would repeat the original
+      mistake in the other direction.
 - [ ] **3. Class A — the speaker-colon-quote discriminator.** Largest class, smallest patch.
 - [ ] **4. Class B — scope the chronicle out**, by the same rule the stamp guard already uses.
 - [ ] **5. Class C — a line that cites a document is a reference, not a question.**
+- [ ] **5a. Class D — a heading is not a finding until its BODY holds a question-shaped line.**
 - [ ] **6. The fourth defect — read an interview's own status line** before calling its questions
       unanswered.
-- [ ] **7. Prove each fix RED first** on the very finding it exists to reclassify, and keep findings
-      8 and 9 GREEN-to-red: a patch that silences the two real ones has made the tool worse than
-      retired.
+- [ ] **7. Prove each fix RED first** on the very finding it exists to reclassify, and keep finding 9
+      RED throughout: a patch that silences the one real finding has made the tool worse than retired.
 
 ## Decisions made without the owner
 
 - **Nothing was fixed in this pass and nothing was moved.** The item was picked up with ~15 minutes
   left in an autonomous window; a half-applied patch to a guard nobody trusts would have been the
   worst of both states. A precise diagnosis is complete on its own and is what the next session needs.
+- **The first pass's own miscount was corrected IN PLACE and left VISIBLE, not silently edited.** This
+  document argues that a wrong count retired a working tool; hiding its own would have made it an
+  example of the thing it describes.
 - **No threshold, no suppression list, no `# noqa`-style escape was added.** The canon allows explicit
   exceptions with the reason on the line; reaching for that before fixing the three classes would
   paper over a guard that is, measured, four times better than the canon's own bar for its kind.
