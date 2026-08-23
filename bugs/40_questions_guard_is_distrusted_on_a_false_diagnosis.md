@@ -1,8 +1,9 @@
 # Bug 40 — the questions guard is written off as «all findings false», and the write-off is itself wrong: 1 of its 9 is REAL
 
-**Status:** 🟡 OPEN — **the real finding is CLOSED (step 2, witnessed 9 → 8)**; the four
-false-positive classes are named with their mechanical discriminators and remain to be patched. No
-code changed yet: this pass was diagnosis plus acting on what the guard actually found.
+**Status:** 🟡 OPEN — **the real finding is CLOSED and class B is FIXED: 9 → 8 → 6 findings, each
+step witnessed by the guard itself.** Classes A, C and D are named with their mechanical
+discriminators and remain. The instrument is no longer «broken» or «working»: every line of its
+output is now accounted for.
 **Version/build:** `main` @ `1cd5163` · **When/context:** found 2026-08-23 17:1x while taking the
 backlog item `STATUS.md` records as *«починить сторож или снять его — сторож, которому не верят,
 хуже отсутствующего»*
@@ -97,17 +98,18 @@ Q1 that 0.8 s is a number ASSIGNED from the middle of the sources' range rather 
 
 **Observed, not claimed** — the same command, before and after:
 
-| | `[G1]` findings | `researches/12` in the list |
-|---|---|---|
-| before | **9** | yes |
-| after | **8** | **no** |
+| | `[G1]` findings | `researches/12` in the list | `PROJECT_HISTORY` in the list |
+|---|---|---|---|
+| at the start of the pass | **9** | yes | yes |
+| after step 2 (the real finding closed) | **8** | **no** | yes |
+| after step 4 (class B scoped out) | **6** | no | **no** |
 
 That 9 → 8 is the whole proof this pass needed: the finding that disappeared is the one that was
 real, and the eight that remain are exactly the four false classes below. **The guard is now a tool
 whose entire output is understood, one line at a time** — which is a different state from both
 «works» and «broken», and it is the state a fix can start from.
 
-## Fix plan — step 2 done; the four classes remain
+## Fix plan — steps 2 and 4 done; three classes remain
 
 - [ ] **1. Correct `STATUS.md` first, before any code.** The line «все находки ложные» is what
       retired the tool, and it is wrong. Correcting a belief costs one sentence; the real finding
@@ -118,7 +120,10 @@ whose entire output is understood, one line at a time** — which is a different
       and it is real**; fixing the tool without acting on what it found would repeat the original
       mistake in the other direction.
 - [ ] **3. Class A — the speaker-colon-quote discriminator.** Largest class, smallest patch.
-- [ ] **4. Class B — scope the chronicle out**, by the same rule the stamp guard already uses.
+- [x] **4. ✅ DONE 2026-08-23 17:2x — class B scoped out.** `PROJECT_HISTORY.md` left the scan, by
+      the same shape the stamp guard already uses (scope, not a suppression list — nothing to keep up
+      to date). **Proved by REVERSE mutation, not only by the after-count:** delete the set's use in
+      `collectMarkdown` and the findings go back to 8, returning exactly `:1682` and `:2292`. 8 → 6.
 - [ ] **5. Class C — a line that cites a document is a reference, not a question.**
 - [ ] **5a. Class D — a heading is not a finding until its BODY holds a question-shaped line.**
 - [ ] **6. The fourth defect — read an interview's own status line** before calling its questions
