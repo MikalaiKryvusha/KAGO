@@ -326,7 +326,12 @@ export function verify({ run = psRun } = {}) {
   for (const letter of PROTECTED_LETTERS) {
     const res = run(`$L='${letter}'; $out=@{}; `
       + '$out.present = [bool](Get-Volume -DriveLetter $L -ErrorAction SilentlyContinue); '
-      + 'try { $f = Get-ChildItem "${L}:\\" -File -ErrorAction Stop | Select-Object -First 1; '
+      // ⚠️ РЕКУРСИВНО, И ЭТО ПОЧИНКА ПО ЖИВОМУ ЗАМЕРУ 2026-08-24. Первая редакция смотрела только в
+      // КОРЕНЬ тома и на всех трёх дисках владельца вернула «нечего пробовать»: файлы лежат в
+      // подкаталогах, а в корнях — одни папки. То есть половина AC9, ради которой read-only и выбран
+      // вместо офлайна (ЧТЕНИЕ ЖИВО), инструментом не проверялась вовсе — он молча отчитывался ни о
+      // чём. `Select-Object -First 1` обрывает конвейер на первом файле, так что обход не идёт вглубь.
+      + 'try { $f = Get-ChildItem "${L}:\\" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1; '
       + 'if ($f) { $fs=[IO.File]::OpenRead($f.FullName); $b=New-Object byte[] 512; $null=$fs.Read($b,0,512); $fs.Close(); $out.read=$true } else { $out.read=$null } } catch { $out.read=$false }; '
       + 'try { [IO.File]::WriteAllText("${L}:\\kago-safe-mode-probe.tmp","p"); [IO.File]::Delete("${L}:\\kago-safe-mode-probe.tmp"); $out.write=$true } catch { $out.write=$false }; '
       + '[pscustomobject]$out | ConvertTo-Json -Compress');
