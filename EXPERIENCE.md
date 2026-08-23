@@ -41,6 +41,24 @@
 
 ## Entries
 
+### EXP-0112 · 2026-08-23 · ❌→✅ · #oracle #instrumentation #precursor #owner-eyes #false-green
+**Context:** the owner's machine died twice in an hour during a live edge search; he reported seeing system micro-lags before the second BSOD and asked whether the oracle had seen anything at the last passing rung.
+**Tried / did:** the oracle had returned PASS. Instead of answering from that, cross-read the write-ahead journal's rung timestamps against the SIDE-CAR TELEMETRY SAMPLER's own timestamps — a process that exists for the dashboard and has nothing to do with verdicts.
+**Result:** ❌→✅ the sampler, polling once per second, lost its beat TWICE inside the last passing rung (3.07 s and 3.37 s, 4.44 s total) and not once in the three safe rungs before it. The next rung killed the machine. **The precursor was recorded by accident, by an instrument nobody was reading, while all three of the oracle's observations stayed silent** — because all three watch OUR computation (checksum, event log, throughput) and none watches the SYSTEM.
+**Lesson:** **when the owner reports perceiving something the instrument denies, look for a THIRD recorder that was running for another purpose — its incidental data is evidence.** A monitoring side-car's own cadence is a system-liveness signal for free: if a 1 Hz poller misses its beat, something starved it. Generalisation past GPUs: every long-running observer you already run (a sampler, a heartbeat, a log writer) carries a second signal in its TIMESTAMPS that nobody designed and nobody reads. Second half, about trust: the owner's perception outranked a green verdict here, and the right response was not to defend the oracle but to go find what could corroborate him.   → link: `ideas/10` · STATUS fact 39 · R4
+**Repro:** join the journal's per-rung start/end times against the sampler's timestamps; count inter-sample gaps > 1.5× the poll period, per rung. A rung with gaps where its neighbours have none is the discriminator.
+**Trigger:** an owner reports a symptom the verdict does not show → enumerate every process that was running and writing timestamps, not just the ones meant to judge.
+**Not for:** deriving a THRESHOLD from one occurrence — n = 1 here, and the threshold needs an archive that does not yet exist.
+
+### EXP-0113 · 2026-08-23 · ❌→✅ · #guards #comments #drift #self-description
+**Context:** three defects closed in one session (`bugs/32`, `bugs/35`, `bugs/36`), each of which stopped a live run on the owner's card.
+**Tried / did:** in each case, before changing anything, read what the code's OWN comment claimed the code did.
+**Result:** ❌→✅ all three were fixed by making the code do what its comment already said. `provenMv: lastPass` was documented as «the deepest voltage this frequency has SURVIVED» while assigning the LATEST; `firstInversion` judged rows the module's own `demandsVoltage` docstring had already argued prove nothing; `sweepFrequency` re-derived a seed the plan had already chosen.
+**Lesson:** **a comment that disagrees with its code is a defect report already written — read it as evidence, not as decoration.** The drift is invisible while the two happen to coincide (a cold card makes «latest» and «deepest» the same number) and surfaces only under a condition nobody had yet met. The mechanical tell is cheap and worth making a habit: when a guard misfires, first quote the comment above it and ask whether the code below satisfies that sentence. Second half: this is the same family as the truth↔mirror registry, one level smaller — the mirror here is prose, and prose is not linted, so it drifts silently and for years.   → link: `bugs/32` · `bugs/35` · `bugs/36` · AGENT_GUIDE → truth↔mirror pairs
+**Repro:** at any guard that fired unexpectedly, read the doc-comment sentence that names the quantity, then check the assignment site of that quantity.
+**Trigger:** a guard refuses something you believe is legal → suspect the QUANTITY, not the threshold, and start from its documented definition.
+**Not for:** code with no comment — there the method has nothing to compare against.
+
 ### EXP-0110 · 2026-08-23 · ❌→✅ · #bench #test-double #fidelity #canon #owner-word
 **Context:** the rehearsal bench printed «ЗАКАЗ ↔ ВЫДАЧА: не разошлись ни разу» run after run, and the plan called for adding a «sag parameter» to the virtual card so the new method could be rehearsed.
 **Tried / did:** started building the parameter; the owner cut through it — *«заказать частоту у видеокарты невозможно. Можно тюнить ту частоту, которую она выдаёт»*. Re-read what the bench actually did: it PINNED the clock on every rung.

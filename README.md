@@ -179,11 +179,11 @@ So KAGO does it differently:
 | **Golden reference** | The workload set runs at stock, and its outputs are stored. Everything later is compared against them — not against "looks fine". |
 | **Three-way verdict** | Each trial ends as **PASS**, **SDC** (output changed, nothing crashed), or **CRASH** (driver TDR, WHEA, application death, BSOD). The middle column is the one that matters. |
 | **Bracket the edge** | Coarse descent to first failure, then a binary search to locate it at grid resolution. The search never dwells at a failing point. |
-| **Add the guardband** | The shipped voltage sits **at least four curve steps, and never less than 25 mV**, above the measured failure point. |
+| **Add the margin** | The shipped voltage sits **one grid step above the last stable rung** — above the voltage at which the frequency still worked, not above the failure point. The distinction matters: the edge is probabilistic, so the anchor is observed stability rather than an observed failure. |
 | **Diverse workloads** | Branchy code and arithmetic-dense code fail differently, and the lowest safe voltage varies by ~100 mV between programs. A point's threshold is the **worst** result across the whole set, never the first one found. |
 | **Transients, not just load** | Supply noise matters more than temperature here, so the hard test is rapid load changes — not a flat 100 % burn. |
 | **A burn that reaches the power limit** | The trial load holds the card **at its 300 W ceiling** and moves **terabytes through VRAM** — measured 305 W median, the driver reporting `sw_power_cap`, against 233 W and *zero* memory traffic for the earlier load. A voltage proved under a third of the electrical stress a game applies is proved against the wrong load. |
-| **Burned at the frequency being tuned** | A burn that reaches the power limit also clamps the clock, so the tool **measures which frequency the card actually ran at** and re-burns the rung with a weaker load until the card sits where it is being tuned. A verdict recorded against a frequency the burn never ran at is worse than no verdict. |
+| **Recorded against the frequency that actually ran** | A frequency cannot be ordered from the card: its own boost governor picks it, bounded by the curve, the power limit and temperature. Under a burn that reaches the power limit, the card answers a lower voltage by dropping the clock. So the tool **measures which frequency the card actually ran at** and records the voltage against that one. A verdict recorded against a frequency the burn never ran at is worse than no verdict. |
 | **Bind to the driver** | Every profile records the driver and VBIOS it was proved against. A driver update invalidates it until re-validated. |
 
 The measurements behind each of these are cited in
@@ -452,11 +452,11 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 | **Золотой эталон** | Набор нагрузок прогоняется на стоке, выходы сохраняются. Всё дальнейшее сравнивается с ними, а не с «вроде нормально». |
 | **Трёхзначный вердикт** | Каждая проба заканчивается как **PASS**, **SDC** (выход изменился, ничего не упало) или **CRASH** (сброс драйвера, WHEA, гибель приложения, BSOD). Средняя графа и есть главная. |
 | **Взять край в вилку** | Грубый спуск до первого сбоя, затем бинарный поиск края по сетке. На сбойном напряжении поиск не задерживается. |
-| **Добавить запас** | Отгружаемое напряжение стоит **минимум на четыре шага сетки и не ближе 25 мВ** над измеренным порогом сбоя. |
+| **Добавить запас** | Отгружаемое напряжение стоит **на один шаг сетки выше последней стабильной ступени** — не выше порога сбоя, а выше того напряжения, на котором частота ещё работала. Разница существенна: край вероятностен, и якорем служит наблюдённая устойчивость, а не наблюдённый отказ. |
 | **Разные нагрузки** | Ветвистый код и счётный отказывают по-разному, а самое низкое безопасное напряжение гуляет между программами на ~100 мВ. Порог ЧАСТОТЫ — **худший** результат по всему набору, а не первый найденный. |
 | **Переходы, а не просто нагрузка** | Шум питания тут значит больше температуры, поэтому тяжёлый тест — это быстрая смена нагрузки, а не ровные 100 %. |
 | **Прожиг, упирающийся в предел мощности** | Испытательная нагрузка держит карту **на её потолке в 300 Вт** и гоняет **терабайты через видеопамять** — замерено 305 Вт медианы при `sw_power_cap` от драйвера, против 233 Вт и *нулевого* трафика памяти у прежней. Напряжение, доказанное при трети той электрической нагрузки, что даёт игра, доказано не тем. |
-| **Прожиг идёт на настраиваемой частоте** | Прожиг, дошедший до предела мощности, зажимает и частоту — поэтому инструмент **измеряет, на какой частоте карта реально шла**, и переигрывает ступень ослабленной нагрузкой, пока карта не сядет туда, что настраивается. Вердикт о частоте, на которой прожиг не шёл, хуже, чем отсутствие вердикта. |
+| **Замер пишется на ту частоту, которая была** | Частоту у видеокарты заказать нельзя: её выбирает собственный регулятор буста, ограниченный кривой, пределом мощности и температурой. Под предельным прожигом карта отвечает на снижение напряжения снижением частоты. Поэтому инструмент **измеряет, на какой частоте карта реально шла**, и записывает напряжение против неё. Вердикт о частоте, на которой прожиг не шёл, хуже, чем отсутствие вердикта. |
 | **Привязка к драйверу** | Профиль записывает драйвер и VBIOS, на которых был доказан. Обновление драйвера делает его недействительным до перепроверки. |
 
 Измерения под каждым пунктом названы в
