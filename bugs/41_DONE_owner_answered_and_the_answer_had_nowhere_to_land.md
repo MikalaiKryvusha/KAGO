@@ -1,6 +1,6 @@
 # Bug 41 — the owner answered and the answer had nowhere to land: one interview had no answer FIELD, the other had no recognised QUESTION at all
 
-**Status:** ✅ **DONE 2026-08-23 18:4x +03:00** — guard written, proven RED on the two real documents
+**Status:** ✅ **DONE 2026-08-23 18:27 +03:00** (штамп взят по КВИТАНЦИИ коммита `eb9af1c`, а не из головы — EXP-0019) — guard written, proven RED on the two real documents
 before the repair and by a mutation after it; both documents repaired and re-measured answerable.
 See «✅ STATUS: DONE» at the foot.
 **Version/build:** `main` @ `6ac94be` · **When/context:** found 2026-08-23 18:0x by the OWNER, while
@@ -111,7 +111,7 @@ question never did.
 4. **The template follows the guard, never the other way round:** `interviews/README.md` and the
    `/interview` skill state the two conditions in the same words the guard checks.
 
-## ✅ STATUS: DONE (2026-08-23 18:4x +03:00)
+## ✅ STATUS: DONE (2026-08-23 18:27 +03:00, по квитанции коммита `eb9af1c`)
 
 **What was built — the refusal now arrives at the AGENT, before the owner is called.**
 
@@ -148,8 +148,43 @@ byte-identical · the skip reported by name and reason). **The block was NOT del
 the gate protects the human from an unanswerable page, and it does not protect a library caller from
 a lying report — those are two different guarantees and both are kept.**
 
+## The class inventory — taken by the judge pass, not by the fix
+
+`BUG_FIXING_FRAMEWORK.md` judges a fix BY THE LIST, so the list was taken by running the new guard
+over EVERY interview in the directory. Two were the incident; **six more carry the same shape, and
+all six are CLOSED:**
+
+| document | refusals | shape |
+|---|---|---|
+| `interview_005_desktop_icons.md` | 2 | questions with no `**Ответ:**` field |
+| `interview_006_optimised_ceiling_after_bsod.md` | 2 | same |
+| `interview_007_unattended_sweep_and_reboots.md` | 1 | same |
+| `interview_008_burn_must_load_rt_cores.md` | 1 | same |
+| `interview_009_step_guard_measures_against_the_order.md` | 1 | same |
+| `interview_010_point_tag_vocabulary.md` | 3 | same |
+
+**They are NOT repaired, and the reason is a rule rather than a shortage of time:** every one of them
+was answered long ago, in prose, by the owner — and an original is not rewritten to match today's
+format (`AGENT_GUIDE.md` → the owner's originals are inviolable; the terminology boundary says the
+same of closed documents). Nothing can be lost through them: a closed interview is never collected
+by `--batch`, and the gate below no longer touches a document that is not waiting.
+
+🔴 **AND THE INVENTORY IMMEDIATELY FOUND A DEFECT IN THE FIX ITSELF, which is why it is worth
+taking.** The FIRST version of the gate judged every document it was handed, so raising one of these
+six to SHOW it — a normal thing to do, and the only way the canon allows showing anything — was
+refused with «владельцу нечем было бы ответить». A closed interview is raised to be READ, not
+answered. **That is the R17 trap verbatim: a guard firing on a state the work legitimately passes
+through, describing an unwritten assumption instead of catching a defect.** Narrowed the same hour:
+the gate judges only documents that are WAITING. Proven both ways — a closed fieldless document
+raises with exit 0, a waiting numberless one still refuses with exit 2 — and the narrowing has its
+own assertion inside block `ANSWERABLE`, mutation-proved (remove the narrowing → the block reddens).
+
 ## Decisions made without the owner
 
+- **The six closed interviews are left as they are** — see the inventory above; repairing a closed
+  original to satisfy today's format is exactly what the canon forbids.
+- **The gate judges only WAITING documents.** The alternative (judge everything, add a flag to show)
+  puts a hatch in the one place a hatch must not be.
 - **The run REFUSES instead of warning, and there is no `--force`.** A warning is read by the agent
   that is already about to call the owner; the cost of being wrong is one extra chat message, while
   the cost of the hatch is the owner's time in front of a page that cannot take his answer.

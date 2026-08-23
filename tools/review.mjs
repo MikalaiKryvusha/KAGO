@@ -1616,11 +1616,21 @@ function collectDocs(opts) {
  * a page that cannot take his answer.
  *
  * Notices (I37) carry no questions BY DEFINITION and are exempt — the class is named, not guessed.
+ *
+ * 🔴 AND SO IS A DOCUMENT THAT IS NOT WAITING, which the first version of this gate got wrong and a
+ * judge pass caught the same hour. Six CLOSED interviews in this project carry no answer field —
+ * they were answered long ago, in prose — and the gate refused to raise them at all. But a closed
+ * interview is raised to be SHOWN, not answered: there is nothing for the owner to type, so
+ * «нечем ответить» is not a defect there. A guard that fires on the states the work legitimately
+ * passes through is describing an unwritten assumption, not catching a defect
+ * (`PROJECT_ARCHITECTURE_INTERNAL_MAP.md` → R17, and R13's own first version fell into it too).
+ * The gate therefore judges exactly the documents whose whole purpose is an answer.
  */
 function refuseUnanswerable(docs) {
   const refusals = [];
   for (const d of docs) {
     if (d.isNotice) continue;
+    if (!isWaiting(d)) continue;
     for (const r of core.answerabilityRefusals(d.doc)) refusals.push({ name: d.name, ...r });
   }
   if (!refusals.length) return;

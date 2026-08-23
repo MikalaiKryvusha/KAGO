@@ -606,7 +606,21 @@ block('ANSWERABLE', 'the page is refused over a document the owner could not ans
   must(r2.length === 2 && r2.every((r) => /Ответ/u.test(r.what)), `expected 2 field refusals, got ${r2.length}`);
   must(r2[0].where.endsWith('Q1') && r2[1].where.endsWith('Q2'), `refusals are not addressed by question id: ${r2.map((r) => r.where).join(' | ')}`);
 
-  // 4 — END TO END, and this is the half that matters: the RAISE refuses, before any beep.
+  // 4 — THE NARROWING, and it is here because the FIRST version of the gate lacked it: a document
+  // that is CLOSED is raised to be SHOWN, not answered, so «нечем ответить» is not a defect there.
+  // Six closed interviews in this project carry no answer field and the first gate refused them all.
+  const closedNoField = fieldless.replace('**Status:** 🔴 ждёт владельца', '**Status:** ✅ закрыто владельцем 2026-08-01');
+  const dirC = freshDir('answerable-closed');
+  const closedPath = join(dirC, 'interview_906_closed.md');
+  writeFileSync(closedPath, closedNoField, 'utf8');
+  const shown = spawn(process.execPath, [join(HERE, 'review.mjs'), closedPath, '--no-serve', '--no-signal', '--no-open']);
+  let outC = '';
+  shown.stdout.on('data', (d) => { outC += d; });
+  shown.stderr.on('data', (d) => { outC += d; });
+  const codeC = await new Promise((res) => shown.on('exit', res));
+  must(codeC === 0, `a CLOSED document was refused — the gate fires on a legitimate state (R17): exit ${codeC} · ${tail(outC)}`);
+
+  // 5 — END TO END, and this is the half that matters: the RAISE refuses, before any beep.
   // The contour is started exactly as a caller starts it; a page must not appear, and the exit
   // code must say so to a machine (the incident's own miss was a truthful message nobody could act on).
   const dir = freshDir('answerable');
