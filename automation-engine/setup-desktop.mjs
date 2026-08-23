@@ -75,17 +75,31 @@ function iconLocationFor(profileName) {
   return existsSync(p) ? `${p},0` : '';
 }
 
+const WSCRIPT = 'C:\\Windows\\System32\\wscript.exe';
+
 /** §4.4: the logon task — re-applies the remembered state through the SAME applier and its gates.
- *  A stale or draft remembered state degrades to factory plus a journal line, never a blind write. */
+ *  A stale or draft remembered state degrades to factory plus a journal line, never a blind write.
+ *
+ *  IT GOES THROUGH wscript, NOT THROUGH node.exe DIRECTLY, and that is a fix rather than a style:
+ *  node.exe is a CONSOLE-subsystem binary, so a task with an InteractiveToken principal draws its
+ *  console IN THE OWNER'S SESSION — a window flashed on every logon (bugs/38, reported by the
+ *  owner 2026-08-23). Measured on a throwaway twin task the same day: node.exe named directly
+ *  produced 2 console windows, BOTH ever-visible; through this launcher, 1 window, ZERO ever
+ *  visible — and the child's exit code still reached LastTaskResult (42 in the probe, 0 on the
+ *  live run). The cure is the same one §4.5 already used for the tray, which is why the boot task
+ *  now looks like the tray task: one cure, two call sites, and neither may drift back. */
 const BOOT_TASK = 'boot-apply';
-const BOOT_TASK_ARGS = `"${PROFILE_MANAGER}" --boot-apply`;
+const BOOT_LAUNCHER = fileURLToPath(new URL('./boot-apply-launcher.js', import.meta.url));
+// The interpreter travels as an ARGUMENT rather than being hard-coded in the launcher: node's
+// location is a fact of this machine, and the launcher ships in a repository. `process.execPath`
+// is the same node that is running setup, i.e. the one the task used to name directly.
+const BOOT_TASK_ARGS = `//B //E:JScript "${BOOT_LAUNCHER}" "${process.execPath}"`;
 
 /** §4.5: the tray task — UNELEVATED on purpose (researches/07 §2: the tray reads one JSON file and
  *  must never hold elevation; an elevated parent cannot cleanly spawn a de-elevated child, so the
  *  tray gets its OWN logon task with RunLevel Limited instead of riding boot-apply). wscript runs
  *  the launcher, the launcher starts powershell HIDDEN (PowerShell#3028 — the console flash cure). */
 const TRAY_TASK = 'tray';
-const WSCRIPT = 'C:\\Windows\\System32\\wscript.exe';
 const TRAY_LAUNCHER = fileURLToPath(new URL('./tray-launcher.js', import.meta.url));
 // //E:JScript pins the engine so the machine's .js association (which a dev tool can rewrite)
 // never decides what wscript does with our file; //B suppresses script-error dialogs.
@@ -248,13 +262,18 @@ async function cmdInstall() {
   }
 
   // §4.4 — the logon re-apply. Registered like the rest, plus the trigger; read back including it.
-  registerTask(BOOT_TASK, BOOT_TASK_ARGS, { logonTrigger: true });
+  registerTask(BOOT_TASK, BOOT_TASK_ARGS, { logonTrigger: true, execute: WSCRIPT });
   const bt = readTask(BOOT_TASK);
-  if (!bt || bt.runLevel !== 'Highest' || bt.trigger !== 'MSFT_TaskLogonTrigger') {
+  // The read-back asserts the WRAPPER, not just the trigger and the elevation. A check that only
+  // looked at RunLevel + trigger would stay green on a task that names node.exe directly — i.e. it
+  // would be green on exactly the defect it exists to prevent (bugs/38).
+  const btWrapped = !!bt && bt.execute.toLowerCase().includes('wscript')
+    && bt.args.includes('boot-apply-launcher.js');
+  if (!bt || bt.runLevel !== 'Highest' || bt.trigger !== 'MSFT_TaskLogonTrigger' || !btWrapped) {
     bad++;
     console.log(`ПРОВАЛ задача ${TASK_FOLDER}${BOOT_TASK} — перечитана как ${JSON.stringify(bt)}`);
   } else {
-    console.log(`OK   задача ${TASK_FOLDER}${BOOT_TASK} → ${path.basename(bt.execute)} ${bt.args.includes('--boot-apply') ? '--boot-apply' : '⚠ ЧУЖИЕ АРГУМЕНТЫ'} · RunLevel ${bt.runLevel} · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
+    console.log(`OK   задача ${TASK_FOLDER}${BOOT_TASK} → wscript //B boot-apply-launcher.js (окно консоли НЕ создаётся видимым) · RunLevel ${bt.runLevel} · триггер: ВХОД ЭТОГО ПОЛЬЗОВАТЕЛЯ`);
   }
 
   // §4.5 — the tray. Its own logon task, UNELEVATED (Limited), no execution time limit: the tray
