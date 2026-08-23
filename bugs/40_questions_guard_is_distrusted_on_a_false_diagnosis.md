@@ -89,6 +89,33 @@ closed, answered interview as fully unanswered. That is not a false positive of 
 instrument contradicting itself inside one printed line, which is precisely what teaches a reader to
 stop believing it.
 
+### A SIXTH, found 2026-08-23 21:4x while filing `interviews/013` — the status is never parsed at all
+
+The «ОБА ПЛЕЧА» line for a freshly filed, correctly-formed interview reads **«статус: не указан»**.
+The header carries `**Статус:** 🔴 ОТКРЫТО …` on its own line inside the blockquote, exactly as the
+canonical `interview_011` does.
+
+**Measured rather than assumed** — `review-core.parseInterview` was run against both files:
+
+```
+interview_013 -> status: null · statusIsWaiting: null · вопросов: 3
+interview_011 -> status: null · statusIsWaiting: null · вопросов: 3
+```
+
+**The core returns `null` for the canonical example too.** So this is not a defect in the new
+document's header: `RE_STATUS_LINE` (`^\s*\*\*(Status|Статус)…`) never matches, because in this
+project's header norm the line begins with the blockquote marker `> `. The statuses the report DOES
+print for the closed interviews therefore come from somewhere other than the parsed field.
+
+**Consequence, and it is why this is worth a line rather than a shrug:** axis **G3 («устаревший
+статус») cannot ever fire.** It is gated on `doc.statusIsWaiting === true`, and that value is `null`
+for every interview in the directory. The axis has reported `новых: 0 · в долге: 0` since it was
+written, and that zero has been read as «no stale statuses» when it means «the check never ran» —
+the crashed-verifier-reads-as-green family (EXP-0016) one floor down.
+
+**What still works, and it is the half that matters:** the guard DID surface `interviews/013` as
+«3 из 3 без ответа» the moment it was filed. Detection is intact; the status label and G3 are not.
+
 ## ✅ Step 2 is DONE, and the guard itself witnessed it
 
 The one real finding was closed the same hour: the three questions of `researches/12` §7 now live in
