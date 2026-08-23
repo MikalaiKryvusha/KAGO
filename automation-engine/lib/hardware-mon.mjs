@@ -37,8 +37,8 @@
 // --check-decode go red and name both sides of the disagreement.
 
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { writeFileSync, appendFileSync, mkdirSync, readFileSync, existsSync, renameSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import config from '../config.mjs';
@@ -343,7 +343,264 @@ export async function sampleFor({ seconds, periodMs = config.TELEMETRY_SAMPLE_MS
 }
 
 // =================================================================================================
-// 5. CLI
+// 5. THE PULSE — reading the sampler's OWN heartbeat
+// =================================================================================================
+//
+// WHY THIS LIVES HERE AND NOT IN THE ORACLE. The sampler is a SEPARATE PROCESS polling the card once
+// a second, and that is the whole point: the sweep blocks inside every burn, this does not. So when
+// THIS process loses a tick, the card did not stall — the SYSTEM did. That is a different face of
+// failure from the three the oracle already watches (checksum · event log · work-per-second), and
+// `ideas/10` §3 measured that all three stay silent through it: they watch OUR WORK, not the system.
+//
+// The evidence, one case, 2026-08-23, band 2805…2700 MHz (`ideas/10` §2): on 2797 MHz the rungs at
+// 865 · 860 · 850 mV lost ZERO ticks; the rung at 845 mV lost two (3,07 s and 3,37 s); the next rung
+// down killed the machine. The oracle said PASS on all four.
+//
+// 🔴 WHAT THIS SECTION DELIBERATELY DOES NOT DO: DECIDE. There is no threshold here and there is no
+// verdict, because n = 1 — one dirty rung against three clean ones, on one frequency, in one run.
+// A threshold picked from that would be an invented number (`PHILOSOPHY.md` → the three doors,
+// door 3 is FORBIDDEN), and this project has already paid for an alarm that lies on schedule
+// (`bugs/27`, the dashboard's freeze detector). What is measurable today is HOW MUCH TIME the
+// sampler lost and WHERE; whether that means «edge» is a judgement with nothing yet to stand on.
+// The archive (§27.1 of `plans/27`) is what will eventually give it something.
+
+/**
+ * The reporting bins for the interval distribution — NOT a threshold, and the difference is the
+ * whole point of this section.
+ *
+ * A threshold answers «is this an edge?» with one number somebody chose. These bins answer «how are
+ * the intervals spread?» with four counts at once, so the human reading the report picks the
+ * boundary FROM THE DATA instead of inheriting mine. `ideas/10` §5.1 names the trap explicitly:
+ * the «1,6 s» in its own table is an analysis convenience, not a measured boundary.
+ */
+export const PULSE_BINS = [1.5, 2, 3, 5];
+
+/**
+ * Parse the driver's timestamp — `"2026/08/23 11:50:13.849"` — into epoch milliseconds.
+ *
+ * Hand-parsed rather than handed to `Date.parse`: that format is not one the ECMAScript spec
+ * requires any engine to accept, so `Date.parse` is free to return NaN on one Node build and a
+ * plausible number on the next. Rule 2 of this module (nothing volatile of ours in the output)
+ * applies to the READING side too — a parser that varies by engine makes every number below vary.
+ *
+ * The stamp carries no zone, because nvidia-smi writes the machine's LOCAL clock; it is therefore
+ * read as local, which is what makes it joinable with the journal's `+03:00` stamps on this machine.
+ *
+ * @returns {number|null} epoch ms, or null when the string is not a stamp we recognise
+ */
+export function parseSampleTime(t) {
+  const m = /^(\d{4})\/(\d{2})\/(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/u.exec(String(t ?? '').trim());
+  if (!m) return null;
+  const [, y, mo, d, H, M, S, ms] = m;
+  const ts = new Date(+y, +mo - 1, +d, +H, +M, +S, ms ? +ms.padEnd(3, '0') : 0).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+/**
+ * The intervals between consecutive samples, in order.
+ *
+ * 🔴 ONE MEASURED QUANTITY, NOT THREE DERIVED ONES — and the cut is worth recording, because the
+ * first cut of this function had three and two of them were undecidable.
+ *
+ * It carried `missedTicks` (`round(ms / period) − 1`) and a `catchUp` flag beside the overshoot.
+ * Mutation proved both unprovable: swapping `round` for `floor`, and swapping the catch-up rule for
+ * a different one, reddened NOTHING — because at 1600 ms there is no non-arbitrary answer to «was a
+ * tick missed?». The probe due at 1000 ms did fire, merely late. Whichever rounding one picks is a
+ * number nobody measured, which is the invented-number class (`PHILOSOPHY.md` → the three doors)
+ * wearing the clothes of arithmetic. Both were removed rather than argued.
+ *
+ * WHAT SURVIVES IS THE THING THE SAMPLER ACTUALLY PROMISES: one probe per period. So the measured
+ * quantity is `overshootMs` — how much longer than the promise the card went unobserved. It needs
+ * no rounding, no threshold and no classification, and it is the same number whichever way anybody
+ * would have argued the boundary. On the fatal run the two real gaps overshoot by 2070 and 2366 ms
+ * (sum 4436, which is `ideas/10` §2's 4,44 s), while the whole file overshoots by 4840 — the extra
+ * 400 being hundreds of ordinary 1002 ms intervals. BOTH numbers are reported, because the
+ * difference between them is jitter and hiding either would be the misleading half.
+ *
+ * WHAT IS NOT AN INTERVAL: the first sample has no predecessor, and the header record (`i: -1`)
+ * carries no clock at all. Both are dropped rather than defaulted — a synthesised first interval is
+ * a fabricated observation, and the sampler's start is exactly where one would be most tempting.
+ *
+ * SHORT INTERVALS ARE REAL AND ARE KEPT. `sampleFor` schedules against an ABSOLUTE due time
+ * (`started + i * periodMs`), so after a stall it fires the backlog back-to-back — the 63 ms and
+ * 78 ms probes that follow each gap in the fatal run. They are genuine samples of a genuine card
+ * and belong in the distribution exactly as they are; labelling them was the part that could not be
+ * justified, not recording them.
+ *
+ * @param {Array<object>} records the sampler's JSONL, header included
+ * @param {{periodMs?: number}} opts nominal period; defaults to the header's own `period_ms`
+ * @returns {{periodMs:number, samples:number, intervals:Array<object>, unparsed:number}}
+ *
+ * [TESTED: 2026-08-23 12:5x · блоки 3-8б набора `pulse`; на ЗАХВАЧЕННОМ файле рокового прогона
+ *  два долгих интервала в 11:52:07 и 11:52:18 дают 4436 мс сверх обещания — число, которое
+ *  `ideas/10` §2 намерил руками. Мутации PB и PE красят свои]
+ */
+export function pulseIntervals(records, { periodMs = null } = {}) {
+  const rows = Array.isArray(records) ? records : [];
+  const header = rows.find((r) => r && r.i === -1 && r.meta) ?? null;
+  // The period comes from the FILE that was written, not from today's config: an archive read a
+  // month later must be measured against the period it was actually sampled at.
+  const period = Number(periodMs ?? header?.meta?.period_ms ?? config.TELEMETRY_SAMPLE_MS);
+
+  const stamped = [];
+  let unparsed = 0;
+  for (const r of rows) {
+    if (!r || r.i === -1 || r.t === undefined) continue;
+    const at = parseSampleTime(r.t);
+    if (at === null) { unparsed++; continue; }
+    stamped.push({ i: r.i, t: r.t, at });
+  }
+
+  const intervals = [];
+  for (let k = 1; k < stamped.length; k++) {
+    const prev = stamped[k - 1];
+    const cur = stamped[k];
+    const ms = cur.at - prev.at;
+    intervals.push({
+      i: cur.i,
+      fromT: prev.t,
+      toT: cur.t,
+      ms,
+      // How many nominal periods this interval spans, UNROUNDED. The reader sees 3,07 and 1,00 and
+      // judges; nothing downstream rounds it into a count.
+      multiple: period > 0 ? ms / period : null,
+      // Time beyond the sampler's promise of one probe per period. Never negative: a stamp that
+      // goes backwards is a clock artefact, not time the card gave back.
+      overshootMs: Math.max(0, ms - period),
+    });
+  }
+
+  return { periodMs: period, samples: stamped.length, intervals, unparsed };
+}
+
+/**
+ * The distribution of those intervals — the shape of a run's pulse, with no verdict in it.
+ *
+ * `overBins` counts the intervals at or above each bin at once, deliberately: one count invites the
+ * reader to treat it as the answer, four counts make the spread visible and force the boundary to be
+ * argued from the data. There is no field here that says whether the run was healthy, and there is a
+ * self-check block that goes red if one ever appears.
+ *
+ * [TESTED: 2026-08-23 12:5x · блоки 8б и 9; мутация PF (добавить булево «здоров ли прогон») красит
+ *  блок 9, мутация PM (корзины без «сверх обещания») красит блок 8б]
+ */
+export function pulseSummary(records, { periodMs = null } = {}) {
+  const r = pulseIntervals(records, { periodMs });
+  const all = r.intervals.map((x) => x.ms).sort((a, b) => a - b);
+  const median = all.length === 0 ? null
+    : (all.length % 2 === 1 ? all[(all.length - 1) / 2] : (all[all.length / 2 - 1] + all[all.length / 2]) / 2);
+
+  // Each bin reports BOTH how many intervals reach it and how much overshoot they account for. One
+  // without the other is the misleading half: counts alone hide how long the stalls were, and a
+  // total alone hides whether it was one stall or four hundred jitters.
+  const overBins = {};
+  for (const b of PULSE_BINS) {
+    const hit = r.intervals.filter((x) => x.ms >= b * r.periodMs);
+    overBins[b] = { count: hit.length, overshootMs: hit.reduce((s, x) => s + x.overshootMs, 0) };
+  }
+
+  return {
+    periodMs: r.periodMs,
+    samples: r.samples,
+    intervals: r.intervals.length,
+    unparsed: r.unparsed,
+    medianMs: median,
+    maxMs: all.length ? all[all.length - 1] : null,
+    // Total time beyond the promise, across every interval — jitter included, and that inclusion is
+    // deliberate: a run of 137 intervals overshooting 3 ms each really did spend 400 ms unobserved.
+    overshootMs: r.intervals.reduce((s, x) => s + x.overshootMs, 0),
+    overBins,
+    // The first and last stamps, so a caller can place this file on a timeline without re-parsing.
+    firstAt: r.intervals.length ? parseSampleTime(r.intervals[0].fromT) : null,
+    lastAt: r.intervals.length ? parseSampleTime(r.intervals[r.intervals.length - 1].toT) : null,
+  };
+}
+
+/**
+ * Read a sampler file from disk into records. Malformed lines are COUNTED, never guessed at: a run
+ * that died mid-write leaves a truncated last line, and that is a fact about the run worth keeping.
+ *
+ * [TESTED: 2026-08-23 12:5x · на роковом файле: 139 записей, 1 битая строка — и битой она оказалась
+ *  не случайно, а потому что машина умерла, не сбросив кэш страниц (`bugs/37`)]
+ */
+export function readPulseFile(path, { fs = null } = {}) {
+  const read = fs?.readFileSync ?? readFileSync;
+  let text;
+  try { text = read(path, 'utf8'); } catch (e) { return { ok: false, why: `не прочитать ${path}: ${e.message}`, records: [], broken: 0 }; }
+  const records = [];
+  let broken = 0;
+  for (const line of String(text).split(/\r?\n/u)) {
+    if (!line.trim()) continue;
+    try { records.push(JSON.parse(line)); } catch { broken++; }
+  }
+  return { ok: true, why: '', records, broken };
+}
+
+// =================================================================================================
+// 6. THE ARCHIVE — a run's pulse outliving its run
+// =================================================================================================
+
+/** Where a run's pulse goes to survive the next run. */
+export const PULSE_ARCHIVE_DIR = join('runs', 'telemetry');
+
+/**
+ * Move the previous run's pulse out of the way BEFORE this run's sampler truncates it.
+ *
+ * 🔴 THE MOMENT IS THE DESIGN, AND IT IS NOT THE OBVIOUS ONE. Archiving at the END of a run is what
+ * one writes first and it does not work here: the runs whose pulse matters most are the runs that
+ * END IN A DEAD MACHINE, and a dead machine runs no cleanup. So the archiving is done by the NEXT
+ * launch, on a file that has been sitting untouched on disk across the reboot. The cost of the fatal
+ * run's evidence is exactly what `ideas/10` §5.6 named: there was no archive at all, and the sampler
+ * truncates on start (`sampleFor`: «a run never appends to a previous run's file»).
+ *
+ * THE NAME COMES FROM THE FILE, NOT FROM THE CLOCK. `<first sample's stamp>.jsonl` — an archive
+ * must say WHEN THE TELEMETRY WAS TAKEN, and the clock at the moment of moving says when it was
+ * tidied away, which can be days later and across a reboot. Same rule as the sampler's own header
+ * (no wall clock in compared output); the moment belongs to the file's own contents.
+ *
+ * A file with no parseable sample is NOT archived. An archive of empty files is an archive somebody
+ * must first learn to filter, and the sampler leaves exactly such a file behind when it is started
+ * and killed within a second.
+ *
+ * @returns {{archived: boolean, to: string|null, why: string}}
+ *
+ * [TESTED: 2026-08-23 12:47 · блоки 10-13 на подставном `fs`, мутации PG · PH · PI красят свои. И
+ *  ПРОГНАНА НА БОЕВОМ ФАЙЛЕ: `runs/dashboard/telemetry.jsonl` переехал в
+ *  `runs/telemetry/20260823-115013.jsonl` — имя от первой пробы, перенос, а не копия]
+ */
+export function archivePulseFile(livePath, { dir = PULSE_ARCHIVE_DIR, fs = null } = {}) {
+  const F = {
+    existsSync: fs?.existsSync ?? existsSync,
+    mkdirSync: fs?.mkdirSync ?? mkdirSync,
+    renameSync: fs?.renameSync ?? renameSync,
+    readFileSync: fs?.readFileSync ?? readFileSync,
+  };
+  if (!F.existsSync(livePath)) return { archived: false, to: null, why: 'предыдущего файла нет — архивировать нечего' };
+
+  const read = readPulseFile(livePath, { fs: { readFileSync: F.readFileSync } });
+  const first = read.records.find((r) => r && r.i !== -1 && r.t !== undefined && parseSampleTime(r.t) !== null);
+  if (!first) return { archived: false, to: null, why: 'в файле нет ни одной пробы со временем — это не улика' };
+
+  // `2026/08/23 11:50:13.849` → `20260823-115013`. Sortable, and it reads as a moment.
+  const m = /^(\d{4})\/(\d{2})\/(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/u.exec(String(first.t).trim());
+  const stamp = `${m[1]}${m[2]}${m[3]}-${m[4]}${m[5]}${m[6]}`;
+
+  let to = join(dir, `${stamp}.jsonl`);
+  // Two runs cannot share a first-sample second in practice, but a collision must never overwrite
+  // evidence — the whole point of this function is that nothing here is destroyed.
+  for (let n = 2; F.existsSync(to); n++) to = join(dir, `${stamp}-${n}.jsonl`);
+
+  try {
+    F.mkdirSync(dir, { recursive: true });
+    F.renameSync(livePath, to);
+  } catch (e) {
+    return { archived: false, to: null, why: `перенести не удалось: ${e.message}` };
+  }
+  return { archived: true, to, why: '' };
+}
+
+// =================================================================================================
+// 7. CLI
 // =================================================================================================
 
 function parseArgs(argv) {

@@ -41,6 +41,31 @@
 
 ## Entries
 
+### EXP-0114 · 2026-08-23 · ❌→✅ · #mutation #invented-number #occam #derived-quantities
+**Context:** building the pulse reader (`plans/27`). I derived THREE quantities from one interval: `missedTicks` (`round(ms/period) − 1`), `lostMs` gated on it, and a `catchUp` flag.
+**Tried / did:** before trusting the 22 green blocks, ran the named mutations. Swapped `round` for `floor`; swapped the catch-up rule for a different one.
+**Result:** ❌ **both mutations reddened NOTHING.** Not a gap in the fixtures — a gap in the CONCEPT: at 1600 ms the question «was a tick missed?» has no non-arbitrary answer, because the probe due at 1000 ms did fire, merely late. Whichever rounding I picked was a number nobody measured. Deleted both quantities; kept `overshootMs` (how much longer than promised the card went unobserved), which needs no rounding, no threshold and no classification. Went from 3 derived numbers to 1 measured one.
+**Lesson:** **a mutation that reddens nothing is not always a missing test — sometimes it is proof the QUANTITY is undecidable, and the fix is to delete the quantity rather than to write a block that cannot judge it.** This is the invented-number ban (`PHILOSOPHY.md` → the three doors) hiding inside arithmetic: a rounding rule looks like maths but encodes a choice nobody measured. Practical test: if two defensible implementations of a quantity are indistinguishable on every real fixture you have, that quantity is not carrying information — Occam says cut it. Report the raw measured thing and let the human bin it.   → link: `plans/27` · `ideas/10` §5.1
+**Repro:** implement both variants of the disputed rule, run the suite against each; identical output on real data = the quantity is the problem, not the coverage.
+**Not for:** quantities that DO differ on real data — there the mutation reddening nothing really is missing coverage.
+
+### EXP-0115 · 2026-08-23 · ❌→✅ · #observation-gate #fixtures #production-data #scale
+**Context:** the pulse report passed 22 blocks against a captured 5-rung journal fixture. Then I ran it once, for real, against the PRODUCTION journal — 671 rungs across many days and several dead machines.
+**Tried / did:** `npm run pulse`, and read the output instead of assuming it.
+**Result:** ❌ it confidently attributed the fatal run's two gaps to «2542 МГц / 895 мВ ЗАВИС» — a rung from a DIFFERENT run, a different band, the previous day. Cause: an orphaned intent (machine died) had a window unbounded FORWARD in time, so it matched every later interval forever. Invisible in the fixture, where the orphan was the only rung and the only run.
+**Lesson:** **a fixture with one run cannot show a defect whose mechanism is «the previous run bleeds into this one». Run the new instrument against the real accumulated store ONCE before believing the green.** The fixture models the SHAPE of the data; production carries its HISTORY, and history is where the cross-contamination bugs live. This is TESTING_FRAMEWORK gate 1 (live smoke with your eyes on the log) doing what the suite structurally cannot. The fix itself needed no invented bound: the journal is sequential, so the next intent existing at all proves the previous rung ended.   → link: `plans/27` §27.3 · `tools/pulse-report.mjs` → `rungsFromJournal`
+**Repro:** point the tool at a store holding several runs including an aborted one; check that today's data is not attributed to yesterday's open record.
+**Trigger:** any new reader joining two time-keyed stores → run it on the real store once, and READ the answer, before the blocks are trusted.
+**Not for:** pure functions with no notion of «previous run».
+
+### EXP-0116 · 2026-08-23 · ❌→✅ · #guards #selftest #false-green #EXP-0040
+**Context:** running mutations against the new `pulse` suite. Mutation PK («drop rungs with no verdict») shortened an array a block indexed into.
+**Tried / did:** expected the block to go red. Watched what the battery actually reported.
+**Result:** ❌ the block threw `TypeError` and **killed the whole suite** — 24 blocks became one crash, and «no failures printed» is exactly how a dead suite looks. The seventh strike of EXP-0040's class, this time caught at birth rather than in the field. Fixed by making the block helper take CLOSURES: arguments are evaluated before the callee is entered, so a `try` inside `ok()` protects nothing unless what it receives is unevaluated. A throwing block now goes RED with the error text as its reason.
+**Lesson:** **a block must be able to go red under the mutation it guards — a block that CRASHES is worse than a missing block, because the crash reads as silence.** And the mechanical part worth remembering: wrapping a check helper in `try/catch` is useless while its call sites pass evaluated expressions; the condition and the failure message both have to arrive as `() => …`. Mutation testing found this, not review — the bug only exists under the mutation.   → link: `tools/pulse-report.mjs` → `ok()` · EXP-0040 · `plans/25` (долг: сетка над набором `engine`)
+**Repro:** mutate the code so a block's fixture array shrinks; the suite must print `ПЛОХО` for that block and still reach its summary line.
+**Trigger:** writing any self-check whose condition indexes into a computed array → pass it as a closure.
+
 ### EXP-0112 · 2026-08-23 · ❌→✅ · #oracle #instrumentation #precursor #owner-eyes #false-green
 **Context:** the owner's machine died twice in an hour during a live edge search; he reported seeing system micro-lags before the second BSOD and asked whether the oracle had seen anything at the last passing rung.
 **Tried / did:** the oracle had returned PASS. Instead of answering from that, cross-read the write-ahead journal's rung timestamps against the SIDE-CAR TELEMETRY SAMPLER's own timestamps — a process that exists for the dashboard and has nothing to do with verdicts.

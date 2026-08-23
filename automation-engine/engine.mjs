@@ -6288,6 +6288,25 @@ async function mainSweep(argv, arg) {
   const { spawn } = await import('node:child_process');
   const { fileURLToPath: toPath } = await import('node:url');
   const samplerScript = join(dirname(toPath(import.meta.url)), 'lib', 'hardware-mon.mjs');
+  // ─── THE PREVIOUS RUN'S PULSE IS MOVED ASIDE, NOT DELETED (`plans/27` §27.1, `ideas/10` §5.6) ───
+  //
+  // This line used to be `rmSync`, and that deletion is why the project has exactly ONE recording of
+  // the sampler losing its tick before the machine died: every run destroyed its predecessor's.
+  // The pulse stopped being decoration the moment `ideas/10` was approved — it is now the candidate
+  // FOURTH observation, and §5.1 cannot pick a threshold from one case, so cases must accumulate.
+  //
+  // ARCHIVING HAPPENS HERE, AT THE START OF THE NEXT RUN, and that placement is the whole trick: the
+  // runs worth keeping are the ones that end with a dead machine, and a dead machine runs no
+  // cleanup. The file simply waits on disk across the reboot until somebody launches again.
+  const archived = await (async () => {
+    const mon = await import('./lib/hardware-mon.mjs');
+    return mon.archivePulseFile(dash.TELEMETRY_PATH);
+  })();
+  console.log(archived.archived
+    ? `ПУЛЬС ПРОШЛОГО ПРОГОНА: убран в ${archived.to} — не затёрт`
+    : `ПУЛЬС ПРОШЛОГО ПРОГОНА: ${archived.why}`);
+  // Whatever was not worth archiving is still in the sampler's way, and the sampler truncates on
+  // start anyway — the removal stays, it just no longer runs on evidence.
   try { rmSync(dash.TELEMETRY_PATH, { force: true }); } catch { /* a stale file the server will age out anyway */ }
   const sideCar = spawn(process.execPath, [
     samplerScript, '--seconds', '36000', '--period', '1000', '--out', dash.TELEMETRY_PATH,

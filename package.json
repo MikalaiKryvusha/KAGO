@@ -48,7 +48,8 @@
     "measure": "node automation-engine/lib/bench-measure.mjs",
     "dashboard": "node automation-engine/lib/run-dashboard.mjs",
     "bench": "node automation-engine/lib/bench-run.mjs",
-    "tidy": "node tools/tidy.mjs"
+    "tidy": "node tools/tidy.mjs",
+    "pulse": "node tools/pulse-report.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
