@@ -55,6 +55,23 @@ const EXCLUDED_DIRS = new Set([
   'interviews', '.kaif', '.claude', '.agents', '.cline', '.grok', '.roo', 'node_modules', '.git',
 ]);
 
+// THE CHRONICLE IS THE CLOSED PAST, AND A QUESTION RECORDED THERE IS A FACT, NOT A QUEUE.
+// Added 2026-08-23 with `bugs/40` class B. `AGENT_GUIDE.md` defines `PROJECT_HISTORY.md` as
+// «the closed past — the append-only chronicle: closed sessions/phases/releases MOVE there
+// verbatim», and the same guide forbids editing an original to match today's rules. So a heading
+// like «ждёт владельца» inside it describes a queue that WAS, and the one action this guard could
+// provoke there — move it to `interviews/` — is the one action the chronicle forbids. A finding
+// nobody may act on is a false alarm by construction (G9, the guard's own first principle).
+//
+// THIS IS THE SHAPE THE PROJECT ALREADY USES FOR THE SAME PROBLEM: the stamp guard «scopes itself by
+// the stamp's OWN date — stamps dated before the adoption stay silent without any baseline file to
+// maintain» (`AGENT_GUIDE.md`). Scope, not a suppression list: nothing has to be kept up to date.
+//
+// Measured before/after on 2026-08-23 17:2x: axis G1 went 8 findings → 6, and the two that left were
+// exactly `PROJECT_HISTORY.md:1682` and `:2292`. Re-prove by deleting this set's use in
+// `collectMarkdown` — the two must come back.
+const EXCLUDED_FILES = new Set(['project_history.md']);
+
 // =================================================================================================
 // 1. Sign (a) — a queue HEADING
 // =================================================================================================
@@ -298,6 +315,7 @@ export function collectMarkdown(root = ROOT) {
         if (EXCLUDED_DIRS.has(e.name.toLowerCase())) continue;
         walk(full);
       } else if (e.isFile() && /\.md$/iu.test(e.name)) {
+        if (EXCLUDED_FILES.has(e.name.toLowerCase())) continue;   // the chronicle — see the set
         files.push(full);
       }
     }
