@@ -151,15 +151,26 @@ function cardTemperatureC() {
 export async function runUndo(actions) {
   const blocks = [];
   for (const a of actions) {
+    // 🔴 ЧТЕНИЕ — НЕ ОТКАТ, И ПУТАТЬ ИХ ДОРОГО (`plans/28`). Список ниже содержит один блок, который
+    // ничего не откатывает: доказательство потолка. Оно живёт здесь ради ПОРЯДКА — читать надо, пока
+    // закрепление ещё держит, — но `undo: true` на нём означал для вызывающего «карта не вернулась»,
+    // а на деле карта возвращалась исправно. Живой прогон 2026-08-23 показал цену: владелец увидел
+    // «ОТКАТ НЕ ЧИСТ … состояние карты назвать нельзя» на прогоне, где карта была чиста, а сам агент
+    // пошёл проверять кривую вместо того, чтобы прочитать настоящую находку.
+    const isProof = a?.kind === 'proof';
+    const mark = isProof ? { undo: false, proof: true } : { undo: true, proof: false };
     if (!a || typeof a.run !== 'function') {
-      blocks.push({ name: a?.name ?? 'без имени', ok: false, undo: true, detail: 'шаг отката без исполняемой части — это дефект списка, а не карты' });
+      blocks.push({ name: a?.name ?? 'без имени', ok: false, ...mark, detail: 'шаг без исполняемой части — это дефект списка, а не карты' });
       continue;
     }
     try {
       const detail = await a.run();
-      blocks.push({ name: a.name, ok: true, undo: true, detail: typeof detail === 'string' ? detail : (detail?.detail ?? '') });
+      blocks.push({ name: a.name, ok: true, ...mark, detail: typeof detail === 'string' ? detail : (detail?.detail ?? '') });
     } catch (e) {
-      blocks.push({ name: a.name, ok: false, undo: true, detail: `шаг отката упал: ${e.message}` });
+      // ПРИЧИНА, А НЕ ТОЛЬКО ИМЯ. `e.message` здесь — это точный текст, который составил судья
+      // (например «карта ушла ВЫШЕ потолка: максимум 2805 МГц при потолке 2790»), и до `plans/28`
+      // он доезжал только сюда: вызывающий печатал `b.name` и выбрасывал самое ценное.
+      blocks.push({ name: a.name, ok: false, ...mark, detail: `${isProof ? 'проверка не прошла' : 'шаг отката упал'}: ${e.message}`, why: e.message });
     }
   }
   return blocks;
@@ -966,6 +977,10 @@ export async function runStep({
         // constant clock here is demanding the thing the cap was chosen to avoid, and on 2026-08-14 it
         // reported a rung whose three load shapes had all PASSED as НЕИЗВЕСТНО. What must be proved is
         // the property the shipped profile actually has: **the card never went ABOVE the ceiling**.
+        // ЭТО ЧТЕНИЕ, А НЕ ОТКАТ — см. `runUndo`. Стоит в этом списке только ради ПОРЯДКА (читать
+        // надо, пока закрепление ещё держит), и `kind: 'proof'` не даёт вызывающему принять его
+        // отказ за «карта не вернулась» (`plans/28`, находка A).
+        kind: 'proof',
         name: pinMhz ? `ЗАКРЕПЛЕНИЕ ДЕРЖАЛОСЬ под нагрузкой на ${pinMhz} МГц` : `ПОТОЛОК ${capMhz} МГц УСТОЯЛ ПОД НАГРУЗКОЙ`,
         run: async () => {
           if (!sampler) return 'телеметрии не снималось — проверять нечего';
@@ -1897,6 +1912,24 @@ export async function selfTest() {
 
   // 5. Nothing to undo is a legal, GREEN outcome — the dry-run and refusal paths take it.
   ok('пустой список отката — не ошибка', (await runUndo([])).length, 0);
+
+  // 6. ЧТЕНИЕ ПОМЕЧАЕТСЯ КАК ЧТЕНИЕ (`plans/28`, находка A). Шов между «кто ставит метку» и «кто её
+  //    читает» до 2026-08-23 не проверял НИКТО: блоки движка строили фикстуру руками, поэтому
+  //    мутация «вернуть проверке undo: true» не красила ничего (EXP-0108 — набор дотягивался до
+  //    судьи, но не до того, кто судью кормит). Здесь проверяется именно пометка.
+  const b5 = await runUndo([
+    { kind: 'proof', name: 'ПОТОЛОК 2790 МГц УСТОЯЛ ПОД НАГРУЗКОЙ', run: async () => { throw new Error('карта ушла ВЫШЕ потолка: максимум 2805 МГц при потолке 2790'); } },
+    step('обнулить кривую'),
+  ]);
+  ok('шаг с kind:proof помечен ЧТЕНИЕМ, а не откатом — иначе его отказ читается как «карта не вернулась»',
+    [b5[0]?.proof ?? null, b5[0]?.undo ?? null], [true, false]);
+  ok('а настоящий шаг отката рядом с ним по-прежнему помечен откатом',
+    [b5[1]?.undo ?? null, b5[1]?.proof ?? null], [true, false]);
+  ok('отказ проверки несёт ПРИЧИНУ отдельным полем, а не только внутри своего рассказа',
+    b5[0]?.why, 'карта ушла ВЫШЕ потолка: максимум 2805 МГц при потолке 2790');
+  ok('и рассказ проверки говорит «проверка не прошла», а не «шаг отката упал»',
+    [String(b5[0]?.detail).startsWith('проверка не прошла'), String(b5[1 - 1]?.detail).includes('шаг отката упал')],
+    [true, false]);
 
   // --- THE VOLTAGE LADDER, on a synthetic curve. Its job is to express the owner's step sizes in the
   // unit he stated them in, and its trap is a curve region where several points share a frequency.

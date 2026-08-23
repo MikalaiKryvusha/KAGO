@@ -19,7 +19,7 @@
 //  and live by the §4.4 proofs — the applier wrote the record on a real apply, the boot task read
 //  it back.]
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -92,6 +92,69 @@ export function readRememberedState(filePath = REMEMBERED_STATE_PATH) {
 export function appendBootJournal(record, filePath = BOOT_JOURNAL_PATH) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, JSON.stringify({ at: localIso(), ...record }) + '\n');
+}
+
+/**
+ * НАМЕРЕНИЕ ВОССТАНОВИТЬ РЕЖИМ — записано и `fsync`-нуто ДО первого байта в карту.
+ *
+ * Тот же приём и та же причина, что у журнала упреждающей записи развёртки (R15): обычная запись
+ * возвращается из кэша страниц ОС, а смерть машины уносит кэш с собой. Здесь это важнее вдвойне —
+ * запись делается на ЗАГРУЗКЕ, то есть ровно там, где смерть машины означает следующую загрузку, и
+ * следующую, и следующую.
+ *
+ * Намерение без вердикта на СЛЕДУЮЩЕМ запуске И ЕСТЬ ответ: машина умерла с этим режимом на карте.
+ *
+ * [NOT-TESTED]
+ */
+export function appendBootIntent(record, filePath = BOOT_JOURNAL_PATH) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  const line = JSON.stringify({ at: localIso(), state: 'intent', ...record }) + '\n';
+  const fd = openSync(filePath, 'a');
+  try { writeSync(fd, line, null, 'utf8'); fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+/**
+ * ПРЕРЫВАТЕЛЬ ПЕТЛИ ЗАГРУЗКИ — и он заменяет собой флаг `qualified` на неприсутственном пути.
+ *
+ * 🔴 ЗАЧЕМ ОН ВООБЩЕ ПОЯВИЛСЯ. Флаг `qualified` придуман агентом и делал ОДНУ настоящую работу:
+ * не давал восстанавливать при каждом входе профиль, чьи числа не проверены. Владелец 2026-08-23
+ * снял его на пути ЯРЛЫКА («его клик и есть решение о приёмке»), и правильно: там флаг спорил с
+ * инстанцией приёмки. Но на пути ЛОГОНА работа флага реальна — плохой режим давал бы петлю
+ * загрузки на рабочей машине.
+ *
+ * Флаг эту работу делал ПЛОХО: он булев, проставляется рукой, ничего не измеряет и дублирует то,
+ * что документ кривой знает поимённо (`origin:measured` · `inherited` · `lever-limited`) — пара
+ * «правда ↔ зеркало», про которые канон предупреждает. Здесь он заменён механизмом, который
+ * наблюдает НАСТОЯЩИЙ отказ, а не его обещание.
+ *
+ * ПРАВИЛО: если в журнале есть намерение восстановить ЭТОТ профиль, за которым не последовало
+ * вердикта, — машина умерла с ним на карте. Восстановление блокируется, пока владелец не применит
+ * режим заново своей рукой (его `--apply` кладёт в журнал строку `owner-cleared`, и она снимает
+ * блок). Запомненное состояние при этом НЕ переписывается: восстановление не есть новое решение
+ * владельца, и отменять его выбор за него нельзя.
+ *
+ * @returns {{blocked: boolean, why: string, at: string|null}}
+ *
+ * [NOT-TESTED]
+ */
+export function bootLoopBreaker(records, profileName) {
+  if (!profileName || profileName === 'factory') return { blocked: false, why: '', at: null };
+  let orphan = null;
+  for (const r of records) {
+    if (!r || r.unparsable) continue;
+    if (r.state === 'intent') { if (r.remembered === profileName) orphan = r; continue; }
+    // ЛЮБАЯ последующая строка про ЭТОТ профиль закрывает намерение: вердикт означает, что процесс
+    // дожил до вывода, а `owner-cleared` — что владелец применил режим заново своей рукой.
+    if (r.remembered === profileName) orphan = null;
+  }
+  if (!orphan) return { blocked: false, why: '', at: null };
+  return {
+    blocked: true,
+    at: orphan.at ?? null,
+    why: `предыдущее восстановление «${profileName}» (${orphan.at ?? 'без отметки'}) не оставило вердикта — `
+      + 'машина умерла с этим режимом на карте. Восстановление ОСТАНОВЛЕНО, чтобы не повторять это '
+      + 'каждый вход. Заводское состояние стоит по физике. Снять блок: применить режим ярлыком заново',
+  };
 }
 
 /** The journal, parsed; unreadable lines are returned as `{ unparsable }` rather than dropped. */

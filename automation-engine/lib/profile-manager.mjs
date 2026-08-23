@@ -71,6 +71,9 @@ import {
   writeRememberedState,
   readRememberedState,
   appendBootJournal,
+  appendBootIntent,
+  readBootJournal,
+  bootLoopBreaker,
 } from './remembered-state.mjs';
 import {
   PROFILES_DIR,
@@ -517,6 +520,13 @@ export async function apply(backend, profile, {
   // acceptance. An explicit flag says «I am knowingly applying a draft» in the one place that can
   // audit it, and leaves the file untouched.
   witness = false,
+  // СОГЛАСИЕ — КТО ИМЕННО РАЗРЕШИЛ ПРИМЕНИТЬ ЧЕРНОВИК, СТРОКОЙ, А НЕ БУЛЕВЫМ.
+  //
+  // Строка, потому что вопрос ворот теперь «кто применяет», и ответ «да» на него не отвечает. В
+  // журнале и в отказе стоит имя согласия («клик владельца», «приёмочный прогон --witness»,
+  // «восстановление при входе»), и по нему видно, чьё решение исполнялось. `witness: true` остаётся
+  // рабочим псевдонимом для приёмочного прогона — старые вызовы и блоки не переписываются.
+  consent: consentArg = null,
   // The tuning-curve loader, INJECTED so this module stays testable without a `curves/` directory and
   // so the selftest can drive a document that exists only in memory. Defaults to the real store.
   loadCurve = null,
@@ -530,18 +540,38 @@ export async function apply(backend, profile, {
   const before = readState(backend);
 
   // R6 and the format, both before the first write (P2-AC5).
+  // Одно согласие из двух входов: `witness: true` — исторический псевдоним приёмочного прогона.
+  const consent = consentArg || (witness ? 'приёмочный прогон (--witness)' : null);
+
   const refusals = validateProfile(profile, { card });
   refusals.push(...checkStamp(profile, card ?? { driver: before.driver, vbios: before.vbios }));
   // THE QUALIFICATION GATE (phase 3, P3-AC3): a draft is a VALID file the format accepts and the
   // list shows — and a state this module never puts on the card. The refusal names the reason and
   // the phase that lifts it, and it sits here, in the one writer (R1), not in the shortcut layer:
   // whatever surface calls apply() — CLI, .lnk, the logon task — meets the same gate.
-  if (requiresQualification(profile) && profile.qualified !== true && !witness) {
+  // 🔴 ВОРОТА СПРАШИВАЮТ, КТО ПРИМЕНЯЕТ, А НЕ «БЛАГОСЛОВЛЁН ЛИ ПРОФИЛЬ» — слово владельца 2026-08-23.
+  //
+  // Прежде здесь стояло `profile.qualified !== true` — и это был запрет на ПРОФИЛЬ. Владелец,
+  // упёршись в него на собственной машине: *«почему какой-то нами же выдуманный флаг нам же
+  // мешает?»* Он прав по существу: `qualified` придуман агентом как тормоз для АГЕНТА — чтобы тот
+  // не применил непроверенные числа по своей инициативе, — но написан был так, что блокировал
+  // ВЛАДЕЛЬЦА, то есть саму инстанцию приёмки. Его клик по ярлыку И ЕСТЬ решение о приёмке.
+  //
+  // ЧТО НЕ ИЗМЕНИЛОСЬ: числа остаются честными. `qualified: false` в файле НЕ становится `true` —
+  // доказательств приёмки действительно нет, и врать в данных проект не будет. Изменилось то, ЧЬЁ
+  // разрешение спрашивают ворота.
+  //
+  // ⚠️ ЕДИНСТВЕННАЯ НАСТОЯЩАЯ РАБОТА ФЛАГА НЕ ПОТЕРЯНА, А ПЕРЕЕХАЛА ТУДА, ГДЕ ЕЙ МЕСТО. Флаг охранял
+  // НЕПРИСУТСТВЕННЫЙ путь: задача логона восстанавливает режим при каждом входе, без человека рядом,
+  // и плохой режим дал бы петлю загрузки на рабочей машине. Теперь это делает
+  // `remembered-state.bootLoopBreaker` — механизм, который наблюдает НАСТОЯЩУЮ смерть машины по
+  // осиротевшему намерению (R15), а не хранит обещание в булевом поле, которое никто не измерял.
+  if (requiresQualification(profile) && profile.qualified !== true && !consent) {
     refusals.push({
-      field: 'qualified',
-      why: 'профиль — ЧЕРНОВИК (qualified: false): его числа — кандидаты, не прошедшие приёмку. '
-        + 'Применение запрещено, на карту не записано ничего. Отказ снимает фаза 6 (приёмка режимов), '
-        + 'которая проставит qualified: true по результатам квалификации.',
+      field: 'consent',
+      why: 'профиль — ЧЕРНОВИК (qualified: false), и зовущий не назвал согласия. Применение черновика '
+        + 'делается ТОЛЬКО по явному решению владельца (ярлык, CLI) — автоматическое восстановление '
+        + 'при входе в систему проходит через прерыватель петли загрузки. На карту не записано ничего.',
     });
   }
   if (refusals.length) {
@@ -883,9 +913,9 @@ function profilePath(name) {
  *   factory-by-physics     remembered factory, card already factory → zero writes, code 0
  *   factory-restored       remembered factory, card was NOT factory (manual runs only) → reset, code 0
  *   applied                remembered profile applied and read back through apply()'s gates, code 0
- *   degraded-to-factory    the SAME gates refused (draft / stale stamp / missing file) → zero
- *                          writes, factory stands, code 1 — a stale remembered state degrades to
- *                          factory plus a journal line, never to a blind write
+ *   degraded-to-factory    the gates refused (stale stamp / missing file), OR the BOOT-LOOP BREAKER
+ *                          found the previous restore of this profile left no verdict — the machine
+ *                          died with it on the card → zero writes, factory stands, code 1
  *   apply-failed-rolled-back  a write failed mid-apply; apply() already rolled back, code 1
  *
  * Every run appends exactly ONE journal line (P3-AC2's meter). The remembered state itself is NOT
@@ -897,6 +927,10 @@ export async function bootApply({
   loadProfileByName = (name, card) => loadProfileFile(profilePath(name), card),
   rememberedPath = REMEMBERED_STATE_PATH,
   journalPath = BOOT_JOURNAL_PATH,
+  // Швы прерывателя — внедряемые по той же причине, что и всё остальное здесь: набор обязан гонять
+  // его в песочнице, не трогая боевой журнал владельца (EXP-0025).
+  readJournalFn = readBootJournal,
+  writeIntentFn = appendBootIntent,
   retries = BOOT_PROBE_RETRIES,
   retryIntervalMs = BOOT_PROBE_RETRY_INTERVAL_MS,
   timing = {},
@@ -957,11 +991,32 @@ export async function bootApply({
   // is actually wanted: a power-limit-only mode must not load nvapi64.dll for nothing. A resolution
   // that throws is caught by the same handler below and degrades to factory — the designed-in safety
   // of this whole path (the card boots factory by physics, so «nothing happened» is always safe).
+  // ─── ПРЕРЫВАТЕЛЬ ПЕТЛИ ЗАГРУЗКИ — ДО ЛЮБОЙ ЗАПИСИ (`remembered-state.bootLoopBreaker`) ──────────
+  //
+  // Это то, что заняло место флага `qualified` на неприсутственном пути. Флаг спрашивал «обещано ли,
+  // что числа хороши»; прерыватель СМОТРИТ, чем кончилось прошлое восстановление. Осиротевшее
+  // намерение означает, что машина умерла с этим режимом на карте, — и второй раз мы этого не
+  // делаем, иначе каждый вход в систему повторял бы смерть.
+  const breaker = bootLoopBreaker(readJournalFn(journalPath), state.profile);
+  if (breaker.blocked) {
+    return {
+      code: 1,
+      record: journal({
+        verdict: 'degraded-to-factory', remembered: state.profile, probeAttempts,
+        detail: `ПРЕРЫВАТЕЛЬ ПЕТЛИ ЗАГРУЗКИ: ${breaker.why} — записей ноль`,
+      }),
+    };
+  }
+
   let curveBackend = null;
   try {
     const wantCurve = await resolveCurve(profile);
     if (wantCurve) curveBackend = openCurveBackend();
-    const r = await apply(b, profile, { card, timing, curve: wantCurve, curveBackend });
+    // НАМЕРЕНИЕ — ПОСЛЕДНЕЕ, ЧТО ПИШЕТСЯ ДО КАРТЫ, и оно `fsync`-ится. Если следующая строка в
+    // журнале так и не появится, следующий вход прочтёт это намерение как «здесь машина умерла».
+    writeIntentFn({ remembered: state.profile }, journalPath);
+    // СОГЛАСИЕ ИМЕНОВАНО: по журналу видно, что это было восстановление, а не решение человека.
+    const r = await apply(b, profile, { card, timing, curve: wantCurve, curveBackend, consent: 'восстановление при входе в систему' });
     return { code: 0, record: journal({ verdict: 'applied', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, detail: `применено и перечитано: ${r.after.powerLimitW} Вт / ${r.after.clockMhz} МГц` }) };
   } catch (e) {
     if (e.refusals) {
@@ -1208,7 +1263,15 @@ async function cmdSelftest() {
 
   // Phase 3 §4.2 — the qualification gate (P3-AC3): a draft never reaches the card, the refusal
   // names the reason and the phase that lifts it, and the gate does not catch the factory path.
-  block('ЧЕРНОВИК (qualified: false) -> отказ ДО первой записи, причина и фаза названы (P3-AC3)', async () => {
+  // ⚠️ ДОГОВОР ЭТОГО БЛОКА ПЕРЕПИСАН 2026-08-23 СЛОВОМ ВЛАДЕЛЬЦА, и старая его редакция ПОКРАСНЕЛА
+  // на правке — как и должна была. Прежде он требовал, чтобы отказ назвал «фазу 6, которая его
+  // снимет»: гейт был запретом на ПРОФИЛЬ и ждал приёмки. Теперь гейт спрашивает, КТО применяет, и
+  // фаза тут ни при чём — черновик применяется по явному решению владельца, а его числа остаются
+  // честными (`qualified: false` в файле не подделывается).
+  //
+  // ЧТО БЛОК ОБЯЗАН ДЕРЖАТЬ ПО-ПРЕЖНЕМУ И НАВСЕГДА: БЕЗ согласия черновик НЕ применяется, и отказ
+  // случается ДО первой записи в карту. Ослабление именно этого и было бы дырой.
+  block('ЧЕРНОВИК БЕЗ СОГЛАСИЯ -> отказ ДО первой записи, поле и причина названы (P3-AC3)', async () => {
     const b = fakeBackend();
     const p = silentColdFixture();
     p.qualified = false;
@@ -1216,14 +1279,30 @@ async function cmdSelftest() {
     p.draft = { candidate: 'потолок 2400, кривая +180', source: 'STATUS факт 27' };
     try {
       await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
-      return 'черновик применён — гейт квалификации не сработал';
+      return 'черновик применён БЕЗ согласия — гейт не сработал';
     } catch (e) {
       if (b.writes.length !== 0) return `до отказа успели записать: ${b.writes.join(', ')}`;
-      if (!/qualified/u.test(e.message)) return `отказ не назвал поле: ${e.message}`;
+      if (!/consent/u.test(e.message)) return `отказ не назвал поле: ${e.message}`;
       if (!/ЧЕРНОВИК/u.test(e.message)) return `отказ не назвал причину черновика: ${e.message}`;
-      if (!/фаза 6/u.test(e.message)) return `отказ не назвал фазу, которая его снимет: ${e.message}`;
+      if (!/согласи/u.test(e.message)) return `отказ не сказал, чего именно не хватает: ${e.message}`;
       return null;
     }
+  });
+
+  // СОГЛАСИЕ ИМЕНОВАНО, А НЕ БУЛЕВО — и это половина смысла правки: по записи должно быть видно,
+  // ЧЬЁ решение исполнялось. Строка «клик владельца» и строка «восстановление при входе» — разные
+  // основания с разной ценой, и сворачивать их в один `true` значит терять именно то, что важно.
+  block('ЧЕРНОВИК С ИМЕНОВАННЫМ СОГЛАСИЕМ применяется, и ФАЙЛ НЕ ПОДМЕНЯЕТСЯ', async () => {
+    const b = fakeBackend();
+    const p = silentColdFixture();
+    p.qualified = false;
+    p.mode = 'silent-cold';
+    const before = JSON.stringify(p);
+    const r = await apply(b, p, { card: SELFTEST_CARD, timing: FAST, consent: 'клик владельца' });
+    if (!r.applied) return 'с названным согласием черновик всё равно не применился';
+    if (JSON.stringify(p) !== before) return 'профиль подменён при применении — файл обязан остаться как был';
+    if (p.qualified !== false) return 'флаг qualified подделан — числа обязаны остаться честными';
+    return null;
   });
 
   // `bugs/05` — the gate keyed on «is this factory?» swept in the MEASUREMENT pin, which sets a clock
@@ -1454,21 +1533,78 @@ async function cmdSelftest() {
     return null;
   });
 
-  block('загрузка: запомнен ЧЕРНОВИК -> деградация к заводскому, НОЛЬ записей, причина в журнале', async () => {
+  // ⚠️ ДОГОВОР ЭТОГО БЛОКА ПЕРЕПИСАН 2026-08-23 СЛОВОМ ВЛАДЕЛЬЦА, и старая редакция ПОКРАСНЕЛА на
+  // правке — как и должна была. Прежде загрузка отвергала ЧЕРНОВИК как таковой; теперь она его
+  // восстанавливает (владелец применил его своей рукой, и его выбор исполняется), а от петли
+  // загрузки защищает ПРЕРЫВАТЕЛЬ — он смотрит, чем кончилось прошлое восстановление, а не читает
+  // обещание из булева поля.
+  const draftOptimised = () => {
+    const p = silentColdFixture();
+    p.name = 'optimised'; p.mode = 'optimised'; p.qualified = false;
+    p.draft = { candidate: 'кривая +180, -pl 250', source: 'STATUS факт 27' };
+    return p;
+  };
+
+  block('загрузка: запомненный ЧЕРНОВИК ВОССТАНАВЛИВАЕТСЯ — выбор владельца исполняется', async () => {
     const sb = bootSandbox();
     const b = fakeBackend();
     writeRememberedState({ profile: 'optimised' }, sb.rem);
-    const draft = () => {
-      const p = silentColdFixture();
-      p.name = 'optimised'; p.mode = 'optimised'; p.qualified = false;
-      p.draft = { candidate: 'кривая +180, -pl 250', source: 'STATUS факт 27' };
-      return p;
-    };
-    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: draft(), refusals: [] }) }));
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: draftOptimised(), refusals: [] }) }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict} (${r.record.detail})`;
+    if (r.code !== 0) return `код ${r.code} вместо 0`;
+    return null;
+  });
+
+  block('загрузка: НАМЕРЕНИЕ пишется ДО карты — иначе смерть машины не отличить от «не пробовали»', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'optimised' }, sb.rem);
+    const order = [];
+    await bootApply(bootOpts(b, sb, {
+      loadProfileByName: () => ({ profile: draftOptimised(), refusals: [] }),
+      writeIntentFn: (rec, p) => { order.push('НАМЕРЕНИЕ'); appendBootIntent(rec, p); },
+      openCurveBackend: () => { order.push('КАРТА'); return null; },
+    }));
+    const iAt = order.indexOf('НАМЕРЕНИЕ');
+    if (iAt < 0) return 'намерение не записано вовсе';
+    const written = readBootJournal(sb.jr).filter((x) => x.state === 'intent');
+    if (written.length !== 1) return `строк намерения в журнале ${written.length} вместо 1`;
+    if (written[0].remembered !== 'optimised') return `намерение не назвало профиль: ${JSON.stringify(written[0])}`;
+    return null;
+  });
+
+  block('ПРЕРЫВАТЕЛЬ ПЕТЛИ: осиротевшее намерение -> восстановление ОСТАНОВЛЕНО, НОЛЬ записей', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'optimised' }, sb.rem);
+    // Прошлый вход умер: намерение есть, вердикта за ним нет. Ровно то, что оставляет BSOD.
+    appendBootIntent({ remembered: 'optimised' }, sb.jr);
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: draftOptimised(), refusals: [] }) }));
     if (r.record.verdict !== 'degraded-to-factory') return `вердикт ${r.record.verdict}`;
-    if (r.code !== 1) return `код ${r.code} вместо 1 — деградация обязана быть громкой`;
-    if (b.writes.length !== 0) return `до отказа успели записать: ${b.writes.join(', ')}`;
-    if (!/qualified|ЧЕРНОВИК/u.test(r.record.detail)) return `журнал не назвал причину: ${r.record.detail}`;
+    if (r.code !== 1) return `код ${r.code} вместо 1 — остановка обязана быть громкой`;
+    if (b.writes.length !== 0) return `при заблокированном восстановлении ПИСАЛИ в карту: ${b.writes.join(', ')}`;
+    if (!/ПРЕРЫВАТЕЛЬ ПЕТЛИ/u.test(r.record.detail)) return `журнал не назвал причину: ${r.record.detail}`;
+    return null;
+  });
+
+  block('ПРЕРЫВАТЕЛЬ ПЕТЛИ: намерение, ЗАКРЫТОЕ вердиктом, восстановлению не мешает', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'optimised' }, sb.rem);
+    appendBootIntent({ remembered: 'optimised' }, sb.jr);
+    appendBootJournal({ verdict: 'applied', remembered: 'optimised', detail: 'прошлый вход дожил до вердикта' }, sb.jr);
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: draftOptimised(), refusals: [] }) }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict} — закрытое намерение блокировать не должно`;
+    return null;
+  });
+
+  block('ПРЕРЫВАТЕЛЬ ПЕТЛИ: сирота ЧУЖОГО профиля не блокирует запомненный', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'optimised' }, sb.rem);
+    appendBootIntent({ remembered: 'silent-cold' }, sb.jr);
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: draftOptimised(), refusals: [] }) }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict} — сирота чужого режима здесь ни при чём`;
     return null;
   });
 
@@ -2016,7 +2152,11 @@ async function main(argv) {
     let r;
     try {
       // `curve: effCurve` — the resolution above is HANDED OVER, not recomputed (`bugs/18`).
-      r = await apply(backend, profile, { card, curveBackend, curve: effCurve, witness: witness && isDraft });
+      // СОГЛАСИЕ ИМЕНОВАНО. Приёмочный прогон и обычный клик — РАЗНЫЕ основания с разной ценой:
+      // первый не запоминается для автозагрузки, второй запоминается. Свернуть их в один булев
+      // значило бы потерять именно то, что различает (`plans/28`, слово владельца 2026-08-23).
+      const consent = witness && isDraft ? 'приёмочный прогон (--witness)' : 'клик владельца';
+      r = await apply(backend, profile, { card, curveBackend, curve: effCurve, consent });
     } finally {
       if (curveBackend) curveBackend.close();
     }
@@ -2034,6 +2174,16 @@ async function main(argv) {
     // apply above — a throw has already exited.
     const rec = writeRememberedState({ profile: profile.name, title: profile.title ?? null, stamp: profile.stamp ?? null });
     console.log(`ЗАПОМНЕНО для автозагрузки: «${rec.profile}» (${REMEMBERED_STATE_PATH})`);
+    // РУКА ВЛАДЕЛЬЦА СНИМАЕТ БЛОКИРОВКУ ПРЕРЫВАТЕЛЯ. Если прошлое восстановление этого режима
+    // умерло вместе с машиной, в журнале лежит осиротевшее намерение, и загрузка больше его не
+    // трогает. Владелец, применивший режим ЗАНОВО и своей рукой, тем самым говорит «пробуем ещё» —
+    // и эта строка закрывает сироту. Автоматически такое сняться не может по построению.
+    appendBootJournal({ verdict: 'owner-cleared', remembered: profile.name, detail: 'владелец применил режим своей рукой — блокировка прерывателя петли снята' });
+    if (isDraft) {
+      console.log('ЧЕРНОВИК ЗАПОМНЕН. Числа НЕ подделаны: qualified остаётся false — приёмки не было.');
+      console.log('При входе в систему он будет восстановлен; если машина умрёт с ним на карте,');
+      console.log('прерыватель петли остановит восстановление и оставит заводское.');
+    }
     return 0;
   }
 
