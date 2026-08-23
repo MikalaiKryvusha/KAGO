@@ -107,6 +107,8 @@ const SUITES = [
     what: 'ФОРМАТ профиля и его отказы', done: /^САМОПРОВЕРКА ФОРМАТА:/mu },
   { id: 'profile', npm: 'npm run profile -- --selftest', argv: ['automation-engine/lib/profile-manager.mjs', '--selftest'],
     what: 'ПРИМЕНИТЕЛЬ профиля, единственный писатель', done: /^САМОПРОВЕРКА ПРИМЕНЕНИЯ:/mu },
+  { id: 'safemode', npm: 'npm run safe-mode -- --selftest', argv: ['tools/safe-mode.mjs', '--selftest'],
+    what: 'безопасный режим дисков: взведён / снят / ВЗВЕДЁН НАПОЛОВИНУ', done: /^САМОПРОВЕРКА safe-mode:/mu },
   { id: 'power', npm: 'npm run power -- --selftest', argv: ['automation-engine/lib/power-baseline.mjs', '--selftest'],
     what: 'эталон мощности и пол прибора', done: /^САМОПРОВЕРКА:/mu },
   { id: 'descend', npm: 'npm run descend -- --selftest', argv: ['automation-engine/lib/ladder-descent.mjs', '--selftest'],

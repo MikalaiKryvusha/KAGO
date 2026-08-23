@@ -41,6 +41,15 @@
 
 ## Entries
 
+### EXP-0134 · 2026-08-24 · ❌→✅ · #vacuous-assertion #self-reading-block #mutation #testing
+**Context:** `plans/30` §2.6 — the logon disarm rides an injectable seam (`disarmDisksFn`). Fixture blocks prove the duty; **nothing proved the PRODUCTION call site passes the seam** — the EXP-0133 hole exactly. So I wrote a block that reads this module's OWN SOURCE and asserts the `--boot-apply` branch contains `disarmDisksFn:`.
+**Tried / did:** anchored it with `src.indexOf("argv.includes('--boot-apply')")`. Green. Then the mutation: delete the seam from the production branch.
+**Result:** ❌ **still green.** The anchor matched the BLOCK'S OWN SOURCE LINE (the block contains that string), and `disarmDisksFn:` was found in the block's own refusal message. A guard reporting on protection that did not exist. Re-anchored on the branch's printed line — **green again on a broken tree**, for the same reason one level up: the block now contained THAT string too. Fixed by (a) building the search key from concatenated parts so it never appears whole in the block's own source, (b) `lastIndexOf`, and (c) a tripwire that fails if the window contains `block(`.
+**Lesson:** **a block that reads its own file must not contain its own search key literally** — `indexOf` finds the block before it finds the subject, and self-match makes it vacuously green forever. Build the key from parts, prefer `lastIndexOf` when the subject sits after the suite, and add a tripwire that detects «I found myself». More generally: source-reading assertions are the one family where the mutation is not optional — a normal block fails loudly when miswired; this kind succeeds.   → link: EXP-0133 · plans/30_safe_mode_for_the_owners_disks.md
+**Repro:** break the production line the block guards → it MUST redden. If it stays green, print the anchor's line number: `src.slice(0,at).split('\n').length`.
+**Trigger:** any assertion that greps the repo's own source (wiring guards, «is the seam passed», «is the flag still there»).
+**Not for:** blocks over runtime values — those cannot match themselves.
+
 ### EXP-0133 · 2026-08-23 · ❌→✅ · #mutation #wiring #unit-vs-endtoend #EXP-0052 #testing
 **Context:** epic 33 phase 2 — a new tag had to travel from a pure decision function, through `closePoint`, into the curve document's row. Unit blocks covered `overshootMarkFor` (does it mark?) and `closePoint` (does it accept the tag and refuse a fake one?). Both green, six blocks.
 **Tried / did:** ran mutation N3 — delete the one line that PASSES the tag from the engine to `closePoint`. It applied (−45 bytes, asserted per EXP-0132).

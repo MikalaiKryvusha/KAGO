@@ -941,8 +941,37 @@ export async function bootApply({
   // provable on a machine with no card, which is what the boot blocks below run on.
   resolveCurve = resolveProfileCurve,
   openCurveBackend = () => nvapiCurveBackend(),
+  // РАЗЖАТИЕ ДИСКОВ ПРИ ВХОДЕ В СИСТЕМУ (`plans/30` §2.6, AC10). Шов, как и всё здесь: набор гоняет
+  // его без единой команды PowerShell.
+  disarmDisksFn = null,
 } = {}) {
   const journal = (record) => { appendBootJournal(record, journalPath); return record; };
+
+  // ─── ДИСКИ РАЗЖИМАЮТСЯ ПЕРВЫМИ, ДО ЛЮБОЙ РАБОТЫ С КАРТОЙ ────────────────────────────────────────
+  //
+  // Владелец просил «чтобы при перезапуске KAGO вывел диски в онлайн, если вдруг был BSOD»
+  // (`interviews/013` Q3). Сделано СИЛЬНЕЕ просимого и в другом месте: не при запуске KAGO, а при
+  // ВХОДЕ В СИСТЕМУ. После чёрного экрана владелец KAGO не запускает — он жмёт кнопку и смотрит на
+  // рабочий стол. Задача `\KAGO\boot-apply` уже существует, уже имеет права `Highest` и уже висит на
+  // триггере входа, поэтому НОВОЙ автозагрузки не заводится: разжатие едет тем же поездом, что и
+  // восстановление профиля карты.
+  //
+  // ⚠️ ПЕРВЫМИ, А НЕ ПОСЛЕДНИМИ. Пока режим взведён наполовину, гейт развёртки писать в карту
+  // откажется (AC4). Разжать сначала — значит не оставить двум сторожам возможности гоняться друг за
+  // другом. И это дёшево: если разжимать нечего, работы ноль.
+  //
+  // ⚠️ ОШИБКА РАЗЖАТИЯ НЕ ОТМЕНЯЕТ ВОССТАНОВЛЕНИЕ ПРОФИЛЯ. Это два независимых дежурства одного
+  // поезда, и R10a про них ровно то же, что про откат: список, а не цепь.
+  if (disarmDisksFn) {
+    try {
+      const d = disarmDisksFn();
+      if (d && (d.done?.length || d.failed?.length)) {
+        journal({ verdict: 'disks-disarmed', remembered: null, detail: `безопасный режим дисков разжат при входе: восстановлено ${d.done?.length ?? 0}, не удалось ${d.failed?.length ?? 0}` });
+      }
+    } catch (e) {
+      journal({ verdict: 'disks-disarm-failed', remembered: null, detail: `разжать диски при входе не удалось: ${e?.message ?? e} — профиль карты восстанавливается всё равно` });
+    }
+  }
 
   const { state, problem } = readRememberedState(rememberedPath);
   if (problem) {
@@ -1452,6 +1481,70 @@ async function cmdSelftest() {
     retries: 3, retryIntervalMs: 1, timing: FAST,
     loadProfileByName: () => ({ profile: silentColdFixture(), refusals: [] }),
     ...extra,
+  });
+
+  // ═══ РАЗЖАТИЕ ДИСКОВ ПРИ ВХОДЕ (`plans/30` §2.6, AC10) ═══════════════════════════════════════════
+  block('вход: безопасный режим дисков РАЗЖИМАЕТСЯ, и это попадает в журнал (AC10)', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    let called = 0;
+    const r = await bootApply(bootOpts(b, sb, {
+      disarmDisksFn: () => { called += 1; return { ok: true, done: ['ftpsvc', 'disk:E'], failed: [] }; },
+    }));
+    if (called !== 1) return `разжатие звали ${called} раз вместо 1`;
+    const lines = journalLines(sb.jr);
+    if (!lines.some((l) => l.includes('disks-disarmed'))) return 'в журнале нет строки о разжатии дисков';
+    if (!lines.some((l) => l.includes('восстановлено 2'))) return 'журнал не назвал, сколько пунктов восстановлено';
+    if (r.record.verdict === 'disks-disarmed') return 'разжатие подменило собой вердикт восстановления профиля';
+    return null;
+  });
+
+  block('вход: разжатие УПАЛО -> профиль карты восстанавливается ВСЁ РАВНО (R10a: список, не цепь)', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'factory' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb, {
+      disarmDisksFn: () => { throw new Error('Set-Disk отказал'); },
+      loadProfileByName: () => ({ profile: factoryFixture(), refusals: [] }),
+    }));
+    const lines = journalLines(sb.jr);
+    if (!lines.some((l) => l.includes('disks-disarm-failed'))) return 'падение разжатия не названо в журнале';
+    if (!lines.some((l) => l.includes('Set-Disk отказал'))) return 'журнал не назвал ПРИЧИНУ падения';
+    if (r.record.verdict === 'disks-disarm-failed') return 'падение разжатия отменило восстановление профиля — это цепь, а не список';
+    return null;
+  });
+
+  block('вход: разжимать нечего -> журнал НЕ засоряется (тихий путь остаётся тихим)', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    const r = await bootApply(bootOpts(b, sb, { disarmDisksFn: () => ({ ok: true, done: [], failed: [] }) }));
+    if (journalLines(sb.jr).some((l) => l.includes('disks-disarmed'))) return 'пустое разжатие всё равно написало строку';
+    if (r.record.verdict !== 'no-remembered-state') return `вердикт ${r.record.verdict}`;
+    return null;
+  });
+
+  // ⚠️ ДЫРА КЛАССА N3 (EXP-0133): дежурство со швом, которого БОЕВОЙ ПУТЬ не передаёт, доказано на
+  // наборе и не исполняется на машине. Блок читает САМ ИСХОДНИК боевой ветки `--boot-apply`.
+  block('вход: БОЕВАЯ ветка --boot-apply реально ПОДАЁТ шов разжатия, а не только набор', async () => {
+    const src = fsReadFileSync(fileURLToPath(import.meta.url), 'utf8');
+    // ⚠️ ЯКОРЬ БЕРЁТСЯ ПО ПЕЧАТИ БОЕВОЙ ВЕТКИ, А НЕ ПО `argv.includes(...)`. Первая редакция искала
+    // именно эту подстроку — и находила ЭТОТ ЖЕ БЛОК, потому что он её содержит: блок читал
+    // собственный исходник, видел `disarmDisksFn:` в своём тексте отказа и зеленел ВСЕГДА. Пойман
+    // мутацией P1 (снять шов из боевой ветки → блок остался зелёным). Пустая проверка — худший вид
+    // сторожа: он отчитывается о защите, которой нет.
+    // ⚠️ КЛЮЧ СОБИРАЕТСЯ ИЗ ЧАСТЕЙ, И ЭТО НЕ УКРАШЕНИЕ. Блок, читающий СВОЙ ЖЕ исходник, не имеет
+    // права содержать искомую строку целиком — иначе он находит самого себя, а не то, что проверяет.
+    // Обе первые редакции этого блока попались: сперва на `argv.includes('--boot-apply')`, потом на
+    // печати боевой ветки. Склейка разрывает совпадение, а `lastIndexOf` — вторая страховка: боевая
+    // ветка в этом файле идёт ПОСЛЕ набора.
+    const marker = `ВОССТАНОВЛЕНИЕ ПРИ ${'ВХОДЕ'} — запомненное состояние`;
+    const at = src.lastIndexOf(marker);
+    if (at < 0) return 'боевая ветка --boot-apply в исходнике не найдена по своей печати';
+    const tail = src.slice(at, at + 1400);
+    if (tail.includes('block(')) return 'якорь уехал в набор, а не в боевую ветку — блок снова читает сам себя';
+    if (!tail.includes('disarmDisksFn:')) return 'боевой вызов bootApply НЕ передаёт disarmDisksFn — дежурство мертво на машине';
+    if (!tail.includes('safe-mode.mjs')) return 'боевая ветка не загружает инструмент безопасного режима';
+    return null;
   });
 
   block('загрузка: запомненного состояния НЕТ -> ноль записей, вердикт назван, журнал получил строку', async () => {
@@ -2068,7 +2161,19 @@ async function main(argv) {
   // retry lives INSIDE bootApply — a probe thrown here would defeat it (§4.4, the logon race).
   if (argv.includes('--boot-apply')) {
     console.log('ВОССТАНОВЛЕНИЕ ПРИ ВХОДЕ — запомненное состояние через те же ворота применителя.');
-    const { code, record } = await bootApply({});
+    // ⚠️ ШОВ ПОДАЁТСЯ ИМЕННО ЗДЕСЬ, В БОЕВОМ ПУТИ. Функция с необязательным швом, которого боевой
+    // вызов не передаёт, — это дежурство, доказанное на наборе и не исполняемое на машине; ровно эту
+    // дыру нашла мутация N3 в эпике 33 (EXP-0133: сторожить оба конца провода — не значит сторожить
+    // провод). Блок ниже проверяет, что вызов подаёт его.
+    // Модуль грузится ЗАРАНЕЕ и мягко: сломанный или отсутствующий инструмент дисков не имеет права
+    // помешать восстановлению профиля карты — это два независимых дежурства одного поезда.
+    let safeMode = null;
+    try { safeMode = await import('../../tools/safe-mode.mjs'); } catch (e) {
+      console.log(`  ДИСКИ    инструмент безопасного режима не загрузился (${e?.message ?? e}) — разжатие пропущено`);
+    }
+    const { code, record } = await bootApply({
+      disarmDisksFn: safeMode ? () => (safeMode.readReceipt() ? safeMode.disarm({}) : null) : null,
+    });
     console.log(`  ВЕРДИКТ  ${record.verdict}${record.remembered ? ` («${record.remembered}»)` : ''}`);
     console.log(`  ${record.detail}`);
     console.log(`  ЖУРНАЛ   ${BOOT_JOURNAL_PATH}`);

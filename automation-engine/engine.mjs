@@ -6536,6 +6536,40 @@ export function selfTest() {
         [noWindow.viewers < 1, dead.viewers < 1], [true, true]);
     }
 
+    // ═══ ГЕЙТ БЕЗОПАСНОГО РЕЖИМА ДИСКОВ (`plans/30` AC4 · AC5) ══════════════════════════════════════
+    // Сторож судится ПО ОБЕ СТОРОНЫ: он обязан останавливать половину И обязан НЕ трогать штатные
+    // состояния. Вторая половина важнее первой — сторож, краснеющий на нормальной работе, будет снят
+    // руками в первый же вечер, и тогда его нет вовсе (R12 · R13 · R17, дважды пройдено проектом).
+    {
+      const sm = await import('../tools/safe-mode.mjs');
+      const disks = [
+        { letter: 'J', number: 0, isReadOnly: false, isOffline: false },
+        { letter: 'F', number: 1, isReadOnly: false, isOffline: false },
+        { letter: 'E', number: 2, isReadOnly: false, isOffline: false },
+        { letter: 'D', number: 4, isReadOnly: false, isOffline: false },
+      ];
+      const onD = 'D:\\work\\KAGO\\runs\\shell\\rollback\\safe-mode.json';
+      const st = (over) => sm.safeModeState(sm.dutiesOf({
+        ftp: { Status: 'Running' }, torrent: { Id: 1, Name: 'q', Path: 'C:\\q.exe' }, disks, ...over,
+      }, { receiptPath: onD })).state;
+      const allShut = disks.map((d) => ([0, 1, 2].includes(d.number) ? { ...d, isReadOnly: true } : d));
+      ok('ГЕЙТ ПРОПУСКАЕТ полностью СНЯТЫЙ режим — это штатное рабочее состояние, а не дефект',
+        st({}), 'disarmed');
+      ok('ГЕЙТ ПРОПУСКАЕТ полностью ВЗВЕДЁННЫЙ режим — тоже штатное',
+        st({ ftp: { Status: 'Stopped' }, torrent: null, disks: allShut }), 'armed');
+      ok('и ОСТАНАВЛИВАЕТ ровно половину: FTP снят, а диски открыты (AC4)',
+        st({ ftp: { Status: 'Stopped' } }), 'half-armed');
+      ok('половина в другую сторону — тоже отказ: диски зажаты, а торрент пишет',
+        st({ disks: allShut }), 'half-armed');
+      ok('и причина ПОЛОВИНЫ называет, что именно взведено, а что нет',
+        (() => {
+          const s = sm.safeModeState(sm.dutiesOf({
+            ftp: { Status: 'Stopped' }, torrent: { Id: 1, Name: 'q', Path: 'C:\\q.exe' }, disks,
+          }, { receiptPath: onD }));
+          return [s.why.includes('ftpsvc'), s.why.includes('disk:')];
+        })(), [true, true]);
+    }
+
     const prodAfter = existsSync(VMIN_DIR) ? readdirSync(VMIN_DIR).length : 0;
     ok('ПРОДАКШЕН НЕ ВЫРОС: самопроверка движка не подбросила улик', prodAfter, prodBefore);
     ok('ПРОДАКШЕН-ЖУРНАЛ НЕ ВЫРОС: ни одна ступень набора не писала в runs/sweep/ (EXP-0025, bugs/08)',
@@ -7144,6 +7178,42 @@ async function mainSweep(argv, arg) {
     return 2;
   }
   console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено`);
+
+  // ─── БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: ОТКАЗ ТОЛЬКО НА ПОЛОВИНЕ (`plans/30` AC4) ─────────────────────────
+  //
+  // Двенадцать грязных выключений с 1 июля, и 22 августа на J: записано 4996 сообщений о повреждении
+  // файловой системы за один день (`researches/17`). Владелец принял риск зависания для КАРТЫ; для
+  // его ХРАНИЛИЩА этого не принимал никто. Отсюда безопасный режим — и отсюда же этот гейт.
+  //
+  // ⚠️ ОН СРАБАТЫВАЕТ РОВНО НА «ВЗВЕДЁН НАПОЛОВИНУ», И НИ НА ЧЁМ БОЛЬШЕ. Ни полностью взведённый
+  // режим, ни полностью снятый прогон не останавливают: и то, и другое — штатные рабочие состояния.
+  // Сторож, краснеющий на штатном состоянии машинерии, которую он защищает, — ловушка, которую канон
+  // называет трижды (R12 · R13 · R17), и проект падал в неё дважды. Опасна именно ПОЛОВИНА: машина,
+  // умершая посреди взвода, выглядит как работающая, и никто не замечает, что защиты нет.
+  try {
+    const sm = await import('../tools/safe-mode.mjs');
+    const smState = sm.safeModeState(sm.dutiesOf(sm.readMachine({})));
+    if (smState.state === 'half-armed') {
+      console.error('ОТКАЗ: БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ ВЗВЕДЁН НАПОЛОВИНУ, а развёртка пишет в карту.');
+      console.error(`       ${smState.why}`);
+      console.error('');
+      console.error('       Половина защиты — это не половина риска: машина, умершая посреди взвода,');
+      console.error('       выглядит как работающая, и никто не замечает, что диски открыты.');
+      console.error('');
+      console.error('       ЧТО СДЕЛАТЬ — одно из двух, и оба одной командой:');
+      console.error('         снять целиком : node tools/safe-mode.mjs --off');
+      console.error('         взвести целиком: node tools/safe-mode.mjs --on');
+      console.error('       Посмотреть, что именно взведено: node tools/safe-mode.mjs');
+      return 2;
+    }
+    console.log(smState.state === 'armed'
+      ? '🔒 БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: взведён полностью — J:, F:, E: от записи закрыты'
+      : 'БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: не взведён (это разрешённое состояние; взвести — safe-mode --on)');
+  } catch (e) {
+    // ⚠️ СЛОМАННЫЙ СТОРОЖ НЕ ОСТАНАВЛИВАЕТ ПРОГОН, НО И НЕ МОЛЧИТ. Отказ здесь означал бы, что
+    // дефект в инструменте защиты дисков отменяет работу с картой, к которой он отношения не имеет.
+    console.log(`БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: проверить не удалось (${e?.message ?? e}) — прогон идёт, но защита НЕ подтверждена`);
+  }
 
   // THE PREVIOUS RUN'S GAUGE IS REMOVED BEFORE THIS ONE WRITES ITS FIRST. The bench has always done
   // this; the live path had not, so a window opened now would first paint the LAST run's ending —
