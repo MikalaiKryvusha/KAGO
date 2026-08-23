@@ -1863,8 +1863,20 @@ export async function sweepFrequency({
     // two places would be a truth↔mirror pair inside one function, and it hid a mutation — burning
     // the rung's lowest frequency instead of its highest reddened nothing, because the caller's
     // hard-coded clock kept the burn where it belonged while the decision moved.
+    // ⚠️ ЗАТРАВКА — ЭТО ПРЫЖОК, И СТРОКА ОБЯЗАНА СКАЗАТЬ ЭТО ВСЛУХ (`bugs/46`). Прыжок ЗАКОННЫЙ:
+    // он приземляется на землю, которую уже доказал прожиг — собственная улика этой частоты
+    // (`sweep-journal.provenRungs`, ступени, которые она ВЫСТОЯЛА) или соседка сверху. Но на экране
+    // 45 мВ от стока неотличимы от нарушения стены `bugs/03`, и владелец был прав, что спросил:
+    // ничто в строке эти два случая не различало. Теперь различает — и величина, и её законность.
+    const seedJumpMv = Number.isFinite(stockVoltageMv) && Number.isFinite(seedMv) ? stockVoltageMv - seedMv : null;
     const sr = await runRung({
       frequencyMhz, voltageMv: seedMv, depthMv: stockVoltageMv - seedMv, zoneStepMv: null, seeded: true,
+      stepMv: seedJumpMv,
+      standMv: stockVoltageMv,
+      seedJump: {
+        groundMhz: out.seedFromOwnEvidence ? frequencyMhz : (seed?.neighbourMhz ?? null),
+        ownEvidence: out.seedFromOwnEvidence,
+      },
     });
     out.rungs.push({ voltageMv: seedMv, seed: true, outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null });
     const decision = seedOutcome({
@@ -2041,12 +2053,31 @@ export async function sweepFrequency({
       stoppedEarly = 'no-progress';
       break;
     }
+    // ─── ШАГ, КОТОРЫЙ СПУСК РЕАЛЬНО ДЕЛАЕТ (`bugs/46`, ВТОРОЙ СТРАЙК) ──────────────────────────────
+    //
+    // Считается ровно там же и ровно так же, как его считает пересчёт выше: от места, где спуск
+    // СТОИТ. Канон над `standMv` формулирует это дословно — «ШАГ ЗОНЫ отмеряется от того места, где
+    // спуск СТОИТ, — от последней ЗАКАЗАННОЙ ступени».
+    //
+    // 🔴 ЗАЧЕМ ЭТО ВООБЩЕ НУЖНО ПЕРЕДАВАТЬ. До сегодня строка ступени печатала `zoneStepMv` — шаг
+    // ЗОНЫ, отмеренный по ГЛУБИНЕ от стока на лестнице, построенной от стока. Когда спуск идёт от
+    // затравки, это ДРУГОЕ ЧИСЛО: 2026-08-23 на 2355 МГц шаг был 5 мВ, а строка говорила «шаг зоны
+    // 25 мВ». Владелец прочитал это дважды за вечер и оба раза назвал багом; второй раз — словами
+    // «заебали эти неверные шаги». Это не пропуск числа, это НЕВЕРНОЕ число на том самом месте, где
+    // глаз проверяет `bugs/03`.
+    //
+    // ⚠️ Захватывается ДО `lastOrderedMv = targetMv`: после присваивания «где спуск стоял» уже
+    // потеряно, и мы напечатали бы ноль.
+    const standNowMv = Math.min(ground, lastOrderedMv ?? ground);
+    const actualStepMv = Number.isFinite(standNowMv) && Number.isFinite(targetMv) ? standNowMv - targetMv : null;
+
     orderedMvHere.add(targetMv);
     lastOrderedMv = targetMv;
 
     const r = await runRung({
       frequencyMhz, voltageMv: targetMv, depthMv: stockVoltageMv - targetMv,
       zoneStepMv: rung.zoneStepMv, seeded: out.seeded, rebased,
+      stepMv: actualStepMv, standMv: standNowMv,
       // THE PROVEN GROUND, HANDED DOWN (`interviews/009`). `lastPass` is the deepest voltage this
       // frequency has actually SURVIVED; before the first PASS it is the descent's start — stock, or
       // the seed, which the neighbour above already proved. The wall is the same `bugs/03` cliff the
@@ -2615,7 +2646,7 @@ export async function sweepRange({
       // Пара, которую можно УБРАТЬ, лучше пары, за которой надо следить: теперь новое поле у
       // источника доезжает само, а не ждёт, пока кто-то вспомнит про второй список.
       runRungFn: async (rungArgs) => {
-        const { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded } = rungArgs;
+        const { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded, stepMv, standMv, seedJump } = rungArgs;
         // THE RUNG IS ANNOUNCED BEFORE THE CARD IS TOUCHED (`ideas/06` §3, `plans/20` §4.2). A frozen
         // screen shows the LAST thing drawn, so a rung published after its own burn would make the
         // frozen frame accuse the PREVIOUS rung — the exact misattribution the write-ahead journal
@@ -2626,9 +2657,35 @@ export async function sweepRange({
         // шага, потому что именно шаг решает, поймаем мы вердикт или повесим машину (`bugs/03`).
         // Подпись была формально верной и всё равно ввела в заблуждение, поэтому теперь строка несёт
         // ОБЕ величины и говорит, от чего каждая отсчитана.
-        say('rung-start', `${frequencyMhz} МГц ← ${voltageMv} мВ (глубина ОТ СТОКА −${depthMv} мВ`
-          + `${Number.isFinite(zoneStepMv) ? `, шаг зоны ${zoneStepMv} мВ` : ''})`,
-          { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded });
+        // 🔴 ШАГ — ВЕДУЩАЯ ВЕЛИЧИНА СТРОКИ, ГЛУБИНА ПОДЧИНЁННАЯ (`bugs/46`, ВТОРОЙ СТРАЙК).
+        //
+        // Владелец дважды за вечер 2026-08-23 прочитал эту строку как объявление шага и оба раза
+        // назвал её багом: сперва `(глубина −110 мВ)` («такого шага не может быть!»), потом
+        // `(глубина ОТ СТОКА −45 мВ)` и `шаг зоны 25 мВ` там, где шаг был 5. Первая починка ДОПИСАЛА
+        // число (шаг зоны) вместо того, чтобы дать то, которое ищет глаз, — и через три часа тот же
+        // упрёк на той же строке. Правило проекта на этот случай прямое: урок, повторившийся дважды,
+        // провалился как текст, и лечится МЕХАНИЗМОМ, а не третьим напоминанием. Механизм — блок
+        // «НАПЕЧАТАННЫЙ ШАГ РАВЕН СДЕЛАННОМУ» в наборе; эта строка — его предмет.
+        //
+        // Почему именно шаг: размер шага решает, поймаем мы вердикт или повесим машину (`bugs/03`).
+        // Глубина от стока не отвечает ни на один вопрос, который задают в момент чтения строки.
+        const stepPart = Number.isFinite(stepMv)
+          ? (seedJump
+            // ЗАКОННЫЙ ПРЫЖОК ЧИТАЕТСЯ КАК ЗАКОННЫЙ. Иначе он неотличим от нарушенной стены.
+            ? `ЗАТРАВКА: прыжок ${stepMv} мВ на ДОКАЗАННУЮ землю (${seedJump.ownEvidence
+              ? 'собственная улика этой частоты'
+              : `доказана соседкой ${seedJump.groundMhz} МГц`}), а НЕ шаг в темноту`
+            : `ШАГ ${stepMv} мВ`)
+          : 'шаг не назван';
+        // Где сделанный шаг РАСХОДИТСЯ с шагом зоны — сказать ПОЧЕМУ, одной оговоркой. Именно это
+        // расхождение и было прочитано как «неверный шаг»: 5 против 25 на 2355 МГц.
+        const zonePart = !seedJump && Number.isFinite(zoneStepMv) && Number.isFinite(stepMv) && zoneStepMv !== stepMv
+          ? ` · шаг зоны ${zoneStepMv} мВ здесь НЕ применён: спуск отмеряет от того, где стоит`
+            + `${Number.isFinite(standMv) ? ` (${standMv} мВ)` : ''}, а не от стока`
+          : (!seedJump && Number.isFinite(zoneStepMv) ? ` · шаг зоны ${zoneStepMv} мВ` : '');
+        say('rung-start', `${frequencyMhz} МГц ← ${voltageMv} мВ · ${stepPart}`
+          + `${zonePart} (глубина ОТ СТОКА −${depthMv} мВ)`,
+          { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded, stepMv, standMv, seedJump: seedJump ?? null });
 
         // ─── THE TABLE IS RE-READ BEFORE THIS RUNG, AND THAT IS THE FIX FOR THE 2026-08-16 STALL ────
         //
@@ -2974,9 +3031,15 @@ export function sweepDryRunLines(dry) {
     const seed = p.seedMv === null
       ? `затравки нет (спуск от стока ${p.stockVoltageMv} мВ)`
         + (p.seedBlockedByHang ? ` — затравку ${p.cancelledSeedMv} мВ ОТМЕНИЛ ПОЛ ЗАВИСАНИЯ ${p.hangFloorMv} мВ` : '')
-      : (p.seedFromOwnEvidence
-        ? `затравка ${p.seedMv} мВ — СОБСТВЕННАЯ улика этой частоты из журнала (bugs/31), а не значение соседки`
-        : `затравка ${p.seedMv} мВ от соседки ${p.seed?.neighbourMhz} МГц (статус «${p.seed?.neighbourStatus}»)`);
+      // ⚠️ ВЕЛИЧИНА ПРЫЖКА НАЗЫВАЕТСЯ И ЗДЕСЬ (`bugs/46`). Сухой прогон — документ рельса S2, тот
+      // самый, что владелец читает ПЕРЕД разрешением на запись. Строка «затравка 850 мВ» при стоке
+      // 895 требует от читателя вычесть в уме, чтобы увидеть прыжок 45 мВ, — а именно этот прыжок он
+      // и проверяет на соответствие стене `bugs/03`. Заставлять считать в уме там, где решают,
+      // трогать ли карту, — то же самое умолчание, что и в строке прогона, только раньше по времени.
+      : (`затравка ${p.seedMv} мВ — ПРЫЖОК ${p.stockVoltageMv - p.seedMv} мВ от стока на ДОКАЗАННУЮ землю, `
+        + (p.seedFromOwnEvidence
+          ? 'улика СОБСТВЕННАЯ, этой частоты, из журнала (bugs/31), а не значение соседки'
+          : `доказана соседкой ${p.seed?.neighbourMhz} МГц (статус «${p.seed?.neighbourStatus}»)`));
     lines.push(`${g.topMhz} МГц — ступень из ${g.count} частот(ы) до ${g.bottomMhz} МГц, сток ${g.stockVoltageMv} мВ`);
     lines.push(`   ${seed}`);
     if (p.refused) { lines.push(`   ❌ ЛЕСТНИЦА НЕ ПОСТРОЕНА: ${p.why}`); continue; }
@@ -5754,12 +5817,17 @@ export function selfTest() {
       ]),
       points: sweepPoints, buildVector: vectorPinned, fromMhz: 2842, toMhz: 2828,
     });
-    ok('СУХОЙ ПРОГОН НАЗЫВАЕТ ОБЕ ЛЕСТНИЦЫ: по затравке и запасную от стока',
+    // Формулировка строки затравки изменена `bugs/46` (величина прыжка теперь названа явно). Блок
+    // обновлён СТРОЖЕ прежнего, а не ослаблен под новый текст: к прежним двум требованиям добавлено
+    // третье — прыжок назван ЧИСЛОМ. Ослабить сторож, чтобы он пропустил правку, — ровно тот подлог,
+    // который `/fable-judge` ищет отдельным проходом.
+    ok('СУХОЙ ПРОГОН НАЗЫВАЕТ ОБЕ ЛЕСТНИЦЫ: по затравке (с ВЕЛИЧИНОЙ прыжка) и запасную от стока',
       (() => {
         const l = sweepDryRunLines(drySeeded);
-        return [l.some((x) => x.includes('затравка 1000 мВ от соседки 2850 МГц')),
+        return [l.some((x) => x.includes('затравка 1000 мВ') && x.includes('соседкой 2850 МГц')),
+          l.some((x) => x.includes('ПРЫЖОК 45 мВ от стока на ДОКАЗАННУЮ землю')),
           l.some((x) => x.includes('если затравка НЕ пройдёт'))];
-      })(), [true, true]);
+      })(), [true, true, true]);
 
     // — the report is COUNTED, not claimed (E2-AC2), and the wall time stands against the estimate
     const lines = sweepReportLines(full);
@@ -6135,6 +6203,68 @@ export function selfTest() {
       ok('СВИДЕТЕЛЬ НАЗЫВАЕТ ИСТОЧНИК УЛИКИ: собственная улика не приписывается соседке',
         [/СОБСТВЕННОЙ улики/.test(note), /соседки undefined/.test(note), /соседки null/.test(note)],
         [true, false, false]);
+
+      // ═══ `bugs/46` — НАПЕЧАТАННЫЙ ШАГ РАВЕН СДЕЛАННОМУ. ГЕЙТ, А НЕ ФОРМУЛИРОВКА ══════════════════
+      //
+      // 🔴 ВТОРОЙ СТРАЙК. Владелец назвал эту строку багом дважды за вечер 2026-08-23 — в 19:0x
+      // («такого шага не может быть!») и в 22:1x («заебали эти неверные шаги»). Первая починка
+      // ДОПИСАЛА в строку число (шаг зоны) вместо того, которое ищет глаз, и упрёк повторился через
+      // три часа. Правило проекта: урок, повторившийся дважды, провалился как текст — лечится
+      // МЕХАНИЗМОМ. Вот механизм.
+      //
+      // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+      //   DM. печатать `zoneStepMv` вместо сделанного шага → «НАПЕЧАТАННЫЙ ШАГ РАВЕН СДЕЛАННОМУ»
+      //   DN. считать шаг от стока, а не от места стояния → он же
+      //   DP. молча уронить `seedJump`                     → «ЗАКОННЫЙ ПРЫЖОК ЧИТАЕТСЯ КАК ЗАКОННЫЙ»
+      const rungLines = alone.events.filter((e) => e.kind === 'rung-start');
+      ok('bugs/46: КАЖДАЯ строка ступени НЕСЁТ шаг, и он равен «где стоял минус куда пошёл»',
+        (() => {
+          if (!rungLines.length) return 'строк ступеней не было вовсе';
+          const bad = rungLines
+            .filter((e) => !(Number.isFinite(e.stepMv) && Number.isFinite(e.standMv)
+              && e.stepMv === e.standMv - e.voltageMv));
+          return bad.length ? bad.map((e) => `${e.voltageMv}мВ: шаг ${e.stepMv} при ${e.standMv}` ) : [];
+        })(), []);
+      // ⚠️ ГЛАВНАЯ ПОЛОВИНА: число обязано быть В ТЕКСТЕ. Дефект был не в поле, а в том, что ЧИТАЕТ
+      // владелец. Поле, верное при вранье в тексте, — ровно то, что здесь уже случилось.
+      ok('bugs/46: и ТЕКСТ строки называет ИМЕННО ЭТОТ шаг — глаз читает текст, а не поле',
+        (() => {
+          const bad = rungLines.filter((e) => {
+            const n = e.seedJump ? `прыжок ${e.stepMv} мВ` : `ШАГ ${e.stepMv} мВ`;
+            return !String(e.text ?? '').includes(n);
+          });
+          return bad.length ? bad.map((e) => String(e.text).slice(0, 70)) : [];
+        })(), []);
+      // ЗАКОННЫЙ ПРЫЖОК ЗАТРАВКИ ЧИТАЕТСЯ КАК ЗАКОННЫЙ. 45 мВ от стока и нарушенная стена `bugs/03`
+      // выглядели на экране одинаково — владелец был прав, что спросил.
+      ok('bugs/46: ЗАТРАВКА называет себя прыжком НА ДОКАЗАННУЮ ЗЕМЛЮ, а не безымянной глубиной',
+        (() => {
+          const s = rungLines.find((e) => e.seedJump);
+          if (!s) return 'строки затравки не было';
+          const t = String(s.text ?? '');
+          return [/ЗАТРАВКА: прыжок \d+ мВ/.test(t), /ДОКАЗАННУЮ землю/.test(t), /НЕ шаг в темноту/.test(t),
+            /собственная улика этой частоты/.test(t)];
+        })(), [true, true, true, true]);
+      // И РАСХОЖДЕНИЕ С ШАГОМ ЗОНЫ ОБЪЯСНЕНО, а не показано молча: 5 против 25 — это и был упрёк.
+      //
+      // ⚠️ ФИКСТУРА ПОДОБРАНА ТАК, ЧТОБЫ РАСХОЖДЕНИЕ БЫЛО, и это не педантизм. Первая редакция этого
+      // блока брала расхождение из `alone` (улика 970) — а 970 ЛЕЖИТ на лестнице от стока 1045 с
+      // шагом 25 (1020 · 995 · 970), расхождения там нет вовсе, и блок сравнивал «нет» с «нет»:
+      // ожидание вычислялось из результата и соглашалось с чем угодно. Здесь улика 975 намеренно
+      // МЕЖДУ ступенями лестницы, поэтому следующая ступень 970 даёт шаг 5 при шаге зоны 25 — ровно
+      // случай 2026-08-23 на 2355 МГц, из-за которого баг и заведён.
+      const offLadder = await seedRun('off-ladder', { rows: [sweepRow(2842, 1045)], provenMv: 975 });
+      const offLines = offLadder.events.filter((e) => e.kind === 'rung-start' && !e.seedJump);
+      ok('bugs/46: расхождение с шагом зоны СУЩЕСТВУЕТ на этой фикстуре — иначе блок ниже пустой',
+        offLines.some((e) => Number.isFinite(e.zoneStepMv) && Number.isFinite(e.stepMv) && e.zoneStepMv !== e.stepMv),
+        true);
+      ok('bugs/46: и оно ОБЪЯСНЕНО в тексте, а не показано молча',
+        (() => {
+          const d = offLines.find((e) => Number.isFinite(e.zoneStepMv) && Number.isFinite(e.stepMv)
+            && e.zoneStepMv !== e.stepMv);
+          const t = String(d?.text ?? '');
+          return [/ШАГ \d+ мВ/.test(t), /шаг зоны \d+ мВ здесь НЕ применён/.test(t), /а не от стока/.test(t)];
+        })(), [true, true, true]);
     }
 
     // ─── ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ (`bugs/33`) ───────────────────────────────────────────
