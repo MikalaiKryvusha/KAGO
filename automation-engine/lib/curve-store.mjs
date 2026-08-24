@@ -120,6 +120,35 @@ export const CURVE_STATUS = Object.freeze({
    *
    *  [NOT-TESTED] at birth — the blocks in `curve --selftest` are what flip this. */
   NOT_SERVED: 'not-served',
+  /** СПУСК ПРЕРВАН АНОМАЛИЕЙ, А ДОКАЗАННАЯ ЗЕМЛЯ СОХРАНЕНА — седьмое значение словаря, закрытого на
+   *  шести. Заведено 2026-08-24 вечером, и повод измерен, а не придуман.
+   *
+   *  ЧТО ОНО ЗНАЧИТ: спуск прошёл несколько ступеней, КАЖДАЯ из них выдержала прожиг, а следующая не
+   *  дала вердикта по причине, лежащей в ПУТИ ЗАПИСИ (карта ушла выше потолка, выдача выше стока,
+   *  назван класс отказа записи). Строка закрывается на ПОСЛЕДНЕЙ ПРОШЕДШЕЙ ступени — напряжении,
+   *  которое реально держало прожиг, — и говорит вслух, что край НЕ найден.
+   *
+   *  ПОЧЕМУ ЭТО ПРИШЛОСЬ ЗАВЕСТИ, В ЧИСЛАХ ЖИВОГО ПРОГОНА 2026-08-24 22:0x: полоса 2355…2175 МГц
+   *  дала **9 прошедших ступеней и 0 закрытых частот**. Каждая частота отдавала по несколько зелёных
+   *  прожигов на карте владельца и выбрасывала их все, потому что спуск кончался аномалией вместо
+   *  чистого края. Слово владельца того же вечера: *«Ты не продукт делаешь, а леса… Рабочий продукт
+   *  важнее процессов»*. Терять оплаченный прожигами замер — это и есть леса вместо здания.
+   *
+   *  ⚠️ ПОЧЕМУ НЕ ЛЮБОЕ ИЗ ШЕСТИ, и каждое различие несущее:
+   *    • НЕ `edge-found` — края мы не видели. Ни одна ступень не ОТКАЗАЛА; спуск прервался.
+   *    • НЕ `lever-limited` — рычаг ±1000 МГц имел запас. Ровно та ложь, которую убрал `depth-capped`.
+   *    • НЕ `depth-capped` — наш потолок глубины не срабатывал; остановило непредвиденное, а не наше
+   *      условие. Записать сюда значило бы сказать «мы решили не смотреть», когда мы смотрели и не
+   *      смогли.
+   *    • НЕ `not-served` — карта напряжение ОБСЛУЖИЛА и прожиг выдержала; не далась СЛЕДУЮЩАЯ ступень.
+   *    • НЕ `stock` — строка не заводская: под ней стоят настоящие прожиги.
+   *
+   *  ⚠️ И ЭТО НЕ ТРЕТИЙ ВЕРДИКТ. Владелец закрыл, что у частоты два вердикта («край найден» /
+   *  «предел рычага»); это запись ДОКУМЕНТА о том, что прервало спуск, — другой вопрос, ровно как у
+   *  `depth-capped`.
+   *
+   *  [NOT-TESTED] at birth — блоки `curve --selftest` и `engine --selftest` это переворачивают. */
+  CUT_SHORT: 'cut-short',
 });
 
 const STATUS_VALUES = Object.freeze(Object.values(CURVE_STATUS));
@@ -191,6 +220,9 @@ export const CURVE_TAGS = Object.freeze({
    *  ceiling, and **no failure was ever observed**. Full reasoning on `CURVE_STATUS.NOT_SERVED`.
    *  The sixth value; owner's word `interviews/013` Q1 = A. */
   STOP_NOT_SERVED: 'stop:not-served',
+  /** СПУСК ПРЕРВАН АНОМАЛИЕЙ ПУТИ ЗАПИСИ, строка стоит на последней ПРОШЕДШЕЙ ступени, край НЕ найден.
+   *  Седьмое значение; полное обоснование — на `CURVE_STATUS.CUT_SHORT`. */
+  STOP_CUT_SHORT: 'stop:cut-short',
   /** Held the 10 s burn at this voltage. */
   BURN_SHORT: 'burn:short',
   /** Held the long burn — one minute since the owner's amendment of 2026-08-15. */
@@ -257,6 +289,7 @@ export const TAG_OF_STATUS = Object.freeze({
   [CURVE_STATUS.LEVER_LIMITED]: CURVE_TAGS.STOP_LEVER_LIMIT,
   [CURVE_STATUS.DEPTH_CAPPED]: CURVE_TAGS.STOP_OUR_CAP,
   [CURVE_STATUS.NOT_SERVED]: CURVE_TAGS.STOP_NOT_SERVED,
+  [CURVE_STATUS.CUT_SHORT]: CURVE_TAGS.STOP_CUT_SHORT,
   [CURVE_STATUS.SHORT_BURN_PROVED]: CURVE_TAGS.BURN_SHORT,
   [CURVE_STATUS.LONG_BURN_PROVED]: CURVE_TAGS.BURN_LONG,
 });
@@ -294,6 +327,7 @@ export function statusFromTags(tags) {
   // held a burn and was THEN closed by the card refusing the order must read as closed, not as
   // «burn-proved»: the burn is still true, and it is still on the row as its own tag.
   if (has(CURVE_TAGS.STOP_NOT_SERVED)) return CURVE_STATUS.NOT_SERVED;
+  if (has(CURVE_TAGS.STOP_CUT_SHORT)) return CURVE_STATUS.CUT_SHORT;
   if (has(CURVE_TAGS.STOP_IN_FLIGHT)) return CURVE_STATUS.PROBING;
   if (has(CURVE_TAGS.BURN_LONG)) return CURVE_STATUS.LONG_BURN_PROVED;
   if (has(CURVE_TAGS.BURN_SHORT)) return CURVE_STATUS.SHORT_BURN_PROVED;

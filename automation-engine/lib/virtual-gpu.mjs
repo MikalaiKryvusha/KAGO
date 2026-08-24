@@ -1034,6 +1034,26 @@ export function virtualCard(cardProfile, {
   // вызов), и `nvapi.writeCurve` считает провалы по СТАТУСАМ. Класс моделирует именно это: список
   // индексов, чьи вызовы «не прошли». Умолчание `null` — все вызовы успешны.
   writeCallFailsAt = null,
+  // ─── КЛАСС C7: ТАБЛИЦА УЕХАЛА МЕЖДУ НАШИМ ЧТЕНИЕМ И ПРИМЕНЕНИЕМ ЗАПИСИ ──────────────────────────
+  //
+  // 🔴 ЗАМЕРЕНО НА ЖИВОЙ КАРТЕ 2026-08-24 21:5x, ЧИТАТЬ ЧИСЛА. Прогрев прожигом и чтение таблицы
+  // каждые 0,5 с: на горячей карте (68–82 °C) соседние пробы расходятся на **15, 23 и 30 МГц** —
+  // записи прыгают 2145→2175, 2317→2347, 2340→2370. На остывшей (≤52 °C) таблица стоит НЕПОДВИЖНО
+  // тринадцать секунд подряд. Живые пропуски того же вечера: потолок 2355 пробит на +15, потолок
+  // 2332 — на +23. Те же величины.
+  //
+  // ПОЧЕМУ ЭТОГО КЛАССА НЕ БЫЛО, ХОТЯ ДРЕЙФ СТЕНД МОДЕЛИРУЕТ ДАВНО. `tableDriftMhz()` СИММЕТРИЧЕН:
+  // и читатель, и применение видят одно значение, поэтому `offset = потолок − F` ложится ровно на
+  // потолок. Живой отказ живёт в АСИММЕТРИИ — движок считает сдвиг по таблице момента T, а драйвер
+  // применяет его к таблице момента T+dt, и результат садится на `потолок + (сколько уехало)`.
+  //
+  // `driftJumpWrites` — сколько ЗАПИСЕЙ ещё сдвигают таблицу. Две модели, и обе нужны:
+  //   1 (или N)  — карта остывает: первая запись ловит движение, вторая уже нет → петля СХОДИТСЯ;
+  //   Infinity   — таблица едет непрерывно → петля НЕ сходится, и лечение обязано честно отказать,
+  //                а не крутиться вечно. Второй случай существует, чтобы починка не была подогнана
+  //                под удобную модель.
+  driftJumpOnWriteMhz = 0,
+  driftJumpWrites = Infinity,
 } = {}) {
   const v = validateCard(cardProfile);
   if (!v.ok) throw new Error(`виртуальная карта не поднимается на негодном профиле (поле ${v.field}): ${v.why}`);
@@ -1049,6 +1069,9 @@ export function virtualCard(cardProfile, {
     // читали. Пока `curveSettleReads` равен нулю — умолчание — оба поля инертны.
     curveOffsetsBeforeWrite: new Array(GRAPHICS_POINTS).fill(0),
     curveReadsSinceWrite: 0,
+    // Класс C7: сколько МГц таблица уже уехала сверх теплового дрейфа, и сколько записей ещё едут.
+    extraDriftMhz: 0,
+    driftJumpsLeft: driftJumpWrites,
     reportedMhz: idleWander[0],
     queue: [],                                    // stale reads, then the ramp — drained by query
     wanderAt: 0,
@@ -1286,6 +1309,14 @@ export function virtualCard(cardProfile, {
           failures,
         };
       }
+      // КЛАСС C7 — ТАБЛИЦА ЕДЕТ В МОМЕНТ ЗАПИСИ, ТО ЕСТЬ ПОСЛЕ ЧТЕНИЯ, ПО КОТОРОМУ СЧИТАЛИ СДВИГ.
+      // Порядок здесь и есть весь класс: прибавить скачок ДО того, как вызывающий перечитает
+      // кривую, и ПОСЛЕ того, как он построил вектор. Сдвиги при этом ложатся РОВНО как заказаны —
+      // поточечная сверка останется зелёной, ровно как на живой карте 2026-08-24.
+      if (driftJumpOnWriteMhz !== 0 && state.driftJumpsLeft > 0) {
+        state.extraDriftMhz += driftJumpOnWriteMhz;
+        state.driftJumpsLeft -= 1;
+      }
       const held = applyWrite
         ? applyWrite(requested, { capMhz, deltaMhz, table: P.vfTable, points: GRAPHICS_POINTS })
         : requested;
@@ -1381,7 +1412,11 @@ export function virtualCard(cardProfile, {
    * патология в нём и состоит: ловушка T7. Так стенд воспроизводит поведение адресно, а не меняет
    * физику всем сразу.
    */
-  const tableDriftMhz = () => (P.fiction?.tableDriftMhzPerC ?? 0) * (thermal.tempC - TELEMETRY_MODEL.tempFloorC);
+  // ДРЕЙФ = ТЕПЛОВОЙ (симметричный, был всегда) ПЛЮС НАКОПЛЕННЫЙ СКАЧОК КЛАССА C7 (асимметричный).
+  // Скачок прибавляется В МОМЕНТ ЗАПИСИ, то есть ПОСЛЕ того, как вызывающий прочитал таблицу и
+  // посчитал по ней сдвиг, — этим он и отличается от теплового, который оба видят одинаково.
+  const tableDriftMhz = () => (P.fiction?.tableDriftMhzPerC ?? 0) * (thermal.tempC - TELEMETRY_MODEL.tempFloorC)
+    + state.extraDriftMhz;
 
   /**
    * THE CARD'S EFFECTIVE V/F TABLE RIGHT NOW — the ONE home of «stock + the offsets the card is
