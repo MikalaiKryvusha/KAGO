@@ -853,6 +853,10 @@ export async function runRung({
   // сдвинет частоту — строка врёт своим же ключом. `null` здесь честен и част: выше пола потолка
   // замка нет вовсе, потолок держит кривая (R11).
   record.appliedPinMhz = atom?.pinMhz ?? null;
+  // ЧТО КРИВАЯ ПРЕДЛАГАЕТ ПОСЛЕ ЗАПИСИ, ПЕРЕЧИТАННОЕ С КАРТЫ (`bugs/50`). Атом мерил это всегда и
+  // всегда ронял на пол. Без него улики о пробитом потолке говорят, что карта ВЫДАЛА, и молчат о
+  // том, что ей ПРЕДЛАГАЛОСЬ, — а это разные утверждения, и виноваты в них разные стороны.
+  record.offeredAfterMhz = atom?.highestOfferedMhz ?? null;
   if (onEvent && Number.isFinite(record.tableDriftMhz) && record.tableDriftMhz !== 0) {
     onEvent({
       kind: 'offset-recomputed',
@@ -890,6 +894,7 @@ export async function runRung({
         appliedDeltaMhz: record.appliedDeltaMhz ?? null,
         tableDriftMhz: record.tableDriftMhz ?? null,
         appliedPinMhz: record.appliedPinMhz ?? null,
+        offeredAfterMhz: record.offeredAfterMhz ?? null,
         why: result.why,
       });
     }
@@ -4705,7 +4710,7 @@ export function selfTest() {
           points: tablePoints, clockMhz: 2842, voltageMv: 1000,
           buildVector: vectorCapped, journal: jrn4, seq: 1, now: clock,
           onEvent: (e) => said.push(e),
-          runStepFn: async () => ({ ...atomPass(1000), offsetMhz: 777, offsetAskedMhz: 770, tableDriftMhz: 7,
+          runStepFn: async () => ({ ...atomPass(1000), offsetMhz: 777, offsetAskedMhz: 770, tableDriftMhz: 7, highestOfferedMhz: 2349,
             pinRequestedMhz: 1500, pinMhz: 1492 }),
         });
         const recs4 = readJournal(jrn4).records;
@@ -4726,6 +4731,14 @@ export function selfTest() {
             // 1492, а не 1500: это ровно тот случай, которым `vf-step` объясняет притяжку к лестнице.
             return [verdict4.appliedPinMhz, verdict4.appliedPinMhz === 1500];
           })(), [1492, false]);
+        // `bugs/50`: РАЗЛИЧИТЕЛЬ. Улика о пробитом потолке обязана нести не только то, что карта
+        // ВЫДАЛА, но и то, что ей ПРЕДЛАГАЛОСЬ после записи. Мутация «не проводить offeredAfterMhz»
+        // краснит этот блок.
+        ok('bugs/50: ВЕРДИКТ НЕСЁТ, ЧТО КРИВАЯ ПРЕДЛАГАЛА ПОСЛЕ ЗАПИСИ — иначе о потолке судить нечем',
+          (() => {
+            if (!verdict4) return 'строки вердикта нет вовсе';
+            return verdict4.offeredAfterMhz;
+          })(), 2349);
         ok('bugs/49: ПЕРЕСЧЁТ ВИДЕН ОПЕРАТОРУ — до этой строки он не показывался ни в одном артефакте',
           (() => {
             const e = said.find((x) => x.kind === 'offset-recomputed');

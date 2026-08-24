@@ -244,6 +244,14 @@ export function writeIntent(journal, rung, io = {}) {
  *   `appliedPinMhz`    the clock the card was ACTUALLY pinned to, or `null` for «no pin was used» —
  *                      which is the normal case above the curve's cap floor, where the curve carries
  *                      the ceiling itself (R11).
+ *   `offeredAfterMhz`  the highest frequency the curve offers AFTER the write, RE-READ FROM THE CARD
+ *                      (`runStep` → `out.highestOfferedMhz`). Added 2026-08-24 for `bugs/50`, and it
+ *                      is the DISCRIMINATOR that investigation lacked: the ceiling breaches recorded
+ *                      in this journal say what the card DELIVERED, and nothing said what it was
+ *                      being OFFERED at the time. Those are different claims and they blame different
+ *                      parties — `offered ≤ cap` while the card ran above it means the CARD exceeded
+ *                      its own curve; `offered > cap` means our write did not land. The atom has
+ *                      always measured this and had always dropped it on the floor.
  *
  * ⚠️ **The third field is here because the TWIN CHECK found it, and the inventory is what the class is
  * judged by** (`BUG_FIXING_FRAMEWORK.md`). The atom overrides exactly TWO of its caller's numbers, not
@@ -276,6 +284,7 @@ export function writeVerdict(journal, closing, io = {}) {
     appliedDeltaMhz: closing.appliedDeltaMhz ?? null,
     tableDriftMhz: closing.tableDriftMhz ?? null,
     appliedPinMhz: closing.appliedPinMhz ?? null,
+    offeredAfterMhz: closing.offeredAfterMhz ?? null,
     why: closing.why ?? '',
   };
   return appendLine(journal, record, io);
