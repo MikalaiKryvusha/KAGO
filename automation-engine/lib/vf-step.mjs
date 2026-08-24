@@ -793,12 +793,20 @@ export async function runStep({
     // ONE WRITER, and for the whole curve it is `nvapi.writeCurve` rather than a sixth open-coded
     // copy of the same loop (plans/05 §4.1 item a). The single-point path stays a single call.
     let failed = 0;
+    // ---- THE WRITE NOW VERIFIES ITSELF, AND IT NAMES THE CLASS WHEN IT FAILS (`plans/40`, epic 36
+    // phase 4). `writeCurve` reads the control structure back THROUGH THE SETTLE CONTRACT and hands
+    // us the table the card actually holds, so the block below compares against a table that has
+    // stopped moving instead of against the first probe after 127 writes — the shape `researches/18`
+    // §5 H1 names as the leading hypothesis for the live failure of 2026-08-24 09:36.
+    let heldKhz = null;
     if (shape === 'raise-and-cap') {
       const w = nvapi.writeCurve(nv, handle, vector.offsets);
-      failed = w.failed;
+      failed = w.failed; heldKhz = w.heldKhz ?? null; out.writeFailureClass = w.failureClass ?? null;
+      out.writeFailureWhy = w.why ?? null; out.writeSettled = w.settled === true;
     } else if (shape === 'uniform') {
       const w = nvapi.writeCurve(nv, handle, offsetMhz);
-      failed = w.failed;
+      failed = w.failed; heldKhz = w.heldKhz ?? null; out.writeFailureClass = w.failureClass ?? null;
+      out.writeFailureWhy = w.why ?? null; out.writeSettled = w.settled === true;
     } else {
       const r = nvapi.writeVfOffset(nv, handle, point, offsetMhz * 1000);
       if (!r.ok) failed++;
@@ -820,7 +828,15 @@ export async function runStep({
     // uniform raise can be asked. The shipped shape asks a different one — every point carries ITS OWN
     // number, several of them zero and several negative — and a count would have passed while the
     // curve held something else entirely. Status 0 is not verification; the read-back is (EXP-0024).
-    const after = nvapi.readVfOffsets(nv, handle);
+    //
+    // ⚠️ THE SECOND READER WAS REMOVED, NOT THE CHECK (2026-08-24, `plans/40` step 4). This block used
+    // to take its OWN `readVfOffsets` — a single shot, right after the write, i.e. exactly the shape
+    // the owner's-machine rule step 4 forbids. It now reads the SETTLED table the write already
+    // brought back: one reader of one fact instead of two kept in agreement (the registry's own
+    // preference — a pair that can be REMOVED beats a pair that must be watched).
+    const after = heldKhz === null
+      ? { ok: false, why: out.writeFailureWhy ?? 'таблица карты не прочиталась после записи' }
+      : { ok: true, offsets: heldKhz };
     let matched = 0;
     let strayNonZero = 0;
     const mismatches = [];
@@ -833,14 +849,27 @@ export async function runStep({
         if (mismatches.length < 5) mismatches.push({ point: i, want, got });
       }
     }
+    // THE CLASS IS NAMED IN THE BLOCK'S OWN TEXT, so it survives every path the block's detail takes —
+    // the console, the journal's `redBlocks`, the operator's screen (`plans/39`, standard item 2).
     block('перечитано ПОТОЧЕЧНО: каждая точка несёт РОВНО свой сдвиг, а не «сколько-то штук»',
       after.ok && matched === curvePoints,
       after.ok
-        ? `сошлось ${matched} из ${curvePoints}${strayNonZero ? `, чужих ненулевых ${strayNonZero}` : ''}`
+        ? `${out.writeFailureClass ? `КЛАСС ОТКАЗА ${out.writeFailureWhy} · ` : ''}`
+          + `сошлось ${matched} из ${curvePoints}${strayNonZero ? `, чужих ненулевых ${strayNonZero}` : ''}`
           + `${mismatches.length ? ` — расхождения ${JSON.stringify(mismatches)}` : ''}`
-        : after.why);
+        : `${out.writeFailureClass ? `КЛАСС ОТКАЗА ${out.writeFailureWhy}` : after.why}`);
 
-    const curveAfter = nvapi.readVfCurve(nv, handle);
+    // THE EFFECTIVE CURVE THROUGH THE SAME CONTRACT. `researches/18` §5 H1 is about THIS read, not
+    // about the offsets one: `curveAfter` was a single probe taken after 127 writes, and it is what
+    // reported a table topping 15 MHz ABOVE a ceiling the vector provably could not exceed.
+    const curveAfter = nvapi.readVfCurveStable(nv, handle);
+    // An effective table that never stood still IS class C1, and it is named here rather than left as
+    // «кривая не перечитана» — a symptom the operator cannot act on (`plans/39`, standard item 2).
+    if (curveAfter.settled === false && !out.writeFailureClass) {
+      out.writeFailureClass = 'C1';
+      out.writeFailureWhy = `C1 — чтение после записи не устоялось: ${curveAfter.why}. `
+        + 'Таблица, которая ещё движется, не измерение';
+    }
     const freqAfter = curveAfter.ok ? curveAfter.points[point].mhz : null;
     out.freqAfter = freqAfter;
     if (shape === 'raise-and-cap') {
@@ -859,11 +888,31 @@ export async function runStep({
         ? Math.max(...curveAfter.points.slice(0, curvePoints).filter((p) => p.freqKhz > 0).map((p) => p.mhz))
         : null;
       out.highestOfferedMhz = offeredNow;
+      // ---- THE CEILING EVIDENCE REACHES THE CLASSIFIER (`plans/40`, epic 36 phase 4).
+      //
+      // `researches/18` §5 names the combination the offsets alone cannot express: a GREEN
+      // point-by-point re-read TOGETHER WITH an offered clock above the cap is class C3 — the driver
+      // placed something we did not send — because the vector's own arithmetic
+      // (`offset_i = min(Δ, cap − F_i)`) cannot exceed the cap, checked offline on six historical
+      // rungs with a leak of 0. This is the ONE caller able to measure it; `writeCurve` has no ceiling
+      // and passes nothing, which is why its answer there is the honest C2.
+      if (offeredNow !== null && capMhz !== null && offeredNow > capMhz
+          && !out.writeFailureClass && Array.isArray(heldKhz)) {
+        const k = nvapi.classifyWriteFailure({
+          requested: requested.map((o) => (o === null ? 0 : Math.round(o * 1000))),
+          held: heldKhz,
+          failedCalls: 0,
+          settled: out.writeSettled !== false,
+          offeredAboveCapMhz: Number((offeredNow - capMhz).toFixed(1)),
+        });
+        if (k) { out.writeFailureClass = k.class; out.writeFailureWhy = `${k.class} — ${k.name}: ${k.why}`; }
+      }
       // THE CEILING, VERIFIED ON THE CARD rather than trusted from the arithmetic that planned it.
       block(`ПОТОЛОК СТОИТ: кривая больше не предлагает ничего выше ${capMhz} МГц`,
         offeredNow !== null && offeredNow <= capMhz,
         offeredNow === null ? 'кривая не перечитана'
-          : `максимум кривой ${offeredNow} МГц при потолке ${capMhz} (план обещал ${vector.highestOfferedMhz})`);
+          : `${out.writeFailureClass ? `КЛАСС ОТКАЗА ${out.writeFailureWhy} · ` : ''}`
+            + `максимум кривой ${offeredNow} МГц при потолке ${capMhz} (план обещал ${vector.highestOfferedMhz})`);
     } else {
       block('кривая подтверждает: точка поехала ВВЕРХ при том же напряжении',
         freqAfter !== null && freqAfter > freqBefore,
@@ -1628,7 +1677,8 @@ export async function runShapeExperiment({
         const w = nvapi.writeCurve(nv, handle, vec.offsets);
         touched = true;
         block(`${side.tag}: ЗАПИСЬ вектора одним писателем`, w.ok,
-          `записано ${w.written}, отказов ${w.failed}${w.failures.length ? ` — ${JSON.stringify(w.failures)}` : ''}`);
+          `записано ${w.written}, отказов ${w.failed}${w.failures.length ? ` — ${JSON.stringify(w.failures)}` : ''}`
+          + `${w.why ? ` · ${w.why}` : ''}`);
         if (!w.ok) break;
         watchdog.beat();
 

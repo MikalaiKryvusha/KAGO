@@ -274,7 +274,17 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
       if (refusal) return refusal;
       const w = mod.writeCurve(nv, handle, vec.offsets, { count: COUNT() });
-      if (!w.ok) return { ok: false, why: `запись кривой: ${w.failed} точек из ${COUNT()} не записались` };
+      // ⚠️ `w.ok` NOW MEANS «the calls were accepted AND the card holds what we asked», not «the
+      // statuses were zero» (`plans/40`, epic 36 phase 4). So the refusal quotes the NAMED class when
+      // there is one: `w.why` carries it, and «C5 — запись инертна ЦЕЛИКОМ» is an answer the old
+      // wording could not produce at all, because a wholly inert write fails zero calls.
+      if (!w.ok) {
+        return {
+          ok: false,
+          failureClass: w.failureClass ?? null,
+          why: w.why ?? `запись кривой: ${w.failed} точек из ${COUNT()} не записались`,
+        };
+      }
       return { ok: true, vector: vec.offsets.slice(0, COUNT()) };
     },
 

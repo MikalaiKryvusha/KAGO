@@ -305,6 +305,13 @@ export function writeVerdict(journal, closing, io = {}) {
     // GREEN blocks are deliberately NOT here: a line carrying two dozen greens buries its one red.
     redBlocks: Array.isArray(closing.redBlocks) ? closing.redBlocks : [],
     redBlocksDropped: closing.redBlocksDropped ?? 0,
+    // THE NAMED CLASS OF WRITE FAILURE — `plans/40` (epic 36 phase 4). `redBlocks` carries the
+    // EVIDENCE; this carries the DIAGNOSIS drawn from it, as its own field, because a diagnosis buried
+    // inside a block's prose cannot be counted across a journal. `writeSettled` is beside it because
+    // «the table never stood still» (C1) and «the table stood still and disagreed» (C2/C3/C5/C6) are
+    // the fork the evening run exists to resolve (`researches/18` §5).
+    writeFailureClass: closing.writeFailureClass ?? null,
+    writeSettled: closing.writeSettled ?? null,
     why: closing.why ?? '',
   };
   return appendLine(journal, record, io);

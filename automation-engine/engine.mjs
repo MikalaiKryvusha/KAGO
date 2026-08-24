@@ -664,7 +664,22 @@ export async function runRung({
     why: '',
     atom: null,
   };
-  const stop = (outcome, why) => ({ ...record, outcome, why });
+  // ---- EVERY STOP OPENS WITH THE NAMED CLASS OF WRITE FAILURE, WHEN THERE IS ONE (`plans/40`,
+  // epic 36 phase 4; the standard is `plans/39`, item 2: «the stop NAMES the class»).
+  //
+  // WHY IT IS DONE HERE AND NOT AT THE FIVE STOP SITES. The stops downstream state true things —
+  // «ВЫДАЧА ВЫШЕ СТОКА», «ПРОВЕРКА НЕ ДАЛА ОТВЕТА», «НЕИЗВЕСТНО» — and every one of them is a
+  // SYMPTOM: each is what a failed write LOOKS like from where that check stands. Prefixing at the
+  // single constructor means a class named by the atom cannot be lost by whichever symptom happens
+  // to fire first, and no future stop site can forget to carry it.
+  //
+  // ⚠️ THE SYMPTOM IS KEPT, NOT REPLACED. The class says HOW the write failed; the symptom says what
+  // the run was doing when it noticed. Dropping either would trade one blind spot for another.
+  const stop = (outcome, why) => ({
+    ...record,
+    outcome,
+    why: record.writeFailureClass ? `КЛАСС ОТКАЗА ЗАПИСИ ${record.writeFailureWhy} · ${why}` : why,
+  });
 
   // ---- 1. THE PAPER PLAN, ON THE LIVE TABLE. A refusal here costs the card nothing at all — no
   // watchdog lease, no write, no reboot. That is the whole reason it runs first.
@@ -857,6 +872,13 @@ export async function runRung({
   // всегда ронял на пол. Без него улики о пробитом потолке говорят, что карта ВЫДАЛА, и молчат о
   // том, что ей ПРЕДЛАГАЛОСЬ, — а это разные утверждения, и виноваты в них разные стороны.
   record.offeredAfterMhz = atom?.highestOfferedMhz ?? null;
+  // КЛАСС ОТКАЗА ЗАПИСИ, НАЗВАННЫЙ АТОМОМ (`plans/40`, эпик 36 фаза 4). До фазы 4 движок вставал на
+  // всех шести классах одинаково — симптомом. Теперь имя класса едет и в текст остановки (см. `stop`
+  // выше), и в журнал: это тот самый различитель, ради которого строился стенд, и получить его задним
+  // числом нельзя — на seq 700 поля просто не было.
+  record.writeFailureClass = atom?.writeFailureClass ?? null;
+  record.writeFailureWhy = atom?.writeFailureWhy ?? null;
+  record.writeSettled = atom?.writeSettled ?? null;
 
   // ---- 5b. КРАСНЫЕ БЛОКИ АТОМА — ВИДНЫ ОПЕРАТОРУ И ПЕРЕЖИВАЮТ СЕССИЮ (`plans/37`, эпик 36 фаза 1).
   //
@@ -944,6 +966,11 @@ export async function runRung({
         // ровно как решил `bugs/49` этим же утром.
         redBlocks: record.redBlocks ?? [],
         redBlocksDropped: record.redBlocksDropped ?? 0,
+        // ИМЯ КЛАССА ОТДЕЛЬНЫМ ПОЛЕМ (`plans/40`). В `why` оно тоже есть — там оно для глаз; здесь
+        // для счёта: «сколько ступеней за прогон встали классом C2» — вопрос, на который прозе не
+        // ответить, а именно он разводит три живые гипотезы `researches/18` §5.
+        writeFailureClass: record.writeFailureClass ?? null,
+        writeSettled: record.writeSettled ?? null,
         why: result.why,
       });
     }
@@ -4882,6 +4909,67 @@ export function selfTest() {
               return [v7.redBlocks?.length ?? null, v7.redBlocksDropped,
                 v7.redBlocks?.[0]?.name ?? null, config.ATOM_RED_BLOCKS_IN_JOURNAL];
             })(), [5, 3, 'красный 0', 5]);
+        }
+
+        // ═══ ЭПИК 36, ФАЗА 4 — ОСТАНОВКА НАЗЫВАЕТ КЛАСС, А НЕ ТОЛЬКО СИМПТОМ (`plans/40`) ════════
+        //
+        // Фаза 1 довезла до журнала УЛИКИ (красные блоки атома). Здесь едет ДИАГНОЗ: имя класса
+        // отказа записи, названное `nvapi.classifyWriteFailure` и годное для счёта по журналу —
+        // «сколько ступеней за прогон встали классом C2» это вопрос к полю, а не к прозе.
+        //
+        // Стандарт честной обработки (`plans/39`, пункт 2) требует, чтобы оператор узнавал, КАКОЙ из
+        // шести классов сработал. До фазы 4 движок вставал на всех шести одинаково — симптомом
+        // («ВЫДАЧА ВЫШЕ СТОКА», «НЕИЗВЕСТНО»), и на seq 700 это стоило суток расследования.
+        //
+        // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+        //   EA. не переносить класс из атома в `record`     → «КЛАСС ДОЕЗЖАЕТ ДО ЖУРНАЛА»
+        //   EB. не приписывать класс к тексту остановки     → «ОСТАНОВКА ОТКРЫВАЕТСЯ КЛАССОМ»
+        //   EC. заменить симптом классом вместо приписки    → «СИМПТОМ СОХРАНЁН РЯДОМ С КЛАССОМ»
+        {
+          const jrn8 = openJournal({ dir: join(journalBox, 'write-class') });
+          const stopped = await runRung({
+            envelopeMhz: 3090,
+            points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+            buildVector: vectorCapped, journal: jrn8, seq: 1, now: clock,
+            runStepFn: async () => ({
+              ...atomPass(1000),
+              verdict: null,                                  // оракул не вынес вердикта → СТОП
+              writeFailureClass: 'C2',
+              writeFailureWhy: 'C2 — часть записей молча инертна: 18 записей из 127 остались нулевыми',
+              writeSettled: true,
+            }),
+          });
+          const v8 = readJournal(jrn8).records.find((r) => r.state === 'verdict');
+          ok('эпик36/ф4: КЛАСС ДОЕЗЖАЕТ ДО ЖУРНАЛА ОТДЕЛЬНЫМ ПОЛЕМ — по прозе класс не сосчитать',
+            (() => {
+              if (!v8) return 'строки вердикта нет вовсе';
+              return [v8.writeFailureClass, v8.writeSettled];
+            })(), ['C2', true]);
+          ok('эпик36/ф4: ОСТАНОВКА ОТКРЫВАЕТСЯ КЛАССОМ — оператор читает диагноз первым, а не последним',
+            /^КЛАСС ОТКАЗА ЗАПИСИ C2 — часть записей молча инертна/.test(stopped.why ?? ''),
+            true);
+          // СИМПТОМ ОСТАЁТСЯ РЯДОМ. Класс говорит, КАК отказала запись; симптом — что делал прогон,
+          // когда заметил. Заменить одно другим значило бы обменять одну слепоту на другую.
+          ok('эпик36/ф4: СИМПТОМ СОХРАНЁН РЯДОМ С КЛАССОМ, а не вытеснен им',
+            /НЕИЗВЕСТНО на 2842 МГц/.test(stopped.why ?? ''), true);
+          // И ОБРАТНАЯ СТОРОНА: где класса нет, приписки тоже нет. Движок, который дописывает
+          // «КЛАСС ОТКАЗА» ко всякой остановке, назвал бы классом отказа записи и чистый отказ
+          // оракула — то есть выдумал бы диагноз (третья дверь `PHILOSOPHY.md`).
+          const jrn9 = openJournal({ dir: join(journalBox, 'no-write-class') });
+          const plain = await runRung({
+            envelopeMhz: 3090,
+            points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+            buildVector: vectorCapped, journal: jrn9, seq: 1, now: clock,
+            runStepFn: async () => ({ ...atomPass(1000), verdict: null }),
+          });
+          const v9 = readJournal(jrn9).records.find((r) => r.state === 'verdict');
+          // ⚠️ `v9 ? … : …`, А НЕ `v9?.x ?? 'нет строки'` — ПЕРВАЯ РЕДАКЦИЯ ЭТОЙ СТРОКИ КРАСНЕЛА САМА
+          // НА СЕБЕ. Ожидаемое значение здесь ИМЕННО `null`, а `null ?? 'нет строки'` возвращает
+          // строку, то есть проверка не умела отличить «поля нет» от «строки вердикта нет». Оставлено
+          // видимым: сторож, чей запасной путь неотличим от искомого значения, ничего не держит.
+          ok('эпик36/ф4: БЕЗ КЛАССА ПРИПИСКИ НЕТ — движок не выдумывает диагноз там, где его не назвали',
+            [/КЛАСС ОТКАЗА/.test(plain.why ?? ''), v9 ? v9.writeFailureClass : 'строки вердикта нет'],
+            [false, null]);
         }
 
         ok('bugs/49: ДРЕЙФ НЕ ИЗМЕРЯЛСЯ — ЭТО null, А НЕ НОЛЬ, и молчащий пересчёт не печатается',

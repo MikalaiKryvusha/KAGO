@@ -675,27 +675,300 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
  *
  * [NOT-TESTED] at birth.
  */
-export function writeCurve(nv, handle, offsetsMhz, { count = CLK_VF_POINT_COUNT - 1 } = {}) {
+/** Bounds of the settle contract on the write path. Measured basis: the card changed state «about a
+ *  second later» on 2026-08-10 (the owner's-machine rule, step 4), so six probes at 250 ms cover it
+ *  with margin while capping the worst case at 1.5 s per write. An expired bound is class C1, never a
+ *  silent accept. */
+const WRITE_SETTLE_SAMPLES = 6;
+const WRITE_SETTLE_GAP_MS = 250;
+
+export function writeCurve(nv, handle, offsetsMhz, {
+  count = CLK_VF_POINT_COUNT - 1,
+  verify = true,
+  settleSamples = WRITE_SETTLE_SAMPLES,
+  settleGapMs = WRITE_SETTLE_GAP_MS,
+} = {}) {
   const asArray = Array.isArray(offsetsMhz)
     ? offsetsMhz
     : Array.from({ length: count }, () => offsetsMhz);
+  // The units of the whole verification below are kHz — what the API takes and what it gives back.
+  // Converting once here is what keeps the comparison like for like.
+  const requestedKhz = Array.from({ length: count }, (_, p) => Math.round((asArray[p] ?? 0) * 1000));
   let failed = 0;
   const failures = [];
   for (let p = 0; p < count; p++) {
-    const r = writeVfOffset(nv, handle, p, Math.round((asArray[p] ?? 0) * 1000));
+    const r = writeVfOffset(nv, handle, p, requestedKhz[p]);
     if (!r.ok) { failed++; if (failures.length < 5) failures.push({ point: p, why: r.why ?? r.status }); }
   }
-  return { ok: failed === 0, written: count - failed, failed, failures };
+  const base = { written: count - failed, failed, failures, requestedKhz };
+  if (!verify) return { ...base, ok: failed === 0, verified: false };
+
+  // ---- THE READ-BACK, WHICH IS THE VERIFICATION — the module's own header has demanded this since
+  // 2026-08-10 («status 0 is not verification, the read-back is», EXP-0024) and only `zeroCurve`
+  // obeyed it. Classes C5 (the write is wholly inert) and C2 (part of it is) are invisible to a
+  // status-only success BY CONSTRUCTION: this card is documented to answer a no-op with status 0 and
+  // not one changed byte (the `zero-filled` branch below).
+  const back = readUntilApplied(nv, handle, requestedKhz, count,
+    { maxSamples: settleSamples, gapMs: settleGapMs });
+  const failure = classifyWriteFailure({
+    requested: requestedKhz,
+    held: back.heldKhz,
+    failedCalls: failed,
+    failedAddresses: failures.map((f) => f.point),
+    settled: back.settled,
+    readWhy: back.why ?? null,
+  });
+  return {
+    ...base,
+    ok: failure === null,
+    verified: true,
+    heldKhz: back.heldKhz,
+    settled: back.settled,
+    // ⚠️ A NUMBER WORTH READING EVEN ON SUCCESS. `probes > 1` means the table did NOT reflect the
+    // write on the first read — i.e. class C1 happened and was WAITED OUT rather than avoided. On a
+    // live sweep that count is the direct evidence for `researches/18` §5 H1, and it exists only
+    // because the poll below records it.
+    probes: back.probes,
+    mismatches: failure?.mismatches ?? 0,
+    failureClass: failure?.class ?? null,
+    why: failure ? `${failure.class} — ${failure.name}: ${failure.why}` : undefined,
+  };
 }
 
-/** The total undo: every point to zero, then a read that must find none left. Zeroing a zero is free. */
+/**
+ * POLL THE CONTROL STRUCTURE UNTIL IT REFLECTS THE WRITE — bounded, and honest when it never does.
+ *
+ * ─── WHY NOT «TWO CONSECUTIVE SAMPLES AGREE» ────────────────────────────────────────────────────
+ *
+ * That is the contract `readVfOffsetsStable` implements, and it is the right one for a state we did
+ * not author (a released clock, a ramping fan). It is the WRONG one here, and the bench proved it
+ * within an hour of phase 3 existing: the virtual card models class C1 as «the first N reads return
+ * the PRE-WRITE table» — the faithful shape of the canon's own measurement, where `-rgc` answered
+ * «All done» and the state changed about a second later. Two probes taken inside that window agree
+ * WITH EACH OTHER and are both stale, so an agreement contract would have accepted the old table and
+ * called it settled. Waiting for quiet is not the same as waiting for the write.
+ *
+ * ─── WHAT THIS WAITS FOR, AND WHAT THE BOUND'S EXPIRY MEANS ─────────────────────────────────────
+ *
+ * It waits for the card to hold WHAT WE ASKED FOR. That is a target we own, unlike «quiet», so the
+ * fast path costs nothing: a card that obeyed answers on probe 1, with no sleep at all.
+ *
+ * When the bound expires the two remaining cases are told apart by the LAST TWO probes:
+ *   they differ → the table is still moving       → `settled: false` → class C1;
+ *   they agree  → the table has stopped elsewhere → `settled: true`  → classified by SHAPE (C2/C3/C5/C6).
+ *
+ * The full bound is walked rather than broken out of early on the first agreement, because a table
+ * that pauses mid-settle would otherwise be sentenced on a pause. The cost is paid only on the
+ * failing path, and only there is it worth 1.5 s.
+ *
+ * [NOT-TESTED] at birth — blocks and mutations live in `vgpu --selftest` against the six fixtures.
+ */
+function readUntilApplied(nv, handle, requestedKhz, count, opts = {}) {
+  return pollUntilApplied(() => readVfOffsets(nv, handle), requestedKhz, count, opts);
+}
+
+/**
+ * The poll's DECISION, with the card behind an injected seam so it can be judged offline.
+ *
+ * The seam is not decoration: what has to be proved here is a SEQUENCE — «the first probes returned
+ * the pre-write table and the poll kept going» — and a sequence is provable only by driving the
+ * reader. This is the same reason `sweep-journal` injects `fs`: order is not observable from outside.
+ *
+ * @param read  () => the shape `readVfOffsets` returns
+ */
+export function pollUntilApplied(read, requestedKhz, count, { maxSamples = 6, gapMs = 250 } = {}) {
+  let previousRaw = null;
+  let last = null;
+  let sameAsPrevious = false;
+  for (let i = 0; i < maxSamples; i++) {
+    const r = read();
+    // A read whose CALL failed is not «unsettled» — it is «could not look», and the classifier is
+    // given both facts separately so it never reports one as the other.
+    if (!r.ok) return { heldKhz: null, settled: true, probes: i + 1, why: r.why ?? `статус ${r.status}` };
+    const held = r.offsets.slice(0, count);
+    last = held;
+    if (held.every((o, p) => o === requestedKhz[p])) {
+      return { heldKhz: held, settled: true, probes: i + 1, why: null };
+    }
+    sameAsPrevious = previousRaw !== null && Buffer.compare(previousRaw, r.raw) === 0;
+    previousRaw = r.raw;
+    if (i < maxSamples - 1 && gapMs > 0) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, gapMs); // blocking sleep, no timer
+    }
+  }
+  return {
+    heldKhz: last,
+    settled: sameAsPrevious,
+    probes: maxSamples,
+    why: sameAsPrevious ? null : `таблица не пришла к заказанной за ${maxSamples} проб и продолжает меняться`,
+  };
+}
+
+/**
+ * NAME THE WAY A CURVE WRITE FAILED — the closed six-class table of `plans/39`, as a decision.
+ *
+ * ─── WHY A CLASSIFIER AND NOT SIX CHECKS AT SIX CALL SITES ──────────────────────────────────────
+ *
+ * Phase 3 made the six classes INJECTABLE on the bench; the engine's answer to all six stayed one
+ * sentence about a SYMPTOM («ВЫДАЧА ВЫШЕ СТОКА», «ПРОВЕРКА НЕ ДАЛА ОТВЕТА»). The `plans/39` standard
+ * of correct handling names three requirements, and the second is «the stop NAMES the class». One
+ * pure function is what lets every caller — the atom, the applier, the rollback — name it the same
+ * way, and lets the naming be judged offline against the very fixtures that model the classes.
+ *
+ * ─── THE ORDER IS PART OF THE RULE ──────────────────────────────────────────────────────────────
+ *
+ * The first matching row wins, because each earlier row describes evidence the later rows cannot
+ * produce. C4 comes first as the only class visible BEFORE any read; C1 second because a mismatch
+ * read off a table that is still moving is not evidence of anything.
+ *
+ * ⚠️ `unclassified` IS NOT A FALL-THROUGH INTO C3. An unnamed disagreement reported as «the driver
+ * adjusted the result» would be an invented diagnosis — the forbidden third door (`PHILOSOPHY.md`).
+ * It fires where the two sides cannot be compared like for like at all, and it quotes the evidence
+ * verbatim instead of labelling it.
+ *
+ * @returns {null} when the card holds exactly what was asked, or the named class.
+ * [NOT-TESTED] at birth.
+ */
+export function classifyWriteFailure({
+  requested, held, failedCalls = 0, failedAddresses = [], settled = true, readWhy = null,
+  offeredAboveCapMhz = null,
+} = {}) {
+  // C4 — a call returned non-zero. The only class that costs the card no time at all.
+  if (failedCalls > 0) {
+    return {
+      class: 'C4', mismatches: null,
+      name: 'вызов записи вернул не ноль',
+      why: `${failedCalls} вызов(ов) не приняты, адреса: ${failedAddresses.slice(0, 5).join(', ')}`
+        + `${failedAddresses.length > 5 ? ' …' : ''}. Отказ пришёл ДО прожига — время карты не потрачено`,
+    };
+  }
+  // C1 — the table never stood still. The leading live hypothesis (`researches/18` §5 H1), and the
+  // one the canon predicted before the bench could reproduce it.
+  if (settled === false) {
+    return {
+      class: 'C1', mismatches: null,
+      name: 'чтение после записи не устоялось',
+      why: `${readWhy ?? 'две подряд пробы не совпали'}. Таблица, которая ещё движется, не измерение — `
+        + 'ступень отказана честно, а не записана по первой пробе',
+    };
+  }
+  // «Could not look» is not a class of write failure — it is the absence of an observation, and the
+  // project already refuses to give one a verdict (the UNKNOWN rule, `plans/02` §3.6).
+  if (!Array.isArray(held)) {
+    return {
+      class: 'НЕ ПРОЧИТАНО', mismatches: null,
+      name: 'таблица карты не прочиталась',
+      why: `${readWhy ?? 'причина не названа'}. О записи это не говорит ничего — ни хорошего, ни плохого`,
+    };
+  }
+  if (held.length !== requested.length) {
+    return {
+      class: 'unclassified', mismatches: null,
+      name: 'заказ и удерживаемое не сравнимы',
+      why: `заказано ${requested.length} записей, прочитано ${held.length} — сравнение like-for-like `
+        + 'невозможно, и назвать класс отказа по несравнимым сторонам значило бы его выдумать',
+    };
+  }
+
+  const mismatched = [];
+  for (let i = 0; i < requested.length; i++) if (held[i] !== requested[i]) mismatched.push(i);
+  const first = mismatched.slice(0, 5).map((i) => ({ point: i, want: requested[i], got: held[i] }));
+  const askedNonZero = requested.filter((o) => o !== 0).length;
+  const inert = mismatched.filter((i) => held[i] === 0).length;
+
+  // ---- C3 BY ITS OWN SIGNATURE, AND IT IS JUDGED BEFORE «no mismatches» ON PURPOSE.
+  //
+  // The rows below judge the CONTROL structure — the offsets we sent. C3 is the one class whose real
+  // signature does NOT live there: «the driver adjusts the result» is observed on the EFFECTIVE curve,
+  // as a table topping ABOVE a ceiling the vector provably cannot exceed. That is what the live card
+  // showed on 2026-08-24 (2370 at a 2355 ceiling), and `researches/18` names the combination
+  // explicitly: **a GREEN point-by-point re-read together with an offered clock above the cap is C3
+  // (or C1)** — so returning «no failure» on zero mismatches would throw away exactly the case the
+  // evening run exists to catch.
+  //
+  // The bench proved the two halves are not interchangeable: its C3 fixture nudges the first pressed
+  // entry by +15 MHz, that entry's offset happens to be −15, and the adjusted value lands on exactly
+  // ZERO — which in the control structure is INDISTINGUISHABLE from an inert entry. By the offsets
+  // alone the honest answer there is C2, and it stays C2. What this arm adds is not a tie-break but
+  // the MISSING EVIDENCE.
+  //
+  // ⚠️ A CALLER THAT CANNOT MEASURE IT PASSES `null` AND GETS THE HONEST C2. `writeCurve` has no
+  // ceiling to compare against and passes nothing; the atom does, and passes it. Inventing the
+  // ceiling evidence would be the forbidden third door (`PHILOSOPHY.md`).
+  if (Number.isFinite(offeredAboveCapMhz) && offeredAboveCapMhz > 0) {
+    return {
+      class: 'C3', mismatches: mismatched.length,
+      name: 'драйвер правит результат',
+      why: `кривая после записи предлагает на ${offeredAboveCapMhz} МГц ВЫШЕ потолка, чего вектор дать `
+        + `не может по арифметике; в управляющей структуре при этом ${mismatched.length} расхождений `
+        + `(инертных ${inert})${mismatched.length ? `. Первые: ${JSON.stringify(first)}` : ' — поточечная сверка ЗЕЛЁНАЯ'}`,
+    };
+  }
+
+  if (mismatched.length === 0) return null;
+
+  // C6 — the table landed SHIFTED. Checked before C2/C5 because a shift is recognised by its SHAPE,
+  // and by count alone it would be swallowed by «part of the entries is inert». Source: measured on
+  // this very structure — «a single bit for point 64 answered in slot 65» (`researches/05`).
+  const shifted = mismatched.filter((i) => i > 0 && held[i] === requested[i - 1]).length;
+  if (shifted >= Math.ceil(mismatched.length * 0.8) && mismatched.length > requested.length / 3) {
+    return {
+      class: 'C6', mismatches: mismatched.length,
+      name: 'таблица легла со сдвигом на одну запись',
+      why: `${mismatched.length} расхождений из ${requested.length}, и ${shifted} из них держат сдвиг `
+        + `СОСЕДА — систематично, этим класс и отличается от частичной инертности. Первые: `
+        + `${JSON.stringify(first)}`,
+    };
+  }
+
+  // C5 — the whole write is inert: the factory table survived at status 0 everywhere. Named apart
+  // from C2 because the run must not read the surviving stock table as «an undervolt that saved
+  // nothing» — a measurement that was never taken.
+  if (inert === mismatched.length && askedNonZero > 0 && held.every((o) => o === 0)) {
+    return {
+      class: 'C5', mismatches: mismatched.length,
+      name: 'запись инертна ЦЕЛИКОМ при успешных статусах',
+      why: `заказано ненулевых ${askedNonZero}, карта не держит НИ ОДНОГО. Успех по статусам этого не `
+        + 'видит вовсе; оставшуюся заводскую таблицу читать как андервольт нельзя',
+    };
+  }
+  // C2 — part of the entries is silently inert.
+  if (inert === mismatched.length) {
+    return {
+      class: 'C2', mismatches: mismatched.length,
+      name: 'часть записей молча инертна',
+      why: `${mismatched.length} записей из ${requested.length} остались нулевыми при статусе 0. `
+        + `Первая разошедшаяся — точка ${mismatched[0]}. Первые: ${JSON.stringify(first)}`,
+    };
+  }
+  // C3 — the driver adjusted the result: entries landed somewhere we did not send them.
+  return {
+    class: 'C3', mismatches: mismatched.length,
+    name: 'драйвер правит результат',
+    why: `${mismatched.length} записей легли не туда, куда послал вектор `
+      + `(инертных из них ${inert}, переставленных ${mismatched.length - inert}). Первые: ${JSON.stringify(first)}`,
+  };
+}
+
+/**
+ * The total undo: every point to zero, and a SETTLED read that must find none left. Zeroing a zero is free.
+ *
+ * ⚠️ THE SECOND READ WAS REMOVED, NOT THE PROOF (2026-08-24, `plans/40` step 2). This function used to
+ * write and then take its OWN single-shot `readVfOffsets` — the very shape the owner's-machine rule
+ * step 4 forbids, sitting on the ROLLBACK path where a wrong answer is worst. `writeCurve` now reads
+ * back through the settle contract, so the proof moved INTO the write instead of being repeated
+ * beside it: one reader of one fact rather than two kept in agreement. The rollback's own assertion —
+ * «nothing non-zero is left» — is unchanged and is now derived from the settled table.
+ */
 export function zeroCurve(nv, handle, { count = CLK_VF_POINT_COUNT - 1 } = {}) {
   const w = writeCurve(nv, handle, 0, { count });
-  const after = readVfOffsets(nv, handle);
+  const remaining = Array.isArray(w.heldKhz) ? w.heldKhz.filter((o) => o !== 0).length : 'не прочитано';
   return {
-    ok: w.ok && after.ok && after.nonZero === 0,
+    ok: w.ok && remaining === 0,
     failed: w.failed,
-    remainingNonZero: after.ok ? after.nonZero : 'не прочитано',
+    remainingNonZero: remaining,
+    failureClass: w.failureClass ?? null,
+    why: w.why,
   };
 }
 
@@ -1067,15 +1340,55 @@ export function dumpControlRegions(raw) {
  * not just the decoded numbers, so a change ANYWHERE in the structure also has to settle.
  */
 export function readVfOffsetsStable(nv, handle, { maxSamples = 12, gapMs = 250 } = {}) {
+  return readUntilStable(() => readVfOffsets(nv, handle), { maxSamples, gapMs, what: 'структура смещений' });
+}
+
+/**
+ * The SAME contract for the EFFECTIVE curve — «frequency → serving voltage» as the card reports it.
+ *
+ * Added 2026-08-24 (epic 36 phase 4, `plans/40` step 1). `readVfOffsetsStable` had existed since
+ * 2026-08-10 and covered the CONTROL structure — what we wrote. The failure of 2026-08-24 09:36 is
+ * about the other side: `researches/18` §5 H1 names ONE read of the effective curve taken straight
+ * after 127 writes (`vf-step`'s `curveAfter`), and that read is what reported a table whose top sat
+ * 15 MHz ABOVE a ceiling the vector provably could not exceed. A structure that has not settled is
+ * not a measurement, and the canon has said so since 2026-08-10 (the owner's-machine rule, step 4).
+ *
+ * ⚠️ THIS ONE WAITS FOR QUIET, NOT FOR THE WRITE — and that is the correct contract HERE and the wrong
+ * one for the control structure. The effective curve is DERIVED by the driver from the offsets plus
+ * its own rules, so there is no exact target we could wait for; quiet is the strongest claim
+ * available. What makes quiet sufficient here is the ORDER: `writeCurve` has already polled the
+ * control structure until it holds what we asked (`readUntilApplied`), so by the time this runs the
+ * write has demonstrably landed and only the derivation is outstanding.
+ *
+ * [NOT-TESTED] at birth — blocks and mutations in `--selftest` (`plans/40` step 6).
+ */
+export function readVfCurveStable(nv, handle, { maxSamples = 12, gapMs = 250, versions } = {}) {
+  const opts = versions ? { versions } : undefined;
+  return readUntilStable(() => readVfCurve(nv, handle, opts), { maxSamples, gapMs, what: 'таблица кривой' });
+}
+
+/**
+ * THE SETTLE CONTRACT ITSELF, in one place: read until two consecutive samples agree.
+ *
+ * Compares the whole RAW buffer rather than the decoded numbers, so a change ANYWHERE in the
+ * structure also has to settle — a decoded view could stand still while the bytes behind it move.
+ *
+ * ⚠️ AN EXPIRED BOUND IS AN ANSWER, NOT A SILENT ACCEPT. Returning the last sample would be exactly
+ * the defect this exists to prevent (EXP-0014), so the expiry returns `ok: false` WITH
+ * `settled: false` — the flag the write-failure classifier reads to name class C1. A read whose CALL
+ * failed returns `ok: false` with `settled` absent, because «could not look» and «looked, and it kept
+ * moving» are different answers (the same distinction the project's UNKNOWN verdict is built on).
+ */
+function readUntilStable(read, { maxSamples = 12, gapMs = 250, what = 'структура' } = {}) {
   let previous = null;
   for (let i = 0; i < maxSamples; i++) {
-    const r = readVfOffsets(nv, handle);
+    const r = read();
     if (!r.ok) return { ...r, samples: i + 1 };
-    if (previous && Buffer.compare(previous, r.raw) === 0) return { ...r, stable: true, samples: i + 1 };
+    if (previous && Buffer.compare(previous, r.raw) === 0) return { ...r, stable: true, settled: true, samples: i + 1 };
     previous = r.raw;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, gapMs); // blocking sleep, no timer
+    if (gapMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, gapMs); // blocking sleep, no timer
   }
-  return { ok: false, why: `структура не устоялась за ${maxSamples} проб` };
+  return { ok: false, settled: false, samples: maxSamples, why: `${what} не устоялась за ${maxSamples} проб` };
 }
 
 /**
@@ -1494,6 +1807,72 @@ export function selftestShape() {
 
   const empty = buildRaiseAndCapVector([{ i: 0, mhz: 0, mv: 0, freqKhz: 0 }], DELTA);
   check('кривая без данных -> отказ, а не пустой профиль', empty.ok === false, empty.why);
+
+  // ═══ ЭПИК 36, ФАЗА 4 — ОПРОС ЖДЁТ НЕ ПОКОЯ, А ТОГО, ЧТО ЗАПИСЬ ЛЕГЛА (`plans/40` шаг 1) ═══════
+  //
+  // Здесь судится ПОСЛЕДОВАТЕЛЬНОСТЬ, а её видно только изнутри: карта стоит за подставным чтением,
+  // ровно как `fs` за подставным швом в журнале упреждающей записи.
+  //
+  // ⚠️ ПОЧЕМУ НЕ «ДВЕ ПОДРЯД СОВПАВШИЕ ПРОБЫ». Это договор `readVfOffsetsStable`, и для состояния,
+  // которое пишем не мы (отпущенная частота, разгоняющийся вентилятор), он верный. Здесь он НЕВЕРЕН,
+  // и стенд показал это через час после того, как фаза 3 появилась: класс C1 моделируется как «первые
+  // N чтений отдают ДОПИСЬМЕННУЮ таблицу» — точная форма замера 2026-08-10, где `-rgc` ответил
+  // «All done», а состояние сменилось через секунду. Две пробы внутри этого окна СОВПАДАЮТ ДРУГ С
+  // ДРУГОМ и обе устаревшие. Ждать покоя — не то же самое, что ждать записи.
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   NA. вернуть первую же пробу                     → «ОПРОС ПЕРЕЖИДАЕТ УСТАИВАНИЕ»
+  //   NB. считать устоявшимся всё, что дожило до конца → «НЕ ПРИШЛА К ЗАКАЗАННОЙ И ДВИЖЕТСЯ = C1»
+  //   NC. брать «две совпавшие подряд» вместо заказа   → «ДВЕ СОВПАВШИЕ УСТАРЕВШИЕ ПРОБЫ НЕ ОТВЕТ»
+  {
+    const WANT = [1000, 2000, 3000];
+    const STALE = [0, 0, 0];
+    const shot = (offsets) => ({ ok: true, offsets, raw: Buffer.from(Int32Array.from(offsets).buffer) });
+    // Модель C1: первые две пробы отдают дописьменную таблицу, третья — записанную.
+    const settling = (staleFor) => { let n = 0; return () => shot(n++ < staleFor ? STALE : WANT); };
+
+    const late = pollUntilApplied(settling(2), WANT, 3, { maxSamples: 6, gapMs: 0 });
+    check('ОПРОС ПЕРЕЖИДАЕТ УСТАИВАНИЕ: таблица пришла к заказанной с третьей пробы, и это УСПЕХ',
+      late.settled === true && late.probes === 3 && late.why === null
+      && late.heldKhz.every((o, i) => o === WANT[i]),
+      `проб ${late.probes}, устоялось ${late.settled}`);
+
+    // 🔴 И ЭТО ЧИСЛО ЧИТАЕТСЯ ДАЖЕ НА УСПЕХЕ. `probes > 1` означает, что класс C1 СЛУЧИЛСЯ и был
+    // пережидан, а не что его не было. На живом прогоне это прямая улика по `researches/18` §5 H1.
+    const once = pollUntilApplied(settling(0), WANT, 3, { maxSamples: 6, gapMs: 0 });
+    check('ПОСЛУШНАЯ КАРТА ОТВЕЧАЕТ С ПЕРВОЙ ПРОБЫ — быстрый путь не стоит ни одной паузы',
+      once.probes === 1 && once.settled === true, `проб ${once.probes}`);
+
+    // Таблица встала на ЧУЖОМ значении: опрос обязан сказать «устоялось» — тогда класс решает ФОРМА.
+    const stuck = pollUntilApplied(() => shot(STALE), WANT, 3, { maxSamples: 4, gapMs: 0 });
+    check('ТАБЛИЦА ВСТАЛА НА ЧУЖОМ: settled = true, и класс решает ФОРМА, а не опрос',
+      stuck.settled === true && stuck.probes === 4 && stuck.heldKhz.every((o) => o === 0),
+      `проб ${stuck.probes}, устоялось ${stuck.settled}`);
+
+    // Таблица ДВИЖЕТСЯ до самого конца бюджета — вот это и есть C1, и опрос не имеет права выдать
+    // последнюю пробу за измерение (EXP-0014: устаревшая проба, принятая молча, и есть тот дефект).
+    let k = 0;
+    const moving = pollUntilApplied(() => shot([k++, 0, 0]), WANT, 3, { maxSamples: 4, gapMs: 0 });
+    check('НЕ ПРИШЛА К ЗАКАЗАННОЙ И ПРОДОЛЖАЕТ МЕНЯТЬСЯ = C1: settled = false, и причина названа',
+      moving.settled === false && /продолжает меняться/.test(moving.why ?? ''),
+      `проб ${moving.probes}: ${moving.why}`);
+
+    // 🔴 БЛОК, РАДИ КОТОРОГО ДОГОВОР И ПЕРЕПИСАН. Прежний договор («две подряд совпали») на модели
+    // C1 согласился бы на устаревшей таблице: пробы 1 и 2 совпадают между собой и обе дописьменные.
+    const agreeingButStale = STALE.every((o, i) => o === STALE[i]);   // две пробы модели совпали
+    const nowCorrect = pollUntilApplied(settling(3), WANT, 6, { gapMs: 0 });
+    check('ДВЕ СОВПАВШИЕ УСТАРЕВШИЕ ПРОБЫ — НЕ ОТВЕТ: опрос идёт дальше и дожидается ЗАКАЗАННОГО',
+      agreeingButStale && nowCorrect.probes === 4 && nowCorrect.heldKhz.every((o, i) => o === WANT[i]),
+      `три дописьменные пробы совпадали между собой, опрос вернул заказанное на пробе ${nowCorrect.probes}`);
+
+    // ЧТЕНИЕ, КОТОРОЕ НЕ СОСТОЯЛОСЬ, — НЕ «НЕ УСТОЯЛОСЬ». Два разных ответа, и классификатор получает
+    // их раздельно, чтобы никогда не выдать один за другой.
+    const broke = pollUntilApplied(() => ({ ok: false, why: 'статус -1' }), WANT, 3, { gapMs: 0 });
+    check('ЧТЕНИЕ НЕ СОСТОЯЛОСЬ ≠ НЕ УСТОЯЛОСЬ: таблицы нет, причина своя, settled не лжёт',
+      broke.heldKhz === null && broke.settled === true && broke.why === 'статус -1'
+      && classifyWriteFailure({ requested: WANT, held: broke.heldKhz, settled: broke.settled, readWhy: broke.why })?.class === 'НЕ ПРОЧИТАНО',
+      `${broke.why} → класс «НЕ ПРОЧИТАНО»`);
+  }
 
   console.log('');
   console.log(`ФОРМА ПРОФИЛЯ: ${failed === 0 ? 'все блоки сходятся' : `ПРОВАЛОВ ${failed}`}.`);

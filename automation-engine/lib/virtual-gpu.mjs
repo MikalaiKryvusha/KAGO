@@ -71,7 +71,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from '
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
-import { buildRaiseAndCapVector, CLK_VF_POINT_COUNT } from './nvapi.mjs';
+import { buildRaiseAndCapVector, CLK_VF_POINT_COUNT, classifyWriteFailure } from './nvapi.mjs';
 import { curveWriteRefusal } from './profile-manager.mjs';
 
 /** The graphics half of the V/F table. One definition, shared with the write path. */
@@ -2100,6 +2100,130 @@ export async function selfTest() {
       c1IsStockTop && c3Top > CAP && (c3Top - CAP) < 50 && c3Top !== c1Top,
       `C1 даёт заводской верх ${c1Top}; C3 даёт ${c3Top} = потолок + ${c3Top - CAP}. `
       + 'Живое наблюдение — 2370 при потолке 2355, то есть форма C3, а НЕ форма C1');
+
+    // ═══ ЭПИК 36, ФАЗА 4 — КЛАСС НАЗЫВАЕТСЯ, А НЕ ПОДРАЗУМЕВАЕТСЯ (`plans/40`) ═══════════════════
+    //
+    // Фаза 3 сделала классы ВОСПРОИЗВОДИМЫМИ; движок отвечал на все шесть одинаково — симптомом.
+    // Здесь судится `nvapi.classifyWriteFailure` — та единственная функция, из которой имя класса
+    // берут атом, применитель и откат, — и судится она НА ТЕХ ЖЕ ФИКСТУРАХ, что моделируют классы.
+    // Стенд кормит классификатор своими таблицами: это и есть та проверка, которой у проекта не было
+    // 2026-08-24 09:36, когда ступень встала и не назвала ничего.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   MA. `classifyWriteFailure` судит по статусам (вернуть null при failedCalls === 0)
+    //                                                  → «C5 ВИДЕН ПРИ УСПЕШНЫХ СТАТУСАХ»
+    //   MB. флаг `settled` проигнорирован                → «C1 И C5 РАЗЛИЧАЕТ ТОЛЬКО ОПРОС»
+    //   MC. `unclassified` свёрнут в C3                  → «НЕСРАВНИМОЕ НЕ ПОЛУЧАЕТ ДИАГНОЗА»
+    //   MD. «не прочитано» названо классом отказа записи → «НЕ ПРОЧИТАНО — ЭТО НЕ КЛАСС»
+    {
+      const named = (r, held, extra = {}) => classifyWriteFailure({
+        requested: r.w.vector, held, failedCalls: 0, settled: true, ...extra,
+      });
+      const c2Class = named(c2, c2.held.offsets);
+      // C3 IS JUDGED WITH THE EVIDENCE THE CLASS IS DEFINED BY, and the bench is what proved that
+      // necessary. Its fixture nudges the first pressed entry by +15 MHz; that entry's own offset is
+      // −15, so the adjusted value lands on exactly ZERO — and a zero in the control structure is
+      // INDISTINGUISHABLE from an inert entry. The fixture was NOT touched to make this green (the
+      // phase-4 gate forbids exactly that, `plans/36`); what was added is the number the class is
+      // actually observed by — the effective curve topping above the ceiling, which is the very shape
+      // the live card produced on 2026-08-24 (2370 at a 2355 ceiling).
+      const c3Class = named(c3, c3.held.offsets, { offeredAboveCapMhz: Number((c3Top - CAP).toFixed(1)) });
+      const c3ByOffsetsOnly = named(c3, c3.held.offsets);
+      const c5Class = named(c5, c5.held.offsets);
+      const c6Class = named(c6, c6.held.offsets);
+      const honestClass = named(honestRun, honestRun.held.offsets);
+
+      // ЧЕСТНАЯ КАРТА НЕ ПОЛУЧАЕТ ДИАГНОЗА. Классификатор, который что-нибудь находит всегда, —
+      // это не прибор, а генератор поводов остановиться.
+      check('ФАЗА 4 · ПОСЛУШНАЯ КАРТА: класса отказа НЕТ',
+        honestClass === null, 'карта держит ровно заказанное — назвать нечего');
+
+      // 🔴 C5 — ЕДИНСТВЕННЫЙ КЛАСС, КОТОРОГО УСПЕХ-ПО-СТАТУСАМ НЕ ВИДИТ ВОВСЕ (E-AC5). Все 127
+      // вызовов вернули ноль, таблица осталась заводской. Мутация MA (судить по статусам) гасит
+      // ровно этот блок.
+      check('ФАЗА 4 · C5 ВИДЕН ПРИ УСПЕШНЫХ СТАТУСАХ: «запись инертна ЦЕЛИКОМ» названа без единого отказа вызова',
+        c5Class?.class === 'C5' && c5.w.ok === true,
+        `статусы чистые (${c5.w.ok}), класс назван: ${c5Class?.class} — ${c5Class?.name}`);
+
+      check('ФАЗА 4 · C2 НАЗВАН: «часть записей молча инертна», с адресом первой разошедшейся',
+        c2Class?.class === 'C2' && /точка \d+/.test(c2Class?.why ?? ''),
+        `${c2Class?.class} — ${c2Class?.why?.slice(0, 90)}…`);
+
+      check('ФАЗА 4 · C3 НАЗВАН ПО СВОЕЙ УЛИКЕ: верх кривой выше потолка ⇒ «драйвер правит результат»',
+        c3Class?.class === 'C3' && /ВЫШЕ потолка/.test(c3Class?.why ?? ''),
+        `${c3Class?.class} — ${c3Class?.name} (верх ${c3Top} при потолке ${CAP})`);
+
+      // 🔴 ГРАНИЦА ЗНАНИЯ, НАЗВАННАЯ ВСЛУХ — И ЭТО ЗНАНИЕ ДЛЯ ВЕЧЕРНЕГО ПРОГОНА, А НЕ ОГОВОРКА.
+      //
+      // Без улики потолка та же фикстура C3 даёт C2, и это ЧЕСТНО: одна запись, заказанная в −15 и
+      // лежащая в 0, — ровно то, что делает инертная запись. Отсюда следует прямое требование к
+      // прогону: поточечная сверка САМА ПО СЕБЕ гипотезу H3 не закрывает, к ней обязано ехать число
+      // «на сколько верх кривой выше потолка». Оба поля теперь доезжают до журнала.
+      check('ФАЗА 4 · БЕЗ УЛИКИ ПОТОЛКА ТА ЖЕ ФИКСТУРА ЧЕСТНО ДАЁТ C2 — поточечной сверки одной НЕ ХВАТАЕТ',
+        c3ByOffsetsOnly?.class === 'C2' && c3Class?.class === 'C3',
+        `по одним смещениям: ${c3ByOffsetsOnly?.class} (запись −15 легла в 0) · с уликой потолка: ${c3Class?.class}`);
+
+      // И ОБРАТНАЯ СТОРОНА ТОГО ЖЕ: ЗЕЛЁНАЯ ПОТОЧЕЧНАЯ СВЕРКА ПРИ ПРОБИТОМ ПОТОЛКЕ — ТОЖЕ C3.
+      // Ровно эта комбинация и осталась неразобранной на seq 700: блока никто не прочитал, а вернись
+      // он зелёным, прежний классификатор ответил бы «отказа нет» и ступень встала бы симптомом.
+      const greenButBreached = classifyWriteFailure({
+        requested: honestRun.w.vector, held: honestRun.held.offsets,
+        failedCalls: 0, settled: true, offeredAboveCapMhz: 15,
+      });
+      check('ФАЗА 4 · ЗЕЛЁНАЯ СВЕРКА + ПРОБИТЫЙ ПОТОЛОК = C3, а не «отказа нет»',
+        greenButBreached?.class === 'C3' && /ЗЕЛЁНАЯ/.test(greenButBreached?.why ?? ''),
+        `${greenButBreached?.class}: ${greenButBreached?.why?.slice(0, 110)}…`);
+
+      check('ФАЗА 4 · C6 НАЗВАН: сдвиг опознан ПО ФОРМЕ, а не по числу расхождений',
+        c6Class?.class === 'C6' && /СОСЕДА/.test(c6Class?.why ?? ''),
+        `${c6Class?.class} — расхождений ${c6Class?.mismatches}, против ${c2Class?.mismatches} у C2`);
+
+      check('ФАЗА 4 · C4 НАЗВАН ДО ВСЯКОГО ЧТЕНИЯ: отказавшие вызовы несут свои адреса',
+        (() => {
+          const k = classifyWriteFailure({ requested: [1, 2, 3], held: [1, 2, 3], failedCalls: 2, failedAddresses: [40, 41] });
+          return k?.class === 'C4' && /40, 41/.test(k.why) && /ДО прожига/.test(k.why);
+        })(), 'класс, который не стоит карте ни секунды');
+
+      // 🔴 ГЛАВНЫЙ БЛОК ФАЗЫ, И ОН ПРО ГРАНИЦУ ЗНАНИЯ, А НЕ ПРО КОД.
+      //
+      // У недоустоявшегося чтения (C1) и у целиком инертной записи (C5) УЛИКА ОДНА И ТА ЖЕ: карта
+      // отдаёт заводскую таблицу при чистых статусах. Различить их по таблице НЕЛЬЗЯ в принципе —
+      // различает только ОПРОС: пришла ли таблица к заказанной, если подождать. Поэтому договор
+      // ждёт не покоя, а того, что запись легла (`nvapi.readUntilApplied`), и его исход — флаг
+      // `settled` — единственный вход, по которому эти два класса расходятся.
+      // Мутация MB (игнорировать флаг) гасит ровно этот блок и ничего больше.
+      const staleTable = c5.held.offsets;                       // заводская таблица: и C1, и C5 дают её
+      const asC1 = classifyWriteFailure({ requested: c5.w.vector, held: staleTable, failedCalls: 0, settled: false });
+      const asC5 = classifyWriteFailure({ requested: c5.w.vector, held: staleTable, failedCalls: 0, settled: true });
+      check('ФАЗА 4 · C1 И C5 РАЗЛИЧАЕТ ТОЛЬКО ОПРОС: одна таблица, два разных класса по флагу устаивания',
+        asC1?.class === 'C1' && asC5?.class === 'C5',
+        `та же таблица: не устоялось → ${asC1?.class}, устоялось → ${asC5?.class}. `
+        + 'По самой таблице эти два класса неразличимы, и стенд это подтверждает');
+
+      // «НЕ ПОСМОТРЕЛИ» — НЕ ДИАГНОЗ ЗАПИСИ. Ровно то же различение, на котором стоит вердикт
+      // НЕИЗВЕСТНО (`plans/02` §3.6): сравнение, которого не было, вердикта не имеет.
+      const unread = classifyWriteFailure({ requested: [1, 2], held: null, failedCalls: 0, settled: true, readWhy: 'статус -1' });
+      check('ФАЗА 4 · НЕ ПРОЧИТАНО — ЭТО НЕ КЛАСС ОТКАЗА ЗАПИСИ',
+        unread?.class === 'НЕ ПРОЧИТАНО' && !/^C\d/.test(unread?.class ?? ''),
+        `${unread?.class}: ${unread?.why}`);
+
+      // НЕСРАВНИМОЕ НЕ ПОЛУЧАЕТ ДИАГНОЗА (третья дверь `PHILOSOPHY.md`). Мутация MC — свернуть эту
+      // ветку в C3 — гасит этот блок, и это единственный способ его погасить.
+      const odd = classifyWriteFailure({ requested: [1, 2, 3], held: [1, 2], failedCalls: 0, settled: true });
+      check('ФАЗА 4 · НЕСРАВНИМОЕ НЕ ПОЛУЧАЕТ ДИАГНОЗА: длины разошлись → unclassified, а не C3',
+        odd?.class === 'unclassified' && odd?.class !== 'C3', `${odd?.class}: ${odd?.name}`);
+
+      // F4-AC3 — ШЕСТЬ ИМЁН, И НИ ОДНО НЕ ПОВТОРЯЕТСЯ. Классификатор, отвечающий одним словом на
+      // несколько классов, вернул бы проект туда, откуда фаза 4 его выводит.
+      // ⚠️ ЧЕРЕЗ `?.`, А НЕ РАЗЫМЕНОВАНИЕМ — ПЕРВАЯ РЕДАКЦИЯ ЭТОЙ СТРОКИ УБИВАЛА ВЕСЬ НАБОР.
+      // Мутация MA («судить по статусам») делает классификатор возвращающим `null`, и `null.class`
+      // ронял `TypeError` вместо того, чтобы покраснеть одним блоком: мутация уносила набор целиком,
+      // то есть сторож не доказывал себя, а прятал доказательство за падением. Это EXP-0075, и здесь
+      // он предъявлен ШЕСТОЙ раз — потому строка оставлена с этим комментарием, а не просто починена.
+      const names = [asC1?.class, c2Class?.class, c3Class?.class, 'C4', c5Class?.class, c6Class?.class];
+      check('ФАЗА 4 · F4-AC3: ШЕСТЬ КЛАССОВ — ШЕСТЬ РАЗНЫХ ИМЁН',
+        new Set(names).size === 6 && names.every((n) => /^C[1-6]$/.test(n)), names.join(' · '));
+    }
   }
 
   // an inversion is the fourth rule, and it needs a vector rather than a scalar
