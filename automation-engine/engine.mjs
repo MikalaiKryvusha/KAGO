@@ -2828,6 +2828,8 @@ export async function sweepRange({
     // умалчиваются: пропуск это не покрытие, и следующая сессия обязана видеть, какие строки ждут
     // закрытия скриптом.
     preBracketed: [],
+    // СТРОКИ, ОСТАВЛЕННЫЕ КАК БЫЛИ, ПОТОМУ ЧТО ДОКУМЕНТ ЗНАЛ ГЛУБЖЕ (`bugs/55`).
+    keptDeeper: [],
     hung: resume.hung ?? [],
     blocked: resume.blocked ?? [],
     // Every floor this journal knows, in the report so it lands in the run's own summary rather than
@@ -3205,6 +3207,14 @@ export async function sweepRange({
       }
     }
 
+    // ─── ДОКУМЕНТ ЗНАЛ ГЛУБЖЕ — ЭТО РЕЗУЛЬТАТ, А НЕ МОЛЧАНИЕ (`bugs/55`) ─────────────────────────
+    // Строка оставлена как была, потому что спуск ОСТАНОВИЛСЯ, а не встретил отказ. Считается
+    // отдельно от закрытых: оператор обязан видеть, что прожиги были потрачены на частоту, о
+    // которой документ уже знал больше, — по этому числу и решается, куда полосу вести дальше.
+    if (closed.kept) {
+      report.keptDeeper.push(closed.kept);
+      say('kept-deeper', closed.why, { frequencyMhz: closed.kept.mhz, keptMv: closed.kept.keptMv, offeredMv: closed.kept.offeredMv });
+    }
     report.closed += closed.closed;
     report.verdicts[outcome.verdict] += 1;
     report.groups.push({ ...g, ...outcome, inherited: closed.inherited.length, raised: closed.raised });
@@ -3682,6 +3692,16 @@ export function sweepReportLines(report) {
   lines.push(`ВЕРДИКТЫ: край найден ${report.verdicts['edge-found']}`
     + ` · остановлено НАШИМ потолком глубины ${cappedCount}`
     + ` · упёрлось в предел сдвига ±1000 МГц ${leverCount}`);
+  // ─── СТРОКИ, ГДЕ ДОКУМЕНТ ЗНАЛ ГЛУБЖЕ (`bugs/55`) ────────────────────────────────────────────
+  // Печатается только когда такое было: строка «оставлено 0» в каждом прогоне была бы шумом, а вот
+  // ненулевая говорит оператору, что прожиги ушли туда, где новое знание оказалось слабее старого.
+  if (report.keptDeeper?.length) {
+    lines.push(`ОСТАВЛЕНО КАК БЫЛО: ${report.keptDeeper.length} строк(и) — документ уже знал ГЛУБЖЕ, а спуск `
+      + 'ОСТАНОВИЛСЯ, а не встретил отказ: '
+      + report.keptDeeper.slice(0, 5).map((k) => `${k.mhz} МГц ${k.keptMv} мВ против предложенных ${k.offeredMv}`).join(', ')
+      + (report.keptDeeper.length > 5 ? ` и ещё ${report.keptDeeper.length - 5}` : ''));
+    lines.push('   Менее глубокое не отменяет более глубокое — иначе одна прерванная ступень поднимает храповиком всё выше (bugs/55).');
+  }
   lines.push(`ЗАТРАВКА: отвергнута ${report.seedRejections} раз(а) — это ЗАМЕР монотонности на этом кремнии, а не сбой прогона`);
   // ─── ПРОПУЩЕННЫЕ ЧАСТОТЫ — ЭТО РАБОТА ДЛЯ МЕНЯ, А НЕ ОТЧЁТ ОБ ОТКАЗЕ ───────────────────────────
   //
