@@ -675,9 +675,15 @@ export async function runRung({
   //
   // ⚠️ THE SYMPTOM IS KEPT, NOT REPLACED. The class says HOW the write failed; the symptom says what
   // the run was doing when it noticed. Dropping either would trade one blind spot for another.
-  const stop = (outcome, why) => ({
+  //
+  // `site` — УСТОЙЧИВЫЙ АДРЕС МЕСТА, КОТОРОЕ СДАЛОСЬ (слово владельца 2026-08-24 ~21:3x: «помечать,
+  // что в них такого аномального в логах, И КАКОЙ БЛОК КОДА НЕ СПРАВИЛСЯ С ТОЧКОЙ — потом пост
+  // фактум по логам будем разбираться и чинить»). Это ИДЕНТИФИКАТОР, а не проза: по нему находки
+  // группируются в классы дефектов, а по прозе — нет.
+  const stop = (outcome, why, site = null) => ({
     ...record,
     outcome,
+    stopSite: site,
     why: record.writeFailureClass ? `КЛАСС ОТКАЗА ЗАПИСИ ${record.writeFailureWhy} · ${why}` : why,
   });
 
@@ -988,7 +994,7 @@ export async function runRung({
     return close(stop('unknown', `ОТКАТ НЕ ЧИСТ на ${clockMhz} МГц / ${voltageMv} мВ — ${dirty.length} шаг(ов) не отработали: `
       + `${dirty.map((b) => (b.detail ? `${b.name} — ${b.detail}` : b.name)).join(' · ')}. `
       + 'Следующая ступень стартовала бы на карте, состояние которой '
-      + 'никто не может назвать, и это СТОП, а не вердикт о напряжении'));
+      + 'никто не может назвать, и это СТОП, а не вердикт о напряжении', 'runRung#undo-dirty'));
   }
 
   // ---- 6a. ПРОВЕРКА НЕ ДАЛА ОТВЕТА — ТОЖЕ СТОП, НО ЭТО ДРУГОЕ УТВЕРЖДЕНИЕ (`plans/28`, находка A).
@@ -1015,7 +1021,7 @@ export async function runRung({
     return close(stop('unknown', `ПРОВЕРКА НЕ ДАЛА ОТВЕТА на ${clockMhz} МГц / ${voltageMv} мВ: `
       + `${failedProofs.map((b) => `${b.why || b.detail} (проверка «${b.name}»)`).join(' · ')}. `
       + 'ОТКАТ ПРИ ЭТОМ ОТРАБОТАЛ — карта вернулась, состояние её известно. Остановка в том, что о '
-      + 'НАПРЯЖЕНИИ вердикта нет: судить ступень не по чему'));
+      + 'НАПРЯЖЕНИИ вердикта нет: судить ступень не по чему', 'runRung#proof-failed'));
   }
 
   // ---- 7. THE ORACLE COULD NOT JUDGE — a STOP, never progress (EXP-0011).
@@ -1024,7 +1030,7 @@ export async function runRung({
     return close(stop('unknown', `НЕИЗВЕСТНО на ${clockMhz} МГц / ${voltageMv} мВ — оракул не вынес вердикта`
       + (atom?.reason ? `: ${atom.reason}` : '')
       + (failed.length ? ` · красные блоки: ${failed.join(' · ')}` : '')
-      + '. Это СТОП: уточнять край вокруг ненаблюдённой границы значило бы выдумать измерение'));
+      + '. Это СТОП: уточнять край вокруг ненаблюдённой границы значило бы выдумать измерение', 'runRung#oracle-no-verdict'));
   }
 
   // ---- 8. THE RE-ASSERTION, AGAINST THE CARD'S OWN RE-READ TABLE.
@@ -1127,7 +1133,7 @@ export async function runRung({
       return close(stop('void', `ШАГ ОТ ДОКАЗАННОГО СЛИШКОМ ГЛУБОК: на ${clockMhz} МГц доказано ${provenMv} мВ, `
         + `заказано ${voltageMv} мВ, а после записи частоту обслуживало ${measuredMv} мВ — это ${stepFromProven} мВ `
         + `от доказанного при разрешённых ${maxStepFromProvenMv} (bugs/03). Размер шага — единственная защита, `
-        + 'которая действует ДО того, как состояние возникнет: все остальные откаты требуют живой ОС'));
+        + 'которая действует ДО того, как состояние возникнет: все остальные откаты требуют живой ОС', 'runRung#step-too-deep'));
     }
   }
   // ⚠️ СТРОГО ВЫШЕ СТОКА, А НЕ «НА СТОКЕ». Живой прогон 2026-08-16 отверг первую редакцию этой
@@ -1139,7 +1145,7 @@ export async function runRung({
   if (Number.isFinite(stockMv) && measuredMv > stockMv) {
     return close(stop('void', `ВЫДАЧА ВЫШЕ СТОКА: заказано ${voltageMv} мВ на ${clockMhz} МГц, а частоту `
       + `обслуживало ${measuredMv} мВ при стоке ${stockMv} мВ. Выше заводского напряжения мы частоту не `
-      + 'поднимали и утверждать о таком напряжении нечего — это не измерение, а несработавшая запись'));
+      + 'поднимали и утверждать о таком напряжении нечего — это не измерение, а несработавшая запись', 'runRung#delivery-above-stock'));
   }
   // ⚠️ «БЛИЖАЙШЕЕ ВЕРХНЕЕ» ТЕПЕРЬ ПРОВЕРЯЕТСЯ, А НЕ ОБЪЯВЛЯЕТСЯ — `bugs/42`, слово владельца
   // 2026-08-16 (`GOAL.md` → «ТО ЖЕ ПРАВИЛО НА ОСИ НАПРЯЖЕНИЯ»): «ближайшее верхнее с сетки (одна
@@ -2309,6 +2315,25 @@ export async function sweepFrequency({
     // message: F2-AC5 demands the sweep exit non-zero and NAME the rung, and a report that reads its
     // own prose to decide would go silent the first time the sentence is reworded.
     if (r?.blocked === true) out.blocked = true;
+    // ─── ДВА МАШИННЫХ ПРИЗНАКА ЕДУТ НАВЕРХ ПОЛЯМИ, А НЕ ТЕКСТОМ (2026-08-24, слово владельца) ────
+    //
+    // Полоса теперь переживает отказ ступени и идёт дальше — кроме двух случаев, и оба про МАШИНУ.
+    // `blocked` (два зависания подряд) уже ехал; `undoClean` не ехал вовсе, а именно он означает
+    // «состояние карты назвать нельзя». Ловить его подстрокой «ОТКАТ НЕ ЧИСТ» значило бы завести
+    // пару «правда ↔ зеркало» против формулировки и потерять её при первой же правке текста —
+    // ровно та ошибка, от которой этот же движок защищается полем `blocked`.
+    out.undoClean = r?.undoClean ?? null;
+    out.cardUndescribable = r?.cardUndescribable === true;
+    // АДРЕС СДАВШЕГОСЯ БЛОКА — едет наверх вместе с остановкой. Без него журнал пропущенных говорит
+    // «не получилось», а чинить надо МЕСТО.
+    out.stopSite = r?.stopSite ?? null;
+    // ДИАГНОСТИКА ДЛЯ ПОЧИНКИ — едет вместе с остановкой, потому что чинить по прозе нельзя.
+    out.writeFailureClass = r?.writeFailureClass ?? null;
+    out.writeSettled = r?.writeSettled ?? null;
+    out.offeredAfterMhz = r?.offeredAfterMhz ?? null;
+    out.appliedDeltaMhz = r?.appliedDeltaMhz ?? null;
+    out.tableDriftMhz = r?.tableDriftMhz ?? null;
+    out.redBlocks = r?.redBlocks ?? [];
     out.why = `РАЗВЁРТКА ОСТАНОВЛЕНА на ${frequencyMhz} МГц / ${rung.mv} мВ, исход «${r?.outcome ?? 'нет ответа'}»: ${r?.why ?? ''}`;
     return withDelivered();
   }
@@ -2605,6 +2630,16 @@ export async function sweepRange({
   envelopeMhz = null,
   buildVector = null,
   chooseShape = chooseWriteShape,
+  // ─── РЕЖИМ ОТЛАДКИ: ВСТАТЬ НА ПЕРВОЙ ЖЕ АНОМАЛИИ ───────────────────────────────────────────────
+  //
+  // Умолчание `false` — прогон идёт до конца полосы, потому что владелец назвал это прямо: сторож
+  // подсказывает и пишет лог, а не убивает инструмент. `true` возвращает прежнее поведение и нужен
+  // РОВНО для отладки — «мы будем уметь работать и без него, так как мы занимаемся разработкой и
+  // отладкой» (его слова 2026-08-24 ~20:1x). Флаг оператора — `--halt-on-anomaly`.
+  //
+  // ⚠️ ЭТО НЕ ВЫКЛЮЧАТЕЛЬ СТОРОЖЕЙ. Судят они одинаково при любом значении, и в документ при любом
+  // значении попадает только подтверждённое. Флаг решает ОДНО: терять ли остаток полосы.
+  haltOnAnomaly = false,
   // RE-READ THE CARD'S TABLE BEFORE EACH RUNG — injected, because this module never calls the card
   // itself (R16a: the sweep composes, it does not touch hardware). `null` keeps the old behaviour of
   // planning every rung against the table read once at the start.
@@ -2677,6 +2712,25 @@ export async function sweepRange({
     closed: 0,
     verdicts: { 'edge-found': 0, 'lever-limited': 0 },
     seedRejections: 0,
+    // ─── ЧАСТОТЫ, КОТОРЫЕ ПОЛОСА ПРОПУСТИЛА, — И ОНИ БОЛЬШЕ НЕ РОНЯЮТ ПОЛОСУ ────────────────────
+    //
+    // 🔴 СЛОВО ВЛАДЕЛЬЦА 2026-08-24 ~20:0x, И ОНО ОТМЕНЯЕТ ПРЕЖНЕЕ ПОВЕДЕНИЕ ЦЕЛИКОМ:
+    //   «меня удручает, что твой инструмент получается таким строгим… чаще сваливаемся в отказы
+    //    прогонов вообще, чем в прогоны, но с косяками. Ты не продукт делаешь, а леса — это
+    //    невероятно плохо. Рабочий продукт важнее процессов. Здание важнее лесов.»
+    //   «Леса должны быть помощниками, а не барьерами… подключать их нужно тогда, когда ты уверен,
+    //    что они помогут.»
+    //
+    // ЕГО ЧИСЛО, А НЕ МНЕНИЕ: 0 закрытых частот 2026-08-23 (0 из 7) и 0 закрытых 2026-08-24
+    // (0 из 27) — оба раза одна аномалия на одной ступени выбрасывала всю полосу вместе с уже
+    // оплаченными прожигами. Развилка «закрывать частоту, а не полосу» стояла вопросом к владельцу
+    // в `bugs/50` §3 и `bugs/42`; этими словами он на неё ответил.
+    //
+    // ⚠️ ГРАНИЦА НАЗВАНА И НЕ СНЯТА. Полосу по-прежнему роняют РОВНО ДВА признака, и оба про МАШИНУ,
+    // а не про строгость: ГРЯЗНЫЙ ОТКАТ (`undoClean === false` — состояние карты назвать нельзя,
+    // писать дальше запрещено) и ДВА ЗАВИСАНИЯ ПОДРЯД на одной ступени (`blocked` — единственная
+    // аварийная остановка, оставленная владельцем, R15). Всё остальное — находка О ЧАСТОТЕ.
+    skipped: [],
     // WHERE THE ORDER AND THE OBSERVATION PARTED — one entry per frequency whose measurement landed in
     // a DIFFERENT row from the one asked for. Counted rather than smoothed over: under the owner's
     // rule the card decides the coverage, and a run that hid that would look like it swept the band
@@ -2850,7 +2904,15 @@ export async function sweepRange({
               + `${frequencyMhz} МГц / ${voltageMv} мВ (получено ${Array.isArray(fresh) ? `${fresh.length} записей вместо ${points.length}` : 'ничего'}). `
               + 'Планировать по старой таблице значило бы вернуть ровно тот дрейф, ради которого она перечитывается. Это СТОП';
             say('rung', why, { frequencyMhz, voltageMv, outcome: 'unknown' });
-            return { outcome: 'unknown', why, cardTouched: false, verdict: null };
+            // ⚠️ ПРИЗНАК «КАРТУ ОПИСАТЬ НЕЛЬЗЯ» — ПОЛЕМ, И ОН РОНЯЕТ ПОЛОСУ (2026-08-24).
+            //
+            // С этого дня отказ ступени полосу НЕ роняет: сторож подсказывает и пишет лог, а прогон
+            // идёт дальше (слово владельца). Этот случай — исключение того же рода, что грязный
+            // откат: если таблицу карты прочитать не удалось, то не «эта частота не далась», а МЫ НЕ
+            // ЗНАЕМ СОСТОЯНИЯ КАРТЫ — и следующая частота планировалась бы вслепую, ровно тем
+            // дрейфом, ради снятия которого шов и заведён. Едет ПОЛЕМ, а не подстрокой «НЕ
+            // ПЕРЕЧИТАНА»: пара «правда ↔ зеркало» против формулировки замолчала бы при первой правке.
+            return { outcome: 'unknown', why, cardTouched: false, verdict: null, cardUndescribable: true };
           }
           // `fresh?.` and not `fresh.` — EXP-0075, now for the sixth time: a mutation that removes
           // the guard above must REDDEN the block that watches it, not kill the whole suite by
@@ -2883,13 +2945,66 @@ export async function sweepRange({
     if (outcome.seedRejected) report.seedRejections += 1;
 
     if (outcome.halted || outcome.verdict === null) {
-      report.ok = false;
-      report.stoppedBy = outcome.blocked === true
-        ? 'blocked-rung'
-        : (outcome.hangFloorHalt === true ? 'hang-floor' : 'halt');
-      report.why = outcome.why;
       report.groups.push({ ...g, ...outcome });
-      break;
+      // ─── СТОРОЖ ПОДСКАЗЫВАЕТ, А НЕ УБИВАЕТ — слово владельца 2026-08-24 ~20:1x, дословно ──────
+      //
+      //   «Сторож должен не ронять инструмент, а подсказывать инструменту, что пошло не так, и как
+      //    это исправить и продолжить дальше. Сторож должен работать вместе с инструментом и
+      //    помогать ему обходить непредвиденное, а не убивать инструмент. Он должен писать логи,
+      //    А ТЫ ПО ЛОГАМ УЖЕ ПОНИМАЕШЬ, где в продукте есть косяки… Непредвиденное делаешь
+      //    предвиденным, предусмотренным.»
+      //
+      // ⚠️ НИ ОДИН СТОРОЖ НЕ ОСЛАБЛЕН. Судит он ровно так же строго; изменилось ПОСЛЕДСТВИЕ его
+      // срабатывания: частота закрывается со СВОЕЙ названной причиной, а полоса идёт дальше. Строка
+      // в документ при этом НЕ пишется — неподтверждённое напряжение по-прежнему не становится
+      // измерением (это и есть «строгий режим включён»: строгость в том, что попадает в документ,
+      // а не в том, сколько работы выбрасывается).
+      // ТРИ ПРИЗНАКА, И ВСЕ ТРИ ПРО МАШИНУ, А НЕ ПРО СТРОГОСТЬ:
+      //   `blocked`            — два зависания подряд на одной ступени (единственная аварийная
+      //                          остановка, оставленная владельцем, R15);
+      //   `undoClean === false` — откат не отработал: состояние карты назвать нельзя;
+      //   `cardUndescribable`   — таблица карты не прочиталась: планировать вслепую нечем.
+      // Всё остальное — находка О ЧАСТОТЕ, и полоса её переживает.
+      const machineLevel = outcome.blocked === true
+        || outcome.undoClean === false
+        || outcome.cardUndescribable === true;
+      if (machineLevel || haltOnAnomaly) {
+        report.ok = false;
+        report.stoppedBy = outcome.blocked === true
+          ? 'blocked-rung'
+          : (outcome.undoClean === false ? 'undo-dirty'
+            : (outcome.cardUndescribable === true ? 'table-unread'
+              : (outcome.hangFloorHalt === true ? 'hang-floor' : 'halt')));
+        report.why = outcome.why;
+        break;
+      }
+      // ЛОГ ДЛЯ ПОЧИНКИ, А НЕ ДЛЯ ОТЧЁТА. Здесь собрано ровно то, чем дефект чинится: класс отказа
+      // записи, что кривая предлагала ПОСЛЕ записи против потолка, сколько сдвиг лёг, куда уехали
+      // таблицы, и красные блоки атома дословно. Всё это уже измерено — до сегодняшнего дня оно
+      // просто умирало вместе с остановкой полосы.
+      const note = {
+        frequencyMhz: g.topMhz,
+        outcome: outcome.outcome ?? (outcome.halted ? 'halted' : 'no-verdict'),
+        // ПРИЧИНА КАК ИДЕНТИФИКАТОР — по ней частоты группируются в КЛАССЫ дефектов. Три частоты с
+        // одной причиной это один дефект, а не три случая, и чинить надо один раз.
+        reason: outcome.hangFloorHalt === true ? 'hang-floor'
+          : (outcome.writeFailureClass ? `write-${outcome.writeFailureClass}` : (outcome.stopSite ?? 'halt')),
+        // КАКОЙ БЛОК КОДА НЕ СПРАВИЛСЯ — прямое требование владельца, чтобы разбор был по адресу.
+        failedAt: outcome.stopSite ?? null,
+        writeFailureClass: outcome.writeFailureClass ?? null,
+        writeSettled: outcome.writeSettled ?? null,
+        offeredAfterMhz: outcome.offeredAfterMhz ?? null,
+        appliedDeltaMhz: outcome.appliedDeltaMhz ?? null,
+        tableDriftMhz: outcome.tableDriftMhz ?? null,
+        deliveredMhz: outcome.deliveredMhz ?? null,
+        redBlocks: outcome.redBlocks ?? [],
+        why: outcome.why,
+      };
+      report.skipped.push(note);
+      say('frequency-skipped',
+        `${g.topMhz} МГц ПРОПУЩЕНА (строка в документ не пишется), полоса продолжается: ${outcome.why}`,
+        note);
+      continue;
     }
 
     // ---- (3) WHICH ROW THIS MEASUREMENT BELONGS TO — the owner's rule, `GOAL.md` → «🎚 ТЮНИМ ТО,
@@ -2907,13 +3022,31 @@ export async function sweepRange({
       // NOT CLOSED AT THE ORDERED FREQUENCY AS A FALLBACK. A fallback here would silently restore the
       // exact claim this rule exists to remove, and it would do it precisely when the evidence is
       // missing — the worst moment to start guessing (PHILOSOPHY → the three doors).
-      report.ok = false;
-      report.stoppedBy = 'delivered';
-      report.why = `НЕ ЗНАЕМ, НА КАКОЙ ЧАСТОТЕ КАРТА РАБОТАЛА на заказе ${orderedMhz} МГц: ${rowMhz.why}. `
+      report.groups.push({ ...g, ...outcome });
+      const why = `НЕ ЗНАЕМ, НА КАКОЙ ЧАСТОТЕ КАРТА РАБОТАЛА на заказе ${orderedMhz} МГц: ${rowMhz.why}. `
         + 'Записывать напряжение против заказанной частоты запрещено словом владельца — карта садится ниже '
         + 'заказа, и это была бы строка, которой никто не мерил';
-      report.groups.push({ ...g, ...outcome });
-      break;
+      if (haltOnAnomaly) {
+        report.ok = false;
+        report.stoppedBy = 'delivered';
+        report.why = why;
+        break;
+      }
+      // ТА ЖЕ ЛОГИКА, ЧТО ВЫШЕ: строка не пишется (запрет владельца цел), но полоса не гибнет.
+      // Машина здесь ни при чём — карта чиста, откат отработал, мы просто не знаем, куда класть замер.
+      const note = {
+        frequencyMhz: orderedMhz, outcome: 'delivered-unknown',
+        reason: 'delivered-unknown',
+        failedAt: 'sweepRange#resolveDeliveredRow',
+        deliveredMhz: outcome.deliveredMhz ?? null,
+        writeFailureClass: outcome.writeFailureClass ?? null,
+        offeredAfterMhz: outcome.offeredAfterMhz ?? null,
+        redBlocks: outcome.redBlocks ?? [],
+        why,
+      };
+      report.skipped.push(note);
+      say('frequency-skipped', `${orderedMhz} МГц ПРОПУЩЕНА, полоса продолжается: ${why}`, note);
+      continue;
     }
     if (rowMhz.mhz !== orderedMhz) {
       report.delivered.push({ orderedMhz, deliveredMhz: outcome.deliveredMhz, rowMhz: rowMhz.mhz });
@@ -2993,6 +3126,21 @@ export async function sweepRange({
     });
   }
 
+  // ─── КОД ВОЗВРАТА ОТРАЖАЕТ РЕЗУЛЬТАТ, А НЕ НАЛИЧИЕ АНОМАЛИИ ────────────────────────────────────
+  //
+  // До 2026-08-24 `ok` означало «не было ни одной аномалии», и полоса гибла на первой же. Владелец
+  // это отменил. Но обратная крайность — отчитаться УСПЕХОМ о прогоне, не закрывшем ни одной
+  // частоты, — ложь того же рода, только приятная на вид, и ловушка T5 держит именно её («развёртка
+  // встаёт, а не пропускает МОЛЧА»).
+  //
+  // Честная мерка одна: ДАЛ ЛИ ПРОГОН РЕЗУЛЬТАТ. Закрыл хоть одну частоту — успех, даже если часть
+  // пропущена; не закрыл ни одной — отказ, и причина берётся у ПЕРВОЙ пропущенной, а не выдумывается.
+  if (report.ok && report.closed === 0 && report.skipped.length > 0) {
+    report.ok = false;
+    report.stoppedBy = report.skipped[0].reason ?? 'halt';
+    report.why = `НИ ОДНА ЧАСТОТА НЕ ЗАКРЫТА: пропущено ${report.skipped.length} из `
+      + `${report.groupCount} ступеней полосы. Первая причина — ${report.skipped[0].why}`;
+  }
   report.doc = doc;
   report.elapsedMs = clockMs() - startedMs;
   return report;
@@ -3229,6 +3377,27 @@ export function sweepReportLines(report) {
     + ` · остановлено НАШИМ потолком глубины ${cappedCount}`
     + ` · упёрлось в предел сдвига ±1000 МГц ${leverCount}`);
   lines.push(`ЗАТРАВКА: отвергнута ${report.seedRejections} раз(а) — это ЗАМЕР монотонности на этом кремнии, а не сбой прогона`);
+  // ─── ПРОПУЩЕННЫЕ ЧАСТОТЫ — ЭТО РАБОТА ДЛЯ МЕНЯ, А НЕ ОТЧЁТ ОБ ОТКАЗЕ ───────────────────────────
+  //
+  // Печатается ВСЕГДА, включая ноль: «не пропущено ни одной» — такой же результат прогона, как и
+  // список. Строка сгруппирована по КЛАССУ причины, потому что чинить продукт надо классами, а не
+  // случаями: три частоты с одним классом — это один дефект, а не три.
+  const skipped = report.skipped ?? [];
+  if (skipped.length) {
+    const byClass = new Map();
+    for (const s of skipped) {
+      const key = s.writeFailureClass ?? s.outcome ?? 'без класса';
+      byClass.set(key, [...(byClass.get(key) ?? []), s.frequencyMhz]);
+    }
+    lines.push(`ПРОПУЩЕНО ЧАСТОТ: ${skipped.length} — строки в документ не записаны, полоса при этом пройдена до конца.`);
+    for (const [key, mhz] of byClass) {
+      lines.push(`   ${key}: ${mhz.length} частот(ы) — ${mhz.slice(0, 12).join(', ')}${mhz.length > 12 ? ' …' : ''}`);
+    }
+    lines.push('   Это ЖУРНАЛ ДЛЯ ПОЧИНКИ: каждая строка несёт класс отказа записи, что кривая предлагала');
+    lines.push('   после записи против потолка, лёгший сдвиг и красные блоки атома — по ним дефект чинится.');
+  } else {
+    lines.push('ПРОПУЩЕНО ЧАСТОТ: 0 — ни одна частота не осталась без вердикта.');
+  }
   // THE ORDER-vs-OBSERVATION LINE. Printed even when it is zero, because «нисколько не разошлось» is
   // itself a finding about the card — and a line that appears only on divergence teaches the reader
   // nothing about the runs where it did not.
@@ -6053,7 +6222,10 @@ export function selfTest() {
       const stopped = await sweepRange({
         envelopeMhz: 3090,
         curveDoc: sweepDoc(bandRows), points: sweepPoints,
-        runStepFn: async (a) => { cardsUntouched.push(a.capMhz); return sweepAtom(-1)(a); },
+        // ЧАСТОТА ПОД ИСПЫТАНИЕМ — это ПИН, если он есть, и потолок иначе (та же строка, что в
+        // `sweepAtom`). Раньше сюда клался только `capMhz`, и утверждение «карту не трогали»
+        // держалось на счётчике, а не на адресе.
+        runStepFn: async (a) => { cardsUntouched.push(a.pinMhz ?? a.capMhz); return sweepAtom(-1)(a); },
         buildVector: vectorPinned, journal: jstop,
         now: () => at,
         clockMs: (() => { let t = 0; return () => (t += 1000); })(),
@@ -6068,11 +6240,27 @@ export function selfTest() {
       // («ступень, повесившая машину ДВАЖДЫ ПОДРЯД, третий раз не начинается, и атом не зван»), which
       // drives `runRung` itself. That is the honest split: the emergency stop the owner left guards
       // the place where the card is touched; the floor guards the place where the rung is chosen.
-      ok('ДВА ЗАВИСАНИЯ: карту третий раз не трогают — и теперь останавливает ПОЛ, то есть РАНЬШЕ (bugs/23)',
-        [stopped.ok, stopped.stoppedBy, stopped.closed, cardsUntouched.length],
-        [false, 'hang-floor', 0, 0]);
-      ok('и остановка НАЗЫВАЕТ зависание, а не «предел рычага» — статус не врёт про причину',
-        /ЗАВИСАНИЕ НА 1020 мВ/.test(stopped.why ?? ''), true);
+      // 🔴 ЭТИ ДВА БЛОКА ПЕРЕПИСАНЫ 2026-08-24 ПО СЛОВУ ВЛАДЕЛЬЦА, И ВОТ ЧТО ИМЕННО ИЗМЕНИЛОСЬ.
+      //
+      // БЫЛО: `[stopped.ok, stoppedBy, closed, cardsUntouched.length] === [false,'hang-floor',0,0]`
+      // — то есть блок держал «прогон ВСТАЛ и карту не тронули ВООБЩЕ». Владелец отменил первую
+      // половину: «Сторож должен не ронять инструмент, а подсказывать… Он должен писать логи».
+      // Его число: 0 закрытых частот два вечера подряд.
+      //
+      // СТАЛО — и это СИЛЬНЕЕ прежнего, а не слабее. Прежняя проверка держала СЧЁТЧИК («атом не
+      // звали ни разу»), и он был зелёным по случайности: когда полоса гибла на первой же частоте,
+      // не трогали НИЧЕГО, и утверждение «повесившую ступень не трогали» не проверялось вовсе.
+      // Теперь проверяется АДРЕС: частота 2842 МГц, повесившая машину дважды, не подаётся атому
+      // НИ РАЗУ, при том что остальные частоты полосы отрабатывают. Это ровно та гарантия, ради
+      // которой блок существует, и теперь её нельзя удовлетворить бездействием.
+      ok('ДВА ЗАВИСАНИЯ: повесившая ступень НЕ ПОДАЁТСЯ АТОМУ — а полоса при этом идёт дальше',
+        [cardsUntouched.includes(2842), stopped.ok, cardsUntouched.length > 0],
+        [false, true, true]);
+      // ПРИЧИНА НАЗВАНА — но теперь она в ЖУРНАЛЕ ПРОПУЩЕННЫХ, а не в тексте гибели прогона. Это и
+      // есть форма «сторож подсказывает и логирует»: работа не выброшена, а причина не потеряна.
+      ok('и причина НАЗЫВАЕТ зависание — в журнале пропущенных частот, а не в тексте гибели полосы',
+        (stopped.skipped ?? []).some((s) => s.frequencyMhz === 2842 && /ЗАВИСАНИЕ НА 1020 мВ/.test(s.why ?? '')),
+        true);
       ok('и заблокированная ступень НАЗВАНА в отчёте — 2842 МГц / 1020 мВ',
         (stopped.blocked ?? []).map((b) => [b.frequencyMhz, b.voltageMv]), [[2842, 1020]]);
       ok('одно зависание — НЕ блокировка: вероятностный край стирать нельзя',
@@ -6873,10 +7061,21 @@ export function selfTest() {
       saveFn: async () => ({ ok: true }),
       now: () => '2026-08-16T02:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
     });
-    ok('БЕЗ ВЫДАННОЙ ЧАСТОТЫ РАЗВЁРТКА ВСТАЁТ и НЕ подставляет заказанную',
-      [blind.ok, blind.stoppedBy, blind.closed,
-        blind.doc.frequencies.every((r) => r.tags?.includes(CURVE_TAGS.STOP_UNTOUCHED))],
-      [false, 'delivered', 0, true]);
+    // 🔴 ПЕРЕПИСАН 2026-08-24 ПО СЛОВУ ВЛАДЕЛЬЦА — и запрет, ради которого блок заведён, ЦЕЛ.
+    //
+    // БЫЛО: `[ok, stoppedBy, closed, всё нетронуто] === [false,'delivered',0,true]`. Отменена ровно
+    // первая пара: полоса больше не гибнет из-за одной частоты. ЗАПРЕТ ВЛАДЕЛЬЦА, который этот блок
+    // и охраняет — «не подставлять заказанную частоту вместо выданной» — остался ТЕМ ЖЕ и проверяется
+    // теми же двумя полями: закрыто НОЛЬ строк, все строки документа несут «не тронуто». Добавлено
+    // третье утверждение, которого раньше не было и которое теперь несёт смысл: частота названа в
+    // журнале пропущенных со своим классом — иначе «полоса прошла» было бы неотличимо от «полоса
+    // прошла и молча забыла».
+    ok('БЕЗ ВЫДАННОЙ ЧАСТОТЫ строка НЕ ПИШЕТСЯ и заказанная НЕ подставляется — но полоса идёт дальше',
+      [blind.closed,
+        blind.doc.frequencies.every((r) => r.tags?.includes(CURVE_TAGS.STOP_UNTOUCHED)),
+        (blind.skipped ?? []).length > 0,
+        (blind.skipped ?? []).every((s) => s.outcome === 'delivered-unknown')],
+      [0, true, true, true]);
 
     // — ТАБЛИЦА ПЕРЕЧИТЫВАЕТСЯ ПЕРЕД КАЖДОЙ СТУПЕНЬЮ. Живой прогон 2026-08-16 встал ровно на этом:
     //   карта грелась 12 минут, заводская таблица уехала по оси частот, и сдвиг, посчитанный по
@@ -7802,6 +8001,10 @@ async function mainSweep(argv, arg) {
     envelopeMhz,
     pinCard,
     journal,
+    // РЕЖИМ ОТЛАДКИ, ВЫКЛЮЧЕННЫЙ ПО УМОЛЧАНИЮ. Без флага прогон проходит полосу до конца и оставляет
+    // журнал пропущенных частот; с флагом встаёт на первой аномалии — это нужно, когда я ловлю
+    // конкретный дефект и хочу карту в момент отказа.
+    haltOnAnomaly: process.argv.includes('--halt-on-anomaly'),
     // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
     // recoveries that could disagree are worse than one that cannot.
     recover: async () => watchdog.recover(),

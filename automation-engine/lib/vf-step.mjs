@@ -1543,6 +1543,161 @@ export async function measureUndervolt({
  * `load: 'graphics'` — Q2RTX's timedemo through graphics-load, price in **FPS**, which is the
  * observable the owner's `Optimised` criterion is actually stated in.
  */
+/**
+ * ЗАМЕР: ЧТО ДРАЙВЕР ДЕЛАЕТ С НАШИМ ВЕКТОРОМ — одна запись, БЕЗ ЕДИНОГО ПРОЖИГА.
+ *
+ * ─── ЗАЧЕМ ЭТОТ ПРИБОР СУЩЕСТВУЕТ ───────────────────────────────────────────────────────────────
+ *
+ * Живой прогон 2026-08-24 19:1x назвал класс отказа — **C3, драйвер правит результат** — и назвал
+ * его правильно: поточечная сверка управляющей структуры ЗЕЛЁНАЯ (0 расхождений из 127), а
+ * эффективная кривая после записи предлагает 2370 при потолке 2355. Что именно драйвер делает, при
+ * этом НЕ ИЗМЕРЕНО, и лечить неизмеренное значило бы выдумывать (`PHILOSOPHY.md`, третья дверь).
+ *
+ * Офлайн-разбор на живой таблице уже снял подозрение с нашей арифметики: `buildRaiseAndCapVector`
+ * при обоих сдвигах (173 и 203) топится ровно на 2355, утечка 0. Значит расхождение вносит сторона
+ * карты, и увидеть его можно только одним способом — записать вектор и прочитать, ЧТО ПОЛУЧИЛОСЬ,
+ * по каждой записи.
+ *
+ * ─── ПОЧЕМУ ЭТО ДЕШЁВЫЙ ЗАМЕР ───────────────────────────────────────────────────────────────────
+ *
+ * Прожига нет вовсе, поэтому нет и риска нестабильности: карта получает вектор на секунды и
+ * возвращается к заводскому. Стоимость — одна запись и один откат; это тот случай, когда наблюдение
+ * дешевле рассуждения.
+ *
+ * ─── ЧТО ОН ПЕЧАТАЕТ, И ПОЧЕМУ ИМЕННО ЭТО ──────────────────────────────────────────────────────
+ *
+ * Главная величина — ПЛАТО. Отгружаемая форма придавливает всё, что выше потолка, НА потолок, и на
+ * этом векторе 64 записи из 127 просят одну и ту же частоту 2355. Ведущая гипотеза замера: такую
+ * кривую драйвер не хранит буквально — он разводит совпадающие записи по своей сетке, отчего часть
+ * уезжает вниз, а часть вверх. Прибор печатает, сколько РАЗЛИЧНЫХ частот карта поставила там, где мы
+ * просили одну, — и это число либо подтверждает гипотезу, либо убивает её.
+ *
+ * ⚠️ ГИПОТЕЗУ ОН НЕ ДОКАЗЫВАЕТ САМ. Он даёт таблицу «просили → получили»; вывод делает читающий.
+ *
+ * [NOT-TESTED] at birth — это измерительный прибор, и его доказательство есть его собственный вывод
+ * на живой карте, приложенный к `bugs/50`.
+ */
+export async function probeCurveSnap({ deltaMhz = 203, capMhz = 2355, ttlSeconds = 90 } = {}) {
+  const nvapi = await import('./nvapi.mjs');
+  const wd = await import('./watchdog.mjs');
+  const pm = await import('./profile-manager.mjs');
+  const out = { deltaMhz, capMhz, blocks: [], rows: [], ok: false };
+  const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
+
+  const stale = await wd.recover({});
+  if (stale.found && stale.ownerAlive) {
+    block('преполётная проверка: сторож свободен', false, `карту держит живой процесс pid ${stale.record.ownerPid}`);
+    return out;
+  }
+
+  const nv = nvapi.openNvapi();
+  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+  const handle = handles.readBigUInt64LE(0);
+  const N = nvapi.CLK_VF_POINT_COUNT - 1;
+
+  let watchdog = null;
+  let touched = false;
+  try {
+    // ЧИТАЕМ «ДО» ЧЕРЕЗ ТОТ ЖЕ ДОГОВОР, что и «после»: таблица едет с температурой, и сравнивать
+    // устоявшееся с неустоявшимся значило бы мерить прибор, а не карту.
+    const before = nvapi.readVfCurveStable(nv, handle);
+    if (!before.ok) { block('таблица «до» прочитана', false, before.why); return out; }
+    const baseMhz = before.points.slice(0, N).map((p) => p.mhz);
+    const topBefore = Math.max(...before.points.slice(0, N).filter((p) => p.freqKhz > 0).map((p) => p.mhz));
+
+    const vec = nvapi.buildRaiseAndCapVector(before.points, deltaMhz, { capMhz });
+    if (!vec.ok) { block('вектор построен', false, vec.why); return out; }
+    // ТЕ ЖЕ ЧЕТЫРЕ ОТКАЗА, что у боевого пути (R11 · R13 · R12) — прибор не имеет права записать то,
+    // что отгружаемый путь записать отказался бы.
+    const refusal = pm.curveWriteRefusal(vec, { capMhz, cardMaxClockMhz: 3090 });
+    if (refusal) { block('вектор прошёл штатные отказы', false, `${refusal.rule}: ${refusal.why}`); return out; }
+
+    const asked = baseMhz.map((b, i) => (before.points[i].freqKhz > 0 ? Number((b + vec.offsets[i]).toFixed(1)) : null));
+    const plateauIdx = asked.map((v, i) => (v !== null && Math.abs(v - capMhz) < 0.5 ? i : -1)).filter((i) => i >= 0);
+    block(`ЗАКАЗ: вектор +${deltaMhz} МГц, потолок ${capMhz} МГц`, true,
+      `верх таблицы «до» ${topBefore} МГц · наш верх по арифметике ${Math.max(...asked.filter((v) => v !== null))} `
+      + `· ПЛАТО: ${plateauIdx.length} записей просят ровно ${capMhz} МГц`);
+
+    watchdog = wd.arm({
+      what: `ЗАМЕР СНАПА ДРАЙВЕРА: вектор +${deltaMhz}, потолок ${capMhz}, БЕЗ ПРОЖИГА`,
+      ttlMs: ttlSeconds * 1000,
+    });
+    const w = nvapi.writeCurve(nv, handle, vec.offsets);
+    touched = true;
+    block('ЗАПИСЬ принята и управляющая структура держит РОВНО вектор', w.ok,
+      `записано ${w.written}, отказов ${w.failed}, расхождений ${w.mismatches ?? 0}, проб устаивания ${w.probes}`
+      + `${w.why ? ` · ${w.why}` : ''}`);
+    watchdog.beat();
+
+    const after = nvapi.readVfCurveStable(nv, handle);
+    if (!after.ok) { block('таблица «после» прочитана и устоялась', false, after.why); return out; }
+    const gotMhz = after.points.slice(0, N).map((p) => p.mhz);
+    const topAfter = Math.max(...after.points.slice(0, N).filter((p) => p.freqKhz > 0).map((p) => p.mhz));
+
+    for (let i = 0; i < N; i++) {
+      if (before.points[i].freqKhz <= 0) continue;
+      out.rows.push({
+        i, mv: before.points[i].mv, base: baseMhz[i], off: vec.offsets[i],
+        asked: asked[i], got: Number(gotMhz[i].toFixed(1)),
+        delta: Number((gotMhz[i] - asked[i]).toFixed(1)),
+      });
+    }
+    const moved = out.rows.filter((r) => Math.abs(r.delta) > 0.5);
+    const distinctOnPlateau = new Set(plateauIdx.map((i) => Number(gotMhz[i].toFixed(1))));
+    out.summary = {
+      topBefore, topAfter, capMhz,
+      overCapMhz: Number((topAfter - capMhz).toFixed(1)),
+      plateauAsked: plateauIdx.length,
+      plateauDistinctGot: distinctOnPlateau.size,
+      plateauGotValues: [...distinctOnPlateau].sort((a, b) => a - b),
+      movedEntries: moved.length,
+    };
+    block(`ПОТОЛОК: карта предлагает максимум ${topAfter} МГц при потолке ${capMhz}`,
+      topAfter <= capMhz, `превышение ${out.summary.overCapMhz} МГц`);
+    block(`ПЛАТО: просили ${plateauIdx.length} записей на одной частоте — карта поставила ${distinctOnPlateau.size} РАЗЛИЧНЫХ`,
+      distinctOnPlateau.size === 1,
+      `значения: ${out.summary.plateauGotValues.join(', ')}`);
+    block(`СМЕЩЕНО ЗАПИСЕЙ: ${moved.length} из ${out.rows.length} легли не туда, куда послал вектор`,
+      moved.length === 0,
+      moved.slice(0, 8).map((r) => `#${r.i} ${r.base}+${r.off}=${r.asked} → ${r.got} (${r.delta > 0 ? '+' : ''}${r.delta})`).join(' · '));
+    out.ok = true;
+  } finally {
+    // ОТКАТ БЕЗУСЛОВНЫЙ И ПЕРВЫЙ. `zeroCurve` сам перечитывает через договор устаивания.
+    if (touched) {
+      try {
+        const z = nvapi.zeroCurve(nv, handle);
+        block('ОТКАТ: вся кривая обнулена, ненулевых не осталось', z.ok,
+          `ненулевых ${z.remainingNonZero}, не записалось ${z.failed}${z.why ? ` · ${z.why}` : ''}`);
+      } catch (e) { block('ОТКАТ: вся кривая обнулена', false, String(e?.message ?? e)); }
+    }
+    try { watchdog?.disarm(); } catch { /* разоружение не должно ронять отчёт */ }
+    try { nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload); } catch { /* закрытие не роняет */ }
+  }
+  return out;
+}
+
+async function mainProbeSnap() {
+  const arg = (name, dflt) => {
+    const i = process.argv.indexOf(`--${name}`);
+    return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : dflt;
+  };
+  const r = await probeCurveSnap({
+    deltaMhz: Number(arg('mhz', 203)),
+    capMhz: Number(arg('cap', 2355)),
+  });
+  for (const b of r.blocks) console.log(`  ${b.ok ? 'OK  ' : 'ПЛОХО'} ${b.name}${b.detail ? ` — ${b.detail}` : ''}`);
+  if (r.summary) {
+    console.log('');
+    console.log(`СВОДКА: верх ${r.summary.topBefore} → ${r.summary.topAfter} при потолке ${r.summary.capMhz} `
+      + `(превышение ${r.summary.overCapMhz}) · плато: просили ${r.summary.plateauAsked} записей на одной частоте, `
+      + `карта дала ${r.summary.plateauDistinctGot} различных · смещено ${r.summary.movedEntries} записей`);
+  }
+  console.log('ПРОЖИГОВ НЕ БЫЛО — это замер формы записи, а не проверка стабильности.');
+  return r.ok && r.blocks.every((b) => b.ok) ? 0 : 1;
+}
+
 export async function runShapeExperiment({
   deltaMhz = 45,
   workload = 'sdc_fma',
@@ -2296,6 +2451,7 @@ async function main() {
   if (process.argv.includes('--shape')) return mainShape();
   if (process.argv.includes('--measure')) return mainMeasure();
   if (process.argv.includes('--ascend')) return mainAscend();
+  if (process.argv.includes('--probe-snap')) return mainProbeSnap();
   const point = Number(arg('point', DEFAULT_POINT));
   const offsetMhz = Number(arg('mhz', DEFAULT_STEP_MHZ));
   const workload = String(arg('workload', 'sdc_fma'));
