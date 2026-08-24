@@ -283,37 +283,58 @@ export function writeIntent(journal, rung, io = {}) {
  *  2026-08-24 are held by the `bugs/49` blocks in `journal --selftest` and `engine --selftest`]
  */
 export function writeVerdict(journal, closing, io = {}) {
+  // ─── ЗАПИСЬ НЕ ПЕРЕЧИСЛЯЕТ ПОЛЯ ВЫЗЫВАЮЩЕГО — ОНА ИХ РАСКРЫВАЕТ (`bugs/54`) ────────────────────
+  //
+  // Здесь стояло явное перечисление семнадцати полей, и оно МОЛЧА роняло всё, чего в нём не было:
+  // ни ошибки, ни исключения, зелёный код возврата. Движок передавал `deliveredMhz` с коммита
+  // `5b3456e`, а на диск не попало ни одной: замер боевого журнала 2026-08-24 — **678 строк
+  // `passed`, поле в НУЛЕ из них.** Вторая половина каждой доказанной пары терялась между вызовом
+  // и файлом, и вызывающий увидеть этого не мог.
+  //
+  // ⚠️ ЛЕЧЕНИЕ — НЕ СТОРОЖ НАД ПЕРЕЧИСЛЕНИЕМ, А ОТСУТСТВИЕ ПЕРЕЧИСЛЕНИЯ. Первая редакция починки
+  // завела список полей и блок, который парсил исходники проекта и сверял ключи вызывающих с ним;
+  // он тут же дал ложную находку на куске метки времени. Владелец 2026-08-24 23:0x: *«стенд должен
+  // становиться проще и гениальнее в своей простоте. KISS, Паретто»*. Раскрытие делает класс
+  // НЕВОЗМОЖНЫМ вместо того, чтобы за ним следить, — и убирает вместе с собой список, сторож,
+  // парсер и его мутацию. Ровно та же форма уже стоит в `remembered-state.appendBootJournal`,
+  // и твин-проверка нашла её чистой ПО ПОСТРОЕНИЮ.
+  //
+  // Перечисление ниже осталось УМОЛЧАНИЯМИ, а не фильтром: строка вердикта должна нести свои поля
+  // явными `null`, иначе «не измерено» и «поля нет» на диске не различить (EXP-0136).
   const record = {
+    seq: null,
+    at: null,
+    outcome: null,
+    verdict: null,
+    decidedBy: null,
+    servingMvAfter: null,
+    // ⚠️ УМОЛЧАНИЕ `null`, А НЕ `deltaMhz`: вердикт, чей вызывающий не смог назвать лёгший сдвиг,
+    // так и говорит, а не подставляет число, которому это поле и заведено не доверять.
+    appliedDeltaMhz: null,
+    tableDriftMhz: null,
+    appliedPinMhz: null,
+    offeredAfterMhz: null,
+    // КРАСНЫЕ БЛОКИ АТОМА — `plans/37`. Зелёные сюда НЕ едут: строка с двумя дюжинами зелёных
+    // хоронит свой единственный красный.
+    redBlocks: [],
+    redBlocksDropped: 0,
+    // КЛАСС ОТКАЗА ЗАПИСИ — `plans/40`. `redBlocks` несёт УЛИКУ, это поле — ДИАГНОЗ по ней, потому
+    // что диагноз, закопанный в прозу блока, нельзя сосчитать по журналу.
+    writeFailureClass: null,
+    writeSettled: null,
+    // ВЫДАННАЯ ЧАСТОТА — вторая половина доказанной пары (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА
+    // ВЫДАЁТ»). Без неё `servingMvAfter` — напряжение без частоты, и восстановить вторую половину
+    // задним числом нельзя: медиана `clocks.gr` считается по пробам ЭТОГО прожига.
+    deliveredMhz: null,
+    deliveredMaxMhz: null,
+    why: '',
+    ...closing,
+    // `state` — последним: он принадлежит журналу, а не вызывающему.
     state: LINE.VERDICT,
-    seq: closing.seq,
-    at: closing.at ?? null,
-    outcome: closing.outcome ?? null,
-    verdict: closing.verdict ?? null,
-    decidedBy: closing.decidedBy ?? null,
-    servingMvAfter: closing.servingMvAfter ?? null,
-    // ⚠️ `?? null` AND NOT `?? closing.deltaMhz`: a verdict whose caller could not name the applied
-    // offset says so, rather than falling back to the number this field exists to distrust.
-    appliedDeltaMhz: closing.appliedDeltaMhz ?? null,
-    tableDriftMhz: closing.tableDriftMhz ?? null,
-    appliedPinMhz: closing.appliedPinMhz ?? null,
-    offeredAfterMhz: closing.offeredAfterMhz ?? null,
-    // THE ATOM'S RED BLOCKS — `plans/37` (epic 36 phase 1). The atom measures the quantities that
-    // NAME a failure and, until 2026-08-24, threw them away: its blocks are not printed by the sweep
-    // and were not journalled, so on the one rung that mattered nobody could say whether the
-    // point-by-point re-read had been green or red. Capped by `config.ATOM_RED_BLOCKS_IN_JOURNAL`
-    // with the dropped count stated — a silent truncation reads as «nothing else happened».
-    // GREEN blocks are deliberately NOT here: a line carrying two dozen greens buries its one red.
-    redBlocks: Array.isArray(closing.redBlocks) ? closing.redBlocks : [],
-    redBlocksDropped: closing.redBlocksDropped ?? 0,
-    // THE NAMED CLASS OF WRITE FAILURE — `plans/40` (epic 36 phase 4). `redBlocks` carries the
-    // EVIDENCE; this carries the DIAGNOSIS drawn from it, as its own field, because a diagnosis buried
-    // inside a block's prose cannot be counted across a journal. `writeSettled` is beside it because
-    // «the table never stood still» (C1) and «the table stood still and disagreed» (C2/C3/C5/C6) are
-    // the fork the evening run exists to resolve (`researches/18` §5).
-    writeFailureClass: closing.writeFailureClass ?? null,
-    writeSettled: closing.writeSettled ?? null,
-    why: closing.why ?? '',
   };
+  // `undefined` не переживает JSON и оставил бы поле ОТСУТСТВУЮЩИМ, то есть неотличимым от старых
+  // строк. Приводится к `null` — «не названо» говорится вслух.
+  for (const k of Object.keys(record)) if (record[k] === undefined) record[k] = null;
   return appendLine(journal, record, io);
 }
 
@@ -695,6 +716,136 @@ export function provenRungs(records) {
     if (!seen || mv < seen.voltageMv) out.set(i.frequencyMhz, { voltageMv: mv, seq: v.seq, at: v.at ?? null });
   }
   return out;
+}
+
+/**
+ * ─── УРОЖАЙ: КАЖДАЯ СТУПЕНЬ, ВЫДЕРЖАВШАЯ ПРОЖИГ, КАК ПОЛНАЯ ПАРА ──────────────────────────────────
+ * `plans/41` фаза 1. Один автор счёта на весь проект: и прогон, и чтение журнала зовут ЭТУ функцию,
+ * поэтому «доказано прожигом N» не может получиться двух разных значений (`AGENT_GUIDE.md` → пару
+ * лучше УБРАТЬ, чем за ней следить).
+ *
+ * ЗАЧЕМ ЭТО ОТДЕЛЬНО ОТ `provenRungs`. Та ключуется ЗАКАЗАННОЙ частотой (она берёт `frequencyMhz` с
+ * намерения) и отвечает на вопрос возобновления «куда этой частоте уже нельзя». Здесь ключ —
+ * **ВЫДАННАЯ** частота, то есть та, на которой карта РЕАЛЬНО работала, и вопрос другой: «что мы
+ * на самом деле доказали». Правило владельца: *«невозможно у карты заказать частоту и ожидать, что
+ * она её послушно выдаст. Она выдаст какую-то частоту. И нам нужно это знание фиксировать»*.
+ *
+ * ЧТО СЧИТАЕТСЯ ПАРОЙ. Ступень с исходом `passed`, у которой на диске ЕСТЬ ОБЕ половины: выданная
+ * частота и напряжение, обслуживавшее её после записи. Половинки НЕ отбрасываются молча — они
+ * возвращаются списком, и это прибор критерия H-AC1 (`plans/41` §3): их должно быть НОЛЬ.
+ *
+ * КТО ПОБЕЖДАЕТ ПРИ СТОЛКНОВЕНИИ — решено владельцем 2026-08-24 (`interviews/014` Q2 = A):
+ * **меньшее напряжение**, потому что оно тоже выдержало прожиг под оракулом, то есть доказано
+ * наблюдением, а «позже = честнее» было бы рассуждением. Столкновения при этом СЧИТАЮТСЯ и
+ * возвращаются: правило выбрало победителя, а не спрятало факт.
+ *
+ * @param {Array} rungs записи ступеней: `{outcome, deliveredMhz, deliveredMaxMhz, servingMvAfter,
+ *                      orderedMhz, orderedMv, seq, at}`
+ * @returns {{burnsHeld:number, fullPairs:number, pairs:Map, halfPairs:Array, contested:Array,
+ *            worstSpreadMhz:number|null}}
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function harvestPairs(rungs) {
+  const pairs = new Map();
+  const halfPairs = [];
+  let burnsHeld = 0;
+  let worstSpreadMhz = null;
+
+  for (const r of Array.isArray(rungs) ? rungs : []) {
+    if (r?.outcome !== RUNG_OUTCOME.PASSED) continue;
+    burnsHeld += 1;
+    const mhz = Number.isFinite(r?.deliveredMhz) ? r.deliveredMhz : null;
+    const mv = Number.isFinite(r?.servingMvAfter) ? r.servingMvAfter : null;
+    if (mhz === null || mv === null) {
+      // ПОЛОВИНКА НАЗЫВАЕТСЯ, А НЕ ПРОПУСКАЕТСЯ. Уцелевшая половина выглядит как запись, и молчание
+      // о второй — ровно то, чем этот дефект жил (EXP-0141, `bugs/54`).
+      halfPairs.push({
+        seq: r?.seq ?? null,
+        at: r?.at ?? null,
+        orderedMhz: r?.orderedMhz ?? null,
+        deliveredMhz: mhz,
+        servingMvAfter: mv,
+        missing: mhz === null && mv === null ? 'обе половины' : (mhz === null ? 'выданная частота' : 'напряжение'),
+      });
+      continue;
+    }
+    // РАЗБРОС ВЫДАЧИ ВНУТРИ ПРОЖИГА. `deliveredMhz` — медиана проб ПОД НАГРУЗКОЙ, `deliveredMaxMhz` —
+    // максимум. Их разность печатается, но пару НЕ отбрасывает: порога никто не мерил, а назначенное
+    // число хуже отсутствующего (`PHILOSOPHY.md` → три двери). Порог назовёт замер, когда он будет.
+    const spread = Number.isFinite(r?.deliveredMaxMhz) ? Math.max(0, r.deliveredMaxMhz - mhz) : null;
+    if (spread !== null) worstSpreadMhz = worstSpreadMhz === null ? spread : Math.max(worstSpreadMhz, spread);
+
+    const seen = pairs.get(mhz);
+    if (!seen) {
+      pairs.set(mhz, {
+        deliveredMhz: mhz,
+        voltagesMv: [mv],
+        deepestMv: mv,
+        shallowestMv: mv,
+        burns: 1,
+        orderedMhz: [r?.orderedMhz ?? null],
+        worstSpreadMhz: spread,
+        seq: r?.seq ?? null,
+        at: r?.at ?? null,
+      });
+      continue;
+    }
+    seen.burns += 1;
+    seen.voltagesMv.push(mv);
+    seen.orderedMhz.push(r?.orderedMhz ?? null);
+    seen.shallowestMv = Math.max(seen.shallowestMv, mv);
+    if (spread !== null) {
+      seen.worstSpreadMhz = seen.worstSpreadMhz === null ? spread : Math.max(seen.worstSpreadMhz, spread);
+    }
+    // ПОБЕДИТЕЛЬ — МЕНЬШЕЕ НАПРЯЖЕНИЕ (`interviews/014` Q2 = A). Вместе с ним переезжает и подпись
+    // (`seq`, `at`): строка обязана указывать на ТУ ступень, чьё число она несёт.
+    if (mv < seen.deepestMv) {
+      seen.deepestMv = mv;
+      seen.seq = r?.seq ?? null;
+      seen.at = r?.at ?? null;
+    }
+  }
+
+  for (const p of pairs.values()) p.voltagesMv.sort((a, b) => a - b);
+  const contested = [...pairs.values()]
+    .filter((p) => p.deepestMv !== p.shallowestMv)
+    .map((p) => ({ deliveredMhz: p.deliveredMhz, voltagesMv: p.voltagesMv, wonByMv: p.deepestMv }));
+
+  return {
+    burnsHeld,
+    fullPairs: burnsHeld - halfPairs.length,
+    pairs,
+    halfPairs,
+    contested,
+    worstSpreadMhz,
+  };
+}
+
+/**
+ * ТОТ ЖЕ УРОЖАЙ, СНЯТЫЙ С ДИСКА — прибор критерия H-AC1 (`plans/41` §3).
+ *
+ * Соединяет вердикт с его намерением по `seq`: заказанная частота живёт на намерении, выданная — на
+ * вердикте, и пара существует только вместе. Считает ОДНОЙ функцией с прогоном — см. `harvestPairs`.
+ *
+ * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
+ */
+export function harvestFromJournal(records) {
+  const intents = new Map(
+    (Array.isArray(records) ? records : []).filter((r) => r?.state === LINE.INTENT).map((r) => [r.seq, r]));
+  const rungs = (Array.isArray(records) ? records : [])
+    .filter((r) => r?.state === LINE.VERDICT)
+    .map((v) => ({
+      outcome: v.outcome,
+      deliveredMhz: v.deliveredMhz ?? null,
+      deliveredMaxMhz: v.deliveredMaxMhz ?? null,
+      servingMvAfter: v.servingMvAfter ?? null,
+      orderedMhz: intents.get(v.seq)?.frequencyMhz ?? null,
+      orderedMv: intents.get(v.seq)?.voltageMv ?? null,
+      seq: v.seq,
+      at: v.at ?? null,
+    }));
+  return harvestPairs(rungs);
 }
 
 export function hangFloors(records) {
@@ -1160,6 +1311,109 @@ export function selfTest() {
           return top.join(',') === [...top].sort().join(',');
         })(), true);
     }
+
+    // ─── УРОЖАЙ: ПОЛНАЯ ПАРА НА КАЖДУЮ ВЫДЕРЖАВШУЮ ПРОЖИГ СТУПЕНЬ (`bugs/54`, `plans/41` фаза 1) ──
+    //
+    // ЧТО ЗДЕСЬ ПРОИЗОШЛО, ЧТОБЫ БЛОКИ НЕ ЧИТАЛИСЬ КАК ЦЕРЕМОНИЯ. `writeVerdict` перечисляет поля
+    // ЯВНО и неизвестный ключ вызывающего роняет молча — ни ошибки, ни исключения, зелёный код
+    // возврата. Движок передавал `deliveredMhz` с коммита `5b3456e`, а на диск не попало НИ ОДНОЙ:
+    // замер боевого журнала 2026-08-24 — **678 строк `passed`, поле в НУЛЕ из них.**
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   HA. вернуть перечисление полей вместо раскрытия → «ОБЕ ПОЛОВИНЫ» и «ПОЛЕ, О КОТОРОМ ЗАПИСЬ НЕ ЗНАЕТ»
+    //   HB. дать вызывающему переопределить `state`     → «`state` вызывающий переопределить не может»
+    //   HC. ключевать урожай ЗАКАЗАННОЙ частотой      → «УРОЖАЙ КЛЮЧУЕТСЯ ВЫДАННОЙ ЧАСТОТОЙ»
+    //   HD. молча пропускать половинку                → «ПОЛОВИНКА СЧИТАЕТСЯ, А НЕ ПРОПУСКАЕТСЯ»
+    //   HE. при столкновении брать последнее по времени → «ПОБЕЖДАЕТ МЕНЬШЕЕ НАПРЯЖЕНИЕ»
+    //   HF. считать урожай по всем исходам, не только PASSED → «УРОЖАЙ СНИМАЕТСЯ ТОЛЬКО С ПРОШЕДШИХ»
+    {
+      const j18 = openJournal({ dir: join(sandbox, 'harvest') });
+      writeIntent(j18, { seq: 1, frequencyMhz: 2355, voltageMv: 850 });
+      writeVerdict(j18, {
+        seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS,
+        servingMvAfter: 850, deliveredMhz: 2205, deliveredMaxMhz: 2212, why: 'прошло',
+      });
+      const backHarvest = readJournal(j18).records.find((r) => r.state === LINE.VERDICT);
+      // — ЭТО И ЕСТЬ БЛОК ПРОТИВ `bugs/54`. Он читает ДИСК, а не то, что функция вернула: потеря
+      //   происходила именно между вызовом и файлом, и вызывающий её увидеть не мог.
+      ok('ОБЕ ПОЛОВИНЫ ПАРЫ ПЕРЕЖИВАЮТ ЗАПИСЬ: напряжение без своей частоты — половина улики',
+        [backHarvest?.servingMvAfter ?? 'ПОТЕРЯНО', backHarvest?.deliveredMhz ?? 'ПОТЕРЯНО',
+          backHarvest?.deliveredMaxMhz ?? 'ПОТЕРЯНО'],
+        [850, 2205, 2212]);
+
+      // — И ГЛАВНОЕ: ЛЮБОЕ ПОЛЕ ВЫЗЫВАЮЩЕГО, А НЕ ТОЛЬКО ЭТИ ДВА.
+      //   Блок держит СВОЙСТВО записи, а не список её полей: поле, о котором запись не знает вовсе,
+      //   обязано доехать до диска. Это и есть проверка того, что перечисления БОЛЬШЕ НЕТ — оно и
+      //   было механизмом потери. Мутация «вернуть перечисление полей» красит и этот блок, и
+      //   круговой ход выше, и ничего больше городить не нужно.
+      const j18b = openJournal({ dir: join(sandbox, 'harvest-unknown-field') });
+      writeVerdict(j18b, {
+        seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS,
+        поле_которого_запись_не_знает: 'доехало',
+      });
+      ok('ПОЛЕ, О КОТОРОМ ЗАПИСЬ НЕ ЗНАЕТ, ДОЕЗЖАЕТ ДО ДИСКА — терять нечем, перечисления нет',
+        readJournal(j18b).records[0]?.поле_которого_запись_не_знает ?? 'ПОТЕРЯНО', 'доехало');
+      // И `state` вызывающему не принадлежит: строка вердикта обязана остаться вердиктом.
+      writeVerdict(j18b, { seq: 2, state: 'intent', outcome: RUNG_OUTCOME.PASSED });
+      ok('но `state` вызывающий переопределить не может — иначе вердикт притворился бы намерением',
+        readJournal(j18b).records[1]?.state, LINE.VERDICT);
+
+      // — УРОЖАЙ КЛЮЧУЕТСЯ ВЫДАННОЙ ЧАСТОТОЙ. Заказали 2355, карта работала на 2205: пара
+      //   принадлежит 2205, потому что напряжение обслуживало ЕЁ (`GOAL.md` → «ТЮНИМ ТО, ЧТО КАРТА
+      //   ВЫДАЁТ»). `provenRungs` рядом ключуется заказанной — это РАЗНЫЕ вопросы, и блок держит обе.
+      const h1 = harvestFromJournal(readJournal(j18).records);
+      ok('УРОЖАЙ КЛЮЧУЕТСЯ ВЫДАННОЙ ЧАСТОТОЙ, а память возобновления — заказанной',
+        [[...h1.pairs.keys()], [...provenRungs(readJournal(j18).records).keys()]],
+        [[2205], [2355]]);
+      ok('и пара несёт напряжение, обслуживавшее выданную частоту, и разброс выдачи',
+        [h1.pairs.get(2205)?.deepestMv ?? 'нет', h1.worstSpreadMhz, h1.burnsHeld, h1.fullPairs],
+        [850, 7, 1, 1]);
+
+      // — ПОЛОВИНКА СЧИТАЕТСЯ, А НЕ ПРОПУСКАЕТСЯ. Это прибор критерия H-AC1: цель — НОЛЬ половинок.
+      //   Фикстура воспроизводит боевой журнал ДО починки: `servingMvAfter` есть, частоты нет.
+      const j19 = openJournal({ dir: join(sandbox, 'harvest-half') });
+      writeIntent(j19, { seq: 1, frequencyMhz: 2355, voltageMv: 850 });
+      writeVerdict(j19, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 850 });
+      const h2 = harvestFromJournal(readJournal(j19).records);
+      ok('ПОЛОВИНКА СЧИТАЕТСЯ, А НЕ ПРОПУСКАЕТСЯ: прожиг был, пары нет, и это НАЗВАНО',
+        [h2.burnsHeld, h2.fullPairs, h2.pairs.size, h2.halfPairs.length, h2.halfPairs[0]?.missing ?? 'нет'],
+        [1, 0, 0, 1, 'выданная частота']);
+
+      // — ПОБЕЖДАЕТ МЕНЬШЕЕ НАПРЯЖЕНИЕ (`interviews/014` Q2 = A, слово владельца 2026-08-24).
+      //   Фикстура строится так, что «последнее по времени» и «меньшее» РАСХОДЯТСЯ — иначе блок
+      //   зеленел бы при обоих правилах и не доказывал бы ничего.
+      const j20 = openJournal({ dir: join(sandbox, 'harvest-contest') });
+      writeIntent(j20, { seq: 1, frequencyMhz: 2355, voltageMv: 850 });
+      writeVerdict(j20, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 785, deliveredMhz: 2205 });
+      writeIntent(j20, { seq: 2, frequencyMhz: 2340, voltageMv: 860 });
+      writeVerdict(j20, { seq: 2, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS, servingMvAfter: 850, deliveredMhz: 2205 });
+      const h3 = harvestFromJournal(readJournal(j20).records);
+      ok('ПОБЕЖДАЕТ МЕНЬШЕЕ НАПРЯЖЕНИЕ, а не последнее по времени',
+        [h3.pairs.get(2205)?.deepestMv ?? 'нет', h3.pairs.get(2205)?.seq ?? 'нет'], [785, 1]);
+      // И СТОЛКНОВЕНИЕ НЕ ПРЯЧЕТСЯ: правило выбрало победителя, факт остался видимым.
+      ok('и столкновение НАЗВАНО: две ступени доказали одну выданную частоту разными напряжениями',
+        [h3.contested.length, h3.contested[0]?.voltagesMv ?? 'нет', h3.burnsHeld, h3.pairs.size],
+        [1, [785, 850], 2, 1]);
+
+      // — УРОЖАЙ СНИМАЕТСЯ ТОЛЬКО С ПРОШЕДШИХ. Отказ и зависание тоже несут выданную частоту, но
+      //   доказывают ОБРАТНОЕ; собрать их в урожай значило бы записать край как рабочую точку.
+      const j21 = openJournal({ dir: join(sandbox, 'harvest-outcomes') });
+      writeIntent(j21, { seq: 1, frequencyMhz: 2355, voltageMv: 780 });
+      writeVerdict(j21, { seq: 1, at: null, outcome: RUNG_OUTCOME.FAILED, verdict: config.VERDICT.SDC, servingMvAfter: 780, deliveredMhz: 2205 });
+      writeIntent(j21, { seq: 2, frequencyMhz: 2355, voltageMv: 775 });
+      writeVerdict(j21, { seq: 2, at: null, outcome: RUNG_OUTCOME.HUNG, verdict: config.VERDICT.HUNG, servingMvAfter: 775, deliveredMhz: 2205 });
+      ok('УРОЖАЙ СНИМАЕТСЯ ТОЛЬКО С ПРОШЕДШИХ: отказ и зависание пары не заводят',
+        (() => { const h = harvestFromJournal(readJournal(j21).records); return [h.burnsHeld, h.pairs.size, h.halfPairs.length]; })(),
+        [0, 0, 0]);
+
+      // — ОДИН АВТОР СЧЁТА. Прогон считает урожай по своим записям ступеней, чтение журнала — по
+      //   диску, и оба зовут ОДНУ функцию. Блок держит именно это: пару лучше УБРАТЬ, чем следить.
+      ok('ОДИН АВТОР СЧЁТА: прогон и чтение журнала дают одно число, потому что зовут одну функцию',
+        harvestPairs([
+          { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2205, deliveredMaxMhz: 2212, servingMvAfter: 850, orderedMhz: 2355, seq: 1 },
+        ]).pairs.get(2205)?.deepestMv ?? 'нет',
+        h1.pairs.get(2205)?.deepestMv ?? 'нет');
+    }
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });
@@ -1221,4 +1475,5 @@ export default {
   SWEEP_DIR, LINE, RUNG_OUTCOME, openJournal, assertSandbox, rungKey,
   appendLine, writeIntent, writeVerdict, readJournal, orphanIntents, closeHangs, closeAsOperatorStop,
   closeAsWriterDeath, attributions, hangFloors, blockedRungs, resumeState,
+  provenRungs, harvestPairs, harvestFromJournal,
 };

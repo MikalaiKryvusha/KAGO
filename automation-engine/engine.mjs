@@ -75,7 +75,7 @@ import {
 import {
   writeIntent, writeVerdict,
   openJournal, readJournal, orphanIntents, resumeState, hangFloors, provenRungs, SWEEP_DIR,
-  closeAsOperatorStop, closeAsWriterDeath, RUNG_OUTCOME,
+  closeAsOperatorStop, closeAsWriterDeath, RUNG_OUTCOME, harvestPairs,
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
@@ -2760,6 +2760,9 @@ export async function sweepRange({
       { frequencyMhz: mhz, voltageMv: f.voltageMv, at: f.at ?? null });
   }
   let seq = resume.nextSeq ?? 1;
+  // КАЖДАЯ СТУПЕНЬ ПОЛОСЫ, В ПОРЯДКЕ ПРОХОЖДЕНИЯ — сырьё урожая (`plans/41` фаза 1). Заполняется
+  // в ОДНОМ месте, в воронке `runRungFn` ниже.
+  const harvestedRungs = [];
 
   const groups = rungGroups({ rows: curveDoc.frequencies, fromMhz, toMhz });
   const voltageGridMv = curveDoc.voltageGridMv ?? [];
@@ -2999,6 +3002,11 @@ export async function sweepRange({
           // в окне, а не только в записи после прогона.
           shapeLadder, onEvent,
         });
+        // ─── УРОЖАЙ СНИМАЕТСЯ ЗДЕСЬ, И ТОЛЬКО ЗДЕСЬ (`plans/41` фаза 1) ─────────────────────────
+        // Через эту воронку проходит КАЖДАЯ ступень полосы — затравка, грубый спуск и мелкие шаги
+        // уточнения, — потому что `sweepFrequency` зовёт её для всех. Считать в трёх местах значило
+        // бы три шанса забыть одно (EXP-0074). Одна строка, один автор.
+        harvestedRungs.push({ ...r, orderedMhz: frequencyMhz });
         say('rung', r.why, { frequencyMhz, voltageMv, outcome: r.outcome });
         return r;
       },
@@ -3204,6 +3212,13 @@ export async function sweepRange({
       + `${report.groupCount} ступеней полосы. Первая причина — ${report.skipped[0].why}`;
   }
   report.doc = doc;
+  // ─── УРОЖАЙ ПРОГОНА (`plans/41` фаза 1, H-AC1 и H-AC7) ────────────────────────────────────────
+  //
+  // Считается ТОЙ ЖЕ функцией, которой читается журнал с диска, поэтому «доказано прожигом N» не
+  // может получиться двух разных значений. Урожай собирается со ВСЕХ ступеней полосы, включая
+  // ступени пропущенных частот: частота могла не закрыться, а её прожиги всё равно состоялись и
+  // всё равно что-то доказали — ровно та работа, которая до сих пор нигде не оседала.
+  report.harvest = harvestPairs(harvestedRungs);
   report.elapsedMs = clockMs() - startedMs;
   return report;
 }
@@ -3429,6 +3444,38 @@ export function sweepReportLines(report) {
   lines.push(`РАЗВЁРТКА${report.bandLabel ? ` «${report.bandLabel}»` : ''}: ступеней ${report.groupCount}, `
     + `частот в полосе ${report.frequenciesInBand}`);
   lines.push(`ПОКРЫТИЕ: закрыто ${report.closed} из ${report.frequenciesInBand} (${pct(report.closed, report.frequenciesInBand)})`);
+  // ─── УРОЖАЙ: «ДОКАЗАНО ПРОЖИГОМ» И «ЗАКРЫТО» — РАЗНЫЕ ЧИСЛА, И ОБА ПЕЧАТАЮТСЯ ─────────────────
+  //
+  // Критерий H-AC7 (`plans/41` §3), и он про честность покрытия. Прогон 2026-08-24 22:0x: **23
+  // ступени, 16 выдержали прожиг, 4 строки в документе** — то есть одна строка «закрыто 4» была
+  // единственным числом, которое видел оператор, и работа, оплаченная шестью минутами карты, в
+  // отчёте не существовала. Слово владельца: *«Промежуточные — знание, оплаченное вашим железом, —
+  // не оседают нигде. Это ценно, а мы это не используем»*.
+  //
+  // Печатается ВСЕГДА, включая ноль: «прожиг не выдержала ни одна ступень» — такой же результат.
+  const h = report.harvest ?? null;
+  if (h) {
+    lines.push(`УРОЖАЙ: прожиг выдержали ${h.burnsHeld} ступен(ей) на ${h.pairs.size} выданных частотах `
+      + `— против ${report.closed} строк(и), закрытых в документе. Это РАЗНЫЕ числа: закрыто ≠ доказано`);
+    // ПРИБОР КРИТЕРИЯ H-AC1, и его цель — НОЛЬ. Половинка выглядит как запись, поэтому молчание о
+    // ней и было дефектом (`bugs/54`: 678 строк из 678 несли напряжение без своей частоты).
+    if (h.halfPairs.length) {
+      lines.push(`   🔴 ПОЛОВИНОК ${h.halfPairs.length}: ступень прожиг выдержала, а пары на диске нет `
+        + `(${[...new Set(h.halfPairs.map((p) => p.missing))].join(' · ')}) — это дефект журнала, а не карты`);
+    } else {
+      lines.push('   половинок 0 — каждая выдержавшая ступень оставила на диске ОБЕ половины пары');
+    }
+    // РАЗБРОС ВЫДАЧИ ПЕЧАТАЕТСЯ, НО ПАРУ НЕ ОТБРАСЫВАЕТ: порога никто не мерил, а назначенное число
+    // хуже отсутствующего (`plans/41` §6, ряд про нестабильную выдачу).
+    if (h.worstSpreadMhz !== null) {
+      lines.push(`   разброс выдачи внутри прожига: худший ${h.worstSpreadMhz} МГц (медиана против максимума проб под нагрузкой)`);
+    }
+    if (h.contested.length) {
+      lines.push(`   одну выданную частоту доказали РАЗНЫМИ напряжениями: ${h.contested.length} — `
+        + h.contested.slice(0, 4).map((c) => `${c.deliveredMhz} МГц ${c.voltagesMv.join('/')} мВ → ${c.wonByMv}`).join(', ')
+        + ' (побеждает меньшее, interviews/014 Q2)');
+    }
+  }
   // «ПРЕДЕЛ РЫЧАГА» РАЗДЕЛЁН НА ДВЕ РАЗНЫЕ ПРИЧИНЫ В ПЕЧАТИ (`CURVE_STATUS.DEPTH_CAPPED`). Одно
   // число над двумя несовместимыми фактами — «карте ниже нельзя» и «мы решили не смотреть» — это
   // ровно то, на чём владелец споткнулся 2026-08-17. Слово «рычаг» тоже убрано: это метафора агента,
@@ -6473,6 +6520,19 @@ export function selfTest() {
         lines.some((l) => l.includes('край найден 2')),
         lines.some((l) => l.includes('ЗАТРАВКА: отвергнута')),
         lines.some((l) => l.includes('против оценки 1.7 ч'))],
+      [true, true, true, true]);
+    // — H-AC7 (`plans/41` §3): «ЗАКРЫТО» И «ДОКАЗАНО ПРОЖИГОМ» — РАЗНЫЕ ЧИСЛА, И ОБА ПЕЧАТАЮТСЯ.
+    //   Прогон 2026-08-24 22:0x: 23 ступени, 16 выдержали прожиг, 4 строки в документе — а оператор
+    //   видел ТОЛЬКО «закрыто 4». Работа, оплаченная шестью минутами карты, в отчёте не существовала.
+    //   АДРЕСАТ МУТАЦИИ: убрать строку УРОЖАЯ из `sweepReportLines` → этот блок.
+    ok('УРОЖАЙ В СВОДКЕ: «доказано прожигом» печатается ОТДЕЛЬНЫМ числом от «закрыто»',
+      [lines.some((l) => l.startsWith('УРОЖАЙ: прожиг выдержали ')),
+        lines.some((l) => l.includes('закрыто ≠ доказано')),
+        // Число урожая обязано быть БОЛЬШЕ закрытого — иначе строка ничего не сообщает и её незачем
+        // печатать. В этой фикстуре 5 закрытых частот, а ступеней прожига больше.
+        (full.harvest?.burnsHeld ?? 0) > full.closed,
+        // H-AC1: половинок ноль, и отчёт это говорит вслух, а не молчит.
+        lines.some((l) => l.includes('половинок 0'))],
       [true, true, true, true]);
 
     // — `bugs/13`: THE LIVE SWEEP'S JOURNAL IS THE PRODUCTION ONE, and the teardown guard must never
