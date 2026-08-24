@@ -1701,7 +1701,29 @@ export function planFrequency({
   // ⚠️ Затравка по-прежнему ПРОЖИГАЕТСЯ первой — это проверка, а не формальность: спуск обязан
   // убедиться, что вчерашний PASS воспроизводится сегодня, прежде чем идти глубже. Экономятся
   // ступени между стоком и уликой, а не проверка самой улики.
-  const ownProvenMv = Number.isFinite(provenPassMv) && provenPassMv < stockVoltageMv ? provenPassMv : null;
+  // ─── И ВТОРОЙ ИСТОЧНИК СОБСТВЕННОЙ УЛИКИ — СВОЯ СТРОКА ДОКУМЕНТА (`plans/41` фаза 4) ────────────
+  //
+  // `provenPassMv` приходит из ЖУРНАЛА и ключуется ЗАКАЗАННОЙ частотой. Урожай живёт в ДОКУМЕНТЕ и
+  // ключуется ВЫДАННОЙ — то есть частота, куда карта заехала по дороге, свою улику имела и спуску
+  // её не показывала. Ровно этот разрыв и есть H-AC6: «число частот с собственной уликой растёт».
+  //
+  // Читается ЗДЕСЬ, а не у двух вызывающих (развёртка и сухой прогон), потому что два места считали
+  // бы одно число врозь — пара «правда↔зеркало», которую этот проект предпочитает УБИРАТЬ.
+  //
+  // ⚠️ ЧТО ИМЕННО БЕРЁТСЯ: `voltageMv` строки — то есть РАБОЧАЯ ТОЧКА, уже с запасом, а не сырая
+  // прошедшая ступень. Это на шаг сетки консервативнее, и так и должно быть: затравка прожигается
+  // первой, и начинать её ровно на краю значило бы проверять край, а не воспроизводимость.
+  //
+  // ⚠️ `seedFor` сюда не годится и не переписывается: она отвечает на ДРУГОЙ вопрос — что доказала
+  // соседка СВЕРХУ — и намеренно пропускает саму частоту (`r.mhz <= frequencyMhz` → continue).
+  const ownRow = Array.isArray(curveDoc?.frequencies)
+    ? curveDoc.frequencies.find((r) => r?.mhz === frequencyMhz) : null;
+  const ownRowMv = ownRow && claimsBurnProof(ownRow) && Number.isFinite(ownRow.voltageMv)
+    ? ownRow.voltageMv : null;
+  // ГЛУБОЧАЙШАЯ ИЗ ДВУХ СОБСТВЕННЫХ — та же логика, что строкой ниже для собственной против соседской.
+  const ownMv = provenPassMv === null ? ownRowMv
+    : (ownRowMv === null ? provenPassMv : Math.min(provenPassMv, ownRowMv));
+  const ownProvenMv = Number.isFinite(ownMv) && ownMv < stockVoltageMv ? ownMv : null;
   const neighbourSeedMv = Number.isFinite(seed?.seedMv) ? seed.seedMv : null;
   const candidateSeedMv = ownProvenMv === null ? neighbourSeedMv
     : (neighbourSeedMv === null ? ownProvenMv : Math.min(ownProvenMv, neighbourSeedMv));
@@ -3226,6 +3248,9 @@ export async function sweepRange({
   const harvested = writeHarvestRows(doc, report.harvest, { at: now ? now() : null });
   report.harvestedRows = harvested.written;
   report.harvestRefusals = harvested.refused;
+  // H-AC6 — ЗАМЕР, А НЕ ЗАЯВЛЕНИЕ: сколько частот имеют СВОЮ улику до урожая и после. Ровно это
+  // число решает, насколько дешевле будет следующий прогон (`plans/41` фаза 4).
+  report.ownEvidence = { before: harvested.ownEvidenceBefore, after: harvested.ownEvidenceAfter };
   if (harvested.written.length) {
     doc = harvested.doc;
     if (saveFn) {
@@ -3283,7 +3308,15 @@ export function writeHarvestRows(doc, harvest, { at = null } = {}) {
   const written = [];
   const refused = [];
   let out = doc;
-  if (!harvest || !(harvest.pairs instanceof Map)) return { doc: out, written, refused };
+  // ПРИБОР КРИТЕРИЯ H-AC6, ВСТРОЕННЫЙ В ПРОДУКТ, А НЕ РАЗОВЫЙ СКРИПТ. «Затравка следующего прогона
+  // улучшается» — утверждение о ЧИСЛЕ частот, у которых есть СВОЯ улика; считается до и после, и
+  // печатается в сводке каждого прогона. Замер, который надо ставить вручную, — замер, которого не
+  // будет через месяц.
+  const countOwnEvidence = (d) => (d?.frequencies ?? []).filter((r) => claimsBurnProof(r)).length;
+  const ownEvidenceBefore = countOwnEvidence(doc);
+  if (!harvest || !(harvest.pairs instanceof Map)) {
+    return { doc: out, written, refused, ownEvidenceBefore, ownEvidenceAfter: ownEvidenceBefore };
+  }
 
   // По убыванию частоты — тем же порядком, каким идёт сам документ, чтобы храповик встречал строки
   // в привычном ему направлении и дифф документа читался.
@@ -3360,7 +3393,7 @@ export function writeHarvestRows(doc, harvest, { at = null } = {}) {
     // прожигом, второе отгружается. Сводка печатает отгружаемое, а разбор ведётся по доказанному.
     written.push({ mhz: p.deliveredMhz, voltageMv: shipMv, provenMv: p.deepestMv, wasMv: row.voltageMv, burns: p.burns });
   }
-  return { doc: out, written, refused };
+  return { doc: out, written, refused, ownEvidenceBefore, ownEvidenceAfter: countOwnEvidence(out) };
 }
 
 /**
@@ -3628,6 +3661,13 @@ export function sweepReportLines(report) {
       + (hr.length ? ` — ${hr.slice(0, 5).map((w) => `${w.mhz} МГц ${w.wasMv}→${w.voltageMv} мВ`).join(', ')}`
         + `${hr.length > 5 ? ` и ещё ${hr.length - 5}` : ''}` : ' (всё, что доказано, уже стоит глубже — перезаписывать нечем)')
       + '. Статус «прожиг выдержан», БЕЗ причины остановки: спуска там не было');
+    // H-AC6 ОДНОЙ СТРОКОЙ: во что урожай обошёлся СЛЕДУЮЩЕМУ прогону. Растущее число — это
+    // ступени, которые он не будет жечь заново, то есть минуты карты владельца.
+    if (report.ownEvidence) {
+      const { before, after } = report.ownEvidence;
+      lines.push(`   частот со СВОЕЙ уликой: было ${before}, стало ${after}`
+        + (after > before ? ` (+${after - before}) — на столько частот следующий прогон стартует глубже` : ' — затравка не улучшилась'));
+    }
     if (report.harvestRefusals?.length) {
       lines.push(`   🟡 урожайных строк ОТВЕРГНУТО ${report.harvestRefusals.length}: `
         + report.harvestRefusals.slice(0, 3).map((r) => `${r.mhz ?? '—'} МГц — ${String(r.why).slice(0, 90)}`).join(' · '));
@@ -4647,6 +4687,43 @@ export function selfTest() {
     const neighbourOnly = plan();
     ok('без собственной улики затравка приходит от соседки — прежнее поведение цело',
       [neighbourOnly.seedMv, neighbourOnly.seedFromOwnEvidence], [990, false]);
+    // ─── ЗАТРАВКА ЕСТ УРОЖАЙ — `plans/41` ФАЗА 4, КРИТЕРИЙ H-AC6 ───────────────────────────────
+    //
+    // Урожайная строка лежит в ДОКУМЕНТЕ и ключуется ВЫДАННОЙ частотой; журнал ключуется
+    // ЗАКАЗАННОЙ. Значит частота, куда карта заехала по дороге, имела собственную улику и спуску
+    // её не показывала — тот самый разрыв, который меряет H-AC6 («число частот с собственной
+    // уликой растёт»). Фикстура: в журнале по 2842 НЕТ ничего, а в документе стоит урожайная
+    // строка — с тегом прожига и БЕЗ причины остановки, ровно как её пишет `writeHarvestRows`.
+    // АДРЕСАТ МУТАЦИИ HN: не читать свою строку документа → этот блок.
+    const docWithHarvest = {
+      ...docWithNeighbour,
+      frequencies: [
+        docWithNeighbour.frequencies[0],
+        {
+          mhz: 2842, voltageMv: 900, stockVoltageMv: 1045,
+          tags: [CURVE_TAGS.BURN_SHORT, CURVE_TAGS.ORIGIN_MEASURED], provenBy: 'УРОЖАЙ: прожиг выдержан',
+        },
+      ],
+    };
+    const harvested = planFrequency({
+      frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: uniform5,
+      availableDepthMv: 200, curveDoc: docWithHarvest,
+    });
+    ok('H-AC6 ЗАТРАВКА ЕСТ УРОЖАЙ: своя урожайная строка 900 мВ сильнее соседкиных 990, и названа СВОЕЙ',
+      [harvested.seedMv, harvested.seedFromOwnEvidence, harvested.startMv], [900, true, 900]);
+    // И «ТОЧКА ОТСЧЁТА, А НЕ ФИНИШ» (слово владельца, `interviews/014` Q1 = A): спуск ОБЯЗАН идти
+    // глубже урожайной строки, а не вставать на ней. Блок держит именно это.
+    ok('...и спуск обязан идти ГЛУБЖЕ урожайной строки — это точка отсчёта, а не финиш',
+      [harvested.rungs.length > 0, harvested.rungs.every((r) => r.mv < 900)], [true, true]);
+    // ⚠️ И СТРОКА БЕЗ ПРОЖИГА УЛИКОЙ НЕ СТАНОВИТСЯ. Иначе стоковая или «предел рычага» строка стала
+    // бы затравкой, то есть спуск стартовал бы от числа, которого никто не доказывал.
+    ok('...а строка БЕЗ прожига уликой не становится: затравка снова соседкина',
+      (() => {
+        const doc = { ...docWithNeighbour, frequencies: [docWithNeighbour.frequencies[0],
+          { mhz: 2842, voltageMv: 900, stockVoltageMv: 1045, tags: [CURVE_TAGS.STOP_LEVER_LIMIT], provenBy: null }] };
+        const p = planFrequency({ frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: uniform5, availableDepthMv: 200, curveDoc: doc });
+        return [p.seedMv, p.seedFromOwnEvidence];
+      })(), [990, false]);
     // Улика ГЛУБЖЕ соседкиной — и решает она: 870 доказаны РОВНО на этой частоте.
     const own = plan({ provenPassMv: 870 });
     ok('СПУСК СТАРТУЕТ ОТ СОБСТВЕННОЙ УЛИКИ: доказанные 870 мВ, а не соседкины 990',
