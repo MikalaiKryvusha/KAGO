@@ -193,6 +193,58 @@ export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
     // частоте при напряжении другой это ровно `bugs/28`.
     const after = vc.oracle.servingVoltageMv(deliveredMhz);
 
+    // ─── ТЕ ЖЕ ПРОВЕРКИ, ЧТО ДЕЛАЕТ ЖИВОЙ АТОМ (`plans/38`, эпик 36 фаза 2) ───────────────────────
+    //
+    // 🔴 ЧЕГО ЗДЕСЬ НЕ БЫЛО И ПОЧЕМУ ЭТО ГЛАВНАЯ ПОЛОВИНА СЛЕПОТЫ СТЕНДА. Подменный атом возвращал
+    // вердикт, выданную частоту и обслуживающее напряжение — и ОДИН блок отката. Ни одного из трёх
+    // чисел, которыми 2026-08-24 пойман дефект живой записи, у него не было:
+    //   · `highestOfferedMhz` — что кривая предлагает ПОСЛЕ записи (на живой карте 2370 при потолке 2355);
+    //   · поточечная сверка — легли ли сдвиги вообще (различитель между тремя гипотезами);
+    //   · блок потолка — устоял ли потолок в самой таблице.
+    // Пока их нет, стенд не проверяет запись, а благословляет её: `researches/18` §6.
+    //
+    // ⚠️ ЧИТАЕМ КАРТУ, А НЕ СВОЙ ЗАКАЗ. Оба чтения идут в бэкенд (`readCurve`, `readCurveOffsets`);
+    // сверять `w.vector` сам с собой значило бы вернуть ровно ту тавтологию, которую фаза 2 снимает.
+    const curveAfter = await vc.curveBackend.readCurve();
+    const offsetsAfter = await vc.curveBackend.readCurveOffsets();
+    const blocks = [];
+    let highestOfferedMhz = null;
+    if (curveAfter.ok) {
+      highestOfferedMhz = Math.max(...curveAfter.points.map((p) => p.mhz));
+      // Имя и флаг `proof` — те же, что у живого атома: `engine.runRung` маршрутизирует по ПОЛЮ,
+      // и блок, отличающийся флагом, поехал бы по другому проводу (`plans/28`, находка A).
+      const capForProof = uniform ? null : capMhz;
+      if (Number.isFinite(capForProof)) {
+        blocks.push({
+          name: `ПОТОЛОК ${capForProof} МГц УСТОЯЛ В ТАБЛИЦЕ`,
+          ok: highestOfferedMhz <= capForProof,
+          proof: true,
+          why: highestOfferedMhz <= capForProof
+            ? `максимум таблицы ${highestOfferedMhz} МГц при потолке ${capForProof}`
+            : `карта ушла ВЫШЕ потолка: максимум ${highestOfferedMhz} МГц при потолке ${capForProof}`,
+          detail: `план обещал не выше ${capForProof}`,
+        });
+      }
+    }
+    // ПОТОЧЕЧНАЯ СВЕРКА — обычный блок, без флагов: у него на живом пути тоже нет своего канала,
+    // и именно поэтому фаза 1 научила движок довозить такие блоки до журнала.
+    if (offsetsAfter.ok && Array.isArray(w.vector)) {
+      let matched = 0;
+      let firstMissAt = null;
+      for (let i = 0; i < w.vector.length; i++) {
+        if (offsetsAfter.offsets[i] === w.vector[i]) matched++;
+        else if (firstMissAt === null) firstMissAt = i;
+      }
+      blocks.push({
+        name: 'перечитано ПОТОЧЕЧНО: каждая точка несёт РОВНО заказанный сдвиг',
+        ok: matched === w.vector.length,
+        detail: matched === w.vector.length
+          ? `сошлось ${matched} из ${w.vector.length}`
+          : `сошлось ${matched} из ${w.vector.length}, первое расхождение в точке ${firstMissAt} `
+            + `(заказано ${w.vector[firstMissAt]}, карта держит ${offsetsAfter.offsets[firstMissAt]})`,
+      });
+    }
+
     await vc.curveBackend.zeroCurve();
     if (pinMhz !== null) vc.backend.resetGraphicsClocks();
     return {
@@ -203,8 +255,13 @@ export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
       deliveredMaxMhz: deliveredMhz,
       clockShortfall: Number.isFinite(ordered) && deliveredMhz < ordered,
       deliveredShortfallMhz: Number.isFinite(ordered) ? ordered - deliveredMhz : null,
-      undervolt: { capMhz, after: { mv: after } },
-      blocks: [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }],
+      // СДВИГ, КОТОРЫЙ РЕАЛЬНО ЛЁГ — то же поле, что живой атом отдаёт движку для журнала
+      // (`bugs/49`). Без него `appliedDeltaMhz` на стенде всегда null, и репетиция не проверяет
+      // проводку, которую живой прогон использует.
+      offsetMhz,
+      highestOfferedMhz,
+      undervolt: { capMhz, offeredAfterMhz: highestOfferedMhz, after: { mv: after } },
+      blocks: [{ name: 'ОТКАТ: кривая обнулена', ok: true, undo: true }, ...blocks],
     };
   };
 }

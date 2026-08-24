@@ -934,6 +934,24 @@ export function virtualCard(cardProfile, {
   // process cannot speak while it runs, and a dashboard whose animation stops for ten seconds every
   // rung is indistinguishable from a dashboard watching a dead machine (`ideas/06` §6.2).
   onTick = null,
+  // ─── THE SEAM THAT LETS THE CARD'S TABLE DISAGREE WITH WHAT WE WROTE (`plans/38`, epic 36) ──────
+  //
+  // 🔴 WHY A BENCH NEEDS THIS AT ALL, in one measured sentence: until 2026-08-24 the virtual card
+  // answered a write by STORING THE VECTOR, so its read-back agreed with the engine because it WAS
+  // the engine's own arithmetic. A green bench meant «the engine is consistent with itself» — and
+  // on 2026-08-24 09:36 the live card, handed a vector whose top is provably ≤ the cap, reported a
+  // table whose top was 15 MHz ABOVE it (`researches/18` §1). The bench could not have produced that
+  // in any fixture, at any Δ.
+  //
+  // `applyWrite(requested, ctx)` receives the offsets the caller asked for and returns the offsets
+  // the CARD ends up holding. The default is faithful application — the honest model of a card that
+  // does what it is told — and phase 3 replaces it per failure class (a fraction of the entries
+  // inert · the driver adjusting the result · a read taken before the table settled).
+  //
+  // ⚠️ IT IS DECLARED HERE AND EXERCISED IN PHASE 3, deliberately: a seam whose shape is invented
+  // alongside its first user gets shaped by that user's convenience. Phase 2 proves the surface with
+  // a fixture; phase 3 injects the classes.
+  applyWrite = null,
 } = {}) {
   const v = validateCard(cardProfile);
   if (!v.ok) throw new Error(`виртуальная карта не поднимается на негодном профиле (поле ${v.field}): ${v.why}`);
@@ -1007,10 +1025,12 @@ export function virtualCard(cardProfile, {
     if (!P.fiction || !Array.isArray(P.fiction.edge) || !P.fiction.edge.length) return null;
     // ПОТОЛОК — самое высокое, что предлагает записанная кривая, но не выше максимума экземпляра
     // (R13: выше него карта не идёт ни при какой кривой).
+    // ОДНА ФОРМУЛА НА ВСЮ КАРТУ (`plans/38`): `effectiveTable` — единственное место, где живёт
+    // «сток + удерживаемые картой сдвиги». `withDrift: false` сохраняет ровно то поведение, что было
+    // здесь до сборки трёх копий в одну; разбор этой асимметрии — в шапке `effectiveTable`.
     let ceiling = -Infinity;
-    for (let i = 0; i < GRAPHICS_POINTS; i++) {
-      const offered = P.vfTable[i].mhz + state.curveOffsetsMhz[i];
-      if (offered > ceiling) ceiling = offered;
+    for (const e of effectiveTable({ withDrift: false })) {
+      if (e.mhz > ceiling) ceiling = e.mhz;
     }
     if (!Number.isFinite(ceiling)) return null;
     ceiling = Math.min(ceiling, P.card.maxGraphicsMhz);
@@ -1158,12 +1178,45 @@ export function virtualCard(cardProfile, {
       const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
       if (refusal) return refusal;
       writes.curveWrite++;
-      state.curveOffsetsMhz = vec.offsets.slice(0, GRAPHICS_POINTS);
-      return { ok: true, vector: vec.offsets.slice(0, GRAPHICS_POINTS) };
+      // ─── ЧТО КАРТА В ИТОГЕ ДЕРЖИТ — РЕШАЕТ КАРТА, А НЕ ВЫЗЫВАЮЩИЙ (`plans/38`) ─────────────────
+      //
+      // Здесь стояло `state.curveOffsetsMhz = vec.offsets…`, то есть карта СОХРАНЯЛА ВЕКТОР. Из-за
+      // этой строки любое последующее чтение соглашалось с движком по построению, и стенд не мог
+      // воспроизвести расхождение, которое живая карта показала 2026-08-24 (`researches/18` §1).
+      //
+      // Умолчание — точное применение: честная модель карты, которая делает, что сказано. Фаза 3
+      // подменяет `applyWrite` по классам отказа.
+      const requested = vec.offsets.slice(0, GRAPHICS_POINTS);
+      const held = applyWrite
+        ? applyWrite(requested, { capMhz, deltaMhz, table: P.vfTable, points: GRAPHICS_POINTS })
+        : requested;
+      if (!Array.isArray(held) || held.length !== GRAPHICS_POINTS || held.some((o) => !Number.isFinite(o))) {
+        // Негодный шов — это дефект ФИКСТУРЫ, и он называется вслух, а не растворяется в карте:
+        // молча подставить сюда `requested` значило бы вернуть ровно ту слепоту, ради снятия которой
+        // шов и заведён.
+        throw new TypeError(`applyWrite обязан вернуть ${GRAPHICS_POINTS} конечных чисел — `
+          + `получено ${Array.isArray(held) ? `${held.length} элемент(ов)` : typeof held}`);
+      }
+      state.curveOffsetsMhz = held;
+      // ⚠️ `vector` — ЗАКАЗ, а не то, что легло. Вызывающий, сверяющий запись, обязан спрашивать
+      // карту (`readCurve`/`readCurveOffsets`), иначе он сверяет свою заявку сам с собой.
+      return { ok: true, vector: requested };
     },
 
     async readCurveOffsets() {
       return { ok: true, offsets: [...state.curveOffsetsMhz] };
+    },
+
+    /**
+     * ЭФФЕКТИВНАЯ КРИВАЯ ПОСЛЕ ЗАПИСИ — то, что на живой карте отдаёт `nvapi.readVfCurve`
+     * (`plans/38`, эпик 36 фаза 2).
+     *
+     * У стенда этого чтения не было ВООБЩЕ, и потому у подменного атома неоткуда было взять
+     * `highestOfferedMhz` — число, которым 2026-08-24 пойман дефект живой записи. `points()` рядом
+     * отвечает на ДРУГОЙ вопрос: какова таблица ДО записи. Два вопроса, два метода, как на карте.
+     */
+    async readCurve() {
+      return { ok: true, points: effectiveTable() };
     },
 
     async zeroCurve() {
@@ -1217,20 +1270,69 @@ export function virtualCard(cardProfile, {
    */
   const tableDriftMhz = () => (P.fiction?.tableDriftMhzPerC ?? 0) * (thermal.tempC - TELEMETRY_MODEL.tempFloorC);
 
+  /**
+   * THE CARD'S EFFECTIVE V/F TABLE RIGHT NOW — the ONE home of «stock + the offsets the card is
+   * actually holding + the drift heat has applied» (`plans/38`, epic 36 phase 2).
+   *
+   * ─── WHY THIS FUNCTION EXISTS ────────────────────────────────────────────────────────────────
+   *
+   * Two things, and the second is the phase's whole point.
+   *
+   * **(a) The arithmetic had three homes.** `servingVoltageMv`, `deliveredUnderCurve` and (once the
+   * curve backend gained a read) a third all spelled out `P.vfTable[i].mhz + offsets[i]`. That is a
+   * truth↔mirror pair inside one module — the shape EXP-0077 was paid for, where two places named
+   * one quantity and the mutation reddened nothing. Collapsed here rather than watched.
+   *
+   * **(b) It reads the offsets the CARD HOLDS, never the vector the caller computed.** Until
+   * 2026-08-24 the virtual card stored the caller's vector and answered reads from it, so the
+   * read-back agreed with the engine by construction. `state.curveOffsetsMhz` is now what
+   * `applyWrite` decided the card ends up holding, which may deliberately differ.
+   *
+   * ⚠️ `withDrift` PRESERVES AN ASYMMETRY THAT WAS ALREADY HERE, and names it instead of quietly
+   * levelling it: `servingVoltageMv` counted the drift, `deliveredUnderCurve`'s ceiling did not.
+   * Whether that difference is physics or an oversight is NOT settled by this refactor, and
+   * inventing an answer while collapsing three copies would smuggle a behaviour change into a
+   * cleanup. Both callers keep exactly what they had; the flag makes the difference visible to
+   * whoever settles it.
+   */
+  const effectiveTable = ({ withDrift = true } = {}) => {
+    const drift = withDrift ? tableDriftMhz() : 0;
+    const out = [];
+    for (let i = 0; i < GRAPHICS_POINTS; i++) {
+      const mhz = P.vfTable[i].mhz + state.curveOffsetsMhz[i] + drift;
+      out.push({
+        i,
+        mhz,
+        mv: P.vfTable[i].voltageMv,
+        // The shape `readVfCurve` returns on the live card, so a caller written against the card
+        // reads the bench without a translation layer — a translation layer is where a double stops
+        // being a double.
+        freqKhz: Math.round(mhz * 1000),
+        microVolts: P.vfTable[i].voltageMv * 1000,
+      });
+    }
+    return out;
+  };
+
   const oracle = {
     /** How far the table has slid from heat, in MHz — exposed so a suite can assert the mechanism
      *  instead of inferring it from a voltage that moved. */
     tableDriftMhz,
 
     /** Which voltage serves `mhz` right now: the LOWEST-voltage entry whose offered frequency
-     *  reaches it, after the offsets currently written AND after the heat has moved the table. */
+     *  reaches it, after the offsets currently written AND after the heat has moved the table.
+     *
+     *  ⚠️ READS `effectiveTable()` RATHER THAN REPEATING ITS ARITHMETIC (`plans/38`). The formula
+     *  «stock + applied offset + drift» now has exactly ONE home; two homes would be a truth↔mirror
+     *  pair inside one module, and this project has already paid for that shape (EXP-0077: two
+     *  places named a rung's frequency and the mutation reddened nothing). A pair that can be
+     *  removed beats a pair that must be watched. */
     servingVoltageMv(mhz) {
-      const drift = tableDriftMhz();
+      const table = effectiveTable();
       for (let i = 0; i < GRAPHICS_POINTS; i++) {
-        const offered = P.vfTable[i].mhz + state.curveOffsetsMhz[i] + drift;
-        if (offered >= mhz) return P.vfTable[i].voltageMv;
+        if (table[i].mhz >= mhz) return table[i].mv;
       }
-      return P.vfTable[GRAPHICS_POINTS - 1].voltageMv;
+      return table[GRAPHICS_POINTS - 1].mv;
     },
 
     /** The invented edge of `mhz` — the nearest frequency of the card's own grid. */
@@ -1693,6 +1795,84 @@ export async function selfTest() {
     }
   }
   check('ПАРИТЕТ: оба бэкенда зовут одно решение, и оно называет ТО ЖЕ правило', parityOk, parityDetail.join(' · '));
+
+  // ═══ ЭПИК 36, ФАЗА 2 — ТАБЛИЦА КАРТЫ КАК НЕЗАВИСИМАЯ ПОВЕРХНОСТЬ (`plans/38`) ═══════════════════
+  //
+  // 🔴 ЧТО ЭТИ БЛОКИ ДЕРЖАТ, И ПОЧЕМУ БЕЗ НИХ ВЕСЬ СТЕНД БЫЛ ТАВТОЛОГИЕЙ. До 2026-08-24 карта
+  // отвечала на запись ХРАНЕНИЕМ ВЕКТОРА, поэтому любое чтение соглашалось с движком по построению.
+  // Живая карта 2026-08-24 09:36, получив вектор, чей верх доказуемо ≤ потолка, отдала таблицу с
+  // верхом на 15 МГц ВЫШЕ (`researches/18` §1) — стенд не мог воспроизвести это ни на одной фикстуре.
+  //
+  // ⚠️ ГЛАВНЫЕ ВОРОТА ФАЗЫ — F2-AC4: стенд обязан УМЕТЬ ПОКРАСНЕТЬ. Стенд, получивший независимую
+  // таблицу и оставшийся зелёным везде, смоделировал наши ожидания во второй раз.
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   EA. хранить вектор вместо ответа applyWrite   → «КАРТА ДЕРЖИТ СВОЁ, А НЕ НАШ ВЕКТОР»
+  //   EB. читать кривую через вектор, а не таблицу  → «ЧТЕНИЕ ВЫВОДИТСЯ ИЗ ТАБЛИЦЫ»
+  //   EC. сверять w.vector сам с собой              → «ПОТОЧЕЧНАЯ СВЕРКА ЛОВИТ ПОТЕРЯННЫЙ СДВИГ»
+  {
+    const CAP = 2842;
+    const DELTA = 200;
+    // (1) ЧЕСТНАЯ КАРТА: applyWrite по умолчанию — точное применение.
+    const honest = virtualCard(CARD, { seed: 7 });
+    await honest.curveBackend.writeRaiseAndCap(DELTA, CAP, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+    const honestCurve = await honest.curveBackend.readCurve();
+    const honestTop = Math.max(...honestCurve.points.map((p) => p.mhz));
+    check('ФАЗА 2: честная карта держит потолок — верх таблицы РОВНО не выше заказанного',
+      honestCurve.ok && honestTop <= CAP, `верх таблицы ${honestTop} при потолке ${CAP}`);
+
+    // (2) КАРТА, КОТОРАЯ НЕ ПОСЛУШАЛАСЬ. Одна запись у самого потолка удерживает НЕ то, что ей
+    // велели, — ровно форма живого отказа: верх уезжает выше потолка, хотя вектор этого не мог.
+    let disobeyedAt = null;
+    const disobedient = virtualCard(CARD, {
+      seed: 7,
+      applyWrite: (requested) => {
+        const held = [...requested];
+        // Ищем запись, которую вектор ПРИДАВИЛ (отрицательный сдвиг) — придавливание и есть
+        // механизм потолка, а значит его отказ и есть «потолок не удержался».
+        const i = held.findIndex((o) => o < 0);
+        if (i >= 0) { disobeyedAt = i; held[i] = held[i] + 15; }
+        return held;
+      },
+    });
+    await disobedient.curveBackend.writeRaiseAndCap(DELTA, CAP, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+    const badCurve = await disobedient.curveBackend.readCurve();
+    const badTop = Math.max(...badCurve.points.map((p) => p.mhz));
+    check('ФАЗА 2 · F2-AC4: КАРТА ДЕРЖИТ СВОЁ, А НЕ НАШ ВЕКТОР — непослушная уходит ВЫШЕ потолка',
+      badCurve.ok && badTop > CAP,
+      `верх таблицы ${badTop} при потолке ${CAP} (не послушалась запись ${disobeyedAt}); `
+      + 'до фазы 2 это было НЕВОЗМОЖНО ни на одной фикстуре');
+
+    // (3) ЧТЕНИЕ ВЫВОДИТСЯ ИЗ ТАБЛИЦЫ, А НЕ ИЗ ЗАКАЗА. Прямое сравнение двух ответов одной карты:
+    // `vector` — то, что просили, `readCurveOffsets` — то, что карта держит.
+    const heldOffsets = await disobedient.curveBackend.readCurveOffsets();
+    check('ФАЗА 2 · ЧТЕНИЕ ВЫВОДИТСЯ ИЗ ТАБЛИЦЫ: карта отдаёт УДЕРЖИВАЕМОЕ, а не заказанное',
+      heldOffsets.ok && disobeyedAt !== null && heldOffsets.offsets[disobeyedAt] !== null
+        && badCurve.points[disobeyedAt].mhz === CARD.vfTable[disobeyedAt].mhz + heldOffsets.offsets[disobeyedAt],
+      `запись ${disobeyedAt}: карта держит сдвиг ${heldOffsets.offsets?.[disobeyedAt]}, `
+      + `таблица показывает ${badCurve.points[disobeyedAt]?.mhz} МГц`);
+
+    // (4) ПОТОЧЕЧНАЯ СВЕРКА ЛОВИТ ПОТЕРЯННЫЙ СДВИГ — различитель, ради которого фаза и делалась.
+    const lossy = virtualCard(CARD, {
+      seed: 7,
+      applyWrite: (requested) => { const h = [...requested]; h[40] = 0; return h; },
+    });
+    const lossyWrite = await lossy.curveBackend.writeRaiseAndCap(DELTA, CAP, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+    const lossyHeld = await lossy.curveBackend.readCurveOffsets();
+    const mismatches = lossyWrite.vector.filter((o, i) => o !== lossyHeld.offsets[i]).length;
+    check('ФАЗА 2 · ПОТОЧЕЧНАЯ СВЕРКА ЛОВИТ ПОТЕРЯННЫЙ СДВИГ — заказ и удерживаемое РАСХОДЯТСЯ',
+      mismatches === 1 && lossyHeld.offsets[40] === 0 && lossyWrite.vector[40] !== 0,
+      `расхождений ${mismatches}; заказано ${lossyWrite.vector[40]}, карта держит ${lossyHeld.offsets[40]}`);
+
+    // (5) НЕГОДНЫЙ ШОВ — ДЕФЕКТ ФИКСТУРЫ, И ОН НАЗЫВАЕТСЯ ВСЛУХ. Молча подставить заказ значило бы
+    // вернуть ту самую слепоту, ради снятия которой шов заведён.
+    let seamThrew = false;
+    try {
+      const broken = virtualCard(CARD, { seed: 7, applyWrite: () => [1, 2, 3] });
+      await broken.curveBackend.writeRaiseAndCap(DELTA, CAP, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+    } catch { seamThrew = true; }
+    check('ФАЗА 2: негодный applyWrite ОТКАЗЫВАЕТ вслух, а не растворяется в заказе', seamThrew, '');
+  }
 
   // an inversion is the fourth rule, and it needs a vector rather than a scalar
   const invVector = new Array(GRAPHICS_POINTS).fill(0);
