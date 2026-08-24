@@ -828,6 +828,43 @@ export async function runRung({
   record.loadLevelUsed = attempts.length ? attempts[attempts.length - 1].level : null;
   record.burnedAtTunedFrequency = attempts.length ? attempts[attempts.length - 1].heldTheFrequency : null;
   record.atom = atom ?? null;
+
+  // ---- 5a. СДВИГ, КОТОРЫЙ РЕАЛЬНО ЛЁГ В КАРТУ (`bugs/49`) — И ОН НАЗЫВАЕТСЯ ВСЛУХ.
+  //
+  // Починка `bugs/47` научила атом ПЕРЕСЧИТЫВАТЬ сдвиг по своей таблице, и это верно. Побочно она
+  // развела намерение и факт: в журнал `writeIntent` кладёт число ДВИЖКА (шаг 4 выше, и по R15 иначе
+  // нельзя — намерение обязано лечь на диск ДО касания карты), а в карту едет число АТОМА. Значит с
+  // 2026-08-24 улика о записи в железо могла не описывать запись в железо.
+  //
+  // Две половины лечения, и обе аддитивные:
+  //   · факт дописывает ВЕРДИКТ (`close` ниже) — намерение остаётся заявкой и своей долговечности
+  //     не теряет;
+  //   · оператор видит пересчёт ЗДЕСЬ. До этой строки он не был виден ни в одном артефакте прогона:
+  //     блоки атома в консоль развёртки не выводятся, а журнал печатал число движка — из-за чего
+  //     доказать `bugs/47` на живой карте было нечем.
+  //
+  // Молчим при нуле и при `null` НАМЕРЕННО: строка про «дрейфа не было» на каждой ступени утопила бы
+  // ту единственную, которая говорит о деле.
+  record.appliedDeltaMhz = atom?.offsetMhz ?? null;
+  record.tableDriftMhz = Number.isFinite(atom?.tableDriftMhz) ? atom.tableDriftMhz : null;
+  // ВТОРОЕ ЧИСЛО, КОТОРОЕ АТОМ ПЕРЕОПРЕДЕЛЯЕТ, — найдено проверкой двойников. `snapToLadder`
+  // притягивает заказанную частоту закрепления к лестнице САМОЙ карты, и до сих пор о закреплении
+  // журнал не знал ничего. Ниже пола потолка развёртка закрепляет, и если притяжка когда-нибудь
+  // сдвинет частоту — строка врёт своим же ключом. `null` здесь честен и част: выше пола потолка
+  // замка нет вовсе, потолок держит кривая (R11).
+  record.appliedPinMhz = atom?.pinMhz ?? null;
+  if (onEvent && Number.isFinite(record.tableDriftMhz) && record.tableDriftMhz !== 0) {
+    onEvent({
+      kind: 'offset-recomputed',
+      frequencyMhz: clockMhz,
+      text: `СДВИГ ПЕРЕСЧИТАН: движок просил ${plan.deltaMhz} МГц, в карту легло ${record.appliedDeltaMhz} — `
+        + `таблица уехала на ${record.tableDriftMhz} МГц между чтением движка и чтением атома (bugs/47). `
+        + 'В журнал вердикта едет ЛЕГШЕЕ число',
+      askedDeltaMhz: plan.deltaMhz,
+      appliedDeltaMhz: record.appliedDeltaMhz,
+      tableDriftMhz: record.tableDriftMhz,
+    });
+  }
   record.verdict = atom?.verdict ?? null;
   record.decidedBy = atom?.worstShape ?? null;
   record.deliveredMhz = atom?.deliveredMhz ?? null;
@@ -844,6 +881,15 @@ export async function runRung({
         seq, at: now ? now() : localIso(),
         outcome: result.outcome, verdict: result.verdict,
         decidedBy: result.decidedBy, servingMvAfter: result.servingMvAfter,
+        // ─── ФАКТ ЗАПИСИ, А НЕ ЗАЯВКА (`bugs/49`) ───────────────────────────────────────────────
+        // Намерение выше несёт `deltaMhz` движка и обязано его нести: оно `fsync`-ится ДО касания
+        // карты и знать о пересчёте не может по построению. Здесь дописывается то, что легло, и
+        // ЗАМЕР расхождения таблиц — величина, которой в проекте нет больше нигде.
+        // Берётся из `record`, а не из `atom` напрямую: `record` — это то, что видит вызывающий, и
+        // расхождение между напечатанным и записанным было бы ровно тем классом, что `bugs/46`.
+        appliedDeltaMhz: record.appliedDeltaMhz ?? null,
+        tableDriftMhz: record.tableDriftMhz ?? null,
+        appliedPinMhz: record.appliedPinMhz ?? null,
         why: result.why,
       });
     }
@@ -4628,6 +4674,84 @@ export function selfTest() {
         [45, 25, true, 'кривая', 'raise-and-cap', 90]);
       ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
         [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
+
+      // ─── `bugs/49` — НАМЕРЕНИЕ ЗАЯВЛЯЕТ, ВЕРДИКТ ОТЧИТЫВАЕТСЯ ────────────────────────────────
+      //
+      // Починка `bugs/47` развела два числа: движок считает сдвиг по СВОЕЙ таблице, атом
+      // ПЕРЕСЧИТЫВАЕТ его по своей, а в журнал ехало только первое. Значит улика о записи в железо
+      // могла не описывать запись в железо — и именно поэтому доказать `bugs/47` живым прогоном
+      // было нечем.
+      //
+      // Перенести журналирование ЗА пересчёт нельзя: намерение обязано лечь на диск ДО касания
+      // карты, иначе зависание не оставит следа (R15). Поэтому пара схлопнута по времени, а не по
+      // месту: намерение остаётся ЗАЯВКОЙ, факт дописывает ВЕРДИКТ.
+      //
+      // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+      //   CV. в вердикт класть `plan.deltaMhz`               → «ВЕРДИКТ НЕСЁТ ТО, ЧТО ЛЕГЛО В КАРТУ»
+      //   CW. подставлять число движка, когда атом молчит    → «НЕ ИЗМЕРЯЛОСЬ — ЭТО null, А НЕ НОЛЬ»
+      //   CX. проглотить пересчёт вместо строки оператору    → «ПЕРЕСЧЁТ ВИДЕН ОПЕРАТОРУ»
+      //   CY. класть в вердикт ЗАКАЗАННУЮ частоту замка      → «ЗАКРЕПЛЕНИЕ ЗАПИСЫВАЕТСЯ ПРИТЯНУТЫМ»
+      //
+      // CY — ВТОРАЯ ПОЛОВИНА КЛАССА, найденная проверкой двойников: атом переопределяет ДВА числа
+      // вызывающего, а не одно (сдвиг и частоту замка через `snapToLadder`). Опись — в шапке
+      // `sweep-journal.writeVerdict`.
+      {
+        const jrn4 = openJournal({ dir: join(journalBox, 'applied-offset') });
+        const said = [];
+        // Атом, который ПЕРЕСЧИТАЛ: 777 — число, которого движок посчитать не мог ни при какой
+        // таблице, поэтому совпадение здесь исключено по построению.
+        const drifted = await runRung({
+          envelopeMhz: 3090,
+          points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, journal: jrn4, seq: 1, now: clock,
+          onEvent: (e) => said.push(e),
+          runStepFn: async () => ({ ...atomPass(1000), offsetMhz: 777, offsetAskedMhz: 770, tableDriftMhz: 7,
+            pinRequestedMhz: 1500, pinMhz: 1492 }),
+        });
+        const recs4 = readJournal(jrn4).records;
+        const intent4 = recs4.find((r) => r.state === 'intent');
+        const verdict4 = recs4.find((r) => r.state === 'verdict');
+        ok('bugs/49: ВЕРДИКТ НЕСЁТ ТО, ЧТО ЛЕГЛО В КАРТУ, а намерение остаётся ЗАЯВКОЙ движка',
+          // Строки читаются через заглушку: мутация, отказывающая ступени на бумаге, не пишет
+          // вердикта вовсе, и `verdict4.appliedDeltaMhz` убило бы отчёт вместо покраснения (EXP-0075).
+          (() => {
+            if (!intent4 || !verdict4) return 'в журнале нет пары намерение+вердикт';
+            return [verdict4.appliedDeltaMhz, verdict4.tableDriftMhz,
+              intent4.deltaMhz === verdict4.appliedDeltaMhz, drifted.outcome];
+          })(),
+          [777, 7, false, 'passed']);
+        ok('bugs/49: ЗАКРЕПЛЕНИЕ ЗАПИСЫВАЕТСЯ ПРИТЯНУТЫМ — тем, на чём карту держали, а не тем, что просили',
+          (() => {
+            if (!verdict4) return 'строки вердикта нет вовсе';
+            // 1492, а не 1500: это ровно тот случай, которым `vf-step` объясняет притяжку к лестнице.
+            return [verdict4.appliedPinMhz, verdict4.appliedPinMhz === 1500];
+          })(), [1492, false]);
+        ok('bugs/49: ПЕРЕСЧЁТ ВИДЕН ОПЕРАТОРУ — до этой строки он не показывался ни в одном артефакте',
+          (() => {
+            const e = said.find((x) => x.kind === 'offset-recomputed');
+            if (!e) return 'события о пересчёте нет';
+            return [e.appliedDeltaMhz, e.tableDriftMhz, /в карту легло 777/.test(e.text)];
+          })(), [777, 7, true]);
+
+        // ТРЕТЬЕ СОСТОЯНИЕ, И ОНО НЕ НОЛЬ. Атом без цели (ручные прогоны, `--drill`, опыты) ничего
+        // не пересчитывает и дрейфа НЕ МЕРЯЕТ. Записать туда 0 значило бы заявить совпадение
+        // таблиц, которого никто не наблюдал, — выдуманное число в улике (три двери, `PHILOSOPHY`).
+        const jrn5 = openJournal({ dir: join(journalBox, 'no-target') });
+        const quiet = [];
+        await runRung({
+          envelopeMhz: 3090,
+          points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, journal: jrn5, seq: 1, now: clock,
+          onEvent: (e) => quiet.push(e),
+          runStepFn: async () => ({ ...atomPass(1000), offsetMhz: 331 }),
+        });
+        ok('bugs/49: ДРЕЙФ НЕ ИЗМЕРЯЛСЯ — ЭТО null, А НЕ НОЛЬ, и молчащий пересчёт не печатается',
+          (() => {
+            const v = readJournal(jrn5).records.find((r) => r.state === 'verdict');
+            if (!v) return 'строки вердикта нет вовсе';
+            return [v.tableDriftMhz, v.appliedDeltaMhz, quiet.some((e) => e.kind === 'offset-recomputed')];
+          })(), [null, 331, false]);
+      }
 
       // A rung refused ON PAPER never reaches the journal: an intent for a rung nobody ran is a rung
       // the next launch would mark ЗАВИС for a hang that never happened.

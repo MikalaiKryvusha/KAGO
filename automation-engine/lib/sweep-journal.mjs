@@ -215,10 +215,53 @@ export function writeIntent(journal, rung, io = {}) {
   return appendLine(journal, record, io);
 }
 
-/** The line that CLOSES an intent. Fsynced too: a verdict lost to the page cache would make the next
- *  launch read a finished rung as the one that killed the machine — safe, but it would cost the sweep
- *  a rung it had already paid for, and on the second such loss it would block the rung outright.
- *  [TESTED: 2026-08-15 23:2x - offline, by this module's 17-block suite] */
+/**
+ * The line that CLOSES an intent. Fsynced too: a verdict lost to the page cache would make the next
+ * launch read a finished rung as the one that killed the machine — safe, but it would cost the sweep
+ * a rung it had already paid for, and on the second such loss it would block the rung outright.
+ *
+ * ─── THE FACT OF THE WRITE LIVES HERE, NOT IN THE INTENT (`bugs/49`) ────────────────────────────────
+ *
+ * The intent is a CLAIM, and it must stay one: it is fsynced BEFORE the card is touched, so it cannot
+ * possibly know what the card ended up being given. `bugs/47` made that gap real — the atom now
+ * RECOMPUTES the offset against its own reading of the table (the frequency axis slides with heat,
+ * R14b), so from 2026-08-24 the intent's `deltaMhz` may name an offset the card never saw. Moving the
+ * journalling behind the recompute was the tempting fix and it is the wrong one: an intent written
+ * after the write survives nothing, which is the entire reason R15 exists.
+ *
+ * So the pair is collapsed the only way that keeps both halves honest — **the intent claims, the
+ * verdict reports**:
+ *
+ *   `appliedDeltaMhz`  the offset that ACTUALLY reached the card (`runStep` → `out.offsetMhz`).
+ *                      The asked value is NOT repeated here: it is already on the intent line under
+ *                      the same `seq`, and duplicating it would be a truth↔mirror pair created on
+ *                      purpose (`AGENT_GUIDE.md` → the pairs registry prefers removal over watching).
+ *   `tableDriftMhz`    the MEASURED disagreement between the caller's reading of the table and the
+ *                      atom's, in MHz. This is the only place in the project where that quantity is
+ *                      recorded at all. **`null` is a third state and it is not `0`:** `null` means
+ *                      the atom was given no target and therefore measured nothing (hand runs,
+ *                      `--drill`, experiments), while `0` means it looked and the tables agreed.
+ *   `appliedPinMhz`    the clock the card was ACTUALLY pinned to, or `null` for «no pin was used» —
+ *                      which is the normal case above the curve's cap floor, where the curve carries
+ *                      the ceiling itself (R11).
+ *
+ * ⚠️ **The third field is here because the TWIN CHECK found it, and the inventory is what the class is
+ * judged by** (`BUG_FIXING_FRAMEWORK.md`). The atom overrides exactly TWO of its caller's numbers, not
+ * one: the offset above, and the pin — `snapToLadder` moves the requested clock onto the card's own
+ * ladder (`vf-step`, «1500 is not on this card's ladder; 1492 is»). Below the cap floor the sweep DOES
+ * pin, and until now the journal recorded nothing about it at all: if a snap ever moves the clock, the
+ * line's own `frequencyMhz` names a frequency the card was not held at — the same lie one field over,
+ * in the field the whole journal is keyed by. Whether the snap ever moves in the sweep's path is a
+ * question only the live card can answer, and recording the number is what makes the next live run
+ * answer it for free instead of leaving a note nobody can settle.
+ *
+ * The caller's own numbers are NOT repeated in any of the three: they are on the intent line under the
+ * same `seq`. The precedent is already in this record — `servingMvAfter` has always been the
+ * verdict-side counterpart of the intent's ordered `voltageMv`, for exactly this reason.
+ *
+ * [TESTED: 2026-08-15 23:2x · offline, by this module's 17-block suite; the two fields added
+ *  2026-08-24 are held by the `bugs/49` blocks in `journal --selftest` and `engine --selftest`]
+ */
 export function writeVerdict(journal, closing, io = {}) {
   const record = {
     state: LINE.VERDICT,
@@ -228,6 +271,11 @@ export function writeVerdict(journal, closing, io = {}) {
     verdict: closing.verdict ?? null,
     decidedBy: closing.decidedBy ?? null,
     servingMvAfter: closing.servingMvAfter ?? null,
+    // ⚠️ `?? null` AND NOT `?? closing.deltaMhz`: a verdict whose caller could not name the applied
+    // offset says so, rather than falling back to the number this field exists to distrust.
+    appliedDeltaMhz: closing.appliedDeltaMhz ?? null,
+    tableDriftMhz: closing.tableDriftMhz ?? null,
+    appliedPinMhz: closing.appliedPinMhz ?? null,
     why: closing.why ?? '',
   };
   return appendLine(journal, record, io);
