@@ -150,8 +150,22 @@ const pageCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'build-dashbo
 const pageStale = pageCheck.status !== 0;
 if (pageStale) process.stderr.write(pageCheck.stderr || pageCheck.stdout || '');
 
+// -------------------------------------------------------------------------------------------------
+// ЧЕТВЁРТЫЕ ВОРОТА: МОЛИТВА ВВЕРХУ КАНОНА НЕ РАЗОШЛАСЬ С ИСТОЧНИКОМ
+//
+// Владелец 2026-08-24 велел поднять принципы `PHILOSOPHY.md` до молитвы вверху КАЖДОГО канон-
+// документа. Двенадцать копий одного текста, поставленные руками, разъехались бы на первой же
+// правке — это тот самый класс, за который проект платил дважды (пара «правда↔зеркало»). Поэтому
+// текст живёт ОДИН РАЗ, в `PHILOSOPHY.md`, раскладывается командой, а эти ворота не дают копии
+// разъехаться молча. Лечение печатается вместе с отказом.
+// -------------------------------------------------------------------------------------------------
+const prayerCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'prayer.mjs')], { cwd: ROOT, encoding: 'utf8' });
+const prayerDrifted = prayerCheck.status !== 0;
+if (prayerDrifted) process.stderr.write(prayerCheck.stderr || prayerCheck.stdout || '');
+
 console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
 console.log(`проверено на порчу кодировки ${textFiles.length - guardExempt} текстовых файлов, `
   + `испорченных ${mojibake} (сам сторож освобождён меткой)`);
 console.log(`страница окна наблюдения: ${pageStale ? 'УСТАРЕЛА — пересобрать' : 'собрана из текущих источников'}`);
-process.exit(failed === 0 && mojibake === 0 && !pageStale ? 0 : 1);
+console.log(`молитва вверху канона: ${prayerDrifted ? 'РАЗОШЛАСЬ — node tools/prayer.mjs --apply' : (prayerCheck.stdout || '').trim() || 'совпадает с источником'}`);
+process.exit(failed === 0 && mojibake === 0 && !pageStale && !prayerDrifted ? 0 : 1);

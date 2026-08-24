@@ -50,7 +50,8 @@
     "bench": "node automation-engine/lib/bench-run.mjs",
     "tidy": "node tools/tidy.mjs",
     "pulse": "node tools/pulse-report.mjs",
-    "safe-mode": "node tools/safe-mode.mjs"
+    "safe-mode": "node tools/safe-mode.mjs",
+    "prayer": "node tools/prayer.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
