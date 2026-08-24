@@ -1446,7 +1446,7 @@ export function seedFor({ frequencyMhz, curveDoc } = {}) {
  *  whole path over a card whose Vmin really is non-monotone. **NOT TESTED on a live card.**]
  */
 export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, frequencyMhz,
-                              fromOwnEvidence = false } = {}) {
+                              fromOwnEvidence = false, rungOutcome = null, stopSite = null } = {}) {
   const depth = Number.isFinite(stockVoltageMv) && Number.isFinite(seedMv) ? stockVoltageMv - seedMv : 0;
   // ОТКУДА ЗАТРАВКА — ЧАСТЬ УТВЕРЖДЕНИЯ, А НЕ УКРАШЕНИЕ (`bugs/32`). Собственная улика доказана
   // РОВНО на этой частоте, соседкина — на более высокой; читатель свидетеля обязан их различать,
@@ -1463,14 +1463,33 @@ export function seedOutcome({ verdict, seedMv, stockVoltageMv, neighbourMhz, fre
         + `спуск продолжается от неё (доказанная глубина −${depth} мВ)`,
     };
   }
+  // ─── ОТКАЗ НАЗЫВАЕТ ПРИЧИНУ, А НЕ СИМПТОМ (`plans/28`; живой прогон 2026-08-25) ─────────────────
+  //
+  // Здесь стояло ОДНО объяснение на все случаи: «монотонность на этом кремнии НАРУШЕНА». Живой
+  // прогон показал, что оно бывает ложным ровно там, где дороже всего: затравка 790 мВ на 2332 МГц
+  // была отвергнута потому, что карта ушла ВЫШЕ потолка и вердикта о НАПРЯЖЕНИИ не появилось вовсе
+  // (`bugs/50`, путь ЗАПИСИ). Оператор прочитал в логе утверждение о КРЕМНИИ, которого никто не мерил.
+  //
+  // Различитель прост и не требует новых замеров: **отказ бывает только там, где был ВЕРДИКТ.**
+  // `failed` — оракул вынес отказ на этом напряжении: монотонность действительно нарушена, и это
+  // находка о карте. Всё остальное (`unknown`, `void`, `lever-limited`, `refused`) означает, что
+  // ступень не судили — сказать о кремнии нечего, и надо назвать место, которое сдалось.
+  const judged = rungOutcome === 'failed';
+  const why = judged
+    ? `вердикт ${verdict ?? 'ОТКАЗ'}, а не PASS. Монотонность на этом кремнии здесь НАРУШЕНА — `
+      + 'это находка о карте, а не сбой прогона.'
+    : `ступень НЕ СУДИЛИ (исход «${rungOutcome ?? 'неизвестен'}»${stopSite ? `, сдался блок ${stopSite}` : ''}): `
+      + 'вердикта о напряжении не появилось, поэтому о монотонности этого кремния тут сказать НЕЧЕГО. '
+      + 'Это находка о ПУТИ ЗАПИСИ, а не о карте.';
   return {
     seeded: false,
     restartFromStock: true,
     provenSavedMv: 0,
-    note: `ЗАТРАВКА ОТВЕРГНУТА на ${frequencyMhz} МГц: ${seedMv} мВ ${source} дало `
-      + `вердикт ${verdict ?? 'НЕИЗВЕСТНО'}, а не PASS. Монотонность на этом кремнии здесь НАРУШЕНА — `
-      + `это находка о карте, а не сбой прогона. Спуск начинается заново от стока ${stockVoltageMv} мВ `
-      + 'по лестнице шагов владельца.',
+    // Отдельным полем — чтобы отчёт мог СЧИТАТЬ, сколько затравок отвергнуто по кремнию, а сколько
+    // по пути записи: по прозе эти два числа не разделить, а лечатся они в разных местах.
+    rejectedBySilicon: judged,
+    note: `ЗАТРАВКА ОТВЕРГНУТА на ${frequencyMhz} МГц: ${seedMv} мВ ${source} дало ${why} `
+      + `Спуск начинается заново от стока ${stockVoltageMv} мВ по лестнице шагов владельца.`,
   };
 }
 
@@ -2050,6 +2069,11 @@ export async function sweepFrequency({
       verdict: sr?.outcome === 'passed' ? sr?.verdict : null,
       seedMv, stockVoltageMv, neighbourMhz: seed?.neighbourMhz ?? null, frequencyMhz,
       fromOwnEvidence: plan.seedFromOwnEvidence === true,
+      // ИСХОД И АДРЕС СДАВШЕГОСЯ БЛОКА — чтобы отказ назывался ПРИЧИНОЙ, а не симптомом
+      // (`plans/28`, живой прогон 2026-08-25). Без них функция знала только «не PASS» и
+      // объявляла нарушением монотонности пробитый потолок, то есть путь ЗАПИСИ.
+      rungOutcome: sr?.outcome ?? null,
+      stopSite: sr?.stopSite ?? null,
     });
     if (decision.seeded) {
       out.seeded = true;
@@ -2830,6 +2854,8 @@ export async function sweepRange({
     preBracketed: [],
     // СТРОКИ, ОСТАВЛЕННЫЕ КАК БЫЛИ, ПОТОМУ ЧТО ДОКУМЕНТ ЗНАЛ ГЛУБЖЕ (`bugs/55`).
     keptDeeper: [],
+    // Строки, закрытые ВНЕ заказанной полосы: карта съехала, замер лёг в соседнюю строку.
+    closedOutsideBand: 0,
     hung: resume.hung ?? [],
     blocked: resume.blocked ?? [],
     // Every floor this journal knows, in the report so it lands in the run's own summary rather than
@@ -3215,6 +3241,15 @@ export async function sweepRange({
       report.keptDeeper.push(closed.kept);
       say('kept-deeper', closed.why, { frequencyMhz: closed.kept.mhz, keptMv: closed.kept.keptMv, offeredMv: closed.kept.offeredMv });
     }
+    // ─── СКОЛЬКО ИЗ ЗАКРЫТОГО ЛЕЖИТ ВНЕ ЗАКАЗАННОЙ ПОЛОСЫ (`bugs/55` соседняя находка) ──────────
+    //
+    // Живой прогон 2026-08-25 напечатал «ПОКРЫТИЕ: закрыто 9 из 7 (128,6 %)». Проценты выше ста —
+    // это не описка отчёта, а следствие правила владельца «тюним то, что карта выдала»: карта
+    // съезжает с заказанной частоты, замер ложится в СОСЕДНЮЮ строку, и та может лежать вне полосы
+    // вместе со своими наследницами. Считается отдельно, а не подмешивается в покрытие: «сколько
+    // частот полосы закрыто» и «сколько строк документа тронуто» — разные вопросы.
+    const inBand = (m) => !Number.isFinite(fromMhz) || !Number.isFinite(toMhz) || (m <= fromMhz && m >= toMhz);
+    report.closedOutsideBand += [rowMhz.mhz, ...closed.inherited].filter((m) => !inBand(m)).length;
     report.closed += closed.closed;
     report.verdicts[outcome.verdict] += 1;
     report.groups.push({ ...g, ...outcome, inherited: closed.inherited.length, raised: closed.raised });
@@ -3626,7 +3661,14 @@ export function sweepReportLines(report) {
   const pct = (n, d) => (d > 0 ? `${Math.round((n / d) * 1000) / 10} %` : '—');
   lines.push(`РАЗВЁРТКА${report.bandLabel ? ` «${report.bandLabel}»` : ''}: ступеней ${report.groupCount}, `
     + `частот в полосе ${report.frequenciesInBand}`);
-  lines.push(`ПОКРЫТИЕ: закрыто ${report.closed} из ${report.frequenciesInBand} (${pct(report.closed, report.frequenciesInBand)})`);
+  // ⚠️ ПРОЦЕНТ СЧИТАЕТСЯ ТОЛЬКО ПО СТРОКАМ В ПОЛОСЕ. Живой прогон 2026-08-25 напечатал «закрыто 9
+  // из 7 (128,6 %)»: карта съехала с заказанных частот, и замеры легли в соседние строки вместе с
+  // наследницами — законно по правилу владельца, но покрытие полосы этим не измеряется. Строки вне
+  // полосы называются ОТДЕЛЬНЫМ числом: это тоже работа, просто ответ на другой вопрос.
+  const closedInBand = Math.max(0, report.closed - (report.closedOutsideBand ?? 0));
+  lines.push(`ПОКРЫТИЕ: закрыто ${closedInBand} из ${report.frequenciesInBand} (${pct(closedInBand, report.frequenciesInBand)})`
+    + (report.closedOutsideBand ? ` · и ещё ${report.closedOutsideBand} строк(и) ВНЕ полосы — карта съехала туда, `
+      + 'и замер лёг по её выдаче' : ''));
   // ─── УРОЖАЙ: «ДОКАЗАНО ПРОЖИГОМ» И «ЗАКРЫТО» — РАЗНЫЕ ЧИСЛА, И ОБА ПЕЧАТАЮТСЯ ─────────────────
   //
   // Критерий H-AC7 (`plans/41` §3), и он про честность покрытия. Прогон 2026-08-24 22:0x: **23
@@ -4850,6 +4892,24 @@ export function selfTest() {
     (() => { const n = seedOutcome({ verdict: config.VERDICT.SDC, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }).note; return /2400/.test(n) && /2842/.test(n) && /900/.test(n) && /1045/.test(n) && /находка/.test(n); })(), true);
   ok('НЕИЗВЕСТНО на затравке тоже отменяет её — не-PASS это не только отказ',
     seedOutcome({ verdict: null, seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 }).seeded, false);
+  // ─── НО ПРИЧИНА НАЗЫВАЕТСЯ РАЗНАЯ, И ЭТО ПРИНЕС ЖИВОЙ ПРОГОН 2026-08-25 (`plans/28`) ───────────
+  //
+  // Одно объяснение стояло на все случаи: «монотонность на этом кремнии НАРУШЕНА». На прогоне
+  // затравку 790 мВ отвергла НЕ карта, а пробитый потолок (`bugs/50`): вердикта о напряжении не
+  // появилось вовсе. Оператор прочитал утверждение о кремнии, которого никто не мерил.
+  // Различитель: отказ бывает только там, где был ВЕРДИКТ (`rungOutcome === 'failed'`).
+  // АДРЕСАТ МУТАЦИИ BE: вернуть один текст на оба случая → оба блока ниже.
+  ok('ОТКАЗ ОРАКУЛА — находка о КРЕМНИИ: монотонность названа нарушенной, и это правда',
+    (() => {
+      const o = seedOutcome({ verdict: config.VERDICT.SDC, rungOutcome: 'failed', seedMv: 900, stockVoltageMv: 1045, neighbourMhz: 2842, frequencyMhz: 2400 });
+      return [o.rejectedBySilicon, /Монотонность на этом кремнии здесь НАРУШЕНА/.test(o.note)];
+    })(), [true, true]);
+  ok('а НЕСУЖДЁННАЯ ступень — находка о ПУТИ ЗАПИСИ: про кремний не утверждается ничего',
+    (() => {
+      const o = seedOutcome({ verdict: null, rungOutcome: 'unknown', stopSite: 'runRung#cap-breach', seedMv: 790, stockVoltageMv: 890, frequencyMhz: 2332, fromOwnEvidence: true });
+      return [o.rejectedBySilicon, /Монотонность/.test(o.note), /НЕ СУДИЛИ/.test(o.note),
+        /runRung#cap-breach/.test(o.note), /ПУТИ ЗАПИСИ/.test(o.note)];
+    })(), [false, false, true, true, true]);
 
   // =============================================================================================
   // `plans/15` §4.3 — THE RUNG'S PLAN: the uniform raise that puts ONE voltage under the pinned clock
