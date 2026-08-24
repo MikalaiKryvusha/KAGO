@@ -1,0 +1,43 @@
+{
+  "kind": "interview",
+  "document": "interview_014_five_forks_of_the_harvest_and_the_flexible_tuning.md",
+  "by": "Mikalai Kryvusha",
+  "at": "2026-08-24T22:54:58+03:00",
+  "at_human": "24.08.2026 22:54",
+  "comment": "",
+  "answers": {
+    "Q1": {
+      "choice": null,
+      "text": "A",
+      "comment": ""
+    },
+    "Q2": {
+      "choice": null,
+      "text": "A",
+      "comment": ""
+    },
+    "Q3": {
+      "choice": null,
+      "text": "A",
+      "comment": ""
+    },
+    "Q4": {
+      "choice": null,
+      "text": "B\tВыведенный край равноправен: отгружаем не как измеренный, а как выработанный. Частично измеренный, частично высчитанный.",
+      "comment": ""
+    },
+    "Q5": {
+      "choice": null,
+      "text": "B",
+      "comment": ""
+    }
+  },
+  "written": [
+    "Q5",
+    "Q4",
+    "Q3",
+    "Q2",
+    "Q1"
+  ],
+  "not_written": []
+}
