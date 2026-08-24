@@ -905,6 +905,68 @@ export function approach(now, target, dtSeconds, tauSeconds) {
  * No randomness anywhere: the wander is a deterministic cycle. Phase 1 has no seed because phase 1
  * has nothing to be random about.
  */
+/**
+ * ШЕСТЬ КЛАССОВ ОТКАЗА ЗАПИСИ КРИВОЙ — закрытая опись, по которой судится фаза 3 (`plans/39`).
+ *
+ * ─── ПОЧЕМУ ЭТО ТАБЛИЦА, А НЕ РОССЫПЬ ФИКСТУР ───────────────────────────────────────────────────
+ *
+ * Приказ владельца звучит как «симулируй отказы ВСЕХ возможных сценариев», и как фраза он
+ * безграничен. Здесь он сделан СЧИТАЕМЫМ: шесть классов, у каждого назван ИСТОЧНИК в этом
+ * репозитории, и ни один не выдуман из головы. Седьмой, найденный позже, — это новая строка, а не
+ * повод считать, что перечисление было бессмысленным.
+ *
+ * Каждая фабрика возвращает ОПЦИИ для `virtualCard`, поэтому класс внедряется по имени:
+ *
+ *   const vc = virtualCard(CARD, { seed: 7, ...WRITE_FAILURE_CLASSES.C2_partly_inert() });
+ *
+ * ⚠️ ЭТО МОДЕЛИ, А НЕ ДИАГНОЗ ЖИВОЙ КАРТЫ. Зелёный прогон против класса доказывает, что движок
+ * ведёт себя честно, ЕСЛИ карта отказывает так. Какой из классов происходит на кремнии владельца —
+ * вопрос к живому прогону, и `researches/18` держит три живые гипотезы, а не одну.
+ */
+export const WRITE_FAILURE_CLASSES = Object.freeze({
+  /** C1 — чтение сразу после записи ещё не устоялось. ИСТОЧНИК: `AGENT_GUIDE.md`, правило машины
+   *  владельца, шаг 4, замерено 2026-08-10 («All done» при коде 0, состояние сменилось через
+   *  секунду). ВЕДУЩАЯ ГИПОТЕЗА по отказу 2026-08-24. ЧЕСТНАЯ ОБРАБОТКА: перечитывать до совпадения
+   *  двух проб, а не верить первой. */
+  C1_unsettled_read: (reads = 2) => ({ curveSettleReads: reads }),
+
+  /** C2 — часть из 127 записей молча инертна. ИСТОЧНИК: `nvapi.mjs`, ветка `zero-filled` — «a SILENT
+   *  NO-OP on this card: status 0, and not one byte of the structure changes». ЧЕСТНАЯ ОБРАБОТКА:
+   *  поточечная сверка краснеет и НАЗЫВАЕТ первую разошедшуюся запись; ступень встаёт без вердикта. */
+  C2_partly_inert: (every = 7) => ({
+    applyWrite: (requested) => requested.map((o, i) => (i % every === 0 ? 0 : o)),
+  }),
+
+  /** C3 — драйвер ПРАВИТ результат: запись садится не туда, куда её послал вектор (снап по сетке,
+   *  правка монотонности). ИСТОЧНИК: `researches/18` §5, гипотеза H3. ЧЕСТНАЯ ОБРАБОТКА: блок
+   *  потолка краснеет, неся ОБА числа, и ступень встаёт. */
+  C3_driver_adjusts: (nudgeMhz = 15) => ({
+    applyWrite: (requested) => {
+      const held = [...requested];
+      const i = held.findIndex((o) => o < 0);      // придавленная запись — это и есть механизм потолка
+      if (i >= 0) held[i] += nudgeMhz;
+      return held;
+    },
+  }),
+
+  /** C4 — один из 127 вызовов вернул не ноль. ИСТОЧНИК: `nvapi.writeCurve` считает провалы по
+   *  статусам и возвращает `ok: false`. ЧЕСТНАЯ ОБРАБОТКА: отказ ДО прожига, карта времени не тратит. */
+  C4_call_fails: (at = [40, 41]) => ({ writeCallFailsAt: at }),
+
+  /** C5 — запись инертна ЦЕЛИКОМ, при всех статусах 0. Вырожденный случай C2, и тот единственный,
+   *  которого успех-по-статусам не видит вовсе. ЧЕСТНАЯ ОБРАБОТКА: как C2; и прогон НЕ имеет права
+   *  прочитать оставшуюся стоковую таблицу как «андервольт, который ничего не сэкономил». */
+  C5_wholly_inert: () => ({ applyWrite: (requested) => requested.map(() => 0) }),
+
+  /** C6 — таблица легла СО СДВИГОМ на одну запись. ИСТОЧНИК: измерено на этой самой структуре —
+   *  «a single bit for point 64 answered in slot 65» (`researches/05`, раскладка записи).
+   *  ЧЕСТНАЯ ОБРАБОТКА: поточечная сверка краснеет, и число расхождений ВЕЛИКО и систематично —
+   *  этим класс отличается от C2. */
+  C6_shifted_by_one: () => ({
+    applyWrite: (requested) => [0, ...requested.slice(0, requested.length - 1)],
+  }),
+});
+
 export function virtualCard(cardProfile, {
   settleSamples = 1, rampSamples = 0, wanderMhz = null,
   seed = 1, allowProcessDeath = false,
@@ -952,6 +1014,26 @@ export function virtualCard(cardProfile, {
   // alongside its first user gets shaped by that user's convenience. Phase 2 proves the surface with
   // a fixture; phase 3 injects the classes.
   applyWrite = null,
+  // ─── КЛАСС C1: ЧТЕНИЕ СРАЗУ ПОСЛЕ ЗАПИСИ ЕЩЁ НЕ УСТОЯЛОСЬ (`plans/39`, эпик 36 фаза 3) ──────────
+  //
+  // Это не выдуманный класс, а ИЗМЕРЕННОЕ поведение этой машины, записанное в собственный канон
+  // проекта. `AGENT_GUIDE.md`, правило машины владельца, шаг 4, дословно: **«A single read taken
+  // immediately after a write can return the previous value. Read until two consecutive samples
+  // agree, then report.»** Замер 2026-08-10: `nvidia-smi -rgc` ответил «All done» с кодом 0, а
+  // `clocks.gr` ещё держал прежнюю частоту — отпустило только на следующей пробе через секунду.
+  //
+  // `curveSettleReads: N` — первые N чтений кривой после записи отдают ДОПИСЬМЕННУЮ таблицу, и лишь
+  // потом устоявшуюся. Умолчание 0 — сегодняшнее поведение, карта отвечает сразу.
+  //
+  // ⚠️ ЭТО ШОВ НА ЧТЕНИИ, А НЕ НА ЗАПИСИ, и по-другому класс не выражается: запись легла правильно,
+  // врёт ответ на вопрос о ней. Смешать это с `applyWrite` значило бы описать другой дефект.
+  curveSettleReads = 0,
+  // ─── КЛАСС C4: ОДИН ИЗ 127 ВЫЗОВОВ ЗАПИСИ ВЕРНУЛ НЕ НОЛЬ (`plans/39`) ───────────────────────────
+  //
+  // На живой карте вектор кладётся ЦИКЛОМ из 127 отдельных вызовов (маска допускает один бит за
+  // вызов), и `nvapi.writeCurve` считает провалы по СТАТУСАМ. Класс моделирует именно это: список
+  // индексов, чьи вызовы «не прошли». Умолчание `null` — все вызовы успешны.
+  writeCallFailsAt = null,
 } = {}) {
   const v = validateCard(cardProfile);
   if (!v.ok) throw new Error(`виртуальная карта не поднимается на негодном профиле (поле ${v.field}): ${v.why}`);
@@ -963,6 +1045,10 @@ export function virtualCard(cardProfile, {
     powerLimitW: P.powerLimitW.default,
     lock: null,                                   // { min, max } | null
     curveOffsetsMhz: new Array(GRAPHICS_POINTS).fill(0),
+    // Класс C1 (`plans/39`): что таблица показывала до последней записи, и сколько раз её с тех пор
+    // читали. Пока `curveSettleReads` равен нулю — умолчание — оба поля инертны.
+    curveOffsetsBeforeWrite: new Array(GRAPHICS_POINTS).fill(0),
+    curveReadsSinceWrite: 0,
     reportedMhz: idleWander[0],
     queue: [],                                    // stale reads, then the ramp — drained by query
     wanderAt: 0,
@@ -1187,6 +1273,19 @@ export function virtualCard(cardProfile, {
       // Умолчание — точное применение: честная модель карты, которая делает, что сказано. Фаза 3
       // подменяет `applyWrite` по классам отказа.
       const requested = vec.offsets.slice(0, GRAPHICS_POINTS);
+      // КЛАСС C4 — отказ ВЫЗОВА, а не расхождение таблицы. Отвечает раньше всего остального: на
+      // живой карте провалившийся вызов виден по статусу СРАЗУ, до всякого прожига, и карта времени
+      // на него не тратит.
+      if (Array.isArray(writeCallFailsAt) && writeCallFailsAt.length) {
+        const failures = writeCallFailsAt.slice(0, 5).map((point) => ({ point, why: 'NVAPI_ERROR (смоделировано)' }));
+        return {
+          ok: false,
+          why: `запись кривой не легла: ${writeCallFailsAt.length} из ${GRAPHICS_POINTS} вызовов вернули не ноль `
+            + `(первые: ${failures.map((f) => f.point).join(', ')})`,
+          failed: writeCallFailsAt.length,
+          failures,
+        };
+      }
       const held = applyWrite
         ? applyWrite(requested, { capMhz, deltaMhz, table: P.vfTable, points: GRAPHICS_POINTS })
         : requested;
@@ -1197,6 +1296,10 @@ export function virtualCard(cardProfile, {
         throw new TypeError(`applyWrite обязан вернуть ${GRAPHICS_POINTS} конечных чисел — `
           + `получено ${Array.isArray(held) ? `${held.length} элемент(ов)` : typeof held}`);
       }
+      // ЧТО ТАБЛИЦА ПОКАЗЫВАЛА ДО ЭТОЙ ЗАПИСИ — опора класса C1. Сохраняется ДО подмены, иначе
+      // «недоустоявшееся» чтение отдавало бы уже новое состояние и класс не выражался бы вовсе.
+      state.curveOffsetsBeforeWrite = [...state.curveOffsetsMhz];
+      state.curveReadsSinceWrite = 0;
       state.curveOffsetsMhz = held;
       // ⚠️ `vector` — ЗАКАЗ, а не то, что легло. Вызывающий, сверяющий запись, обязан спрашивать
       // карту (`readCurve`/`readCurveOffsets`), иначе он сверяет свою заявку сам с собой.
@@ -1204,7 +1307,15 @@ export function virtualCard(cardProfile, {
     },
 
     async readCurveOffsets() {
-      return { ok: true, offsets: [...state.curveOffsetsMhz] };
+      // ТОТ ЖЕ ШОВ C1 НА УПРАВЛЯЮЩЕМ СТРУКТЕ. На живой карте это ВТОРОЙ прибор (`readVfOffsets`
+      // против `readVfCurve`), и он читает ту же аппаратную поверхность — значит и недоустаиваться
+      // обязан вместе с ней. Дать ему устояться раньше значило бы подарить движку различитель,
+      // которого на карте нет.
+      const held = (state.curveReadsSinceWrite < curveSettleReads)
+        ? state.curveOffsetsBeforeWrite
+        : state.curveOffsetsMhz;
+      state.curveReadsSinceWrite++;
+      return { ok: true, offsets: [...held] };
     },
 
     /**
@@ -1216,7 +1327,9 @@ export function virtualCard(cardProfile, {
      * отвечает на ДРУГОЙ вопрос: какова таблица ДО записи. Два вопроса, два метода, как на карте.
      */
     async readCurve() {
-      return { ok: true, points: effectiveTable() };
+      const points = effectiveTable({ settling: true });
+      state.curveReadsSinceWrite++;
+      return { ok: true, points };
     },
 
     async zeroCurve() {
@@ -1295,11 +1408,19 @@ export function virtualCard(cardProfile, {
    * cleanup. Both callers keep exactly what they had; the flag makes the difference visible to
    * whoever settles it.
    */
-  const effectiveTable = ({ withDrift = true } = {}) => {
+  const effectiveTable = ({ withDrift = true, settling = false } = {}) => {
     const drift = withDrift ? tableDriftMhz() : 0;
+    // КЛАСС C1: пока чтений после записи меньше `curveSettleReads`, карта отдаёт ПРЕЖНЮЮ таблицу.
+    // Спрашивают об этом только читатели кривой (`settling: true`); оракул и регулятор буста живут
+    // в НАСТОЯЩЕМ состоянии карты, потому что кремний работает по тому, что записано, а не по тому,
+    // что успел отдать интерфейс чтения. Смешать эти два значило бы сказать, что недоустоявшийся
+    // ОТВЕТ меняет физику — а он меняет только то, что мы о ней знаем.
+    const held = (settling && state.curveReadsSinceWrite < curveSettleReads)
+      ? state.curveOffsetsBeforeWrite
+      : state.curveOffsetsMhz;
     const out = [];
     for (let i = 0; i < GRAPHICS_POINTS; i++) {
-      const mhz = P.vfTable[i].mhz + state.curveOffsetsMhz[i] + drift;
+      const mhz = P.vfTable[i].mhz + held[i] + drift;
       out.push({
         i,
         mhz,
@@ -1872,6 +1993,113 @@ export async function selfTest() {
       await broken.curveBackend.writeRaiseAndCap(DELTA, CAP, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
     } catch { seamThrew = true; }
     check('ФАЗА 2: негодный applyWrite ОТКАЗЫВАЕТ вслух, а не растворяется в заказе', seamThrew, '');
+  }
+
+  // ═══ ЭПИК 36, ФАЗА 3 — ШЕСТЬ КЛАССОВ ОТКАЗА ЗАПИСИ (`plans/39`) ════════════════════════════════
+  //
+  // Приказ владельца: *«Симулируй ОТКАЗЫ ВСЕХ ВОЗМОЖНЫХ СЦЕНАРИЕВ»*. Сделан считаемым: шесть
+  // классов, у каждого источник в этом репозитории (опись — в шапке `WRITE_FAILURE_CLASSES`).
+  //
+  // ⚠️ ГЛАВНОЕ ТРЕБОВАНИЕ ФАЗЫ (F3-AC2): каждый класс обязан РАЗОЙТИСЬ с честной картой. Класс, на
+  // котором стенд остался таким же, как на послушной карте, НЕ СМОДЕЛИРОВАН — он просто описан
+  // словами. Именно поэтому ниже сравнивается не «зелено ли», а «отличается ли от честной».
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   FA. игнорировать `curveSettleReads`              → «C1 ОТДАЁТ ПРЕЖНЮЮ ТАБЛИЦУ»
+  //   FB. сделать фикстуру класса честной              → блок этого класса зеленеет (сторож смотрит
+  //                                                      на КЛАСС, а не на константу)
+  {
+    const CAP = 2842;
+    const DELTA = 200;
+    const write = async (opts) => {
+      const vc = virtualCard(CARD, { seed: 7, ...opts });
+      const w = await vc.curveBackend.writeRaiseAndCap(DELTA, CAP, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
+      if (!w.ok) return { w, curve: null, held: null };
+      const curve = await vc.curveBackend.readCurve();
+      const held = await vc.curveBackend.readCurveOffsets();
+      return { w, curve, held };
+    };
+    const honestRun = await write({});
+    const honestTop = Math.max(...honestRun.curve.points.map((p) => p.mhz));
+    const mismatchesOf = (r) => (r.held && r.w.vector
+      ? r.w.vector.filter((o, i) => o !== r.held.offsets[i]).length : null);
+
+    // C1 — чтение не устоялось: первая проба отдаёт ДОПИСЬМЕННУЮ таблицу (у честной карты — записанную).
+    const c1 = await write(WRITE_FAILURE_CLASSES.C1_unsettled_read(2));
+    const c1Top = Math.max(...c1.curve.points.map((p) => p.mhz));
+    check('ФАЗА 3 · C1 ОТДАЁТ ПРЕЖНЮЮ ТАБЛИЦУ: первое чтение после записи ещё не устоялось',
+      c1Top !== honestTop && c1Top === Math.max(...CARD.vfTable.slice(0, GRAPHICS_POINTS).map((e) => e.mhz)),
+      `недоустоявшееся чтение даёт верх ${c1Top}, честное ${honestTop} — это ИЗМЕРЕННОЕ поведение машины `
+      + '(AGENT_GUIDE, правило машины владельца, шаг 4)');
+
+    // C2 — часть записей инертна: поточечная сверка обязана увидеть расхождения, и их немного.
+    const c2 = await write(WRITE_FAILURE_CLASSES.C2_partly_inert(7));
+    const c2Miss = mismatchesOf(c2);
+    check('ФАЗА 3 · C2 ЧАСТЬ ЗАПИСЕЙ ИНЕРТНА: заказ и удерживаемое расходятся в НЕСКОЛЬКИХ точках',
+      c2Miss > 0 && c2Miss < GRAPHICS_POINTS / 2,
+      `расхождений ${c2Miss} из ${GRAPHICS_POINTS} (у честной карты ${mismatchesOf(honestRun)})`);
+
+    // C3 — драйвер правит результат: верх таблицы уходит ВЫШЕ потолка, чего вектор дать не может.
+    const c3 = await write(WRITE_FAILURE_CLASSES.C3_driver_adjusts(15));
+    const c3Top = Math.max(...c3.curve.points.map((p) => p.mhz));
+    check('ФАЗА 3 · C3 ДРАЙВЕР ПРАВИТ РЕЗУЛЬТАТ: верх таблицы ВЫШЕ потолка, хотя вектор этого не мог',
+      c3Top > CAP && honestTop <= CAP,
+      `верх ${c3Top} при потолке ${CAP}; это ровно форма живого отказа 2026-08-24 (2370 при потолке 2355)`);
+
+    // C4 — вызов записи провалился: отказ приходит ДО всякого прожига, и он несёт СЧЁТ и АДРЕСА.
+    const c4 = await write(WRITE_FAILURE_CLASSES.C4_call_fails([40, 41]));
+    check('ФАЗА 3 · C4 ВЫЗОВ ЗАПИСИ ПРОВАЛИЛСЯ: отказ ДО прожига, со счётом и адресами',
+      c4.w.ok === false && c4.w.failed === 2 && /40, 41/.test(c4.w.why ?? ''),
+      `${c4.w.why}`);
+
+    // C5 — запись инертна ЦЕЛИКОМ: таблица осталась заводской, и это НЕ «андервольт без экономии».
+    const c5 = await write(WRITE_FAILURE_CLASSES.C5_wholly_inert());
+    const c5Miss = mismatchesOf(c5);
+    const c5Stock = c5.curve.points.every((p, i) => p.mhz === CARD.vfTable[i].mhz);
+    check('ФАЗА 3 · C5 ЗАПИСЬ ИНЕРТНА ЦЕЛИКОМ: таблица заводская при УСПЕШНЫХ статусах',
+      c5.w.ok === true && c5Stock && c5Miss > GRAPHICS_POINTS / 2,
+      `расхождений ${c5Miss} из ${GRAPHICS_POINTS}, таблица заводская — успех по статусам этого НЕ ВИДИТ`);
+
+    // C6 — сдвиг на одну запись: расхождений МНОГО и они систематичны, этим класс отличается от C2.
+    const c6 = await write(WRITE_FAILURE_CLASSES.C6_shifted_by_one());
+    const c6Miss = mismatchesOf(c6);
+    check('ФАЗА 3 · C6 ТАБЛИЦА ЛЕГЛА СО СДВИГОМ: расхождений МНОГО — этим класс отличим от C2',
+      c6Miss > c2Miss && c6Miss > GRAPHICS_POINTS / 3,
+      `сдвиг даёт ${c6Miss} расхождений против ${c2Miss} у частичной инертности `
+      + '(источник: «a single bit for point 64 answered in slot 65», researches/05)');
+
+    // F3-AC4 — КЛАССЫ РАЗЛИЧИМЫ МЕЖДУ СОБОЙ. Без этого шесть фикстур были бы одним классом в шести
+    // одеждах, и движок, научившийся отвечать на один, считался бы отвечающим на все.
+    const signature = (r, top) => `${r.w.ok}/${mismatchesOf(r)}/${top > CAP}`;
+    const sigs = [
+      signature(c1, c1Top), signature(c2, Math.max(...c2.curve.points.map((p) => p.mhz))),
+      signature(c3, c3Top), `${c4.w.ok}/null/false`,
+      signature(c5, Math.max(...c5.curve.points.map((p) => p.mhz))),
+      signature(c6, Math.max(...c6.curve.points.map((p) => p.mhz))),
+    ];
+    check('ФАЗА 3 · F3-AC4: КЛАССЫ РАЗЛИЧИМЫ — ни два не дают одинаковой улики',
+      new Set(sigs).size >= 4, `подписи: ${sigs.join(' · ')}`);
+
+    // 🔴 СВЕРКА С ЖИВЫМ ЧИСЛОМ — РАДИ ЭТОГО СТЕНД И СТРОИЛСЯ (`researches/18` §1).
+    //
+    // Живая карта 2026-08-24 09:36, seq 700: потолок 2355, кривая после записи предложила **2370**,
+    // то есть ПОТОЛОК + 15. Не заводской верх (3157), а на две ступени сетки выше потолка.
+    //
+    // Классы дают РАЗНУЮ форму, и это и есть различитель:
+    //   · C1 (чтение не устоялось, всё-или-ничего) → ЗАВОДСКОЙ верх;
+    //   · C2 / C5 (инертность)                     → ЗАВОДСКОЙ верх (незаписанная запись держит своё);
+    //   · C3 (драйвер правит результат)            → ПОТОЛОК + небольшая добавка.
+    //
+    // ⚠️ ЧТО ЭТОТ БЛОК УТВЕРЖДАЕТ И ЧЕГО НЕ УТВЕРЖДАЕТ. Он держит СВОЙСТВО МОДЕЛЕЙ — что эти два
+    // класса дают разные формы верха, — и потому переживает смену чисел. Он НЕ объявляет C3 причиной
+    // живого отказа: у C1 остаётся живой вариант «устоялась ЧАСТЬ записей», который дал бы
+    // промежуточный верх и от C3 по одному этому числу неотличим. Назвать причину может только
+    // живой прогон с поточечной сверкой (фаза 1 её довозит).
+    const c1IsStockTop = c1Top === Math.max(...CARD.vfTable.slice(0, GRAPHICS_POINTS).map((e) => e.mhz));
+    check('ФАЗА 3 · ФОРМА ЖИВОГО ОТКАЗА (потолок + малая добавка) ОТЛИЧАЕТ C3 ОТ C1 И ОТ ИНЕРТНОСТИ',
+      c1IsStockTop && c3Top > CAP && (c3Top - CAP) < 50 && c3Top !== c1Top,
+      `C1 даёт заводской верх ${c1Top}; C3 даёт ${c3Top} = потолок + ${c3Top - CAP}. `
+      + 'Живое наблюдение — 2370 при потолке 2355, то есть форма C3, а НЕ форма C1');
   }
 
   // an inversion is the fourth rule, and it needs a vector rather than a scalar
