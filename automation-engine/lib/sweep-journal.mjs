@@ -174,7 +174,19 @@ export function appendLine(journal, record, io = {}) {
   const close = io.closeSync ?? closeSync;
   // Sorted keys: the journal is diffed between runs and read by eye after an incident; a stable field
   // order is what makes both possible (`AGENT_GUIDE.md` → canonical order for anything compared).
-  const line = `${JSON.stringify(record, Object.keys(record).sort())}\n`;
+  //
+  // ⚠️ NOT `JSON.stringify(record, Object.keys(record).sort())`, and the difference is not stylistic.
+  // An ARRAY second argument is a KEY FILTER, and `JSON.stringify` applies it at EVERY level — so a
+  // nested object keeps only the keys that happen to exist at the TOP level, and loses the rest
+  // SILENTLY. Measured 2026-08-24 the moment the first nested field arrived (`redBlocks`, `plans/37`):
+  // the array came through with the right length and every element gutted to `{}`.
+  //
+  // Nothing was lost historically — every line this journal has ever written is flat — but the trap
+  // was armed and would have fired on the first diagnostic field anyone nested. Sorting an object's
+  // own keys is what was wanted; filtering the document was never the intent.
+  const sorted = {};
+  for (const k of Object.keys(record).sort()) sorted[k] = record[k];
+  const line = `${JSON.stringify(sorted)}\n`;
   const fd = open(journal.path, 'a');
   try {
     write(fd, line);
@@ -285,6 +297,14 @@ export function writeVerdict(journal, closing, io = {}) {
     tableDriftMhz: closing.tableDriftMhz ?? null,
     appliedPinMhz: closing.appliedPinMhz ?? null,
     offeredAfterMhz: closing.offeredAfterMhz ?? null,
+    // THE ATOM'S RED BLOCKS — `plans/37` (epic 36 phase 1). The atom measures the quantities that
+    // NAME a failure and, until 2026-08-24, threw them away: its blocks are not printed by the sweep
+    // and were not journalled, so on the one rung that mattered nobody could say whether the
+    // point-by-point re-read had been green or red. Capped by `config.ATOM_RED_BLOCKS_IN_JOURNAL`
+    // with the dropped count stated — a silent truncation reads as «nothing else happened».
+    // GREEN blocks are deliberately NOT here: a line carrying two dozen greens buries its one red.
+    redBlocks: Array.isArray(closing.redBlocks) ? closing.redBlocks : [],
+    redBlocksDropped: closing.redBlocksDropped ?? 0,
     why: closing.why ?? '',
   };
   return appendLine(journal, record, io);
@@ -1096,6 +1116,43 @@ export function selfTest() {
     ok('ВОЗОБНОВЛЕНИЕ ОТДАЁТ ОБЕ ПОЛОВИНЫ: и пол зависания, и доказанную землю',
       [resumed.floors?.get(2820)?.voltageMv ?? 'пола нет', resumed.proven?.get(2820)?.voltageMv ?? 'улики нет'],
       [850, 870]);
+
+    // ─── ВЛОЖЕННЫЙ ОБЪЕКТ ПЕРЕЖИВАЕТ ЗАПИСЬ ЦЕЛИКОМ (найдено 2026-08-24, `plans/37`) ─────────────
+    //
+    // `appendLine` сортировал ключи через `JSON.stringify(record, Object.keys(record).sort())`, а
+    // МАССИВ вторым аргументом — это ФИЛЬТР КЛЮЧЕЙ, и он применяется на ВСЕХ уровнях. Значит
+    // вложенный объект сохранял только те ключи, которые случайно есть НАВЕРХУ, а остальные
+    // терял МОЛЧА. Замерено в тот же миг, когда появилось первое вложенное поле: массив пришёл
+    // нужной длины, а каждый элемент выпотрошен до `{}`.
+    //
+    // Исторически не потеряно ничего — все строки этого журнала плоские, — но ловушка стояла
+    // заряженной и сработала бы на первом же диагностическом поле, которое кто-нибудь вложит.
+    // Блок держит СВОЙСТВО, а не сегодняшнее поле: любой вложенный объект round-trip'ится целиком.
+    //
+    // МУТАЦИЯ: вернуть массив-фильтр вторым аргументом → блок краснеет.
+    {
+      const nestBox = openJournal({ dir: join(sandbox, 'nested') });
+      appendLine(nestBox, {
+        state: 'verdict', seq: 1, at: null,
+        // Ключи вложенного НАРОЧНО не совпадают ни с одним верхним — так фильтр и проявлялся.
+        payload: [{ имя: 'блок', причина: 'сошлось 120 из 127' }],
+        глубже: { уровень2: { уровень3: 'дно' } },
+      });
+      const back = readJournal(nestBox).records[0];
+      ok('ВЛОЖЕННЫЙ ОБЪЕКТ ПЕРЕЖИВАЕТ ЗАПИСЬ ЦЕЛИКОМ — сортируются КЛЮЧИ, а не фильтруется документ',
+        [back?.payload?.[0]?.имя ?? 'ПОТЕРЯНО', back?.payload?.[0]?.причина ?? 'ПОТЕРЯНО',
+          back?.глубже?.уровень2?.уровень3 ?? 'ПОТЕРЯНО'],
+        ['блок', 'сошлось 120 из 127', 'дно']);
+      // И сортировка верхнего уровня при этом НЕ потеряна — иначе починка обменяла бы один дефект
+      // на другой: журнал диффят между прогонами, и порядок полей это то, что делает дифф читаемым.
+      ok('и порядок ключей ВЕРХНЕГО уровня остался отсортированным — дифф между прогонами цел',
+        (() => {
+          const raw = readFileSync(nestBox.path, 'utf8').split(/\r?\n/).filter(Boolean)[0];
+          const keys = [...raw.matchAll(/"([^"]+)":/g)].map((m) => m[1]);
+          const top = keys.filter((k) => ['at', 'seq', 'state', 'payload', 'глубже'].includes(k));
+          return top.join(',') === [...top].sort().join(',');
+        })(), true);
+    }
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
     rmSync(assertSandbox({ dir: sandbox }), { recursive: true, force: true });

@@ -857,6 +857,50 @@ export async function runRung({
   // всегда ронял на пол. Без него улики о пробитом потолке говорят, что карта ВЫДАЛА, и молчат о
   // том, что ей ПРЕДЛАГАЛОСЬ, — а это разные утверждения, и виноваты в них разные стороны.
   record.offeredAfterMhz = atom?.highestOfferedMhz ?? null;
+
+  // ---- 5b. КРАСНЫЕ БЛОКИ АТОМА — ВИДНЫ ОПЕРАТОРУ И ПЕРЕЖИВАЮТ СЕССИЮ (`plans/37`, эпик 36 фаза 1).
+  //
+  // ЧТО ЭТО ЧИНИТ, НА ОДНОМ ИЗМЕРЕННОМ ПРИМЕРЕ. Атом мерит ровно ту величину, которая называет
+  // сегодняшний дефект: «перечитано ПОТОЧЕЧНО — каждая точка несёт РОВНО заказанный сдвиг»
+  // (`vf-step:837`) и «ПОТОЛОК СТОИТ» (`vf-step:863`). На ступени seq 700 второй ОБЯЗАН был
+  // покраснеть — кривая после записи предлагала 2370 при потолке 2355. Его не увидел никто:
+  // блоки атома в консоль развёртки не выводятся и в журнал не едут. Три гипотезы
+  // (`researches/18` §5) до сих пор не разведены только поэтому.
+  //
+  // ⚠️ ОТБОР ИДЁТ ПО ФЛАГАМ, А НЕ ПО ИМЕНИ. У двух видов блоков канал УЖЕ есть, со своими
+  // формулировками: `undo: true` печатается как «ОТКАТ НЕ ЧИСТ», `proof: true` — как «ПРОВЕРКА НЕ
+  // ДАЛА ОТВЕТА» (`plans/28`, находка A). Ловить их подстрокой в имени значило бы завести пару
+  // «правда ↔ зеркало» против формулировок блоков, и она замолчала бы при первой же их правке —
+  // ровно то, что этот движок уже делает для грязного отката (поле, а не имя).
+  //
+  // Здесь остаются ОБЫЧНЫЕ блоки, у которых сегодня нет канала вообще.
+  const redOrdinary = (atom?.blocks ?? []).filter(
+    (b) => b && b.ok === false && b.undo !== true && b.proof !== true);
+  const redCap = config.ATOM_RED_BLOCKS_IN_JOURNAL;
+  record.redBlocks = redOrdinary.slice(0, redCap).map((b) => ({ name: b.name, detail: b.detail ?? '' }));
+  // ОТБРОШЕННОЕ НАЗЫВАЕТСЯ ЧИСЛОМ. Молчаливое усечение читается как «больше ничего не было» — тот
+  // самый класс, ради которого поле и заводится.
+  record.redBlocksDropped = Math.max(0, redOrdinary.length - record.redBlocks.length);
+  if (onEvent && record.redBlocks.length) {
+    for (const b of record.redBlocks) {
+      onEvent({
+        kind: 'atom-red',
+        frequencyMhz: clockMhz,
+        // Формулировка блока едет ДОСЛОВНО: оператор ставит диагноз, и слова блока — это улика,
+        // а не материал для пересказа.
+        text: `КРАСНЫЙ БЛОК АТОМА: ${b.name}${b.detail ? ` — ${b.detail}` : ''}`,
+        blockName: b.name,
+      });
+    }
+    if (record.redBlocksDropped) {
+      onEvent({
+        kind: 'atom-red',
+        frequencyMhz: clockMhz,
+        text: `…и ещё ${record.redBlocksDropped} красных блок(ов) атома НЕ показаны — потолок ${redCap} `
+          + '(config.ATOM_RED_BLOCKS_IN_JOURNAL). Полный список — в блоках атома этого прогона',
+      });
+    }
+  }
   if (onEvent && Number.isFinite(record.tableDriftMhz) && record.tableDriftMhz !== 0) {
     onEvent({
       kind: 'offset-recomputed',
@@ -895,6 +939,11 @@ export async function runRung({
         tableDriftMhz: record.tableDriftMhz ?? null,
         appliedPinMhz: record.appliedPinMhz ?? null,
         offeredAfterMhz: record.offeredAfterMhz ?? null,
+        // ДИАГНОЗ ЕДЕТ В ВЕРДИКТ, А НЕ В НАМЕРЕНИЕ (`plans/37`). Намерение `fsync`-ится ДО касания
+        // карты и обязано остаться маленьким и постоянным — это R15; разбор принадлежит вердикту,
+        // ровно как решил `bugs/49` этим же утром.
+        redBlocks: record.redBlocks ?? [],
+        redBlocksDropped: record.redBlocksDropped ?? 0,
         why: result.why,
       });
     }
@@ -4758,6 +4807,83 @@ export function selfTest() {
           onEvent: (e) => quiet.push(e),
           runStepFn: async () => ({ ...atomPass(1000), offsetMhz: 331 }),
         });
+        // ═══ ЭПИК 36, ФАЗА 1 — КРАСНЫЙ БЛОК АТОМА ПЕРЕСТАЁТ ПРОПАДАТЬ (`plans/37`) ════════════════
+        //
+        // Повод измерен: на seq 700 блок «ПОТОЛОК СТОИТ» обязан был покраснеть (кривая предлагала
+        // 2370 при потолке 2355), и его не увидел никто — три гипотезы `researches/18` §5 не
+        // разведены ровно поэтому.
+        //
+        // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+        //   DA. не собирать красные вовсе                  → «КРАСНЫЙ БЛОК АТОМА ДОЕЗЖАЕТ ДО ЖУРНАЛА»
+        //   DB. класть в журнал и ЗЕЛЁНЫЕ тоже             → «ЗЕЛЁНЫЕ НЕ ЕДУТ»
+        //   DC. усечь молча, без счёта отброшенных         → «ОТБРОШЕННОЕ НАЗВАНО ЧИСЛОМ»
+        //   DD. ловить undo/proof по имени, а не по флагу  → «У ДВУХ ВИДОВ СВОЙ КАНАЛ — НЕ ДУБЛИРУЕМ»
+        {
+          const jrn6 = openJournal({ dir: join(journalBox, 'atom-red') });
+          const said6 = [];
+          // Атом с ОДНИМ обычным красным, одним зелёным, одним красным `undo` и одним красным
+          // `proof`: последние два обязаны остаться в СВОИХ каналах и сюда не попасть.
+          const noisy = await runRung({
+            envelopeMhz: 3090,
+            points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+            buildVector: vectorCapped, journal: jrn6, seq: 1, now: clock,
+            onEvent: (e) => said6.push(e),
+            runStepFn: async () => ({
+              ...atomPass(1000),
+              blocks: [
+                ...cleanUndo,
+                // ⚠️ ИМЯ ЭТОГО БЛОКА НАРОЧНО НЕ ПОХОЖЕ НИ НА «ПОТОЛОК», НИ НА «ОТКАТ». Первая
+                // редакция фикстуры звала его «ПОТОЛОК 2842 МГц УСТОЯЛ», и мутация DD («ловить два
+                // вида по ИМЕНИ вместо флага») НЕ ПОКРАСНЕЛА: имя случайно совпадало с шаблоном, то
+                // есть блок не умел отличить проверяемое свойство от совпадения слов. Сторож,
+                // который не краснеет на своей мутации, не держит того, что заявляет (EXP-0127).
+                { name: 'нечто совсем иное', ok: false, detail: 'предлагает 2857 при потолке 2842', proof: true },
+                { name: 'перечитано ПОТОЧЕЧНО', ok: false, detail: 'сошлось 120 из 127' },
+                { name: 'АНДЕРВОЛЬТ: напряжение УПАЛО', ok: true, detail: 'всё хорошо' },
+              ],
+            }),
+          });
+          const v6 = readJournal(jrn6).records.find((r) => r.state === 'verdict');
+          ok('эпик36/ф1: КРАСНЫЙ БЛОК АТОМА ДОЕЗЖАЕТ ДО ЖУРНАЛА — и несёт свою причину, а не одно имя',
+            (() => {
+              if (!v6) return 'строки вердикта нет вовсе';
+              return [v6.redBlocks?.length ?? null, v6.redBlocks?.[0]?.name ?? null,
+                /сошлось 120 из 127/.test(v6.redBlocks?.[0]?.detail ?? '')];
+            })(), [1, 'перечитано ПОТОЧЕЧНО', true]);
+          ok('эпик36/ф1: ЗЕЛЁНЫЕ НЕ ЕДУТ — журнал, несущий два десятка зелёных, хоронит свой единственный красный',
+            (v6?.redBlocks ?? []).some((b) => /АНДЕРВОЛЬТ/.test(b.name)), false);
+          // ПОЛЕМ, А НЕ ИМЕНЕМ: у отката и у проверки СВОИ формулировки на выходе, и дублировать их
+          // здесь значило бы сказать оператору одно и то же дважды разными словами.
+          ok('эпик36/ф1: У ДВУХ ВИДОВ СВОЙ КАНАЛ — undo и proof сюда НЕ дублируются (отбор по ФЛАГУ, не по имени)',
+            (v6?.redBlocks ?? []).some((b) => /нечто совсем иное|ОТКАТ/.test(b.name)), false);
+          ok('эпик36/ф1: и оператор видит блок ЖИВЬЁМ, дословно — он ставит диагноз, а не читает пересказ',
+            (() => {
+              const e = said6.find((x) => x.kind === 'atom-red');
+              if (!e) return 'события о красном блоке нет';
+              return [/КРАСНЫЙ БЛОК АТОМА: перечитано ПОТОЧЕЧНО/.test(e.text), e.blockName];
+            })(), [true, 'перечитано ПОТОЧЕЧНО']);
+
+          // ПОТОЛОК И ЧЕСТНЫЙ СЧЁТ ОТБРОШЕННЫХ. Восемь обычных красных против потолка в 5.
+          const jrn7 = openJournal({ dir: join(journalBox, 'atom-red-capped') });
+          await runRung({
+            envelopeMhz: 3090,
+            points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+            buildVector: vectorCapped, journal: jrn7, seq: 1, now: clock,
+            runStepFn: async () => ({
+              ...atomPass(1000),
+              blocks: [...cleanUndo,
+                ...Array.from({ length: 8 }, (_, i) => ({ name: `красный ${i}`, ok: false, detail: `причина ${i}` }))],
+            }),
+          });
+          const v7 = readJournal(jrn7).records.find((r) => r.state === 'verdict');
+          ok('эпик36/ф1: ОТБРОШЕННОЕ НАЗВАНО ЧИСЛОМ — молчаливое усечение читается как «больше ничего не было»',
+            (() => {
+              if (!v7) return 'строки вердикта нет вовсе';
+              return [v7.redBlocks?.length ?? null, v7.redBlocksDropped,
+                v7.redBlocks?.[0]?.name ?? null, config.ATOM_RED_BLOCKS_IN_JOURNAL];
+            })(), [5, 3, 'красный 0', 5]);
+        }
+
         ok('bugs/49: ДРЕЙФ НЕ ИЗМЕРЯЛСЯ — ЭТО null, А НЕ НОЛЬ, и молчащий пересчёт не печатается',
           (() => {
             const v = readJournal(jrn5).records.find((r) => r.state === 'verdict');

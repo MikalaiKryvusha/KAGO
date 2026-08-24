@@ -268,6 +268,29 @@ export const CURVE_GRAPHICS_POINT_COUNT = CLK_VF_POINT_COUNT - 1;
 export const CLOCK_LADDER_STEP_TOLERANCE_MHZ = 8;
 
 /**
+ * HOW MANY RED ATOM BLOCKS ONE VERDICT LINE MAY CARRY (`plans/37`, epic 36 phase 1).
+ *
+ * ─── WHY A CAP AT ALL, AND WHY THIS NUMBER ──────────────────────────────────────────────────────
+ *
+ * The atom emits **23 blocks per rung** (counted 2026-08-24 over `vf-step.runStep`, not estimated),
+ * a sweep walks tens of rungs, and the write-ahead journal is read BY EYE after an incident. A line
+ * carrying everything buries the one block that matters — the same reason the guarded loop's pulse
+ * is written only when work completes rather than on a timer.
+ *
+ * Five is the count that fits the failure SHAPES this project has actually seen: a rung fails for
+ * one reason and its neighbours redden as consequences (the ceiling breach reddens the ceiling
+ * block and the undervolt block; a failed write reddens the point-by-point re-read and everything
+ * downstream of it). Beyond five the tail is repetition, and the dropped count is stated out loud —
+ * silent truncation reads as «nothing else happened», which is the defect this field exists to stop.
+ *
+ * ⚠️ **Not a filter on WHICH blocks are interesting** — the first five in emission order are kept,
+ * because emission order is causal order in this atom: the earliest red block is the one nearest
+ * the cause. Choosing «the important ones» would be the agent deciding what the next session is
+ * allowed to see.
+ */
+export const ATOM_RED_BLOCKS_IN_JOURNAL = 5;
+
+/**
  * HOW FAR THE FACTORY V/F TABLE SLIDES ALONG THE FREQUENCY AXIS PER DEGREE OF HEAT.
  *
  * MEASURED, not chosen: −1.7 MHz per °C on this card (`PROJECT_ARCHITECTURE_INTERNAL_MAP.md` → R14b;
@@ -1148,6 +1171,7 @@ export default Object.freeze({
   CLK_VF_POINT_COUNT,
   CURVE_GRAPHICS_POINT_COUNT,
   CLOCK_LADDER_STEP_TOLERANCE_MHZ,
+  ATOM_RED_BLOCKS_IN_JOURNAL,
   VF_TABLE_DRIFT_MHZ_PER_C,
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
   FAST_DESCENT_FLOOR_MV,
