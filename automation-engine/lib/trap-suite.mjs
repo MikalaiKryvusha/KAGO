@@ -98,6 +98,10 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
 import { loadCard, virtualCard, TRAPS, GOLDEN_CHECKSUM, PROVABILITY_LINE, MODULE_URL } from './virtual-gpu.mjs';
 import { searchEdge, sweepRange } from '../engine.mjs';
+// СУДЬЯ ВЫДАННОЙ ЧАСТОТЫ — ТОТ ЖЕ, ЧТО У ЖИВОГО АТОМА, А НЕ ВТОРАЯ ЕГО КОПИЯ (`plans/45` шаг 1).
+// Стенд обязан приходить к тому же решению тем же путём: две реализации одного суждения — это пара
+// «истина ↔ зеркало» внутри одного проекта, и она уже молчала здесь однажды (EXP-0077).
+import { judgeDeliveredClock, applyCeilingJudgement } from './vf-step.mjs';
 import { openJournal, readJournal, resumeState, RUNG_OUTCOME } from './sweep-journal.mjs';
 
 const TRAP_DIR = join('benches', 'cards', 'traps');
@@ -152,7 +156,7 @@ export function makeStepFn(vc, card, stress, golden, stampOk, { alwaysPass = fal
  * exactly that.
  */
 export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
-  return async ({ offsetMhz, capMhz, pinMhz = null, writeShape = null, sustain = 10 }) => {
+  return async ({ offsetMhz, capMhz, pinMhz = null, lockMhz = null, writeShape = null, sustain = 10 }) => {
     // ─── СТЕНД СЛУШАЕТСЯ ФОРМЫ, КОТОРУЮ ЕМУ ВЫДАЛИ (`bugs/26`, `plans/25` шаг 1.3) ────────────────
     //
     // `runRung` решает, КТО держит потолок, и передаёт решение сюда тремя полями (`writeShape`,
@@ -175,7 +179,16 @@ export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
     // заказать частоту у карты нельзя (слово владельца 2026-08-23); там, где потолок держит кривая,
     // живой прогон карту не запирает, и стенд, запиравший её всегда, репетировал другую работу.
     if (pinMhz !== null) vc.backend.lockGraphicsClocksMhz(pinMhz, pinMhz);
-    const ordered = pinMhz ?? capMhz;
+    // ─── ГРАНИЦА СВЕРХУ — ДИАПАЗОНОМ, А НЕ ТОЧКОЙ (`plans/45` шаги 3–4) ───────────────────────────
+    //
+    // `min` — нижняя ступень лестницы САМОЙ карты, `max` — потолок. Написать `min = max` значило бы
+    // поставить ЗАКРЕПЛЕНИЕ вместо границы: карта потеряла бы право сбрасывать частоту, а стенд
+    // репетировал бы форму, которую владелец прямо запретил (`GOAL.md`: *«карта сама могла и
+    // разгоняться и снижать частоты»*; факт 38 — диапазон и есть потолок).
+    //
+    // ⚠️ ПОРЯДОК ТОТ ЖЕ, ЧТО У ЖИВОГО АТОМА: сперва кривая (она покупает частоту), потом граница (она
+    // её ограничивает). Обратный порядок ограничивал бы ЗАВОДСКУЮ форму — другое состояние.
+    if (lockMhz !== null) vc.backend.lockGraphicsClocksMhz(card.frequencyGridMhz[card.frequencyGridMhz.length - 1], lockMhz);
 
     const burst = stress.runBurst({
       name: 'sdc_fma', args: [], sustainSeconds: sustain, run: (b, a) => vc.oracle.run(b, a),
@@ -245,16 +258,94 @@ export function makeSweepStepFn(vc, card, stress, golden, stampOk) {
       });
     }
 
+    // ─── ПОТОЛОК СУДИТСЯ ПО ВЫДАННОЙ ЧАСТОТЕ, А НЕ ТОЛЬКО ПО ТАБЛИЦЕ (`plans/45` шаг 1) ────────────
+    //
+    // 🔴 РАЗРЫВ ВЕРНОСТИ, РАДИ КОТОРОГО ЭТОТ БЛОК И ПОЯВИЛСЯ. Замер фазы 1 (`plans/44` → «ЧТО ФАЗА 2
+    // ОБЯЗАНА СДЕЛАТЬ ПЕРВЫМ ШАГОМ»): на живой карте пробитый потолок ловила проверка потолка ПОД
+    // НАГРУЗКОЙ и называла держателя `КАРТА`; на стенде движок вставал РАНЬШЕ, на
+    // `runRung#delivery-above-stock`, и держателей в сводке не было вовсе. Двойник падал не там, где
+    // падает карта, — значит любой зелёный после починки доказывал бы ветку, которой живая карта не
+    // проходит. Выяснилось это откатом чужой правки: убрали побочную остановку — и ловушка перестала
+    // ловить ЧТО-ЛИБО (EXP-0148).
+    //
+    // Своего блока потолка у стенда было ДВА слова из трёх: «ПОТОЛОК УСТОЯЛ В ТАБЛИЦЕ» судит то, что
+    // кривая ПРЕДЛАГАЕТ, а живой дефект в том, что карта уходит выше вставшей формы. Третье слово —
+    // это оно и есть.
+    //
+    // ⚠️ ОДНА ПРОБА, И ОНА ЧЕСТНАЯ, А НЕ ЭКОНОМИЯ. Живой атом считает медиану и максимум по пробам
+    // сэмплера под нагрузкой, потому что живые пробы шумят. Виртуальная карта детерминирована:
+    // `clockNow()` при записанной кривой и без очереди отдаёт одно и то же число сколько ни спрашивай,
+    // поэтому медиана и максимум РАВНЫ прочитанному, и лишние чтения дали бы те же цифры ценой
+    // перемешивания состояния карты (очередь устаревших проб, блуждание в простое) — то есть цену без
+    // выгоды. Асимметрия судьи (вверх — по максимуму, вниз — по медиане) при этом не теряется: она
+    // живёт в самой функции и заработает, как только у стенда появятся разные пробы.
+    //
+    // ⚠️ РЕШЕНИЕ НЕ ПОВТОРЯЕТСЯ ЗДЕСЬ, А ВЫЗЫВАЕТСЯ. `applyCeilingJudgement` — то же самое место, что
+    // решает на живом пути: какие поля выставить, снять ли вердикт, что считать недобором. Она БРОСАЕТ
+    // на превышении, потому что у живого атома отказ выражается красным блоком списка отката; здесь
+    // блок собирается руками, поэтому бросок гасится, а красным делается блок. Скопировать её тело
+    // значило бы завести вторую правду о потолке — ровно то, что запрещает её собственная шапка.
+    //
+    // ⚠️ ЗАКРЕПЛЁННАЯ СТУПЕНЬ СЮДА НЕ ВХОДИТ, И ЭТО ТОЖЕ ВЕРНОСТЬ ЖИВОМУ ПУТИ: там, где держит
+    // закрепление, живой атом судит СОВСЕМ ДРУГИМ прибором (`verifyLockUnderLoad` — «частота
+    // ПОСТОЯННА»), а потолка у формы `uniform` нет вовсе.
+    const out = { verdict: v.verdict };
+    const judged = pinMhz === null && !uniform && Number.isFinite(capMhz);
+    if (judged) {
+      const j = judgeDeliveredClock({
+        capMhz,
+        median: deliveredMhz,
+        max: deliveredMhz,
+        samples: 1,
+        offeredAfterMhz: Number.isFinite(highestOfferedMhz) ? highestOfferedMhz : null,
+      });
+      try {
+        applyCeilingJudgement(out, j, { capMhz, median: deliveredMhz, max: deliveredMhz, loadedSamples: 1 });
+      } catch {
+        // Превышение — это КРАСНЫЙ БЛОК атома, а не исключение из него: `runRung` маршрутизирует
+        // отказ по флагу `proof`, и брошенное отсюда исключение поехало бы мимо этого провода.
+      }
+      // Имя и флаг — те же, что у живого атома (`vf-step`, список отката, `kind: 'proof'`): движок
+      // отбирает блоки ПО ФЛАГУ, и блок с другим флагом поехал бы другим каналом (`plans/28`, A).
+      blocks.push({
+        name: `ПОТОЛОК ${capMhz} МГц УСТОЯЛ ПОД НАГРУЗКОЙ`,
+        // ⚠️ «НЕ ВЫШЕ», А НЕ «РОВНО»: карта под ГРАНИЦЕЙ законно сидит ниже неё, и это измеряемая
+        // величина, а не отказ. Мутация NC (`ok: deliveredMhz === capMhz`) прогнана 2026-08-25 и
+        // воспроизвела регресс 2026-08-14 дословно: полоса T6 встала на `runRung#proof-failed`,
+        // закрыто 0 частот из 6 — здоровые ступени объявлены неизмеримыми.
+        ok: !j.breached,
+        proof: true,
+        why: j.why,
+        detail: `выдано ${deliveredMhz} МГц при потолке ${capMhz}`,
+      });
+    }
+
     await vc.curveBackend.zeroCurve();
-    if (pinMhz !== null) vc.backend.resetGraphicsClocks();
+    // ⚠️ ОДНО УСЛОВИЕ НА ОБА СПОСОБА ДЕРЖАТЬ ЧАСТОТУ — как и в живом атоме. Оставить здесь только
+    // `pinMhz` значило бы бросить `-lgc` на карте и отчитаться чистым откатом: отказ, которого не
+    // видит ни один сторож, потому что все они смотрят на блоки, а блок был бы зелёным.
+    if (pinMhz !== null || lockMhz !== null) vc.backend.resetGraphicsClocks();
     return {
-      verdict: v.verdict,
-      reason: v.reason,
+      verdict: out.verdict,
+      // ГРАНИЦА, КОТОРАЯ РЕАЛЬНО ВСТАЛА — движок кладёт её в `record.appliedLockMhz`, и без этого
+      // поля репетиция не проверяет проводку, которой пользуется живой прогон (класс `bugs/49`).
+      lockMhz,
+      // ПРИЧИНА СНЯТОГО ВЕРДИКТА ЕДЕТ ОТ СУДЬИ, А НЕ ОТ ОРАКУЛА. Оракул сказал PASS; вердикт снял
+      // потолок, и объяснять ступень обязано то утверждение, которое её остановило.
+      reason: out.reason ?? v.reason,
       worstShape: 'sdc_fma/transient',
       deliveredMhz,
       deliveredMaxMhz: deliveredMhz,
-      clockShortfall: Number.isFinite(ordered) && deliveredMhz < ordered,
-      deliveredShortfallMhz: Number.isFinite(ordered) ? ordered - deliveredMhz : null,
+      // НЕДОБОР СЧИТАЕТ СУДЬЯ, А НЕ ЭТОТ ФАЙЛ. Прежняя редакция считала его здесь своей арифметикой
+      // (`deliveredMhz < ordered`) — то есть второй копией решения, и копия была СТРОЖЕ оригинала:
+      // она звала недобором любую разницу, включая одну ступень сетки, которую судья считает
+      // округлением (`config.CLOCK_LADDER_STEP_TOLERANCE_MHZ`). Где судья не звался — закреплённая
+      // ступень, — молчим, ровно как молчит живой атом на своей закреплённой ветке.
+      clockShortfall: judged ? out.clockShortfall === true : false,
+      deliveredShortfallMhz: judged ? (out.deliveredShortfallMhz ?? null) : null,
+      // ДЕРЖАТЕЛЬ ПРОБИТОГО ПОТОЛОКА — `КАРТА` · `ЗАПИСЬ` · `НЕИЗВЕСТНО` (`bugs/50`). Без этого поля
+      // сводка прогона на стенде не могла отличить починку КОДА записи от ЗАМЕРА карты.
+      ceilingBreachHolder: out.ceilingBreachHolder ?? null,
       // СДВИГ, КОТОРЫЙ РЕАЛЬНО ЛЁГ — то же поле, что живой атом отдаёт движку для журнала
       // (`bugs/49`). Без него `appliedDeltaMhz` на стенде всегда null, и репетиция не проверяет
       // проводку, которую живой прогон использует.
@@ -437,6 +528,31 @@ export async function runTrapSuite() {
     check(`${t.name}: карта существует и её вымысел годен`, Boolean(card), 'карты нет на диске');
   }
 
+  // ─── КАРТА ПОСЛЕ ПОЛОСЫ ОБЯЗАНА ОСТАТЬСЯ ЧИСТОЙ — ОДИН СТОРОЖ НА ВСЕ ЛОВУШКИ ────────────────────
+  //
+  // 🔴 ЗАВЕДЁН ПО НАХОДКЕ МУТАЦИИ, А НЕ ПО ПЛАНУ (`plans/45` шаг 6, мутация NB). Мутация «взвести
+  // границу и НЕ отпустить её» покрасила РОВНО НОЛЬ утверждений: набор из 51 блока прошёл целиком,
+  // хотя стенд оставлял `-lgc` на карте после каждой ступени. Причина структурная и потому опасная:
+  // следующая ступень ПЕРЕЗАПИСЫВАЕТ замок своим, а в конце полосы никто не спрашивал карту, держит
+  // ли её ещё что-нибудь. То есть утечка состояния была невидима ПО ПОСТРОЕНИЮ.
+  //
+  // ⚠️ И ЭТО КЛАСС, А НЕ СЛУЧАЙ: границу с этого дня получает КАЖДАЯ ступень выше пола потолка, то
+  // есть все полосы всех ловушек, — поэтому сторож один и зовётся после каждого прогона, а не живёт
+  // внутри T8. «Починить экземпляр» здесь означало бы оставить четыре дыры из пяти.
+  //
+  // Спрашиваем КАРТУ (`peek`), а не свои намерения: счётчик вызовов сказал бы, сколько раз мы звали
+  // сброс, а вопрос стоит о том, что осталось НА КАРТЕ.
+  const cardAtRest = (label, vc) => {
+    const st = vc?.peek?.();
+    check(`${label}: КАРТА ПОСЛЕ ПОЛОСЫ ЧИСТА — ни замка, ни ненулевых сдвигов кривой`,
+      Boolean(st) && st.lock === null && st.nonZeroOffsets === 0,
+      !st ? 'карта не отдала своё состояние — спросить не у чего'
+        : `осталось: замок ${st.lock ? `${st.lock.min}…${st.lock.max} МГц` : 'нет'}, `
+          + `ненулевых сдвигов ${st.nonZeroOffsets}. Следующий прогон стартовал бы на карте, `
+          + 'состояние которой никто не называл',
+      'замка нет, ненулевых сдвигов 0');
+  };
+
   // The assertion's NAME carries the trap's own `mustDo` verbatim, and that is not decoration: the
   // report guard below finds an assertion by that substring, so a renamed check would read as a
   // VANISHED one. One string, one source — the trap's definition.
@@ -455,6 +571,7 @@ export async function runTrapSuite() {
     const { golden, stampOk } = stressFor(t3card);
     // A band that CONTAINS the inversion: the neighbour above 2842 is tuned first and seeds it.
     const r = await runSweep(t3card, { seed: 21, fromMhz: 2857, toMhz: 2842, stress, golden, stampOk });
+    cardAtRest('T3', r.vc);
 
     // ─── МЕХАНИЗМ ЗАЩИТЫ СМЕНИЛСЯ КАНОНОМ, СВОЙСТВО — НЕТ (2026-08-23, `plans/25` шаг 1.3) ─────────
     //
@@ -527,6 +644,7 @@ export async function runTrapSuite() {
         + `${CAP - atZeroDepth} МГц, а ловушка заявляет не меньше 60`,
       `${atZeroDepth} МГц при потолке ${CAP}, недобор ${CAP - atZeroDepth} МГц`);
     const r6 = await runSweep(t6card, { seed: 31, fromMhz: 2857, toMhz: 2790, stress, golden, stampOk });
+    cardAtRest('T6', r6.vc);
     const diverged = r6.said.filter((e) => e.kind === 'delivered-elsewhere');
     const measured6 = r6.report.doc.frequencies.filter((x) => !x.tags.includes('stop:untouched'));
     check(`T6: ${mustDoOf('T6_never_delivers_the_ordered_clock')} — прогнано, а не заявлено`,
@@ -694,25 +812,52 @@ export async function runTrapSuite() {
         + 'то есть замок буста не подавляет и фаза 2 строится на неверной посылке',
       `под замком ${CAP8} МГц выдано ровно ${deliveredLocked} МГц, превышение 0 (против ${deliveredAtZero - CAP8} МГц без замка)`);
 
+    // ─── УТВЕРЖДЕНИЕ САМОЙ ЛОВУШКИ: АТОМ НАЗЫВАЕТ ДЕРЖАТЕЛЯ, И ЭТО ПРОВЕРЯЕТСЯ БЕЗ ЗАМКА ──────────
+    //
+    // ⚠️ ПОЧЕМУ ЭТО НЕ ПРОГОН ПОЛОСЫ, А ОДИН ВЫЗОВ АТОМА. `mustDo` этой ловушки говорит о том, что
+    // движок обязан сделать, КОГДА ПРОБОЙ СЛУЧИЛСЯ. После фазы 2 отгружаемая форма несёт замок, и
+    // пробоя в полосе не случается вовсе — значит на прогоне полосы это утверждение стало бы
+    // ВАКУУМНЫМ: пустой список пропущенных «не содержит ЗАПИСЬ» с тем же успехом, что и полный. Оно
+    // проверяется там, где пробой ещё возможен: атом получает форму БЕЗ замка и обязан назвать
+    // держателя `КАРТА`.
+    //
+    // И это же — постоянный сторож проводки, которую поставил шаг 1 `plans/45`: пока
+    // `judgeDeliveredClock` не проходил через стенд, держателя не называл никто, и дефект ловился
+    // ПОБОЧНО, чужой проверкой (EXP-0148). Удалить вызов судьи из атома — и этот блок краснеет.
+    const bareVc = virtualCard(t8card, { settleSamples: 0, seed: 31 });
+    const bareStep = makeSweepStepFn(bareVc, t8card, stress, golden, stampOk);
+    const bare = await bareStep({ offsetMhz: 0, capMhz: CAP8, pinMhz: null, writeShape: 'raise-and-cap', sustain: 1 });
+    check(`T8: ${mustDoOf('T8_runs_above_the_ceiling_it_was_given')} — прогнано, а не заявлено`,
+      bare.ceilingBreachHolder === 'КАРТА' && bare.verdict !== config.VERDICT.PASS,
+      `атом без замка вернул держателя «${bare.ceilingBreachHolder ?? '—'}» и вердикт `
+      + `«${bare.verdict ?? '—'}»: пробой либо не замечен, либо приписан не той стороне `
+      + `(выдано ${bare.deliveredMhz} МГц при потолке ${CAP8})`,
+      `без замка держатель «${bare.ceilingBreachHolder}», вердикт снят (выдано ${bare.deliveredMhz} МГц `
+      + `при потолке ${CAP8}); запись при этом безупречна — кривая предлагает не выше ${bare.highestOfferedMhz}`);
+
+    // ─── А ТЕПЕРЬ — ЛЕЧЕНИЕ: ОТГРУЖАЕМАЯ ФОРМА ОБЯЗАНА ПОТОЛОК УДЕРЖАТЬ ────────────────────────────
+    //
+    // Два утверждения об одном прогоне полосы, и они РАЗНЫЕ: первое — что пробоя больше нет, второе —
+    // что полоса от этого не гибнет. Порознь каждое можно удовлетворить дёшево (не судить потолок
+    // вовсе · закрыть полосу нулём строк), вместе — только замком.
     const r8 = await runSweep(t8card, { seed: 31, fromMhz: 2857, toMhz: 2827, stress, golden, stampOk });
+    // ⚠️ ЗДЕСЬ ОН ГЛАВНЫЙ: это единственная полоса, где граница взводится на КАЖДОЙ ступени и
+    // отпускается столько же раз. Мутация NB («не отпускать») краснит именно его.
+    cardAtRest('T8', r8.vc);
     const skipped8 = r8.report.skipped ?? [];
     const byCard = skipped8.filter((s) => s.ceilingBreachHolder === 'КАРТА');
-    // 🔴 ЖДЁТ ФАЗЫ 2, И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО. Прогон 2026-08-25 10:2x: движок встаёт
-    // РАНЬШЕ проверки потолка — на `runRung#delivery-above-stock`, — поэтому держателей в сводке
-    // «—», а не «КАРТА». То есть на стенде дефект встречает ДРУГУЮ ветку, чем на живой карте, где
-    // сработала именно проверка потолка. Разрыв верности двойника назван в `plans/44` и закрывается
-    // фазой 2 ПЕРВЫМ шагом: сперва двойник обязан падать там же, где падает карта.
-    pending(`T8: ${mustDoOf('T8_runs_above_the_ceiling_it_was_given')} — прогнано, а не заявлено`,
-      `движок останавливается на «${r8.report.stoppedBy ?? '—'}» РАНЬШЕ проверки потолка; держатели в `
-      + `сводке: ${[...new Set(skipped8.map((s) => s.ceilingBreachHolder ?? '—'))].join(', ')} `
-      + `(пропущено ${skipped8.length}, с держателем КАРТА ${byCard.length}). Закрывает фаза 2 эпика 43`);
-    // ⚠️ И ДЕРЖАТЕЛЬ ОБЯЗАН БЫТЬ ИМЕННО «КАРТА»: если бы движок назвал ЗАПИСЬ, чинили бы путь
-    // записи, который здесь безупречен, — а это ровно та ошибка адресации, ради которой поле и
-    // заведено (`bugs/50`). Проверяется УТВЕРДИТЕЛЬНО, а не отсутствием: пустой список тоже «не
-    // содержит ЗАПИСЬ».
-    pending('T8: и полоса НЕ ГИБНЕТ из-за этого — частота закрывается своей причиной, прогон идёт дальше',
-      `сегодня гибнет: остановлено «${r8.report.stoppedBy ?? '—'}» — ${String(r8.report.why).slice(0, 120)}. `
-      + 'Закрывает фаза 2 эпика 43 вместе с утверждением выше');
+    const closed8 = Object.values(r8.report.verdicts ?? {}).reduce((a, b) => a + b, 0);
+    check('T8: ОТГРУЖАЕМАЯ ФОРМА ДЕРЖИТ ПОТОЛОК — ни одна ступень полосы не пропущена по пробитому потолку',
+      byCard.length === 0,
+      `пропущено по пробитому потолку ${byCard.length} ступеней из ${skipped8.length}; остановлено `
+      + `«${r8.report.stoppedBy ?? '—'}». Держатели в сводке: `
+      + `${[...new Set(skipped8.map((s) => s.ceilingBreachHolder ?? '—'))].join(', ')}`,
+      `пропущенных по потолку 0 (всего пропущено ${skipped8.length})`);
+    check('T8: и полоса НЕ ГИБНЕТ — частота закрывается своей причиной, прогон идёт дальше',
+      closed8 >= 1 && !r8.report.stoppedBy,
+      `закрыто ${closed8} строк(и), остановлено «${r8.report.stoppedBy ?? '—'}» — `
+      + `${String(r8.report.why ?? '').slice(0, 120)}`,
+      `закрыто ${closed8} строк(и), полоса доведена до конца`);
   } else fail('T8: карта загружена', 'карты нет на диске');
 
   // ── T4 — the edge lies DEEPER than our ±1000 MHz lever reaches. Reporting that as an edge would be
@@ -721,6 +866,7 @@ export async function runTrapSuite() {
   if (t4card) {
     const { golden, stampOk } = stressFor(t4card);
     const r = await runSweep(t4card, { seed: 31, fromMhz: 2842, toMhz: 2827, stress, golden, stampOk });
+    cardAtRest('T4', r.vc);
     check(`T4: ${mustDoOf('T4_edge_below_the_lever')} — прогнано, а не заявлено`,
       r.report.verdicts['lever-limited'] >= 1 && r.report.verdicts['edge-found'] === 0,
       `край найден ${r.report.verdicts['edge-found']}, предел рычага ${r.report.verdicts['lever-limited']}, `
@@ -757,6 +903,9 @@ export async function runTrapSuite() {
       seed: 41, fromMhz: twice.frequencyMhz, toMhz: twice.frequencyMhz,
       journal: openJournal({ dir: twice.dir }), stress, golden, stampOk,
     });
+    // ⚠️ И ЗДЕСЬ ТОЖЕ, ХОТЯ ПОЛОСА ОСТАНАВЛИВАЕТСЯ ПОЛОМ ЗАВИСАНИЯ: остановленный прогон — ровно тот
+    // случай, где утечка состояния вероятнее всего, потому что путь выхода не штатный.
+    cardAtRest('T5', third.vc);
     check(`T5: ${mustDoOf('T5_hangs_twice_on_one_rung')} — развёртка встаёт, а не пропускает молча`,
       third.report.ok === false && third.report.stoppedBy === 'hang-floor',
       `ok ${third.report.ok}, остановлено «${third.report.stoppedBy}»: ${third.report.why}`,

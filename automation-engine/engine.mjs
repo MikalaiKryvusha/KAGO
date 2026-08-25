@@ -748,6 +748,18 @@ export async function runRung({
   // НЕИЗВЕСТНО. `pinRequired` is the field that decides it, and it belongs to `chooseWriteShape`.
   const pinMhz = held.pinRequired ? clockMhz : null;
 
+  // ─── И ВТОРОЙ РЫЧАГ, КОТОРЫЙ НЕ ЯВЛЯЕТСЯ ЗАКРЕПЛЕНИЕМ: ГРАНИЦА (`plans/45`, эпик 43 фаза 2) ──────
+  //
+  // `lockRequired` — не синоним `pinRequired`, и держать их одним полем нельзя: закрепление ЗАКАЗЫВАЕТ
+  // частоту (`min = max`, доказывается постоянством), граница ЗАПРЕЩАЕТ уйти выше (`min` = пол
+  // лестницы, доказывается правилом «никогда ВЫШЕ»). Слить их значило бы потребовать от карты под
+  // границей постоянства — ровно конфликт 2026-08-14, где три прошедших прожига стали НЕИЗВЕСТНО.
+  //
+  // Взаимную исключительность решает `chooseWriteShape`, а не этот файл: там она видна рядом с
+  // причиной. Здесь — только проводка, и она ОБЯЗАНА быть проводкой одного числа: граница стоит на
+  // ИСПЫТУЕМОЙ частоте, ровно там же, где потолок кривой, — обе называют одно (`researches/11` §8).
+  const lockMhz = held.lockRequired ? clockMhz : null;
+
   // AND THE SAME RULE READ FROM THE OTHER END, which is the half that lives here: the ceiling handed
   // to the atom is the one the vector was built with. Under the lock that is the ENVELOPE, never the
   // clock under test — the clock under test travels as `pinMhz`, and the two must not name the same
@@ -822,6 +834,7 @@ export async function runRung({
       writeShape: held.shape,
       capMhz: capForAtom,
       pinMhz,
+      lockMhz,
       pinCard,
       shapes: ladder[li],
       seconds,
@@ -874,6 +887,10 @@ export async function runRung({
   // сдвинет частоту — строка врёт своим же ключом. `null` здесь честен и част: выше пола потолка
   // замка нет вовсе, потолок держит кривая (R11).
   record.appliedPinMhz = atom?.pinMhz ?? null;
+  // ГРАНИЦА, КОТОРАЯ РЕАЛЬНО ВСТАЛА — тем же проводом и по той же причине, что закрепление выше:
+  // атом ПРИТЯГИВАЕТ заказанную частоту к лестнице самой карты, и если притяжка когда-нибудь сдвинет
+  // границу, строка будет описывать не тот потолок, под которым шёл прожиг (`plans/45`, эпик 43 фаза 2).
+  record.appliedLockMhz = atom?.lockMhz ?? null;
   // ЧТО КРИВАЯ ПРЕДЛАГАЕТ ПОСЛЕ ЗАПИСИ, ПЕРЕЧИТАННОЕ С КАРТЫ (`bugs/50`). Атом мерил это всегда и
   // всегда ронял на пол. Без него улики о пробитом потолке говорят, что карта ВЫДАЛА, и молчат о
   // том, что ей ПРЕДЛАГАЛОСЬ, — а это разные утверждения, и виноваты в них разные стороны.
@@ -5087,23 +5104,41 @@ export function selfTest() {
     //   made the first live sweep stop on its first rung. The lock stays REACHABLE because below the
     //   curve's cap floor it is the only holder there is.
     //   MUTATION ADDRESSEES, NAMED BEFORE THE RUN:
-    //     F. default `demandPin` back to true          → «ПО УМОЛЧАНИЮ ЗАМКА НЕТ»
+    //     F. default `demandPin` back to true          → «ПО УМОЛЧАНИЮ ЗАКРЕПЛЕНИЯ НЕТ»
     //     G. pass the cap alongside the pin            → «потолок и замок НИКОГДА не на одной частоте»
     //     H. ignore `demandPin` in `chooseWriteShape`  → «ЗАКРЕПЛЕНИЕ ПО ЗАПРОСУ»
     //     I. delete the explicit locked shape          → «ЗАКРЕПЛЕНИЕ ПО ЗАПРОСУ»
+    //     NA. drop `lockRequired` from the shipped shape → «ПО УМОЛЧАНИЮ ЗАКРЕПЛЕНИЯ НЕТ»
+    //     ND. name the holder in prose but never pass `lockMhz` → тот же блок, через `atomArg`
     // Re-run first: three refusing rungs stand between `good` and here, and `atomLog` holds only the
     // LAST call. Reading it stale would assert about a rung that is not the one named.
+    //
+    // ─── ✏️ ПЕРЕПИСАНО 2026-08-25 (`plans/45`, эпик 43 фаза 2) — ЧТО ИМЕННО И ЗАЧЕМ ────────────────
+    //
+    // БЫЛО: «потолок … держит его КРИВАЯ», `holder === 'кривая'`, и никакого замка на отгружаемой
+    // ступени. Опровергнуто замером: девять ступеней из девяти, карта уходит выше потолка на целое
+    // число ступеней сетки при безупречной записи (`researches/11` §8). Одна кривая потолком не
+    // является.
+    //
+    // СТАЛО: держателей двое — кривая снизу, ГРАНИЦА сверху, — и граница едет до атома ПОЛЕМ
+    // `lockMhz`. Поле проверяется здесь, а не только в `chooseWriteShape`: решение, не доехавшее до
+    // атома, — это класс EXP-0133, где мутация «удалить строку, передающую поле» не краснила ничего.
+    //
+    // ЧТО НЕ ОСЛАБЛЕНО, И ЭТО ГЛАВНОЕ: `pinMhz` по-прежнему обязан быть `null`. Отгружаемая ступень
+    // не ЗАКРЕПЛЯЕТСЯ — закрепление заказывает частоту и требует её постоянства, и ровно это дралось
+    // 2026-08-14. Утверждение стало СТРОЖЕ прежнего: раньше проверялось отсутствие закрепления,
+    // теперь ещё и присутствие границы ровно на испытуемой частоте.
     const byDefault = await rungOK();
-    ok('ПО УМОЛЧАНИЮ ЗАМКА НЕТ: потолок стоит на ИСПЫТУЕМОЙ частоте и держит его КРИВАЯ',
-      [byDefault.holder, byDefault.writeShape, atomArg('capMhz'), atomArg('pinMhz')],
-      ['кривая', 'raise-and-cap', 2842, null]);
+    ok('ПО УМОЛЧАНИЮ ЗАКРЕПЛЕНИЯ НЕТ, А ГРАНИЦА ЕСТЬ: потолок и граница стоят на ИСПЫТУЕМОЙ частоте, держат её КРИВАЯ и ЗАМОК',
+      [byDefault.holder, byDefault.writeShape, atomArg('capMhz'), atomArg('pinMhz'), atomArg('lockMhz')],
+      ['кривая + замок', 'raise-and-cap', 2842, null, 2842]);
 
     // THE LOCKED SHAPE, ON REQUEST. Its ceiling is the card's ENVELOPE, never the clock under test —
     // two holders on ONE frequency is what fought on 2026-08-14.
     const locked = await rungOK({ demandPin: true });
     ok('ЗАКРЕПЛЕНИЕ ПО ЗАПРОСУ: держит замок, а потолок уезжает на конверт карты',
-      [locked.holder, locked.writeShape, atomArg('capMhz'), atomArg('pinMhz')],
-      ['закрепление частоты', 'raise-and-cap', 3090, 2842]);
+      [locked.holder, locked.writeShape, atomArg('capMhz'), atomArg('pinMhz'), atomArg('lockMhz')],
+      ['закрепление частоты', 'raise-and-cap', 3090, 2842, null]);
     ok('потолок и замок НИКОГДА не встают на одну частоту — именно это дралось 2026-08-14',
       atomLog.length ? atomLog[0].capMhz === atomLog[0].pinMhz : 'АТОМ НЕ ВЫЗЫВАЛСЯ', false);
 
@@ -5367,7 +5402,11 @@ export function selfTest() {
           if (!i) return 'НАМЕРЕНИЯ В ЖУРНАЛЕ НЕТ (ступень отказала до записи)';
           return [i.depthMv, i.zoneStepMv, i.seeded, i.holder, i.writeShape, i.pointIndex];
         })(),
-        [45, 25, true, 'кривая', 'raise-and-cap', 90]);
+        // ✏️ `holder` 2026-08-25: «кривая» → «кривая + замок». Намерение несёт ДЕРЖАТЕЛЯ, а держателей
+        // с этого дня двое (`plans/45`, эпик 43 фаза 2): кривая снизу, граница сверху. Строка журнала
+        // и есть то, по чему следующий запуск восстанавливает, в какой форме шёл прожиг, — назвать
+        // там одну кривую значило бы описать не тот прогон.
+        [45, 25, true, 'кривая + замок', 'raise-and-cap', 90]);
       ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
         [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
 
@@ -7028,8 +7067,14 @@ export function selfTest() {
     const holderInPlan = (await sweepDryRun({
       curveDoc: sweepDoc([sweepRow(2842, 1045)]), points: sweepPoints, buildVector: vectorCapped,
     })).groups[0]?.holder;
+    // ✏️ ОЖИДАНИЕ ОБНОВЛЕНО 2026-08-25: «кривая» → «кривая + замок» (`plans/45`, эпик 43 фаза 2).
+    // Обе стороны переехали САМИ и одновременно — потому что обе спрашивают ОДНУ `chooseWriteShape`
+    // (пара схлопнута, а не сторожится, `AGENT_GUIDE.md` → реестр пар). Это и есть F2-AC5: сухой
+    // прогон называет держателя ДО записи, и назвать другого он не может по построению.
+    // ⚠️ Литерал остаётся ЖЁСТКИМ, а не «сравни одно с другим»: равенство двух `undefined` тоже
+    // равенство, и такой блок остался бы зелёным ровно тогда, когда держателя не называет никто.
     ok('ПЛАН И ПРОГОН НАЗЫВАЮТ ОДНОГО ДЕРЖАТЕЛЯ — иначе оператор санкционирует не тот прогон (bugs/09, bugs/14)',
-      [holderInPlan, holderInRun], ['кривая', 'кривая']);
+      [holderInPlan, holderInRun], ['кривая + замок', 'кривая + замок']);
 
     // ─── ЗАЖАТЫЙ КРАЙ ПРОПУСКАЕТСЯ, ГРУБАЯ СКОБКА — НЕТ (`bugs/31`, `plans/25` шаг 1.2) ────────────
     //
@@ -7925,22 +7970,30 @@ async function mainBand(argv, arg) {
     nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload);
   }
 
-  console.log('РАЗВЁРТКА ПО ДИАПАЗОНУ — вся кривая вверх, частота закреплена на каждой ступени');
+  // ⚠️ ШАПКА ОПИСЫВАЕТ ТУ ЖЕ РАБОТУ, ЧТО ПОЙДЁТ, — ЭТО РЕЛЬС S2, А НЕ УКРАШЕНИЕ. Оператор читает
+  // сухой прогон ПЕРЕД тем, как санкционировать запись в карту владельца, и шапка, описывающая
+  // прошлую форму, превращает санкцию в подпись под другим документом (класс `bugs/09`: «план,
+  // который врёт, отмывает догадку в разрешение»). Правлена 2026-08-25 вместе с формой (`plans/45`).
+  console.log('РАЗВЁРТКА ПО ДИАПАЗОНУ — вся кривая вверх, потолок держат кривая и ГРАНИЦА частоты');
   console.log('');
   console.log(`  СТУПЕНИ:   ${pins.join(', ')} МГц`);
   console.log(`  НАБОР:     ${DIVERSE_SET.length} формы по ${seconds} с — ступень ≈ ${DIVERSE_SET.length * seconds + 4} с`);
   console.log('  ПОДЪЁМ:    ВСЯ кривая (127 точек), а не одна — иначе напряжение потолка не падает вовсе (bugs/02)');
   console.log('  ФОРМА:     где кривая способна удержать потолок — пишем ОТГРУЖАЕМУЮ форму (подъём с потолком),');
-  console.log('             то есть ровно то, что уедет в профиль. Ниже пола железа (верх кривой минус 1000 МГц)');
-  console.log('             потолка кривой не удержать вовсе — там подъём равномерный, а потолок держит');
-  console.log('             ЗАКРЕПЛЕНИЕ, и это печатается по каждой ступени отдельно.');
+  console.log('             то есть ровно то, что уедет в профиль, И СТАВИМ ГРАНИЦУ ЧАСТОТЫ сверху: одной кривой');
+  console.log('             потолка НЕ УДЕРЖАТЬ — замерено 9 ступеней из 9, карта уходит выше на 2–3 ступени');
+  console.log('             сетки при безупречной записи (researches/11 §8, bugs/50). Ниже пола железа (верх');
+  console.log('             кривой минус 1000 МГц) потолка кривой не удержать вовсе — там подъём равномерный,');
+  console.log('             а потолок держит ЗАКРЕПЛЕНИЕ. Держатель печатается по каждой ступени отдельно.');
   // THE POLICY IN FORCE FOR THIS RUN, printed with the plan — an argument nobody can read before the
   // write is the defect `bugs/09` was about, and it applies to the knobs as much as to the bound.
   console.log(`  ПОЛИТИКА:  шаг сетки ${gridStepMv} мВ · грубый шаг = каждая ${stride}-я ступень`
     + ` · пол быстрого спуска ${fastFloorMv} мВ · за сессию не глубже ${sessionMaxDepthMv} мВ от доказанного`);
   console.log('             (умолчания из config.mjs; меняются флагами --grid-step --stride --fast-floor --session-depth,');
   console.log(`             и сторож всё равно откажет при первом шаге глубже ${config.ASCENT_FIRST_STEP_MAX_MV ?? 25} мВ или разрыве больше ${config.ASCENT_STEP_MAX_MV ?? 35} мВ)`);
-  console.log('  ЗАКРЕПЛЕНИЕ: -lgc на ступени, законно для ЗАМЕРА и запрещено в отгружаемом профиле');
+  console.log('  ГРАНИЦА:   -lgc ДИАПАЗОНОМ «пол лестницы … потолок» — карта свободна ВНИЗ, но не выше потолка.');
+  console.log('             Это НЕ закрепление: закрепление (min = max) заказывает частоту и запрещено');
+  console.log('             в отгружаемом профиле; оно остаётся только ниже пола железа, где держать больше нечем');
   console.log('  ОТКАТ:     частота отпущена и кривая обнулена в finally, под сторожем, на каждой ступени');
   console.log('');
 
@@ -8162,9 +8215,13 @@ async function mainSweep(argv, arg) {
     return 1;
   }
   console.log(`КОНВЕРТ КАРТЫ: ${envelopeMhz} МГц — выше него ни одна поднятая точка кривой ничего не предлагает`);
-  console.log('               (R13, bugs/11). Частоту в прогоне держит ВЫПРЯМЛЕННАЯ КРИВАЯ: всё, что торчало бы');
-  console.log('               выше испытуемой частоты, придавлено на неё. Замок частоты НЕ ставится — замерено');
-  console.log('               2026-08-16, что он держит только вниз и карту вверх не поднимает (researches/11).');
+  console.log('               (R13, bugs/11). Частоту в прогоне держат ДВОЕ: ВЫПРЯМЛЕННАЯ КРИВАЯ снизу — всё, что');
+  console.log('               торчало бы выше испытуемой частоты, придавлено на неё, — и ГРАНИЦА ЧАСТОТЫ сверху.');
+  console.log('               ⚠️ ОДНОЙ КРИВОЙ НЕ ХВАТАЕТ: подъём делает её верх ПЛОСКИМ, и арбитраж буста сходит');
+  console.log('               с плато на 2–3 ступени сетки — замерено 9 из 9 при безупречной записи (bugs/50,');
+  console.log('               researches/11 §8). Граница — это -lgc ДИАПАЗОНОМ «пол лестницы … потолок»: карта');
+  console.log('               свободна вниз. Прежний вывод «замка не ставить» был про ДРУГОЕ направление —');
+  console.log('               поднять карту К потолку он не умеет, и это по-прежнему верно (researches/11 §1, §5).');
   console.log('               ЗАПИСЬ ИДЁТ ПРОТИВ ВЫДАННОЙ частоты, а не заказанной (GOAL.md, слово владельца).');
 
   // ─── ПОЛОСА, ВЫВЕДЕННАЯ ИЗ ДОКУМЕНТА, ЕСЛИ ОПЕРАТОР ЕЁ НЕ НАЗВАЛ ────────────────────────────────

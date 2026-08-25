@@ -444,7 +444,7 @@ export function applyCeilingJudgement(out, j, { capMhz, median, max, loadedSampl
 
 export function chooseWriteShape(vector, { pinned = false, demandPin = false } = {}) {
   if (!vector || vector.ok !== true) {
-    return { ok: false, shape: null, heldBy: null, pinRequired: false, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
+    return { ok: false, shape: null, heldBy: null, pinRequired: false, lockRequired: false, why: `вектор не построен: ${vector?.why ?? 'нет данных кривой'}` };
   }
 
   // ─── THE OWNER'S ALGORITHM, STEP 7 — AND IT OVERRIDES EVERYTHING BELOW ──────────────────────────
@@ -472,7 +472,7 @@ export function chooseWriteShape(vector, { pinned = false, demandPin = false } =
   if (demandPin) {
     if (!pinned) {
       return {
-        ok: false, shape: null, heldBy: null, pinRequired: false,
+        ok: false, shape: null, heldBy: null, pinRequired: false, lockRequired: false,
         why: 'АЛГОРИТМ ВЛАДЕЛЬЦА (ideas/03 шаг 7) требует ЗАКРЕПИТЬ карту ровно на испытуемой частоте, '
           + 'а закрепление здесь недоступно (нет лестницы частот карты). Прожигать нечего: без закрепления '
           + 'карта под нагрузкой уйдёт со ступени, и напряжение было бы записано против частоты, на которой она не стояла',
@@ -489,6 +489,9 @@ export function chooseWriteShape(vector, { pinned = false, demandPin = false } =
       shape: vector.capEnforced ? 'raise-and-cap' : 'uniform',
       heldBy: 'закрепление частоты',
       pinRequired: true,
+      // ЗАКРЕПЛЕНИЕ И ГРАНИЦА ВЗАИМНО ИСКЛЮЧАЮТ ДРУГ ДРУГА. `min = max` уже запрещает уход вверх,
+      // и второй механизм на ту же частоту — это конфликт 2026-08-14 дословно.
+      lockRequired: false,
       why: 'ЧАСТОТА ЗАКРЕПЛЕНА (алгоритм владельца, шаг 7): карта обязана выдать ровно испытуемую частоту, '
         + 'и это проверяется чтением ПОД НАГРУЗКОЙ. '
         + (vector.capEnforced
@@ -503,9 +506,43 @@ export function chooseWriteShape(vector, { pinned = false, demandPin = false } =
   if (vector.capEnforced) {
     return {
       ok: true,
+      // ─── ТРЕТЬЯ ФОРМА: ПОДНЯТАЯ КРИВАЯ + ЗАМОК ВЕРХНЕЙ ГРАНИЦЕЙ (`plans/45`, эпик 43 фаза 2) ─────
+      //
+      // 🔴 ЧТО ЭТО ЛЕЧИТ, ЧИСЛОМ. Прежняя редакция этой ветки утверждала, что кривая потолок ДЕРЖИТ.
+      // Замерено 2026-08-25 на двух живых полосах: НЕ держит — девять ступеней из девяти, карта
+      // уходит выше на ЦЕЛОЕ число ступеней сетки (2 в семи случаях, 3 в двух), и запись при этом
+      // безупречна (кривая, перечитанная С КАРТЫ, встаёт ровно на потолок, `writeSettled: true`,
+      // поточечная сверка зелёная, дрейф таблиц 0). Пять ступеней из одиннадцати потеряли вердикт.
+      //
+      // Механизм — `researches/11` §8, и он следует из §4, а не спорит с ним: подъём ВЫПРЯМЛЯЕТ верх
+      // кривой, широкая полоса напряжений предлагает одну и ту же верхнюю частоту, и арбитраж буста
+      // остаётся на плато, которому нечего ему запретить, — он сходит с него на две-три корзины.
+      // «Плоская вершина» даёт ПРЕДПОЧТИТЕЛЬНУЮ частоту, а не ОГРАНИЧЕННУЮ.
+      //
+      // ⚠️ ЭТО НЕ ПОВТОР КОНФЛИКТА 2026-08-14, И РАЗЛИЧИЕ МЕХАНИЧЕСКОЕ, А НЕ РИТОРИЧЕСКОЕ. Тогда
+      // одну частоту держали ДВА механизма, называвшие РАЗНОЕ: потолок кривой сажал карту на 2812, а
+      // ЗАКРЕПЛЕНИЕ требовало ровно 2842 — и доказательство закрепления справедливо отвергало три
+      // прошедших прожига. Здесь оба называют ОДНУ частоту: кривая снизу (какое напряжение её
+      // покупает), замок сверху (выше не пускать). И доказательство остаётся ДРУГИМ: не «частота
+      // ПОСТОЯННА», а «НИКОГДА НЕ ВЫШЕ» — `judgeDeliveredClock`, для которого недобор это замер, а не
+      // отказ. Поэтому поле `lockRequired` заведено ОТДЕЛЬНО от `pinRequired`: их обещания и их
+      // доказательства разные, и один флаг на двоих вернул бы ровно тот конфликт.
+      //
+      // Слово владельца, `interviews/015` Q1 = A · Q2 = A, дословно: *«A, на всей полосе частот»* —
+      // замок ставится на КАЖДОЙ ступени выше пола потолка, одна форма на всю полосу, чтобы строки
+      // полосы оставались сопоставимы между собой.
+      // ⚠️ ФОРМА ЗАПИСИ НЕ МЕНЯЕТСЯ, И ЭТО НЕ УДОБСТВО, А ЗНАЧЕНИЕ СЛОВА. `writeShape` называет то,
+      // что пишется В КРИВУЮ (`point` · `uniform` · `raise-and-cap`); замок в кривую не пишет ничего —
+      // это отдельное состояние карты, ровно как закрепление. Прецедент уже стоит рядом: ветка
+      // `demandPin` возвращает ту же `raise-and-cap`, а закрепление называет в `heldBy`.
+      //
+      // И у этого есть цена, которую нельзя платить зря: храповик РАЗДЕЛЯЕТ историю по форме записи
+      // (`partitionByWriteShape`), а прогон печатает «все строки полосы сняты в ОДНОМ режиме». Новая
+      // строка формы отрезала бы 86 уже оттюненных частот от всего, что снимется дальше, — и отрезала
+      // бы ЛОЖНО: кривая, которую мы пишем, побайтово та же самая.
       shape: 'raise-and-cap',
-      heldBy: 'кривая',
-      // ONE HOLDER, NEVER TWO — and this field is what stops a caller from adding a second one.
+      heldBy: 'кривая + замок',
+      // ONE HOLDER, NEVER TWO — and this field is what stops a caller from adding one that DISAGREES.
       //
       // Paid for live on 2026-08-14, first band run in the shipped shape: the sweep capped the curve
       // at 2842 AND pinned the clock at 2842. A capped card sits a little BELOW its ceiling (measured
@@ -513,11 +550,16 @@ export function chooseWriteShape(vector, { pinned = false, demandPin = false } =
       // demanded a frequency the curve had just forbidden. The card delivered 2775…2827, the lock
       // proof correctly refused, and a rung whose three load shapes had all PASSED was reported as
       // НЕИЗВЕСТНО. Nothing was wrong with the card — the run had asked two mechanisms to hold one
-      // ceiling at one frequency, and they fought.
+      // ceiling at one frequency, and they fought. `pinRequired` stays FALSE here for that reason:
+      // what the shipped shape gains is a BOUND, and a bound is not an order.
       pinRequired: false,
-      why: `потолок ${vector.capMhz} МГц держит САМА КРИВАЯ (выше пола железа ${vector.lowestEnforceableCapMhz} МГц) — `
-        + 'это ровно та форма, которая отгружается в профиле. ЗАКРЕПЛЕНИЕ ЗДЕСЬ ЛИШНЕЕ И ВРЕДНОЕ: '
-        + 'карта под потолком садится чуть ниже него, а замок требует ровно потолок — они дерутся',
+      lockRequired: true,
+      why: `потолок ${vector.capMhz} МГц держат ДВОЕ, и они не спорят: КРИВАЯ снизу (выше пола железа `
+        + `${vector.lowestEnforceableCapMhz} МГц она даёт напряжение) и ЗАМОК сверху (верхняя граница, `
+        + 'выше которой карта не идёт). Одна кривая потолком НЕ ЯВЛЯЕТСЯ — замерено девять раз из девяти, '
+        + 'карта уходит выше на 2–3 ступени сетки при безупречной записи (researches/11 §8). '
+        + 'ЗАКРЕПЛЕНИЯ здесь по-прежнему нет: карта под границей свободна вниз, и это проверяется '
+        + 'правилом «никогда ВЫШЕ», а не «частота ПОСТОЯННА»',
     };
   }
   if (pinned) {
@@ -526,6 +568,7 @@ export function chooseWriteShape(vector, { pinned = false, demandPin = false } =
       shape: 'uniform',
       heldBy: 'закрепление частоты',
       pinRequired: true,
+      lockRequired: false,
       why: `потолок ${vector.capMhz} МГц кривой НЕ удержать (пол железа ${vector.lowestEnforceableCapMhz} МГц, утечка `
         + `${vector.capLeakMhz} МГц), поэтому его держит ЗАКРЕПЛЕНИЕ, а кривая поднимается равномерно. `
         + 'Замер законен, но это НЕ отгружаемая форма — на этой ступени они расходятся, и расхождение названо',
@@ -536,6 +579,7 @@ export function chooseWriteShape(vector, { pinned = false, demandPin = false } =
     shape: null,
     heldBy: null,
     pinRequired: false,
+    lockRequired: false,
     why: `ОТКАЗ: потолок ${vector.capMhz} МГц не держит НИЧТО — кривой его не удержать (пол железа `
       + `${vector.lowestEnforceableCapMhz} МГц, утечка ${vector.capLeakMhz} МГц), а частота не закреплена. `
       + 'Карта ушла бы выше испытуемой частоты, и вердикт был бы о состоянии, которое никто не назвал',
@@ -642,6 +686,24 @@ export async function runStep({
   // `-lgc` is legal HERE and illegal in a shipped profile — `min = max` forbids the card from clocking
   // down at idle (plans/05 §4.5a, and the owner's own requirement that the card stay free to move).
   pinMhz = null,
+  // ЗАМОК КАК ВЕРХНЯЯ ГРАНИЦА — И ЭТО НЕ ЗАКРЕПЛЕНИЕ (`plans/45`, эпик 43 фаза 2; владелец —
+  // `interviews/015` Q1 = A · Q2 = A, дословно *«A, на всей полосе частот»*).
+  //
+  // ЧТО ЭТО ЛЕЧИТ: поднятая кривая с потолком на испытуемой частоте потолком НЕ ЯВЛЯЕТСЯ. Замерено
+  // 2026-08-25, девять ступеней из девяти на двух живых полосах: запись безупречна (кривая,
+  // перечитанная С КАРТЫ, встаёт ровно на потолок), а карта под нагрузкой уходит выше на целое число
+  // ступеней сетки. Подъём ВЫПРЯМЛЯЕТ верх кривой, и арбитраж буста сходит с плоской вершины
+  // (`researches/11` §8). Граница — это то, чего не хватало: кривая даёт напряжение, граница не даёт
+  // уйти выше.
+  //
+  // ⚠️ ЧЕМ ОНА ОТЛИЧАЕТСЯ ОТ `pinMhz`, И ПОЧЕМУ ЭТО ОТДЕЛЬНЫЙ ПАРАМЕТР, А НЕ ЗНАЧЕНИЕ ТОГО ЖЕ:
+  //   · `pinMhz` — `min = max`. Обещание «карта стоит РОВНО здесь», доказательство —
+  //     `verifyLockUnderLoad` («частота ПОСТОЯННА»). Отгружать нельзя: карта теряет право сбрасываться.
+  //   · `lockMhz` — `min` = пол лестницы карты, `max` = потолок. Обещание «карта НИКОГДА НЕ ВЫШЕ»,
+  //     доказательство — `judgeDeliveredClock` («не выше; недобор — это ЗАМЕР, а не отказ»).
+  // Потребовать постоянства под ГРАНИЦЕЙ — это конфликт 2026-08-14 дословно: тогда три прошедших
+  // прожига стали НЕИЗВЕСТНО. Поэтому одновременно они не ставятся, и решает это `chooseWriteShape`.
+  lockMhz = null,
   // The card WITH ITS LADDER, probed once by the caller. Re-probing per rung spawns `nvidia-smi`
   // queries inside every step of a long sweep, and on the sixth rung of the first live sweep one of
   // them came back without a ladder and turned a healthy rung into НЕИЗВЕСТНО. `ladder-descent` had
@@ -661,7 +723,7 @@ export async function runStep({
     throw new RangeError(`неизвестная форма записи «${shape}» — только point | uniform | raise-and-cap`);
   }
 
-  const out = { point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, writeShape: shape, capMhz, pinMhz, blocks: [], verdict: null };
+  const out = { point, offsetMhz, workload, seconds, sustain, dryRun, allPoints, writeShape: shape, capMhz, pinMhz, lockMhz, blocks: [], verdict: null };
   const block = (name, ok, detail = '') => out.blocks.push({ name, ok, detail });
 
   if (offsetMhz <= 0) throw new RangeError(`шаг обязан быть ПОЛОЖИТЕЛЬНЫМ (это и есть андервольт): ${offsetMhz}`);
@@ -689,6 +751,12 @@ export async function runStep({
   // The clock pin and its release live outside the try so the `finally` can undo whatever was applied,
   // including the case where the pin succeeded and the load then died.
   let pinned = false;
+  // ОДИН ФЛАГ НА ОБА СПОСОБА ДЕРЖАТЬ ЧАСТОТУ — ЗАКРЕПЛЕНИЕ И ГРАНИЦУ. Их обещания разные (см. `lockMhz`
+  // в шапке), но состояние на карте они оставляют ОДНО И ТО ЖЕ — записанный `-lgc`, — и откат у него
+  // тоже один. Правило R9a: новый вид записываемого состояния РАСШИРЯЕТ откат ДО первой своей записи,
+  // а не заводит второй шаг рядом; здесь вида не прибавилось вовсе, поэтому расширяется флаг, а не
+  // список. Шаг отката при этом сохраняет своё ИМЯ, и набор проверяет шаги ПО ИМЕНАМ, а не по счёту.
+  let clocksHeld = false;
   let pmBackend = null;
   // DECLARED OUT HERE, not inside the try, and the reason is a defect that happened: with these two
   // living in the try's scope, the `finally` threw a ReferenceError on its FIRST line and jumped over
@@ -1025,9 +1093,51 @@ export async function runStep({
       pmBackend = pm.nvidiaSmiBackend();
       const applied = await pm.apply(pmBackend, ld.candidateProfile(pinMhz, card), { card, verifyLock: 'deferred' });
       pinned = true;                                   // set BEFORE judging success: a partial apply still needs undoing
+      clocksHeld = true;
       block(`ЧАСТОТА ЗАКРЕПЛЕНА на ${pinMhz} МГц${snap.snapped ? ` (просили ${snap.from}, притянуто к лестнице карты)` : ''} — иначе низ кривой под нагрузкой не тестируется вовсе`,
         applied.ok !== false, applied.why ?? 'проверка закрепления — под нагрузкой, не на простое');
       if (applied.ok === false) return out;
+      watchdog.beat();
+    }
+
+    // ---- 3c-bis. ГРАНИЦА СВЕРХУ — ВТОРОЙ ДЕРЖАТЕЛЬ ПОТОЛКА, И ОН НЕ ЗАКАЗЫВАЕТ ЧАСТОТУ.
+    //
+    // Ставится ПОСЛЕ записи кривой намеренно: кривая — это то, что даёт напряжение, и до неё граница
+    // ограничивала бы заводскую форму, то есть другое состояние. Порядок «сперва то, что покупает
+    // частоту, потом то, что её ограничивает» — это же порядок и в откате, только обратный.
+    //
+    // ⚠️ ВЗАИМНАЯ ИСКЛЮЧИТЕЛЬНОСТЬ ПРОВЕРЯЕТСЯ ЗДЕСЬ, А НЕ ПОДРАЗУМЕВАЕТСЯ. `chooseWriteShape` их
+    // разводит, но атом зовут и руками, и ошибка вызова обязана стать красным блоком, а не молча
+    // поставить на одну частоту два механизма — ровно то, что дралось 2026-08-14.
+    if (lockMhz && pinMhz) {
+      block('ГРАНИЦА ЧАСТОТЫ', false, `на ${lockMhz} МГц запрошены СРАЗУ закрепление и граница — это два `
+        + 'держателя одного потолка, и 2026-08-14 они подрались: потолок сажал карту ниже, а замок '
+        + 'требовал ровно его. Форму выбирает chooseWriteShape, и она их не совмещает');
+      return out;
+    }
+    if (lockMhz && !pinMhz) {
+      const pm = await import('./profile-manager.mjs');
+      const ld = await import('./ladder-descent.mjs');
+      const ps = await import('./profile-store.mjs');
+      const card = pinCard ?? ps.probeCard();
+      if (!card.ladder?.ok) {
+        block('ГРАНИЦА ЧАСТОТЫ', false, `лестница частот недоступна — ${card.ladder?.why ?? 'не прочитана'}`);
+        return out;
+      }
+      // Частота берётся С ЛЕСТНИЦЫ САМОЙ КАРТЫ, а не из круглого числа (`ladder-descent` правило 3).
+      const snapL = ld.snapToLadder(lockMhz, card.ladder.mhz);
+      out.lockRequestedMhz = lockMhz;
+      lockMhz = snapL.mhz;
+      out.lockMhz = lockMhz;
+      pmBackend = pmBackend ?? pm.nvidiaSmiBackend();
+      // `verifyLock: 'deferred'` — та же причина, что у закрепления: на ПРОСТОЕ высокая граница
+      // невидима, карта и так стоит ниже (EXP-0020). Доказывается она под нагрузкой, блоком потолка.
+      const appliedL = await pm.apply(pmBackend, ld.ceilingLockProfile(lockMhz, card), { card, verifyLock: 'deferred' });
+      clocksHeld = true;                               // ДО суждения об успехе: частичное применение тоже надо откатывать
+      block(`ГРАНИЦА ЧАСТОТЫ ${lockMhz} МГц${snapL.snapped ? ` (просили ${snapL.from}, притянуто к лестнице карты)` : ''} `
+        + `— карта свободна ВНИЗ (нижняя ступень лестницы ${card.ladder.mhz[0]} МГц), но не выше границы`,
+        appliedL.ok !== false, appliedL.why ?? 'проверка границы — под нагрузкой, не на простое');
+      if (appliedL.ok === false) return out;
       watchdog.beat();
     }
 
@@ -1229,11 +1339,16 @@ export async function runStep({
       {
         name: 'ОТКАТ: частота ОТПУЩЕНА, карта снова свободна вверх и вниз',
         run: async () => {
-          if (!pinned) return 'частота не закреплялась';
+          // ⚠️ ГРАНИЦА ОТПУСКАЕТСЯ ТЕМ ЖЕ ШАГОМ, ЧТО И ЗАКРЕПЛЕНИЕ (`plans/45` шаг 4). Раньше здесь
+          // стояло `if (!pinned)`, и после появления второго способа держать частоту это молча
+          // оставило бы `-lgc` на карте владельца: шаг отработал бы, отчитался «не закреплялась» и
+          // блок был бы ЗЕЛЁНЫМ. Отказ вида «откат отчитался об успехе, ничего не откатив» — худший
+          // из возможных, потому что его не видит ни один сторож. Флаг общий именно поэтому.
+          if (!clocksHeld) return 'частота не закреплялась и границей не ограничивалась';
           // `resetToFactory` is TOTAL rather than differential — rule R9's reasoning: after something
           // goes wrong nobody knows what was applied, so the only honest undo is factory.
           const pm = await import('./profile-manager.mjs');
-          const released = await pm.resetToFactory(pmBackend, { knownLockMhz: pinMhz });
+          const released = await pm.resetToFactory(pmBackend, { knownLockMhz: pinMhz ?? lockMhz });
           if (released.ok === false) throw new Error(released.why ?? 'сброс отказал');
           return released.why ?? 'сброс к заводскому применён и перечитан';
         },
@@ -2284,11 +2399,42 @@ export async function selfTest() {
   // findings» (EXP-0040). So the call itself is caught, and an exception becomes a red block.
   const choose = (v, o) => { try { return chooseWriteShape(v, o); } catch (e) { return { ok: `ИСКЛЮЧЕНИЕ: ${e.message}`, shape: null, heldBy: null, why: '' }; } };
 
+  // ─── ✏️ ЭТОТ БЛОК ПЕРЕПИСАН 2026-08-25 (`plans/45`, эпик 43 фаза 2), И ВОТ ЗАЧЕМ ─────────────────
+  //
+  // ЧТО ОН УТВЕРЖДАЛ РАНЬШЕ: «потолок держит КРИВАЯ … и закрепление для этого не нужно»,
+  // `heldBy === 'кривая'`. Первая половина ОПРОВЕРГНУТА ЗАМЕРОМ: девять ступеней из девяти на двух
+  // живых полосах 2026-08-25 — карта под нагрузкой уходит выше потолка на целое число ступеней
+  // сетки, при безупречной записи (`researches/11` §8, `bugs/50`). Кривая потолок НЕ держит; она
+  // даёт напряжение, а верх её после подъёма плоский, и арбитраж буста с этого плато сходит.
+  //
+  // ЧТО ОН СТОРОЖИТ ТЕПЕРЬ: держателей ДВА и они названы оба — кривая снизу, замок сверху
+  // (`interviews/015` Q1 = A · Q2 = A). Вторая половина прежнего утверждения при этом НЕ ослаблена
+  // и стоит рядом отдельным блоком: `pinRequired` по-прежнему `false`, потому что ЗАКРЕПЛЕНИЕ здесь
+  // так же вредно, как было, — оно заказывает частоту, а не ограничивает её, и это конфликт
+  // 2026-08-14. Изменилось не «нужен ли второй держатель», а КАКОЙ второй держатель законен.
+  //
+  // Могли ли прежние блоки теперь проходить ПО НЕВЕРНОЙ ПРИЧИНЕ: нет — `pinRequired` проверяется
+  // отдельно ниже и на тех же фикстурах, а `lockRequired` получил свои блоки и свою мутацию (NA).
   const byCurve = choose(vec({}), { pinned: false });
-  ok('потолок держит КРИВАЯ → форма ОТГРУЖАЕМАЯ, и закрепление для этого не нужно',
-    [byCurve.ok, byCurve.shape, byCurve.heldBy], [true, 'raise-and-cap', 'кривая']);
+  ok('потолок держат ДВОЕ — КРИВАЯ снизу и ЗАМОК сверху, и оба названы',
+    [byCurve.ok, byCurve.shape, byCurve.heldBy, byCurve.lockRequired],
+    [true, 'raise-and-cap', 'кривая + замок', true]);
   ok('и когда кривая держит сама, закрепление НИЧЕГО не меняет в выборе формы',
     choose(vec({}), { pinned: true }).shape, 'raise-and-cap');
+  // ФОРМА ЗАПИСИ ОТ ЗАМКА НЕ МЕНЯЕТСЯ — и это сторож против соблазна завести четвёртую форму.
+  // Храповик разделяет историю ПО ФОРМЕ (`partitionByWriteShape`), а кривая, которую мы пишем,
+  // побайтово та же; новая строка формы отрезала бы все уже оттюненные частоты ЛОЖНО.
+  ok('замок — это ДЕРЖАТЕЛЬ, а не форма записи: в кривую он не пишет ничего',
+    choose(vec({}), { pinned: false }).shape, 'raise-and-cap');
+  // ─── ГРАНИЦА И ЗАКРЕПЛЕНИЕ ВЗАИМНО ИСКЛЮЧАЮТ ДРУГ ДРУГА, И ЭТО ПРОВЕРЯЕТСЯ НА ВСЕХ ВЕТКАХ ───────
+  // Мутация NA («убрать замок из формы») краснит первый блок; мутация, ставящая `lockRequired: true`
+  // рядом с `pinRequired: true`, краснит этот.
+  ok('НИКОГДА ОБА СРАЗУ: ни одна ветка не требует и закрепления, и границы',
+    [choose(vec({}), { pinned: false }), choose(vec({}), { pinned: true }),
+      choose(vec({ capMhz: 2100, capEnforced: false, capLeakMhz: 72 }), { pinned: true }),
+      choose(vec({}), { pinned: true, demandPin: true })]
+      .map((r) => Boolean(r.pinRequired && r.lockRequired)),
+    [false, false, false, false]);
 
   const low = vec({ capMhz: 2100, capEnforced: false, capLeakMhz: 72 });
   const byPin = choose(low, { pinned: true });

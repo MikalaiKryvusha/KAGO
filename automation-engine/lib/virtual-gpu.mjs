@@ -1136,11 +1136,23 @@ export function virtualCard(cardProfile, {
   const thermal = { tempC: TELEMETRY_MODEL.tempFloorC, fanPct: TELEMETRY_MODEL.fanFloorPct, secondsUnderLoad: 0 };
 
   /** Where the clock is HEADED. Computed from the state, never stored beside it — two sources for
-   *  one fact is how a double drifts from itself. */
+   *  one fact is how a double drifts from itself.
+   *
+   *  ⚠️ ЗДЕСЬ ЖИВЁТ ТОЛЬКО ВЫРОЖДЕННЫЙ СЛУЧАЙ `min = max` — ЗАКРЕПЛЕНИЕ. Диапазонный замок
+   *  (`min < max`) — это ВЕРХНЯЯ ГРАНИЦА, а не заказ частоты, и он обрабатывается в `runningMhz`:
+   *  под ним карта свободна вниз и выдаёт то, что тянет её кремний, лишь бы не выше границы.
+   *  Разбор — `researches/11` §1 и §8; правило владельца — карта обязана уметь сбрасывать частоту. */
   const targetMhz = () => {
     if (!state.lock) return null;                             // unlocked: the card wanders, see below
+    if (state.lock.min !== state.lock.max) return null;       // диапазон — это граница, а не цель
     const snapped = snapToLadder(P.frequencyGridMhz, state.lock.max);
     return Math.min(Math.max(snapped, state.lock.min), P.card.maxGraphicsMhz);
+  };
+
+  /** ВЕРХНЯЯ ГРАНИЦА, ЕСЛИ ЗАМОК ДИАПАЗОННЫЙ. `null` — границы нет (не заперта или заперта пином). */
+  const lockCeilingMhz = () => {
+    if (!state.lock || state.lock.min === state.lock.max) return null;
+    return snapToLadder(P.frequencyGridMhz, state.lock.max);
   };
 
   /** Queue the stale reads and the ramp that a write produces. */
@@ -1254,7 +1266,21 @@ export function virtualCard(cardProfile, {
     // Нулевая кривая сюда не попадает: это заводское состояние, и там карта просто блуждает.
     if (state.curveOffsetsMhz.some((o) => o !== 0)) {
       const d = deliveredUnderCurve();
-      if (d !== null) return d;
+      // ─── ДИАПАЗОННЫЙ ЗАМОК ПОДРЕЗАЕТ СВЕРХУ И НЕ ПОДНИМАЕТ СНИЗУ (`researches/11` §1, §8) ────────
+      //
+      // Источник, дословно: *«`--lock-gpu-clocks` sets the upper bound the clock may not exceed, not a
+      // clock the card is commanded to hold»*. Замерено на этой карте тем же документом (§1, пробы 1
+      // и 2): заказ 3082 МГц карта проигнорировала и осталась на 2887 — поднять замок не умеет.
+      //
+      // ⚠️ ПОЧЕМУ ДВОЙНИК ОБЯЗАН УМЕТЬ ИМЕННО ПОДРЕЗАНИЕ, А НЕ ПРОСТО «СТОЯТЬ НА ГРАНИЦЕ». Если бы
+      // замок ставил карту РОВНО на границу, всякая ступень под ним отчитывалась бы «выдано = потолок»,
+      // и просадка — главная измеряемая величина метода владельца (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА
+      // ВЫДАЁТ») — стала бы невидимой на всём стенде. Ловушка T6 (регулятор не доходит до потолка на
+      // 60 МГц) — это ровно тот сторож, который такую подмену краснит.
+      const ceil = lockCeilingMhz();
+      if (d !== null) return Number.isFinite(ceil) ? Math.min(d, ceil) : d;
+      // Кривая записана, но края у карты нет вовсе (карта фазы 1) — граница сама по себе частоту не
+      // назначает, и выдумывать выдачу из одного замка нельзя.
     }
     return null;
   };
