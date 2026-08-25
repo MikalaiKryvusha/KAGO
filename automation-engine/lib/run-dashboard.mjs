@@ -941,6 +941,57 @@ export function closeWindow({ titleLike = 'KAGO', waitMs = 4000 } = {}) {
 }
 
 /**
+ * ВТОРОЙ СВИДЕТЕЛЬ — ВИДИМОЕ ОКНО В СИСТЕМЕ, А НЕ ПОДПИСКА НА ПОТОК (`bugs/56`).
+ *
+ * ─── ЗАЧЕМ ОН, СЛОВАМИ ВЛАДЕЛЬЦА ────────────────────────────────────────────────────────────────
+ *
+ * 2026-08-25, во время живого прогона, после доклада агента «окно поднято — подключилось»:
+ * *«я не знал, что ты это показываешь. У меня давно всё закрыто»*. Прогон целиком прошёл без единого
+ * зрителя, а прибор и агент считали обратное.
+ *
+ * ⚠️ ПРЕЖНЕЕ ПОКАЗАНИЕ НЕ БЫЛО НАИВНЫМ — И ИМЕННО ПОЭТОМУ ОШИБКА ВЫЖИЛА. Здесь уже чинили более
+ * грубую версию («мы породили браузер» → «поток событий подключён»), и это настоящее наблюдение.
+ * Но оно отвечает на вопрос «подписан ли КТО-ТО», а не «смотрит ли ЧЕЛОВЕК»: в том же логе прогона
+ * назван правдоподобный подписчик — «порт держит дашборд прошлой сессии (pid 14864)», то есть
+ * фоновый процесс браузера от прошлой сессии, у которого вкладку закрыли, а процесс остался.
+ * **Улучшение прибора не сменило его РОД** (EXP-0145): оба показания про «что-то присоединено».
+ *
+ * ─── ПОЧЕМУ ЭТО РАЗЛИЧАЕТ, А НЕ ПРОСТО ВТОРАЯ ТА ЖЕ ПРОВЕРКА ────────────────────────────────────
+ *
+ * У процесса браузера с ЗАКРЫТОЙ вкладкой `MainWindowTitle` ПУСТ — окна верхнего уровня у него нет.
+ * Значит фоновый процесс, способный переподключить поток событий, сюда не попадает по построению.
+ * Это ровно та поверхность, на которой живёт подпись класса (EXP-0140), и техника взята не новая:
+ * её же использует `closeWindow` выше, ею же 2026-08-23 доказали «консольных окон 13, ВИДИМЫХ 0».
+ *
+ * ⚠️ ЧЕГО ЭТОТ СВИДЕТЕЛЬ НЕ УМЕЕТ, И ЭТО НАЗВАНО, А НЕ СПРЯТАНО: он смотрит на `msedge` и `chrome`.
+ * Другой браузер, другой рабочий стол, окно на второй машине — и он скажет «не вижу», когда владелец
+ * ВИДИТ. Поэтому его отрицательный ответ НЕ является воротами и не отменяет прогон: он переводит
+ * доклад из утверждения в ВОПРОС. Сенсора для экрана владельца у агента нет, и честная форма —
+ * спросить (`AGENT_GUIDE.md` → «NEVER SAY FIXED WHERE THE OBSERVATION IS NOT AVAILABLE TO YOU»).
+ *
+ * @returns {{ok:boolean, count:number, why:string}} `ok:false` — спросить не удалось, и это ТРЕТЬЕ
+ *          состояние: «не смог посмотреть» не то же самое, что «посмотрел и не нашёл».
+ *
+ * [NOT-TESTED] at birth — flipped by the blocks in `selfTest` and their mutations.
+ */
+export function countVisibleWindows({ titleLike = 'KAGO', waitMs = 4000 } = {}) {
+  try {
+    // Та же PowerShell-форма, что у `closeWindow`, и по той же причине (EXP-0043: вызовы Windows API
+    // идут через PowerShell, а не через bash). Пустой `MainWindowTitle` отсеивается САМИМ фильтром
+    // `-like '*KAGO*'` — пустая строка ему не подходит.
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
+      '@(Get-Process msedge,chrome -ErrorAction SilentlyContinue | '
+      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' }).Count`,
+    ], { encoding: 'utf8', windowsHide: true, timeout: waitMs + 6000 }).trim();
+    const n = Number(out);
+    if (!Number.isFinite(n)) return { ok: false, count: 0, why: `ответ не число: ${JSON.stringify(out)}` };
+    return { ok: true, count: n, why: '' };
+  } catch (e) {
+    return { ok: false, count: 0, why: e.message };
+  }
+}
+
+/**
  * RAISE THE WINDOW — THE WHOLE STARTUP, IN THE ONE ORDER THAT CANNOT LEAVE A BROKEN DESKTOP.
  *
  * ⚠️ THE ORDER IS THE FIX, and it was paid for on 2026-08-16 by the owner («ты опять поднял в
@@ -971,8 +1022,13 @@ export async function raiseDashboard({
   startFn = startServing,
   waitFreeFn = waitPortFree,
   waitViewerFn = waitForViewer,
+  // ВТОРОЙ СВИДЕТЕЛЬ, СО СВОИМ ШВОМ (`bugs/56`). Шов обязателен: без него набор самопроверки
+  // порождал бы PowerShell и спрашивал бы про РЕАЛЬНЫЙ рабочий стол разработчика — то есть блок
+  // зеленел бы или краснел от того, что у кого-то открыто в браузере.
+  visibleWindowsFn = countVisibleWindows,
 } = {}) {
   let viewerSeen = null;
+  let windowSeen = null;
   let started = await startFn({ port });
 
   if (!started.ok && started.code === 'EADDRINUSE') {
@@ -1030,11 +1086,32 @@ export async function raiseDashboard({
     const livePort = started.s?.server?.address?.()?.port ?? port;
     const seen = await waitViewerFn(livePort, { probeFn });
     viewerSeen = seen;
-    log(seen
-      ? 'ОКНО:    подключилось — прибор его видит, прогон стартовать сможет.'
-      : 'ОКНО:    НЕ ПОДКЛЮЧИЛОСЬ. Сервер поднят, зрителей ноль — прогон в таком виде стартовать ОТКАЖЕТСЯ.');
+    // ─── ДВА СВИДЕТЕЛЯ, И ОНИ ОТВЕЧАЮТ НА РАЗНЫЕ ВОПРОСЫ (`bugs/56`) ─────────────────────────────
+    //
+    // Поток событий: «подписан ли КТО-ТО» — правда, но её может дать фоновый процесс прошлой сессии.
+    // Видимое окно: «есть ли на экране окно верхнего уровня с нашим заголовком» — та поверхность, на
+    // которой живёт подпись класса. Ни один из них по отдельности не отвечает на вопрос владельца
+    // «вижу ли Я», поэтому доклад ниже РАЗЛИЧАЕТ три состояния и в двух из них СПРАШИВАЕТ.
+    const win = visibleWindowsFn();
+    windowSeen = win;
+    if (seen && win.ok && win.count > 0) {
+      log(`ОКНО:    подключилось — ДВА свидетеля: поток событий подписан И видимых окон с «KAGO» в `
+        + `заголовке ${win.count}. Прогон стартовать сможет.`);
+    } else if (seen && win.ok && win.count === 0) {
+      // ⚠️ ИМЕННО ЭТО СОСТОЯНИЕ ВЛАДЕЛЕЦ ЗАСТАЛ 2026-08-25, и прежний код печатал здесь «подключилось».
+      log('ОКНО:    поток событий подписан, а ВИДИМОГО окна с «KAGO» в заголовке НЕ НАЙДЕНО — так');
+      log('         выглядит фоновый процесс браузера с закрытой вкладкой. Прогон стартовать сможет,');
+      log('         но ВИДИТЕ ЛИ ВЫ ОКНО НА ЭКРАНЕ? Если нет — откройте адрес выше вручную.');
+    } else if (seen) {
+      // Спросить не удалось. «Не смог посмотреть» ≠ «посмотрел и не нашёл» — третье состояние, и оно
+      // называется, а не сводится к одному из двух (то же правило, что у провайдеров событий, R4b).
+      log(`ОКНО:    поток событий подписан. Второго свидетеля спросить НЕ УДАЛОСЬ (${win.why}) —`);
+      log('         значит про Ваш экран прибор не знает ничего. ВИДИТЕ ЛИ ВЫ ОКНО?');
+    } else {
+      log('ОКНО:    НЕ ПОДКЛЮЧИЛОСЬ. Сервер поднят, зрителей ноль — прогон в таком виде стартовать ОТКАЖЕТСЯ.');
+    }
   }
-  return { ok: true, s: started.s, url: started.url, windowTouched, viewerSeen };
+  return { ok: true, s: started.s, url: started.url, windowTouched, viewerSeen, windowSeen };
 }
 
 // =================================================================================================
@@ -1272,6 +1349,7 @@ export async function selfTest() {
     // And the green half: a free port raises, and THEN the window is opened.
     const good = await raiseDashboard({
       port: 0, log: quiet, closeWindowFn: spyClose, openWindowFn: spyOpen, waitViewerFn: async () => true,
+      visibleWindowsFn: () => ({ ok: true, count: 1, why: '' }),
     });
     check('СВОБОДНЫЙ ПОРТ: сервер поднят, и ТОЛЬКО ПОСЛЕ ЭТОГО открыто окно',
       good.ok === true && closes === 1 && opens === 1,
@@ -1282,11 +1360,51 @@ export async function selfTest() {
     //   АДРЕСАТ: AP. докладывать успех, не спросив прибор → этот блок.
     const blind = await raiseDashboard({
       port: 0, log: quiet, closeWindowFn: spyClose, openWindowFn: spyOpen, waitViewerFn: async () => false,
+      visibleWindowsFn: () => ({ ok: true, count: 0, why: '' }),
     });
     check('ОКНО, КОТОРОЕ НЕ ПОДКЛЮЧИЛОСЬ, НАЗЫВАЕТСЯ ВСЛУХ — спавн браузера не выдаётся за окно',
       blind.viewerSeen === false,
       JSON.stringify({ viewerSeen: blind.viewerSeen }));
     blind.s?.close();
+
+    // ─── ВТОРОЙ СВИДЕТЕЛЬ: ПОТОК ПОДПИСАН, А ОКНА НА ЭКРАНЕ НЕТ (`bugs/56`) ──────────────────────
+    //
+    // Ровно то состояние, которое владелец застал 2026-08-25: подписчиком был фоновый процесс
+    // браузера прошлой сессии с закрытой вкладкой, прибор сказал «подключилось», экран был пуст.
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   AQ. не звать второго свидетеля вовсе          → «ДВА СВИДЕТЕЛЯ, А НЕ ОДИН»
+    //   AR. считать «спросить не удалось» за «нашли»   → «НЕ СМОГ ПОСМОТРЕТЬ ≠ ПОСМОТРЕЛ И НЕ НАШЁЛ»
+    //   AS. вернуть доклад к утверждению вместо вопроса → «ПУСТОЙ ЭКРАН НЕ НАЗЫВАЕТСЯ ПОДКЛЮЧИВШИМСЯ»
+    let said = [];
+    const ghost = await raiseDashboard({
+      port: 0, log: (m) => said.push(String(m)), closeWindowFn: spyClose, openWindowFn: spyOpen,
+      waitViewerFn: async () => true,
+      visibleWindowsFn: () => ({ ok: true, count: 0, why: '' }),
+    });
+    check('ДВА СВИДЕТЕЛЯ, А НЕ ОДИН: поток подписан, но видимого окна нет — и это ВИДНО в показании',
+      ghost.windowSeen?.ok === true && ghost.windowSeen?.count === 0,
+      JSON.stringify({ windowSeen: ghost.windowSeen }));
+    check('ПУСТОЙ ЭКРАН НЕ НАЗЫВАЕТСЯ ПОДКЛЮЧИВШИМСЯ — доклад СПРАШИВАЕТ, а не утверждает',
+      said.some((m) => /ВИДИТЕ ЛИ ВЫ/.test(m)) && !said.some((m) => /подключилось/.test(m)),
+      `сказано: ${JSON.stringify(said)}`);
+    ghost.s?.close();
+
+    // «Спросить не удалось» — ТРЕТЬЕ состояние, и оно не сводится ни к одному из двух: молча
+    // засчитать его за «нашли» значило бы вернуть ровно тот дефект, только тише (то же правило,
+    // что у провайдеров событий — `ok` / `no-events` / `error`, R4b).
+    said = [];
+    const blindWitness = await raiseDashboard({
+      port: 0, log: (m) => said.push(String(m)), closeWindowFn: spyClose, openWindowFn: spyOpen,
+      waitViewerFn: async () => true,
+      visibleWindowsFn: () => ({ ok: false, count: 0, why: 'powershell не отозвался' }),
+    });
+    check('НЕ СМОГ ПОСМОТРЕТЬ ≠ ПОСМОТРЕЛ И НЕ НАШЁЛ — третье состояние названо, а не сведено к двум',
+      blindWitness.windowSeen?.ok === false
+        && said.some((m) => /спросить НЕ УДАЛОСЬ/.test(m))
+        && said.some((m) => /ВИДИТЕ ЛИ ВЫ/.test(m))
+        && !said.some((m) => /подключилось/.test(m)),
+      `сказано: ${JSON.stringify(said)}`);
+    blindWitness.s?.close();
 
     // And the meter itself: a live server with nobody watching must say «нет зрителя», not hope.
     const lonely = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json') });
