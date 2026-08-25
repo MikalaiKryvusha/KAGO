@@ -201,6 +201,76 @@ are not the prize.
   true only under the conditions it was taken (EXP-0011), and these are those conditions.**
 - Whether `-lmc` (memory clock lock) interacts. Not probed.
 
+## 8. ✏️ AMENDMENT 2026-08-25 — §5's «no clock lock at all» IS TOO WIDE, AND THE CARD SHOWED WHY
+
+> **Do not read §5 without this section.** Its conclusion stands for the case it was written about
+> and does not extend to the case measured here. The original wording above is NOT rewritten — an
+> original is not edited to match a later measurement; the boundary is drawn here instead.
+
+**What §5 concluded (and it remains correct):** a clock lock cannot LIFT a card to a ceiling it does
+not reach on its own — probes 1 and 2 measured that refusal, and `bugs/12`'s remedy failed for
+exactly that reason. Nothing below disputes it.
+
+**What §5 also implied, and what is now refuted:** that the raised curve, capped at the tested
+frequency, is sufficient to hold the card there. It is not.
+
+### The measurement — 9 rungs across two live bands, no exception
+
+The write is provably intact on every one: the curve RE-READ FROM THE CARD after the write tops out
+at exactly the ordered ceiling (`offeredAfterMhz == capMhz`), `writeSettled: true`, the point-by-point
+re-read of the control structure green, `tableDriftMhz: 0`. And under load the card ran ABOVE it.
+
+| ceiling | curve after write | card delivered (max) | overshoot, in grid steps |
+|---|---|---|---|
+| 2400 | 2400 | 2415 | 2 |
+| 2377 | 2377 | 2392 | 2 |
+| 2355 | 2355 | 2370 | 2 |
+| 2332 | 2332 | 2355 | 3 |
+| 2332 | 2332 | 2355 | 3 |
+| 2295 | 2295 | 2310 | 2 |
+| 2280 | 2280 | 2295 | 2 |
+| 2250 | 2250 | 2265 | 2 |
+| 2175 | 2175 | 2190 | 2 |
+
+**The overshoot is always a WHOLE number of this card's frequency-grid steps — two or three, never
+fractional, never one-and-a-half.** Checked against `curves/frequency-grid.json` (steps alternate
+7 and 8 MHz). It is not thermal drift, not a stale read, and not our arithmetic: it is quantised.
+
+### Why this follows from §4 rather than contradicting it
+
+§4 says a fixed frequency is produced by FLATTENING the curve. That is exactly what
+`offset_i = min(Δ, cap − F_i)` does — and the flattening is the problem, not the solution. After the
+raise, a wide band of voltage points all offer the SAME top frequency; the boost arbitration is left
+standing on a plateau with nothing above it to refuse, and it steps off the plateau by two or three
+grid bins. §4's mechanism produces a PREFERRED frequency, not a BOUNDED one.
+
+### What the clock lock does in this direction — §1's own finding, applied the other way round
+
+§1, verbatim: *«`nvidia-smi --lock-gpu-clocks` sets **the upper bound the clock may not exceed**, not
+a clock the card is commanded to hold»*. §5 read that as a limitation. In this case it is precisely
+the property required: we do not need the lock to lift anything — the raised curve already supplies
+the voltage — we need it to REFUSE the two or three bins above the ceiling.
+
+So the two mechanisms are not the 2026-08-14 conflict repeated. That day one frequency was held by
+a curve cap AND a pin that DISAGREED (cap sat the card at 2812, the pin demanded exactly 2842). Here
+they agree by construction: both name the same frequency, the curve from below, the lock from above.
+
+### The cost this section does NOT hide
+
+- **A lock is a state written to the card**, so it needs its rollback in the same `finally` as the
+  curve, and the total undo (R9a) already covers clocks.
+- **The 2026-08-14 refusal proof must stay a refusal proof.** Its rule — «pinned ⇒ the clock must be
+  CONSTANT» — is the wrong assertion here: a capped card is legitimately free BELOW the ceiling.
+  The assertion for this shape is the one already written: never ABOVE, median not short by more
+  than one step.
+- **Unmeasured:** whether the lock itself moves the delivered clock DOWN (it should not — §1 says it
+  bounds rather than commands), and whether it interacts with the raised curve at the very top of
+  the range. Both are questions for the bench first, then for a live band.
+
+**Owner's decision, 2026-08-25 10:0x** (`interviews/015`, Q1 = A · Q2 = A, verbatim *«A, на всей
+полосе частот»*): the shape gains the lock as an upper bound, on EVERY rung above the ceiling floor,
+one shape per band so the band's rows stay comparable with each other.
+
 ## Sources
 
 - [nvidia-smi clock locking behaviour — indii.org](https://indii.org/blog/fix-clock-speed-on-nvidia-gpu/)
