@@ -33,11 +33,18 @@ report numbers. A permission entry in settings is not a reason to act.
 
 ```
 npm install                    # koffi dependency
-npm run check                  # expect: 33 .mjs files, 0 failed (re-measured 2026-08-14 22:0x)
+npm run check                  # expect: 56 .mjs files, 0 failed (re-measured 2026-08-25 11:4x)
+npm run selftest:all           # expect: 28 sets, 0 red, 1370 green blocks (re-measured 2026-08-25 11:42)
+npm run traps                  # expect: 56 assertions, 0 failures, 0 WAITING
 npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
 npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
 npm run questions              # expect: «ЧИСТО»
 ```
+
+> ⚠️ **The counts above are re-measured by the commands themselves, never edited by hand** — the same
+> rule `STATUS.md` states for its own battery line. This block carried «33 .mjs files» for eleven
+> days after the tree had grown to 56, which is how a session learns to skip a number it is supposed
+> to compare against.
 
 **STOP lines:** driver ≠ 610.88 → every golden, checksum and NVAPI id is invalid until re-proved
 (R6); report, do not proceed. Fresh clone → `runs/` is empty, every stress verdict is UNKNOWN
@@ -79,7 +86,9 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 | one candidate, judged by the 3-shape set | `npm run vfstep -- --set --point N --mhz M --cap C` | **S1 — owner present** |
 | the SHIPPED shape by hand (whole curve + ceiling) | `npm run vfstep -- --shipped-shape --mhz M --cap C` | **S1 — owner present.** Refuses without `--cap`: no ceiling, no shipped shape |
 | edge search at one clock | `npm run engine -- --search --cap C` | **S1 — owner present.** Writes the SHIPPED shape and walks the VOLTAGE ladder. **REFUSES outright when `C` is below the curve's floor** (`top − 1000 MHz`, = 2157 on this card): with no pin, nothing would hold the ceiling |
-| edge search on one frequency band | `npm run engine -- --band N --seconds 10` | **S1 — owner present.** Per rung it prints WHICH shape it writes and WHO holds the ceiling — the curve where it can, the clock pin below the floor. `bugs/02` step 1 landed 2026-08-14; the search no longer halts by design |
+| edge search on one frequency band | `npm run engine -- --band N --seconds 10` | **S1 — owner present.** Per rung it prints WHICH shape it writes and WHO holds the ceiling — above the floor «кривая + замок» (curve + BOUND), below it the clock PIN. `bugs/02` step 1 landed 2026-08-14; the search no longer halts by design |
+| **sweep a band top-down** | `npm run engine -- --sweep --from N --to N --max-depth D [--dashboard]` | **S1 — owner present.** ALWAYS run `--dry-run` first and read it (S2): it prints, per frequency, the first-step depth AND the holder. Resumes an interrupted sweep from the write-ahead journal by itself |
+| **rehearse the same sweep offline** | `npm run bench -- --from N --to N [--max-depth D]` | free — virtual card, no GPU write at all. Carries the SAME limits as the live run, so it rehearses the same work |
 | apply / reset a profile | `npm run profile -- --apply <id>` · `-- --reset` | drafts REFUSE until phase 6 (machine gate); reset is always legal |
 | fan level (upward only) | `npm run nvapi -- --fan-write 80 [--cool-to 42]` | state change → owner aware; AUTO restored in `finally` |
 | acoustic / thermal ladders | `npm run fanladder -- --period 15` · `npm run thermal -- --points ...` | owner present (fanladder needs his EAR) |
@@ -96,14 +105,30 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 
 **Reading rules bought with measurements:** a point is judged by the WORST shape of the set, and
 the deciding shape is named (fact 37) · price under a game is FPS; ops/s is a clock-stretching
-detector, not a price (R4a, EXP-0030) · a delta below the instrument's measured floor is noise
+detector, not a price (R4a, EXP-0030) · **a shortfall of the delivered clock is a MEASUREMENT, not a
+refusal** — the row goes to the frequency the card actually ran (canon 2026-08-22); only going ABOVE
+the ceiling is a failure · a delta below the instrument's measured floor is noise
 (EXP-0032) · the edge is PROBABILISTIC — same voltage can PASS and CRASH (`researches/02` §6.4);
-the shipping margin is failure + 2 grid steps = +10 mV (owner's final word) · convert the search
+**the shipping margin is the LAST STABLE rung + ONE minimum grid step** (= 5 mV on this card) — the
+owner's re-anchoring of 2026-08-17, *«последняя стабильная до отказа точка (соседка отказа сверху)
++ 5 мВ»*, and the anchor is the PASS, never the failure (`config.marginAboveLastStableMv`, which
+REFUSES a doubled cushion by name) · convert the search
 unit into the physical unit THROUGH AN OBSERVED READ-BACK, never through a model of the state
 (EXP-0034, `bugs/02`) · fan/temperature pairs are valid only at a DETECTED plateau — transients
 under-read fans by 10–18 pp (facts 35–36) · **a CEILING must be held by something and the run names
-by what** — the curve can only hold a cap down to `top − 1000 MHz` (2157 here), below that the clock
-pin holds it and the shape is no longer the shipped one (`bugs/02` step 1).
+by what** — and since 2026-08-25 the answer above the floor is TWO holders, not one: **the curve from
+below AND a clock BOUND from above** («кривая + замок»). The curve alone is NOT a ceiling — measured
+9 rungs of 9, the card runs 2–3 grid steps above it while the write is provably intact
+(`researches/11` §8, `bugs/50`, owner's decision `interviews/015` Q1 = A · Q2 = A). Below the floor
+(`top − 1000 MHz`, 2157 here) nothing can be capped and the clock PIN holds it, and the shape is no
+longer the shipped one (`bugs/02` step 1).
+
+⚠️ **BOUND ≠ PIN, and confusing them re-runs a paid-for incident.** A BOUND is `-lgc <ladder floor,
+ceiling>`: the card stays free DOWNWARD, and its proof is «never ABOVE». A PIN is `-lgc min=max`: it
+ORDERS a frequency, its proof is «the clock is CONSTANT», and it is forbidden in anything shipped
+(the owner's rule that the card must keep its dynamic range). Demanding constancy under a BOUND is
+the 2026-08-14 conflict verbatim — three rungs whose every load shape PASSED were reported
+НЕИЗВЕСТНО, and mutation NC reproduced it on the bench in 2026-08-25 (a healthy band closed 0 of 6).
 
 ## 4. Standing STOP lines (the full list)
 
