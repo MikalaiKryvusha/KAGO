@@ -34,8 +34,8 @@ report numbers. A permission entry in settings is not a reason to act.
 ```
 npm install                    # koffi dependency
 npm run check                  # expect: 56 .mjs files, 0 failed (re-measured 2026-08-25 11:4x)
-npm run selftest:all           # expect: 28 sets, 0 red, 1370 green blocks (re-measured 2026-08-25 11:42)
-npm run traps                  # expect: 56 assertions, 0 failures, 0 WAITING
+npm run selftest:all           # expect: 28 sets, 0 red, 1385 green blocks (re-measured 2026-08-25 20:53)
+npm run traps                  # expect: 60 assertions, 0 failures, 1 WAITING (declared: epic 47 phase 2)
 npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
 npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
 npm run questions              # expect: «ЧИСТО»
@@ -66,6 +66,7 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 | shell health (tasks, tray) | `npm run setup -- --status` | 7/7 tasks, tray alive |
 | boot-series meter (P3-AC2) | read `runs/shell/boot-apply.jsonl` | one JSON line per logon; series closes at 5 natural verified records |
 | re-analyze recorded telemetry | `npm run thermal -- --analyze` | plateau verdict per run, no card touched |
+| what a run BOUGHT vs what it WASTED | the sweep's own summary: `УРОЖАЙ:` then `ПРОЖИГОВ БЕЗ НОВОЙ ГЛУБИНЫ: N из M` | printed on every run and every `bench` rehearsal, **0 printed honestly**. ⚠️ Read the number BESIDE it: on a band where no delivered frequency was burned twice, «0 wasted» means «there was nowhere to waste», not «the engine does not waste». Same counter re-measures any PAST run from `runs/sweep/journal.jsonl` with no new burn (`harvestFromJournal`) |
 
 **Loads & verdicts (load the card, write nothing):**
 
@@ -103,7 +104,11 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 | **UNKNOWN / НЕИЗВЕСТНО** | comparison could not happen (stale stamp, no baseline, wrong args) | **STOP.** Never coerce into PASS/SDC; fix the reason first |
 | boot-apply verdicts (8) | `applied · factory-by-physics · factory-restored · degraded-to-factory · no-remembered-state · remembered-unreadable · driver-gave-up · apply-failed-rolled-back` | all are TERMINAL journal states; anything else in the journal is a bug to file |
 
-**Reading rules bought with measurements:** a point is judged by the WORST shape of the set, and
+**Reading rules bought with measurements:** **a burn on a delivered frequency already proven DEEPER
+in this same run buys nothing** — the owner's word 2026-08-25 *«ни один прожиг не должен быть в
+пустую»*, and the «isn't a repeat a second sample of a probabilistic edge?» fork is closed by his
+own answer `interviews/014` Q5 = B (*one burn proves it, move on*). Measured today: 2 of 11 live,
+24 of 89 on the ordinary rehearsal · a point is judged by the WORST shape of the set, and
 the deciding shape is named (fact 37) · price under a game is FPS; ops/s is a clock-stretching
 detector, not a price (R4a, EXP-0030) · **a shortfall of the delivered clock is a MEASUREMENT, not a
 refusal** — the row goes to the frequency the card actually ran (canon 2026-08-22); only going ABOVE

@@ -744,16 +744,38 @@ export function provenRungs(records) {
  * наблюдением, а «позже = честнее» было бы рассуждением. Столкновения при этом СЧИТАЮТСЯ и
  * возвращаются: правило выбрало победителя, а не спрятало факт.
  *
+ * ─── ПРОЖИГ БЕЗ НОВОЙ ГЛУБИНЫ — ЧЕТВЁРТАЯ ВЕЛИЧИНА, И ОНА ПРО ЦЕНУ, А НЕ ПРО УРОЖАЙ ───────────────
+ * `plans/48` (эпик 47 фаза 1). Слово владельца 2026-08-25: *«Ни один прожиг не должен быть в
+ * пустую»*. Ступень куплена впустую, если её ВЫДАННАЯ частота в этом прогоне уже жглась, а
+ * обслужившее напряжение не стало глубже уже доказанного там. Такой прожиг стоит минуту карты
+ * владельца и не добавляет к документу ничего.
+ *
+ * ⚠️ ПОЧЕМУ «НЕ ГЛУБЖЕ», А НЕ «РОВНО ТО ЖЕ». Повтор ровно того же значения — частный случай; шаг,
+ * вернувшийся ВЫШЕ уже доказанного, покупает столько же, то есть ничего: более высокое напряжение
+ * на той же частоте уже подразумевается прошедшим более низким. Мерка «совпало с предыдущей» ловит
+ * только соседей и пропускает повтор через одну.
+ *
+ * ⚠️ И ПОЧЕМУ ЭТО НЕ РЕШЕНИЕ АГЕНТА, А РЕШЕНИЕ ВЛАДЕЛЬЦА. Край этой карты вероятностный, поэтому
+ * повторный прожиг той же пары можно было бы считать вторым свидетельством, а не тратой. Развилка
+ * задавалась ему прямо (`interviews/014` Q5) и закрыта **вариантом B — «один прожиг = доказано,
+ * движемся глубже сразу»**, против рекомендации агента. Здесь исполняется его ответ: раз одного
+ * прожига достаточно, второй той же пары не покупает ничего.
+ *
+ * ⚠️ ПОЛОВИНКА — НЕ ТРАТА. Ступень, оставившая на диске напряжение без частоты, отсеивается ВЫШЕ и
+ * сюда не доходит: это дефект журнала (`bugs/54`), и записать его в трату значило бы предъявить
+ * карте счёт за нашу же потерю данных.
+ *
  * @param {Array} rungs записи ступеней: `{outcome, deliveredMhz, deliveredMaxMhz, servingMvAfter,
  *                      orderedMhz, orderedMv, seq, at}`
  * @returns {{burnsHeld:number, fullPairs:number, pairs:Map, halfPairs:Array, contested:Array,
- *            worstSpreadMhz:number|null}}
+ *            worstSpreadMhz:number|null, wastedBurns:Array, repeatedFrequencies:number}}
  *
  * [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this.
  */
 export function harvestPairs(rungs) {
   const pairs = new Map();
   const halfPairs = [];
+  const wastedBurns = [];
   let burnsHeld = 0;
   let worstSpreadMhz = null;
 
@@ -796,6 +818,23 @@ export function harvestPairs(rungs) {
       });
       continue;
     }
+    // ⚠️ СЧИТАЕТСЯ ДО ОБНОВЛЕНИЯ `deepestMv` — иначе сравнение шло бы с самим собой и трата никогда
+    // бы не нашлась. Сравнение с тем, что было известно ПЕРЕД этим прожигом, и есть весь вопрос.
+    if (mv >= seen.deepestMv) {
+      wastedBurns.push({
+        seq: r?.seq ?? null,
+        at: r?.at ?? null,
+        deliveredMhz: mhz,
+        servingMvAfter: mv,
+        // ЧТО УЖЕ БЫЛО ИЗВЕСТНО НА ЭТОЙ ВЫДАННОЙ ЧАСТОТЕ ДО ПРОЖИГА — без этого числа строка
+        // «прожиг впустую» недоказуема глазом: читатель обязан видеть, ЧЕМУ он не добавил.
+        knownDeepestMv: seen.deepestMv,
+        // ЧТО ЗАКАЗЫВАЛИ — обе половины заказа. Именно расхождение заказа с выдачей и покупает
+        // пустой прожиг: движок целится в частоту, которой карта не даёт (`plans/47` F1).
+        orderedMhz: r?.orderedMhz ?? null,
+        orderedMv: r?.orderedMv ?? null,
+      });
+    }
     seen.burns += 1;
     seen.voltagesMv.push(mv);
     seen.orderedMhz.push(r?.orderedMhz ?? null);
@@ -824,6 +863,14 @@ export function harvestPairs(rungs) {
     halfPairs,
     contested,
     worstSpreadMhz,
+    // ПРОЖИГИ, КУПЛЕННЫЕ БЕЗ НОВОЙ ГЛУБИНЫ (`plans/48`). Ноль здесь — результат, а не молчание.
+    wastedBurns,
+    // ⚠️ СКОЛЬКО ЧАСТОТ ВООБЩЕ ЖГЛИСЬ ПОВТОРНО — И БЕЗ ЭТОГО ЧИСЛА НОЛЬ ВЫШЕ НИЧЕГО НЕ ЗНАЧИТ.
+    // Прогон, где каждая выданная частота прожигалась ровно один раз, физически не может дать
+    // траты: там «трат 0» означает «случая не было», а не «движок не тратит». Это ровно класс
+    // `bugs/40` — заголовок, совпавший без чтения того, что под ним, — и утверждение, которое
+    // читает `wastedBurns.length === 0` без этого числа, проходит вакуумно.
+    repeatedFrequencies: [...pairs.values()].filter((p) => p.burns > 1).length,
   };
 }
 
@@ -1418,6 +1465,95 @@ export function selfTest() {
           { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2205, deliveredMaxMhz: 2212, servingMvAfter: 850, orderedMhz: 2355, seq: 1 },
         ]).pairs.get(2205)?.deepestMv ?? 'нет',
         h1.pairs.get(2205)?.deepestMv ?? 'нет');
+
+      // ─── ПРОЖИГ БЕЗ НОВОЙ ГЛУБИНЫ — АРИФМЕТИКА (`plans/48`, эпик 47 фаза 1) ─────────────────────
+      //
+      // Фикстура — ЖИВОЙ ЗАМЕР, а не выдумка: полоса 2355 МГц вечером 2026-08-25, четыре ступени
+      // подряд, все заказывали потолок 2355, карта все четыре раза выдала 2347. Именно на ней
+      // владелец сказал «каждый прожиг — для нас должен быть уликой».
+      const band2355 = [
+        { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 850, orderedMhz: 2355, orderedMv: 850, seq: 759 },
+        { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 845, orderedMhz: 2355, orderedMv: 845, seq: 760 },
+        { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 820, seq: 761 },
+        { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 810, seq: 762 },
+      ];
+      const hw = harvestPairs(band2355);
+      // ⚠️ ОЖИДАЕТСЯ ОДИН, А НЕ ДВА. Ступень 761 заказывала 820 и получила 840 — это НА 5 мВ ГЛУБЖЕ
+      //   предыдущих 845, то есть прожиг купил глубину, хоть карта заказ и не отдала. Пустая только
+      //   762: те же 840 при уже доказанных 840. Разница «карта не отдала заказ» ↔ «прожиг ничего не
+      //   купил» — это и есть содержание счётчика, и путать их значит считать не то.
+      ok('ПУСТОЙ ПРОЖИГ НАЗВАН ПОИМЁННО: не давший НОВОЙ ГЛУБИНЫ, а не «карта не отдала заказ»',
+        [hw.wastedBurns.length, hw.wastedBurns[0]?.seq ?? 'нет', hw.wastedBurns[0]?.servingMvAfter ?? 'нет',
+          hw.wastedBurns[0]?.knownDeepestMv ?? 'нет'],
+        [1, 762, 840, 840]);
+      // — И ГЛУБЖЕ УЖЕ ДОКАЗАННОГО — НЕ ТРАТА, даже когда карта промахнулась мимо заказа.
+      ok('ступень, ушедшая ГЛУБЖЕ доказанного, тратой НЕ считается — даже с промахом заказа',
+        hw.wastedBurns.some((w) => w.seq === 761), false);
+      // — ВЫШЕ УЖЕ ДОКАЗАННОГО — ТОЖЕ ТРАТА, а не только точный повтор. Более высокое напряжение на
+      //   той же частоте уже подразумевается прошедшим более низким; мерка «совпало с предыдущей»
+      //   пропустила бы этот случай, и на стенде он составляет большинство трат.
+      ok('ВЫШЕ доказанного — тоже трата: повтор не обязан быть точным',
+        harvestPairs([
+          { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 800, orderedMhz: 2355, orderedMv: 800, seq: 1 },
+          { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 900, orderedMhz: 2340, orderedMv: 900, seq: 2 },
+        ]).wastedBurns.length, 1);
+      // — ЧУЖАЯ ВЫДАННАЯ ЧАСТОТА — НЕ ТРАТА. Ключ — пара, а не напряжение: то же напряжение на
+      //   ДРУГОЙ выданной частоте это новое знание. Ровно та ошибка ключа, что живёт в стороже
+      //   продвижения (`plans/47` F6) и сделала бы прогоны короче, а не длиннее.
+      ok('то же напряжение на ДРУГОЙ выданной частоте — НЕ трата: ключ это пара, а не напряжение',
+        harvestPairs([
+          { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 840, seq: 1 },
+          { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2325, servingMvAfter: 840, orderedMhz: 2332, orderedMv: 840, seq: 2 },
+        ]).wastedBurns.length, 0);
+      // — ⚠️ ВАКУУМНЫЙ ПРОХОД НАЗВАН ЧИСЛОМ, А НЕ ДОВЕРИЕМ. Полоса, где каждая выданная частота
+      //   жглась ровно один раз, даёт «трат 0» ПО ПОСТРОЕНИЮ. Читатель обязан отличать «движок не
+      //   тратит» от «тратить было негде» — иначе это `bugs/40`: заголовок совпал, под ним не читали.
+      ok('НОЛЬ ТРАТ БЕЗ ПОВТОРОВ — это «тратить было негде», и число повторов стоит рядом',
+        (() => {
+          const h = harvestPairs([
+            { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 840, seq: 1 },
+            { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2325, servingMvAfter: 800, orderedMhz: 2332, orderedMv: 800, seq: 2 },
+          ]);
+          return [h.wastedBurns.length, h.repeatedFrequencies];
+        })(), [0, 0]);
+      // — И НАОБОРОТ: повтор БЫЛ, и он ушёл глубже — тогда ноль трат это результат, а не отсутствие случая.
+      ok('НОЛЬ ТРАТ ПРИ ПОВТОРЕ — это результат: случай был, и каждый повтор ушёл глубже',
+        (() => {
+          const h = harvestPairs([
+            { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 850, orderedMhz: 2355, orderedMv: 850, seq: 1 },
+            { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 840, seq: 2 },
+          ]);
+          return [h.wastedBurns.length, h.repeatedFrequencies];
+        })(), [0, 1]);
+      // — ПОЛОВИНКА НЕ ПОПАДАЕТ В ТРАТЫ. Ступень, оставившая напряжение без частоты, — дефект
+      //   журнала (`bugs/54`), и записать его в трату значило бы предъявить карте счёт за нашу
+      //   потерю данных. Обе величины считаются, и они РАЗНЫЕ.
+      ok('ПОЛОВИНКА — дефект журнала, а не пустой прожиг: считается отдельно и в траты не идёт',
+        (() => {
+          const h = harvestPairs([
+            { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 840, seq: 1 },
+            { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: null, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 835, seq: 2 },
+          ]);
+          return [h.wastedBurns.length, h.halfPairs.length, h.burnsHeld];
+        })(), [0, 1, 2]);
+      // — ОТКАЗ И ЗАВИСАНИЕ В ТРАТЫ НЕ ИДУТ: они покупают знание о крае, то есть прожиг не пустой.
+      ok('отказ и зависание — не пустые прожиги: они покупают край',
+        harvestPairs([
+          { outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 840, seq: 1 },
+          { outcome: RUNG_OUTCOME.FAILED, deliveredMhz: 2347, servingMvAfter: 840, orderedMhz: 2355, orderedMv: 835, seq: 2 },
+          { outcome: RUNG_OUTCOME.HUNG, deliveredMhz: 2347, servingMvAfter: 845, orderedMhz: 2355, orderedMv: 830, seq: 3 },
+        ]).wastedBurns.length, 0);
+      // — ТОТ ЖЕ СЧЁТ С ДИСКА. Урожай и траты считает одна функция, поэтому журнал прошлого прогона
+      //   можно перемерить без нового прожига (EXP-0146: инструмент пишет улики и после сессии).
+      const j22 = openJournal({ dir: join(sandbox, 'harvest-waste') });
+      for (const r of band2355) {
+        writeIntent(j22, { seq: r.seq, frequencyMhz: r.orderedMhz, voltageMv: r.orderedMv });
+        writeVerdict(j22, { seq: r.seq, at: null, outcome: r.outcome, verdict: config.VERDICT.PASS,
+          servingMvAfter: r.servingMvAfter, deliveredMhz: r.deliveredMhz });
+      }
+      ok('ТРАТЫ ЧИТАЮТСЯ С ДИСКА тем же счётом: прошлый прогон перемеривается без нового прожига',
+        (() => { const h = harvestFromJournal(readJournal(j22).records); return [h.wastedBurns.length, h.wastedBurns[0]?.seq ?? 'нет']; })(),
+        [1, 762]);
     }
   } finally {
     // assertSandbox FIRST — this exact teardown deleted the production store on 2026-08-14.
