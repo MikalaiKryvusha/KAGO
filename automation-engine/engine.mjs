@@ -885,6 +885,12 @@ export async function runRung({
   record.writeFailureClass = atom?.writeFailureClass ?? null;
   record.writeFailureWhy = atom?.writeFailureWhy ?? null;
   record.writeSettled = atom?.writeSettled ?? null;
+  // ДЕРЖАТЕЛЬ ПРОБИТОГО ПОТОЛОКА — `ЗАПИСЬ` · `КАРТА` · `НЕИЗВЕСТНО` (`bugs/50`, замер 2026-08-25).
+  // Поле, а не подстрока: под одним сообщением «карта ушла ВЫШЕ потолка» стояли ДВА отказа —
+  // невставшая форма записи (один случай за всю историю журнала) и карта, работающая выше формы,
+  // которая встала (три случая в одной полосе). Чинят их в разных местах, и сосчитать их по прозе
+  // нельзя.
+  record.ceilingBreachHolder = atom?.ceilingBreachHolder ?? null;
 
   // ---- 5b. КРАСНЫЕ БЛОКИ АТОМА — ВИДНЫ ОПЕРАТОРУ И ПЕРЕЖИВАЮТ СЕССИЮ (`plans/37`, эпик 36 фаза 1).
   //
@@ -977,6 +983,10 @@ export async function runRung({
         // ответить, а именно он разводит три живые гипотезы `researches/18` §5.
         writeFailureClass: record.writeFailureClass ?? null,
         writeSettled: record.writeSettled ?? null,
+        // ДЕРЖАТЕЛЬ ПРОБИТОГО ПОТОЛОКА — тем же проводом и по той же причине, что класс записи выше:
+        // «сколько ступеней за прогон встали потому, что КАРТА не соблюла вставшую форму» — вопрос
+        // к счёту, а не к прозе, и именно он разводит починку кода от замера карты (`bugs/50`).
+        ceilingBreachHolder: record.ceilingBreachHolder ?? null,
         // ВЫДАННАЯ ЧАСТОТА — В ЖУРНАЛ, ПО КАЖДОЙ СТУПЕНИ. Без неё строка вердикта несла напряжение
         // без частоты, то есть половину пары, и восстановить вторую половину задним числом нельзя:
         // медиана `clocks.gr` считается по пробам ЭТОГО прожига и после него не существует нигде.
@@ -2433,6 +2443,7 @@ export async function sweepFrequency({
     // ДИАГНОСТИКА ДЛЯ ПОЧИНКИ — едет вместе с остановкой, потому что чинить по прозе нельзя.
     out.writeFailureClass = r?.writeFailureClass ?? null;
     out.writeSettled = r?.writeSettled ?? null;
+    out.ceilingBreachHolder = r?.ceilingBreachHolder ?? null;
     out.offeredAfterMhz = r?.offeredAfterMhz ?? null;
     out.appliedDeltaMhz = r?.appliedDeltaMhz ?? null;
     out.tableDriftMhz = r?.tableDriftMhz ?? null;
@@ -3107,12 +3118,18 @@ export async function sweepRange({
         outcome: outcome.outcome ?? (outcome.halted ? 'halted' : 'no-verdict'),
         // ПРИЧИНА КАК ИДЕНТИФИКАТОР — по ней частоты группируются в КЛАССЫ дефектов. Три частоты с
         // одной причиной это один дефект, а не три случая, и чинить надо один раз.
+        // ПОРЯДОК ВЕТОК — ЧАСТЬ ПРАВИЛА: раньше стоит то, что объясняет позднее. Отказ ЗАПИСИ
+        // объясняет пробитый потолок (форма не встала), обратное неверно; поэтому класс записи
+        // старше держателя потолка, а держатель — старше адреса блока.
         reason: outcome.hangFloorHalt === true ? 'hang-floor'
-          : (outcome.writeFailureClass ? `write-${outcome.writeFailureClass}` : (outcome.stopSite ?? 'halt')),
+          : (outcome.writeFailureClass ? `write-${outcome.writeFailureClass}`
+            : (outcome.ceilingBreachHolder ? `ceiling-${outcome.ceilingBreachHolder}`
+              : (outcome.stopSite ?? 'halt'))),
         // КАКОЙ БЛОК КОДА НЕ СПРАВИЛСЯ — прямое требование владельца, чтобы разбор был по адресу.
         failedAt: outcome.stopSite ?? null,
         writeFailureClass: outcome.writeFailureClass ?? null,
         writeSettled: outcome.writeSettled ?? null,
+        ceilingBreachHolder: outcome.ceilingBreachHolder ?? null,
         offeredAfterMhz: outcome.offeredAfterMhz ?? null,
         appliedDeltaMhz: outcome.appliedDeltaMhz ?? null,
         tableDriftMhz: outcome.tableDriftMhz ?? null,
@@ -3754,7 +3771,13 @@ export function sweepReportLines(report) {
   if (skipped.length) {
     const byClass = new Map();
     for (const s of skipped) {
-      const key = s.writeFailureClass ?? s.outcome ?? 'без класса';
+      // ГРУППИРУЕМ ПО `reason`, А НЕ ПО ПЕРЕСЧЁТУ ЕГО ЗАНОВО. Поле `reason` заведено ровно как
+      // «ПРИЧИНА КАК ИДЕНТИФИКАТОР» на месте, где строка рождается; здесь стояла ВТОРАЯ формула
+      // того же (`writeFailureClass ?? outcome`), и она уже разошлась с первой: пробитый потолок
+      // с чистой записью попадал в неё как «unknown» вместе со всем остальным без класса. Пара
+      // «истина ↔ зеркало» внутри одного файла — тот класс, который проект предпочитает УБИРАТЬ,
+      // а не сторожить (`AGENT_GUIDE.md` → реестр пар).
+      const key = s.reason ?? s.outcome ?? 'без класса';
       byClass.set(key, [...(byClass.get(key) ?? []), s.frequencyMhz]);
     }
     lines.push(`ПРОПУЩЕНО ЧАСТОТ: ${skipped.length} — строки в документ не записаны, полоса при этом пройдена до конца.`);

@@ -339,9 +339,10 @@ export function askAtClockMhz(orderedMhz, offeredAfterMhz) {
  *
  * [NOT-TESTED] at birth — flipped by the blocks in `--selftest` and their mutations.
  */
-export function judgeDeliveredClock({ capMhz, median, max, samples = null,
+export function judgeDeliveredClock({ capMhz, median, max, samples = null, offeredAfterMhz = null,
                                       toleranceMhz = config.CLOCK_LADDER_STEP_TOLERANCE_MHZ } = {}) {
-  const base = { capMhz, median, max, samples, shortfall: null, breached: false, short: false };
+  const base = { capMhz, median, max, samples, offeredAfterMhz, shortfall: null,
+                 breached: false, short: false, breachHolder: null };
   if (!Number.isFinite(capMhz) || !Number.isFinite(median)) {
     return { ...base, ok: false, why: 'нечего судить: не названы ни потолок, ни выданная частота' };
   }
@@ -350,8 +351,37 @@ export function judgeDeliveredClock({ capMhz, median, max, samples = null,
   const breached = top > capMhz + toleranceMhz;
   const short = shortfall > toleranceMhz;
   if (breached) {
-    return { ...base, shortfall, breached: true, ok: false,
-      why: `карта ушла ВЫШЕ потолка: максимум ${top} МГц при потолке ${capMhz}` };
+    // ─── ПРОБИТЫЙ ПОТОЛОК — ЭТО ДВА РАЗНЫХ ОТКАЗА, И ДО 2026-08-25 ОНИ ПЕЧАТАЛИСЬ ОДНОЙ СТРОКОЙ ───
+    //
+    // `bugs/50`, замер по журналу: у шести ступеней последней полосы `writeSettled: true`,
+    // поточечная сверка зелёная, а `offeredAfterMhz` РАВЕН потолку — форма записи встала. И при
+    // этом три из шести карта под нагрузкой отработала выше него (+15, +23, +23 МГц). Ровно один
+    // случай за всю историю журнала (`seq 702`) устроен наоборот: кривая ПОСЛЕ записи сама
+    // предлагала на 15 МГц выше потолка, чего вектор не может дать по арифметике
+    // (`offset_i = min(Δ, потолок − F_i)`), и он назван классом записи C3.
+    //
+    // Различитель — ОДНО сравнение над числом, которое на месте вызова уже лежит. Без него оператор
+    // видит одну строку там, где в одном случае чинят КОД пути записи, а в другом МЕРЯЮТ КАРТУ:
+    // это тот же дефект «остановка называет симптом», который фаза 4 эпика 36 закрывала ярусом ниже
+    // (`plans/39`, пункт 2).
+    //
+    // Третье значение существует по правилу трёх дверей (`PHILOSOPHY.md`): если кривую после записи
+    // не перечитали, назвать держателя НЕЧЕМ, и выдумывать его нельзя. Это тот же ход, что
+    // `unclassified` у классификатора записи, и по той же причине.
+    const holder = !Number.isFinite(offeredAfterMhz) ? 'НЕИЗВЕСТНО'
+      : (offeredAfterMhz > capMhz ? 'ЗАПИСЬ' : 'КАРТА');
+    const over = Number((top - capMhz).toFixed(1));
+    const why = holder === 'ЗАПИСЬ'
+      ? `ФОРМА НЕ ВСТАЛА: кривая после записи сама предлагает ${offeredAfterMhz} МГц при потолке `
+        + `${capMhz}, и карта ушла ВЫШЕ потолка — максимум ${top} МГц. Отказ на пути ЗАПИСИ, `
+        + 'его класс называет отдельное поле'
+      : holder === 'КАРТА'
+        ? `ФОРМА УСТОЯЛА, КАРТА ЕЁ НЕ СОБЛЮЛА: кривая после записи не предлагает выше `
+          + `${offeredAfterMhz} МГц, а карта ушла ВЫШЕ потолка — максимум ${top} МГц при потолке `
+          + `${capMhz} (+${over}). Путь записи здесь ни при чём: это наблюдение О КАРТЕ`
+        : `карта ушла ВЫШЕ потолка: максимум ${top} МГц при потолке ${capMhz} — кривая после записи `
+          + 'не перечитана, и назвать, устояла ли форма, нечем';
+    return { ...base, shortfall, breached: true, breachHolder: holder, ok: false, why };
   }
   if (short) {
     return { ...base, shortfall, short: true, ok: false,
@@ -397,6 +427,11 @@ export function applyCeilingJudgement(out, j, { capMhz, median, max, loadedSampl
   out.deliveredShortfallMhz = j.shortfall;
   if (j.short) out.clockShortfall = true;
   if (j.breached) {
+    // ДЕРЖАТЕЛЬ ПРОБИТОГО ПОТОЛОКА ЕДЕТ ПОЛЕМ, А НЕ ТОЛЬКО ВНУТРИ РАССКАЗА (`bugs/50`). Сводка
+    // прогона группирует пропущенные частоты ПО КЛАССУ — слово владельца 2026-08-24: «три частоты
+    // с одной причиной — это один дефект, а не три случая», — а группировать по строке нельзя:
+    // в неё входят числа самой ступени.
+    out.ceilingBreachHolder = j.breachHolder ?? null;
     if (out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; }
     out.reason = j.why;
     throw new Error(j.why);
@@ -1162,7 +1197,11 @@ export async function runStep({
           // ONE LADDER STEP of tolerance and not a millihertz more: the card's own grid is 7–8 MHz,
           // and `clocks.gr` is reported on that grid, so a reading one step above the cap is rounding
           // rather than a breach. Anything beyond it means the ceiling did not hold.
-          const j = judgeDeliveredClock({ capMhz, median, max, samples: loaded.length });
+          // `offeredAfterMhz` — максимум кривой, ПЕРЕЧИТАННОЙ С КАРТЫ после записи (выставлен выше,
+          // блоком «ПОТОЛОК СТОИТ»). Он и отвечает на вопрос, встала ли форма: без него превышение
+          // под нагрузкой неотличимо от невставшей записи (`bugs/50`, замер 2026-08-25).
+          const j = judgeDeliveredClock({ capMhz, median, max, samples: loaded.length,
+            offeredAfterMhz: Number.isFinite(out.highestOfferedMhz) ? out.highestOfferedMhz : null });
           // 🪜 НЕДОБОР ЧАСТОТЫ — ЭТО ЗАМЕР, А НЕ ОТКАЗ (канон 2026-08-22, `GOAL.md` →
           // «УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ — НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА»).
           //
@@ -2351,6 +2390,45 @@ export async function selfTest() {
     ok('НЕЧЕГО СУДИТЬ — ЭТО ОТКАЗ, а не молчаливое «сойдёт»',
       [J({ capMhz: null, median: 2880, max: 2880 }).ok, J({ capMhz: 2880, median: null, max: null }).ok],
       [false, false]);
+
+    // ─── ДЕРЖАТЕЛЬ ПРОБИТОГО ПОТОЛОКА (`bugs/50`, замер 2026-08-25) ────────────────────────────
+    //
+    // Фикстуры — НАСТОЯЩИЕ строки боевого журнала, а не придуманные: `seq 727` (потолок 2355,
+    // кривая после записи 2355, карта 2370) и `seq 702` (потолок 2355, кривая после записи 2370).
+    // Оба до этой правки печатали ОДНО сообщение, и по нему чинили бы одно и то же место.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   CB. вернуть одно сообщение на оба случая     → «...и НЕВСТАВШАЯ форма зовётся ЗАПИСЬЮ»
+    //   CC. звать ЗАПИСЬ при кривой, равной потолку  → «ВСТАВШАЯ ФОРМА — ЭТО КАРТА, А НЕ ЗАПИСЬ»
+    //   CD. подставлять КАРТА без перечитанной кривой→ «НЕ ПЕРЕЧИТАНО = НЕИЗВЕСТНО, А НЕ ДОГАДКА»
+    //
+    // ✏️ АДРЕСАТ CB ИСПРАВЛЕН ПОСЛЕ ПРОГОНА, А НЕ ПОДОГНАН ЗАДНИМ ЧИСЛОМ. Заранее был назван блок
+    // «ПРОБИТЫЙ ПОТОЛОК НАЗЫВАЕТ ДЕРЖАТЕЛЯ», и он остался ЗЕЛЁНЫМ: поле `breachHolder` считается
+    // отдельно от текста, поэтому мутация текста его не трогает. Класс поймал соседний блок — тот,
+    // что судит саму формулировку. Это разделение верное (поле для счёта, текст для глаз), и запись
+    // здесь стоит ради него: два блока сторожат ДВЕ разные половины одного решения, а не одну дважды.
+    const card = J({ capMhz: 2355, median: 2370, max: 2370, offeredAfterMhz: 2355 });
+    const write = J({ capMhz: 2355, median: 2370, max: 2370, offeredAfterMhz: 2370 });
+    const blind = J({ capMhz: 2355, median: 2370, max: 2370 });
+    ok('ПРОБИТЫЙ ПОТОЛОК НАЗЫВАЕТ ДЕРЖАТЕЛЯ: три положения дел — три разных ответа, а не одно',
+      [card.breachHolder, write.breachHolder, blind.breachHolder],
+      ['КАРТА', 'ЗАПИСЬ', 'НЕИЗВЕСТНО']);
+    ok('ВСТАВШАЯ ФОРМА — ЭТО КАРТА, А НЕ ЗАПИСЬ: кривая ровно на потолке (seq 727), виновата карта',
+      [/КАРТА ЕЁ НЕ СОБЛЮЛА/.test(card.why), /ФОРМА НЕ ВСТАЛА/.test(card.why)], [true, false]);
+    ok('...и НЕВСТАВШАЯ форма зовётся ЗАПИСЬЮ: кривая выше потолка (seq 702) — виноват путь записи',
+      [/ФОРМА НЕ ВСТАЛА/.test(write.why), /наблюдение О КАРТЕ/.test(write.why)], [true, false]);
+    ok('НЕ ПЕРЕЧИТАНО = НЕИЗВЕСТНО, А НЕ ДОГАДКА: без кривой после записи держатель не выдумывается',
+      [/не перечитана/.test(blind.why), /КАРТА ЕЁ НЕ СОБЛЮЛА|ФОРМА НЕ ВСТАЛА/.test(blind.why)],
+      [true, false]);
+    ok('и все три ответа остаются ОТКАЗОМ — различитель называет виновного, а не отменяет остановку',
+      [card.ok, write.ok, blind.ok, card.breached, write.breached, blind.breached],
+      [false, false, false, true, true, true]);
+    // Держатель — величина ТОЛЬКО пробитого потолка. У недобора и у прошедшей ступени его нет, и
+    // `null` здесь значит «вопрос не стоял», а не «не смогли ответить».
+    ok('держателя нет там, где потолок не пробит — ни у недобора, ни у чистой ступени',
+      [J({ capMhz: 2880, median: 2865, max: 2865, offeredAfterMhz: 2880 }).breachHolder,
+       J({ capMhz: 2880, median: 2880, max: 2880, offeredAfterMhz: 2880 }).breachHolder],
+      [null, null]);
   }
 
   // ─── ЧТО СТУПЕНЬ ДЕЛАЕТ С ЭТИМ ВЕРДИКТОМ (`plans/25` шаг 1.2, долг сессии 38) ─────────────────
@@ -2398,6 +2476,25 @@ export async function selfTest() {
       [over.threw, over.out.verdict, over.out.pinRefused], [true, null, true]);
     ok('и причина остановки НАЗЫВАЕТ потолок, а не сообщает «что-то не так»',
       /ВЫШЕ потолка/.test(over.out.reason ?? ''), true);
+
+    // ─── ДЕРЖАТЕЛЬ ЕДЕТ ПОЛЕМ, А НЕ ТОЛЬКО В ПРОЗЕ (`bugs/50`) ─────────────────────────────────
+    //   CE. не довозить `ceilingBreachHolder` до `out` → этот блок
+    // Сводка прогона группирует пропущенные частоты ПО КЛАССУ (слово владельца 2026-08-24), а по
+    // строке группировать нельзя: в неё входят числа самой ступени, и две одинаковые причины дадут
+    // два разных ключа. Поэтому блок судит ПОЛЕ, а не текст.
+    const byCard = run(stepWithPass(),
+      J({ capMhz: 2355, median: 2370, max: 2370, offeredAfterMhz: 2355 }),
+      { capMhz: 2355, median: 2370, max: 2370, loadedSamples: 40 });
+    const byWrite = run(stepWithPass(),
+      J({ capMhz: 2355, median: 2370, max: 2370, offeredAfterMhz: 2370 }),
+      { capMhz: 2355, median: 2370, max: 2370, loadedSamples: 40 });
+    ok('ДЕРЖАТЕЛЬ ЕДЕТ ПОЛЕМ: ступень несёт «КАРТА» или «ЗАПИСЬ» отдельным полем, годным для счёта',
+      [byCard.out.ceilingBreachHolder, byWrite.out.ceilingBreachHolder], ['КАРТА', 'ЗАПИСЬ']);
+    ok('...и обе по-прежнему ОСТАНАВЛИВАЮТ ступень — различитель не смягчает остановку',
+      [byCard.threw, byWrite.threw, byCard.out.verdict, byWrite.out.verdict],
+      [true, true, null, null]);
+    ok('...а у ступени без пробитого потолка поля нет вовсе — «вопрос не стоял», а не «не смогли»',
+      short.out.ceilingBreachHolder ?? null, null);
 
     // ЧИСТАЯ СТУПЕНЬ — контроль, что зелёный путь не задет ни одной из мутаций.
     const clean = run(stepWithPass(), J({ capMhz: 2880, median: 2880, max: 2880 }),
