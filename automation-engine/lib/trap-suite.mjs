@@ -370,9 +370,10 @@ export async function runTrapSuite() {
   // ⚠️ ЧИСЛО ЗДЕСЬ ЖЁСТКОЕ НАМЕРЕННО, И ЭТО НЕ ПЕДАНТИЗМ: ловушка, тихо выпавшая с диска, — это
   // покрытие, исчезнувшее без единого красного блока. Сторож заметил появление шестой (T6,
   // 2026-08-23) и седьмой (T7, тот же день, вечер) ровно так, как должен был, и число правится
-  // ВМЕСТЕ с реестром, а не вслед за прогоном.
-  check('ЛОВУШКИ: их СЕМЬ, и класс каждой назван ДО прогона (B3-AC1)',
-    TRAPS.length === 7 && cards.size === 7, `на диске ${cards.size} из ${TRAPS.length}`);
+  // ВМЕСТЕ с реестром, а не вслед за прогоном. Восьмую (T8, 2026-08-25, `plans/44`) он заметил
+  // так же — красным, — и число правится здесь ОСОЗНАННО, а не подгоняется под то, что нашлось.
+  check('ЛОВУШКИ: их ВОСЕМЬ, и класс каждой назван ДО прогона (B3-AC1)',
+    TRAPS.length === 8 && cards.size === 8, `на диске ${cards.size} из ${TRAPS.length}`);
 
   // ---- 1. T1 — the edge sits above the descent's reach (class A, judged by the REAL searchEdge)
   const t1 = cards.get('T1_edge_above_reach');
@@ -642,6 +643,78 @@ export async function runTrapSuite() {
       `ступеней ${steps} из бюджета ${BUDGET}, повторов нет, исход «${report7?.stoppedBy ?? 'полоса закрыта'}»`);
   } else fail('T7: карта загружена', 'карты нет на диске');
 
+  // ── T8 — КАРТА, КОТОРАЯ РАБОТАЕТ ВЫШЕ ПОТОЛКА СОБСТВЕННОЙ КРИВОЙ (`plans/44`, эпик 43 фаза 1) ────
+  //
+  // Ловушка на `bugs/50`. До 2026-08-25 стенд этого не умел ПО ПОСТРОЕНИЮ — `deliveredUnderCurve`
+  // отбрасывает всё, что выше потолка, — а живая карта делала это девять раз из девяти, всегда на
+  // ЦЕЛОЕ число ступеней сетки (2 в семи случаях, 3 в двух; `researches/11` §8).
+  //
+  // ⚠️ ФАЗА 1 СТАВИТ ЛОВУШКУ, А НЕ ЛЕЧИТ. Утверждение ниже про то, что движок обязан НАЗВАТЬ
+  // происходящее, а не про то, что прогон обязан пройти: замок появляется в фазе 2, и до неё
+  // ступень законно остаётся без вердикта.
+  const t8card = cards.get('T8_runs_above_the_ceiling_it_was_given');
+  if (t8card) {
+    const { golden, stampOk } = stressFor(t8card);
+    // ⚠️ СНАЧАЛА — САМ МЕХАНИЗМ, ПРИ НУЛЕВОЙ ГЛУБИНЕ. Урок T6 дословно: первая редакция той ловушки
+    // проверяла только следствие, и мутация «отнять у карты ограничитель» не покрасила НИЧЕГО.
+    // Здесь спуска нет вовсе — кривая только подрезана потолком, — поэтому уйти ВЫШЕ потолка карта
+    // может ТОЛЬКО от поля ловушки: ни край, ни шум вверх не двигают.
+    const boostVc = virtualCard(t8card, { settleSamples: 0, seed: 31 });
+    const CAP8 = 2842;
+    await boostVc.curveBackend.writeRaiseAndCap(0, CAP8, { cardMaxClockMhz: t8card.card.maxGraphicsMhz });
+    const deliveredAtZero = Number(boostVc.backend.query(['clocks.gr'])['clocks.gr']);
+    await boostVc.curveBackend.zeroCurve();
+    check('T8: КАРТА УХОДИТ ВЫШЕ ПОТОЛКА ДАЖЕ БЕЗ АНДЕРВОЛЬТА — это и есть механизм ловушки',
+      Number.isFinite(deliveredAtZero) && deliveredAtZero > CAP8,
+      `при нулевой глубине карта выдала ${deliveredAtZero} МГц при потолке ${CAP8} — превышения нет, `
+        + 'значит поле ловушки не доехало до карты и всё зелёное ниже ничего не стоит',
+      `${deliveredAtZero} МГц при потолке ${CAP8}, превышение ${deliveredAtZero - CAP8} МГц`);
+    // И ПРЕВЫШЕНИЕ ОБЯЗАНО БЫТЬ БОЛЬШЕ ДОПУСКА СУДЬИ, иначе ловушка ловит округление, а не дефект:
+    // допуск — ОДНА ступень сетки (`config.CLOCK_LADDER_STEP_TOLERANCE_MHZ`), ловушка несёт две.
+    check('T8: и превышение БОЛЬШЕ допуска судьи — ловушка ловит дефект, а не округление сетки',
+      deliveredAtZero - CAP8 > config.CLOCK_LADDER_STEP_TOLERANCE_MHZ,
+      `превышение ${deliveredAtZero - CAP8} МГц против допуска ${config.CLOCK_LADDER_STEP_TOLERANCE_MHZ} МГц`,
+      `превышение ${deliveredAtZero - CAP8} МГц > допуска ${config.CLOCK_LADDER_STEP_TOLERANCE_MHZ} МГц`);
+
+    // ─── ЗАМОК ПОДАВЛЯЕТ ПРЕВЫШЕНИЕ — КОНТРАКТ МОДЕЛИ, НА КОТОРЫЙ ОБОПРЁТСЯ ФАЗА 2 (F1-AC3) ──────
+    //
+    // ⚠️ ЧЕСТНО О ТОМ, ЧТО ЭТОТ БЛОК ДОКАЗЫВАЕТ, А ЧТО НЕТ. Подавление выпадает из модели ДАРОМ:
+    // `runningMhz` возвращает закреплённую частоту первой, поэтому закреплённая виртуальная карта
+    // не может уйти выше НИ ПРИ КАКОМ поле. Значит блок доказывает не кремний, а КОНТРАКТ двойника:
+    // «замок сильнее буста» зафиксировано, и фаза 2 не сможет тихо его поменять. Держит ли замок на
+    // ЖИВОЙ карте — вопрос `researches/11` §1 и приёмки фазы 3, и ничем другим он не закрывается.
+    const lockedVc = virtualCard(t8card, { settleSamples: 0, seed: 31 });
+    await lockedVc.curveBackend.writeRaiseAndCap(0, CAP8, { cardMaxClockMhz: t8card.card.maxGraphicsMhz });
+    lockedVc.backend.lockGraphicsClocksMhz(CAP8, CAP8);
+    const deliveredLocked = Number(lockedVc.backend.query(['clocks.gr'])['clocks.gr']);
+    await lockedVc.curveBackend.zeroCurve();
+    check('T8: ЗАМОК СИЛЬНЕЕ БУСТА — под замком та же карта превышения не даёт (контракт для фазы 2)',
+      deliveredLocked === CAP8,
+      `под замком ${CAP8} МГц карта выдала ${deliveredLocked} МГц — превышение ${deliveredLocked - CAP8} МГц, `
+        + 'то есть замок буста не подавляет и фаза 2 строится на неверной посылке',
+      `под замком ${CAP8} МГц выдано ровно ${deliveredLocked} МГц, превышение 0 (против ${deliveredAtZero - CAP8} МГц без замка)`);
+
+    const r8 = await runSweep(t8card, { seed: 31, fromMhz: 2857, toMhz: 2827, stress, golden, stampOk });
+    const skipped8 = r8.report.skipped ?? [];
+    const byCard = skipped8.filter((s) => s.ceilingBreachHolder === 'КАРТА');
+    // 🔴 ЖДЁТ ФАЗЫ 2, И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО. Прогон 2026-08-25 10:2x: движок встаёт
+    // РАНЬШЕ проверки потолка — на `runRung#delivery-above-stock`, — поэтому держателей в сводке
+    // «—», а не «КАРТА». То есть на стенде дефект встречает ДРУГУЮ ветку, чем на живой карте, где
+    // сработала именно проверка потолка. Разрыв верности двойника назван в `plans/44` и закрывается
+    // фазой 2 ПЕРВЫМ шагом: сперва двойник обязан падать там же, где падает карта.
+    pending(`T8: ${mustDoOf('T8_runs_above_the_ceiling_it_was_given')} — прогнано, а не заявлено`,
+      `движок останавливается на «${r8.report.stoppedBy ?? '—'}» РАНЬШЕ проверки потолка; держатели в `
+      + `сводке: ${[...new Set(skipped8.map((s) => s.ceilingBreachHolder ?? '—'))].join(', ')} `
+      + `(пропущено ${skipped8.length}, с держателем КАРТА ${byCard.length}). Закрывает фаза 2 эпика 43`);
+    // ⚠️ И ДЕРЖАТЕЛЬ ОБЯЗАН БЫТЬ ИМЕННО «КАРТА»: если бы движок назвал ЗАПИСЬ, чинили бы путь
+    // записи, который здесь безупречен, — а это ровно та ошибка адресации, ради которой поле и
+    // заведено (`bugs/50`). Проверяется УТВЕРДИТЕЛЬНО, а не отсутствием: пустой список тоже «не
+    // содержит ЗАПИСЬ».
+    pending('T8: и полоса НЕ ГИБНЕТ из-за этого — частота закрывается своей причиной, прогон идёт дальше',
+      `сегодня гибнет: остановлено «${r8.report.stoppedBy ?? '—'}» — ${String(r8.report.why).slice(0, 120)}. `
+      + 'Закрывает фаза 2 эпика 43 вместе с утверждением выше');
+  } else fail('T8: карта загружена', 'карты нет на диске');
+
   // ── T4 — the edge lies DEEPER than our ±1000 MHz lever reaches. Reporting that as an edge would be
   // the false `[TESTED]` the second verdict exists to forbid.
   const t4card = cards.get('T4_edge_below_the_lever');
@@ -718,9 +791,16 @@ export async function runTrapSuite() {
   // pending again, because a pending row now would mean the sweep exists and nobody pointed it here.
   for (const t of TRAPS.filter((x) => x.klass === 'B')) {
     const rows = results.filter((r) => r.n.includes(t.mustDo));
-    check(`${t.name}: утверждение НАПИСАНО и ПРОГНАНО — не отсутствует и больше не «ждёт»`,
-      rows.length > 0 && rows.every((r) => r.state !== 'ЖДЁТ'),
-      rows.length === 0 ? 'утверждения нет вовсе' : `состояния: ${rows.map((r) => r.state).join(', ')}`);
+    // ⚠️ ОДНО ОБЪЯВЛЕННОЕ ИСКЛЮЧЕНИЕ, И ОНО НЕ ОСЛАБЛЯЕТ СТОРОЖА (`plans/44`). Ловушка, поставленная
+    // ФАЗОЙ, лечение которой стоит в СЛЕДУЮЩЕЙ фазе, объявляет это полем `openPhase` — и только тогда
+    // ей позволено «ЖДЁТ». Без поля правило прежнее и жёсткое. Отсутствие утверждения по-прежнему
+    // запрещено ВСЕМ: сторож заводился против того, что утверждение тихо исчезает, и это цело.
+    const mayWait = typeof t.openPhase === 'string' && t.openPhase.length > 0;
+    check(`${t.name}: утверждение НАПИСАНО и ПРОГНАНО — не отсутствует и больше не «ждёт»`
+      + (mayWait ? ' (кроме объявленной открытой фазы)' : ''),
+      rows.length > 0 && (mayWait || rows.every((r) => r.state !== 'ЖДЁТ')),
+      rows.length === 0 ? 'утверждения нет вовсе' : `состояния: ${rows.map((r) => r.state).join(', ')}`,
+      mayWait ? `ждёт по объявленной причине: ${t.openPhase}` : '');
   }
 
   return report(results);
