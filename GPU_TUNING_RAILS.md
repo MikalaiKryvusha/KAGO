@@ -34,8 +34,8 @@ report numbers. A permission entry in settings is not a reason to act.
 ```
 npm install                    # koffi dependency
 npm run check                  # expect: 56 .mjs files, 0 failed (re-measured 2026-08-25 11:4x)
-npm run selftest:all           # expect: 28 sets, 0 red, 1385 green blocks (re-measured 2026-08-25 20:53)
-npm run traps                  # expect: 60 assertions, 0 failures, 1 WAITING (declared: epic 47 phase 2)
+npm run selftest:all           # expect: 28 sets, 0 red, 1387 green blocks (re-measured 2026-08-25 21:51)
+npm run traps                  # expect: 61 assertions, 0 failures, 0 WAITING
 npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
 npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
 npm run questions              # expect: «ЧИСТО»
