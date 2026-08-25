@@ -806,6 +806,18 @@ export function harvestPairs(rungs) {
     const spread = Number.isFinite(r?.deliveredMaxMhz) ? Math.max(0, r.deliveredMaxMhz - mhz) : null;
     if (spread !== null) worstSpreadMhz = worstSpreadMhz === null ? spread : Math.max(worstSpreadMhz, spread);
 
+    // ─── ПАРА «ЗАКАЗ ↔ ВЫДАЧА» ПОМЕЧАЕТСЯ ВИДЕННОЙ НА КАЖДОМ ПРОЖИГЕ, А НЕ ТОЛЬКО НА ТРАТЕ ───────
+    //
+    // 🔴 ЗДЕСЬ БЫЛ ДЕФЕКТ, И ОН ЗАВЫШАЛ ОЦЕНКУ В МОЮ ЖЕ ПОЛЬЗУ. Отметка стояла ВНУТРИ ветки траты,
+    // поэтому прожиг, который пару ОТКРЫЛ (и тратой не был), виденной её не делал — и ПЕРВАЯ трата
+    // на паре всегда числилась «разведочной», даже когда спуск уже знал, где работает карта.
+    // Поймано живым прогоном 2026-08-25 22:0x: затравка 2355 легла на 2347 и обслужила 840, затем
+    // заказ 820 вернул те же 840 — вторая ступень на той же паре, а счётчик назвал её разведкой.
+    // Сторож, который считает в свою пользу, хуже отсутствующего: он делает зелёное дешевле правды.
+    const descentKey = `${r?.orderedMhz ?? '—'}@${mhz}`;
+    const firstOnPair = !seenInDescent.has(descentKey);
+    seenInDescent.add(descentKey);
+
     const seen = pairs.get(mhz);
     if (!seen) {
       pairs.set(mhz, {
@@ -839,11 +851,8 @@ export function harvestPairs(rungs) {
       //
       // ИЗБЕЖНЫЙ — это ВТОРОЙ и далее прожиг на той же выданной частоте в том же спуске: там движок
       // УЖЕ знал, где карта, и всё равно не углубился. Цель фазы 2 — обнулить именно его.
-      const descentKey = `${r?.orderedMhz ?? '—'}@${mhz}`;
-      const discovery = !seenInDescent.has(descentKey);
-      seenInDescent.add(descentKey);
       wastedBurns.push({
-        discovery,
+        discovery: firstOnPair,
         seq: r?.seq ?? null,
         at: r?.at ?? null,
         deliveredMhz: mhz,
