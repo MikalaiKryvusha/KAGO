@@ -5115,7 +5115,8 @@
         "sdc_fma": 1,
         "branchy": 1.35
       },
-      "perLaunchSeconds": 0.132
+      "perLaunchSeconds": 0.132,
+      "hangAtOrBelowMv": null
     }
   }
 }
