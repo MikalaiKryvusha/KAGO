@@ -62,7 +62,7 @@ import { marginAboveLastStableMv } from './config.mjs';
 // `chooseWriteShape` is imported STATICALLY and that is safe offline: `vf-step` imports `nvapi`
 // lazily, inside the functions that write, so nothing here reaches for koffi or the driver.
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
-import { DIVERSE_SET, furnaceSetAtLevel, FURNACE_LADDER } from './lib/stress-tester.mjs';
+import { DIVERSE_SET, furnaceSetAtLevel, FURNACE_LADDER, sweepBurnShape, burnLoadSeconds, OWNER_BURN_BUDGET_SECONDS } from './lib/stress-tester.mjs';
 import { localIso } from './lib/card-grids.mjs';
 // The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
 // measured; `curve-store` decides what the artifact may hold, and there is no second writer.
@@ -3883,12 +3883,18 @@ export async function sweepDryRun({
  * строка пишется по ВЫДАННОЙ частоте, принуждать стало нечего. Побочно это чинит и измерение:
  * ослабленный прожиг доказывал напряжение под НЕ ТОЙ нагрузкой, под которой владелец играет.
  *
+ * 🆕 И НАБОР ВНУТРИ СТУПЕНИ — ТОЖЕ ОДИН, решение владельца 2026-08-26 (`interviews/016`, Q1 = A,
+ * Q2 = C; `GOAL.md` → «🎯 ЗАЧЕМ ПРОЖИГ СУЩЕСТВУЕТ»). Его слово: *«10 секунд макс нагрузка всей
+ * видеокарты»*. До этого ступень гоняла ТРИ формы по 10 с и судила по худшей — то есть 30 с стенки
+ * и 25 с настоящей нагрузки там, где заказано 10 (`bugs/59`, найден им же на глаз за десять секунд
+ * внимания). Выбор устойчивой формы `furnace` и цена двух выбывших разобраны у `sweepBurnShape`.
+ *
  * @returns {Array<Array<object>>} лестница наборов форм; её длина И ЕСТЬ число попыток на ступень
  *
  * [NOT-TESTED] at birth — flipped by the block «ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ» in `--selftest`.
  */
 export function sweepBurnLadder() {
-  return [furnaceSetAtLevel(0)];
+  return [sweepBurnShape(0)];
 }
 
 export function sweepDryRunLines(dry) {
@@ -3903,9 +3909,18 @@ export function sweepDryRunLines(dry) {
     // ЛЕСТНИЦА БЕРЁТСЯ ИЗ ОДНОГО ИСТОЧНИКА С ПРОГОНОМ (`sweepBurnLadder`, `bugs/33`) — иначе план
     // описывает работу, которой не будет, а читает его оператор перед разрешением записи в карту.
     const ladder = sweepBurnLadder();
-    const strongest = ladder[0].filter((s) => s.bearsVerdict).map((s) => s.id).join(' + ');
-    lines.push(`ПРОЖИГ: ${strongest} по ${config.SWEEP_PROBE_SECONDS ?? 10} с, `
-      + `ОДНИМ полным набором — попытка на ступень ${ladder.length}. `
+    const bearing = ladder[0].filter((s) => s.bearsVerdict);
+    const strongest = bearing.map((s) => s.id).join(' + ');
+    const probeSeconds = config.SWEEP_PROBE_SECONDS ?? 10;
+    // БЮДЖЕТ ВЛАДЕЛЬЦА ПЕЧАТАЕТСЯ РЯДОМ С НАБОРОМ, а не проверяется только в блоке: `bugs/59` прожил
+    // неделю именно потому, что число «10 секунд» жило в каноне прозой, а оператор видел лишь итог.
+    // Здесь оно стоит там, где его прочтут ПЕРЕД разрешением записи в карту владельца (рельс S2).
+    const loadSeconds = burnLoadSeconds(bearing, probeSeconds);
+    lines.push(`ПРОЖИГ: ${strongest} по ${probeSeconds} с — `
+      + `нагрузки ${Number.isInteger(loadSeconds) ? loadSeconds : loadSeconds.toFixed(1)} с `
+      + `при бюджете владельца ${OWNER_BURN_BUDGET_SECONDS} с`
+      + `${loadSeconds > OWNER_BURN_BUDGET_SECONDS ? ' — 🔴 БЮДЖЕТ ПРЕВЫШЕН' : ''}. `
+      + `Форм, несущих вердикт: ${bearing.length}, попытка на ступень ${ladder.length}. `
       + (ladder.length > 1
         ? `Если карта под ним не сядет на настраиваемую частоту — ступень ПЕРЕИГРЫВАЕТСЯ ослабленной `
           + `нагрузкой (${FURNACE_LADDER.map((l) => `${l.wattsSeen} Вт→${l.heldMhzSeen} МГц`).join(' · ')}). `
@@ -7853,6 +7868,38 @@ export function selfTest() {
         [/ПЕРЕИГРЫВАНИЯ НЕТ/.test(burnLine), /ПЕРЕИГРЫВАЕТСЯ/.test(burnLine),
           /ВЫДАННУЮ\s+частоту/.test(burnLine)],
         [true, false, true]);
+
+      // ─── ПРОЖИГ — ОДНА ФОРМА, И ОН УКЛАДЫВАЕТСЯ В БЮДЖЕТ ВЛАДЕЛЬЦА (`bugs/59`) ─────────────────
+      // Владелец нашёл это ГЛАЗОМ за десять секунд внимания, тогда как агент печатал числа этого
+      // прогона часами и не читал их (EXP-0157). Причина, по которой прозы в каноне не хватило:
+      // «судим по худшей из трёх форм» и «прожиг десять секунд» — оба требования законны по
+      // отдельности, никто не писал «значит тридцать», и потому ревизовать было нечего. Число из
+      // канона живёт теперь в УТВЕРЖДЕНИИ, а не только в тексте.
+      //
+      // Переходная форма считается по своей СКВАЖНОСТИ, а не по стенке: её десять секунд несут
+      // пять секунд нагрузки (TRANSIENT_ON/OFF = 5/5). Считать её десятью — это дать набору пройти
+      // бюджет, недогрузив карту, то есть ровно та подмена, которая пряталась за цифрой 307 Вт,
+      // пока никто не посмотрел на долю времени под нагрузкой.
+      //
+      // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+      //   DA. вернуть развёртке набор из трёх форм        → «ПРОЖИГ — ОДНА ФОРМА» + «БЮДЖЕТ»
+      //   DB. считать переходную форму по стенке          → «ПЕРЕХОДНАЯ СЧИТАЕТСЯ ПО НАГРУЗКЕ»
+      //   DC. убрать бюджет из строки плана               → «БЮДЖЕТ НАЗВАН В ДОКУМЕНТЕ РЕЛЬСА S2»
+      const bearing = ladder[0].filter((s) => s.bearsVerdict);
+      ok('ПРОЖИГ — ОДНА ФОРМА, несущая вердикт: слово владельца «10 секунд макс нагрузка всей видеокарты»',
+        [bearing.length, bearing[0]?.id], [1, 'furnace/sustained@0']);
+      ok('ПРОЖИГ УКЛАДЫВАЕТСЯ В БЮДЖЕТ ВЛАДЕЛЬЦА — секунд нагрузки не больше десяти',
+        burnLoadSeconds(bearing, config.SWEEP_PROBE_SECONDS ?? 10) <= OWNER_BURN_BUDGET_SECONDS, true);
+      // Сторож обязан ЛОВИТЬ прежнее поведение, иначе он не сторож: старый набор из трёх форм даёт
+      // 25 секунд нагрузки (не 30 — переходная несёт половину) и бюджет обязан его отвергнуть.
+      ok('и он КРАСНЕЕТ на прежнем наборе — три формы дают 25 с нагрузки против бюджета 10',
+        [burnLoadSeconds(furnaceSetAtLevel(0), 10),
+          burnLoadSeconds(furnaceSetAtLevel(0), 10) <= OWNER_BURN_BUDGET_SECONDS],
+        [25, false]);
+      ok('ПЕРЕХОДНАЯ СЧИТАЕТСЯ ПО НАГРУЗКЕ, а не по стенке: её 10 с несут 5 с работы',
+        burnLoadSeconds([{ shape: 'transient' }], 10), 5);
+      ok('БЮДЖЕТ НАЗВАН В ДОКУМЕНТЕ РЕЛЬСА S2 — оператор читает его ДО разрешения записи',
+        [/бюджете владельца 10 с/.test(burnLine), /нагрузки 10 с/.test(burnLine)], [true, true]);
     }
 
     // — the resolver alone, on hostile inputs. It is the one place allowed to pick a row.

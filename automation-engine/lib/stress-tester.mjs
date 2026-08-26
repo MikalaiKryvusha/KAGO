@@ -548,6 +548,83 @@ export function furnaceSetAtLevel(level) {
 }
 
 /**
+ * THE SWEEP'S BURN — ONE FORM OF TEN SECONDS, by the owner's decision of 2026-08-26.
+ *
+ * His words, verbatim (`GOAL.md` → «🎯 ЗАЧЕМ ПРОЖИГ СУЩЕСТВУЕТ», `interviews/016` Q1/Q2):
+ * *«10 секунд макс нагрузка всей видеокарты»* · *«мне плевать на тип нагрузки… Важно, чтобы она
+ * сильно грузила карту, чтобы укладывалась в 10 секунд»* · *«SDC несостоятелен, пользы от него я не
+ * видел»*.
+ *
+ * WHY THE SUSTAINED MEMBER IS THE ONE THAT SURVIVES, and both halves are MEASURED (2026-08-26,
+ * live card at stock, 10 s per point, `runs/power/grid59-*.json`):
+ *
+ *   · `furnace/sustained@0`  307.8 W of a 300 W limit — the card sits ON its ceiling for the whole
+ *                            window, and `furnace.cu` loads FP32, the VRAM read AND write paths,
+ *                            SFU and INT/addressing, every one folded into the same checksum;
+ *   · `furnace/transient@0`  307.1 W *under load* — but TRANSIENT_ON/OFF = 5/5, so its ten seconds
+ *                            contain FIVE of load. It cannot satisfy «ten seconds of max load» by
+ *                            construction, and the power figure hides that;
+ *   · `branchy/sustained`    198.4 W = 66 % of the limit, at 98.5 % duty — that is the shape of the
+ *                            computation, not idleness. It does not reach the envelope at all.
+ *
+ * WHAT LEAVES WITH THE OTHER TWO IS PROVOCATION, NOT DETECTION — verified in code rather than
+ * assumed, because the first version of this reasoning overstated the loss: `queryFaults({from,to})`
+ * is a WINDOW over the Windows event log, so CRASH detection is independent of which workload ran;
+ * ЗАВИС is derived from an unclosed intent in the write-ahead journal (R15) and never involved the
+ * load at all — and it is the verdict that actually fires (13 of 750 in the whole journal, against
+ * ZERO SDC, which is what the owner's «SDC несостоятелен» rests on). What genuinely leaves: the
+ * di/dt transition shape and the divergent-branching shape. Debt with an address: if the sweep's
+ * hang rate per burn moves materially, the transition shape is the first suspect (`plans/50`).
+ *
+ * THE SET IS THE SOURCE, THE SELECTION IS HERE — deliberately. Deriving from `furnaceSetAtLevel`
+ * rather than re-declaring the descriptor means the intensity args live in ONE place
+ * (`FURNACE_LADDER`), so this function cannot drift into burning a shape the ladder does not
+ * describe. A pair that cannot form beats a pair that must be watched.
+ *
+ * @param {number} level ступень интенсивности из `FURNACE_LADDER`
+ * @returns {ReadonlyArray<object>} набор ровно из ОДНОЙ формы, несущей вердикт
+ *
+ * [NOT-TESTED] at birth — flipped by «ПРОЖИГ — ОДНА ФОРМА» and «ПРОЖИГ УКЛАДЫВАЕТСЯ В БЮДЖЕТ
+ * ВЛАДЕЛЬЦА» in `engine --selftest`.
+ */
+export function sweepBurnShape(level) {
+  const set = furnaceSetAtLevel(level);
+  const one = set.find((s) => s.workload === 'furnace' && s.shape === 'sustained');
+  // Отказ, а не тихий возврат первой попавшейся: если набор перестроят и устойчивой формы в нём не
+  // окажется, прожиг обязан ОСТАНОВИТЬСЯ, а не сжечь карту владельца непонятно чем.
+  if (!one) throw new Error(`в наборе ступени ${level} нет устойчивой формы furnace — прожиг не определён`);
+  return Object.freeze([one]);
+}
+
+/**
+ * THE OWNER'S BURN BUDGET, in seconds — the number his canon fixes and prose could not enforce.
+ *
+ * *«стресс нагрузка на 10 секунд»* (2026-08-16 23:0x) · *«чтобы укладывалась в 10 секунд»*
+ * (2026-08-26). Kept HERE, beside the shapes, because the thing it bounds is a property of the
+ * shape list: `bugs/59` happened precisely because «judge by three shapes» and «ten seconds per
+ * burn» were both true, individually reasonable, and nobody ever computed their PRODUCT (EXP-0157).
+ */
+export const OWNER_BURN_BUDGET_SECONDS = 10;
+
+/**
+ * Load seconds a shape list actually costs at the given per-shape duration.
+ *
+ * The transient shape is NOT counted at its wall-clock: it alternates
+ * TRANSIENT_ON_SECONDS/TRANSIENT_OFF_SECONDS, so a ten-second transient window carries five seconds
+ * of load. Counting it as ten would let a set pass the budget while under-loading the card — the
+ * exact confusion that hid inside the 307 W figure until the duty was looked at.
+ *
+ * [NOT-TESTED] at birth — flipped by «ПРОЖИГ УКЛАДЫВАЕТСЯ В БЮДЖЕТ ВЛАДЕЛЬЦА» in `engine --selftest`.
+ */
+export function burnLoadSeconds(shapes, secondsPerShape) {
+  const duty = config.TRANSIENT_ON_SECONDS / (config.TRANSIENT_ON_SECONDS + config.TRANSIENT_OFF_SECONDS);
+  return shapes.reduce((sum, s) => {
+    const sec = s.seconds ?? s.sustain ?? secondsPerShape;
+    return sum + (s.shape === 'transient' ? sec * duty : sec);
+  }, 0);
+}
+
+/**
  * Reduce a list of per-shape verdicts to the one that describes the candidate.
  *
  * THE ORDER IS THE DESIGN, and it is the same order `decideVerdict` already uses one level down:
