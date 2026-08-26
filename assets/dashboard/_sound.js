@@ -700,6 +700,7 @@ const KagoSound = (() => {
     what: 'Записанная тема, 4 мин 10 с, играет по кругу. Космический эмбиент — выбор владельца.',
   };
   let trackEl = null;
+  let gestureWaiting = false;   // ждём ли мы сейчас жеста человека ради автозапуска (`bugs/60`)
 
   function trackStart() {
     if (!armed) return;
@@ -718,7 +719,54 @@ const KagoSound = (() => {
     }
     try { trackEl.currentTime = 0; } catch (e) { /* ещё не готов — начнёт с начала сам */ }
     const p = trackEl.play();
-    if (p && p.catch) p.catch(() => { /* автозапуск не дали — щелчок человека вернёт сюда же */ });
+    // ОТКАЗ АВТОЗАПУСКА БОЛЬШЕ НЕ ГЛОТАЕТСЯ МОЛЧА (`bugs/60`, найден владельцем 2026-08-26).
+    // Прежняя редакция ловила отказ и не делала НИЧЕГО, полагаясь на то, что «щелчок человека
+    // вернёт сюда же». На стенде это верно, а в бою — нет: окно наблюдения поднимает САМ ПРОГОН
+    // («ОКНО НАБЛЮДЕНИЯ: не открыто — поднимаю сам»), то есть страница приходит БЕЗ единого жеста.
+    // Браузер по своей политике автозапуска отказывает, страница показывает «звук включён», и
+    // владелец слышит тишину, пока не догадается кликнуть. Это ровно тот класс, который этот же
+    // модуль называет у геттера `running`, и за который проект уже платил (`bugs/27`).
+    if (p && p.catch) p.catch(() => { awaitGesture(); });
+  }
+
+  /**
+   * ЖДАТЬ ЖЕСТА И СКАЗАТЬ ОБ ЭТОМ ВСЛУХ.
+   *
+   * Политику автозапуска обойти НЕЛЬЗЯ — ни одной строкой кода: браузер требует жеста человека, и
+   * это его право, а не наш дефект. Дефектом было МОЛЧАНИЕ. Поэтому здесь ровно две вещи, и обе
+   * честные: сказать человеку, чего ждём, и вернуться к запуску на первом же его действии.
+   *
+   * Три входа, потому что «жест» у браузеров разный: щелчок, клавиша и возвращение вкладки на
+   * передний план. Последний и есть сценарий владельца — окно поднято в фоне, он кликает по нему,
+   * чтобы вывести вперёд.
+   *
+   * Слушатели снимаются ПЕРВЫМ ЖЕ срабатыванием: подписка, которая живёт после того, как сделала
+   * своё дело, — это утечка, а не надёжность.
+   */
+  function awaitGesture() {
+    onMove(TRACK.name + ' · ЖДЁТ ЩЕЛЧКА ПО СТРАНИЦЕ — браузер не даёт звук без него');
+    if (gestureWaiting) return;                  // уже ждём: второй подписки не заводим
+    gestureWaiting = true;
+    const off = () => {
+      gestureWaiting = false;
+      document.removeEventListener('pointerdown', retry, true);
+      document.removeEventListener('keydown', retry, true);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', retry);
+    };
+    const retry = () => {
+      off();
+      if (!armed || !soundOn || melIdx !== TRACK_INDEX) return;
+      // Контекст мог остаться усыплённым — будим его ДО запуска элемента, иначе граф отдаст тишину.
+      Promise.resolve(ac && ac.resume ? ac.resume() : null)
+        .catch(() => { /* не разбудился — элемент всё равно попробует сам */ })
+        .then(() => { onMove(TRACK.name + ' · играет по кругу'); trackStart(); });
+    };
+    const onVis = () => { if (!document.hidden) retry(); };
+    document.addEventListener('pointerdown', retry, true);
+    document.addEventListener('keydown', retry, true);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', retry);
   }
 
   function trackStop() {
