@@ -66,6 +66,7 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 | shell health (tasks, tray) | `npm run setup -- --status` | 7/7 tasks, tray alive |
 | boot-series meter (P3-AC2) | read `runs/shell/boot-apply.jsonl` | one JSON line per logon; series closes at 5 natural verified records |
 | re-analyze recorded telemetry | `npm run thermal -- --analyze` | plateau verdict per run, no card touched |
+| WHERE inside a rung the card idles | `npm run pulse -- --rung-profile` | second-by-second load/idle profile of a rung, averaged over the run, plus the gap BETWEEN rungs. Measured 2026-08-26: the between-rung gap is **0.0 s** — all idle lives INSIDE the rung, as head (write + arm) and tail (rollback + disarm). Reads two files, writes nothing (`bugs/53`) |
 | what a run BOUGHT vs what it WASTED | the sweep's own summary: `УРОЖАЙ:` then `ПРОЖИГОВ БЕЗ НОВОЙ ГЛУБИНЫ: N из M` | printed on every run and every `bench` rehearsal, **0 printed honestly**. ⚠️ Read the number BESIDE it: on a band where no delivered frequency was burned twice, «0 wasted» means «there was nowhere to waste», not «the engine does not waste». Same counter re-measures any PAST run from `runs/sweep/journal.jsonl` with no new burn (`harvestFromJournal`) |
 
 **Loads & verdicts (load the card, write nothing):**

@@ -27,6 +27,7 @@
 //   node tools/pulse-report.mjs --all                  every archived pulse, one summary line each
 //   node tools/pulse-report.mjs <file>                 one named file
 //   node tools/pulse-report.mjs <file> --intervals     every interval, not just the gapped rungs
+//   node tools/pulse-report.mjs --rung-profile         WHERE inside a rung the card idles (bugs/53)
 //   node tools/pulse-report.mjs --selftest             the blocks
 //
 // [TESTED: 2026-08-23 12:5x · 24 блока офлайн + 11 мутаций, каждая красит свои; и прогон на
@@ -266,6 +267,129 @@ function printAll() {
   console.log(files.length >= 3 && clean >= 1
     ? 'ПОРОГ МОЖНО ВЫВОДИТЬ ИЗ ДАННЫХ — фаза 2 планируется.'
     : 'ПОРОГ ВЫВОДИТЬ НЕ ИЗ ЧЕГО — назначать его сейчас значило бы выдумать число.');
+  return 0;
+}
+
+// =================================================================================================
+// 3a. THE RUNG PROFILE — where inside a rung the card is idle (`bugs/53`)
+// =================================================================================================
+
+/**
+ * THE SECOND-BY-SECOND SHAPE OF A RUNG, averaged over every rung of a run.
+ *
+ * WHY IT LIVES HERE rather than in a tool of its own: this file already lays telemetry over the
+ * sweep's rungs, already reads the journal with PURE functions only (the header explains why that
+ * matters — three diagnostic calls once wrote three false hangs into the production journal), and
+ * already writes nothing anywhere. A second tool would be a second copy of all three properties.
+ *
+ * WHAT IT ANSWERS, and it is `bugs/53`'s own first step («первый шаг починки не оптимизация, а
+ * ЗАМЕР»): the run reports a quarter of the card's time as idle — WHERE is it? Between rungs, or
+ * inside them; at the head, in the middle, or at the tail. Those three answers have completely
+ * different remedies, and one of them (the middle) belongs to the burn's shape rather than to the
+ * machinery, which is exactly what the 2026-08-26 measurement found.
+ *
+ * MEASURED THIS WAY ON 2026-08-25 22:4x — 6 rungs, ZERO variance between them:
+ *   sec 0–2   idle   the head: curve write, watchdog arm, golden stamps
+ *   sec 3–7   load   `furnace/transient@0` — and 5 s is exactly its ON phase
+ *   sec 8–13  idle   the transient's OFF phase (5 s) plus process turnaround
+ *   sec 14–22 load   `furnace/sustained@0`
+ *   sec 23    idle   turnaround
+ *   sec 24–34 load   `branchy/sustained`
+ *   sec 35–37 idle   the tail: rollback and disarm
+ * The three load blocks match the shape list's own order — an independent check that the segmentation
+ * is read off the data rather than fitted to a story.
+ *
+ * THE LOADED/IDLE THRESHOLD IS NOT INVENTED HERE: 50 % of `utilization.gpu` is the same boundary
+ * `power-baseline` already splits its halves on. One concept, one number, one place to change it.
+ *
+ * GPU WRITES: NONE. Two files read, a table printed.
+ *
+ * [NOT-TESTED] at birth — flipped by «ПРОФИЛЬ СТУПЕНИ» in `--selftest`.
+ */
+export const RUNG_PROFILE_LOADED_UTIL = 50;
+
+export function rungProfile(samples, rungs, { loadedUtil = RUNG_PROFILE_LOADED_UTIL } = {}) {
+  const windows = rungs.filter((r) => r.fromAt !== null).sort((a, b) => a.fromAt - b.fromAt);
+  const rowAt = (ms) => {
+    let hit = null;
+    for (const w of windows) {
+      if (ms < w.fromAt) continue;
+      if (w.toAt !== null && ms > w.toAt) continue;
+      hit = w;
+    }
+    return hit;
+  };
+
+  const bySecond = new Map();
+  let loaded = 0, idle = 0, unattributed = 0;
+  for (const s of samples) {
+    const ms = parseSampleTime(s?.t);
+    if (ms === null) continue;
+    const w = rowAt(ms);
+    if (!w) { unattributed++; continue; }
+    const util = Number(s?.sample?.['utilization.gpu'] ?? 0);
+    const isLoaded = util >= loadedUtil;
+    if (isLoaded) loaded++; else idle++;
+    const off = Math.floor((ms - w.fromAt) / 1000);
+    if (!bySecond.has(off)) bySecond.set(off, { loaded: 0, idle: 0 });
+    bySecond.get(off)[isLoaded ? 'loaded' : 'idle']++;
+  }
+
+  // Разрывы МЕЖДУ ступенями: от закрытия одной до намерения следующей. Замер 2026-08-26 на четырёх
+  // прогонах подряд дал здесь РОВНО НОЛЬ — и это сузило поиск вдвое до того, как что-то трогалось.
+  const gaps = [];
+  for (let k = 1; k < windows.length; k++) {
+    if (windows[k - 1].toAt !== null) gaps.push(windows[k].fromAt - windows[k - 1].toAt);
+  }
+
+  return {
+    seconds: [...bySecond.keys()].sort((a, b) => a - b).map((off) => ({ off, ...bySecond.get(off) })),
+    loaded,
+    idle,
+    unattributed,
+    betweenRungsMs: gaps,
+    rungCount: windows.length,
+  };
+}
+
+function printRungProfile(path) {
+  const pulse = readPulseFile(path);
+  if (!pulse.ok) { console.log(pulse.why); return 1; }
+  const jr = readJournal({ path: join('runs', 'sweep', 'journal.jsonl') });
+  const rungs = rungsFromJournal(jr.records ?? jr ?? []);
+  const samples = pulse.records.filter((r) => r?.sample && r?.t);
+  if (!samples.length) { console.log('В файле нет проб с телеметрией.'); return 1; }
+
+  // Только ступени, попадающие в окно ЭТОГО файла — иначе чужой прогон другого дня приклеится к
+  // нашим пробам, как это уже случилось однажды с орфанами (см. `rungsFromJournal`).
+  const t0 = parseSampleTime(samples[0].t);
+  const t1 = parseSampleTime(samples[samples.length - 1].t);
+  const mine = rungs.filter((r) => r.fromAt !== null && r.fromAt >= t0 - 5000 && r.fromAt <= t1 + 5000);
+
+  const p = rungProfile(samples, mine);
+  const total = p.loaded + p.idle;
+  console.log(`ПРОФИЛЬ СТУПЕНИ — ${path}`);
+  console.log(`  проб ${total} · ступеней ${p.rungCount} · окно ${samples[0].t} … ${samples[samples.length - 1].t}`);
+  if (!total) { console.log('  Ни одна проба не легла в ступень: журнал и телеметрия из разных прогонов.'); return 1; }
+  console.log(`  ПОД НАГРУЗКОЙ ${p.loaded} · В ПРОСТОЕ ${p.idle} · доля полезного ${(100 * p.loaded / total).toFixed(0)} %`
+    + (p.unattributed ? ` · вне ступеней ${p.unattributed}` : ''));
+  const med = (a) => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
+  const g = med(p.betweenRungsMs);
+  console.log(`  МЕЖДУ ступенями: медиана ${g === null ? '—' : (g / 1000).toFixed(1) + ' с'}`
+    + ` · сумма ${(p.betweenRungsMs.reduce((x, y) => x + y, 0) / 1000).toFixed(1)} с`);
+  console.log('');
+  console.log('  сек | нагружена | простой | картина');
+  for (const row of p.seconds) {
+    const n = row.loaded + row.idle;
+    const share = row.loaded / n;
+    const bar = '#'.repeat(Math.round(share * 20)).padEnd(20, '.');
+    console.log(`  ${String(row.off).padStart(3)} | ${String(row.loaded).padStart(9)} | `
+      + `${String(row.idle).padStart(7)} | ${bar} ${(100 * share).toFixed(0)}%`);
+  }
+  console.log('');
+  console.log('  ГОЛОВА и ХВОСТ — это ЗАПИСЬ В КАРТУ И ЕЁ ОТКАТ, то есть машинерия безопасности');
+  console.log('  (R5 · R9 · R10a · договор устаивания), а не накладные расходы стенда. Срезать их');
+  console.log('  — та самая экономия, чья цена названа по имени: bugs/03, 5 ч 40 мин зависания.');
   return 0;
 }
 
@@ -600,6 +724,63 @@ export function selfTest() {
       () => (`вердикты: ${[865, 860, 850, 845].map((mv) => `${mv}:${by(mv)?.verdict}`).join(' ')}`));
   }
 
+  // ─── bugs/53 · ПРОФИЛЬ СТУПЕНИ ─────────────────────────────────────────────────────────────────
+  // Данные ПОСТРОЕНЫ, а не сняты: блок обязан доказывать разметку, а не повторять один прогон.
+  // Ступень длится 8 с; нагрузка стоит на секундах 2..5, простой — по краям. Это миниатюра того,
+  // что замер 2026-08-26 нашёл на кремнии: голова, тело, хвост.
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   PR. считать смещение от НАЧАЛА ФАЙЛА, а не от начала ступени → «СЕКУНДА СЧИТАЕТСЯ ОТ СТУПЕНИ»
+  //   PS. класть пробу вне окна в ближайшую ступень                → «ПРОБА ВНЕ СТУПЕНЕЙ НЕ ПРИПИСЫВАЕТСЯ»
+  //   PT. взять порог нагрузки нулём                               → «ПОРОГ НАГРУЗКИ РАЗДЕЛЯЕТ»
+  {
+    const base = new Date(2026, 7, 26, 12, 0, 0, 0).getTime();
+    const stamp = (ms) => {
+      const d = new Date(ms);
+      const q = (n, w = 2) => String(n).padStart(w, '0');
+      return `${d.getFullYear()}/${q(d.getMonth() + 1)}/${q(d.getDate())} `
+        + `${q(d.getHours())}:${q(d.getMinutes())}:${q(d.getSeconds())}.${q(d.getMilliseconds(), 3)}`;
+    };
+    // Две ступени по 8 с, встык — ровно как их пишет журнал (разрыв между ними ноль).
+    const rungs = [
+      { seq: 1, frequencyMhz: 2842, voltageMv: 900, fromAt: base, toAt: base + 8000, verdict: 'PASS', orphaned: false },
+      { seq: 2, frequencyMhz: 2835, voltageMv: 895, fromAt: base + 8000, toAt: base + 16000, verdict: 'PASS', orphaned: false },
+    ];
+    const mk = (ms, util) => ({ t: stamp(ms), sample: { 'utilization.gpu': util } });
+    const samples = [];
+    for (const r of rungs) {
+      for (let sec = 0; sec < 8; sec++) {
+        samples.push(mk(r.fromAt + sec * 1000, sec >= 2 && sec <= 5 ? 99 : 3));
+      }
+    }
+    // И одна проба ЗАДОЛГО до первой ступени — ей в ступени места нет.
+    samples.unshift(mk(base - 60000, 4));
+
+    const prof = rungProfile(samples, rungs);
+    const at = (off) => prof.seconds.find((x) => x.off === off);
+
+    ok('bugs/53 · СЕКУНДА СЧИТАЕТСЯ ОТ СТУПЕНИ, а не от начала файла: обе ступени дают один профиль',
+      () => ([0, 1, 6, 7].every((o) => at(o) && at(o).loaded === 0 && at(o).idle === 2)
+        && [2, 3, 4, 5].every((o) => at(o) && at(o).loaded === 2 && at(o).idle === 0)),
+      () => ('профиль: ' + prof.seconds.map((x) => `${x.off}:${x.loaded}/${x.idle}`).join(' ')));
+    ok('bugs/53 · ПОРОГ НАГРУЗКИ РАЗДЕЛЯЕТ: под нагрузкой 8 проб, в простое 8',
+      () => (prof.loaded === 8 && prof.idle === 8),
+      () => (`нагружено ${prof.loaded} · простой ${prof.idle}`));
+    ok('bugs/53 · ПРОБА ВНЕ СТУПЕНЕЙ НЕ ПРИПИСЫВАЕТСЯ ближайшей — она считается отдельно',
+      () => (prof.unattributed === 1),
+      () => (`вне ступеней ${prof.unattributed}`));
+    ok('bugs/53 · РАЗРЫВ МЕЖДУ СТУПЕНЯМИ СЧИТАЕТСЯ — встык это ноль, и ноль это ЗАМЕР',
+      () => (prof.betweenRungsMs.length === 1 && prof.betweenRungsMs[0] === 0),
+      () => (`разрывы ${JSON.stringify(prof.betweenRungsMs)}`));
+    // Сторож обязан УМЕТЬ увидеть разрыв, иначе «ноль между ступенями» ничего не значит.
+    ok('bugs/53 · и он ВИДИТ разрыв, когда тот есть — иначе ноль был бы слепотой, а не замером',
+      () => {
+        const moved = [rungs[0], { ...rungs[1], fromAt: base + 11000, toAt: base + 19000 }];
+        return rungProfile(samples, moved).betweenRungsMs[0] === 3000;
+      },
+      () => ('разрыв со сдвинутой второй ступенью не опознан'));
+  }
+
   return { ok: results.every((x) => x.ok), results };
 }
 
@@ -619,6 +800,16 @@ async function main(argv) {
 
   const named = argv.find((a) => !a.startsWith('--')) ?? null;
   const withIntervals = argv.includes('--intervals');
+
+  // ПРОФИЛЬ СТУПЕНИ (`bugs/53`) — тот же вход, тот же контракт «ничего не пишем», другой вопрос.
+  if (argv.includes('--rung-profile')) {
+    if (named) return printRungProfile(named);
+    const arch = archivedPulseFiles();
+    if (arch.length) return printRungProfile(arch[arch.length - 1]);
+    if (existsSync(TELEMETRY_PATH)) return printRungProfile(TELEMETRY_PATH);
+    console.log('Ни архива, ни текущего файла телеметрии нет.');
+    return 1;
+  }
 
   if (named) return printFile(named, { withIntervals });
 
