@@ -35,6 +35,7 @@
 //   npm run curve -- --init      seed frequency → voltage from the live card (step 5)
 //   npm run curve -- --show      print the table
 //   npm run curve -- --verify    hold the document against the live card
+//   npm run curve -- --progress  the delivery line: edges known / 389, modes shipped / 4 (ideas/14)
 //   npm run curve -- --selftest  hostile fixtures, no GPU
 //
 // [NOT-TESTED] — born 2026-08-15 with plan 14; re-keyed to frequency the same day on the owner's word.
@@ -541,6 +542,78 @@ export function summarize(doc) {
     deepestCutMv: tuned.length ? Math.max(...tuned.map((r) => r.stockVoltageMv - r.voltageMv)) : 0,
     averageCutMv: tuned.length ? Math.round((savedMv / tuned.length) * 10) / 10 : 0,
   };
+}
+
+// =================================================================================================
+// 2a. Acceptance progress — the delivery line (ideas/14; интервью 017 Q1 reads the moratorium
+//     threshold «краёв ≥ 195/389» off this exact count)
+// =================================================================================================
+
+/** The two DERIVED origins the owner legalised (`GOAL.md` → «🏁 КРИТЕРИЙ ПРИЁМКИ ТЮНИНГА» §3) that
+ *  are NOT in `CURVE_TAGS` yet — their mechanism is epic 42 phases 5/5a. The counter names them
+ *  TODAY so that the day they land, «выведено» lights up without touching this module again; until
+ *  then they count 0 by construction. Deliberately not added to the vocabulary here: the vocabulary
+ *  grows with the mechanism, not with the report (the moratorium, интервью 017 Q1 = A). */
+export const DERIVED_ORIGIN_TAGS = Object.freeze(['origin:interpolated', 'origin:extrapolated']);
+
+/** The four shortcuts on the owner's desk — the denominator of «режимов отгружено Y/4». */
+export const ACCEPTANCE_MODES = Object.freeze(['max-performance', 'optimised', 'silent-cold', 'stock-default']);
+
+/**
+ * THE ACCEPTANCE COUNT — the one number the owner and the agent read the same way (ideas/14).
+ * Pure: takes the curve document and the parsed profile objects, touches nothing.
+ *
+ * «Край известен» is read FROM THE TAGS, not re-invented (ideas/14 step 2): a row is closed by an
+ * edge when it carries `stop:edge-found`. The breakdown inside follows the owner's closed provenance
+ * vocabulary (прожигом · соседкой · выведено); an edge row whose provenance fits none of the three —
+ * today that is the row whose only origin is `origin:ratcheted` — is printed as ITS OWN line rather
+ * than swallowed or guessed into a column. `stop:lever-limited` and a bare `origin:ratcheted` are
+ * NOT edges, ever — the first is our lever running out, the second is a consequence of someone
+ * else's edge (`demandsVoltage` holds the full argument).
+ *
+ * «Режим отгружен» = its profile stopped refusing and passed qualification — machine-readably,
+ * `qualified === true` (the qualification gate P3-AC3 refuses anything else before the first
+ * write). Today the honest answer is 0/4 and the counter must say so (ideas/14 step 3).
+ */
+export function acceptanceProgress(doc, { profiles = [] } = {}) {
+  const rows = doc?.frequencies ?? [];
+  const has = (r, t) => Array.isArray(r.tags) && r.tags.includes(t);
+  const edges = rows.filter((r) => has(r, CURVE_TAGS.STOP_EDGE_FOUND));
+  const burned = edges.filter((r) => has(r, CURVE_TAGS.ORIGIN_MEASURED));
+  const inherited = edges.filter((r) => !has(r, CURVE_TAGS.ORIGIN_MEASURED) && has(r, CURVE_TAGS.ORIGIN_INHERITED));
+  const derived = edges.filter((r) => !has(r, CURVE_TAGS.ORIGIN_MEASURED) && !has(r, CURVE_TAGS.ORIGIN_INHERITED)
+    && DERIVED_ORIGIN_TAGS.some((t) => has(r, t)));
+  const unclassified = edges.filter((r) => !burned.includes(r) && !inherited.includes(r) && !derived.includes(r));
+  const untouched = rows.filter(isUnmeasured).length;
+
+  const byMode = new Map(profiles.filter((p) => p && typeof p === 'object').map((p) => [p.mode, p]));
+  const shipped = ACCEPTANCE_MODES.filter((m) => byMode.get(m)?.qualified === true);
+
+  return {
+    total: rows.length,
+    edges: {
+      total: edges.length,
+      burned: burned.length,
+      inherited: inherited.length,
+      derived: derived.length,
+      unclassified: unclassified.map((r) => ({ mhz: r.mhz, tags: [...(r.tags ?? [])] })),
+    },
+    untouched,
+    touched: rows.length - untouched,
+    modes: { shipped: shipped.length, total: ACCEPTANCE_MODES.length, names: shipped },
+  };
+}
+
+/** The delivery line itself — one string, the exact shape the canon orders a session to open and
+ *  close with (`AGENT_GUIDE.md` → The critical path rule, rule 1). */
+export function renderDeliveryLine(p) {
+  const e = p.edges;
+  let line = `ПРИЁМКА: краёв ${e.total}/${p.total} (прожигом ${e.burned} · соседкой ${e.inherited} · выведено ${e.derived})`
+    + ` · не тронуто ${p.untouched} · режимов отгружено ${p.modes.shipped}/${p.modes.total}`;
+  if (e.unclassified.length > 0) {
+    line += `\nне классифицировано: ${e.unclassified.length} — ${e.unclassified.map((r) => `${r.mhz} МГц [${r.tags.join(', ')}]`).join(' · ')}`;
+  }
+  return line;
 }
 
 // =================================================================================================
@@ -1258,6 +1331,32 @@ function cmdShow() {
   return bad.length === 0 ? 0 : 1;
 }
 
+/** The profiles directory, resolved locally rather than imported: `profile-store` depends on curve
+ *  documents, so importing it from here would be a cycle bought for one constant. One path, stated. */
+const PROFILES_DIR_LOCAL = fileURLToPath(new URL('../../profiles/', import.meta.url));
+
+/** Read every parseable profile JSON in the directory. Reads only; a broken file is reported to the
+ *  caller by name rather than swallowed — a mode whose file does not parse is NOT shipped. */
+function readProfileObjects(dir = PROFILES_DIR_LOCAL) {
+  if (!existsSync(dir)) return { profiles: [], broken: [] };
+  const profiles = []; const broken = [];
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+    try { profiles.push(JSON.parse(readFileSync(path.join(dir, f), 'utf8'))); } catch { broken.push(f); }
+  }
+  return { profiles, broken };
+}
+
+function cmdProgress({ json = false } = {}) {
+  const doc = loadCurveDoc();
+  if (!doc) { console.log(`Документа кривой нет: ${curvePath()}. Посеять — \`npm run curve -- --init\`.`); return 1; }
+  const { profiles, broken } = readProfileObjects();
+  const p = acceptanceProgress(doc, { profiles });
+  if (json) { console.log(JSON.stringify({ ...p, brokenProfileFiles: broken }, null, 2)); return 0; }
+  console.log(renderDeliveryLine(p));
+  if (broken.length > 0) console.log(`⚠️ профили не прочитались и отгруженными не считаются: ${broken.join(', ')}`);
+  return 0;
+}
+
 async function cmdVerify() {
   const doc = loadCurveDoc();
   if (!doc) { console.log(`Документа кривой нет: ${curvePath()}.`); return 1; }
@@ -1310,7 +1409,8 @@ function cmdSelftest() {
   console.log(H('САМОПРОВЕРКА curve-store — враждебные фикстуры, карта не нужна'));
   console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона (EXP-0016): словарь статусов · напряжение с сетки · '
     + 'напряжение не выше стокового · монотонность по частоте · порядок таблицы · частота с сетки карты · '
-    + 'потолок R13 · штамп · свидетель прожига · атомарная запись · перевод в смещения · сверка сетки');
+    + 'потолок R13 · штамп · свидетель прожига · атомарная запись · перевод в смещения · сверка сетки · '
+    + 'счётчик приёмки (подмена происхождения)');
 
   console.log('\n— ЗДОРОВЫЙ ДОКУМЕНТ —');
   ok('чистый документ принимается', fieldsOf(healthyDoc()).length === 0, JSON.stringify(fieldsOf(healthyDoc()).slice(0, 3)));
@@ -1318,6 +1418,58 @@ function cmdSelftest() {
   ok('сводка считает глубину среза', (() => {
     const d = healthyDoc(); d.frequencies[0].voltageMv = 1000; d.frequencies[1].voltageMv = 1000;
     const s = summarize(d); return s.tuned === 2 && s.deepestCutMv === 100;
+  })());
+
+  console.log('\n— СЧЁТЧИК ПРИЁМКИ (ideas/14): край читается из тегов, происхождение не подменяется —');
+  const T = CURVE_TAGS;
+  const progDoc = (tagSets) => {
+    const d = healthyDoc();
+    tagSets.forEach((tags, i) => { d.frequencies[i].tags = tags; });
+    return d;
+  };
+  ok('посев: краёв 0, не тронуто всё, режимов 0/4', (() => {
+    const p = acceptanceProgress(healthyDoc(), { profiles: [] });
+    return p.edges.total === 0 && p.untouched === p.total && p.modes.shipped === 0 && p.modes.total === 4;
+  })());
+  ok('край с прожигом идёт в «прожигом», край от соседки — в «соседкой»', (() => {
+    const p = acceptanceProgress(progDoc([
+      [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED],
+      [T.STOP_EDGE_FOUND, T.ORIGIN_INHERITED],
+    ]));
+    return p.edges.total === 2 && p.edges.burned === 1 && p.edges.inherited === 1 && p.untouched === 8;
+  })());
+  ok('МУТАЦИЯ КРИТЕРИЯ 3: выведенный край НЕ считается прожжённым', (() => {
+    const p = acceptanceProgress(progDoc([[T.STOP_EDGE_FOUND, 'origin:interpolated']]));
+    return p.edges.burned === 0 && p.edges.derived === 1 && p.edges.total === 1;
+  })());
+  ok('предел рычага и голый храповик краем не являются', (() => {
+    const p = acceptanceProgress(progDoc([
+      [T.STOP_LEVER_LIMIT, T.ORIGIN_MEASURED],
+      [T.STOP_OUR_CAP, T.ORIGIN_RATCHETED],
+    ]));
+    return p.edges.total === 0;
+  })());
+  ok('спорная комбинация (край только от храповика) не глотается и называет частоту', (() => {
+    const p = acceptanceProgress(progDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_RATCHETED]]));
+    return p.edges.total === 1 && p.edges.burned === 0 && p.edges.unclassified.length === 1
+      && p.edges.unclassified[0].mhz === 3090
+      && renderDeliveryLine(p).includes('не классифицировано: 1');
+  })());
+  ok('режим отгружен только при qualified === true; чужой mode и черновик не считаются', (() => {
+    const p = acceptanceProgress(healthyDoc(), {
+      profiles: [
+        { mode: 'optimised', qualified: true },
+        { mode: 'silent-cold', qualified: false },
+        { mode: 'max-performance' },
+        { mode: 'test-pl250', qualified: true },
+      ],
+    });
+    return p.modes.shipped === 1 && p.modes.names.join() === 'optimised';
+  })());
+  ok('строка доставки несёт форму канона', (() => {
+    const line = renderDeliveryLine(acceptanceProgress(progDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]])));
+    return line.startsWith('ПРИЁМКА: краёв 1/10 (прожигом 1 · соседкой 0 · выведено 0)')
+      && line.includes('не тронуто 9') && line.includes('режимов отгружено 0/4');
   })());
 
   console.log('\n— ФОРМА И ОБЯЗАТЕЛЬНЫЕ ПОЛЯ —');
@@ -1840,8 +1992,9 @@ async function main() {
   if (has('--grids')) return cmdGrids();
   if (has('--init')) return cmdInit({ force: has('--force') });
   if (has('--verify')) return cmdVerify();
+  if (has('--progress')) return cmdProgress({ json: has('--json') });
   if (has('--show') || argv.length === 0) return cmdShow();
-  console.log('Использование: --grids | --init [--force] | --show | --verify | --selftest');
+  console.log('Использование: --grids | --init [--force] | --show | --verify | --progress [--json] | --selftest');
   return 1;
 }
 
@@ -1852,4 +2005,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 export default {
   CURVE_STATUS, CURVES_DIR, initFromCard, validateCurveDoc, saveCurveDoc, loadCurveDoc,
   verifyAgainstCard, summarize, offsetsFor, firstInversion, curvePath, stockVoltageFor, leverFloorFor,
+  acceptanceProgress, renderDeliveryLine,
 };
