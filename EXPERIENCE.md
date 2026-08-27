@@ -77,6 +77,14 @@
 
 ## Entries
 
+### EXP-0162 · 2026-08-28 · ❌→✅ · #windows-timer-quantum #timeBeginPeriod #millisecond-cadence #death-watch #off-by-one
+**Context:** the death watch (plans/52) needs a 2 ms tick; the first probe showed `Atomics.wait(2)` sleeping **13.6 ms median** — the default Windows timer quantum — which would have made the instrument a lie at birth.
+**Tried / did:** probed three sleep strategies BEFORE writing the module: bare wait (13.6 ms), spin (0.0 ms but burns a whole core), and `timeBeginPeriod(1)` via winmm.dll + bare wait (**0.77 ms median, 2.5 ms max**). Took the third; the resolution is taken at start and returned in `finally`, named out loud as a system-wide setting. Then the first 8 s floor run caught TWO more rakes: the catch-up arithmetic (`ceil(elapsed/tick)`) skipped one tick after EVERY late wake — 49.25 % delivered on a healthy machine; and `createRequire()` on an ESM graph with a top-level await killed the driver worker silently.
+**Result:** ✅ floor 60 s: both watchers 97.4 % ticks delivered, overshoot median 0.9 ms, max < 5 ms, zero misses ≥ 10 ms.
+**Lesson:** **on Windows, no sleep is finer than ~14 ms until `timeBeginPeriod(1)` is called — probe the timer BEFORE designing any millisecond-cadence loop, and verify the loop's own delivery ratio on a live run: a scheduling loop's off-by-one shows up as ~50 % delivery, not as an error.** And a watcher that dies at start writes nothing — its silence is indistinguishable from «no misses», so start-up failure must be LOUD (risk (b) of plans/52 fired for real on day one).
+**Trigger:** any loop promising a tick < 15 ms on Windows · a delivered-ticks ratio near 50 % · `require()` of a project .mjs from a worker thread.
+→ link: `plans/52` шаги 1, 5 · `automation-engine/lib/death-watch.mjs` (the lesson is kept at both fix sites).
+
 ### EXP-0160 · 2026-08-28 · ❌→✅ · #cleanup-vs-live-work #owner-facing-window #title-sweep #stop-hook #bugs-64
 **Context:** the review contour was raised for the owner (interview 017); the page died in front of him TWICE, both times right after the agent's turn ended. His words: «опять закрылось само!!!!».
 **Tried / did:** read the Stop hook chain instead of guessing: `tidy --apply` runs at every turn end → calls `dash.closeWindow()` unconditionally → PowerShell sweeps EVERY msedge/chrome whose `MainWindowTitle` matches `'*KAGO*'` → the review page is titled «KAGO — Интервью 017…».
