@@ -147,6 +147,11 @@ kill the machine.**
       lesson is kept at the fix site so nobody re-simplifies it back
 - [ ] **6. Ride along, don't drive.** The engine spawns the watcher beside the telemetry sampler on
       the next sweep the owner authorises. It votes on nothing yet — it only records.
+      🟡 **THE WIRING HALF IS DONE 2026-08-28** (risk (d): remembering must not be required): the
+      live sweep spawns `death-watch --floor --seconds 36000 --tick 2` beside the sampler and kills
+      it on every exit path the sampler dies on (engine.mjs, «THE DEATH WATCH RIDES ALONG»);
+      `npm run check` 57 files clean, `engine --selftest` 367 blocks green. The RIDE itself — a
+      live sweep with the watcher aboard — ждёт прогона, который владелец авторизует сам.
 - [ ] **7. Report to the owner** what the floor is and, when a death is finally captured, which
       watcher saw it first.
 

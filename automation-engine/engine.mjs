@@ -9044,6 +9044,27 @@ async function mainSweep(argv, arg) {
   process.on('exit', stopSideCar);
   console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
 
+  // ─── THE DEATH WATCH RIDES ALONG — plans/52 step 6: it votes on NOTHING, it only records ───────
+  //
+  // Wired into the sweep's own start-up so that remembering is not required (plans/52 risk (d): a
+  // death captured with the watcher not running is a lost data point, and deaths cannot be
+  // re-ordered). Two watchers in their own process at 2 ms: `timer` stalls — the SYSTEM is being
+  // strangled; `driver` stalls — the display driver is dying. Which stalls FIRST is the epic's
+  // discriminating measurement (P52-AC6), and it decides which RESCUE can physically work
+  // (`GOAL.md` → «🚑 СПАСЕНИЕ ВМЕСТО КОНСТАТАЦИИ»: драйвер жив → поднять напряжение; драйвер
+  // встал → только снять нагрузку). Its misses are fsync'd per line into runs/death-watch/ and
+  // survive the machine; a sweep that ends normally kills it here like the sampler above.
+  const watchScript = join(dirname(toPath(import.meta.url)), 'lib', 'death-watch.mjs');
+  const deathWatch = spawn(process.execPath, [
+    watchScript, '--floor', '--seconds', '36000', '--tick', '2',
+  ], { windowsHide: true, stdio: 'ignore' });
+  deathWatch.unref?.();
+  const stopDeathWatch = () => { try { deathWatch.kill(); } catch { /* already gone */ } };
+  process.on('exit', stopDeathWatch);
+  // One ref stops both riders on the operator-stop and writer-death paths above.
+  sideCarRef = () => { stopSideCar(); stopDeathWatch(); };
+  console.log(`СТОРОЖ СМЕРТИ: pid ${deathWatch.pid}, такт 2 мс, промахи в runs/death-watch/ (голоса не имеет — только пишет)`);
+
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
   // в ступени, иначе его бюджет молчания описывает работу, которой больше нет (см. `openPulse`), а
