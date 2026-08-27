@@ -211,6 +211,13 @@ const SUITES = [
   // `finally`. Ни GPU, ни `runs/`, ни задач планировщика.
   { id: 'trayautostart', npm: 'node automation-engine/lib/tray-autostart.mjs --selftest', argv: ['automation-engine/lib/tray-autostart.mjs', '--selftest'],
     what: 'автозагрузка трея: возврат в неё применением режима, отказы названы вслух', done: /^САМОПРОВЕРКА АВТОЗАГРУЗКИ ТРЕЯ:/mu },
+  // ВОШЁЛ 2026-08-28 ВМЕСТЕ СО СВОИМ КОДОМ (plans/52 шаг 2). ДОКАЗАТЕЛЬСТВО ИНЕРТНОСТИ, рядом с
+  // записью: ветка `--selftest` зовёт ТОЛЬКО чистые функции (`promisedTick` · `classifyTick` ·
+  // `summarize` · `formatMiss`) — ни worker_threads, ни NVML, ни winmm, ни файлов: потоки и карта
+  // живут в `runWatcher`/`cmdFloor`, куда из самопроверки нет ни одного вызова. Заголовок набора
+  // сам говорит: «ни потоков, ни карты, ни часов».
+  { id: 'deathwatch', npm: 'npm run deathwatch -- --selftest', argv: ['automation-engine/lib/death-watch.mjs', '--selftest'],
+    what: 'сторож смерти: логика тактов, порога записи и сводки (эпик 51 фаза 1)', done: /^САМОПРОВЕРКА death-watch/mu },
 ];
 
 // =================================================================================================

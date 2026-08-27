@@ -2,8 +2,13 @@
 
 > **Created:** 2026-08-26 21:1x +03:00 · **Parent:** `plans/51` (epic) · `bugs/61` · `bugs/62` ·
 > `GOAL.md` → «🛑 ЛАГ ТЕЛЕМЕТРИИ — ЭТО ОТКАЗ, А НЕ PASS. КРАЙ НАЙДЕН»
-> **Status:** 🟡 OPEN — written before any implementation, on the owner's instruction
-> («сначала мы пишем планы, а затем по планам пишем имплементацию», 2026-08-26)
+> **Status:** 🟢 STEPS 1–5 DONE 2026-08-28 02:1x (session 56) — the watcher exists, is proven by
+> selftest + five mutations, survives an abrupt kill, and the noise floor is MEASURED (numbers in
+> step 5 below). Steps 6–7 остаются: ride-along on the next owner-authorised sweep, and the
+> discriminating death (AC6) cannot be scheduled. 🚑 2026-08-28: the owner raised the epic's top
+> rung to ACTIVE RESCUE (`GOAL.md` → «🚑 СПАСЕНИЕ ВМЕСТО КОНСТАТАЦИИ», epic phase 6) — step 3's
+> answer now also decides WHICH rescue action can physically work (driver alive → raise voltage;
+> driver hung → unload only)
 > **Outbound:** the answer to step 3 decides WHICH signal becomes the verdict input in phase 2, so
 > phase 2 is not planned until this closes.
 
@@ -111,17 +116,35 @@ kill the machine.**
 
 ## Steps
 
-- [ ] **1. Build `automation-engine/lib/death-watch.mjs`** — one process, two worker threads, tick
+- [x] **1. Build `automation-engine/lib/death-watch.mjs`** — one process, two worker threads, tick
       configurable (default 2 ms). Pure decision logic (`classifyTick`, `summarize`) separated from
-      threads and time, so it can be proven without either.
-- [ ] **2. Its checks, in the same step** (`--selftest`): overshoot measured from the PROMISED tick
+      threads and time, so it can be proven without either. ✅ `npm run deathwatch`; the 2 ms tick
+      is bought by `timeBeginPeriod(1)` (measured: default Windows timer grants ~13.6 ms sleeps;
+      at 1 ms resolution the same wait overshoots 0.77 ms median) — taken at start, returned in
+      `finally`, named out loud as the system-wide price of watching
+- [x] **2. Its checks, in the same step** (`--selftest`): overshoot measured from the PROMISED tick
       rather than the actual one; early arrival is zero, not negative; the record threshold is
-      strict at the boundary; the summary carries median AND max together.
-- [ ] **3. Prove the checks RED by mutation** before trusting any green.
-- [ ] **4. Prove durability (AC3)** — abrupt kill, then read the tail.
-- [ ] **5. Measure the noise floor (`--floor`, AC2)** on an idle machine, ≥ 60 s, and WRITE THE
-      NUMBERS INTO THIS PLAN. This is the step that makes a future threshold derivable instead of
-      invented (`ideas/10` §5.1).
+      strict at the boundary; the summary carries median AND max together. ✅ **8 blocks**, plus:
+      call-stall is its own kind and outranks `late`; expected ticks come from TIME, not the loop
+      counter; a miss line parses alone
+- [x] **3. Prove the checks RED by mutation** before trusting any green. ✅ five mutations (overshoot
+      folded into tick modulus · clamp removed · boundary flipped to strict-greater · max silently
+      becomes median · expected from counter), each reddened its own block
+- [x] **4. Prove durability (AC3)** — abrupt kill, then read the tail. ✅ `Stop-Process -Force` at
+      record-threshold 0 after ~5 s: both files' tails parse (timer 1674 lines / driver 1619,
+      `fsync` per miss). **Finding on the first attempt:** the driver worker was dying at start —
+      `require()` on an ESM graph with top-level await — and a dead watcher wrote NOTHING; fixed
+      with dynamic `import()`. Risk (b)'s loud-refusal path is real, not theoretical
+- [x] **5. Measure the noise floor (`--floor`, AC2)** on an idle machine, ≥ 60 s, and WRITE THE
+      NUMBERS INTO THIS PLAN. ✅ **THE FLOOR, 2026-08-28 02:14, 60 s, tick 2 ms, idle machine:**
+      **timer 29 235/30 000 тактов (97,45 %) · перелёт медиана 0,92 мс · max 3,99 мс · промахов
+      ≥ 10 мс — 0** · **driver 29 233/30 001 (97,44 %) · медиана 0,90 мс · max 4,71 мс · промахов
+      ≥ 10 мс — 0**. Both AC1 targets met. Between the floor's max (~5 ms) and the known precursors
+      (3 042 / 4 490 ms) lie THREE ORDERS OF MAGNITUDE of clean separation — the future threshold
+      (phase 3, from archive) has room to be derived rather than guessed.
+      **A second finding paid for by the first 8 s run:** the catch-up arithmetic skipped one tick
+      after EVERY late wake (off-by-one; 49,25 % delivered on a healthy machine) — fixed, and the
+      lesson is kept at the fix site so nobody re-simplifies it back
 - [ ] **6. Ride along, don't drive.** The engine spawns the watcher beside the telemetry sampler on
       the next sweep the owner authorises. It votes on nothing yet — it only records.
 - [ ] **7. Report to the owner** what the floor is and, when a death is finally captured, which
@@ -139,7 +162,11 @@ kill the machine.**
 | nothing was written to the GPU | `watchdog --status` before and after; NVML calls reviewed by name |
 | the decision logic is right | `--selftest`, and each block reddened by its own mutation |
 
-**[NOT-TESTED] until each row above has actually run.**
+**[TESTED: 2026-08-28 · все пять строк прогнаны]** — the tick count against elapsed time is the
+floor run's own summary; the floor numbers are pasted into step 5; the abrupt-kill tails parsed for
+both roles; `watchdog --status`-class proof is by call names (the ONE driver call is
+`nvmlDeviceGetPowerUsage`, documented read-only; GPU writes 0 by construction); the selftest ran
+with five mutations. AC6 остаётся жить на будущих прогонах.
 
 ## Risks, tiered
 
