@@ -5,11 +5,13 @@
 
 > **Слово владельца, 2026-08-24:** *«давай поднимем принципы из ФИЛОСОФИИ на уровень молитвы перед
 > началом любой работы… с просьбой тебя молитву озвучить перед каждой работой»*.
+> **Каденция уточнена владельцем 2026-08-28 (интервью 017, Q2 = B).**
 >
-> 🔴 **АГЕНТ, ПРОИЗНЕСИ ЕЁ В ЧАТЕ ПЕРЕД НАЧАЛОМ ЛЮБОЙ РАБОТЫ.** Целиком, дословно, своими словами
-> не заменяя и пунктов не пропуская. Это не украшение: каждый пункт здесь оплачен провалом, и
-> перечисление вслух — единственное, что переносит его из документа в решение, которое ты сейчас
-> примешь. Разбор каждого принципа — `PHILOSOPHY.md`.
+> 🔴 **АГЕНТ: ПРОИЗНЕСИ ЕЁ В ЧАТЕ ЦЕЛИКОМ ОДИН РАЗ НА СЕССИЮ — при входе (`/resume`, вход в
+> цикл), дословно, пунктов не пропуская. ПЕРЕД КАЖДОЙ СЛЕДУЮЩЕЙ ЗАДАЧЕЙ — ОДНА СТРОКА: ТРИ
+> принципа из шестнадцати, самых важных для этой задачи, своим выбором.** Это не украшение:
+> каждый пункт оплачен провалом; полный текст раз в сессию переносит его в решения дня, а выбор
+> трёх под задачу — применение, а не декламация. Разбор каждого принципа — `PHILOSOPHY.md`.
 
 1. **ПРОСТОТА ВЫШЕ ВСЕГО.** Если долго — значит я усложнил, а не задача трудна. Застрял — заново
    понять задачу, а не громоздить.
@@ -330,6 +332,36 @@ the sync ritual in their headers can diff against upstream and port changes with
 KAIF-specific clause into their text would fork the vendor and quietly break that ritual — so the
 project's own obligations attach at the CALL POINT, which is this section. The sphere library plays the
 role of their domain adapters for the same reason.
+
+### The critical path rule — the acceptance criterion is the only shared score (интервью 017)
+
+Born from the method audit (`reports/KAIF_AUDIT/2026-08-28_audit_03_method.md`): every KAIF
+instrument grades honesty, correctness or safety, and nothing grades DISTANCE TO THE OWNER'S
+ACCEPTANCE — so sessions honestly optimized the newest pain at full ceremony (9 engine reworks in
+two weeks, 11 edges of 389). The owner closed the forks on 2026-08-28 (интервью 017); four rules
+are canon, each citing its answer:
+
+1. **The delivery line (the carrier of Q1).** Open and close every session with:
+   `краёв: X/389 (прожигом · соседкой · выведено) · режимов: Y/4 · сегодня: <one line, or the
+   named blocker>` — printed by `npm run curve -- --progress` (`ideas/14`, unblocked by Q1);
+   until that command lands, read `curves/measured.json`. A session that moves nothing and
+   unblocks no upcoming live run must name why, in one line, out loud.
+2. **The moratorium (интервью 017, Q1 = A).** Until «краёв ≥ 195/389 (50 %)», new machinery
+   contours (guards, benches, suites, windows, canon sections) are NOT opened. One exception: a
+   blocker of the NEAREST live run. Epic 51 (the death watch) is such a blocker and proceeds.
+3. **Live-run autonomy (интервью 017, Q4 — the owner's own variant, verbatim in the interview).**
+   Edge-seeking runs happen ONLY with a human at the machine — the machine still hangs and the
+   oracle is weak; the named cure is the high-frequency telemetry-lag edge predictor (epic 51,
+   `plans/52`). Unattended live runs are allowed ONLY for work that does NOT seek the edge and is
+   guaranteed not to hang; what qualifies as «guaranteed» is decided per plan, conservatively,
+   and named out loud.
+4. **The price tag on entry (интервью 017, Q5 = A).** Every new owner wish is answered with the
+   work AND its price line — «стоит ~N вечеров/сессий, подвинет в очереди Z» — so the owner
+   decides with the price in hand. Absorbing scope silently is the defect, not the courtesy.
+
+The prayer's cadence changed by the same interview (Q2 = B) and lives in the prayer block itself.
+The GOAL split (Q3 = A) is a standing work item: «ЗАКАЗ» — the operative digest of current-force
+definitions the owner approves — over `GOAL.md` as the verbatim append-only archive.
 
 ### Planning discipline — the task ladder (`/plan-task` · `/plan-epic`)
 
