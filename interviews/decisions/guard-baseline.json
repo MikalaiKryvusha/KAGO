@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "frozen_at": "2026-08-28T01:04:24+03:00",
+  "note": "Унаследованный долг сторожа мест вопросов. Ключ = файл + sha1(текст строки). Долг должен убывать.",
+  "items": [
+    {
+      "key": "AGENT_GUIDE.md#10acd417cca78523e14c6bbd564a55c908182fad",
+      "axis": "G1",
+      "file": "AGENT_GUIDE.md",
+      "sample": "shopfront it becomes a brand and needs the owner's word. That is exactly the line that was crossed:",
+      "why": "запрос решения владельца"
+    },
+    {
+      "key": "GOAL.md#a1047715ceac1ca19f323cfce8601ab4d277770d",
+      "axis": "G1",
+      "file": "GOAL.md",
+      "sample": "Владелец: *«проверить, что… видеокарта стабильно себя ведет, **не зависает**»*. И отдельным",
+      "why": "обращение «Владелец, …»"
+    },
+    {
+      "key": "assets/logo/README.md#94e26a28a62073be6c83c3ba4ab06ef74f388df3",
+      "axis": "G1",
+      "file": "assets/logo/README.md",
+      "sample": "владельцу, история выбора.",
+      "why": "обращение «Владелец, …»"
+    },
+    {
+      "key": "bugs/14_operator_stop_is_recorded_as_a_hang_and_runs_start_without_the_window.md#d02a7acd1d65af804b8df704cbe7ef2cdb43ec02",
+      "axis": "G1",
+      "file": "bugs/14_operator_stop_is_recorded_as_a_hang_and_runs_start_without_the_window.md",
+      "sample": "Владелец: *«ты ни разу не протестировал твою остановку? И что это ЗАВИС напечатает!»* — и он прав.",
+      "why": "обращение «Владелец, …»"
+    },
+    {
+      "key": "bugs/42_DONE_the_descent_reorders_a_voltage_the_card_will_not_take.md#c9ed63616cff5d98e04fa75b6627228bc983c67e",
+      "axis": "G1",
+      "file": "bugs/42_DONE_the_descent_reorders_a_voltage_the_card_will_not_take.md",
+      "sample": "## Still open, and it is a question for the owner rather than a defect",
+      "why": "заголовок «questions for the owner»"
+    },
+    {
+      "key": "bugs/54_DONE_the_journal_silently_drops_the_delivered_frequency_it_is_handed.md#43f81c7bd8b739297c70b85975226e69236221fb",
+      "axis": "G1",
+      "file": "bugs/54_DONE_the_journal_silently_drops_the_delivered_frequency_it_is_handed.md",
+      "sample": "Владелец, увидев это: *«стенд должен становиться проще и гениальнее в своей простоте. KISS,",
+      "why": "обращение «Владелец, …»"
+    },
+    {
+      "key": "bugs/KAIF/07_no_delivery_accounting_sessions_graded_on_honesty_not_distance_to_acceptance.md#21a117b76700df83178d274c7c83d550bfa62a2a",
+      "axis": "G1",
+      "file": "bugs/KAIF/07_no_delivery_accounting_sessions_graded_on_honesty_not_distance_to_acceptance.md",
+      "sample": "**Delivered upstream:** NOT YET — awaiting the owner's word (outward action).",
+      "why": "ожидание ответа владельца"
+    },
+    {
+      "key": "bugs/KAIF/08_fixed_maximal_ceremony_per_incident_no_severity_ladder.md#21a117b76700df83178d274c7c83d550bfa62a2a",
+      "axis": "G1",
+      "file": "bugs/KAIF/08_fixed_maximal_ceremony_per_incident_no_severity_ladder.md",
+      "sample": "**Delivered upstream:** NOT YET — awaiting the owner's word (outward action).",
+      "why": "ожидание ответа владельца"
+    },
+    {
+      "key": "ideas/12_flexible_tuning_by_what_we_actually_burned.md#8217af7ed2c90843d7917f09806b87c99f1379dc",
+      "axis": "G1",
+      "file": "ideas/12_flexible_tuning_by_what_we_actually_burned.md",
+      "sample": "### Открытые вопросы к владельцу — вынесены в эпик, здесь только перечень",
+      "why": "заголовок «открытые вопросы»"
+    },
+    {
+      "key": "researches/10_virtual_gpu_test_bench.md#4c03d6468467dacdde55873227930af6df18d844",
+      "axis": "G1",
+      "file": "researches/10_virtual_gpu_test_bench.md",
+      "sample": "## 5. Open forks for the owner",
+      "why": "заголовок «forks for the owner»"
+    }
+  ]
+}
