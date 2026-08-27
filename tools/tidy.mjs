@@ -118,6 +118,15 @@ export function runInFlight(nodeProcs, armed, isAlive) {
     /vf-step\.mjs/u, /ladder-descent\.mjs/u, /thermal-ladder\.mjs/u,
     /fan-ladder\.mjs/u, /trap-suite\.mjs/u, /bench/u,
   ];
+  // Контур согласований — владельцу заданы вопросы, сервер ждёт его ответа с бесконечным
+  // терпением. Убить его окно или сервер значит отобрать у владельца вопросы посреди ответа —
+  // `bugs/64`, близнец `bugs/21` контуром выше: там уборка убила прогон, здесь — страницу
+  // владельца (дважды за вечер, его слова: «опять закрылось само!!!!»). Мгновенные формы без
+  // сервера и окна (`--no-serve`, `--selftest`) уборке не преграда.
+  const review = (nodeProcs ?? []).find((p) => /tools[\\/]review\.mjs/u.test(p.cmd)
+    && !/--no-serve|--selftest/u.test(p.cmd));
+  if (review) return { busy: true, why: `контур согласований ждёт владельца: pid ${review.pid}` };
+
   // `--dry-run` ничего не пишет и никого не поднимает; убирать при нём законно.
   const live = (nodeProcs ?? []).find((p) => !/--dry-run/u.test(p.cmd) && MARKERS.some((m) => m.test(p.cmd)));
   if (live) return { busy: true, why: `идёт прогон: pid ${live.pid}` };
@@ -232,6 +241,15 @@ async function selfTest() {
 
   check('СУХОЙ прогон не считается работой — он ничего не пишет и никого не поднимает',
     runInFlight([P(1, 'node automation-engine/engine.mjs --sweep --from 2887 --to 900 --dry-run')], null, alive).busy === false);
+
+  // bugs/64 — уборка дважды закрыла владельцу страницу с вопросами посреди ответа.
+  const rv = runInFlight([P(3, 'node tools/review.mjs interviews/interview_017_five_method_forks.md')], null, alive);
+  check('живой контур согласований делает машину занятой — страница владельца не мусор (bugs/64)',
+    rv.busy === true && /контур согласований/u.test(rv.why), rv.why);
+
+  check('мгновенные формы контура (--no-serve, --selftest) уборке не преграда',
+    runInFlight([P(4, 'node tools/review.mjs doc.md --no-serve --no-signal')], null, alive).busy === false
+    && runInFlight([P(5, 'node tools/review.mjs --selftest')], null, alive).busy === false);
 
   check('посторонний node не делает машину занятой',
     runInFlight([P(2, 'node some/other/thing.mjs')], null, alive).busy === false);

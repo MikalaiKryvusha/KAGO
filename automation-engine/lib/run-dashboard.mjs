@@ -900,8 +900,15 @@ export function openWindow(url, { size = '--window-size=1200,820', profileDir = 
  * Close the window we opened. Two ways, in order of certainty:
  *   1. the pid we recorded — ours by construction, killed with its children;
  *   2. a window whose TITLE is this page's — the fallback for windows opened before the profile
- *      existed, and the only way to reach a window that joined the owner's own browser. It sends
- *      WM_CLOSE to that window alone, so his other tabs are not touched.
+ *      existed. ⚠️ APP WINDOWS ONLY (`bugs/64`): the sweep additionally requires the title NOT to
+ *      carry the browser's own product suffix («… — Microsoft Edge» / «… - Google Chrome»). An
+ *      `--app=` window's title is the bare page title; the owner's real browser window always
+ *      carries the suffix — and `CloseMainWindow` posted to a MAIN browser window closes the WHOLE
+ *      window with every tab in it (the previous comment here promised the opposite and was wrong).
+ *      Paid for live: the sweep matched «KAGO — Интервью 017…» and closed the review-contour page
+ *      in front of the owner, twice in one evening. Assumption named: Edge/Chrome do not localize
+ *      the product-name suffix — true on this machine; if the sweep ever goes quiet on a real
+ *      dashboard app window, re-check this first.
  */
 // ⚠️ SYNCHRONOUS ON PURPOSE, AND THAT IS THE WHOLE POINT OF THIS FUNCTION'S SHAPE.
 //
@@ -930,7 +937,9 @@ export function closeWindow({ titleLike = 'KAGO', waitMs = 4000 } = {}) {
     // is still alive (and still holding the browser profile directory) when we return.
     const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
       `$w = @(Get-Process msedge,chrome -ErrorAction SilentlyContinue | `
-      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' }); `
+      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' `
+      + `-and $_.MainWindowTitle -notlike '*Microsoft Edge*' `
+      + `-and $_.MainWindowTitle -notlike '*Google Chrome*' }); `
       + `$w | ForEach-Object { $_.CloseMainWindow() } | Out-Null; `
       + `$w | ForEach-Object { $_.WaitForExit(${waitMs}) } | Out-Null; `
       + '$w.Count',
@@ -979,9 +988,13 @@ export function countVisibleWindows({ titleLike = 'KAGO', waitMs = 4000 } = {}) 
     // Та же PowerShell-форма, что у `closeWindow`, и по той же причине (EXP-0043: вызовы Windows API
     // идут через PowerShell, а не через bash). Пустой `MainWindowTitle` отсеивается САМИМ фильтром
     // `-like '*KAGO*'` — пустая строка ему не подходит.
+    // Тот же суффикс-фильтр, что у `closeWindow` (bugs/64): вкладка «KAGO …» в НАСТОЯЩЕМ браузере
+    // владельца — не «окно KAGO», и считать её свидетелем значило бы вернуть ложное «подключилось».
     const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
       '@(Get-Process msedge,chrome -ErrorAction SilentlyContinue | '
-      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' }).Count`,
+      + `Where-Object { $_.MainWindowTitle -like '*${titleLike}*' `
+      + `-and $_.MainWindowTitle -notlike '*Microsoft Edge*' `
+      + `-and $_.MainWindowTitle -notlike '*Google Chrome*' }).Count`,
     ], { encoding: 'utf8', windowsHide: true, timeout: waitMs + 6000 }).trim();
     const n = Number(out);
     if (!Number.isFinite(n)) return { ok: false, count: 0, why: `ответ не число: ${JSON.stringify(out)}` };
