@@ -244,9 +244,22 @@ Accepting a contour = walking this roster.
   `file://` link from an http page is blocked — embedding is the only working path). A choice
   among four mockups opens as a SEPARATE window (opened by script → closable by script); the
   inline frame is for quick previews of smaller decisions.
-- **P7** — a comment field per question AND a document-wide comment at the bottom; the latter is a
-  legitimate review outcome on its own ("no answers, but something to say"), appended as a dated
-  block — comments accumulate, never overwrite.
+- **P7** — a comment field per question AND a document-wide comment at the bottom; EVERY rendered
+  input is a legitimate review outcome ON ITS OWN — a rendered field whose content can be silently
+  discarded is a defect by construction: if the contour draws a field, it owes the human its
+  content (origin issue #19: three deployments repeated the same `if (choice || text)` line and
+  lost the per-question comment — the owner's STANDARD way of answering; on conflict I10 wins —
+  silently dropping typed text is a quiet refusal of the human's work). Comments accumulate,
+  never overwrite. The decision snapshot distinguishes THREE states, not two: *no answer* (the
+  human has not engaged) · *an answer* (a choice or text) · **rejected-with-direction** (no
+  choice, a non-empty comment) — the third is the STRONGEST of the three, because it means the
+  offered options did not fit and the comment is the new direction; the reading agent treats it
+  as a STOP of the work in progress, never as consent. Two boundaries: never derive a choice
+  from the comment text (the decision belongs to the human — an empty choice stays empty), and a
+  document-wide comment never substitutes for a per-question one (they route to different
+  addressees). The build-step guard verifies the CLOSING of the form, not its rendering: the
+  case "only the comment field filled → the answer is recorded" must exist and must have been
+  seen red (a guard that checks the textarea exists in the markup proves nothing about saving).
 - **P8** — a markdown mini-renderer (~120 lines), zero dependencies, escaping as the FIRST action.
 - **P9** — the project name in the page header: the owner runs several projects, and the document
   title alone does not say WHO is asking.

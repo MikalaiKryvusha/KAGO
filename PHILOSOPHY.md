@@ -116,6 +116,16 @@ strictness modes, the division by model strength). This is Occam applied to the 
 spend cognition where determinism suffices — and the 20% left for the model is not a shortfall but
 the part that actually needs a mind.
 
+The owner's razor for WHERE each thing lives (his word, distilled): models understand GUIDANCE
+well and PROHIBITIONS poorly; they are weak at precise instruction-following and strong at
+predicting what would be best. Therefore whatever demands strictness and precision is regulated
+and moved into code and hooks; whatever demands the model's creativity and good intuition stays
+as prose and agreements — but written as CONCRETE STEP-BY-STEP PLANS of concrete actions, never
+as vague prose. "Work without bugs" is the vague kind; "write test cases, test against them, file
+the defects" is the executable kind. A prohibition earns its keep only restated as positive
+guidance or moved into a guard that reddens by itself (the form rule for canon obligations —
+`AGENT_GUIDE.md`).
+
 ### Murphy's Law — anything unforeseen tends to happen
 If a risk isn't accounted for, it has a good chance of being exactly what bites you. You can't defend
 against every risk in the universe, so tier them: **(a)** the highest risks — take seriously and build

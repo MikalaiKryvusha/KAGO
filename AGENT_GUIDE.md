@@ -758,6 +758,27 @@ Updating the README — draw on the current README and the owner's other repo st
 storefront handwriting, not the agent's); updating the notes — draw on THIS project's previous
 notes (`gh release view <prev>`). Mixing these scopes is a defect, not a style choice.
 
+### The form of an obligation — a command, a step, or a checkbox
+
+A weak model under load honours an obligation in proportion to how EXECUTABLE its form is. Field
+measurement (origin issue #22): two rules of equal canonical weight sat in the same context — the
+one that had a command was honoured unprompted; the one stated as prose accumulated debt for 90
+minutes and was paid only when the owner asked. The owner's razor behind this rule lives in
+`PHILOSOPHY.md` → "Code before cognition": models understand guidance, not prohibitions, and
+concrete step-by-step plans, not vague prose.
+
+Therefore every obligation in a canon document carries one of three executable forms:
+
+1. **A command** — a runnable line the agent copies and runs;
+2. **A step** — a numbered plan or checklist entry with a verifiable exit condition;
+3. **A checkbox** — a box a ritual ticks.
+
+Prose stays as the rationale UNDER the carrier: it explains WHY, it never carries the obligation
+alone. Two corollaries: a rule that produces an ARTIFACT names the command that produces it — if
+no command exists, the rule is incomplete, so ship the command rather than phrasing the paragraph
+harder; and a new PROHIBITION enters the canon only restated as positive guidance ("do X" instead
+of "never Y") or moved into a guard that reddens by itself.
+
 ### The storefront — text a stranger reads
 
 The storefront (README, release notes, a release page, a landing page) differs from a working

@@ -48,8 +48,26 @@ const val = (f) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? a
 const has = (f) => args.includes(f);
 
 const BUNDLE = val('--bundle') || '.kaif/install/KAIF-CORE-BUNDLE.md';
+// --lang takes an ISO 639-1 code — and a mistyped value used to DISABLE the language pack
+// silently (bug 92.1): `--lang Russian` deployed an all-English tree, wrote "russian" into the
+// marker and printed a false "no bundled template for this language yet" while the ru pack sat
+// in the bundle. Every language value — CLI or inherited from a marker — passes checkedLang:
+// a real code without a pack stays legal (the honest English-first note is the designed path),
+// a language NAME suggests its code, anything else refuses loudly with the bundled-pack list.
+const ISO_639_1 = new Set(('aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu cv cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za zh zu').split(' '));
+const LANG_NAME_HINTS = { english: 'en', russian: 'ru', 'русский': 'ru', arabic: 'ar', german: 'de',
+  deutsch: 'de', spanish: 'es', 'español': 'es', espanol: 'es', french: 'fr', 'français': 'fr',
+  francais: 'fr', hindi: 'hi', japanese: 'ja', portuguese: 'pt', 'português': 'pt', portugues: 'pt',
+  chinese: 'zh-Hans', mandarin: 'zh-Hans' };
+function checkedLang(raw, from) {
+  const v = String(raw).toLowerCase();
+  if (ISO_639_1.has(v.split('-')[0])) return v;   // zh-Hans-style script/region suffixes ride on a valid base
+  const hint = LANG_NAME_HINTS[v];
+  die(`unknown language value from ${from}: "${raw}" — ${hint ? `that is a language NAME; its ISO 639-1 code is "${hint}"` : 'not an ISO 639-1 code'}. ${from === '--lang' ? '' : 'Heal the marker by re-running the command with an explicit --lang <code>. '}Bundled packs: en ar de es fr hi ja pt ru zh-Hans; any other real code deploys English-first with an honest note in the task.`);
+}
 // LANG/AGENTS/MODE are `let`: post-install commands inherit them from the project's
 // .kaif/kaif.json unless explicitly overridden on the CLI (see below for MODE/ANON).
+// The CLI value is validated just below the log/die helpers (checkedLang needs die live).
 let LANG = (val('--lang') || 'en').toLowerCase();
 let MODE = (val('--mode') || 'standard').toLowerCase();
 let ANON = MODE === 'anonymous';
@@ -71,6 +89,11 @@ const AUTHOR_TOKEN_CLUSTERS = [['Kryvusha', 'Кривуша', 'MikalaiKryvusha']
 const ACRONYM_EXPANSIONS = ['KAIF (Krinik AI Framework)', 'Krinik AI Framework (KAIF)', 'Krinik AI Framework'];
 const KAIF_JSON = '.kaif/kaif.json';
 const DEPLOY_MANIFEST = '.kaif/deploy-manifest.json'; // persisted path list — `check` works after the bundle is cleaned
+// Crash journal (field ask, plan 77 U′2): written AFTER the backup and BEFORE the first
+// tree mutation of an update, deleted as the update's last act. A run killed mid-flight leaves
+// either an untouched tree or a VISIBLE journal — a half-updated tree without a trace cannot
+// exist by construction. `resume` restores the pre-update tree from the journal's backup.
+const UPDATE_JOURNAL = '.kaif/update-journal.json';
 const TASK_FILE = 'KAIF_ADAPTATION_TASK.md';
 const FENCE = '`'.repeat(6);
 
@@ -95,12 +118,22 @@ const STATUS_SOFT_LINES = 200;
 
 const log = (s) => console.log(s);
 const die = (s) => { console.error('✖ ' + s); process.exit(1); };
+// die() is right for sync paths — but process.exit() over LIVE undici handles trips a libuv
+// assertion on win32, and the one real error arrives dressed as two: the printed ✖ plus an
+// "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" banner (issue #10; probed 5/5 on
+// Node v24 win32 — draining the response body alone does NOT clear it, only letting the event
+// loop wind down does). Refusals that fire AFTER a network fetch die SOFTLY: same message,
+// then a sentinel the dispatcher catches to set the exit code and let the loop drain (~300 ms).
+const dieSoft = (s) => { console.error('✖ ' + s); const e = new Error(s); e.kaifDie = true; throw e; };
 const okOnDisk = (p) => existsSync(p) && statSync(p).size > 0;
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 const fileSha = (p) => sha256(readFileSync(p));
 const sh = (cmd) => { try { return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
 // JSON reader tolerant of a UTF-8 BOM (Windows tools like PowerShell 5 write one).
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8').replace(/^﻿/, ''));
+
+// The CLI-passed --lang is validated the moment die() is live (bug 92.1; checkedLang above).
+if (val('--lang')) LANG = checkedLang(val('--lang'), '--lang');
 
 // Anonymity is a property of the DEPLOYMENT, not of the CLI call (bug 11 / GH issue #1,
 // reproduced by three field reports): a bare `check` on an anonymous install reported the
@@ -247,6 +280,7 @@ function ensureIgnoreFirst() {
   const wanted = ['.kaif/install/', 'KAIF.md', 'KAIF-LOADER.mjs', TASK_FILE, UPDATE_TASK,
                   'KAIF_UPDATE_TASK.superseded.md', 'KAIF_ADAPTATION_TASK.superseded.md',
                   '.kaif/backup-*/',        // pre-update backups are rollback material, never history (field ask)
+                  UPDATE_JOURNAL,           // the crash journal is transient run state; it must be VISIBLE, not committed
                   '.kaif/heartbeat.log',    // the guarded loop's pulse is runtime state, not history
                   '.kaif/refresh-marker.json']; // the context-refresh witness is session state, not history (AGENT_GUIDE → Context refresh)
   let text = existsSync('.gitignore') ? readFileSync('.gitignore', 'utf8') : '';
@@ -331,8 +365,17 @@ function applyLanguage(files) {
     }
     out.push(entry);
   }
-  return { deploy: out, translated: overrides.size };
+  // `translated` is the pack size IN THE BUNDLE — the right input for "does a pack exist at
+  // all" (the task's language item). The INSTALL SUMMARY may not print it: it counts the disk
+  // via overridePaths at the summary site (bugs/99 №1 — same doctrine as countAliasedOnDisk).
+  return { deploy: out, translated: overrides.size, overridePaths: [...overrides.keys()] };
 }
+
+// Frozen language packs (owner's decision #56, 2.3): eight packs stay in the bundle at their
+// full 2.2 state and deploy as before, but receive no updates — en and ru are the maintained
+// two. The freeze is DECLARED at deploy time, like the pack boundary below: a status the owner
+// learns from the docs but not from the install that just used the pack would be a silent one.
+const FROZEN_PACKS = ['ar', 'de', 'es', 'fr', 'hi', 'ja', 'pt', 'zh-hans'];
 
 // The pack boundary is DECLARED at deploy time, not discovered post-factum (field: a new skill
 // arrived as "a raw English body with a localized alias line glued on" and read as a defect;
@@ -340,6 +383,9 @@ function applyLanguage(files) {
 // names exactly what arrives in English and needs manual transfer if the owner wants it local.
 function logPackHonesty(files, deploy) {
   if (LANG === 'en') return;
+  if (FROZEN_PACKS.includes(LANG)) {
+    log(`⟳ language pack "${LANG}" is FROZEN at its KAIF 2.2 state (origin decision #56): it deploys as before but receives no updates — en/ru are the maintained packs. A frozen pack is revived on community demand: open an issue at the origin.`);
+  }
   const prefix = `templates/languages/${LANG}/`.toLowerCase();
   let hasPack = false;
   const packed = new Set();
@@ -353,7 +399,10 @@ function logPackHonesty(files, deploy) {
   const enDocs = deploy.filter((f) => f.path.endsWith('.md') && !packed.has(f.path)
     && !/^\.claude\/skills\//.test(f.path) && !f.path.startsWith('.kaif/spheres/')
     && !f.path.startsWith('templates/languages/')).map((f) => f.path).sort();
-  const skills = deploy.filter((f) => skillName(f.path)).length;
+  // The honest line names what ARRIVES — so it must apply the same anonymity filter the write
+  // sites do (bugs/99 №2: "all 35 skill bodies" one line above "31 skills trigger-aliased" of
+  // the same run; the 4 ORIGIN_TIED skills never land on an anonymous install).
+  const skills = deploy.filter((f) => skillName(f.path) && !isSkippedAnon(f.path)).length;
   log(`⟳ language pack "${LANG}" is INCOMPLETE BY DESIGN (the framework is English-first): it localizes ${packed.size} owner doc(s). Arriving in ENGLISH and needing manual transfer if you want them localized: ${enDocs.join(', ')} + all ${skills} skill bodies (their trigger aliases ARE localized).`);
 }
 
@@ -498,12 +547,20 @@ function expectedAgentArtifacts(skillNames) {
 function unresolvedOnDisk(unresolved, deploy) {
   let declared = null;
   try { const s = readJson(KAIF_JSON).sphere; if (s && s !== 'TODO') declared = `.kaif/spheres/${s}.md`; } catch { /* no marker yet */ }
-  return [...unresolved].map((ph) => ({
-    ph,
-    paths: deploy.filter((f) => f.path.endsWith('.md') && okOnDisk(f.path)
+  return [...unresolved].map((ph) => {
+    const paths = deploy.filter((f) => f.path.endsWith('.md') && okOnDisk(f.path)
       && (!f.path.startsWith('.kaif/spheres/') || f.path === declared)
-      && readFileSync(f.path, 'utf8').includes(ph)).map((f) => f.path),
-  })).filter((u) => u.paths.length);
+      && readFileSync(f.path, 'utf8').includes(ph)).map((f) => f.path);
+    // Issue #3 (gate-scope-wider-than-instruction): before the sphere is declared, the libraries
+    // are rightly excluded above — but the ONE the agent will declare (the `sphere` item of this
+    // same task) joins the placeholder gate the moment it is recorded, and a list that omits a
+    // future member teaches the session to distrust the task's other lists. Name it as exactly
+    // what it is: a member that joins later.
+    if (!declared && deploy.some((f) => f.path.startsWith('.kaif/spheres/')
+        && !f.path.endsWith('/_template.md') && f.content.includes(ph)))
+      paths.push('.kaif/spheres/<sphere>.md — YOUR declared library joins this list the moment you run `sphere <name>`');
+    return { ph, paths };
+  }).filter((u) => u.paths.length);
 }
 // Honest cap per slot: name the first paths outright, count the rest (never a silent cut).
 const fmtSlots = (list) => list.map((u) =>
@@ -555,6 +612,68 @@ function backupTree(deploy, fromVer, toVer) {
   } catch (e) { log(`⚠ pre-update backup skipped: ${e.message}`); }
 }
 
+// ---------------------------------------------------------------------------- crash journal (plan 77 U′2, field ask п. 2)
+// The update's writes are interleaved with classification, so a run killed mid-flight used to
+// leave a HALF-UPDATED tree with no trace: marker and manifest still old, files partly new —
+// and a naive re-run then classified every already-replaced file as owner-diverged. The journal
+// closes that: written after the backup, BEFORE the first tree mutation; deleted as the last
+// act of a successful run. While it exists, update/bootstrap REFUSE and name `resume`.
+function writeUpdateJournal(from, to, source, route, deploy) {
+  const born = [];
+  for (const f of deploy) if (!isSkippedAnon(f.path) && !existsSync(f.path)) born.push(f.path);
+  for (const p of expectedAgentArtifacts(deploy.filter((f) => skillName(f.path) && !isSkippedAnon(f.path)).map((f) => skillName(f.path))))
+    if (!existsSync(p)) born.push(p);
+  const j = { from: from || '?', to, source, route, startedAt: localStamp(),
+              backupDir: `.kaif/backup-${from || 'unknown'}-${to}`, born };
+  writeFileSync(UPDATE_JOURNAL, JSON.stringify(j, null, 2) + '\n');
+  log(`+ wrote ${UPDATE_JOURNAL} (crash journal — a run killed mid-flight stays visible; removed on success)`);
+}
+function clearUpdateJournal() {
+  if (existsSync(UPDATE_JOURNAL)) { unlinkSync(UPDATE_JOURNAL); log(`- removed ${UPDATE_JOURNAL} (update completed — nothing to resume)`); }
+}
+function refuseOnJournal() {
+  if (!okOnDisk(UPDATE_JOURNAL)) return;
+  let j = {}; try { j = readJson(UPDATE_JOURNAL); } catch { /* unreadable journal is still a journal */ }
+  die(`an update journal exists (${UPDATE_JOURNAL}): the previous update (${j.from || '?'} → ${j.to || '?'}, started ${j.startedAt || '?'}) died mid-flight and the tree may be half-updated. Run \`node .kaif/kaif-core.mjs resume\` to restore the pre-update tree from its backup, then re-run update — or delete the journal consciously if you already reconciled the tree by hand.`);
+}
+
+// resume — restore the pre-update tree recorded by the crash journal: every backed-up file
+// returns byte-exact, files BORN by the dead run are removed, the journal is consumed.
+function cmdResume() {
+  if (!okOnDisk(UPDATE_JOURNAL)) die(`nothing to resume — no ${UPDATE_JOURNAL} (no crashed update is recorded here)`);
+  const j = readJson(UPDATE_JOURNAL);
+  const backup = j.backupDir;
+  if (!backup || !existsSync(backup)) die(`the journal names backup ${backup || '(none)'}, which does not exist — mechanical restore is impossible; roll back with git (git status / git checkout) and delete ${UPDATE_JOURNAL} consciously.`);
+  const walk = (dir) => {
+    const out = [];
+    for (const n of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, n.name);
+      if (n.isDirectory()) out.push(...walk(p)); else out.push(p);
+    }
+    return out;
+  };
+  const backupAbs = join(process.cwd(), backup);
+  let restored = 0;
+  for (const src of walk(backupAbs)) {
+    const rel = src.slice(backupAbs.length + 1);
+    // A directory squatting on a file path (or vice versa) is an obstruction the crash may have
+    // left — clear it rather than die half-way through a restore.
+    if (existsSync(rel) && statSync(rel).isDirectory()) rmSync(rel, { recursive: true, force: true });
+    mkdirSync(dirname(rel) || '.', { recursive: true });
+    writeFileSync(rel, readFileSync(src));
+    restored++;
+  }
+  let removed = 0;
+  for (const p of j.born || []) {
+    if (!existsSync(p)) continue;
+    rmSync(p, { recursive: true, force: true });
+    removed++;
+  }
+  unlinkSync(UPDATE_JOURNAL);
+  log(`✔ resume: ${restored} file(s) restored byte-exact from ${backup}${removed ? `, ${removed} file(s) born by the dead run removed` : ''}; journal consumed.`);
+  log(`➡ the tree is back at KAIF ${j.from || '?'} — re-run: node .kaif/kaif-core.mjs update`);
+}
+
 // ---------------------------------------------------------------------------- adaptation task
 // The ONE cognitive deliverable left to the AI agent. Every item ends in a forced
 // checkpoint line (the fable-method lesson: weak models follow rules at decision
@@ -569,6 +688,13 @@ function writeAdaptationTask(unresolvedLive, translated, meta, values = {}) {
     items.push(['project-name', `<PROJECT_NAME> was auto-filled with "${values['<PROJECT_NAME>']}" from a technical identifier (package.json/folder name) — a lowercase tech id is NOT the project's canonical name, and identity is the OWNER's, never the machinery's guess. Confirm the canonical name with the owner, record it: \`node .kaif/kaif-core.mjs project-name "<Name>"\` (the marker and future fills heal), then correct any seeded headings carrying the wrong form.`]);
   if (unresolvedLive.length) items.push(['placeholders', `Fill the remaining placeholders at their REAL locations (each verified on disk at generation time; grep to be sure): ${fmtSlots(unresolvedLive)}`]);
   items.push(['maps', 'Fill PROJECT_STRUCTURE_EXTERNAL_MAP.md and PROJECT_ARCHITECTURE_INTERNAL_MAP.md from your inspection. Keep them SHORT; write in 2-3 small edits, not one giant write.']);
+  // Issue #4 (obligation-exists-but-no-deploy-step): the canon routes owner-text writing through
+  // the voice portrait "when the project has one" — and no deployment step ever MADE the project
+  // have one, so a field README shipped before the owner's voice arrived and the owner had to
+  // intervene twice. The item stands BEFORE goal-plan — the first owner-facing text of the pass —
+  // and the ignore decision travels in the same step (ignore-first is already canon: a public
+  // repo + a quote-bearing portrait = the owner's private writing published).
+  items.push(['owner-voice', 'Ask the owner whether a voice portrait exists (`AUTHOR_STYLOMETRY.md`; skill /owner-voice). If YES: install it at the project root, and when the repository is PUBLIC add it to .gitignore in the SAME step — a portrait may quote the owner\'s private writing. If NO: record the canonical line `no voice portrait` (with date) in AGENT_GUIDE.md → "Notes from the human", so no future session re-asks. Either way this item closes BEFORE any owner-facing text (GOAL wording, README) is written.']);
   items.push(['goal-plan', 'If GOAL.md is empty, seed it and ask the owner; derive MASTER_PLAN.md from GOAL.md (skill: /revision).']);
   items.push(['sphere', 'Pick the project\'s sphere (libraries ship in .kaif/spheres/; do NOT author a new document unless none fits) and record it by running `node .kaif/kaif-core.mjs sphere <name>` (e.g. `sphere programming`) — never edit .kaif/kaif.json by hand.']);
   if (needTranslate) items.push(['language', `Translate the owner-facing docs (GOAL.md, KAIF_FRAMEWORK.md, the directory READMEs) into "${LANG}" — no bundled template for this language yet. Keep agent-only docs in English.`]);
@@ -793,15 +919,39 @@ function writeUpdateTask(diverged, meta, contextLine, opts = {}) {
   log(`+ wrote ${UPDATE_TASK} (${items.length} items${diverged.length ? `, ${diverged.length} diverged files` : ''}${modFiles.length ? `, ${modFiles.length} files with module diffs` : ''})`);
 }
 
+// A bare github.com/<owner>/<repo> is the first thing a human passes as --source (three field
+// projects did, issue #10) — and by itself it serves no artifacts: the old path died with an
+// unhelpful 404 on <repo>/kaif-manifest.json. Resolve it to the repo's latest-release download
+// base (the exact base `update`'s release channel already uses) and say so out loud.
+function resolveSourceBase(src) {
+  const m = src && src.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/?$/i);
+  if (!m) return src;
+  const base = `https://github.com/${m[1]}/${m[2]}/releases/latest/download`;
+  log(`⟳ --source ${src} → ${base} (a bare repo URL resolves to its latest-release assets)`);
+  return base;
+}
+
+// The failed-download refusal names the EXPECTED forms of --source: a 404 that prints only the
+// URL it invented sends the human to guess the layout of a release page (issue #10 cost half a
+// session naming one). One extra line closes that.
+const SOURCE_FORMS_HINT = `  --source must be a base that serves kaif-manifest.json, KAIF-CORE.mjs and KAIF-CORE-BUNDLE.md directly:\n  a local directory with the three artifacts · ${ORIGIN}/releases/latest/download · ${ORIGIN}/releases/download/v<X.Y> · a bare https://github.com/<owner>/<repo> (auto-resolved to its latest release)`;
+
 // Fetch one artifact for `update` (URL or local dir), mirroring the loader.
 async function fetchArtifact(base, name) {
   if (!/^https?:\/\//.test(base)) {
     const p = join(base, name);
-    if (!existsSync(p)) die(`not found in source: ${p}`);
+    if (!existsSync(p)) dieSoft(`not found in source: ${p}\n${SOURCE_FORMS_HINT}`);
     return readFileSync(p);
   }
-  const res = await fetch(`${base}/${name}`, { redirect: 'follow' });
-  if (!res.ok) die(`download failed (${res.status}) — ${base}/${name}`);
+  let res;
+  try { res = await fetch(`${base}/${name}`, { redirect: 'follow' }); }
+  catch (err) {   // no-network/DNS failure: one refusal, not a raw stack (same issue #10 class)
+    dieSoft(`download failed (${(err && err.cause && err.cause.code) || (err && err.message) || 'network error'}) — ${base}/${name}\n${SOURCE_FORMS_HINT}`);
+  }
+  if (!res.ok) {
+    try { await res.body?.cancel(); } catch { /* draining a dead response is best-effort */ }
+    dieSoft(`download failed (${res.status}) — ${base}/${name}\n${SOURCE_FORMS_HINT}`);
+  }
   return Buffer.from(await res.arrayBuffer());
 }
 
@@ -816,7 +966,8 @@ async function fetchMaybe(base, name) {
       return existsSync(p) ? readFileSync(p) : null;
     }
     const res = await fetch(`${base}/${name}`, { redirect: 'follow', signal: AbortSignal.timeout(BASELINE_FETCH_TIMEOUT_MS) });
-    return res.ok ? Buffer.from(await res.arrayBuffer()) : null;
+    if (!res.ok) { try { await res.body?.cancel(); } catch { /* best-effort */ } return null; }   // same handle-drain as fetchArtifact
+    return Buffer.from(await res.arrayBuffer());
   } catch { return null; }
 }
 
@@ -1186,15 +1337,16 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null) {
 // in scope at all. Requires the deploy manifest with `shas` (installs since 1.5).
 async function cmdUpdate() {
   if (!okOnDisk(KAIF_JSON)) die('no .kaif/kaif.json — KAIF is not deployed here');
+  refuseOnJournal();   // a crashed previous update stays LOUD until resumed or consciously discarded
   const cur = readJson(KAIF_JSON);
   if (cur.tracking === 'anonymous') die('anonymous install tracks no origin — update by dropping a fresh thin KAIF.md and re-running the bootstrap (the surviving deploy manifest makes that pass mechanical since 2.0)');
-  if (!val('--lang') && cur.language) LANG = String(cur.language).toLowerCase();
+  if (!val('--lang') && cur.language) LANG = checkedLang(cur.language, 'the deploy marker');   // a poisoned pre-92.1 marker refuses with the healing flag named
   if (!val('--agents') && Array.isArray(cur.agents) && cur.agents.length) AGENTS = cur.agents;
   // A mistyped channel VALUE must refuse, not silently become "release" (judge finding, L3 —
   // the same bug-33 class one level below the flag whitelist: form was validated, values not).
   const chan = (val('--channel') || 'release').toLowerCase();
   if (!(chan in SOURCES)) die(`unknown channel: ${chan} — known: ${Object.keys(SOURCES).join(' | ')}`);
-  const base = val('--source') || SOURCES[chan];
+  const base = val('--source') ? resolveSourceBase(val('--source')) : SOURCES[chan];   // bare repo URL → release assets (issue #10)
   log(`update: checking ${base}`);
   const man = JSON.parse((await fetchArtifact(base, 'kaif-manifest.json')).toString('utf8'));
   if (man.version === cur.version) { log(`✅ already up to date (KAIF ${cur.version})`); return; }
@@ -1211,7 +1363,7 @@ async function cmdUpdate() {
   for (const name of ['KAIF-CORE.mjs', 'KAIF-CORE-BUNDLE.md']) {
     bufs[name] = await fetchArtifact(base, name);
     const got = sha256(bufs[name]);
-    if (got !== man.sha256[name]) die(`sha256 mismatch for ${name}: expected ${man.sha256[name]}, got ${got}`);
+    if (got !== man.sha256[name]) dieSoft(`sha256 mismatch for ${name}: expected ${man.sha256[name]}, got ${got}`);   // post-fetch refusal: soft (issue #10)
   }
   const bundlePath = '.kaif/install/KAIF-CORE-BUNDLE.md';
   writeFileSync(bundlePath, bufs['KAIF-CORE-BUNDLE.md']);
@@ -1233,6 +1385,7 @@ async function cmdUpdate() {
   const sizeBefore = {};
   for (const f of deploy) if (okOnDisk(f.path)) sizeBefore[f.path] = statSync(f.path).size;
   backupTree(deploy, cur.version, man.version);      // rollback material BEFORE anything is written
+  writeUpdateJournal(cur.version, man.version, base, 'core-update', deploy);   // crash journal: after the backup, before the first mutation
   const { replaced, added, kept, mergedModules, diverged, divergedModules, ownerConvention, adopted, translatedWholesale } =
     classifyAndApply(deploy, old, values, unresolved, cur, oldBase);
   const sizeJumps = deploy
@@ -1312,6 +1465,7 @@ async function cmdUpdate() {
     ownerConvention });
   appendHistory(marker, cur.version, man.version, 'core-update');
   writeFileSync(KAIF_JSON, JSON.stringify(marker, null, 2) + '\n');
+  clearUpdateJournal();   // the LAST act: from here there is nothing left to resume
   log(`\n✅ KAIF updated mechanically to ${man.version} — finish ${UPDATE_TASK}, then: node .kaif/kaif-core.mjs update-verify`);
 }
 
@@ -1340,6 +1494,117 @@ function writeReceipt(r) {
 // by which route — /kaif-version gets real memory, forensics gets a machine-readable trail.
 function appendHistory(marker, from, to, route) {
   marker.history = [...(marker.history || []), { from: from || '?', to, route, date: localStamp() }];
+}
+
+// ---------------------------------------------------------------------------- package.json splice (issue #16)
+// The kaif:* wiring used to mutate the parsed object and write JSON.stringify(pkg, null, 2)
+// back — re-serializing EVERY key: 24 whitespace-only diff lines in the owner's hand-formatted
+// manifest under a log line promising an additive edit ("+ wired kaif:* handles"), on the
+// deployment's very first commit (field: issue #16; the same tool-diff-wider-than-intent class
+// as bug 22's CRLF rewrite). The wiring now SPLICES only what it adds into the file's own text,
+// so everything outside the inserted entries survives byte-exact (indentation, key order,
+// compact one-line values, a missing final newline). A shape the splicer cannot PROVE itself on
+// falls back to the full re-serialize — and then the log says so instead of promising additivity.
+
+// Top-level tokenizer for a JSON OBJECT text. Returns { entries: [{ key, keyStart, valueStart,
+// valueEnd }], rootOpenIdx, rootCloseIdx } or null when the shape defeats it. The input has
+// already passed JSON.parse, so the null branches are belt-and-suspenders, not a real path.
+function jsonTopLevel(text) {
+  const n = text.length;
+  let i = text.indexOf('{');
+  if (i < 0) return null;
+  const rootOpenIdx = i;
+  i++;
+  const entries = [];
+  const ws = (c) => c === ' ' || c === '\t' || c === '\r' || c === '\n';
+  const skipWs = () => { while (i < n && ws(text[i])) i++; };
+  const readString = () => {          // at '"'; leaves i just past the closing quote
+    i++;
+    while (i < n) { if (text[i] === '\\') i += 2; else if (text[i] === '"') { i++; return true; } else i++; }
+    return false;
+  };
+  const skipValue = () => {           // at the value's first char; leaves i just past its last char
+    const c = text[i];
+    if (c === '"') return readString();
+    if (c === '{' || c === '[') {
+      let d = 0;
+      while (i < n) {
+        const ch = text[i];
+        if (ch === '"') { if (!readString()) return false; continue; }
+        if (ch === '{' || ch === '[') d++;
+        else if (ch === '}' || ch === ']') { d--; if (!d) { i++; return true; } }
+        i++;
+      }
+      return false;
+    }
+    while (i < n && !ws(text[i]) && text[i] !== ',' && text[i] !== '}') i++;   // number/true/false/null
+    return true;
+  };
+  while (i < n) {
+    skipWs();
+    if (text[i] === '}') return { entries, rootOpenIdx, rootCloseIdx: i };
+    if (text[i] === ',') { i++; continue; }
+    if (text[i] !== '"') return null;
+    const keyStart = i;
+    if (!readString()) return null;
+    let key; try { key = JSON.parse(text.slice(keyStart, i)); } catch { return null; }
+    skipWs();
+    if (text[i] !== ':') return null;
+    i++; skipWs();
+    const valueStart = i;
+    if (!skipValue()) return null;
+    entries.push({ key, keyStart, valueStart, valueEnd: i });
+  }
+  return null;
+}
+
+// Splice the missing kaif:* entries (and optionally a missing "name") into package.json TEXT.
+// Returns the new text, or null when the file's shape is not splice-safe (caller falls back).
+function splicePackageJson(raw, addName, addScripts) {
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  let out = raw;
+  const lastSolid = (s, from) => { let j = from - 1; while (j >= 0 && /\s/.test(s[j])) j--; return j; };
+  const lineIndent = (s, idx) => { const ls = s.lastIndexOf('\n', idx - 1) + 1; return (s.slice(ls, idx).match(/^[ \t]*/) || [''])[0]; };
+  const pairs = Object.entries(addScripts).map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+
+  if (pairs.length) {
+    const top = jsonTopLevel(out);
+    if (!top) return null;
+    const scripts = top.entries.find((e) => e.key === 'scripts');
+    if (scripts) {
+      const closeAbs = scripts.valueEnd - 1;                       // index of the scripts object's '}'
+      const j = lastSolid(out, closeAbs);                          // last solid char before it
+      if (j === scripts.valueStart) {                              // "scripts": {} — empty object
+        const keyIndent = lineIndent(out, scripts.keyStart);
+        const entryIndent = keyIndent + (keyIndent || '  ');
+        out = out.slice(0, scripts.valueStart)
+          + `{${eol}${entryIndent}${pairs.join(',' + eol + entryIndent)}${eol}${keyIndent}}`
+          + out.slice(scripts.valueEnd);
+      } else if (out.slice(scripts.valueStart, scripts.valueEnd).includes('\n')) {   // multiline object
+        const entryIndent = lineIndent(out, j);                    // match the LAST entry's own line
+        out = out.slice(0, j + 1) + `,${eol}${entryIndent}${pairs.join(',' + eol + entryIndent)}` + out.slice(j + 1);
+      } else {                                                     // compact one-line object with entries
+        out = out.slice(0, j + 1) + `, ${pairs.join(', ')}` + out.slice(j + 1);
+      }
+    } else {
+      const j = lastSolid(out, top.rootCloseIdx);
+      if (j === top.rootOpenIdx) return null;                      // empty {} root — nothing to preserve
+      const rootIndent = top.entries.length ? lineIndent(out, top.entries[0].keyStart) : '  ';
+      const step = rootIndent || '  ';
+      out = out.slice(top.rootOpenIdx, top.rootCloseIdx).includes('\n')
+        ? out.slice(0, j + 1) + `,${eol}${rootIndent}"scripts": {${eol}${rootIndent + step}${pairs.join(',' + eol + rootIndent + step)}${eol}${rootIndent}}` + out.slice(j + 1)
+        : out.slice(0, j + 1) + `, "scripts": { ${pairs.join(', ')} }` + out.slice(j + 1);
+    }
+  }
+  if (addName) {
+    const top = jsonTopLevel(out);                                 // re-scan: offsets moved above
+    if (!top || !top.entries.length) return null;
+    const e0 = top.entries[0];
+    const sep = out.slice(top.rootOpenIdx, top.rootCloseIdx).includes('\n')
+      ? `,${eol}${lineIndent(out, e0.keyStart)}` : ', ';
+    out = out.slice(0, e0.keyStart) + `"name": ${JSON.stringify(addName)}${sep}` + out.slice(e0.keyStart);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------- final gates
@@ -1727,9 +1992,9 @@ async function cmdInstall() {
   // re-running a ru-deployment's bootstrap without --lang used to silently apply English
   // templates and aliases (the same silent-widening class as bug 14's five systems).
   if (okOnDisk(KAIF_JSON) && !val('--lang')) {
-    try { const j = readJson(KAIF_JSON); if (j.language) LANG = String(j.language).toLowerCase(); } catch { /* CLI default stands */ }
+    try { const j = readJson(KAIF_JSON); if (j.language) LANG = checkedLang(j.language, 'the deploy marker'); } catch { /* CLI default stands */ }
   }
-  const { deploy, translated } = applyLanguage(files);
+  const { deploy, translated, overridePaths } = applyLanguage(files);
   logPackHonesty(files, deploy);   // the pack boundary is declared, not discovered post-factum
   const values = stableValues();   // a re-run/bootstrap over an existing deploy keeps ITS values (bug 26)
   const unresolved = new Set();
@@ -1745,6 +2010,16 @@ async function cmdInstall() {
     try { legacyOld = readJson(KAIF_JSON); } catch { /* unreadable marker — treat as fresh */ }
     if (legacyOld) log(`⟳ existing KAIF ${legacyOld.version || '?'} detected — running as an UPDATE to ${meta.version} (existing files are kept, new ones added)`);
   }
+  // ONE flag must not split into two behaviours (issue #8): the legacy branch used to honour an
+  // explicit --mode for FILE deployment while the marker inherited the old tracking — a standard
+  // tree labeled anonymous, and every consumer of the marker believed the marker (`version`
+  // answered anonymous, `update` refused, the feedback contour kept signals local). An explicit
+  // --mode either performs a NAMED transition (anonymous → origin, written at the marker below)
+  // or refuses here, BEFORE any write. The implicit default still inherits the marker (bug 11).
+  if (legacyOld && val('--mode') && ANON && (legacyOld.tracking || 'origin') !== 'anonymous') {
+    die(`--mode anonymous contradicts the deployed marker (tracking: ${legacyOld.tracking || 'origin'}) — a tracked deployment cannot be anonymized by install: its origin-tied skills are already on disk, and no command performs tracked → anonymous. Re-run without --mode to keep the deployment as it is; anonymity is a fresh-deployment choice.`);
+  }
+  if (legacyOld) refuseOnJournal();   // a crashed previous update/bootstrap stays LOUD until resumed
   // A legacy bootstrap must not silently WIDEN the deployment: the old default (all five
   // systems) handed a two-system project ~80 unrequested files (bug 14, project C). Inherit the
   // marker's agents — the 1.4-era singular `agent` included — and always say what was chosen.
@@ -1767,7 +2042,10 @@ async function cmdInstall() {
   let adopted = [];
   let cls = null;
   if (legacyOld) {
-    if (legacyOld.version !== meta.version) backupTree(deploy, legacyOld.version, meta.version); // rollback material BEFORE any write
+    if (legacyOld.version !== meta.version) {
+      backupTree(deploy, legacyOld.version, meta.version); // rollback material BEFORE any write
+      writeUpdateJournal(legacyOld.version, meta.version, BUNDLE, 'bootstrap', deploy);   // crash journal: same contract as core-update
+    }
     let baseline = null;
     if (okOnDisk(DEPLOY_MANIFEST)) {
       try { const mOld = readJson(DEPLOY_MANIFEST); if (mOld.templateShas) baseline = mOld; } catch { /* unreadable — try synthetic */ }
@@ -1817,6 +2095,15 @@ async function cmdInstall() {
   // of past schemas pile up (bug 19.3: agentsSupported from 1.4 living next to agents).
   // `agents` is always written above — the old spellings are safe to drop unconditionally.
   if (legacyOld) for (const stale of ['agent', 'agentsSupported']) delete marker[stale];
+  // The other half of issue #8: an EXPLICIT --mode standard on the legacy branch WRITES the
+  // transition instead of dropping the flag for the marker while honouring it for files — the
+  // run whose banner says "mode standard" leaves a marker that says the same. `fork` tracking
+  // is untouched (a fork IS a standard deployment; severing it is /kaif-switch-origin's job).
+  if (legacyOld && val('--mode') && !ANON && legacyOld.tracking === 'anonymous') {
+    marker.tracking = 'origin';
+    marker.origin = ORIGIN;
+    log('⟳ marker: tracking anonymous → origin (explicit --mode standard — version checks, updates and the feedback loop are live from here)');
+  }
   // Same auto-record as cmdUpdate (project C D2, bug 31): a legacy bootstrap that just recognized
   // translated-wholesale files on a non-English deployment writes the i18n fact down.
   if (legacyOld && cls && LANG !== 'en' && cls.translatedWholesale.length && String(legacyOld.i18n || '').toLowerCase() !== 'translated') {
@@ -1829,25 +2116,51 @@ async function cmdInstall() {
   // an unreadable file means "skip the handles and say so", not "overwrite the user's file".
   // Anonymous installs get no kaif:* handles at all (they point at the origin-carrying core,
   // which verify-final removes) — the version stays readable in .kaif/kaif.json.
-  let pkg = null;
+  let pkg = null, pkgRaw = null;
   if (ANON) { /* no handles by design */ }
   else if (existsSync('package.json')) {
-    try { pkg = readJson('package.json'); }
-    catch { console.error('⚠ package.json exists but is not parseable JSON — kaif:* handles NOT wired (add them by hand)'); }
+    try { pkgRaw = readFileSync('package.json', 'utf8'); pkg = JSON.parse(pkgRaw.replace(/^﻿/, '')); }
+    catch { pkg = null; console.error('⚠ package.json exists but is not parseable JSON — kaif:* handles NOT wired (add them by hand)'); }
   } else pkg = {};
   if (pkg) {
     // Write ONLY when something was actually added: an unconditional rewrite re-serialized the
     // user's file (CRLF→LF) into a phantom whole-file diff on every install (bug 22 / project A K4).
-    let wired = 0;
-    if (!pkg.name) { pkg.name = values['<PROJECT_NAME>'].toLowerCase().replace(/[^a-z0-9-]+/g, '-'); wired++; }
-    pkg.scripts = pkg.scripts || {};
+    // And when something IS added, it is SPLICED into the owner's text (issue #16): the old
+    // JSON.stringify(pkg) rewrite restyled every hand-formatted key under a log line that
+    // promised an additive edit — the exact diff class the git-hygiene canon tells agents to stop on.
     const handles = { 'kaif:version': 'node .kaif/kaif-core.mjs version', 'kaif:check': 'node .kaif/kaif-core.mjs check',
                       'kaif:update': 'node .kaif/kaif-core.mjs update' };
-    for (const [k, v] of Object.entries(handles)) if (!pkg.scripts[k]) { pkg.scripts[k] = v; wired++; }
-    if (wired) {
-      writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+    const addScripts = Object.entries(handles).filter(([k]) => !(pkg.scripts && pkg.scripts[k]));
+    const addName = pkg.name ? null : values['<PROJECT_NAME>'].toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+    if (!addScripts.length && !addName) log('= kaif:* handles already wired — package.json untouched');
+    else if (pkgRaw == null) {
+      // the file did not exist — a fresh minimal manifest is ours to format
+      writeFileSync('package.json', JSON.stringify({ name: addName, scripts: Object.fromEntries(addScripts) }, null, 2) + '\n');
       log('+ wired kaif:* handles into package.json');
-    } else log('= kaif:* handles already wired — package.json untouched');
+    } else {
+      const next = splicePackageJson(pkgRaw, addName, Object.fromEntries(addScripts));
+      // The splice must PROVE itself before it ships: parsed result carries exactly the additions,
+      // and with them removed it deep-equals the original. Anything less falls back honestly.
+      const sane = (() => {
+        if (next == null) return false;
+        try {
+          const orig = JSON.parse(pkgRaw.replace(/^﻿/, ''));
+          const chk = JSON.parse(next.replace(/^﻿/, ''));
+          for (const [k, v] of addScripts) { if (!chk.scripts || chk.scripts[k] !== v) return false; delete chk.scripts[k]; }
+          if (addName) { if (chk.name !== addName) return false; delete chk.name; }
+          if (addScripts.length && !orig.scripts) { if (Object.keys(chk.scripts).length) return false; delete chk.scripts; }
+          return JSON.stringify(chk) === JSON.stringify(orig);
+        } catch { return false; }
+      })();
+      if (sane) { writeFileSync('package.json', next); log('+ wired kaif:* handles into package.json'); }
+      else {
+        if (addName) pkg.name = addName;
+        pkg.scripts = pkg.scripts || {};
+        for (const [k, v] of addScripts) pkg.scripts[k] = v;
+        writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+        log('+ wired kaif:* handles into package.json (file re-serialized — its shape was not splice-safe; whitespace-only diffs outside scripts are expected)');
+      }
+    }
   }
 
   // 4) persist the deploy manifest so `check` outlives the bundle's cleanup.
@@ -1980,7 +2293,19 @@ async function cmdInstall() {
   const bad = validate(deploy, skillFiles, legacyOld ? UPDATE_TASK : TASK_FILE);
   if (bad) die(`install INCOMPLETE: ${bad} artifacts missing — re-run, or fix and \`check\``);
   const aliased = countAliasedOnDisk();   // read back AFTER validate(): every write is done by here
-  log(`\n✅ KAIF ${meta.version} deployed mechanically (lang ${LANG}${translated ? ` · ${translated} owner docs templated` : ''}${aliased ? ` · ${aliased} skills trigger-aliased` : ''}, mode ${MODE}, agents ${AGENTS.join(',')}).`);
+  // "N owner docs templated" counts what is ON DISK, never the pack size in the bundle
+  // (bugs/99 №1 — the same doctrine as `aliased` above): an install over existing owner docs
+  // keeps them (`= kept existing`), and the plan-sized counter claimed localization the disk
+  // never received. A doc counts when its disk bytes carry THIS run's localized template.
+  const translatedOnDisk = (overridePaths || []).filter((p) => {
+    const f = deploy.find((d) => d.path === p);
+    if (!f || !okOnDisk(p)) return false;
+    let want = f.path.endsWith('.mjs') ? f.content : fillPlaceholders(f.content, values, new Set());
+    if (ANON && !f.path.endsWith('.mjs')) want = anonymize(want);
+    return normEol(readFileSync(p, 'utf8')) === normEol(want);
+  }).length;
+  clearUpdateJournal();   // bootstrap road completed — nothing left to resume
+  log(`\n✅ KAIF ${meta.version} deployed mechanically (lang ${LANG}${translatedOnDisk ? ` · ${translatedOnDisk} owner docs templated` : ''}${aliased ? ` · ${aliased} skills trigger-aliased` : ''}, mode ${MODE}, agents ${AGENTS.join(',')}).`);
   // Agent clients read their command list ONCE at startup: skills that appeared on disk after that
   // are absent from it, and the first thing the human sees when trying one is "no such command" —
   // which reads as "the install failed". Saying it HERE costs one line and prevents that diagnosis.
@@ -2210,6 +2535,19 @@ function cmdCheckpoint() {
     if (!recorded) die('checkpoint project-name REFUSED: no projectName in .kaif/kaif.json — confirm the canonical name with the owner and record it first: node .kaif/kaif-core.mjs project-name "<Canonical Name>"');
     log(`✔ canonical name on record: ${recorded} (executed by the checkpoint itself)`);
   }
+  if (id === 'owner-voice') {
+    // The item's contract is objective on both branches (issue #4): either the portrait is
+    // INSTALLED, or the "owner has none" fact is RECORDED where the next session reads it —
+    // a bare tick attests neither. The record is a canonical English line (like the DONE tag
+    // and the [TESTED] markers) so the gate greps it in any project language; the ignore half
+    // stays the agent's judgement (public vs private repository).
+    const hasPortrait = okOnDisk('AUTHOR_STYLOMETRY.md');
+    const recorded = existsSync('AGENT_GUIDE.md') && readFileSync('AGENT_GUIDE.md', 'utf8').includes('no voice portrait');
+    if (!hasPortrait && !recorded)
+      die('checkpoint owner-voice REFUSED: neither AUTHOR_STYLOMETRY.md on disk nor a `no voice portrait` record in AGENT_GUIDE.md — install the portrait (skill /owner-voice) or record the owner\'s "none" first (canonical line: `no voice portrait`, with date, under "Notes from the human")');
+    log(hasPortrait ? '✔ owner voice portrait on disk: AUTHOR_STYLOMETRY.md (executed by the checkpoint itself)'
+                    : '✔ `no voice portrait` recorded in AGENT_GUIDE.md (executed by the checkpoint itself)');
+  }
   if (id === 'stale-claims') {
     try {
       const rec = okOnDisk(LAST_UPDATE) ? readJson(LAST_UPDATE) : null;
@@ -2319,12 +2657,13 @@ async function cmdDiff() {
   // templates against a deployed manifest reported phantom deltas (a heading containing
   // <PROJECT_NAME> changes its own signature when filled; sandbox-caught).
   if (!val('--lang') && okOnDisk(KAIF_JSON)) {
-    try { const j = readJson(KAIF_JSON); if (j.language) LANG = String(j.language).toLowerCase(); } catch { /* default stands */ }
+    try { const j = readJson(KAIF_JSON); if (j.language) LANG = checkedLang(j.language, 'the deploy marker'); } catch { /* default stands */ }
   }
-  const man2 = JSON.parse((await fetchArtifact(src, 'kaif-manifest.json')).toString('utf8'));
+  const srcBase = resolveSourceBase(src);   // bare github.com/<o>/<r> → its latest-release assets (issue #10)
+  const man2 = JSON.parse((await fetchArtifact(srcBase, 'kaif-manifest.json')).toString('utf8'));
   mkdirSync('.kaif/install', { recursive: true });
   const tmp = '.kaif/install/DIFF-BUNDLE.md';
-  writeFileSync(tmp, await fetchArtifact(src, 'KAIF-CORE-BUNDLE.md'));
+  writeFileSync(tmp, await fetchArtifact(srcBase, 'KAIF-CORE-BUNDLE.md'));
   const { files, meta } = parseBundle(tmp);
   unlinkSync(tmp);
   const { deploy: otherDeploy } = applyLanguage(files);
@@ -2337,7 +2676,7 @@ async function cmdDiff() {
   if (!mineModShas || !Object.keys(mineModShas).length) {
     const curVer = okOnDisk(KAIF_JSON) ? (() => { try { return readJson(KAIF_JSON).version; } catch { return null; } })() : null;
     const synth = await buildSyntheticBaseline({ version: curVer });
-    if (!synth) die(`this deployment carries a v1 manifest (no template provenance) and no baseline artifact for v${curVer || '?'} is reachable — pass --baseline <dir|url> with that version's release artifacts, or run the next update (it upgrades the manifest to v2)`);
+    if (!synth) dieSoft(`this deployment carries a v1 manifest (no template provenance) and no baseline artifact for v${curVer || '?'} is reachable — pass --baseline <dir|url> with that version's release artifacts, or run the next update (it upgrades the manifest to v2)`);   // post-fetch refusal: soft (issue #10)
     mineModShas = synth.moduleShas;
   }
   let changedFiles = 0, sameFiles = 0;
@@ -2401,6 +2740,7 @@ const COMMANDS = {
   modules:         { fn: cmdModules,      desc: 'print the module cut of a bundle as JSON (audit surface)', flags: { '--bundle': true }, pos: 0 },
   install:         { fn: cmdInstall,      mutating: true, desc: 'deploy KAIF from a bundle (the loader calls this explicitly)', flags: { '--bundle': true, '--lang': true, '--mode': true, '--agents': true, '--baseline': true, '--force': false }, pos: 0 },
   update:          { fn: cmdUpdate,       mutating: true, desc: 'respectful mechanical update from the origin/release', flags: { '--source': true, '--channel': true, '--lang': true, '--agents': true, '--baseline': true }, pos: 0 },
+  resume:          { fn: cmdResume,       mutating: true, desc: 'restore the pre-update tree after a crashed update (per .kaif/update-journal.json)', flags: {}, pos: 0 },
   'update-verify': { fn: cmdUpdateVerify, mutating: true, desc: 'final gates of an update; self-cleans on green', flags: {}, pos: 0 },
   'verify-final':  { fn: cmdVerifyFinal,  mutating: true, desc: 'final gates of an install; self-cleans on green', flags: {}, pos: 0 },
   checkpoint:      { fn: cmdCheckpoint,   mutating: true, desc: 'record a finished task item (recheck/placeholders/project-name EXECUTE their gates)', flags: { '--verdict': true, '--verdict-file': true }, pos: 1 },
@@ -2458,5 +2798,12 @@ if (CMD === 'help') {
     die(`no command given — nothing was executed (flags seen: ${args.join(' ')}). The old bare-run default was \`install\`; say the command explicitly.`);
 } else {
   validateArgv(spec);
-  await spec.fn();
+  try { await spec.fn(); }
+  catch (e) {
+    if (!(e && e.kaifDie)) throw e;   // real bugs keep their stack — only the soft-die sentinel is expected
+    // Message already printed by dieSoft. Mark the failure and let the event loop drain
+    // naturally: process.exit() here would trip the win32 libuv assertion the sentinel exists
+    // to avoid (issue #10) — the pooled fetch handles unref within ~300 ms on their own.
+    process.exitCode = 1;
+  }
 }

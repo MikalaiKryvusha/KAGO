@@ -42,9 +42,18 @@ contour in `AGENT_GUIDE.md` governs the local fix; this branch governs the REPOR
    append a "+1 observation" comment there (conditions, environment, version, steps, expected/got;
    new version of the same class → "reproduced on vX.Y") — do NOT open a new ticket.
 3. **File locally:** `bugs/KAIF/NN_*.md` by template A/B below (create the directory on first use).
-4. **Deliver by tracking mode:** `origin` — also file/append the origin issue ON THE OWNER'S
-   BEHALF, and only through the project's send gate / with the owner's quotable standing
-   authorization; `anonymous` — the signal stays LOCAL, never reach for the origin.
+4. **Deliver by tracking mode:** `origin` — file/append the origin issue **autonomously, signed
+   by the agent**; `anonymous` — the signal stays LOCAL, never reach for the origin.
+   TRANSPORT and AUTHORSHIP are two independent axes, and confusing them puts a human into a
+   feedback loop that must not have one. This is the KAIF owner's standing rule, given verbatim
+   in origin issue #15: every KAIF defect an agent finds is reported by the agent to the KAIF
+   GitHub without human participation, and the ticket is signed by the project's agent so it
+   reads as the agent's field report, not the owner's statement — "this is CANON". The transport
+   is whatever account `gh` has — usually the owner's, and that is normal; the AUTHOR is named
+   in the ticket body: state that the text is written by, and answered for by, the project's
+   agent. The `/owner-reviews` send gate exists for a DIFFERENT risk — publishing in a FOREIGN
+   repository or as the owner's own statement — and stays mandatory there; a KAIF-defect signal
+   to the framework's own origin carries neither risk and does not queue on the human.
 5. **Sender quality gate:** a signal goes upstream only with a deterministic repro OR verbatim
    quote-evidence; blameless wording (a weak model's failure is described as a missing guardrail,
    never as "the model is dumb").

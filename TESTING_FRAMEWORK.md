@@ -59,6 +59,41 @@ the project's sphere library: its *Verification by observation* and *Minimum evi
    worthless — always test against the OWNER'S requirements (`GOAL.md`, the idea, the plan), not only
    against the code's own consistency.
 
+## The testing activities — the chain that makes "tested" mean something
+
+The trust contract below says how much to TRUST a result; this section says how the testing WORK
+is done. Field-paid reason for its existence (origin issue #21): with no obligation to design the
+observation set, an agent ran ONE happy path, reported the feature as working, and the owner
+produced five uncovered cases in about a minute. Testing a feature is a chain of activities, not
+one observation — walk it in order, each step with its exit condition:
+
+1. **Analyze the test basis.** Name the source of truth for the expected behaviour — a
+   requirement, the owner's word, a spec, the canon map (`REQUIREMENTS_FRAMEWORK.md` shapes
+   these). *Exit:* every claim under test quotes where its expectation comes from; an expectation
+   that is missing or untestable goes back as a requirements defect (principle 3 — cheapest right
+   here). Studying the requirements to derive the test basis IS a testing activity, not somebody
+   else's chapter.
+2. **Design the observation set by named techniques.** Derive the cases with the standard
+   instruments: equivalence partitioning · boundary values · decision tables · state transitions ·
+   pairwise · use-case walk · error guessing. *Exit:* a written case list whose DIMENSIONS are
+   named — which partitions, boundaries and states are covered, and which are consciously not
+   (principle 2: prioritize by risk, and SAY what was left out).
+3. **Write the documentation before executing.** Test documentation lives in files, never in the
+   session's head: a plan (what and why) · a suite / checklist (the ordered set) · cases (steps ·
+   expected · status). Copy the shipped template into the project's test-doc home (default
+   `testcases/`, created on first use; the sphere or the project may name another):
+   `cp .kaif/_testcases-template.md testcases/TC_<feature>_<slug>.md` — an artifact class with no
+   home and no shape does not get written.
+4. **Execute with bookkeeping.** Every case ends in a status — `pass` · `fail` · `blocked` ·
+   `skipped` — with the observation named (what ran, what was seen). *Exit:* no case without a
+   status; coverage is the case list, never an impression.
+5. **Run the control case before calling the feature working.** Turn the controlling flag off /
+   remove the controlling parameter and observe the feature NOT work: a feature check that cannot
+   fail proves nothing (gate 5 below, applied at feature level).
+6. **File defects in the defined shape.** Steps to reproduce · expected vs actual ·
+   severity/priority · environment · evidence — then hand off to `BUG_FIXING_FRAMEWORK.md`
+   (one document per defect; skill `/report-bug`).
+
 ## Test-status markers — the trust contract
 
 Every non-trivial artifact the agent generates carries an explicit, grep-friendly test status in its
@@ -86,6 +121,11 @@ of the project language:
    `/fable-judge` hunts it like any false completion claim. Never flip a marker without the observation.
 6. **Carrier by artifact type:** code → the block/method comment; a document → the section's note; any
    other sphere → the nearest commentable carrier the sphere convention offers.
+7. **A FEATURE marker requires a designed set.** `[TESTED]` on a feature is legal only alongside the
+   written case set with its covered dimensions (the activities chain above); a single observation
+   flips the marker of a single CASE, never of the feature. "It worked once on the happy path" is a
+   case-level fact — a marker satisfied by one observation certifies that something was observed,
+   while silently claiming the feature was tested: two different statements (origin issue #21).
 
 Markers are the persistent memory of verification: fable-method's Step 5 verifies *in the moment*; the
 marker preserves that fact **across sessions**, for future agents and posterity — who else will know the
@@ -101,12 +141,16 @@ dies with the session. This is principle 3 (early testing) applied to production
 inspection, and it is why the harness section below exists — the harness is what makes the checking
 repeatable once it exists.
 
-Two operational consequences, one on each side of the work:
+The contract in step form — walk it on every non-trivial piece of work:
 
-- **New behaviour is born with the check that watches it** — and the check is proven on the broken
-  version before its green is trusted (gate 5 below; `BUG_FIXING_FRAMEWORK.md` → Guards).
-- **A closed defect is born with the guard for its CLASS** — that rule already lives in
-  `BUG_FIXING_FRAMEWORK.md` ("a fix without a guard is a fix on credit") and is not restated here.
+1. **Name the check while planning the work.** The same task step that builds X names what will
+   check X — a suite · a checklist · test cases · a fixture · a guard.
+2. **Land both in the same step.** The check enters the repository together with the work — never
+   "later", never only in the session's scratchpad.
+3. **Prove the check on a broken version** before trusting its green (gate 5 below;
+   `BUG_FIXING_FRAMEWORK.md` → Guards). A closed defect is additionally born with the guard for
+   its CLASS — that rule lives in `BUG_FIXING_FRAMEWORK.md` ("a fix without a guard is a fix on
+   credit") and is not restated here.
 
 The triviality gate applies: a trivial change verified by its one obvious check needs no ceremony
 beyond the usual comment and marker. What is never legal is finishing non-trivial work with nothing
@@ -131,6 +175,23 @@ ships, walk the gates that apply:
 5. **A check that has never failed proves nothing.** Every new guard/check is verified on a broken
    version first (see `BUG_FIXING_FRAMEWORK.md` → Guards); goldens for refactors are byte-exact —
    an empty diff is proof, "the numbers look the same" is not.
+6. **After a deploy, the gate is production itself, entered as a user.** Sign in by whatever door
+   the product offers, walk the real screens, read the console — only then is "deployed" a fact.
+   A smoke that only walks public surfaces proves the landing page is alive, not the product: if
+   the product has authenticated state, an unauthenticated smoke is NOT evidence about the
+   product. (Field-paid: three deploys in one night served an application that did not start at
+   all, with every local instrument green — origin issue #18.)
+7. **Artifact integrity before shipping.** "It built" and "it is one build" are different claims:
+   the shipped bundle carries exactly ONE build identity, asserted mechanically before upload. An
+   output directory that is not cleaned between builds ships a mixture of two builds — every
+   individual file valid, the SET broken — and mixtures fail in ways no test sees.
+
+Two placement rules, paid for by the same outage: gates 6–7 belong IN THE DEPLOY PATH, not in
+prose — one deploy door that runs them itself and fails on any red step (where the agent system
+has hooks, deny the raw deploy command; a rule that lives only in a document is a rule the
+shipping session skips under pressure). And a post-deploy smoke must be able to FAIL on a dead
+product: prove there was something to measure before painting green — a smoke that is greenest
+when the product is emptiest is worse than no smoke.
 
 ## The taste class — when the observer must be human
 
@@ -145,7 +206,9 @@ a verification and never flips a marker; the owner's recorded verdict is.
 
 - **`REQUIREMENTS_FRAMEWORK.md`** — shapes what is REQUIRED before anything is made; this framework
   verifies what was MADE against it. Principle 3 (early testing) is executed at the requirements
-  stage by that canon; bugs are what is born where the two meet (`BUG_FIXING_FRAMEWORK.md`).
+  stage by that canon; bugs are what is born where the two meet (`BUG_FIXING_FRAMEWORK.md`). The
+  boundary does not close the door on requirements analysis: deriving the test basis FROM the
+  requirements is step 1 of the activities chain here.
 - **fable-method** — Step 5 (verify by observation) is HOW a single check is performed; this framework
   says WHAT must carry a status and how trust propagates. The triviality gate still applies: a trivial
   change verified by its one obvious check needs no ceremony beyond its normal comment.
@@ -156,5 +219,7 @@ a verification and never flips a marker; the owner's recorded verdict is.
 - **The harness** — invest in tooling that makes verification observable and deterministic
   (`AGENT_GUIDE.md` → Test harness); eyeballing is not testing.
 
-*Grounding: the seven principles are the ISTQB canon (istqb.org; ru: testbase.ru) — distilled here for an
-AI agent across all spheres.*
+*Grounding: the seven principles and the activities chain (test basis → design techniques →
+documentation → execution → defect reporting) are the ISTQB canon (istqb.org; ru: testbase.ru) —
+distilled here for an AI agent across all spheres. The activities section, the feature/case marker
+rule and gates 6–7 were paid for in the field: origin issues #21 and #18.*

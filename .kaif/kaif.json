@@ -1,7 +1,7 @@
 {
   "framework": "KAIF",
-  "version": "2.2",
-  "released": "2026-08-08",
+  "version": "2.3",
+  "released": "2026-08-21",
   "origin": "https://github.com/MikalaiKryvusha/KAIF",
   "tracking": "origin",
   "sphere": "programming",
@@ -14,5 +14,13 @@
   ],
   "language": "ru",
   "canonArtifacts": [],
-  "projectName": "KAGO"
+  "projectName": "KAGO",
+  "history": [
+    {
+      "from": "2.2",
+      "to": "2.3",
+      "route": "core-update",
+      "date": "2026-08-28T00:04:33+03:00"
+    }
+  ]
 }

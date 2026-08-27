@@ -261,7 +261,7 @@ assumes.
 
 ## 6. Built with KAIF
 
-The project runs under [KAIF 2.2](https://github.com/MikalaiKryvusha/KAIF) — the author's framework
+The project runs under [KAIF 2.3](https://github.com/MikalaiKryvusha/KAIF) — the author's framework
 for AI agents: external memory, autonomy made wider and better, and the discipline that keeps a
 claim of "it works" attached to an observation.
 
@@ -533,7 +533,7 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 ## 6. Собран на KAIF
 
-Проект живёт под [KAIF 2.2](https://github.com/MikalaiKryvusha/KAIF) — авторским фреймворком для
+Проект живёт под [KAIF 2.3](https://github.com/MikalaiKryvusha/KAIF) — авторским фреймворком для
 ИИ-агентов: внешняя память, расширенная и улучшенная автономия и дисциплина, которая держит
 заявление «работает» привязанным к наблюдению.
 

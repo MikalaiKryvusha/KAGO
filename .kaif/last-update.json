@@ -1,0 +1,22 @@
+{
+  "from": "2.2",
+  "to": "2.3",
+  "route": "core-update",
+  "source": "https://github.com/MikalaiKryvusha/KAIF/releases/latest/download",
+  "counters": {
+    "replaced": 5,
+    "mergedModules": 8,
+    "added": 1,
+    "kept": 71
+  },
+  "diverged": [],
+  "divergedModules": {
+    "AGENT_GUIDE.md": [
+      "## Project identity (CANON — use these, don't invent)"
+    ]
+  },
+  "ownerConvention": [],
+  "date": "2026-08-28T00:04:33+03:00",
+  "judgeVerdict": "# /fable-judge — verdict on the KAIF 2.2 → 2.3 update (KAGO, 2026-08-28)\n\nClaims re-run as observations, not read from the updater's report:\n\n- **C1 — versions.** `.kaif/kaif.json`: `\"version\": \"2.3\"`, `\"released\": \"2026-08-21\"`, and a new\n  `history` entry `{from: 2.2, to: 2.3, route: core-update}`. Every owner-level field preserved\n  byte-for-byte: `tracking: origin` · `sphere: programming` · 5 agents · `language: ru` ·\n  `projectName: KAGO`. OBSERVED.\n- **C2 — nothing owner-authored lost.** All four canon merges read in full diff: purely ADDITIVE\n  modules (form-of-obligation in AGENT_GUIDE, owner's razor in PHILOSOPHY, activities chain +\n  marker rule 7 + gates 6–7 in TESTING, writing checklist in REQUIREMENTS). The one\n  \"kept for you\" module (AGENT_GUIDE → Project identity) retains the real repo URL and the brand\n  expansion the owner fixed in commit `34de49b`. Prayer blocks present in all four merged files.\n  OBSERVED.\n- **C3 — manifest.** `node .kaif/kaif-core.mjs check`: `✅ manifest satisfied: 80 files + 144 agent\n  artifacts present` — ran green twice (standalone and inside `checkpoint recheck`). OBSERVED.\n- **C4 — gates executed, not ticked.** `checkpoint placeholders` and `checkpoint stale-claims` ran\n  their own scans and reported clean; the 2.2 rake (`bugs/KAIF/01` — the gate tripping on verbatim\n  quotes in the sphere library) did NOT reproduce on 2.3. OBSERVED.\n- **C5 — the project's own build gate.** First `npm run check` run was RED: the prayer guard found\n  the prayer block diverged between PHILOSOPHY.md (rewritten by the machinery with LF endings) and\n  STATUS.md/GOAL.md (untouched, CRLF). Cure was the guard's own prescription —\n  `node tools/prayer.mjs --apply` (2 files) — after which the full gate is GREEN: 56 .mjs parsed\n  0 failed · 420 text files, 0 encoding-corrupted · prayer identical across 12 canon docs.\n  `git diff STATUS.md GOAL.md` after the cure is EMPTY (content unchanged; endings normalized by\n  autocrlf). OBSERVED.\n- **C6 — the sandbox predicted the live pass.** The real update was first run in a scratchpad copy\n  of the tree; the live run's action list matched the sandbox line-for-line (same merges, same\n  replacements, same additions). OBSERVED.\n\n**VERDICT: VERIFIED WITH CAVEATS.**\n\nCaveats, both named: (1) the machinery writes LF line endings, which transiently reddened the\nproject's own prayer-consistency guard — healed by the guard's own cure, zero content loss;\n(2) the 152 re-synced mirror skill copies (.agents/.grok/.cline/.roo) are verified by the manifest\ncheck, not read individually.",
+  "verifiedAt": "2026-08-28T00:09:45+03:00"
+}

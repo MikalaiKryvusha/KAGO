@@ -139,6 +139,28 @@ reach). "Search is fast" → Scale: ms per query at 500 RPS · Meter: load-test 
 A criterion nobody can measure is a wish; a criterion with Scale/Meter/Target is a check the agent can
 execute and cite (verification then follows `TESTING_FRAMEWORK.md` — by observation, never inferred).
 
+## The writing checklist — the executable carrier of this canon
+
+The sections above explain WHY; this checklist is what the writing session actually walks
+(the form rule of obligations — `AGENT_GUIDE.md`: prose explains, a carrier obliges). Writing any
+target document — a plan, an epic, a bug's "done when", an idea:
+
+- [ ] **Open with the goal vector:** the pain being solved + where we want to be; name the goal
+      type — Achieve · Maintain · Avoid.
+- [ ] **Follow with the acceptance criteria** — one line per criterion, each carrying a fit
+      criterion (numeric ones as Scale · Meter · Target).
+- [ ] **Write each requirement as ONE EARS sentence:** active voice, actor named, one modal used
+      honestly (shall / should / will).
+- [ ] **Sweep the draft against the stop-word dictionary** — every hit is rewritten measurably or
+      justified in place; where the shipped linter is wired, run it:
+      `node .kaif/tools/kaif-requirements-lint.mjs`
+- [ ] **Trace each requirement to its source** (owner's word · goal · law · document) — a
+      requirement with no source is a guess wearing a modal verb.
+- [ ] **Prioritize** once the list exceeds a handful — and the levels must differ (criterion 8).
+
+The ten criteria remain the judge's rubric over what this checklist produced; the checklist
+consults the writer the same way the linter does — it never blocks a draft (see Boundaries below).
+
 ## Boundaries — what this framework is NOT
 
 - **Not a Definition-of-Ready gate.** The criteria work as a LINTER and a judge's rubric over what is

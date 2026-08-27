@@ -58,7 +58,7 @@ APIs were still moving through beta across the industry when this table was writ
 | **Google Antigravity** | `sample-antigravity-hooks.json` | ❌ no session/compaction event exists | ✅ `PreInvocation` → `injectSteps` | ❌ field names match, blocking value not verified |
 | **GitHub Copilot** | `sample-copilot-hooks.json` | ✅ `additionalContext` on `sessionStart` | ❌ injection not permitted on `userPromptSubmitted` | ❌ not permitted on `agentStop` |
 | **Grok Build** | *(none needed)* | ⚠️ reads `.claude/settings.json`; **injection not verified** | ⚠️ same path, same gap | ⚠️ same path, same gap |
-| **Meta Muse Code** | *(none yet)* | ❌ no such event found | 🟡 a prompt event exists; contract not published | ❌ |
+| **Meta Muse Code** | *(none yet)* | ❌ `PreCompact`/`PostCompact` exist, context-injection output not documented | ❌ prompt/LLM-call events exist, same injection gap | ❌ output contract of `Stop` not documented |
 | **Windsurf / Cascade** | *(not supported)* | ❌ | ❌ | ❌ hooks cannot inject context at all — exit codes only |
 | **Cline** | *(not supported)* | ❌ | ❌ | ❌ hooks are SDK plugins (TS/JS objects), not config-invoked commands |
 | **Zoo Code** | *(markdown ritual)* | — | — | — no hook mechanism |
@@ -75,10 +75,15 @@ events are passive ("stdout is ignored"), so whether it honours `additionalConte
 Claude-compatible path is unverified — if the order never appears in your session, that is the
 first thing to test.
 
-**Meta Muse Code** (beta since 2026-08-05) documents hooks with a prompt-submission event and its
-own trust model — project and user hooks must be explicitly trusted before they run. No sample
-ships until the vendor publishes the contract: a config written from overviews would look like
-delivery and behave like a guess.
+**Meta Muse Code** (beta since 2026-08-05) published its hook contract at
+`dev.meta.ai/docs/muse-code/extending.md` (re-read live 2026-08-21): twelve lifecycle events
+including `SessionStart`, `PreCompact`/`PostCompact` and `UserPromptSubmit`; project hooks live in
+`<project-root>/.muse/hooks.json`, and project/user hooks must be explicitly trusted
+(`muse hooks trust <key>`) before they run. Still no sample here, but the reason has changed:
+the contract is now published, yet it documents no output field that injects context into the
+agent — and injection is what all three hooks of this module do. The moment the vendor documents
+an injection shape, Muse Code becomes a sample candidate; until then the markdown ritual is the
+honest answer.
 
 **Adding a system yourself:** read its live hook docs, find (1) the event that fires after context
 is lost or per turn, and (2) the exact output field that injects context into the AGENT — not a

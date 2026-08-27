@@ -18,8 +18,20 @@ Trigger: the human says "let's add this to experience" / "log this lesson" / "re
 finished something with a reusable takeaway (a success worth repeating, a failure worth avoiding, a
 non-obvious gotcha). **Capture proactively — don't wait to be asked.**
 
+0. **Ask the mechanization question FIRST — "can this lesson be made unnecessary, and at what
+   cost?"** The hierarchy of means, in order: **(1) remove the trap itself** (a config line, a
+   safer default, a rename — often cheaper than the entry that would warn about it); **(2) a
+   guard/linter/gate that reddens by itself;** **(3) only when neither is cheaply possible — a log
+   entry.** Field measurement behind this order (origin issue #14): 281 entries across three
+   projects, 7 mechanized — the journal had become the default sink, and the recall ritual
+   structurally misses action-level lessons, so an entry is the WEAKEST carrier, never the default.
 1. **Distill the lesson** to its reusable core — the *approach-level* takeaway, not defect detail
    (defect detail belongs in `bugs/`; `EXPERIENCE.md` is "what to do / not do next time").
+   A lesson about a dangerous ACTION (a command that destroys state: a test runner that wipes a
+   directory, a reset, a force-push) also lives IN THE ROW OF THAT ACTION in the project's tool
+   registry (`AGENT_GUIDE.md` → Tools) — where sessions look when they RUN it; the journal entry
+   duplicates it with an `#action:<command>` tag, it never replaces it (sessions grep by what they
+   FIX and get burned by what they RUN).
 2. **Write one entry** at the **top** of the `## Entries` section, in the canonical format:
    ```
    ### EXP-NNNN · <ISO date> · <✅|❌|❌→✅> · #tag #area
@@ -33,6 +45,13 @@ non-obvious gotcha). **Capture proactively — don't wait to be asked.**
    **Trigger:** for class-level lessons — the decision point that must invoke this lesson, as
      "writing X → run Y" (the lesson names WHERE it applies, instead of hoping to be remembered).
    **Not for:** the validity range — where this lesson does NOT apply.
+   **Mechanization:** REQUIRED, exactly one of three (the step-0 answer, recorded):
+     `mechanized: <the tool>` — the lesson is now enforced/eliminated by code ·
+     `none-cheap: <why>` — mechanization is not cheaply possible, the reason named ·
+     `subject-lesson` — a lesson about the subject matter; the journal is its right home.
+     An entry whose text reduces to "first A, then B" / "don't forget X before Y" is a TRAP
+     CANDIDATE BY FORM: `subject-lesson` is not available to it — it carries `mechanized:` or
+     `none-cheap: <why>`.
    ```
    - `EXP-NNNN` = next id (highest existing + 1, zero-padded).
    - Pick 1–3 short `#tags` **inline on the entry** (there is no central tag cloud) — reuse an existing tag
@@ -41,7 +60,9 @@ non-obvious gotcha). **Capture proactively — don't wait to be asked.**
 3. Keep it truthful — record what actually happened, including failures.
 4. **A lesson that repeats is a lesson that failed as text.** When the same class recurs in NEW code
    after its entry was recorded, the lesson MUST become executable (a linter rule, a guard, a gate) and
-   the entry gains the line `mechanized: <the tool>`. Two strikes → a mechanism, never a third reminder.
+   the entry's Mechanization field flips to `mechanized: <the tool>`. Two strikes → a mechanism, never
+   a third reminder — that deadline stands; step 0 asks the question at the FIRST capture so the
+   second burn stops being the price of asking.
 
 ## Mode B — RECALL lessons ("recount your experience")
 
@@ -50,7 +71,9 @@ OR you are **starting a task** and want to avoid known dead ends. **Recall at th
 default** — it's cheap and prevents repeated mistakes.
 
 1. **Grep** `EXPERIENCE.md` by the task's tags/keywords: `grep -i '#loop\|context' EXPERIENCE.md`
-   (`-A4` to include the entry body), then read the matched entries.
+   (`-A4` to include the entry body), then read the matched entries. **Grep a second axis too — the
+   ACTIONS you are about to run:** `grep '#action:' EXPERIENCE.md` — a session greps by what it
+   FIXES and gets burned by what it RUNS; subject tags never surface an action lesson.
 2. **Summarize** the relevant lessons in 1–5 lines: what was tried, what worked, what to avoid — and let
    that steer the approach BEFORE writing code. If a past entry says an approach failed, don't blindly
    retry it; go the other way (or note why this time differs). Mind each entry's **Not for:** range —
