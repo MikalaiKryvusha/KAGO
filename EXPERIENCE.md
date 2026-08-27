@@ -77,6 +77,22 @@
 
 ## Entries
 
+### EXP-0160 · 2026-08-28 · ❌→✅ · #cleanup-vs-live-work #owner-facing-window #title-sweep #stop-hook #bugs-64
+**Context:** the review contour was raised for the owner (interview 017); the page died in front of him TWICE, both times right after the agent's turn ended. His words: «опять закрылось само!!!!».
+**Tried / did:** read the Stop hook chain instead of guessing: `tidy --apply` runs at every turn end → calls `dash.closeWindow()` unconditionally → PowerShell sweeps EVERY msedge/chrome whose `MainWindowTitle` matches `'*KAGO*'` → the review page is titled «KAGO — Интервью 017…».
+**Result:** ✅ two-layer fix, proven: a live `tools/review.mjs` makes the machine BUSY for cleanup (selftest 13→15 blocks, marker mutation reddens its own block); the title sweep now requires the title NOT to carry the browser product suffix — an `--app=` window has the bare page title, the owner's real browser always has «— Microsoft Edge», and `CloseMainWindow` to a main window would close ALL his tabs. Live: `tidy --apply` against the raised contour → «НЕ ТРОГАЮ», `/alive` 200.
+**Lesson:** **a cleanup tool on an end-of-turn hook is at war with every interactive surface the agent raises FOR the owner — «recognized as ours» must never equal «ours to kill»: a page the owner is answering is live work, and a window-title sweep that can reach the owner's main browser is a defect even while it sleeps.** Twin of bugs/21 one contour up: the class is «cleanup cannot tell its garbage from its work», and every NEW long-lived owner-facing surface must be added to the busy list AT BIRTH.
+**Trigger:** adding any hook that kills processes/windows · raising any new long-lived owner-facing surface (page, window, server) · a window «closes itself» correlated with turn ends.
+→ link: `bugs/64` · `bugs/21` · `researches/20` §4.
+
+### EXP-0161 · 2026-08-28 · ❌→✅ · #prescription-needs-carrier #audit-follow-through #delivery-line #method
+**Context:** the 2026-08-21 audit prescribed «покупать продукт, а не леса» in PROSE. The following week opened three more machinery epics and ~20 bugs; edges stood at 11/389. The method audit (2026-08-28) had to re-diagnose the same thing.
+**Tried / did:** attached every recommendation to a CARRIER instead of restating it: a counter command (`ideas/14`) + a delivery line opening/closing every session + a moratorium rule reading the counter's number + canon at the decision point (`AGENT_GUIDE` → The critical path rule) — and put the forks to the owner through the contour, recorded, propagated with citations (guard: 12 return-leg checks, 0 violations).
+**Result:** ✅ the owner closed five forks the same night; the rules are canon with named numbers; the next session opens with the score instead of the newest pain.
+**Lesson:** **a prescription without a carrier does not survive one week — even with strong models and even when everyone agrees with it. An audit's output is not findings but CARRIERS: a command that prints the number, a line a session must say, a gate that reads it.** Same mechanism origin issue #22 measured for weak models; field-repeated here on strong ones.
+**Trigger:** writing any audit/review/retro recommendation · noticing the same finding twice in two audits — the second occurrence means the first had no carrier.
+→ link: `reports/KAIF_AUDIT/2026-08-28_audit_03_method.md` §6 · `bugs/KAIF/07` · интервью 017.
+
 ### EXP-0159 · 2026-08-28 · ✅ · #kaif-update #sandbox-rehearsal #line-endings #byte-exact-guards #framework-migration
 **Context:** first-ever `/kaif-update` of this deployment that actually changed bytes (2.2 → 2.3): 8 modules merged into 4 canon docs that carry heavy local edits (the prayer block in every one), 5 files replaced including the machinery itself. The skill offers a sandbox rehearsal as an option "on the first-ever update and on any deployment with heavy localization" — both were true here.
 **Tried / did:** exported the clean tree (`git archive HEAD -o tree.tar` — a FILE, not a PowerShell 5.1 pipe, which corrupts binary streams), ran the REAL `update` in the copy, read its diff and `KAIF_UPDATE_TASK.md`, and only then ran the live pass. After the live pass, ran the project's OWN build gate (`npm run check`), not just the framework's.

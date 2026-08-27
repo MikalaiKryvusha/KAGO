@@ -1,0 +1,92 @@
+# Plan 53 — «ЗАКАЗ»: the operative digest of GOAL, approved by the owner
+
+> **Created:** 2026-08-28 · **Parent:** интервью 017, Q3 = A (the owner's decision, 2026-08-28
+> 01:23) · method audit `reports/KAIF_AUDIT/2026-08-28_audit_03_method.md` §6 (Р3)
+> **Status:** 🟡 OPEN — written before any implementation, per the owner's word («мы напишем нужные
+> планы и закроем чат, а делать по планам будем в новом чате», 2026-08-28)
+> **Outbound:** the draft goes to the owner THROUGH THE REVIEW CONTOUR; nothing is in force until
+> his approval is recorded.
+
+## Goal vector
+
+**Pain.** `GOAL.md` is 1,514 lines of verbatim transcript with cancellation layers; the operative
+truth (what a mode IS, when tuning ENDS, what the barriers ARE) must be excavated from
+redefinition history on every read — including documented traps («не перепутай два числа 885»).
+The «two truths» class recurs because the corpus outgrew the sessions that maintain it.
+
+**Where we want to be.** One document «ЗАКАЗ» (`ЗАКАЗ.md`, root, RU — the owner reads it): ~150
+lines of CURRENT-FORCE definitions only, each line carrying a link to its verbatim source in
+`GOAL.md`; approved by the owner; edited only on his word. `GOAL.md` remains the verbatim
+append-only archive (its header already says so — интервью 017, Q3). Sessions re-read «ЗАКАЗ»;
+the archive is for disputes and archaeology.
+
+**Goal type:** Achieve (the digest exists and is in force) + Maintain (not one owner formulation
+is lost or reworded — the digest LINKS, never paraphrases silently).
+
+## Acceptance criteria (Scale · Meter · Target)
+
+| # | Criterion | Meter | Target |
+|---|---|---|---|
+| AC1 | «ЗАКАЗ» is small and sourced | line count; every definition carries a `GOAL.md`-anchor + date | ≤ 200 lines; 0 definitions without a source link |
+| AC2 | Coverage is the NAMED set, not «everything important» | section checklist (below) | all 9 sections present, none beyond them without the owner's word |
+| AC3 | The owner approved it | review-contour decision record (`interviews/decisions/`) | recorded approval; until then «ЗАКАЗ» carries a draft banner and is NOT in force |
+| AC4 | Wired into the canon surface | `AGENT_GUIDE.md` context router: definitions route to «ЗАКАЗ»; `/resume` set unchanged in size | router row edited; no new documents beyond «ЗАКАЗ» itself |
+| AC5 | The archive is untouched | `git diff GOAL.md` for the delivery commit | header pointer only (already placed 2026-08-28); body byte-identical |
+
+**AC2 — the nine sections:** (1) the four modes table (one voltage vector · power limits
+300/250/250 · ceiling only in Silent Cold) · (2) the acceptance criterion of the whole project
+(edges for ALL 389 frequencies; the four legal origins) · (3) the five barriers (ratchet · hang
+floors · oracle as condition · watchdog/rollback · no unconfirmed writes) with «всё прочее —
+помощники» · (4) the margin rule (last stable + 1 grid step) · (5) noise thresholds (40 % / 60 %,
+the rpm ruler) and the temperature targets derived from them · (6) the flexible-tuning unit of
+work (one burn; the three-source intersection; «каждый прожиг — улика») · (7) the frequency
+language (no numbered points; frequency → serving voltage) and the register rule pointer ·
+(8) live-run autonomy (интервью 017 Q4 verbatim: edge only with a human; unattended only
+non-edge, guaranteed non-hanging) · (9) the standing method rules from интервью 017 (moratorium
+threshold · delivery line · price on entry) as POINTERS to `AGENT_GUIDE.md`, not copies.
+
+## Steps
+
+- [ ] 1. **Extract candidates:** walk `GOAL.md` (+ `MASTER_PLAN.md` mode table, `STATUS.md`
+      facts 15–39 where they define, not measure) and list every current-force definition with its
+      source anchor and date; superseded formulations are NOT candidates.
+- [ ] 2. **Draft `ЗАКАЗ.md`** (RU, owner's register — no borrowed jargon) with a top banner:
+      «ЧЕРНОВИК — не в силе до утверждения владельцем; правится только его словом». Every line:
+      definition → source link → date of the owner's word.
+- [ ] 3. **Self-check against the frameworks:** definitions stay QUOTES or tight restatements with
+      sources (`REQUIREMENTS_FRAMEWORK` stop-words inside quoted owner text are legal); the
+      questions-guard must stay clean (the draft asks nothing — it states).
+- [ ] 4. **Raise through the review contour** (`npm run ask ЗАКАЗ.md` — the show contour opens any
+      markdown, I16); the owner reads, comments, approves. A comment without approval =
+      rejected-with-direction = rework, not force.
+- [ ] 5. **On approval:** remove the draft banner (the approval record is the force), edit the
+      `AGENT_GUIDE.md` context-router row (definitions → «ЗАКАЗ»), append the pointer line to the
+      STATUS relay. NO other canon edits; no new guards (the moratorium holds — this plan adds
+      ZERO machinery).
+- [ ] 6. **DONE-tag this plan** with the approval date and the recorded decision path.
+
+## Verification by observation
+
+| claim | observation |
+|---|---|
+| every definition has a source | a link-check pass over the draft (grep `GOAL.md#`/dates), count = definitions count |
+| the owner approved | the decision file exists with `by`/`at`; quoted in this plan's DONE section |
+| the archive untouched | `git diff` of the delivery commit shows GOAL.md unchanged |
+| sessions actually read less | the router row; the next session's /resume names «ЗАКАЗ» in its pass |
+
+## Risks, tiered
+
+- **(a) Highest — distillation drops a nuance the owner meant.** Mitigation: links-not-paraphrase
+  as the default form; the owner's contour read IS the gate; anything he flags returns to GOAL
+  verbatim quoting.
+- **(b) Plausible — «ЗАКАЗ» starts drifting from GOAL as new owner words arrive.** Mitigation
+  WITHOUT new machinery (moratorium): the fix-vision ritual gains one line in its checklist — a
+  new owner word that changes a definition updates «ЗАКАЗ» + appends to GOAL in the same commit;
+  named here, wired during step 5 as a one-line edit to the `/fix-vision` skill text.
+- **(c) Small — the draft exceeds 200 lines.** Mitigation: pointers instead of copies for
+  anything already canonical elsewhere (AC2 §9 pattern).
+
+## Price (интервью 017, Q5 discipline)
+
+~1 offline session for steps 1–3, one owner contour read for step 4, minutes for step 5.
+Displaces nothing: it is itself the audit queue's item.
