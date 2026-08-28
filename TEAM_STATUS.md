@@ -14,7 +14,7 @@
 | Role | State | Doing | Waiting for | Updated |
 |---|---|---|---|---|
 | manager | 🟢 free | — | — | 2026-08-28 14:30 |
-| engineer | 🟢 free | — | — | 2026-08-28 14:30 |
+| engineer | 🟢 free | — | — | 2026-08-28 14:22 |
 | verifier | 🟢 free | — | — | 2026-08-28 14:30 |
 
 *(States: 🟢 free · 🔴 busy. "Doing" — one short line: what and on whose assignment. "Waiting
