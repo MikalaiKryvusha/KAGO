@@ -710,10 +710,58 @@ export async function runStep({
   // already written the rule this violates: «probeCard() already resolved the ladder — take it, do
   // not re-derive it» (EXP-0013).
   pinCard = null,
+  // ⚡ THE DEVICE PORT (epic 59 phase 2, plans/61) — the ONE seam between this atom and hardware.
+  // null → the live adapter below: the exact calls this module always made, bit for bit. Injected →
+  // the whole write chain runs against a stand-in (the phase-2 selftest fake today, the digital
+  // twin's adapter in phase 3). PURE arithmetic (buildRaiseAndCapVector, classifyWriteFailure,
+  // snapToLadder, verdict/ceiling logic) is deliberately NOT in the port: a stand-in must not be
+  // able to bring its own arithmetic (invariant I2 — a double softer than the original lies green).
+  device = null,
 } = {}) {
   const nvapi = await import('./nvapi.mjs');
   const wd = await import('./watchdog.mjs');
   const stress = await import('./stress-tester.mjs');
+  const dev = device ?? {
+    recover: (o) => wd.recover(o),
+    arm: (o) => wd.arm(o),
+    open: () => {
+      const nv = nvapi.openNvapi();
+      nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+      const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+      nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
+      return { nv, handle: handles.readBigUInt64LE(0) };
+    },
+    close: (nv) => { nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload); },
+    readVfOffsets: (nv, h) => nvapi.readVfOffsets(nv, h),
+    readVfCurve: (nv, h) => nvapi.readVfCurve(nv, h),
+    readVfCurveStable: (nv, h) => nvapi.readVfCurveStable(nv, h),
+    writeCurve: (nv, h, x) => nvapi.writeCurve(nv, h, x),
+    writeVfOffset: (nv, h, p, khz) => nvapi.writeVfOffset(nv, h, p, khz),
+    zeroCurve: (nv, h) => nvapi.zeroCurve(nv, h),
+    readTempC: () => cardTemperatureC(),
+    clockBackend: async () => (await import('./profile-manager.mjs')).nvidiaSmiBackend(),
+    applyProfile: async (be, profile, opts) => (await import('./profile-manager.mjs')).apply(be, profile, opts),
+    resetToFactory: async (be, opts) => (await import('./profile-manager.mjs')).resetToFactory(be, opts),
+    probeCard: async () => (await import('./profile-store.mjs')).probeCard(),
+    startSampler: ({ seconds: samplerSeconds, pinMhz: p, capMhz: c, offsetMhz: o }) => {
+      const { spawn } = require('node:child_process');
+      const { join, dirname } = require('node:path');
+      const { fileURLToPath } = require('node:url');
+      const { mkdirSync } = require('node:fs');
+      const here = dirname(fileURLToPath(import.meta.url));
+      const runsDir = join(here, '..', '..', 'runs', 'vmin');
+      mkdirSync(runsDir, { recursive: true });
+      const file = join(runsDir, `${p ? `pin-${p}` : `cap-${c}`}-${o}.jsonl`);
+      const proc = spawn(process.execPath, [join(here, 'hardware-mon.mjs'), '--seconds', String(samplerSeconds), '--out', file],
+        { windowsHide: true, stdio: 'ignore' });
+      return { file, kill: () => { try { proc.kill(); } catch { /* уже вышел */ } } };
+    },
+    burn: {
+      judgeCandidate: (o) => stress.judgeCandidate(o),
+      stressTest: (o) => stress.stressTest(o),
+      runOptionsForShape: (sh, o) => stress.runOptionsForShape(sh, o),
+    },
+  };
 
   // THE SHAPE IS RESOLVED ONCE, HERE, and it rides in the report — a record that does not say which
   // shape produced it cannot be compared with one that does (EXP-0011: a value is true only under the
@@ -729,7 +777,7 @@ export async function runStep({
   if (offsetMhz <= 0) throw new RangeError(`шаг обязан быть ПОЛОЖИТЕЛЬНЫМ (это и есть андервольт): ${offsetMhz}`);
 
   // ---- 1. PREFLIGHT
-  const stale = await wd.recover({});
+  const stale = await dev.recover({});
   if (stale.found && stale.ownerAlive) {
     block('преполётная проверка: сторож свободен', false,
       `карту держит живой процесс pid ${stale.record.ownerPid} («${stale.record.what}»)`);
@@ -740,11 +788,7 @@ export async function runStep({
       `прошлый прогон умер, держа карту; сброшено — ${stale.reset.steps.filter((s) => s.ok).length} из ${stale.reset.steps.length} шагов`);
   }
 
-  const nv = nvapi.openNvapi();
-  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
-  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
-  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
-  const handle = handles.readBigUInt64LE(0);
+  const { nv, handle } = dev.open();
 
   let watchdog = null;
   let written = false;
@@ -766,13 +810,13 @@ export async function runStep({
   let samplerFile = null;
 
   try {
-    const before = nvapi.readVfOffsets(nv, handle);
-    const curveBefore = nvapi.readVfCurve(nv, handle);
+    const before = dev.readVfOffsets(nv, handle);
+    const curveBefore = dev.readVfCurve(nv, handle);
     block('старт: карта на стоке, все сдвиги нулевые',
       before.ok && before.nonZero === 0, before.ok ? `ненулевых ${before.nonZero} из 128` : before.why);
     if (!before.ok || before.nonZero !== 0) return out;
 
-    const tempBefore = cardTemperatureC();
+    const tempBefore = dev.readTempC();
     out.tempBefore = tempBefore;
     const freqBefore = curveBefore.ok ? curveBefore.points[point].mhz : null;
     const mvAtPoint = curveBefore.ok ? curveBefore.points[point].mv : null;
@@ -874,7 +918,7 @@ export async function runStep({
       uniform: `АНДЕРВОЛЬТ: вся кривая равномерно +${offsetMhz} МГц`,
       point: `АНДЕРВОЛЬТ: точка ${point} (+${offsetMhz} МГц)`,
     }[shape];
-    watchdog = wd.arm({ what: `${armWhat}, нагрузка ${Array.isArray(shapes) ? `набор из ${shapeCount} форм` : workload}`, ttlMs });
+    watchdog = dev.arm({ what: `${armWhat}, нагрузка ${Array.isArray(shapes) ? `набор из ${shapeCount} форм` : workload}`, ttlMs });
     block('сторож взведён ДО записи', Boolean(watchdog.guardPid),
       `pid ${watchdog.guardPid}, аренда ${ttlMs / 1000} с, откат — полный возврат к заводскому`);
 
@@ -903,15 +947,15 @@ export async function runStep({
     // §5 H1 names as the leading hypothesis for the live failure of 2026-08-24 09:36.
     let heldKhz = null;
     if (shape === 'raise-and-cap') {
-      const w = nvapi.writeCurve(nv, handle, vector.offsets);
+      const w = dev.writeCurve(nv, handle, vector.offsets);
       failed = w.failed; heldKhz = w.heldKhz ?? null; out.writeFailureClass = w.failureClass ?? null;
       out.writeFailureWhy = w.why ?? null; out.writeSettled = w.settled === true;
     } else if (shape === 'uniform') {
-      const w = nvapi.writeCurve(nv, handle, offsetMhz);
+      const w = dev.writeCurve(nv, handle, offsetMhz);
       failed = w.failed; heldKhz = w.heldKhz ?? null; out.writeFailureClass = w.failureClass ?? null;
       out.writeFailureWhy = w.why ?? null; out.writeSettled = w.settled === true;
     } else {
-      const r = nvapi.writeVfOffset(nv, handle, point, offsetMhz * 1000);
+      const r = dev.writeVfOffset(nv, handle, point, offsetMhz * 1000);
       if (!r.ok) failed++;
     }
     written = failed < targets.length;
@@ -965,7 +1009,7 @@ export async function runStep({
     // THE EFFECTIVE CURVE THROUGH THE SAME CONTRACT. `researches/18` §5 H1 is about THIS read, not
     // about the offsets one: `curveAfter` was a single probe taken after 127 writes, and it is what
     // reported a table topping 15 MHz ABOVE a ceiling the vector provably could not exceed.
-    const curveAfter = nvapi.readVfCurveStable(nv, handle);
+    const curveAfter = dev.readVfCurveStable(nv, handle);
     // An effective table that never stood still IS class C1, and it is named here rather than left as
     // «кривая не перечитана» — a symptom the operator cannot act on (`plans/39`, standard item 2).
     if (curveAfter.settled === false && !out.writeFailureClass) {
@@ -1070,7 +1114,6 @@ export async function runStep({
     // verified UNDER LOAD rather than at idle (EXP-0020 — at idle a high lock is invisible), and it is
     // released in the `finally` below on every path.
     if (pinMhz) {
-      const pm = await import('./profile-manager.mjs');
       const ld = await import('./ladder-descent.mjs');
       // THE CARD WITH ITS LADDER, and it is a DIFFERENT probe from the one the oracle uses. This
       // project has two functions named `probeCard`: `stress-tester`'s answers driver/VBIOS for a
@@ -1078,8 +1121,7 @@ export async function runStep({
       // power envelope. The validator needs the second, and passing the first cost a live rung —
       // it threw inside `validateProfile` AFTER the curve had been written (the `finally` cleaned up,
       // which is the only reason that was a stumble rather than an incident).
-      const ps = await import('./profile-store.mjs');
-      const card = pinCard ?? ps.probeCard();
+      const card = pinCard ?? await dev.probeCard();
       if (!card.ladder?.ok) {
         block('ЧАСТОТА ЗАКРЕПЛЕНА', false, `лестница частот недоступна — ${card.ladder?.why ?? 'не прочитана'}`);
         return out;
@@ -1090,8 +1132,8 @@ export async function runStep({
       out.pinRequestedMhz = pinMhz;
       pinMhz = snap.mhz;
       out.pinMhz = pinMhz;
-      pmBackend = pm.nvidiaSmiBackend();
-      const applied = await pm.apply(pmBackend, ld.candidateProfile(pinMhz, card), { card, verifyLock: 'deferred' });
+      pmBackend = await dev.clockBackend();
+      const applied = await dev.applyProfile(pmBackend, ld.candidateProfile(pinMhz, card), { card, verifyLock: 'deferred' });
       pinned = true;                                   // set BEFORE judging success: a partial apply still needs undoing
       clocksHeld = true;
       block(`ЧАСТОТА ЗАКРЕПЛЕНА на ${pinMhz} МГц${snap.snapped ? ` (просили ${snap.from}, притянуто к лестнице карты)` : ''} — иначе низ кривой под нагрузкой не тестируется вовсе`,
@@ -1116,10 +1158,8 @@ export async function runStep({
       return out;
     }
     if (lockMhz && !pinMhz) {
-      const pm = await import('./profile-manager.mjs');
       const ld = await import('./ladder-descent.mjs');
-      const ps = await import('./profile-store.mjs');
-      const card = pinCard ?? ps.probeCard();
+      const card = pinCard ?? await dev.probeCard();
       if (!card.ladder?.ok) {
         block('ГРАНИЦА ЧАСТОТЫ', false, `лестница частот недоступна — ${card.ladder?.why ?? 'не прочитана'}`);
         return out;
@@ -1129,10 +1169,10 @@ export async function runStep({
       out.lockRequestedMhz = lockMhz;
       lockMhz = snapL.mhz;
       out.lockMhz = lockMhz;
-      pmBackend = pmBackend ?? pm.nvidiaSmiBackend();
+      pmBackend = pmBackend ?? await dev.clockBackend();
       // `verifyLock: 'deferred'` — та же причина, что у закрепления: на ПРОСТОЕ высокая граница
       // невидима, карта и так стоит ниже (EXP-0020). Доказывается она под нагрузкой, блоком потолка.
-      const appliedL = await pm.apply(pmBackend, ld.ceilingLockProfile(lockMhz, card), { card, verifyLock: 'deferred' });
+      const appliedL = await dev.applyProfile(pmBackend, ld.ceilingLockProfile(lockMhz, card), { card, verifyLock: 'deferred' });
       clocksHeld = true;                               // ДО суждения об успехе: частичное применение тоже надо откатывать
       block(`ГРАНИЦА ЧАСТОТЫ ${lockMhz} МГц${snapL.snapped ? ` (просили ${snapL.from}, притянуто к лестнице карты)` : ''} `
         + `— карта свободна ВНИЗ (нижняя ступень лестницы ${card.ladder.mhz[0]} МГц), но не выше границы`,
@@ -1152,19 +1192,11 @@ export async function runStep({
     // It runs in a SEPARATE process: an in-process one records nothing, because `spawnSync` inside the
     // load blocks this event loop (measured, `power-baseline.mjs` header).
     if (pinMhz || capMhz) {
-      const { spawn } = require('node:child_process');
-      const { join, dirname } = require('node:path');
-      const { fileURLToPath } = require('node:url');
-      const here = dirname(fileURLToPath(import.meta.url));
-      const { mkdirSync } = require('node:fs');
-      const runsDir = join(here, '..', '..', 'runs', 'vmin');
-      mkdirSync(runsDir, { recursive: true });
-      // The name says which mechanism was holding the ceiling, so two runs at one clock cannot be
-      // mistaken for each other after the fact.
-      samplerFile = join(runsDir, `${pinMhz ? `pin-${pinMhz}` : `cap-${capMhz}`}-${offsetMhz}.jsonl`);
+      // The file name says which mechanism held the ceiling; BUILDING it is the device's business
+      // now — the twin's sampler must land in the bench sandbox, never in runs/vmin (I1).
       const samplerSeconds = seconds * ((Array.isArray(shapes) && shapes.length) || 1) + 30;
-      sampler = spawn(process.execPath, [join(here, 'hardware-mon.mjs'), '--seconds', String(samplerSeconds), '--out', samplerFile],
-        { windowsHide: true, stdio: 'ignore' });
+      sampler = dev.startSampler({ seconds: samplerSeconds, pinMhz, capMhz, offsetMhz });
+      samplerFile = sampler?.file ?? null;
     }
 
     // ---- 4. THE ORACLE — the full three-way verdict under real load
@@ -1172,12 +1204,12 @@ export async function runStep({
     // With a SET, the point's verdict is the WORST over the set and the deciding shape is named
     // (plans/05 §4.3). Without one, this stays the single-shape atom it has always been.
     if (Array.isArray(shapes) && shapes.length) {
-      const judged = await stress.judgeCandidate({
+      const judged = await dev.burn.judgeCandidate({
         shapes,
         // The mapping «shape -> how to run it» lives in stress-tester as a pure function with its
         // own blocks: a run labelled one shape and executed as another is invisible from here.
-        runShapeFn: (s) => stress.stressTest({
-          ...stress.runOptionsForShape(s, { seconds, sustain }),
+        runShapeFn: (s) => dev.burn.stressTest({
+          ...dev.burn.runOptionsForShape(s, { seconds, sustain }),
           onBurst: () => { watchdog.beat(); },
         }),
         onShape: () => { watchdog.beat(); },
@@ -1210,7 +1242,7 @@ export async function runStep({
       return out;
     }
 
-    const result = await stress.stressTest({
+    const result = await dev.burn.stressTest({
       name: workload,
       seconds,
       sustain,
@@ -1347,8 +1379,7 @@ export async function runStep({
           if (!clocksHeld) return 'частота не закреплялась и границей не ограничивалась';
           // `resetToFactory` is TOTAL rather than differential — rule R9's reasoning: after something
           // goes wrong nobody knows what was applied, so the only honest undo is factory.
-          const pm = await import('./profile-manager.mjs');
-          const released = await pm.resetToFactory(pmBackend, { knownLockMhz: pinMhz ?? lockMhz });
+          const released = await dev.resetToFactory(pmBackend, { knownLockMhz: pinMhz ?? lockMhz });
           if (released.ok === false) throw new Error(released.why ?? 'сброс отказал');
           return released.why ?? 'сброс к заводскому применён и перечитан';
         },
@@ -1359,7 +1390,7 @@ export async function runStep({
           if (!written) return 'в кривую не писали';
           // Zero EVERY point, not only the ones this run wrote: "undo exactly what I did" needs a
           // record a crash may have taken with it. Zeroing a zero costs nothing.
-          const z = nvapi.zeroCurve(nv, handle);
+          const z = dev.zeroCurve(nv, handle);
           if (!z.ok) throw new Error(`отказов записи ${z.failed} · ненулевых осталось ${z.remainingNonZero}`);
           return `отказов записи 0 · ненулевых ${z.remainingNonZero} из 128`;
         },
@@ -1376,7 +1407,7 @@ export async function runStep({
       },
       {
         name: 'ОТКАТ: библиотека NVAPI выгружена',
-        run: async () => { nv.koffi.call(nv.resolve(0xD22BDD7E).ptr, nv.protos.Unload); return 'Unload вызван'; },
+        run: async () => { dev.close(nv); return 'выгрузка вызвана'; },
       },
     ]));
   }
@@ -2676,6 +2707,99 @@ export async function selfTest() {
     ok('bugs/47: таблицы совпали → дрейф ноль, число не меняется',
       (() => { const r = offsetForTarget({ targetClockMhz: 2355, pointFreqMhz: 2152, askedOffsetMhz: 203 }); return [r.offsetMhz, r.driftMhz]; })(),
       [203, 0]);
+  }
+
+  // ─── ⚡ ПОРТ УСТРОЙСТВА (эпик 59 фаза 2, plans/61): ПУТЬ ЗАПИСИ ЦЕЛИКОМ — ВПЕРВЫЕ ОФЛАЙН ───────
+  //
+  // До этого порта шапка модуля честно признавала: «untested offline: the write path itself».
+  // Фейковое устройство ниже гонит runStep через ВСЮ цепочку (преполёт → чтения → вектор → сторож →
+  // запись → поточечное чтение → потолок → андервольт → сэмплер → оракул → откат) без карты.
+  // Чистая арифметика (buildRaiseAndCapVector) НАМЕРЕННО не в порте: вектор ниже посчитан настоящей
+  // функцией по фикстурной кривой — фейк не может принести свою (инвариант I2 эпика 59).
+  {
+    const { tmpdir } = await import('node:os');
+    const { writeFileSync: wf, mkdirSync: mkd } = await import('node:fs');
+    const { join: j } = await import('node:path');
+    const N_PTS = 127;
+    // Поля — РОВНО те, что читает voltageForClock (i · mv · microVolts · freqKhz · mhz): фикстура,
+    // не знающая полей потребителя, красит блок «частота вне кривой» на здоровой логике.
+    const basePoints = Array.from({ length: N_PTS }, (_, i) => ({
+      i, mhz: 500 + i * 15, mv: 600 + i * 5, microVolts: (600 + i * 5) * 1000, freqKhz: (500 + i * 15) * 1000,
+    }));
+    const POINT = 100;
+    const CAP = basePoints[POINT].mhz + 30; // 2030: подъём +30 доводит испытуемую точку ровно до потолка
+    const sandbox = j(tmpdir(), `vfstep-port-${process.pid}`);
+    mkd(sandbox, { recursive: true });
+    const samplerPath = j(sandbox, 'sampler.jsonl');
+
+    const makeFake = ({ writeFails = false } = {}) => {
+      const calls = [];
+      let lastOffsets = null;
+      return {
+        calls,
+        dev: {
+          recover: () => { calls.push('recover'); return { found: false }; },
+          arm: () => { calls.push('arm'); return { guardPid: 777, beat: () => {}, disarm: () => calls.push('disarm') }; },
+          open: () => { calls.push('open'); return { nv: { fake: true }, handle: 1n }; },
+          close: () => { calls.push('close'); },
+          readVfOffsets: () => ({ ok: true, nonZero: 0 }),
+          readVfCurve: () => ({ ok: true, points: basePoints }),
+          readVfCurveStable: () => ({
+            ok: true, settled: true,
+            points: basePoints.map((p, i) => ({ ...p, mhz: p.mhz + (lastOffsets?.[i] ?? 0), freqKhz: (p.mhz + (lastOffsets?.[i] ?? 0)) * 1000 })),
+          }),
+          writeCurve: (_nv, _h, offsets) => {
+            calls.push('writeCurve');
+            if (writeFails) return { ok: false, failed: N_PTS, settled: false, heldKhz: null, failureClass: 'C2', why: 'C2 — фейк по заказу мутационного свидетеля' };
+            lastOffsets = offsets;
+            return { ok: true, failed: 0, settled: true, heldKhz: offsets.map((o) => Math.round((o ?? 0) * 1000)) };
+          },
+          writeVfOffset: () => { calls.push('writeVfOffset'); return { ok: true }; },
+          zeroCurve: () => { calls.push('zeroCurve'); return { ok: true, failed: 0, remainingNonZero: 0 }; },
+          readTempC: () => 45,
+          clockBackend: async () => { calls.push('clockBackend'); return {}; },
+          applyProfile: async () => ({ ok: true }),
+          resetToFactory: async () => ({ ok: true }),
+          probeCard: async () => ({ ladder: { ok: true, mhz: basePoints.map((p) => p.mhz) } }),
+          startSampler: () => {
+            calls.push('sampler');
+            // Дюжина проб «под нагрузкой» чуть НИЖЕ потолка: недобор — замер, не отказ (bugs/29).
+            wf(samplerPath, Array.from({ length: 12 }, () => JSON.stringify({ 'utilization.gpu': 99, 'clocks.gr': CAP - 7 })).join('\n'));
+            return { file: samplerPath, kill: () => calls.push('sampler.kill') };
+          },
+          burn: {
+            judgeCandidate: async () => { throw new Error('набора в этом прогоне нет'); },
+            stressTest: async () => { calls.push('stressTest'); return { verdict: config.VERDICT.PASS, reason: 'фейковый оракул: сумма сошлась', meters: { badElems: 0 }, bursts: [{}] }; },
+            runOptionsForShape: () => ({}),
+          },
+        },
+      };
+    };
+
+    const happy = makeFake();
+    const r1 = await runStep({
+      point: POINT, offsetMhz: 30, writeShape: 'raise-and-cap', capMhz: CAP,
+      workload: 'sdc_fma', seconds: 1, sustain: 1, device: happy.dev,
+    });
+    ok('ПОРТ: путь записи ЦЕЛИКОМ офлайн — вердикт PASS, ни одного красного блока',
+      [r1.verdict, r1.blocks.filter((b) => !b.ok).length], [config.VERDICT.PASS, 0]);
+    ok('ПОРТ: вектор посчитан НАСТОЯЩЕЙ арифметикой по фикстуре (фейк о ней и не спрошен)',
+      [r1.vector?.capMhz, (r1.vector?.atFullDelta ?? 0) > 0, happy.calls.includes('buildVector')],
+      [CAP, true, false]);
+    ok('ПОРТ: откат отработал в finally — кривая обнулена, устройство закрыто, сторож снят',
+      ['zeroCurve', 'close', 'disarm'].every((c) => happy.calls.includes(c))
+        && happy.calls.indexOf('zeroCurve') > happy.calls.indexOf('stressTest'), true);
+    ok('ПОРТ: андервольт ИЗМЕРЕН на фикстуре — точка подешевела, экономия положительная',
+      (r1.undervolt?.savedMv ?? -1) > 0, true);
+
+    const sour = makeFake({ writeFails: true });
+    const r2 = await runStep({
+      point: POINT, offsetMhz: 30, writeShape: 'raise-and-cap', capMhz: CAP,
+      workload: 'sdc_fma', seconds: 1, sustain: 1, device: sour.dev,
+    });
+    ok('ПОРТ: запись, отклонённая ВСЕМИ точками, не рождает вердикта — и откат всё равно идёт',
+      [r2.verdict, r2.blocks.some((b) => !b.ok), sour.calls.includes('zeroCurve') === false && sour.calls.includes('close')],
+      [null, true, true]);
   }
 
   return { ok: results.every((r) => r.ok), results };
