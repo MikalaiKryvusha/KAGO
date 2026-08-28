@@ -77,6 +77,24 @@
 
 ## Entries
 
+### EXP-0164 · 2026-08-28 · ❌→✅ · #process-exit-skips-finally #lock-file #stale-lock #node
+**Context:** the team board tool (`tools/team-board.mjs`) refuses a busy resource lock from inside the `withFileLock` callback; the first draft refused via `process.exit(1)` right there.
+**Tried / did:** caught before running: `process.exit` terminates immediately and the `finally { closeSync; unlinkSync }` that releases the lock FILE never runs — every refusal branch would leave a stale `.lock` behind, and the next writer would wait out the 15 s abandonment timeout. Rewrote the callback to RETURN an outcome `{code, msg}`; the caller prints and exits OUTSIDE the lock.
+**Result:** ✅ — refusal branches proven live from foreign worktrees, no lock left behind after any of them.
+**Lesson:** **never `process.exit` inside a callback that a resource-holding wrapper (lock, temp file, fan/GPU restore) is going to clean up in `finally` — exit skips finally, and the leak lives exactly on the ERROR paths, where it hurts most.** Return the outcome and exit at the top level.
+**Repro:** `node -e "(async()=>{try{await (async()=>{process.exit(0)})()}finally{console.log('finally ran')}})()"` — prints nothing: finally is skipped.
+**Trigger:** writing `process.exit` anywhere below a `try/finally` that releases a resource · a stale `.lock` file found next to a board/journal.
+→ link: `tools/team-board.mjs` (the comment at the fix site) · `plans/54`.
+
+### EXP-0163 · 2026-08-28 · ✅ · #kaif-update #placeholders #verbatim-quotes #append-only #trust-neither-list
+**Context:** the KAIF 2.4 update task's `placeholders` item named `EXPERIENCE.md` and `KAIF_FRAMEWORK.md` as REAL fill locations for `<BUILD_COMMAND>`.
+**Tried / did:** read both locations before filling: each is a verbatim QUOTE of the 2.2 refusal (this journal's EXP-0002 and the deployment record) — filling them would falsify append-only history. Left them verbatim, filled only the genuine slots (end-chat-soft agent/e-mail); the gate agreed (`✔ placeholder scan ran clean`).
+**Result:** ✅ — checkpoint passed with the quotes intact; the asymmetry ticketed as `bugs/KAIF/10`.
+**Lesson:** **EXP-0002's rule now cuts BOTH ways: the gate scans wider than the item's list (2.2), and the item's list can be wider than the gate (2.4 — quotes listed as slots). Trust neither list: before filling any named placeholder location, read its CONTEXT and classify slot-vs-quote; a quote is never filled, whatever the task file says.**
+**Repro:** `grep -n -B2 -A2 "BUILD_COMMAND\|YOUR AGENT" <named file>` — a hit inside backticks/blockquote narrating history = quote, leave verbatim; a bare template slot = fill.
+**Trigger:** any KAIF task item enumerating placeholder locations · any instruction to edit a file that records history.
+→ link: `bugs/KAIF/10` · `reports/KAIF_UPDATES/KAGO_KAIF_2.4_UPDATE_REPORT.md` §2.
+
 ### EXP-0162 · 2026-08-28 · ❌→✅ · #windows-timer-quantum #timeBeginPeriod #millisecond-cadence #death-watch #off-by-one
 **Context:** the death watch (plans/52) needs a 2 ms tick; the first probe showed `Atomics.wait(2)` sleeping **13.6 ms median** — the default Windows timer quantum — which would have made the instrument a lie at birth.
 **Tried / did:** probed three sleep strategies BEFORE writing the module: bare wait (13.6 ms), spin (0.0 ms but burns a whole core), and `timeBeginPeriod(1)` via winmm.dll + bare wait (**0.77 ms median, 2.5 ms max**). Took the third; the resolution is taken at start and returned in `finally`, named out loud as a system-wide setting. Then the first 8 s floor run caught TWO more rakes: the catch-up arithmetic (`ceil(elapsed/tick)`) skipped one tick after EVERY late wake — 49.25 % delivered on a healthy machine; and `createRequire()` on an ESM graph with a top-level await killed the driver worker silently.
