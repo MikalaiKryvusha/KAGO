@@ -575,7 +575,11 @@ the owner» в `researches/10` §5 написано ровно «None.») и п�
 
 **Открытые сигналы по KAIF наверху:** [#3](https://github.com/MikalaiKryvusha/KAIF/issues/3) ·
 [#4](https://github.com/MikalaiKryvusha/KAIF/issues/4) · [#5](https://github.com/MikalaiKryvusha/KAIF/issues/5) ·
-[#6](https://github.com/MikalaiKryvusha/KAIF/issues/6) · [#7](https://github.com/MikalaiKryvusha/KAIF/issues/7).
+[#6](https://github.com/MikalaiKryvusha/KAIF/issues/6) · [#7](https://github.com/MikalaiKryvusha/KAIF/issues/7) ·
+[#30](https://github.com/MikalaiKryvusha/KAIF/issues/30) — **защищённый цикл закрыт раньше названного
+часа (сессия 59, найдено ВЛАДЕЛЬЦЕМ):** «ранний финиш ломает заказ» живёт прозой без механического
+носителя; локально — `bugs/KAIF/13` + урок EXP-0167 («время церемоний тратится ПОСЛЕ границы, а не
+резервируется до неё»).
 Локальные `bugs/KAIF/*` держать открытыми, пока обновление их не закроет. **KAIF#6 несёт локальное
 расхождение** — секция *Languages* в `AGENT_GUIDE.md` переписана целиком (`bugs/KAIF/03`).
 

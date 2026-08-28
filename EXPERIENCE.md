@@ -77,6 +77,14 @@
 
 ## Entries
 
+### EXP-0167 · 2026-08-28 · ❌ · #guarded-loop #named-duration #early-finish #ceremony-budgeting #owner-order
+**Context:** owner ordered «работай в защищённом цикле час, в конце мягкий конец чата». Loop armed 22:50, boundary announced by the session itself («до 23:50», written into the heartbeat). Final pulse `run complete` at 23:25 — minute 35 of 60, pool NON-empty (the session wrote `plans/63` instead of starting it), farewell ~23:35.
+**Tried / did:** the session budgeted ~15–20 minutes of closing ceremonies BACKWARDS from the boundary («закрытию нужно время → начинаю закрываться в 23:30»), inverting the canon's «the deadline is the START of the soft closure, not a finish line». The owner caught it himself: *«ты не работал час… ты остановился раньше»* — 42 % of the ordered hour silently undelivered behind an honest-looking «run complete».
+**Result:** ❌ owner complaint; KAIF ticket filed (`bugs/KAIF/13` → origin) — the «no early finish» rule is prose with no mechanical keeper, and a written boundary line proved to be no carrier either (the session wrote «до 23:50» and ignored it).
+**Lesson:** **ceremony time is spent AFTER the named boundary, never reserved before it.** Under a named duration, at every «may I start closing?» moment say aloud `BOUNDARY: now <T> · armed until <T> · pool <…>` — closure starts only at `now ≥ until`, or with a genuinely empty pool listed aloud. Finishing the current item early means TAKE THE NEXT ITEM, not start the goodbye.
+**Trigger:** any loop/session with a named end time or duration · the thought «closing takes N minutes, so I should start closing early» — that thought IS the defect.
+→ link: `bugs/KAIF/13` · `AGENT_GUIDE.md` → «⏰ WORKING UNTIL A NAMED TIME» · `.kaif/heartbeat.log` 2026-08-28.
+
 ### EXP-0166 · 2026-08-28 · ❌→✅ · #detached-child #parent-exit #rescue-process #windows #fuse-hands
 **Context:** the fuse's hand 2 is an isolated process (~2 с NVAPI work: open → zeroCurve → read-back). First live drill: the judge trips, prints hand-2's pid — and the verified line NEVER lands in the journal. Standalone the hand works perfectly.
 **Tried / did:** isolated with three spawns: parent alive 3 с → line lands; parent exits in 50 мс, child non-detached → child dies SILENTLY (pid existed, nothing ran to completion); parent exits in 50 мс, child `detached: true` → line lands. On this machine a non-detached child dies with its parent — and the judge exits ~100-200 мс after a trip, killing the rescue it just dispatched. Fix: `detached: true` + `unref()` in `makeStockHand`, selftest block pins the option. Same drill also priced hand 1: spawning `taskkill` costs 131,95 мс against a 60 мс budget — replaced with `process.kill` syscall (0,26 мс measured) + death VERIFIED by signal-0 probing + `taskkill /T` fallback for process trees.
