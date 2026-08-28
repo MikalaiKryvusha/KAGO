@@ -77,6 +77,14 @@
 
 ## Entries
 
+### EXP-0165 · 2026-08-28 · ❌→✅ · #blocked-event-loop #dgram-send #atomics-wait #channel-delivery-floor #fuse
+**Context:** the fuse (epic 51 phase 2) feeds liveness beats from the probe loop to the judge as loopback datagrams; the probe's measured loop shape is `Atomics.wait` cadence (EXP-0162). Plan 55 step 1 demanded the channel be measured in the sender's REAL loop shape before arming anything.
+**Tried / did:** `fuse --jitter-floor --seconds 60` with the sender running the probe's own blocking loop: **12,72 % delivered** (3 817 of ~30 000), arrival gaps median 0,01 мс — the beats queued in the process and left in rare BURSTS, because `dgram.send` hands data to a loop that `Atomics.wait` never lets run. Fix: the beat-armed probe (and its `--beat-sender` twin) sleeps by a yielding `setTimeout` chain — same promised-tick arithmetic, loop runs every tick; the beat-less floor mode keeps `Atomics.wait` byte-identical to the measured instrument. Re-measured: delivery ~100 %.
+**Result:** ✅ second floor: sent ≈ received, gaps regular; the mutant «удар не отправлен» still reddens end-to-end.
+**Lesson:** **a transport that rides the event loop (dgram, net, streams) CANNOT be fed from a loop that blocks the event loop — the send() call succeeds, the datagram silently waits, and the failure mode is bursty partial delivery, not an error.** Ship every in-memory channel with a delivery-ratio floor run in the sender's true loop shape BEFORE trusting it: 12,72 % on a healthy machine is the signature of a blocked loop, not of a lossy network. Second half: when one process needs both a blocking-precision duty and a loop-riding duty, split the duties by MODE and keep the measured instrument's mode byte-identical — re-measure the new mode as its own floor instead of inheriting the old numbers.
+**Trigger:** dgram/net send from inside `Atomics.wait`/`spawnSync`-shaped loops · a channel delivering a suspiciously round fraction in bursts · reusing a measured loop's numbers after changing its sleep shape.
+→ link: `plans/55` шаг 1 · `automation-engine/lib/death-watch.mjs` (обе формы сна, у места) · `automation-engine/lib/fuse.mjs` (шапка: числа обоих полов) · EXP-0162 (та же лестница: сперва замерь такт, теперь — доставку).
+
 ### EXP-0164 · 2026-08-28 · ❌→✅ · #process-exit-skips-finally #lock-file #stale-lock #node
 **Context:** the team board tool (`tools/team-board.mjs`) refuses a busy resource lock from inside the `withFileLock` callback; the first draft refused via `process.exit(1)` right there.
 **Tried / did:** caught before running: `process.exit` terminates immediately and the `finally { closeSync; unlinkSync }` that releases the lock FILE never runs — every refusal branch would leave a stale `.lock` behind, and the next writer would wait out the 15 s abandonment timeout. Rewrote the callback to RETURN an outcome `{code, msg}`; the caller prints and exits OUTSIDE the lock.

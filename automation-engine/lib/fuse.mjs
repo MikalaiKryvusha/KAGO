@@ -42,12 +42,21 @@
 // The ring is forensics OUTSIDE the control loop's cadence — not an oracle input, no disk per tick.
 //
 // LOOPBACK CHANNEL FLOOR (measured on THIS machine, 2026-08-28, `--jitter-floor --seconds 60`,
-// sender in the death-watch probe's own loop shape — Atomics.wait cadence, fire-and-forget send):
-//   beats sent 29 985 · received 29 985 (100 %) · arrival gap: median 2,00 мс · p99 2,49 мс ·
-//   max 4,45 мс · зазор до N≈50 мс — десятикратный, канал бюджета не ест.
+// tick 2 мс — THREE runs, each one a finding, kept in order because each killed a wrong design):
+//   floor 1 — sender in the probe's `Atomics.wait` shape: **12,72 %** delivered, gaps 0,01 мс —
+//             a blocked event loop never flushes dgram; beats left in bursts (EXP-0165). The
+//             beat-armed probe therefore YIELDS per tick; the beat-less floor keeps Atomics.wait.
+//   floor 2 — yielding sender, no own timer grant: **14,03 %**, gaps 15,76 мс — the stock Windows
+//             quantum: since Win10 2004 `timeBeginPeriod` is PER-PROCESS and does not reach a
+//             spawned child. The sender now holds its own grant, as the live `--probe` does.
+//   floor 3 — yielding sender + own grant: **29 658 of ~30 000 (98,86 %)** · arrival gap median
+//             2,01 мс · p99 4,06 мс · max 10,46 мс. Channel healthy; N≈50 мс keeps ~5× headroom
+//             over max. The LOADED floor — and the final N — are phase 3's measurement.
 //
-// [TESTED: 2026-08-28 · `--selftest` → 21 blocks, 0 failed · battery id `fuse` in selftest:all;
-//  port inertness: selftest binds ONLY port 0 (OS-assigned ephemeral, loopback), never a fixed one]
+// [TESTED: 2026-08-28 · `--selftest` → 27 blocks, 0 failed · battery id `fuse` in selftest:all;
+//  mutation proof: boundary `>=`→`>` → 1 red · hand 1 filtered out → 6 red · beat send dropped →
+//  1 red (received 0), each reverted to green · port inertness: selftest binds ONLY port 0
+//  (OS-assigned ephemeral, loopback), never a fixed one]
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

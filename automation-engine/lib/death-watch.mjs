@@ -201,7 +201,15 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
     for (;;) {
       const promisedMs = promisedTick(startMs, tickMs, nextIndex);
       if (promisedMs > endTarget) break;
-      sleepMs(promisedMs - performance.now());
+      // TWO SLEEP SHAPES, AND THE DIFFERENCE IS MEASURED, NOT STYLISTIC. `Atomics.wait` blocks the
+      // event loop, and a blocked loop never flushes dgram sends: the first jitter floor
+      // (2026-08-28) delivered 12,72 % of beats, in bursts, because they queued for a loop that
+      // never ran. So the BEAT-ARMED probe yields per tick (setTimeout chain, same promised-tick
+      // arithmetic), while the beat-less floor keeps `Atomics.wait` — byte-identical to the
+      // instrument the 2026-08-28 noise floor was measured on. The yielding probe's own floor is
+      // phase 3's measurement, made with the shape that will actually ride the live runs.
+      if (beatSock) await new Promise((res) => setTimeout(res, Math.max(0, promisedMs - performance.now())));
+      else sleepMs(promisedMs - performance.now());
       const wokeMs = performance.now();
 
       let callMs = null;
@@ -302,13 +310,25 @@ async function cmdBeatSender({ port, seconds, tickMs }) {
   const dgram = await import('node:dgram');
   const sock = dgram.createSocket('udp4');
   const buf = Buffer.from([0x01]);
+  // Since Windows 10 2004 the timer resolution is PER-PROCESS — the parent's `timeBeginPeriod(1)`
+  // does not reach a spawned child. The second jitter floor (2026-08-28) measured it: a yielding
+  // sender WITHOUT its own grant beat every 15,76 мс — the stock quantum — delivering 14 %. The
+  // live probe (`--probe`) holds its own grant; this twin must too, or it mimics a slower probe
+  // than the one that will actually ride.
+  const mm = loadWinmm();
+  const granted = mm.begin(1);
+  if (granted !== 0) console.error(`⚠️ timeBeginPeriod(1) отказал (код ${granted}) — такт будет зернистым ~15,6 мс`);
+  try {
   const startMs = performance.now();
   const endTarget = startMs + seconds * 1000;
   let nextIndex = 1;
   for (;;) {
     const promisedMs = promisedTick(startMs, tickMs, nextIndex);
     if (promisedMs > endTarget) break;
-    sleepMs(promisedMs - performance.now());
+    // Yielding sleep, NOT `Atomics.wait` — same reason and same receipt as the beat-armed probe in
+    // `runWatcher` above: the first jitter floor measured 12,72 % delivery from a blocked loop.
+    // This sender exists to mimic the fuse-mode probe, so it mimics the yielding shape.
+    await new Promise((res) => setTimeout(res, Math.max(0, promisedMs - performance.now())));
     sock.send(buf, port, '127.0.0.1');
     const elapsedTicks = (performance.now() - startMs) / tickMs;
     nextIndex = Math.max(nextIndex + 1, Math.floor(elapsedTicks) + 1);
@@ -316,6 +336,7 @@ async function cmdBeatSender({ port, seconds, tickMs }) {
   await new Promise((res) => setTimeout(res, 100)); // let the loop drain the send queue before close
   sock.close();
   return 0;
+  } finally { mm.end(1); }
 }
 
 // =================================================================================================
