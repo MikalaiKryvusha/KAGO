@@ -174,8 +174,21 @@ async function openDriverProbe() {
   };
 }
 
-async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs }) {
+async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, beatPort = null }) {
   const driver = role === 'driver' ? await openDriverProbe() : null;
+  // ⚡ THE FUSE'S LIVENESS FEED (epic 51 phase 2, `plans/55`): after every SUCCESSFUL probe return,
+  // one datagram to the judge on loopback — in memory, fire-and-forget, no disk in the loop (the
+  // owner's «НЕ ДИСК РАЗ В СЕКУНДУ» is a design input). Only status 0 beats: a LOST card answers
+  // INSTANTLY with an error code, and a beat on that answer would hold the fuse asleep on a
+  // corpse. No `beatPort` — no socket at all: the floor mode stays byte-identical to the
+  // instrument the noise floor was measured on.
+  let beatSock = null; let beatBuf = null;
+  if (beatPort !== null && driver) {
+    const dgram = await import('node:dgram');
+    beatSock = dgram.createSocket('udp4');
+    beatSock.unref?.();
+    beatBuf = Buffer.from([0x01]);
+  }
   mkdirSync(path.dirname(outPath), { recursive: true });
   const fd = openSync(outPath, 'a');
   const overshoots = [];
@@ -194,8 +207,9 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs })
       let callMs = null;
       if (driver) {
         const before = performance.now();
-        driver.probe();
+        const st = driver.probe();
         callMs = performance.now() - before;
+        if (beatSock && st === 0) beatSock.send(beatBuf, beatPort, '127.0.0.1');
       }
 
       const verdict = classifyTick({ promisedMs, actualMs: wokeMs, callMs, recordThresholdMs });
@@ -219,6 +233,7 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs })
   } finally {
     closeSync(fd);
     if (driver) driver.close();
+    if (beatSock) { try { beatSock.close(); } catch { /* the watch is over either way */ } }
   }
   return summarize({ role, tickMs, startMs, endMs: performance.now(), overshoots, missCount });
 }
@@ -270,6 +285,37 @@ async function cmdFloor({ seconds, tickMs, recordThresholdMs }) {
   } finally {
     mm.end(1);
   }
+}
+
+// =================================================================================================
+// 4b. The beat sender — the jitter-floor's counterpart (`fuse.mjs --jitter-floor`, plan 55 step 1)
+// =================================================================================================
+
+/**
+ * Sends liveness beats in the EXACT loop shape of the probe — `Atomics.wait` cadence, the same
+ * catch-up idiom (EXP-0162's off-by-one lesson included) — but with NO card behind it. The jitter
+ * floor must measure the channel as the probe will really drive it, not as an event-loop sender
+ * would idealize it; a datagram that fails to leave a blocked-loop process would show up HERE, as
+ * zero received, before it could ever silently disarm the live fuse.
+ */
+async function cmdBeatSender({ port, seconds, tickMs }) {
+  const dgram = await import('node:dgram');
+  const sock = dgram.createSocket('udp4');
+  const buf = Buffer.from([0x01]);
+  const startMs = performance.now();
+  const endTarget = startMs + seconds * 1000;
+  let nextIndex = 1;
+  for (;;) {
+    const promisedMs = promisedTick(startMs, tickMs, nextIndex);
+    if (promisedMs > endTarget) break;
+    sleepMs(promisedMs - performance.now());
+    sock.send(buf, port, '127.0.0.1');
+    const elapsedTicks = (performance.now() - startMs) / tickMs;
+    nextIndex = Math.max(nextIndex + 1, Math.floor(elapsedTicks) + 1);
+  }
+  await new Promise((res) => setTimeout(res, 100)); // let the loop drain the send queue before close
+  sock.close();
+  return 0;
 }
 
 // =================================================================================================
@@ -356,7 +402,28 @@ if (!isMainThread && workerData?.deathWatchRole) {
         recordThresholdMs: num('--record-threshold', RECORD_THRESHOLD_MS),
       });
     }
-    console.log('Использование: --floor [--seconds 60] [--tick 2] [--record-threshold 10] | --selftest');
+    if (has('--beat-sender')) {
+      return cmdBeatSender({ port: num('--port', 0), seconds: num('--seconds', 60), tickMs: num('--tick', DEFAULT_TICK_MS) });
+    }
+    if (has('--probe')) {
+      // The LIVE probe with beats — the fuse's driver-role process (phases 4-5 wire the engine to
+      // this; running it by hand is safe: the probe is the same documented read the floor uses).
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const mm = loadWinmm();
+      const granted = mm.begin(1);
+      if (granted !== 0) console.log(`⚠️ timeBeginPeriod(1) отказал (код ${granted})`);
+      try {
+        const s = await runWatcher({
+          role: 'driver', tickMs: num('--tick', DEFAULT_TICK_MS), seconds: num('--seconds', 36000),
+          outPath: path.join(DEATH_WATCH_DIR, `${stamp}-driver.jsonl`),
+          recordThresholdMs: num('--record-threshold', RECORD_THRESHOLD_MS),
+          beatPort: argv.includes('--port') ? num('--port', null) : null,
+        });
+        console.log(`ПРОБА ЗАКОНЧИЛА: тактов ${s.delivered}/${s.expected} (${s.deliveredPct} %) · промахов ${s.missCount}`);
+        return 0;
+      } finally { mm.end(1); }
+    }
+    console.log('Использование: --floor [--seconds 60] [--tick 2] [--record-threshold 10] | --probe [--port P] [--seconds S] | --beat-sender --port P [--seconds S] | --selftest');
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });

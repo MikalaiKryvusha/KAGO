@@ -218,6 +218,11 @@ const SUITES = [
   // сам говорит: «ни потоков, ни карты, ни часов».
   { id: 'deathwatch', npm: 'npm run deathwatch -- --selftest', argv: ['automation-engine/lib/death-watch.mjs', '--selftest'],
     what: 'сторож смерти: логика тактов, порога записи и сводки (эпик 51 фаза 1)', done: /^САМОПРОВЕРКА death-watch/mu },
+  // Inertness proof for the battery rule above: the fuse selftest binds ONLY port 0 (OS-assigned
+  // ephemeral, loopback) — no fixed port to collide with; artefacts go to os.tmpdir(), never to
+  // runs/death-watch/ (EXP-0025); the card is never opened — hands are injected fakes.
+  { id: 'fuse', npm: 'npm run fuse -- --selftest', argv: ['automation-engine/lib/fuse.mjs', '--selftest'],
+    what: 'предохранитель: deadman-судья, руки спасения, кольцо чёрного ящика (эпик 51 фаза 2)', done: /^САМОПРОВЕРКА fuse/mu },
   // ВОШЛИ 2026-08-28 ВМЕСТЕ СО СВОИМ КОДОМ (развёртывание команды, plans/54). ДОКАЗАТЕЛЬСТВО
   // ИНЕРТНОСТИ, рядом с записью: доска гоняет ЧИСТЫЕ функции переписывания строк плюс замок-файл
   // в `mkdtempSync`-песочнице, снимаемой в `finally` — настоящий TEAM_STATUS.md не открывается

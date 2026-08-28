@@ -54,7 +54,8 @@
     "safe-mode": "node tools/safe-mode.mjs",
     "prayer": "node tools/prayer.mjs",
     "team": "node tools/team-board.mjs",
-    "workplace": "node tools/team-workplace.mjs"
+    "workplace": "node tools/team-workplace.mjs",
+    "fuse": "node automation-engine/lib/fuse.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
