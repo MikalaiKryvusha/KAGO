@@ -26,7 +26,7 @@
 // [TESTED: 2026-08-28 · `--smoke`: полоса на двойнике от старта до отчёта, отпечаток I1 совпал]
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +60,18 @@ export async function makeTwinAssembly({
   // фаза 4 эпика 59 (смерти по профилям) и самопроверка ниже включают их адресно, боевой смоук
   // идёт на честной карте.
   cardOpts = {},
+  // ─── ФАЗА 4 ЭПИКА 59 — смерти по профилям (`plans/63`) ────────────────────────────────────────
+  // `armJudge` — судья всадников ВЗВОДИТСЯ (N = DERIVED_ARM_N_MS) и получает руку 2 ДВОЙНИКА
+  //   (`--twin-stock`): взведённый судья на виртуальном прогоне БЕЗ виртуальной руки 2 бил бы
+  //   стоком по живой карте владельца — ровно нарушение I1, ради недопущения которого судья до
+  //   этой фазы ездил невзведённым.
+  // `deathRehearsal` — 'strangle' | 'instant' | 'hang': прожиг идёт через ПРОЦЕСС-НОСИТЕЛЬ (руке 1
+  //   есть кого убивать, у ступени есть настоящее время стены), проба играет ИЗМЕРЕННЫЙ профиль
+  //   смерти (кроме 'hang' — там движок убивают снаружи, профиль не нужен). Подразумевает armJudge
+  //   для strangle/instant; 'hang' идёт с невзведённым судьёй — смерть МАШИНЫ не спасает никто,
+  //   её запись держит журнал упреждающей записи (R15).
+  armJudge = false,
+  deathRehearsal = null,
 } = {}) {
   const vgpu = await import('./virtual-gpu.mjs');
   const nvapi = await import('./nvapi.mjs');
@@ -118,12 +130,30 @@ export async function makeTwinAssembly({
     args,
     checksum: card.fiction?.goldenChecksum ?? vgpu.GOLDEN_CHECKSUM,
   });
+  // ─── НОСИТЕЛЬ ГОРНА (фаза 4): тело прожига — процесс, вердикт — внутрипроцессный оракул ────────
+  // Состояние модели (тепло, последовательность ГСЧ, удержанные смещения) НЕ форкается в ребёнка —
+  // ребёнок держит только ВРЕМЯ СТЕНЫ и умирает от руки 1. Убитый носитель возвращается статусом
+  // ≠ 0 ДОСЛОВНО в форме spawnSync — `runBurst` проваливает его своей штатной дорогой
+  // («нагрузка вышла с кодом …»), ровно как taskkill валит furnace на живом пути (фаза 5 эпика 51).
+  const carrierScript = join(HERE, 'twin-burn-carrier.mjs');
+  const burnPidfile = join(runDir, 'burn-carrier.pid');
+  const carrierLauncher = (binary, argv) => {
+    const i = argv.indexOf('--sustain');
+    const secs = i === -1 ? 1 : Number(argv[i + 1]);
+    const r = spawnSync(process.execPath, [carrierScript, '--seconds', String(secs), '--pidfile', burnPidfile],
+      { encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) return r; // убит рукой 1 — дорога оракула, без нового кода записи
+    return vc.oracle.run(binary, argv);
+  };
   const twinStressTest = async ({
     name = 'sdc_fma', seconds = 10, sustain = 0, args = [], onBurst = null,
   } = {}) => {
     const golden = goldenFor(args);
     const stampOk = stress.checkGoldenStamp(golden, probedCard, args);
-    const burst = stress.runBurst({ name, args, sustainSeconds: Math.max(1, sustain || seconds), run: (b, a) => vc.oracle.run(b, a) });
+    const burst = stress.runBurst({
+      name, args, sustainSeconds: Math.max(1, sustain || seconds),
+      run: deathRehearsal ? carrierLauncher : (b, a) => vc.oracle.run(b, a),
+    });
     if (onBurst) onBurst(burst);
     const decision = stress.decideVerdict({ bursts: [burst], golden, stamp: stampOk, faults: { providers: [], faults: [] } });
     return {
@@ -234,14 +264,24 @@ export async function makeTwinAssembly({
     },
   };
 
+  // ─── ВСАДНИКИ (фаза 4): взведение и профили — только по явному заказу, дефолт прежний ──────────
+  const { DERIVED_ARM_N_MS } = await import('./fuse.mjs');
+  const armed = armJudge || deathRehearsal === 'strangle' || deathRehearsal === 'instant';
+  const playsProfile = deathRehearsal === 'strangle' || deathRehearsal === 'instant';
   return {
     vc, card, device, probedCard, recover, loadDoc,
-    docName, docDir, journalDir, runDir,
+    docName, docDir, journalDir, runDir, burnPidfile,
     saveDoc: (d) => cs.saveCurveDoc(d, { name: docName, dir: docDir }),
     canonLine: 'ЦИФРОВОЙ ДВОЙНИК — ВЫМЫСЕЛ (I3): зелёный прогон здесь доказывает ЛОГИКУ движка и '
       + 'проводку живого пути, а не кремний, драйвер или карту владельца.',
     riders: {
-      judgeArgs: ['--judge', '--seconds', '600', '--out', join(runDir, 'fuse.jsonl')],
+      judgeArgs: ['--judge',
+        // Взведённый судья на двойнике НЕ БЫВАЕТ без руки 2 двойника: --arm-n и --twin-stock —
+        // одна дверь, не две (см. комментарий у armJudge выше).
+        ...(armed ? ['--arm-n', String(DERIVED_ARM_N_MS), '--burn-pidfile', burnPidfile, '--twin-stock', cardFile] : []),
+        '--seconds', '600', '--out', join(runDir, 'fuse.jsonl')],
+      probeArgs: ['--beat-sender', '--seconds', '600', '--tick', '2',
+        ...(playsProfile ? ['--play-profile', deathRehearsal, '--after-pidfile', burnPidfile] : [])],
       probeMode: 'beat-sender',
     },
   };
@@ -272,6 +312,40 @@ function deliveryLine() {
   return line.trim();
 }
 
+/** Свежая песочница двойника: документ и журнал зависаний УНОСЯТСЯ в archive-<штамп>, не стираются.
+ *  Репетиции смертей должны начинаться с известного состояния — иначе уже закрытая полоса не даст
+ *  ни одного прожига и профилю не на чем сыграть; а стирать заработанные двойником знания незачем. */
+function archiveTwinSandbox() {
+  const stamp = localIso().replace(/[:+]/g, '-');
+  const dest = join(BENCH_RUNS, `archive-${stamp}`);
+  let moved = 0;
+  if (existsSync(BENCH_RUNS)) {
+    for (const name of readdirSync(BENCH_RUNS)) {
+      if (!name.startsWith('virtual-')) continue;
+      mkdirSync(dest, { recursive: true });
+      renameSync(join(BENCH_RUNS, name), join(dest, name));
+      moved += 1;
+    }
+  }
+  return { moved, dest: moved ? dest : null };
+}
+
+/** Новейший каталог прогона всадников (`twin-<штамп>`) — там журнал и кольцо судьи. */
+function newestTwinRunDir() {
+  if (!existsSync(BENCH_RUNS)) return null;
+  const dirs = readdirSync(BENCH_RUNS).filter((n) => n.startsWith('twin-') && statSync(join(BENCH_RUNS, n)).isDirectory());
+  if (!dirs.length) return null;
+  dirs.sort();
+  return join(BENCH_RUNS, dirs[dirs.length - 1]);
+}
+
+function readJsonl(file) {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split(/\r?\n/u).map((s) => s.trim()).filter(Boolean).map((s) => {
+    try { return JSON.parse(s); } catch { return null; }
+  }).filter(Boolean);
+}
+
 async function mainSmoke(argv) {
   const arg = (name, fallback) => {
     const i = argv.indexOf(`--${name}`);
@@ -282,8 +356,11 @@ async function mainSmoke(argv) {
   // 300 мВ, а не 60: придуманный край двойника на верхах лежит ~245 мВ под стоком, и смоук обязан
   // ДОЙТИ до края — иначе репетируется только «предел глубины», а оракул и уточнение края спят.
   const maxDepth = arg('max-depth', '300');
+  // P63-AC5: тот же здоровый смоук, но судья ВЗВЕДЁН (N=60) — ложных трипов обязано быть ноль.
+  const armed = argv.includes('--armed');
 
-  console.log('СМОУК СБОРКИ «--card virtual» (plans/62 шаг 4): та же команда развёртки, целиком на двойнике.');
+  console.log(`СМОУК СБОРКИ «--card virtual» (${armed ? 'plans/63 P63-AC5: судья ВЗВЕДЁН' : 'plans/62 шаг 4'}): та же команда развёртки, целиком на двойнике.`);
+  if (armed) archiveTwinSandbox(); // взведённому смоуку нужны настоящие прожиги — свежая полоса
   const before = liveFingerprint();
   const lineBefore = deliveryLine();
   console.log(`I1 ДО:    документ ${before.measuredSha} · журнал ${before.journalSha} · runs/death-watch ${before.deathWatchFiles} файлов`);
@@ -291,7 +368,8 @@ async function mainSmoke(argv) {
 
   const engine = join(HERE, '..', 'engine.mjs');
   const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
-    '--from', from, '--to', to, '--max-depth', maxDepth], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    '--from', from, '--to', to, '--max-depth', maxDepth,
+    ...(armed ? ['--twin-arm'] : [])], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
   const logFile = join(BENCH_RUNS, `twin-smoke-${localIso().replace(/[:+]/g, '-')}.log`);
   mkdirSync(BENCH_RUNS, { recursive: true });
@@ -311,7 +389,135 @@ async function mainSmoke(argv) {
   console.log(clean
     ? '✅ I1 ДЕРЖИТСЯ: живой документ, боевой журнал и боевая папка всадников не тронуты, строка доставки не сдвинулась.'
     : '🔴 I1 НАРУШЕН: отпечатки разошлись — виртуальный прогон дотянулся до живого пути.');
-  return r.status === 0 && clean ? 0 : 1;
+
+  if (!armed) return r.status === 0 && clean ? 0 : 1;
+
+  // ─── P63-AC5: ложных трипов НОЛЬ — по журналу судьи, не по впечатлению ───────────────────────
+  const runDir = newestTwinRunDir();
+  const fuseLines = runDir ? readJsonl(join(runDir, 'fuse.jsonl')) : [];
+  const trips = fuseLines.filter((l) => l.phase === 'intent');
+  const noTrip = trips.length === 0 && !/ТРИП/u.test(log);
+  console.log(noTrip
+    ? `✅ P63-AC5: судья ВЗВЕДЁН (N=60) прошёл здоровый смоук БЕЗ ЕДИНОГО ТРИПА (журнал ${runDir ?? '—'}/fuse.jsonl пуст от намерений).`
+    : `🔴 P63-AC5 ПРОВАЛЕН: ложных трипов ${trips.length} — читать ${runDir}/fuse.jsonl и кольцо.`);
+  return r.status === 0 && clean && noTrip ? 0 : 1;
+}
+
+// =================================================================================================
+// Репетиции смертей по ИЗМЕРЕННЫМ профилям (эпик 59 фаза 4, `plans/63` шаг 5)
+// =================================================================================================
+
+/** Прочитать журнал судьи и кольцо после репетиции; рука 2 — ДЕТАЧНУТЫЙ процесс, ей дают дожить. */
+async function collectRescueEvidence() {
+  await new Promise((res) => setTimeout(res, 4000)); // рука 2 двойника: спавн + модель + своя строка
+  const runDir = newestTwinRunDir();
+  if (!runDir) return { runDir: null, fuse: [], ring: [] };
+  return {
+    runDir,
+    fuse: readJsonl(join(runDir, 'fuse.jsonl')),
+    ring: readJsonl(join(runDir, 'fuse-ring.jsonl')),
+  };
+}
+
+async function mainRehearseDeath(profile) {
+  console.log(`РЕПЕТИЦИЯ СМЕРТИ «${profile}» НА ДВОЙНИКЕ (plans/63): проба играет ИЗМЕРЕННЫЙ профиль, судья взведён, руки бьют по двойнику.`);
+  const archived = archiveTwinSandbox();
+  if (archived.moved) console.log(`песочница двойника унесена в ${archived.dest} (${archived.moved} шт.) — репетиция со свежего стока`);
+  const before = liveFingerprint();
+  const lineBefore = deliveryLine();
+  console.log(`I1 ДО:    документ ${before.measuredSha} · журнал ${before.journalSha} · runs/death-watch ${before.deathWatchFiles} файлов`);
+
+  const engine = join(HERE, '..', 'engine.mjs');
+  const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
+    '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', profile],
+  { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
+  const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+  const logFile = join(BENCH_RUNS, `twin-death-${profile}-${localIso().replace(/[:+]/g, '-')}.log`);
+  writeFileSync(logFile, log, 'utf8');
+  console.log(`ПРОГОН: код ${r.status} · лог ${logFile}`);
+  for (const l of log.split('\n').filter((l) => /ПРЕДОХРАНИТЕЛЬ|ПРОБА ФЬЮЗА|ТРИП|СПАСЕНИЕ|встал|ОТКАЗ|вышла с кодом|ИТОГ/u.test(l)).slice(0, 25)) console.log(`  | ${l.trim()}`);
+
+  const ev = await collectRescueEvidence();
+  const intents = ev.fuse.filter((l) => l.phase === 'intent');
+  const hand1 = ev.fuse.find((l) => l.phase === 'outcome' && l.hand === 1);
+  const hand2spawn = ev.fuse.find((l) => l.phase === 'outcome' && l.hand === 2 && l.action === 'stock-voltage');
+  const hand2done = ev.fuse.find((l) => l.hand === 2 && l.action === 'stock-voltage-verified-twin');
+  const after = liveFingerprint();
+  const lineAfter = deliveryLine();
+  const i1 = JSON.stringify(before) === JSON.stringify(after) && lineBefore === lineAfter;
+
+  const checks = [
+    ['трип случился (намерение в журнале судьи, причина beat-silence)', intents.length === 1 && intents[0].cause === 'beat-silence'],
+    ['рука 1 отработала: носитель горна убит (pid из пид-файла)', hand1?.ok === true],
+    ['рука 2 запущена детачнуто и сама подтвердила СТОК ДВОЙНИКА чтением', hand2spawn?.ok === true && hand2done?.ok === true],
+    ['полоса ВСТАЛА до следующей ступени (stopWhen: судья вышел, код 2 — спасение)', /СПАСЕНИЕ сработало/u.test(log)],
+    ['спасённая ступень провалилась дорогой оракула (нагрузка вышла с кодом / ОТКАЗ)', /вышла с кодом|ОТКАЗ/u.test(log)],
+    ['кольцо судьи сброшено и читается (суб-пороговые такты на месте)', ev.ring.length >= 10],
+    ['I1: живой документ · боевой журнал · боевая папка всадников · строка доставки — не тронуты', i1],
+  ];
+  let bad = 0;
+  for (const [what, okc] of checks) { console.log(`${okc ? '✅' : '🔴'} ${what}`); if (!okc) bad += 1; }
+  console.log(`журнал судьи: ${ev.runDir ?? '—'}\\fuse.jsonl · кольцо: fuse-ring.jsonl (${ev.ring.length} тактов)`);
+  return bad === 0 ? 0 : 1;
+}
+
+/**
+ * Виртуальный ЗАВИС (P63-AC4): процесс развёртки УМИРАЕТ посреди прожига — движок убивают снаружи,
+ * ровно как машину убивает край. Намерение уже fsync-нуто (R15); ВТОРОЙ прогон обязан закрыть его
+ * как ЗАВИС, поднять виртуальный пол зависания и не вернуться на роковую ступень.
+ */
+async function mainRehearseHang() {
+  console.log('РЕПЕТИЦИЯ ВИРТУАЛЬНОГО ЗАВИСА (plans/63): движок умирает посреди прожига, второй прогон закрывает намерение полом.');
+  const archived = archiveTwinSandbox();
+  if (archived.moved) console.log(`песочница двойника унесена в ${archived.dest} (${archived.moved} шт.)`);
+  const before = liveFingerprint();
+
+  const { spawn } = await import('node:child_process');
+  const engine = join(HERE, '..', 'engine.mjs');
+  const child = spawn(process.execPath, [engine, '--sweep', '--card', 'virtual',
+    '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', 'hang'],
+  { windowsHide: true });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d.toString(); });
+  child.stderr.on('data', (d) => { out += d.toString(); });
+
+  // Ждём ПИД-ФАЙЛ носителя — прожиг в полёте, намерение уже на диске (R15: fsync ДО касания карты).
+  const started = Date.now();
+  let pidfile = null;
+  while (Date.now() - started < 120_000) {
+    const runDir = newestTwinRunDir();
+    const cand = runDir ? join(runDir, 'burn-carrier.pid') : null;
+    if (cand && existsSync(cand)) { pidfile = cand; break; }
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  if (!pidfile) { try { child.kill(); } catch { /* уже вышел */ } console.log('🔴 носитель так и не родился — прожиг не начался'); return 1; }
+  const carrierPid = Number(readFileSync(pidfile, 'utf8').trim());
+  await new Promise((res) => setTimeout(res, 300)); // прожиг заведомо В полёте
+  try { process.kill(child.pid, 'SIGKILL'); } catch { /* умер сам? */ }
+  try { process.kill(carrierPid, 'SIGKILL'); } catch { /* носитель мог выйти */ }
+  // Всадники пережили SIGKILL движка (его exit-обработчики не бежали) — гасим по напечатанным pid.
+  for (const m of out.matchAll(/(?:судья|ПРОБА ФЬЮЗА:) pid (\d+)/gu)) { try { process.kill(Number(m[1]), 'SIGKILL'); } catch { /* уже нет */ } }
+  console.log(`движок убит посреди прожига (pid ${child.pid}, носитель ${carrierPid}) — намерение осталось незакрытым`);
+
+  await new Promise((res) => setTimeout(res, 500));
+  const r2 = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
+    '--from', '2842', '--to', '2812', '--max-depth', '300'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
+  const log2 = `${r2.stdout ?? ''}\n${r2.stderr ?? ''}`;
+  const logFile = join(BENCH_RUNS, `twin-hang-${localIso().replace(/[:+]/g, '-')}.log`);
+  writeFileSync(logFile, `=== ПЕРВЫЙ (убит) ===\n${out}\n=== ВТОРОЙ ===\n${log2}`, 'utf8');
+  for (const l of log2.split('\n').filter((l) => /ЗАВИС|ПОЛ ЗАВИСАНИЯ|ИТОГ|полоса/u.test(l)).slice(0, 15)) console.log(`  | ${l.trim()}`);
+
+  const after = liveFingerprint();
+  const checks = [
+    ['второй прогон закрыл намерение: «ЗАВИС» приписан своей частоте и напряжению', /ЗАВИС/u.test(log2)],
+    ['виртуальный пол зависания поднят — на роковую ступень спуск не возвращается', /ПОЛ ЗАВИСАНИЯ/u.test(log2)],
+    ['второй прогон дошёл до конца полосы (код 0)', r2.status === 0],
+    ['I1: живые артефакты не тронуты обоими прогонами', JSON.stringify(before) === JSON.stringify(after)],
+  ];
+  let bad = 0;
+  for (const [what, okc] of checks) { console.log(`${okc ? '✅' : '🔴'} ${what}`); if (!okc) bad += 1; }
+  console.log(`лог: ${logFile}`);
+  return bad === 0 ? 0 : 1;
 }
 
 // =================================================================================================
@@ -326,6 +532,10 @@ async function mainSmoke(argv) {
 //   TA3. `twinStressTest`: судить самому вместо `decideVerdict` (всегда PASS)
 //        → «КРАЙ: у края двойника вердикт МЕНЯЕТСЯ» (фейк фазы 2 этого не умел — модель края
 //        и есть то, чем сборка отличается от фикстуры)
+//   TA4. всадники: взвести судью БЕЗ руки 2 двойника (снять --twin-stock из armed-ветки)
+//        → «ВСАДНИКИ: взведённый судья двойника НЕ БЫВАЕТ без руки 2 двойника»
+//   TA5. носитель: вернуть прожиг в процесс движка (carrierLauncher → oracle.run напрямую)
+//        → «НОСИТЕЛЬ: убитое тело прожига проваливает ступень дорогой оракула»
 export async function selfTest() {
   const results = [];
   const ok = (what, got, want) => {
@@ -387,6 +597,53 @@ export async function selfTest() {
   ok('ПЕСОЧНИЦА: документ и журнал двойника живут в benches/runs, не в curves/ и не в runs/sweep',
     [asm.docDir.includes(join('benches', 'runs')), asm.journalDir.includes(join('benches', 'runs'))],
     [true, true]);
+
+  // 6. ВСАДНИКИ (фаза 4, TA4): дефолт — судья невзведён и без профиля (поведение фазы 3, I4);
+  //    взведение и рука 2 двойника — ОДНА дверь; профиль смерти играет только репетиция.
+  ok('ВСАДНИКИ: дефолт — судья невзведён, проба без профиля (фаза 3 как была)',
+    [asm.riders.judgeArgs.includes('--arm-n'), asm.riders.probeArgs.includes('--play-profile')],
+    [false, false]);
+  const asmArmed = await makeTwinAssembly({ seed: 7, armJudge: true });
+  ok('ВСАДНИКИ: взведённый судья двойника НЕ БЫВАЕТ без руки 2 двойника (--arm-n ⇒ --twin-stock и пид-файл)',
+    [asmArmed.riders.judgeArgs.includes('--arm-n'), asmArmed.riders.judgeArgs.includes('--twin-stock'),
+      asmArmed.riders.judgeArgs.includes('--burn-pidfile'), asmArmed.riders.probeArgs.includes('--play-profile')],
+    [true, true, true, false]);
+  const asmDeath = await makeTwinAssembly({ seed: 7, deathRehearsal: 'strangle' });
+  ok('ВСАДНИКИ: репетиция смерти — судья взведён И проба играет измеренный профиль после пид-файла',
+    [asmDeath.riders.judgeArgs.includes('--arm-n'),
+      asmDeath.riders.probeArgs.includes('--play-profile'),
+      asmDeath.riders.probeArgs[asmDeath.riders.probeArgs.indexOf('--play-profile') + 1],
+      asmDeath.riders.probeArgs.includes('--after-pidfile')],
+    [true, true, 'strangle', true]);
+  const asmHang = await makeTwinAssembly({ seed: 7, deathRehearsal: 'hang' });
+  ok('ВСАДНИКИ: репетиция ЗАВИСА — носитель есть, но судья НЕВЗВЕДЁН (смерть машины не спасает никто) и профиль не играется',
+    [asmHang.riders.judgeArgs.includes('--arm-n'), asmHang.riders.probeArgs.includes('--play-profile')],
+    [false, false]);
+
+  // 7. НОСИТЕЛЬ (TA5): счастливый путь служит время и отдаёт вердикт оракулу; убитое тело
+  //    проваливает ступень ДОРОГОЙ ОРАКУЛА — «нагрузка вышла с кодом …», без нового кода записи.
+  {
+    const stress = await import('./stress-tester.mjs');
+    const happy = stress.runBurst({
+      name: 'sdc_fma', args: [], sustainSeconds: 1,
+      run: (b, a) => {
+        const carrier = join(HERE, 'twin-burn-carrier.mjs');
+        const pf = join(asmDeath.runDir, 'burn-carrier.pid');
+        const rr = spawnSync(process.execPath, [carrier, '--seconds', '0.2', '--pidfile', pf], { encoding: 'utf8', windowsHide: true });
+        if (rr.status !== 0) return rr;
+        return asmDeath.vc.oracle.run(b, a);
+      },
+    });
+    ok('НОСИТЕЛЬ: счастливый путь — время отслужено, вердикт от внутрипроцессного оракула (PASS-форма)',
+      [happy.died, typeof happy.checksum === 'string'], [false, true]);
+    const killedShape = stress.runBurst({
+      name: 'sdc_fma', args: [], sustainSeconds: 1,
+      run: () => ({ status: 1, stdout: '', stderr: 'убит рукой 1 (SIGKILL)' }),
+    });
+    ok('НОСИТЕЛЬ: убитое тело прожига проваливает ступень дорогой оракула («нагрузка вышла с кодом»)',
+      [killedShape.died, /вышла с кодом 1/u.test(killedShape.reason)], [true, true]);
+  }
+
   const after = liveFingerprint();
   ok('I1: живой документ, боевой журнал и боевая папка всадников самопроверкой не тронуты',
     after, before);
@@ -407,13 +664,23 @@ async function main(argv) {
     return r.ok ? 0 : 1;
   }
   if (argv.includes('--smoke')) return mainSmoke(argv);
+  if (argv.includes('--rehearse-death')) {
+    const i = argv.indexOf('--rehearse-death');
+    const profile = argv[i + 1];
+    if (!['strangle', 'instant'].includes(profile)) {
+      console.error('--rehearse-death принимает strangle | instant (виртуальный ЗАВИС — --rehearse-hang).');
+      return 2;
+    }
+    return mainRehearseDeath(profile);
+  }
+  if (argv.includes('--rehearse-hang')) return mainRehearseHang();
   if (argv.includes('--i1')) {
     const f = liveFingerprint();
     console.log(`I1: документ ${f.measuredSha} · журнал ${f.journalSha} · runs/death-watch ${f.deathWatchFiles} файлов`);
     console.log(`СТРОКА ДОСТАВКИ: ${deliveryLine()}`);
     return 0;
   }
-  console.log('Использование: --selftest | --smoke [--from МГц --to МГц] [--max-depth мВ] | --i1');
+  console.log('Использование: --selftest | --smoke [--from МГц --to МГц] [--max-depth мВ] [--armed] | --rehearse-death strangle|instant | --rehearse-hang | --i1');
   return 2;
 }
 

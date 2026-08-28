@@ -340,6 +340,116 @@ async function cmdBeatSender({ port, seconds, tickMs }) {
 }
 
 // =================================================================================================
+// 4c. Death profiles — the two MEASURED ways this machine has died (epic 59 phase 4, plans/63)
+// =================================================================================================
+//
+// The phase's gate forbids INVENTING a profile: each one cites its measurement, and the strangle
+// profile is DERIVED from the committed fixture at play time rather than copied into numbers here —
+// a copied list would be a truth↔mirror pair with the fixture (EXP-0077's shape), and the fixture is
+// the project's ONLY recording of a sampler losing its tick before the machine died.
+//
+//   strangle — 2026-08-23, 2797 МГц (`__fixtures__/pulse_2797mhz_death__captured.jsonl`): eighteen
+//              sub-trip overshoots of 11–29 ms (degraded but alive — the fuse must NOT trip here),
+//              then +2070 ms and +2366 ms (the rung's 4,49 s total the pulse tool reports), then the
+//              recording ends in a NUL-byte tail — the page cache died with the machine.
+//   instant  — 2026-08-28 third death (STATUS session 58): both watch tails EMPTY (0 bytes), the
+//              fatal probe call never returned, telemetry healthy one second before. Same class as
+//              the 2026-08-26 20:18 death (pulse saw 0,03 s — the sampler vanished WITH the system).
+//              Beats simply END mid-stream; there is nothing to derive — absence is the profile.
+
+/** The strangle stalls, derived from a captured sampler file: every interval's overshoot beyond the
+ *  sampler's own promised period, at the watch's record threshold. Pure — the selftest feeds it the
+ *  committed fixture and pins the shape the rehearsal relies on (no stall between 30 ms and 2070 ms,
+ *  so an armed N=60 judge trips exactly on the first big stall, never on the degradation phase). */
+export function strangleStallsFromPulse(rows, { periodMs = 1000, thresholdMs = RECORD_THRESHOLD_MS } = {}) {
+  const parse = (s) => {
+    const m = String(s).match(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})/u);
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], +m[7]).getTime() : null;
+  };
+  const ts = rows.filter((r) => r && r.t !== undefined).map((r) => parse(r.t)).filter((t) => t !== null);
+  const stalls = [];
+  for (let i = 1; i < ts.length; i++) {
+    const overshoot = ts[i] - ts[i - 1] - periodMs;
+    if (overshoot >= thresholdMs) stalls.push(overshoot);
+  }
+  return stalls;
+}
+
+/** Where the strangle fixture lives — exported so the player and the selftest read the SAME file. */
+export const STRANGLE_FIXTURE = fileURLToPath(new URL('./__fixtures__/pulse_2797mhz_death__captured.jsonl', import.meta.url));
+
+export const DEATH_PROFILES = Object.freeze({
+  strangle: Object.freeze({
+    class: 'удушение',
+    source: '__fixtures__/pulse_2797mhz_death__captured.jsonl — 2026-08-23, 2797 МГц, машина умерла после записи',
+  }),
+  instant: Object.freeze({
+    class: 'мгновенная',
+    source: 'runs/death-watch 2026-08-28: оба хвоста сторожа 0 байт — роковой звонок не вернулся (STATUS сессия 58)',
+  }),
+});
+
+/** Read the strangle fixture from disk (NUL-tail and blank lines skipped — the tail IS the death). */
+function readStrangleFixtureRows() {
+  const { readFileSync } = require('node:fs');
+  const rows = [];
+  for (const line of readFileSync(STRANGLE_FIXTURE, 'utf8').split(/\r?\n/u)) {
+    const t = line.replace(/\0/gu, '').trim();
+    if (!t) continue;
+    try { rows.push(JSON.parse(t)); } catch { /* the NUL tail the death left — not a record */ }
+  }
+  return rows;
+}
+
+/**
+ * Play a measured death profile through the beat channel (epic 59 phase 4, `plans/63` шаг 2).
+ *
+ * Healthy beats until `afterPidfile` appears (the burn carrier wrote its pid — the burn is in
+ * flight, exactly when the real stranglings began), then the profile:
+ *   strangle — for each measured stall: SILENCE of that length (a strangled sender's loop does not
+ *              run — the first jitter floor measured exactly that, EXP-0165), then `betweenMs` of
+ *              healthy beats. Real spacing between stalls was 1–15 s; the rehearsal compresses it
+ *              (the bench's own acceleration rule, `ideas/04`) and says so here. After the last
+ *              measured stall the sender EXITS — on the real evening nothing ever beat again.
+ *   instant  — beats END mid-stream, process exits. No taper: both empty-tail deaths had none.
+ */
+async function cmdPlayProfile({ port, profileName, tickMs, afterPidfile, warmupMs, betweenMs }) {
+  const profile = DEATH_PROFILES[profileName];
+  if (!profile) { console.error(`нет такого профиля смерти: ${profileName} (есть: ${Object.keys(DEATH_PROFILES).join(', ')})`); return 1; }
+  const dgram = await import('node:dgram');
+  const { existsSync: exists } = await import('node:fs');
+  const sock = dgram.createSocket('udp4');
+  const buf = Buffer.from([0x01]);
+  const mm = loadWinmm();
+  const granted = mm.begin(1);
+  if (granted !== 0) console.error(`⚠️ timeBeginPeriod(1) отказал (код ${granted})`);
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  try {
+    const healthyBeats = async (ms) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until) { sock.send(buf, port, '127.0.0.1'); await sleep(tickMs); }
+    };
+    // Warmup: healthy rhythm while the engine boots; then wait for the burn to actually start.
+    await healthyBeats(warmupMs);
+    if (afterPidfile) {
+      const deadline = performance.now() + 120_000;
+      while (!exists(afterPidfile) && performance.now() < deadline) await healthyBeats(tickMs * 5);
+    }
+    if (profileName === 'instant') return 0; // beats END — the exit IS the profile
+    const stalls = strangleStallsFromPulse(readStrangleFixtureRows());
+    for (const stallMs of stalls) {
+      await sleep(stallMs);       // silence: the strangled loop never runs, nothing is sent
+      await healthyBeats(betweenMs);
+    }
+    return 0; // after the last measured stall the machine was dead — no more beats, ever
+  } finally {
+    mm.end(1);
+    await sleep(50);
+    try { sock.close(); } catch { /* the run is over either way */ }
+  }
+}
+
+// =================================================================================================
 // 5. Selftest — pure logic, no threads, no card, no clock (P52-AC5)
 // =================================================================================================
 
@@ -394,6 +504,41 @@ function cmdSelftest() {
     return o.role === 'driver' && o.kind === 'call-stall' && o.callMs === 12.35 && line.endsWith('\n');
   })());
 
+  // ---- death profiles (epic 59 phase 4, plans/63): measured, never invented
+  ok('удушение выводится из проб: перелёт сверх обещания, порог записи включительно', (() => {
+    const rows = [
+      { t: '2026/08/23 10:00:00.000' }, { t: '2026/08/23 10:00:01.000' },        // ровно период — не останов
+      { t: '2026/08/23 10:00:02.010' },                                          // +10 = ровно порог — уже останов
+      { t: '2026/08/23 10:00:03.009' },                                          // +9 — под порогом
+      { t: '2026/08/23 10:00:06.079' },                                          // +2070
+    ];
+    return JSON.stringify(strangleStallsFromPulse(rows)) === '[10,2070]';
+  })());
+
+  ok('профиль удушения ИЗ ФИКСТУРЫ держит форму репетиции: мелочь < 30 мс, затем 2070 и 2366, между ними пусто', (() => {
+    const { readFileSync } = require('node:fs');
+    const rows = [];
+    for (const line of readFileSync(STRANGLE_FIXTURE, 'utf8').split(/\r?\n/u)) {
+      const t = line.replace(/\0/gu, '').trim();
+      if (!t) continue;
+      try { rows.push(JSON.parse(t)); } catch { /* NUL-хвост смерти */ }
+    }
+    const stalls = strangleStallsFromPulse(rows);
+    const small = stalls.filter((s) => s < 60);
+    const big = stalls.filter((s) => s >= 60);
+    // Ни одного останова между 30 и 2070: взведённый N=60 трипает РОВНО на первом большом, и
+    // фаза деградации (11–29 мс) не даёт ложного трипа — это и есть AC1 в арифметике.
+    return small.length === 18 && small.every((s) => s <= 29)
+      && JSON.stringify(big) === '[2070,2366]';
+  })());
+
+  ok('словарь профилей закрыт и каждый называет свой замер источником', (() => {
+    const names = Object.keys(DEATH_PROFILES);
+    return JSON.stringify(names) === '["strangle","instant"]'
+      && /pulse_2797mhz_death/.test(DEATH_PROFILES.strangle.source)
+      && /0 байт|хвоста/u.test(DEATH_PROFILES.instant.source);
+  })());
+
   console.log(`\nИТОГ: ${pass} зелёных, ${fail} красных.`);
   return fail === 0 ? 0 : 1;
 }
@@ -424,6 +569,20 @@ if (!isMainThread && workerData?.deathWatchRole) {
       });
     }
     if (has('--beat-sender')) {
+      // Профиль смерти поверх отправителя ударов (эпик 59 фаза 4): здоровый ритм до появления
+      // пид-файла горна, затем ИЗМЕРЕННЫЙ профиль — см. cmdPlayProfile.
+      const i = argv.indexOf('--play-profile');
+      if (i !== -1) {
+        const j = argv.indexOf('--after-pidfile');
+        return cmdPlayProfile({
+          port: num('--port', 0),
+          profileName: argv[i + 1],
+          tickMs: num('--tick', DEFAULT_TICK_MS),
+          afterPidfile: j !== -1 ? argv[j + 1] : null,
+          warmupMs: num('--warmup-ms', 500),
+          betweenMs: num('--between-ms', 200),
+        });
+      }
       return cmdBeatSender({ port: num('--port', 0), seconds: num('--seconds', 60), tickMs: num('--tick', DEFAULT_TICK_MS) });
     }
     if (has('--probe')) {
@@ -444,7 +603,7 @@ if (!isMainThread && workerData?.deathWatchRole) {
         return 0;
       } finally { mm.end(1); }
     }
-    console.log('Использование: --floor [--seconds 60] [--tick 2] [--record-threshold 10] | --probe [--port P] [--seconds S] | --beat-sender --port P [--seconds S] | --selftest');
+    console.log('Использование: --floor [--seconds 60] [--tick 2] [--record-threshold 10] | --probe [--port P] [--seconds S] | --beat-sender --port P [--seconds S] [--play-profile strangle|instant [--after-pidfile F] [--warmup-ms 500] [--between-ms 200]] | --selftest');
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });

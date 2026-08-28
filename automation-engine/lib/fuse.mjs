@@ -230,7 +230,7 @@ export function makeImageKillHand({ spawnSyncFn }) {
  * boundary, not an await. The hand writes its own outcome line into the same journal (fsync'd
  * there), so the timeline stays complete even when the judge never hears back.
  */
-export function makeStockHand({ spawnFn, journalPath }) {
+export function makeStockHand({ spawnFn, journalPath, extraArgs = [] }) {
   const handScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fuse-rescue-hand.mjs');
   return () => {
     const t0 = performance.now();
@@ -239,12 +239,28 @@ export function makeStockHand({ spawnFn, journalPath }) {
     // parent — the hand was spawned (pid printed) and silently never ran. Proven both ways: parent
     // alive 3 с → line lands; detached + parent dead in 50 мс → line lands; non-detached + parent
     // dead → nothing. A hand that needs ~2 с of NVAPI work must own its life. (EXP-0166)
-    const child = spawnFn(process.execPath, [handScript, '--journal', journalPath], {
+    //
+    // `extraArgs` is the twin door (epic 59 phase 4): an ARMED judge riding a virtual sweep passes
+    // `--twin <card>` here, so a trip stocks the TWIN through the mock bridge — a live-NVAPI hand
+    // under a twin rehearsal would be exactly the I1 violation the rehearsal exists to avoid.
+    const child = spawnFn(process.execPath, [handScript, '--journal', journalPath, ...extraArgs], {
       windowsHide: true, stdio: 'ignore', detached: true,
     });
     child.unref?.();
     return { ok: child.pid !== undefined, ms: performance.now() - t0, detail: child.pid === undefined ? 'spawn failed' : `pid ${child.pid}` };
   };
+}
+
+/** The burn carrier's pid, read AT TRIP TIME — never cached at judge start: the carrier of the
+ *  FATAL burst is what must die, and it is spawned long after the judge was. A missing or stale
+ *  file is an honest null (hand 1 then reports «nothing to kill»; hand 2 still runs). */
+export function readBurnPidfile(pidfilePath, { readFileSyncFn = null } = {}) {
+  if (!pidfilePath) return null;
+  try {
+    const read = readFileSyncFn ?? require('node:fs').readFileSync;
+    const pid = Number(String(read(pidfilePath, 'utf8')).trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch { return null; }
 }
 
 /**
@@ -291,6 +307,7 @@ export function runTrip({ verdict, burnPid, burnImages = null, killHand, imageKi
  */
 export async function runJudge({
   beatPort = 0, armNMs = null, armMMs = null, burnPid = null, burnImages = null,
+  burnPidFile = null, twinStockCard = null,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
   spawnSyncFn, spawnFn, killFn = process.kill.bind(process), onReady = null, log = () => {},
 }) {
@@ -313,7 +330,7 @@ export async function runJudge({
 
   const killHand = makeKillHand({ spawnSyncFn, killFn });
   const imageKillHand = makeImageKillHand({ spawnSyncFn });
-  const stockHand = makeStockHand({ spawnFn, journalPath });
+  const stockHand = makeStockHand({ spawnFn, journalPath, extraArgs: twinStockCard ? ['--twin', twinStockCard] : [] });
 
   const sock = dgram.createSocket('udp4');
   let lastBeatMs = null;
@@ -333,7 +350,7 @@ export async function runJudge({
     sock.bind({ address: '127.0.0.1', port: beatPort }, resolve);
   });
   const boundPort = sock.address().port;
-  log(`СУДЬЯ: порт ${boundPort} · такт ${JUDGE_TICK_MS} мс · N=${armNMs ?? 'НЕ ВЗВЕДЁН (наблюдение)'} · M=${armMMs ?? 'не взведён'} · pid прожига: ${burnPid ?? (burnImages?.length ? 'по именам: ' + burnImages.join(',') : 'нет')}`);
+  log(`СУДЬЯ: порт ${boundPort} · такт ${JUDGE_TICK_MS} мс · N=${armNMs ?? 'НЕ ВЗВЕДЁН (наблюдение)'} · M=${armMMs ?? 'не взведён'} · pid прожига: ${burnPid ?? (burnPidFile ? `из пид-файла в момент трипа (${burnPidFile})` : (burnImages?.length ? 'по именам: ' + burnImages.join(',') : 'нет'))}${twinStockCard ? ' · рука 2: ДВОЙНИК' : ''}`);
   if (onReady) onReady({ port: boundPort });
 
   const startMs = performance.now();
@@ -354,7 +371,10 @@ export async function runJudge({
       });
       lastTickMs = now;
       if (verdict.tripped && !tripOutcomes) {
-        tripOutcomes = runTrip({ verdict, burnPid, burnImages, killHand, imageKillHand, stockHand, writeLine, dumpRing });
+        // The pidfile is read HERE, at the trip, never at judge start: the carrier of the fatal
+        // burst is spawned long after the judge was, and a pid cached at start would name a corpse.
+        const pidNow = burnPid ?? readBurnPidfile(burnPidFile);
+        tripOutcomes = runTrip({ verdict, burnPid: pidNow, burnImages, killHand, imageKillHand, stockHand, writeLine, dumpRing });
         log(`⚡ ТРИП: ${verdict.cause} — тишина ${round2(verdict.beatSilenceMs ?? -1)} мс. Руки отработали: ${tripOutcomes.map((o) => `${o.action}=${o.ok}`).join(' · ')}`);
         resolve(); // one trip ends this judge: the step is over either way, a second trip would fire on a corpse
         return;
@@ -523,7 +543,8 @@ async function cmdSelftest() {
   };
   console.log('САМОПРОВЕРКА fuse — deadman-судья, руки, кольцо; карта не трогается, порт только эфемерный');
   console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона: включительная граница N · невзведённый не трипает · '
-    + 'непроведённый прогресс не трипает · порядок рук · намерение раньше рук · кольцо переживает трип · судья слышит настоящие удары');
+    + 'непроведённый прогресс не трипает · порядок рук · намерение раньше рук · кольцо переживает трип · судья слышит настоящие удары · '
+    + 'пид-файл читается В МОМЕНТ трипа · рука 2 двойника несёт --twin');
 
   // ---- judgeLiveness: the deadman core (P55-AC1)
   ok('тишина РОВНО N — трип (граница включительная, канон classifyTick)',
@@ -690,6 +711,49 @@ async function cmdSelftest() {
       unverified.ok === false && /остаточных 3/.test(unverified.detail));
   }
 
+  // ---- hand 2 on the TWIN (epic 59 phase 4): the same core, the bridge is the model, zeroing OBSERVED
+  {
+    const { doStockRescue, buildTwinNvapiModule } = await import('./fuse-rescue-hand.mjs');
+    const vgpu = await import('./virtual-gpu.mjs');
+    const cardFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'benches', 'cards', 'rtx5070ti.json');
+    const loaded = vgpu.loadCard(cardFile);
+    const vc = vgpu.virtualCard(loaded.card, { seed: 63 });
+    vc.curveBackend.holdOffsetsSync(vc.curveBackend.points().map(() => 30)); // то, что оставил умирающий писатель
+    const mod = await buildTwinNvapiModule({ vc });
+    const r = await doStockRescue({ nvapiModule: mod });
+    const after = vc.curveBackend.readOffsetsSync().filter((o) => o !== 0).length;
+    ok('рука 2 двойника: тот же doStockRescue, смещения РЕАЛЬНО обнулены на модели и подтверждены чтением',
+      r.ok === true && /подтверждён чтением/.test(r.detail) && after === 0);
+  }
+
+  // ---- burn pidfile (epic 59 phase 4): the carrier's pid, resolved at the trip and never earlier
+  {
+    const os = await import('node:os');
+    const { writeFileSync: wf, rmSync: rf } = await import('node:fs');
+    const pf = path.join(os.tmpdir(), `fuse-pidfile-${process.pid}.pid`);
+    try { rf(pf, { force: true }); } catch { /* clean slate */ }
+    ok('пид-файл: нет файла — честный null (рука 1 скажет «нечего убивать», рука 2 всё равно идёт)',
+      readBurnPidfile(pf) === null && readBurnPidfile(null) === null);
+    wf(pf, '4242\n', 'utf8');
+    ok('пид-файл: число читается, мусор и не-положительное — null', (() => {
+      const good = readBurnPidfile(pf) === 4242;
+      wf(pf, 'мусор', 'utf8');
+      const bad = readBurnPidfile(pf) === null;
+      wf(pf, '-5', 'utf8');
+      const neg = readBurnPidfile(pf) === null;
+      try { rf(pf, { force: true }); } catch { /* done */ }
+      return good && bad && neg;
+    })());
+  }
+
+  ok('рука 2 двойника: --twin <карта> доезжает до argv изолированного процесса, живой дефолт — без него', (() => {
+    let twinArgs = null; let liveArgs = null;
+    makeStockHand({ spawnFn: (exe, args) => { twinArgs = args; return { pid: 1, unref() {} }; }, journalPath: 'X.jsonl', extraArgs: ['--twin', 'CARD.json'] })();
+    makeStockHand({ spawnFn: (exe, args) => { liveArgs = args; return { pid: 1, unref() {} }; }, journalPath: 'X.jsonl' })();
+    return twinArgs.includes('--twin') && twinArgs[twinArgs.indexOf('--twin') + 1] === 'CARD.json'
+      && !liveArgs.includes('--twin');
+  })());
+
   // ---- live integration on fixtures: a real judge, real datagrams, ephemeral port (P55-AC1 end-to-end)
   {
     const dgram = await import('node:dgram');
@@ -733,6 +797,36 @@ async function cmdSelftest() {
     // beats slow 0,13 → 4,49 s) reaches the same verdict through the same silence check: the
     // deadman does not need to distinguish the two to rescue — only the post-mortem does.
     ok('обрыв ударов без замедления (профиль мгновенной смерти) — тот же трип', result.tripped);
+  }
+
+  // ---- pidfile end-to-end: the file appears AFTER the judge starts, and the trip still kills ITS pid
+  {
+    const dgram = await import('node:dgram');
+    const os = await import('node:os');
+    const { writeFileSync: wf } = await import('node:fs');
+    const tmp = path.join(os.tmpdir(), `fuse-pidfile-e2e-${process.pid}`);
+    const pf = path.join(tmp, 'burn-carrier.pid');
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    const killed = [];
+    let readyPort = null;
+    const sender = dgram.createSocket('udp4');
+    const judgeDone = runJudge({
+      beatPort: 0, armNMs: 60, burnPid: null, burnPidFile: pf, journalPath, seconds: 5,
+      spawnSyncFn: () => ({ status: 0 }),
+      killFn: (pid, sig) => { if (sig === 'SIGKILL') killed.push(pid); else throw new Error('ESRCH'); },
+      spawnFn: () => ({ pid: 1, unref() {} }),
+      onReady: ({ port }) => { readyPort = port; },
+    });
+    await new Promise((res) => setTimeout(res, 50));
+    const feeder = setInterval(() => { if (readyPort) sender.send(Buffer.from([0x01]), readyPort, '127.0.0.1'); }, 5);
+    await new Promise((res) => setTimeout(res, 120));
+    wf(pf, '31415\n', 'utf8'); // the carrier is born LONG after the judge — a start-time read finds nothing
+    await new Promise((res) => setTimeout(res, 120));
+    clearInterval(feeder);
+    const result = await judgeDone;
+    sender.close();
+    ok('пид-файл, сквозной: судья трипнул и убил pid, записанный ПОСЛЕ его старта — чтение в момент трипа',
+      result.tripped && JSON.stringify(killed) === '[31415]');
   }
 
   // ---- gap analysis (plans/56 step 2): the sawtooth arithmetic, pinned before any live floor
@@ -825,6 +919,8 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           armMMs: has('--arm-m') ? num('--arm-m', null) : null,
           burnPid: has('--burn-pid') ? num('--burn-pid', null) : null,
           burnImages: str('--burn-images', null)?.split(',').map((x) => x.trim()).filter(Boolean) ?? null,
+          burnPidFile: str('--burn-pidfile', null),
+          twinStockCard: str('--twin-stock', null),
           // --out: the sandbox door (P56-AC4, the phase-2 verdict's caveat). A rehearsal that can
           // only write into runs/death-watch/ plants fixtures among real post-mortems (EXP-0025).
           journalPath: str('--out', null) ?? path.join(FUSE_DIR, `${stamp}-fuse.jsonl`),
@@ -838,7 +934,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
     if (has('--loaded-floor')) {
       return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID | --burn-images a.exe,b.exe] [--seconds S] [--out FILE] | --loaded-floor [--seconds 90]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] | --loaded-floor [--seconds 90]');
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });

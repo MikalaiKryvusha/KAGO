@@ -8674,8 +8674,23 @@ async function mainSweep(argv, arg) {
     console.error(`ОШИБКА: --card принимает только «virtual», получено «${cardArg}». Без флага — живая карта.`);
     return 2;
   }
+  // Фаза 4 эпика 59 (`plans/63`): `--twin-death strangle|instant|hang` — репетиция смерти по
+  // ИЗМЕРЕННОМУ профилю; `--twin-arm` — взведённый судья на здоровом прогоне (P63-AC5). Оба флага
+  // живут только вместе с `--card virtual`: на живой карте судья взведён всегда и без них.
+  const twinDeath = arg('twin-death');
+  if (twinDeath !== null && !['strangle', 'instant', 'hang'].includes(twinDeath)) {
+    console.error(`ОШИБКА: --twin-death принимает strangle | instant | hang, получено «${twinDeath}».`);
+    return 2;
+  }
+  if ((twinDeath !== null || process.argv.includes('--twin-arm')) && cardArg !== 'virtual') {
+    console.error('ОШИБКА: --twin-death и --twin-arm имеют смысл только с --card virtual.');
+    return 2;
+  }
   const twin = cardArg === 'virtual'
-    ? await (await import('./lib/twin-assembly.mjs')).makeTwinAssembly({})
+    ? await (await import('./lib/twin-assembly.mjs')).makeTwinAssembly({
+      armJudge: process.argv.includes('--twin-arm'),
+      deathRehearsal: twinDeath,
+    })
     : null;
   if (twin) console.log(twin.canonLine);
 
@@ -9161,12 +9176,14 @@ async function mainSweep(argv, arg) {
       // The probe rises only once the judge NAMED its port — beats have an address from tick one.
       // Двойнику NVML-проба недоступна и не нужна: здоровый ритм даёт отправитель ударов (E7/R1;
       // профили смертей — фаза 4 эпика 59).
+      // Аргументы виртуальной пробы даёт СБОРКА (`twin.riders.probeArgs`): здоровый ритм по
+      // умолчанию, измеренный профиль смерти в репетиции фазы 4 (`plans/63`).
       fuseProbe = spawn(process.execPath, twin
-        ? [watchScript, '--beat-sender', '--port', m[1], '--seconds', '600', '--tick', '2']
+        ? [watchScript, ...twin.riders.probeArgs, '--port', m[1]]
         : [watchScript, '--probe', '--port', m[1], '--seconds', '36000', '--tick', '2'],
       { windowsHide: true, stdio: 'ignore' });
       fuseProbe.unref?.();
-      console.log(`ПРОБА ФЬЮЗА: pid ${fuseProbe.pid} → порт ${m[1]}, удары каждые 2 мс${twin ? ' (виртуальная: отправитель ударов, судья невзведён)' : ''}`);
+      console.log(`ПРОБА ФЬЮЗА: pid ${fuseProbe.pid} → порт ${m[1]}, удары каждые 2 мс${twin ? ` (виртуальная: ${twin.riders.probeArgs.includes('--play-profile') ? 'ПРОФИЛЬ СМЕРТИ ' + twin.riders.probeArgs[twin.riders.probeArgs.indexOf('--play-profile') + 1] : 'отправитель ударов'})` : ''}`);
     }
   });
   fuseJudge.unref?.();
@@ -9177,7 +9194,9 @@ async function mainSweep(argv, arg) {
   process.on('exit', stopDeathWatch);
   // One ref stops all riders on the operator-stop and writer-death paths above.
   sideCarRef = () => { stopSideCar(); stopDeathWatch(); };
-  console.log(`⚡ ПРЕДОХРАНИТЕЛЬ: судья pid ${fuseJudge.pid}, N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: образы горна → сток; журнал в runs/death-watch/*-fuse.jsonl`);
+  console.log(twin
+    ? `⚡ ПРЕДОХРАНИТЕЛЬ (двойник): судья pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЁН N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: пид-файл носителя → сток ДВОЙНИКА` : 'невзведён (наблюдение)'}; журнал в песочнице ${twin.runDir}`
+    : `⚡ ПРЕДОХРАНИТЕЛЬ: судья pid ${fuseJudge.pid}, N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: образы горна → сток; журнал в runs/death-watch/*-fuse.jsonl`);
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся

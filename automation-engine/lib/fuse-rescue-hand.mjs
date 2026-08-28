@@ -53,13 +53,56 @@ export async function doStockRescue({ nvapiModule = null } = {}) {
   }
 }
 
-// ---- CLI: --journal PATH ------------------------------------------------------------------------
+/**
+ * The TWIN bridge for this hand (epic 59 phase 4, `plans/63` шаг 4): the same `doStockRescue` code
+ * path — Initialize → EnumPhysicalGPUs → zeroCurve → READ-BACK — over the virtual card's model
+ * instead of the driver. The read-back is REAL (the twin's backend models write/read semantics), so
+ * `ok` still means «the card HOLDS stock», never «the call did not complain».
+ *
+ * Named modelling limit, honestly: the hand process holds ITS OWN twin instance — the live card is
+ * machine-global state, the twin is per-process by construction. What this rehearses is the hand's
+ * whole FORM (detached process, mock bridge open, zeroing, read-back verification, its own fsync'd
+ * journal line); state identity across processes goes to the parity register (epic 59 phase 5).
+ *
+ * `vc` is injectable so a selftest can hold offsets on the SAME instance and observe them zeroed.
+ */
+export async function buildTwinNvapiModule({ cardFile = null, vc = null, seed = 63 } = {}) {
+  const vgpu = await import('./virtual-gpu.mjs');
+  let card = null;
+  if (!vc) {
+    const loaded = vgpu.loadCard(cardFile);
+    if (!loaded.ok) throw new Error(`карта двойника не поднялась (${cardFile}): ${loaded.why}`);
+    card = loaded.card;
+    vc = vgpu.virtualCard(card, { seed });
+    // The state a dying writer leaves behind: a raised curve. Without it the zeroing would verify
+    // vacuously — there would be nothing to zero and nothing the read-back could catch.
+    const points = vc.curveBackend.points();
+    vc.curveBackend.holdOffsetsSync(points.map(() => 30));
+  }
+  return {
+    vc,
+    openNvapi: () => ({
+      koffi: { call: () => {} },
+      resolve: () => ({ ptr: 1 }),
+      protos: { Initialize: 'Initialize', EnumPhysicalGPUs: 'EnumPhysicalGPUs' },
+    }),
+    zeroCurve: () => {
+      vc.curveBackend.zeroCurveSync();
+      const remaining = vc.curveBackend.readOffsetsSync().filter((o) => o !== 0).length;
+      return { ok: remaining === 0, remainingNonZero: remaining, failed: 0 };
+    },
+  };
+}
+
+// ---- CLI: --journal PATH [--twin CARDFILE] ------------------------------------------------------
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--journal');
   const journalPath = i !== -1 ? argv[i + 1] : null;
+  const t = argv.indexOf('--twin');
+  const twinCard = t !== -1 ? argv[t + 1] : null;
   const run = async () => {
-    const r = await doStockRescue({});
+    const r = await doStockRescue({ nvapiModule: twinCard ? await buildTwinNvapiModule({ cardFile: twinCard }) : null });
     if (journalPath) {
       mkdirSync(path.dirname(journalPath), { recursive: true });
       const fd = openSync(journalPath, 'a');
@@ -67,7 +110,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         writeSync(fd, `${JSON.stringify({
           at: new Date().toISOString(), phase: 'outcome', cause: null,
           beatSilenceMs: null, progressSilenceMs: null,
-          hand: 2, action: 'stock-voltage-verified', ok: r.ok,
+          // The twin marks its OWN line: a rehearsal stock that read like a live stock in a
+          // post-mortem would be a twin trace in real forensics — the worst class (EXP-0025).
+          hand: 2, action: twinCard ? 'stock-voltage-verified-twin' : 'stock-voltage-verified', ok: r.ok,
           ms: Math.round(r.ms * 100) / 100, detail: r.detail,
         })}\n`);
         fsyncSync(fd);
