@@ -204,6 +204,27 @@ export function makeKillHand({ spawnSyncFn, killFn = process.kill.bind(process) 
 }
 
 /**
+ * Hand 1 for ENGINE duty: kill the burn BY IMAGE NAME. The live burn runs inside `spawnSync`
+ * (vf-step's measurement core) and its pid is unreachable from outside by construction — plumbing
+ * it out would refactor the very path the fuse guards. The workload images are OURS and
+ * distinctive (furnace.exe, branchy.exe, sdc_fma.exe), so `taskkill /IM` by argv array takes the
+ * load down without knowing the pid. «Образ не найден» (status 128) is NOT a failure: the burn
+ * may have exited on its own during the very stall that tripped us.
+ */
+export function makeImageKillHand({ spawnSyncFn }) {
+  return (images) => {
+    const t0 = performance.now();
+    const results = [];
+    for (const image of images) {
+      const r = spawnSyncFn('taskkill', ['/IM', image, '/F'], { windowsHide: true, encoding: 'utf8', timeout: 5_000 });
+      results.push(`${image}:${r.status === 0 ? 'убит' : (r.status === 128 ? 'не найден' : `status ${r.status}`)}`);
+    }
+    const ok = results.every((s) => /убит|не найден/.test(s));
+    return { ok, ms: performance.now() - t0, detail: results.join(' · ') };
+  };
+}
+
+/**
  * Hand 2: spawn the isolated stock-voltage process and DO NOT WAIT for it. The judge's loop must
  * stay alive to record; a hand that can wedge (it talks to the dying driver) gets a process
  * boundary, not an await. The hand writes its own outcome line into the same journal (fsync'd
@@ -231,17 +252,21 @@ export function makeStockHand({ spawnFn, journalPath }) {
  * BEFORE any action, so a rescue that dies mid-way still left evidence; then hand 1; then hand 2;
  * then outcomes and the ring dump. Returns what happened for the caller's log line.
  */
-export function runTrip({ verdict, burnPid, killHand, stockHand, writeLine, dumpRing }) {
+export function runTrip({ verdict, burnPid, burnImages = null, killHand, imageKillHand = null, stockHand, writeLine, dumpRing }) {
   writeLine(formatFuseLine({
     atIso: new Date().toISOString(), phase: 'intent', cause: verdict.cause,
     beatSilenceMs: verdict.beatSilenceMs, progressSilenceMs: verdict.progressSilenceMs,
   }));
   const outcomes = [];
   for (const step of decideRescue({ cause: verdict.cause })) {
-    // A missing burn pid does not cancel hand 2 — voltage rescue is meaningful even when the burn
-    // already exited on its own (the strangling can outlive the workload that started it).
+    // Hand 1 targets: an exact pid when the caller has one (drills), the image list on engine
+    // duty (the burn's pid lives inside spawnSync), honestly «nothing» otherwise — and a missing
+    // target never cancels hand 2: voltage rescue is meaningful even when the burn already
+    // exited on its own (the strangling can outlive the workload that started it).
     const r = step.hand === 1
-      ? (burnPid ? killHand(burnPid) : { ok: null, ms: 0, detail: 'no burn pid — nothing to kill' })
+      ? (burnPid ? killHand(burnPid)
+        : (burnImages?.length && imageKillHand ? imageKillHand(burnImages)
+          : { ok: null, ms: 0, detail: 'no burn pid — nothing to kill' }))
       : stockHand();
     outcomes.push({ ...step, ...r });
     writeLine(formatFuseLine({
@@ -265,7 +290,7 @@ export function runTrip({ verdict, burnPid, killHand, stockHand, writeLine, dump
  * observation), recorded into the ring like everything else.
  */
 export async function runJudge({
-  beatPort = 0, armNMs = null, armMMs = null, burnPid = null,
+  beatPort = 0, armNMs = null, armMMs = null, burnPid = null, burnImages = null,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
   spawnSyncFn, spawnFn, killFn = process.kill.bind(process), onReady = null, log = () => {},
 }) {
@@ -287,6 +312,7 @@ export async function runJudge({
   };
 
   const killHand = makeKillHand({ spawnSyncFn, killFn });
+  const imageKillHand = makeImageKillHand({ spawnSyncFn });
   const stockHand = makeStockHand({ spawnFn, journalPath });
 
   const sock = dgram.createSocket('udp4');
@@ -307,7 +333,7 @@ export async function runJudge({
     sock.bind({ address: '127.0.0.1', port: beatPort }, resolve);
   });
   const boundPort = sock.address().port;
-  log(`СУДЬЯ: порт ${boundPort} · такт ${JUDGE_TICK_MS} мс · N=${armNMs ?? 'НЕ ВЗВЕДЁН (наблюдение)'} · M=${armMMs ?? 'не взведён'} · pid прожига: ${burnPid ?? 'нет'}`);
+  log(`СУДЬЯ: порт ${boundPort} · такт ${JUDGE_TICK_MS} мс · N=${armNMs ?? 'НЕ ВЗВЕДЁН (наблюдение)'} · M=${armMMs ?? 'не взведён'} · pid прожига: ${burnPid ?? (burnImages?.length ? 'по именам: ' + burnImages.join(',') : 'нет')}`);
   if (onReady) onReady({ port: boundPort });
 
   const startMs = performance.now();
@@ -328,7 +354,7 @@ export async function runJudge({
       });
       lastTickMs = now;
       if (verdict.tripped && !tripOutcomes) {
-        tripOutcomes = runTrip({ verdict, burnPid, killHand, stockHand, writeLine, dumpRing });
+        tripOutcomes = runTrip({ verdict, burnPid, burnImages, killHand, imageKillHand, stockHand, writeLine, dumpRing });
         log(`⚡ ТРИП: ${verdict.cause} — тишина ${round2(verdict.beatSilenceMs ?? -1)} мс. Руки отработали: ${tripOutcomes.map((o) => `${o.action}=${o.ok}`).join(' · ')}`);
         resolve(); // one trip ends this judge: the step is over either way, a second trip would fire on a corpse
         return;
@@ -609,6 +635,31 @@ async function cmdSelftest() {
     return r.ok && JSON.stringify(seen) === JSON.stringify(['taskkill', '/PID', '777', '/T', '/F']) && r.detail === 'taskkill /T fallback';
   })());
 
+  // ---- hand 1 by IMAGE (engine duty, P58-AC2): the burn's pid is locked inside spawnSync
+  ok('рука 1 по именам: taskkill /IM <образ> /F argv-массивом на каждый образ, «не найден» (128) — не отказ', (() => {
+    const seen = [];
+    const hand = makeImageKillHand({ spawnSyncFn: (cmd, args) => { seen.push([cmd, ...args].join(' ')); return { status: seen.length === 1 ? 0 : 128 }; } });
+    const r = hand(['furnace.exe', 'branchy.exe']);
+    return r.ok && seen[0] === 'taskkill /IM furnace.exe /F' && seen[1] === 'taskkill /IM branchy.exe /F'
+      && /furnace\.exe:убит/.test(r.detail) && /branchy\.exe:не найден/.test(r.detail);
+  })());
+  ok('рука 1 по именам: настоящий отказ taskkill (не 0 и не 128) — рука честно не-ok', (() => {
+    const hand = makeImageKillHand({ spawnSyncFn: () => ({ status: 1 }) });
+    return hand(['furnace.exe']).ok === false;
+  })());
+  ok('трип без pid, но с образами — рука 1 бьёт по образам (режим движка)', (() => {
+    const calls = [];
+    runTrip({
+      verdict: { cause: 'beat-silence', beatSilenceMs: 70, progressSilenceMs: null },
+      burnPid: null, burnImages: ['furnace.exe'],
+      killHand: () => { calls.push('pid'); return { ok: true, ms: 1, detail: null }; },
+      imageKillHand: (imgs) => { calls.push(`img:${imgs.join(',')}`); return { ok: true, ms: 1, detail: 'furnace.exe:убит' }; },
+      stockHand: () => ({ ok: true, ms: 1, detail: null }),
+      writeLine: () => {}, dumpRing: () => {},
+    });
+    return JSON.stringify(calls) === '["img:furnace.exe"]';
+  })());
+
   ok('рука 2: ИЗОЛИРОВАННЫЙ процесс, судья НЕ ждёт, и он DETACHED — на этой машине недетачнутый ребёнок умирает с родителем (живой прогон 28.08, EXP-0166)', (() => {
     let spawned = null; let opts = null;
     const stock = makeStockHand({ spawnFn: (exe, args, o) => { spawned = args; opts = o; return { pid: 999, unref() {} }; }, journalPath: 'X.jsonl' });
@@ -773,6 +824,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           armNMs: has('--arm-n') ? num('--arm-n', null) : null,
           armMMs: has('--arm-m') ? num('--arm-m', null) : null,
           burnPid: has('--burn-pid') ? num('--burn-pid', null) : null,
+          burnImages: str('--burn-images', null)?.split(',').map((x) => x.trim()).filter(Boolean) ?? null,
           // --out: the sandbox door (P56-AC4, the phase-2 verdict's caveat). A rehearsal that can
           // only write into runs/death-watch/ plants fixtures among real post-mortems (EXP-0025).
           journalPath: str('--out', null) ?? path.join(FUSE_DIR, `${stamp}-fuse.jsonl`),
@@ -786,7 +838,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
     if (has('--loaded-floor')) {
       return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID] [--seconds S] [--out FILE] | --loaded-floor [--seconds 90]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID | --burn-images a.exe,b.exe] [--seconds S] [--out FILE] | --loaded-floor [--seconds 90]');
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });

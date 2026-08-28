@@ -2996,6 +2996,11 @@ export async function sweepRange({
   now = null,
   clockMs = () => Date.now(),
   onEvent = null,
+  // ⚡ ВНЕШНИЙ СТОП ПЕРЕД СТУПЕНЬЮ (эпик 51 фаза 5, `plans/58` P58-AC3). Возвращает null — идём;
+  // строку-причину — полоса встаёт ДО ступени, остаток не жжётся. Родился для трипа предохранителя:
+  // судья вышел (спасение или собственная смерть) — прогон без фьюза ЗАПРЕЩЁН той же фазой, и оба
+  // случая останавливают одинаково. Дефолт null — прежнее поведение, ни один старый вызов не задет.
+  stopWhen = null,
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ, СИЛЬНЕЙШИЙ НАБОР ПЕРВЫМ (слово владельца 2026-08-22: прожиг обязан
   // идти на настраиваемой частоте). `null` — прежнее поведение: одна попытка формой по умолчанию.
   shapeLadder = null,
@@ -3208,6 +3213,18 @@ export async function sweepRange({
   };
 
   for (const g of groups) {
+    // ⚡ THE FUSE'S VOICE — checked FIRST, before the rung spends anything. A trip mid-burn kills
+    // the workload (hand 1) and the form fails through the oracle's ordinary road; THIS check is
+    // the other half: the NEXT rung must never start, because the judge that would have guarded it
+    // is gone. The reason is recorded as the sweep's stop, not invented into any rung's verdict.
+    const externalStop = stopWhen ? stopWhen() : null;
+    if (externalStop) {
+      report.ok = report.closed > 0;
+      report.stoppedBy = 'external-stop';
+      report.why = `ПОЛОСА ОСТАНОВЛЕНА ВНЕШНИМ СТОПОМ ПЕРЕД ${g.topMhz} МГц: ${externalStop}`;
+      say('external-stop', report.why, { frequencyMhz: g.topMhz, reason: externalStop });
+      break;
+    }
     const already = bracketedEdge(g.topMhz);
     if (already) {
       report.preBracketed.push({
@@ -7113,6 +7130,33 @@ export function selfTest() {
     // HARDEST member of the rung is the one that must be proved before the others inherit (E2-AC3).
     ok('СТУПЕНЬ ПРОЖИГАЕТСЯ НА САМОЙ ВЫСОКОЙ СВОЕЙ ЧАСТОТЕ — она самая трудная, остальные наследуют от неё',
       [...new Set(burned)].sort((a, b) => b - a), [2842, 2820]);
+
+    // =============================================================================================
+    // ⚡ `plans/58` P58-AC3 — THE FUSE'S VOICE: an external stop ends the band BEFORE the next rung
+    // =============================================================================================
+    {
+      const burnedUnderStop = [];
+      const stopped = await sweepRange({
+        envelopeMhz: 3090,
+        curveDoc: sweepDoc(bandRows), points: sweepPoints,
+        runStepFn: async (args) => { burnedUnderStop.push(args.pinMhz ?? args.capMhz); return sweepAtom(-1)(args); },
+        buildVector: vectorPinned,
+        saveFn: async () => ({ ok: true }),
+        // The judge «exits» the moment the first rung has burned: the NEXT rung must never start.
+        stopWhen: () => (burnedUnderStop.length ? 'судья вышел (код 2 — спасение сработало)' : null),
+        now: () => '2026-08-16T02:00:00+03:00',
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('трип предохранителя: полоса встаёт ДО следующей ступени — сожжена ровно одна частота',
+        [...new Set(burnedUnderStop)].length, 1);
+      // closed = 3, not 1: the ONE burned frequency closes itself plus two inheritors — the same
+      // inheritance the full-band block above shows (5 closed from 2 burns). The stop stops BURNS,
+      // never the bookkeeping of what the last burn honestly proved.
+      ok('остановка названа СВОИМ именем, а не подделана в вердикт ступени',
+        [stopped.stoppedBy, /судья вышел/.test(stopped.why ?? ''), stopped.closed], ['external-stop', true, 3]);
+      ok('закрытая до трипа частота — успех прогона: спасение не крадёт уже добытое',
+        stopped.ok, true);
+    }
     // The order proof, and it is the point of «before the next frequency»: the document is on disk
     // before a single rung of the next rung is written.
     // ✏️ ОБНОВЛЁН 2026-08-24 СТРОЖЕ, А НЕ СЛАБЕЕ (`plans/41` фаза 3). Блок покраснел на третьем
@@ -9008,6 +9052,7 @@ async function mainSweep(argv, arg) {
   // leaves the readouts blinking, and it already exists for a different job (the atom's ceiling proof
   // owns that one and keys it by rung — two consumers of one file would fight over its lifetime).
   const { spawn } = await import('node:child_process');
+  const fuseMod = await import('./lib/fuse.mjs');
   const { fileURLToPath: toPath } = await import('node:url');
   const samplerScript = join(dirname(toPath(import.meta.url)), 'lib', 'hardware-mon.mjs');
   // ─── THE PREVIOUS RUN'S PULSE IS MOVED ASIDE, NOT DELETED (`plans/27` §27.1, `ideas/10` §5.6) ───
@@ -9044,26 +9089,46 @@ async function mainSweep(argv, arg) {
   process.on('exit', stopSideCar);
   console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
 
-  // ─── THE DEATH WATCH RIDES ALONG — plans/52 step 6: it votes on NOTHING, it only records ───────
+  // ─── ⚡ THE FUSE RIDES ARMED — epic 51 phase 5 (`plans/58`): the watch that RESCUES ─────────────
   //
-  // Wired into the sweep's own start-up so that remembering is not required (plans/52 risk (d): a
-  // death captured with the watcher not running is a lost data point, and deaths cannot be
-  // re-ordered). Two watchers in their own process at 2 ms: `timer` stalls — the SYSTEM is being
-  // strangled; `driver` stalls — the display driver is dying. Which stalls FIRST is the epic's
-  // discriminating measurement (P52-AC6), and it decides which RESCUE can physically work
-  // (`GOAL.md` → «🚑 СПАСЕНИЕ ВМЕСТО КОНСТАТАЦИИ»: драйвер жив → поднять напряжение; драйвер
-  // встал → только снять нагрузку). Its misses are fsync'd per line into runs/death-watch/ and
-  // survive the machine; a sweep that ends normally kills it here like the sampler above.
+  // Until 2026-08-28 this spot spawned a bare recorder (`--floor`), which the third machine death
+  // proved blind by construction: a probe call that never returns writes nothing. Now the sweep
+  // raises the JUDGE (deadman, N from the measured loaded floor — `DERIVED_ARM_N_MS`, provenance
+  // in fuse.mjs) plus the live PROBE feeding it liveness beats. On N мс of silence the judge kills
+  // the burn BY IMAGE (its pid lives inside spawnSync), returns the card to FACTORY voltage in a
+  // detached hand, fsync's the timeline — and exits. `stopWhen` below turns that exit into the
+  // band's stop before the next rung: a sweep without its fuse is forbidden by the same phase.
+  // Wired into the sweep's own start-up so that remembering is not required (plans/52 risk (d)).
   const watchScript = join(dirname(toPath(import.meta.url)), 'lib', 'death-watch.mjs');
-  const deathWatch = spawn(process.execPath, [
-    watchScript, '--floor', '--seconds', '36000', '--tick', '2',
-  ], { windowsHide: true, stdio: 'ignore' });
-  deathWatch.unref?.();
-  const stopDeathWatch = () => { try { deathWatch.kill(); } catch { /* already gone */ } };
+  const fuseScript = join(dirname(toPath(import.meta.url)), 'lib', 'fuse.mjs');
+  const fuseJudge = spawn(process.execPath, [
+    fuseScript, '--judge', '--arm-n', String(fuseMod.DERIVED_ARM_N_MS),
+    '--burn-images', 'furnace.exe,branchy.exe,sdc_fma.exe',
+    '--seconds', '36000',
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  let fuseProbe = null;
+  let fuseJudgeLog = '';
+  fuseJudge.stdout.on('data', (d) => {
+    fuseJudgeLog += d.toString();
+    const m = fuseJudgeLog.match(/порт (\d+)/u);
+    if (m && !fuseProbe) {
+      // The probe rises only once the judge NAMED its port — beats have an address from tick one.
+      fuseProbe = spawn(process.execPath, [
+        watchScript, '--probe', '--port', m[1], '--seconds', '36000', '--tick', '2',
+      ], { windowsHide: true, stdio: 'ignore' });
+      fuseProbe.unref?.();
+      console.log(`ПРОБА ФЬЮЗА: pid ${fuseProbe.pid} → порт ${m[1]}, удары каждые 2 мс`);
+    }
+  });
+  fuseJudge.unref?.();
+  const stopDeathWatch = () => {
+    try { fuseJudge.kill(); } catch { /* already gone */ }
+    try { fuseProbe?.kill(); } catch { /* already gone */ }
+  };
   process.on('exit', stopDeathWatch);
-  // One ref stops both riders on the operator-stop and writer-death paths above.
+  // One ref stops all riders on the operator-stop and writer-death paths above.
   sideCarRef = () => { stopSideCar(); stopDeathWatch(); };
-  console.log(`СТОРОЖ СМЕРТИ: pid ${deathWatch.pid}, такт 2 мс, промахи в runs/death-watch/ (голоса не имеет — только пишет)`);
+  console.log(`⚡ ПРЕДОХРАНИТЕЛЬ: судья pid ${fuseJudge.pid}, N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: образы горна → сток; журнал в runs/death-watch/*-fuse.jsonl`);
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
@@ -9097,6 +9162,11 @@ async function mainSweep(argv, arg) {
     // журнал пропущенных частот; с флагом встаёт на первой аномалии — это нужно, когда я ловлю
     // конкретный дефект и хочу карту в момент отказа.
     haltOnAnomaly: process.argv.includes('--halt-on-anomaly'),
+    // ⚡ Трип (или собственная смерть) судьи останавливает полосу ДО следующей ступени — оба случая
+    // одинаково: прогон без фьюза запрещён фазой 5 (plans/58), различается только текст причины.
+    stopWhen: () => (fuseJudge.exitCode === null ? null
+      : (fuseJudge.exitCode === 2 ? `судья вышел (код 2 — СПАСЕНИЕ сработало): читай runs/death-watch/*-fuse.jsonl`
+        : `судья фьюза умер (код ${fuseJudge.exitCode}) — прогон без фьюза запрещён`)),
     // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
     // recoveries that could disagree are worse than one that cannot.
     recover: async () => watchdog.recover(),
