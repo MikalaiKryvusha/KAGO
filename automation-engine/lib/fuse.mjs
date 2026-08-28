@@ -73,6 +73,25 @@ export const JUDGE_TICK_MS = 2;
  *  precursor (4,49 s), short enough to dump in one write. */
 export const RING_CAPACITY = 15_000;
 
+/**
+ * ⚡ THE DERIVED DEADMAN THRESHOLD — phase 3's number (`plans/56` §Итог замера, 2026-08-28), the
+ * one constant `plans/52` forbade inventing and this measurement finally earned:
+ *
+ *   loaded floor ×2 (furnace 2400·8192·256·64 --sustain 60, ~307 W, card at stock, ZERO writes):
+ *     run 1 — beats 99,01 % · gap median 1,96 / p99 4,42 / max 9,57 мс
+ *     run 2 — beats 98,91 % · gap median 1,96 / p99 4,45 / max 7,28 мс
+ *
+ *   N = 60 мс clears EVERY shoulder at once:
+ *     ≥ 5 × max_loaded (9,57 → k = 6,3)      — the plan's formula, P56-AC2;
+ *     ≥ 5 × worst gap of ALL floors (10,46 idle jitter floor → k = 5,7);
+ *     ≤ 302 мс (a tenth of the 3042 мс strangling precursor) — 5× under the ceiling;
+ *     ≥ 11 × the judge's own worst tick (5,43 мс) — the judge cannot trip on its own lateness.
+ *
+ * Still a PARAMETER at every call site (`--arm-n`): this constant is the derived recommendation
+ * with its provenance, not a hidden hardcode — phase 4 arms with it, the доспех stays inspectable.
+ */
+export const DERIVED_ARM_N_MS = 60;
+
 // =================================================================================================
 // 1. Pure decision logic — no sockets, no clock, no card (provable on fixtures alone, P55-AC1/2)
 // =================================================================================================
@@ -309,6 +328,40 @@ export async function runJudge({
 }
 
 // =================================================================================================
+// 3b. Gap analysis from the ring — the loaded floor's arithmetic (plans/56 step 2), pure
+// =================================================================================================
+
+/**
+ * COMPLETED beat gaps from a ring timeline. The ring stores `beatSilenceMs` per judge tick — a
+ * sawtooth that climbs during a gap and drops on each beat. The honest gap list is the sawtooth's
+ * local maxima: the value on the tick JUST BEFORE each drop. A median over raw silences would
+ * read ≈ gap/2 (every gap is sampled along its whole climb) — a books-balancing average this
+ * function exists to refuse. The tail climb (never closed by a beat) is NOT a gap — an
+ * unfinished measurement reported as one would be an invented number.
+ *
+ * Resolution honesty: gaps are sampled at the judge's tick, so every figure carries ±tick — the
+ * caller prints the tick next to the numbers.
+ */
+export function gapsFromRing(rows) {
+  const gaps = [];
+  for (let i = 1; i < rows.length; i++) {
+    const prev = rows[i - 1].beatSilenceMs;
+    const cur = rows[i].beatSilenceMs;
+    if (prev !== null && cur !== null && cur < prev) gaps.push(prev);
+  }
+  return gaps;
+}
+
+/** median / p99 / max over a list — the three the floor prints, together (a median alone hides
+ *  the one long stall, a max alone reads a hiccup as a way of life — `summarize`'s reasoning). */
+export function distStats(xs) {
+  if (xs.length === 0) return { n: 0, medianMs: null, p99Ms: null, maxMs: null };
+  const s = [...xs].sort((a, b) => a - b);
+  const at = (p) => s[Math.min(s.length - 1, Math.floor(s.length * p))];
+  return { n: s.length, medianMs: round2(at(0.5)), p99Ms: round2(at(0.99)), maxMs: round2(s[s.length - 1]) };
+}
+
+// =================================================================================================
 // 4. Jitter floor — the channel measured in the sender's REAL loop shape (plan step 1)
 // =================================================================================================
 
@@ -358,6 +411,60 @@ function loadWinmm() {
   const koffi = require('koffi');
   const winmm = koffi.load('winmm.dll');
   return { begin: winmm.func('uint32_t timeBeginPeriod(uint32_t)'), end: winmm.func('uint32_t timeEndPeriod(uint32_t)') };
+}
+
+// =================================================================================================
+// 4b. Loaded floor — the REAL rig: unarmed judge + live probe, load started by the operator
+// =================================================================================================
+
+/**
+ * Phase 3's measurement (`plans/56` шаги 2, 4): the judge runs UNARMED in this process, the live
+ * probe (`death-watch --probe`) rides as a child on this judge's port, and the OPERATOR starts the
+ * load in another window when told — the rig measures beat gaps exactly as the armed fuse will see
+ * them. Artifacts land in the real `runs/death-watch/` deliberately: this is a genuine floor
+ * measurement, the same standing the phase-1 night floor files have — NOT a rehearsal (rehearsals
+ * take `--judge --out` into a sandbox).
+ */
+async function cmdLoadedFloor({ seconds, tickMs }) {
+  const { spawn, spawnSync } = await import('node:child_process');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const journalPath = path.join(FUSE_DIR, `${stamp}-loaded-floor.jsonl`);
+  console.log(`ПОЛ ПОД НАГРУЗКОЙ: судья unarmed · такт ${JUDGE_TICK_MS} мс · ${seconds} с · проба живая (NVML, чтение)`);
+  const mm = loadWinmm(); mm.begin(1);
+  let probe = null;
+  try {
+    const watchScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'death-watch.mjs');
+    const r = await runJudge({
+      beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
+      journalPath, seconds,
+      // The ring must cover the WHOLE run: the default 30-second cap silently drops the loaded
+      // window's head on a 90-second floor (paid on run 1: 15 000 ticks kept, load at t≈12-72
+      // partly outside). Slack on top for late-wake catch-ups.
+      ringCapacity: Math.ceil((seconds * 1000) / JUDGE_TICK_MS) + 2000,
+      spawnSyncFn: spawnSync, spawnFn: spawn, log: console.log,
+      onReady: ({ port }) => {
+        probe = spawn(process.execPath, [watchScript, '--probe', '--port', String(port), '--seconds', String(seconds), '--tick', String(tickMs)], { windowsHide: true, stdio: 'inherit' });
+        console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}.`);
+        // LOAD-NOW is deliberately ASCII: an orchestrating shell greps for it, and both Cyrillic
+        // bytes and backslash paths already cost one silently-spinning wait loop (run 1).
+        console.log('>>> LOAD-NOW — нагрузку можно запускать (окно 2): workloads/furnace.exe 2400 8192 256 64 --sustain <с> <<<');
+      },
+    });
+    const { readFileSync } = await import('node:fs');
+    const rows = readFileSync(r.ringPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const gaps = distStats(gapsFromRing(rows));
+    const ticks = distStats(rows.map((x) => x.gapMs).filter((x) => x !== undefined));
+    const expected = Math.floor((seconds * 1000) / 2);
+    console.log(`\nударов ${r.beats} из ~${expected} (${round2((r.beats / expected) * 100)} %) · тактов судьи в кольце ${rows.length}`);
+    console.log(`ЗАЗОРЫ УДАРОВ (±${JUDGE_TICK_MS} мс такта): закрытых ${gaps.n} · медиана ${gaps.medianMs} мс · p99 ${gaps.p99Ms} мс · max ${gaps.maxMs} мс`);
+    console.log(`такт самого судьи: медиана ${ticks.medianMs} мс · p99 ${ticks.p99Ms} мс · max ${ticks.maxMs} мс`);
+    console.log(`кольцо: ${r.ringPath}`);
+    console.log('N выводится ТОЛЬКО из прогона С НАГРУЗКОЙ: N = k × max, k ≥ 5, и N ≤ 302 мс (десятая предвестника 3042 мс).');
+    return 0;
+  } finally {
+    mm.end(1);
+    if (probe) { try { probe.kill(); } catch { /* уже вышла */ } }
+  }
 }
 
 // =================================================================================================
@@ -546,6 +653,48 @@ async function cmdSelftest() {
     ok('обрыв ударов без замедления (профиль мгновенной смерти) — тот же трип', result.tripped);
   }
 
+  // ---- gap analysis (plans/56 step 2): the sawtooth arithmetic, pinned before any live floor
+  ok('зазоры из кольца — локальные максимумы пилы, хвост без удара НЕ зазор', (() => {
+    const rows = [0, 2, 4, 0.5, 2.5, 4.5, 6.5, 1, 3, 5].map((v) => ({ beatSilenceMs: v }));
+    return JSON.stringify(gapsFromRing(rows)) === '[4,6.5]';
+  })());
+  ok('зазоры: null-такты (до первого удара) не рождают зазор', (() => {
+    const rows = [null, null, 0, 2, 0.5].map((v) => ({ beatSilenceMs: v }));
+    return JSON.stringify(gapsFromRing(rows)) === '[2]';
+  })());
+  ok('distStats несёт медиану, p99 и max ВМЕСТЕ; пустой список — нули честно null', (() => {
+    const d = distStats([1, 2, 3, 4, 100]);
+    const e = distStats([]);
+    return d.medianMs === 3 && d.maxMs === 100 && e.maxMs === null && e.n === 0;
+  })());
+
+  // ---- --out (P56-AC4): the REAL CLI, a sandbox journal, and the combat dir left untouched
+  {
+    const { spawn } = await import('node:child_process');
+    const { readdirSync, existsSync } = await import('node:fs');
+    const os = await import('node:os');
+    const outDir = path.join(os.tmpdir(), `fuse-out-${process.pid}`);
+    const outJournal = path.join(outDir, 'rehearsal.jsonl');
+    const combatBefore = new Set(existsSync(FUSE_DIR) ? readdirSync(FUSE_DIR) : []);
+    const code = await new Promise((res) => {
+      const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--judge', '--seconds', '0.3', '--out', outJournal], { windowsHide: true, stdio: 'ignore' });
+      c.on('exit', res);
+    });
+    const combatAfter = new Set(existsSync(FUSE_DIR) ? readdirSync(FUSE_DIR) : []);
+    const newInCombat = [...combatAfter].filter((f) => !combatBefore.has(f));
+    ok('--out: живой CLI судьи уводит журнал и кольцо в песочницу, боевая папка НЕ пополнилась (EXP-0025)',
+      code === 0 && existsSync(outJournal.replace(/\.jsonl$/u, '-ring.jsonl')) && newInCombat.length === 0,
+      newInCombat.length ? `в боевой папке появилось: ${newInCombat.join(', ')}` : '');
+  }
+
+  // ---- the derived N: both shoulders pinned as arithmetic, so a drive-by edit of the constant
+  // (or of the floor numbers it stands on) reddens a block instead of silently rearming the fuse
+  ok('выведенное N держит оба плеча: ≥ 5× худшего зазора всех полов (10,46) и ≤ 302 мс потолка удушения', (() => {
+    const worstGapMs = 10.46; const stranglePrecursorMs = 3042;
+    const { DERIVED_ARM_N_MS: N } = { DERIVED_ARM_N_MS };
+    return N >= 5 * worstGapMs && N <= stranglePrecursorMs / 10;
+  })());
+
   // ---- the real sender process end-to-end (mutation target «удар не отправлен»): death-watch's
   // `--beat-sender` is the probe's exact loop shape minus the card; a mutant that drops the send
   // must go red HERE, offline, not first on a live evening. ~1 s of runtime, ephemeral port only.
@@ -579,6 +728,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
   const argv = process.argv.slice(2);
   const has = (f) => argv.includes(f);
   const num = (f, dflt) => { const i = argv.indexOf(f); return i !== -1 && argv[i + 1] !== undefined ? Number(argv[i + 1]) : dflt; };
+  const str = (f, dflt) => { const i = argv.indexOf(f); return i !== -1 && argv[i + 1] !== undefined ? argv[i + 1] : dflt; };
   const run = async () => {
     if (has('--selftest')) return cmdSelftest();
     if (has('--jitter-floor')) return cmdJitterFloor({ seconds: num('--seconds', 60), tickMs: num('--tick', JUDGE_TICK_MS) });
@@ -592,7 +742,9 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           armNMs: has('--arm-n') ? num('--arm-n', null) : null,
           armMMs: has('--arm-m') ? num('--arm-m', null) : null,
           burnPid: has('--burn-pid') ? num('--burn-pid', null) : null,
-          journalPath: path.join(FUSE_DIR, `${stamp}-fuse.jsonl`),
+          // --out: the sandbox door (P56-AC4, the phase-2 verdict's caveat). A rehearsal that can
+          // only write into runs/death-watch/ plants fixtures among real post-mortems (EXP-0025).
+          journalPath: str('--out', null) ?? path.join(FUSE_DIR, `${stamp}-fuse.jsonl`),
           seconds: has('--seconds') ? num('--seconds', null) : null,
           spawnSyncFn: spawnSync, spawnFn: spawn, log: console.log,
         });
@@ -600,7 +752,10 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
         return r.tripped ? 2 : 0; // exit 2 = rescue fired: the caller must treat the step as a FAIL edge
       } finally { mm.end(1); }
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID] [--seconds S]');
+    if (has('--loaded-floor')) {
+      return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
+    }
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID] [--seconds S] [--out FILE] | --loaded-floor [--seconds 90]');
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });
