@@ -52,7 +52,9 @@
     "pulse": "node tools/pulse-report.mjs",
     "deathwatch": "node automation-engine/lib/death-watch.mjs",
     "safe-mode": "node tools/safe-mode.mjs",
-    "prayer": "node tools/prayer.mjs"
+    "prayer": "node tools/prayer.mjs",
+    "team": "node tools/team-board.mjs",
+    "workplace": "node tools/team-workplace.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"
