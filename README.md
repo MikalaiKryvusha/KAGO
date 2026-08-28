@@ -97,6 +97,16 @@ offered above the clock the card already delivered, it draws **7.71 W (5.6 %) le
 exactly the stock clock** — and no clock lock is used, so the card still boosts and still drops to idle
 speeds. One number from one pair of runs; two independent series are what will make it a result.
 
+**Every live sweep now rides under an armed fuse.** A deadman judge in its own process listens to
+millisecond liveness beats from a driver probe; N ms of silence — the threshold derived from a
+measured floor under load, not invented — and it kills the burn (0.26 ms, syscall), returns the
+card to factory voltage in a detached hand that verifies by read-back, and stops the sweep before
+the next rung. Rehearsed live end-to-end: trip at 61 ms, load gone, stock confirmed. The card also
+has a **digital twin** (the owner's term): a virtual card derived from this card's own measured
+dictionaries, deep enough to burn rungs, find edges and die by the machine's real death profiles —
+the seam inventory and device port are done, and the sweep engine is being assembled onto it so
+fuses and sweeps can be drilled with zero risk to the real machine.
+
 The bench samples the card, loads it with KAGO's own CUDA workloads, watches the Windows event log,
 and returns a three-way verdict — PASS, SDC or CRASH — by comparing a run against a golden reference
 captured at stock. SDC is the one that matters: more than half of undervolting failures corrupt data
@@ -369,6 +379,17 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 5 °C холоднее при ровно стоковой частоте** — и никакой фиксации частоты при этом не применяется, так что
 карта по-прежнему разгоняется и по-прежнему сбрасывается на простое. Это одно число из одной пары
 прогонов; результатом его сделают две независимые серии.
+
+**Каждый живой прогон теперь идёт под взведённым предохранителем.** Судья-deadman в отдельном
+процессе слушает миллисекундные удары живости от пробы драйвера; N мс тишины — порог выведен из
+измеренного пола под нагрузкой, не выдуман — и он убивает прожиг (0,26 мс, сисколл), возвращает
+карте заводское напряжение отдельной рукой с проверкой чтением и останавливает развёртку до
+следующей ступени. Отрепетировано живьём конец-в-конец: трип на 61 мс, нагрузка снята, сток
+подтверждён. У карты есть и **цифровой двойник** (термин владельца): виртуальная карта, выведенная
+из измеренных словарей именно этого экземпляра, — достаточно глубокая, чтобы жечь ступени, находить
+края и умирать по настоящим профилям смертей этой машины; опись швов и порт устройства готовы,
+движок развёртки собирается на двойника, чтобы предохранители и развёртки репетировались с нулевым
+риском для живой машины.
 
 Стенд снимает телеметрию, грузит карту своими ядрами на CUDA, читает журнал Windows и выносит
 вердикт из трёх — PASS, SDC или CRASH, — сверяя прогон с эталоном, снятым на заводских настройках.
