@@ -101,7 +101,7 @@ const FENCE = '`'.repeat(6);
 // detect mechanically; the rest lands in the adaptation task for the agent.
 const PLACEHOLDERS = ['<PROJECT_NAME>', '<SHORT_NAME>', '<AUTHOR>', '<REPO_URL>', '<LOCAL_PATH>',
                       '<LICENSE>', '<BUILD_COMMAND>', '<TEST_HARNESS>', '<COMMIT_COMMAND>', '<YOUR AGENT/MODEL>',
-                      "<YOUR AGENT'S noreply EMAIL>",   // bug 28: shipped by /end-chat, was invisible to the gate
+                      "<YOUR AGENT'S noreply EMAIL>",   // bug 28: shipped by /end-chat (now /end-chat-soft), was invisible to the gate
                       '<OWNER_LANGUAGE>'];
 
 // Docs seeded/owned by the OWNER after deploy — an update never touches them and never
@@ -804,6 +804,12 @@ function scanStaleClaims(fromVersion, toVersion, templateShas = null) {
         const line = lines[i];
         if (!line.includes(fromVersion) || line.includes(toVersion)) continue;
         if (/^\s*>/.test(line)) continue;          // blockquote = the owner's quoted word (bugs/35, project B Г5)
+        // project A 2.3 field wish R2: a JUSTIFIED old-version mention re-flagged on EVERY interval,
+        // forever ("minutes per update, forever"). The canonical marker `KAIF-VERSION-OK` (an
+        // English greppable token, same family as [TESTED]/DONE) on the hit line or the line
+        // right above it records the justification ONCE — <!-- KAIF-VERSION-OK: reason --> —
+        // and the scan converges to zero instead of re-litigating history each time.
+        if (/KAIF-VERSION-OK/i.test(line) || (i > 0 && /KAIF-VERSION-OK/i.test(lines[i - 1]))) continue;
         if (/\b\d{4}-\d{2}/.test(line)) continue;  // a dated record = journal/chronicle/decision row, not a claim (project B Г5, project A гр.4)
         if (p === 'STATUS.md' && /предыдущ|previous/i.test(line)) continue;   // history, not a claim
         // Attributions — "(KAIF 1.6)" naming the version a rule arrived with — are history, not
@@ -882,7 +888,7 @@ function writeUpdateTask(diverged, meta, contextLine, opts = {}) {
   // stale-claims comes AFTER review-news: the news carry the history-migration instruction, and
   // the scan once flagged the very STATUS lines that migration moves two items later (bugs/35,
   // project A гр.4); the checkpoint re-runs the scanner, so the post-migration state is what counts.
-  if (staleClaims.length) items.push(['stale-claims', `These lines still assert the OLD version (${fromVersion}) — after the history migration from the news above, update each or state why it is correct:\n${staleClaims.map((h) => `    · ${h}`).join('\n')}`]);
+  if (staleClaims.length) items.push(['stale-claims', `These lines still assert the OLD version (${fromVersion}) — after the history migration from the news above, update each or state why it is correct. A line that is correct BY DESIGN (a rule's arrival version, a verbatim quote) gets the permanent justification marker on it or on the line above — \`<!-- KAIF-VERSION-OK: reason -->\` — and stops re-flagging on every future interval:\n${staleClaims.map((h) => `    · ${h}`).join('\n')}`]);
   items.push(['recheck', 'Run `node .kaif/kaif-core.mjs check` — the deployed manifest must be 100% green.']);
   items.push(['judge', 'Run a /fable-judge pass over this update (versions in .kaif/kaif.json, nothing owner-authored lost, the merges real) — its verdict is quoted in the field report below and update-verify is not green without it (decision #46).']);
   // Epic M (feedback loop): the update report is MANDATORY, even for a smooth pass (deviations
@@ -1026,6 +1032,21 @@ async function buildSyntheticBaseline(legacyOld) {
 // cycles while its file's upstream modules merge mechanically; conflict module → diff in the
 // task; upstream-untouched divergence makes no noise; a translated-wholesale file is kept intact
 // (no doubling); dryRun analyzes without writes; owner-added sections never trip the net]
+// KAIF ticket 06 (KAGO 2.3 field report): rewriting an EXISTING file keeps the file's dominant
+// line-ending convention. On an autocrlf=true tree `update` used to write LF into a CRLF working
+// tree — git normalizes on commit, so the REPO was unharmed, but any local guard comparing text
+// blocks byte-exact across files on disk went transiently red right after a green mechanical
+// pass ("the project stays whole at every step" broken in letter). New files stay LF: there is
+// no convention to preserve. One helper covers merge and replace alike (the ticket's smallest fix).
+function writeMatchingEol(path, content) {
+  let out = content;
+  try {
+    if (existsSync(path) && readFileSync(path, 'utf8').includes('\r\n'))
+      out = content.replace(/\r?\n/g, '\r\n');
+  } catch { /* unreadable target — write the content as-is */ }
+  writeFileSync(path, out);
+}
+
 function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null) {
   const disk = normEol(readFileSync(path, 'utf8'));
   const diskMods = splitModules(disk);
@@ -1264,7 +1285,7 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null) {
       // under the i18n flag (the flag protects the owner's translation, and an untouched file
       // carries none; s07 T2 guards this for pure-EN files on translated deployments).
       if (fileShaNorm(f.path) === normSha(content)) { kept++; continue; } // upstream didn't change it either
-      writeFileSync(f.path, content); log(`↻ replaced ${f.path}`); replaced++; continue;
+      writeMatchingEol(f.path, content); log(`↻ replaced ${f.path}`); replaced++; continue;
     }
     // bugs/32 (all four 2.1 field reports): a diverged/translated file whose TEMPLATE did not
     // change in this interval has NOTHING to deliver — it stays as-is and never makes a task
@@ -1299,8 +1320,10 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null) {
           kept++; adopted.push(f.path);
           continue;
         }
-        if (res.changed) { writeFileSync(f.path, res.merged); mergedModules += res.replaced;
-          log(`↻ merged ${res.replaced} module(s) into ${f.path}${res.divergedList.length ? ` (${res.divergedList.length} kept for you)` : ''}`); }
+        if (res.changed) { writeMatchingEol(f.path, res.merged); mergedModules += res.replaced;
+          // KAGO 2.3 field wish: NAME the kept modules by signature — "1 kept for you" made the
+          // answer require a sandbox diff, and the answer should not require a sandbox.
+          log(`↻ merged ${res.replaced} module(s) into ${f.path}${res.divergedList.length ? ` (kept for you: ${res.divergedList.map((d) => d.signature).join(' · ')})` : ''}`); }
         if (res.divergedList.length) { divergedModules[f.path] = res.divergedList; kept++; adopted.push(f.path); }
         continue;
       }
@@ -2401,7 +2424,7 @@ function cmdCheck() {
   if (okOnDisk('STATUS.md')) {
     const n = readFileSync('STATUS.md', 'utf8').replace(/\r?\n$/, '').split(/\r?\n/).length;
     if (n > STATUS_SOFT_LINES)
-      console.error(`⚠ STATUS.md: ${n} lines against the soft target of ~${STATUS_SOFT_LINES} — time for a bonsai trim: move closed history verbatim into PROJECT_HISTORY.md (the /end-chat rules)`);
+      console.error(`⚠ STATUS.md: ${n} lines against the soft target of ~${STATUS_SOFT_LINES} — time for a bonsai trim: move closed history verbatim into PROJECT_HISTORY.md (the /end-chat-soft rules)`);
   }
   log(`✅ manifest satisfied: ${paths.length} files + ${agents.length} agent artifacts present${drifted ? ` (⚠ ${drifted} drifted mirrors — see above)` : ''}`);
 }

@@ -3,7 +3,7 @@
 > The APPEND-ONLY chronicle of how this project lived and grew: closed sessions, shipped phases,
 > releases, big decisions in the order they happened. This is where `STATUS.md` sheds its past —
 > STATUS stays a short live summary of NOW; everything finished moves HERE (the "bonsai trim" step
-> of `/end-chat`).
+> of `/end-chat-soft`; until KAIF 2.4 the skill was named `/end-chat`).
 >
 > **Not required reading.** This file is NOT part of `/resume`'s canon set and not in the
 > before-every-task minimum — open it only when you actually need the archaeology: how a decision

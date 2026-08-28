@@ -82,7 +82,7 @@ Fourteen key documents ship with a deployment (thirteen project documents plus t
 | `GOAL.md` | The owner's vision. | **The owner.** |
 | `MASTER_PLAN.md` | The phased road from the current state to the GOAL. | Agent derives (`/revision`). |
 | `STATUS.md` | The living SUMMARY of now and the baton between sessions (soft target ~200 lines; closed work moves to the chronicle — the bonsai trim). | Agent, after every task. |
-| `PROJECT_HISTORY.md` | The append-only chronicle: closed sessions/phases/releases, newest first; NOT in `/resume`'s canon set — archaeology on demand (2.1, epic H). | Agent, at `/end-chat`'s trim. |
+| `PROJECT_HISTORY.md` | The append-only chronicle: closed sessions/phases/releases, newest first; NOT in `/resume`'s canon set — archaeology on demand (2.1, epic H). | Agent, at `/end-chat-soft`'s trim. |
 | `EXPERIENCE.md` | The grep-friendly journal of lessons with trigger tags. | Agent (`/experience`). |
 | `PROJECT_STRUCTURE_EXTERNAL_MAP.md` | The external map: directories, files. | Agent maintains. |
 | `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` | The internal map: abstractions and interactions. | Agent maintains. |
@@ -111,11 +111,11 @@ project's working language); **OTHER KAIF documents** — the project's local "h
 
 ## 6. The skill system
 
-Thirty-five skills — the verbs of project work — deploy to `.claude/skills/` (canonical) and are
+Thirty-seven skills — the verbs of project work — deploy to `.claude/skills/` (canonical) and are
 mirrored into every declared agent system (§7.3). Groups:
 
 - **Session:** `resume` (read ALL canon documents, pick one main thing) · `pause` (soft-park the
-  chat: logical stopping point, green tree, local commit, NO pushes) · `end-chat` (full closure:
+  chat: logical stopping point, green tree, local commit, NO pushes) · `end-chat-soft` (the unhurried full closure) + `end-chat-force` (the urgent capture-and-go closure:
   STATUS baton, judge, commit AND push) · `refresh-context` · `check-backlog`.
 - **Autonomy loops:** `autoloop` · `dayloop` · `nightloop` — grind the backlog; every item ends
   with a mandatory judge pass; an owner's drive-by note is filed to the backlog, not a task switch —

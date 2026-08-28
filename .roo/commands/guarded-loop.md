@@ -21,6 +21,11 @@ Two parameters, spoken back in ONE line before starting:
 
 Example: *"Guarded loop: until 22:00, wake-ups every 10 min (default). Starting."*
 
+The duration bounds the WORKING, not the closing (`AGENT_GUIDE.md` → Working until a named time):
+work at your normal pace right up to the boundary — no early finish out of deadline fear — and
+reaching the boundary STARTS the soft closure (Step 5), it never means "everything must be
+finished before it".
+
 ## Step 1 — arm the WATCHDOG (external, never self)
 
 The process that runs the work must not be the only judge of its own health — a hung agent cannot
@@ -80,10 +85,11 @@ Woken by the watchdog and the pulse is stale:
 
 ## Step 5 — end of the run
 
-At the duration boundary (or when the pool is empty): finish the current item cleanly, write the
-final heartbeat line (`run complete`), **disarm the external watchdog**, and close per the
-session's situation — a parking note (the `/pause` way) if the chat continues, or the full
-`/end-chat` ceremony if the session ends. Report: items done, restarts survived, anything
+At the duration boundary (or when the pool is empty): finish the current item cleanly to a
+natural cut — unhurried, the boundary started the closing, it does not rush it — write the final
+heartbeat line (`run complete`), **disarm the external watchdog**, and close per the session's
+situation: the full unhurried `/end-chat-soft` ceremonies if the session ends, or a parking note
+(the `/pause` way) if the chat continues. Report: items done, restarts survived, anything
 escalated.
 
 ## What this skill refuses to do

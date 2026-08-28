@@ -48,8 +48,10 @@ Pick a single direction for this session. Priority (descending):
 2. **Next item from the `STATUS.md` "where to continue" checklist** — if bugs are clear.
 3. **Next phase from `MASTER_PLAN.md`** — if the checklist is empty/done.
 
-Before starting, **tell the human in one paragraph**: what you read and the current status; what you
-picked as the main thing and why; what you're about to do right now.
+Before starting, **say the creed and the prayer aloud in the chat** (`AGENT_GUIDE.md`, the blocks
+between `KAIF:CREED` / `KAIF:PRAYER` markers — in full, no paraphrase), then **tell the human in
+one paragraph**: what you read and the current status; what you picked as the main thing and why;
+what you're about to do right now.
 
 Wait for confirmation only if the task is **destructive** or **large and non-obvious**. If the plan is
 clear — start right after the short announcement.

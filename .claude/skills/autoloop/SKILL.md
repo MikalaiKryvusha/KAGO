@@ -94,6 +94,9 @@ without those resources.
 
 ## When to STOP the loop (and report to the human)
 
+- The owner NAMED an end time for this run and it has arrived → **start `/end-chat-soft`**; until
+  that time — normal pace, no early finish out of deadline fear (`AGENT_GUIDE.md` → Working until
+  a named time).
 - The autonomous pool is exhausted (everything left needs the human/resources).
 - A serious UI/UX/brand/architecture fork the agent must NOT decide alone → file an `/interview` and
   pause. (A project running the `/owner-reviews` contour queues the interview to its "N accumulated"

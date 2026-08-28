@@ -45,7 +45,7 @@ well-structured explanation they can read and act on.
 
 4. **The skills — the commands you type.** List them grouped, each with a one-line purpose — build the
    groups from the ACTUAL skills inventory (never this example verbatim): session (`/resume`, `/pause` —
-   soft-park, the chat continues, `/end-chat` — full wrap-up with a handoff), autonomy (`/autoloop`,
+   soft-park, the chat continues, `/end-chat-soft` — full unhurried wrap-up with a handoff, `/end-chat-force` — the urgent capture-and-go closure), autonomy (`/autoloop`,
    `/dayloop`, `/nightloop`, `/guarded-loop`), hygiene (`/refresh-context`, `/check-backlog`), knowledge & memory
    (`/report-bug`, `/bug-research`, `/propose-idea`, `/experience`), owner (`/interview`, `/fix-vision`,
    `/what-next`, `/owner-voice`, `/owner-reviews`), planning (`/plan-task`, `/plan-epic`, `/revision`),
@@ -56,7 +56,7 @@ well-structured explanation they can read and act on.
 
 5. **How a normal workflow looks.** A short example: *"`/resume` to start → I work and keep `STATUS.md`
    current → you drop ideas in `ideas/` or answer an `/interview` → `/pause` to break off (the chat
-   continues later) or `/end-chat` to close the chat with a handoff."* Note the human's role (visionary:
+   continues later) or `/end-chat-soft` to close the chat with a handoff (`/end-chat-force` when it must close right now)."* Note the human's role (visionary:
    `GOAL.md`, ideas, interview answers) vs. the agent's (executor).
 
 6. **Where to go deeper.** Point to `.kaif/KAIF_REFERENCE.md` (the authoritative framework

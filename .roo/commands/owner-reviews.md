@@ -184,9 +184,18 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
 - **I34. The sound path must not depend on user OS settings.** Native notifications get muted
   silently with a success exit code; the beep goes through the sound card; delivery is confirmed
   WITH THE HUMAN, never by exit code.
-- **I35. The voice falls back honestly to the system one.** No engine on this machine (other box,
-  removed venv) — the approval contour has no right to break over timbre; make route choice a pure
-  function so both branches sit under guards regardless of the machine running the checks.
+- **I35. The named neural voice is PART of the contour's identity — installing it is a DEPLOY
+  step; the stock system voice is only an honest DEGRADED fallback.** The field law, verbatim:
+  "you called me with the wrong voice — that is not our contour's voice." Deploying the contour
+  REQUIRES downloading the concrete engine and pinning ONE concrete voice in it (reference
+  tract: Silero — local, offline, CPU; the voice is chosen by the owner by blind listening of
+  samples on one material, and only the owner may change it). A contour brought up on the stock
+  system engine without a RECORDED impossibility (no disk, no permissions, the owner's explicit
+  "skip") is NOT a deployed contour: the fallback exists for the machine where the engine is
+  genuinely absent right now, it announces itself in every call ("system voice — engine not
+  installed") and stands as a recorded debt until the engine lands. The engineering half stays:
+  the approval contour has no right to BREAK over timbre — make route choice a pure function so
+  both branches sit under guards regardless of the machine running the checks.
 - **I36. Text normalization for speech lives in the ENGINE, not in the project.** The call phrase
   almost always carries a number ("interview #16"); without normalization digits get swallowed or
   spelled out. Heavy shared resources (the TTS model, its venv) belong to the MACHINE, not the
@@ -229,7 +238,11 @@ Accepting a contour = walking this roster.
 - **P1** — question widget with a 4–5 px state stripe on the left edge; the stripe's color IS the
   state (waiting / answered): one detail carries two meanings — separates and informs.
 - **P2** — explicit state tags on every question: answered / unanswered / awaits you.
-- **P3** — selection clearable by a second click (a native radio cannot return to "none").
+- **P3** — fork options are RADIO INPUTS, ALWAYS: one radio per parsed option row (the canon's
+  two forms — a table row `| **A** | … |` or a list item `- **A)** …`) plus the free-variant
+  field; options shown as prose are a question NOT shown — the field keeps re-paying this
+  (agents render the A/B/C/D options as plain text and the human has nothing to click). Selection clearable
+  by a second click (a native radio cannot return to "none").
   Field-corrected mechanics (pilot 2026-08-07 — the mousedown/click scheme still let the label
   duplicate the click, and the second click "cleared and instantly re-selected"): take the
   activation over on `pointerdown` with `preventDefault` — the native label duplicate ceases to
@@ -555,8 +568,10 @@ server that outlives the silence threshold → red.
 
 ## Parameters and compatibility
 
-- Sound/TTS are PARAMETERS: the voice name is a parameter, not a menu (a field machine had exactly
-  one usable voice out of 185); quiet hours are mandatory, not optional.
+- The ENGINE is a REQUIREMENT, the voice NAME is the owner's parameter: the concrete neural
+  engine is downloaded at deploy (I35); the pinned voice inside it is a parameter, not a menu
+  (a field machine had exactly one usable voice out of 185); quiet hours are mandatory, not
+  optional.
 - Industrial four on the page: **Approve / Reject-with-reason / Edit / Respond**; the payload is
   visible in full; the audit trail keeps refusals too.
 - An answer's force never depends on transport: **HTML = md = chat** — all are the owner's word,

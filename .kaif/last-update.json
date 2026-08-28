@@ -1,22 +1,25 @@
 {
-  "from": "2.2",
-  "to": "2.3",
+  "from": "2.3",
+  "to": "2.4",
   "route": "core-update",
   "source": "https://github.com/MikalaiKryvusha/KAIF/releases/latest/download",
   "counters": {
-    "replaced": 5,
+    "replaced": 7,
     "mergedModules": 8,
-    "added": 1,
-    "kept": 71
+    "added": 6,
+    "kept": 68
   },
   "diverged": [],
   "divergedModules": {
     "AGENT_GUIDE.md": [
-      "## Project identity (CANON — use these, don't invent)"
+      "# KAGO — AI Agent Guide"
     ]
   },
-  "ownerConvention": [],
-  "date": "2026-08-28T00:04:33+03:00",
-  "judgeVerdict": "# /fable-judge — verdict on the KAIF 2.2 → 2.3 update (KAGO, 2026-08-28)\n\nClaims re-run as observations, not read from the updater's report:\n\n- **C1 — versions.** `.kaif/kaif.json`: `\"version\": \"2.3\"`, `\"released\": \"2026-08-21\"`, and a new\n  `history` entry `{from: 2.2, to: 2.3, route: core-update}`. Every owner-level field preserved\n  byte-for-byte: `tracking: origin` · `sphere: programming` · 5 agents · `language: ru` ·\n  `projectName: KAGO`. OBSERVED.\n- **C2 — nothing owner-authored lost.** All four canon merges read in full diff: purely ADDITIVE\n  modules (form-of-obligation in AGENT_GUIDE, owner's razor in PHILOSOPHY, activities chain +\n  marker rule 7 + gates 6–7 in TESTING, writing checklist in REQUIREMENTS). The one\n  \"kept for you\" module (AGENT_GUIDE → Project identity) retains the real repo URL and the brand\n  expansion the owner fixed in commit `34de49b`. Prayer blocks present in all four merged files.\n  OBSERVED.\n- **C3 — manifest.** `node .kaif/kaif-core.mjs check`: `✅ manifest satisfied: 80 files + 144 agent\n  artifacts present` — ran green twice (standalone and inside `checkpoint recheck`). OBSERVED.\n- **C4 — gates executed, not ticked.** `checkpoint placeholders` and `checkpoint stale-claims` ran\n  their own scans and reported clean; the 2.2 rake (`bugs/KAIF/01` — the gate tripping on verbatim\n  quotes in the sphere library) did NOT reproduce on 2.3. OBSERVED.\n- **C5 — the project's own build gate.** First `npm run check` run was RED: the prayer guard found\n  the prayer block diverged between PHILOSOPHY.md (rewritten by the machinery with LF endings) and\n  STATUS.md/GOAL.md (untouched, CRLF). Cure was the guard's own prescription —\n  `node tools/prayer.mjs --apply` (2 files) — after which the full gate is GREEN: 56 .mjs parsed\n  0 failed · 420 text files, 0 encoding-corrupted · prayer identical across 12 canon docs.\n  `git diff STATUS.md GOAL.md` after the cure is EMPTY (content unchanged; endings normalized by\n  autocrlf). OBSERVED.\n- **C6 — the sandbox predicted the live pass.** The real update was first run in a scratchpad copy\n  of the tree; the live run's action list matched the sandbox line-for-line (same merges, same\n  replacements, same additions). OBSERVED.\n\n**VERDICT: VERIFIED WITH CAVEATS.**\n\nCaveats, both named: (1) the machinery writes LF line endings, which transiently reddened the\nproject's own prayer-consistency guard — healed by the guard's own cure, zero content loss;\n(2) the 152 re-synced mirror skill copies (.agents/.grok/.cline/.roo) are verified by the manifest\ncheck, not read individually.",
-  "verifiedAt": "2026-08-28T00:09:45+03:00"
+  "ownerConvention": [
+    "STATUS.md",
+    "PROJECT_HISTORY.md"
+  ],
+  "date": "2026-08-28T13:58:43+03:00",
+  "judgeVerdict": "FABLE-JUDGE VERDICT on the KAIF 2.3 → 2.4 update (KAGO, 2026-08-28): VERIFIED WITH CAVEATS.\n\nClaims re-run, not trusted:\n1. \"Versions stamped\" — `node -e` read of `.kaif/kaif.json`: version=2.4, released=2026-08-28,\n   history carries both intervals (2.2→2.3, 2.3→2.4 route core-update). CONFIRMED.\n2. \"Nothing owner-authored lost\" — `git status --porcelain` filtered for STATUS.md, GOAL.md,\n   MASTER_PLAN.md, plans/, bugs/, ideas/, interviews/, researches/, curves/, runs/: zero modified\n   owner files (the only bugs/ change is the NEW ticket 10, an addition). `node tools/prayer.mjs\n   --apply` reports all 12 canon copies byte-identical to PHILOSOPHY.md. CONFIRMED.\n3. \"The merges are real\" — AGENT_GUIDE.md now carries exactly one KAIF:CREED pair (lines 7/10) and\n   one KAIF:PRAYER pair (lines 12/46); the English template prayer and the duplicated PRIME\n   PRINCIPLE / AUTONOMOUS MODE blocks inserted by the mechanical pass were folded out (each block\n   counted once by Select-String, 3 patterns → 3 hits); the new WORKING-UNTIL-A-NAMED-TIME rule is\n   present once. The kept-for-us module (Russian prayer with the owner's интервью-017 cadence)\n   survived verbatim. CONFIRMED.\n4. \"The project still works\" — `npm run check`: 57 .mjs parse, 436 text files encoding-clean.\n   `npm run selftest:all`: 29 sets, 0 red, 1421 green blocks, 17.0 s — identical to the numbers\n   STATUS.md recorded before the update. `node .kaif/kaif-core.mjs check`: manifest satisfied,\n   85 files + 152 agent artifacts. CONFIRMED.\n5. \"Deprecation done\" — old /end-chat removed in all five agent dirs (git rm), pair\n   /end-chat-force + /end-chat-soft present, 169 mirror copies re-synced by the checkpoints,\n   the only live reference re-pointed (PROJECT_HISTORY.md header); chronicle entries kept verbatim\n   per append-only rule. CONFIRMED.\n\nCaveats:\n- The named-time rule and the intro stay in ENGLISH in AGENT_GUIDE.md — legal (agent-read doc,\n  language routed by audience), but the ru language pack will keep arriving English-first; the\n  localized prayer cadence (full text once per session, three principles per task) intentionally\n  diverges from the upstream template's every-task-in-full cadence on the owner's word\n  (интервью 017 Q2 = B) — a permanent, documented local module.\n- Two 2.4 POLICY changes (the /end-chat split; the named-time contract) were adopted on the\n  strength of the owner's explicit order to update to 2.4 and surfaced verbatim in the chat; the\n  owner has not yet separately ratified them — veto remains one line away.\n- STATUS.md bonsai warning (1426 lines vs ~200) is pre-existing debt, named in STATUS itself,\n  unrelated to this update.\n- One framework defect found and ticketed, not silently fixed: bugs/KAIF/10 (the placeholders task\n  item lists verbatim quotes as fill locations; the gate correctly skips them).",
+  "verifiedAt": "2026-08-28T14:07:32+03:00"
 }

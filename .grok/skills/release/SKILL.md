@@ -60,6 +60,27 @@ Bring `README.md` in line with reality: phase status, working features, instruct
 both languages in sync. Don't invent — reflect only what's actually done and verified (cross-check
 `STATUS.md` and the closed `bugs/`/`ideas/` `*_DONE_*`).
 
+**The version number also lives INSIDE images — regenerate them with a command, not by eye.** A
+showcase carries its version in places no text search reaches: a caption burned into a logo or a
+banner, plus the badge, the version line, the image alt text and the newest row of the version
+history table. List those places once, give each a command, and run them here:
+
+```bash
+<your command that redraws the versioned image, e.g. node tools/build-logo-title.mjs>
+```
+
+Then OPEN the image and read the caption — a render is judged by eyes. Paid for in the field on
+this framework's own origin: release 2.3 shipped to GitHub carrying a logo that still said
+version 2.2, and a README still on the previous version, because nothing could redraw the caption
+and nobody opened it.
+
+**And the MEANING of a code name is asked of the owner, never derived from the name itself.** If
+the showcase explains what the version's name means, quote the owner's word for that meaning (an
+interview, the decision journal, a chat message). No such word — either ask one pointed question
+or don't explain the name at all; a neutral framing is legitimate. Paid for in the same session: a
+name was read as a plausible-sounding metaphor, and the guess spread through both language halves
+of the release notes as paragraphs and headings while every showcase guard stayed green.
+
 **The README and the release notes are the OWNER'S artifacts — the showcase they sign.** So if the
 project has a voice portrait (`AUTHOR_STYLOMETRY.md`, `/owner-voice`), OPEN it now and run its
 self-check before handing the text over; no portrait, no obligation, and its absence never reddens
