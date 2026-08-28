@@ -9,10 +9,14 @@
 // is a SEPARATE process, not blocked by the burn, and on that same rung it lost two ticks where the
 // three safe rungs before it lost none. This tool is what makes that comparison repeatable.
 //
-// 🔴 WHAT THIS TOOL DOES NOT DO: DECIDE. It prints a distribution, never a verdict, and there is no
-// threshold anywhere in it. `ideas/10` §5.1 is explicit that n = 1 cannot yield one, and this
-// project has already paid for an alarm that lies on schedule (`bugs/27`). The boundary gets chosen
-// when the archive holds enough runs to choose it FROM — which is what §27.1 started collecting.
+// 🔴 WHAT THIS REPORT DOES NOT DO: pick the PRECISE threshold number. `ideas/10` §5.1 is right that
+// n = 1 cannot yield one, and this project has already paid for an alarm that lies on schedule
+// (`bugs/27`). ⚠️ BUT that caution is about the REPORT and the exact number only — it must NOT be
+// read as «the instrument gives no verdict»: the owner named that reading a lie (`bugs/62`,
+// 2026-08-26), and the standing canon is «ЛАГ ТЕЛЕМЕТРИИ — ЭТО ОТКАЗ» (`GOAL.md`): the background
+// (1008…1053 ms) and the precursors (3042/4490 ms) have NOTHING between them — the distinction
+// needs no threshold. Wiring the rung's pulse into the verdict is `bugs/61`; the live-run stop is
+// carried by the fuse (epic 51).
 //
 // GPU WRITES: NONE. Reads two files and prints.
 //
