@@ -97,12 +97,11 @@ threshold · delivery line · price on entry) as POINTERS to `AGENT_GUIDE.md`, n
       при сборке черновика) · факты STATUS 15–39 — отобрать ОПРЕДЕЛЯЮЩИЕ (15 форма профиля ·
       29 линейка шума · 32 запас · 34+36 Silent Cold · 38 пол потолка) от измерительных.
       Дальше — шаг 2: сборка черновика `ЗАКАЗ.md` по этой карте.
-- [ ] 2. **Draft `ЗАКАЗ.md`** (RU, owner's register — no borrowed jargon) with a top banner:
-      «ЧЕРНОВИК — не в силе до утверждения владельцем; правится только его словом». Every line:
-      definition → source link → date of the owner's word.
-- [ ] 3. **Self-check against the frameworks:** definitions stay QUOTES or tight restatements with
-      sources (`REQUIREMENTS_FRAMEWORK` stop-words inside quoted owner text are legal); the
-      questions-guard must stay clean (the draft asks nothing — it states).
+- [x] 2. **Draft `ЗАКАЗ.md`** ✅ 2026-08-29 00:3x (сессия 60) — 115 строк, баннер черновика,
+      девять секций AC2, каждая дефиниция с якорем и датой слова владельца.
+- [x] 3. **Self-check** ✅ — механический link-check: 34 якоря `GOAL.md:N`, все 34 попали в
+      заголовки/цитаты своих разделов (прогон в сессии 60); вопросов черновик не задаёт —
+      только утверждает; стоп-слова живут внутри цитат владельца.
 - [ ] 4. **Raise through the review contour** (`npm run ask ЗАКАЗ.md` — the show contour opens any
       markdown, I16); the owner reads, comments, approves. A comment without approval =
       rejected-with-direction = rework, not force.
