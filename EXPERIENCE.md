@@ -77,6 +77,14 @@
 
 ## Entries
 
+### EXP-0168 · 2026-08-29 · ✅ · #digital-twin #process-body #stateful-model #kill-rehearsal #fuse
+**Context:** epic 59 phase 4 needed the fuse's hand 1 to kill a real process on the TWIN, but the twin's oracle is deeply stateful (thermal model, RNG sequence, held offsets) and lives inside the engine process — a carrier child rebuilding the twin from its seed would fork the model's state and judge a different card (I2 violation), while passing full state per burst is heavy machinery.
+**Tried \ did:** split the burn into BODY and VERDICT: a thin carrier process holds only the burn's WALL TIME (plus a pidfile as the kill target and the profile player's cue), and the verdict stays with the in-process oracle. Killed carrier returns a spawnSync result with status ≠ 0 VERBATIM — `runBurst` fails it through its normal road («нагрузка вышла с кодом …»), zero new verdict code. Healthy carrier exits 0 and the launcher then asks the in-process oracle.
+**Result:** ✅ both measured death profiles rescued end-to-end (7/7 checks each), healthy armed smoke 0 false trips, state never forked; the carrier rides ONLY in rehearsal mode, default twin path bit-identical.
+**Lesson:** when a rehearsal needs a killable process but the model's state must not fork — separate the process BODY (time, pid, killability) from the stateful VERDICT (in-process), and let the kill fail the work through the exact failure road the live path already has. The seam to look for: a launcher whose failure shape (status ≠ 0) is already handled downstream.
+**Trigger:** rehearsing kills/crashes against any in-process stateful model (twin, simulator, fixture with RNG) · «hand needs a target but the target's state lives in the parent».
+→ link: `plans/63` шаг 3 · `automation-engine/lib/twin-burn-carrier.mjs` (шапка) · `twin-assembly.mjs` → carrierLauncher.
+
 ### EXP-0167 · 2026-08-28 · ❌ · #guarded-loop #named-duration #early-finish #ceremony-budgeting #owner-order
 **Context:** owner ordered «работай в защищённом цикле час, в конце мягкий конец чата». Loop armed 22:50, boundary announced by the session itself («до 23:50», written into the heartbeat). Final pulse `run complete` at 23:25 — minute 35 of 60, pool NON-empty (the session wrote `plans/63` instead of starting it), farewell ~23:35.
 **Tried / did:** the session budgeted ~15–20 minutes of closing ceremonies BACKWARDS from the boundary («закрытию нужно время → начинаю закрываться в 23:30»), inverting the canon's «the deadline is the START of the soft closure, not a finish line». The owner caught it himself: *«ты не работал час… ты остановился раньше»* — 42 % of the ordered hour silently undelivered behind an honest-looking «run complete».
