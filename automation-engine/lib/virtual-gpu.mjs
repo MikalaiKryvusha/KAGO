@@ -1111,6 +1111,9 @@ export function virtualCard(cardProfile, {
 
   const P = cardProfile;
   const idleWander = wanderMhz ?? defaultWander(P);
+  // ⏳ Сколько чтений `clocks.gr` после прожига ещё показывают частоту ВЫДАЧИ, прежде чем карта
+  // сбросится в простой (спад — см. clockNow; в мгновенном режиме время двойника меряется чтениями).
+  const LOAD_CLOCK_DECAY_READS = 6;
 
   const state = {
     powerLimitW: P.powerLimitW.default,
@@ -1123,6 +1126,8 @@ export function virtualCard(cardProfile, {
     // Класс C7: сколько МГц таблица уже уехала сверх теплового дрейфа, и сколько записей ещё едут.
     extraDriftMhz: 0,
     driftJumpsLeft: driftJumpWrites,
+    // ⏳ Сколько чтений частоты после прожига ещё показывают ВЫДАЧУ (спад простоя — см. clockNow).
+    loadedReadsLeft: 0,
     reportedMhz: idleWander[0],
     queue: [],                                    // stale reads, then the ramp — drained by query
     wanderAt: 0,
@@ -1287,7 +1292,30 @@ export function virtualCard(cardProfile, {
 
   const clockNow = () => {
     if (state.queue.length) { state.reportedMhz = state.queue.shift(); return state.reportedMhz; }
-    const r = runningMhz();
+    // ─── ПРОСТОЙ БЕЗ НАГРУЗКИ — КАРТА СБРАСЫВАЕТСЯ ВНИЗ, КАКАЯ БЫ КРИВАЯ НИ СТОЯЛА ────────────────
+    //
+    // Кривая говорит, ЧЕМ обслуживается частота ПОД РАБОТОЙ, а не приказывает работать; в покое
+    // живая карта сидит на сотнях мегагерц при любой записанной кривой (замер владельца: ~825 МГц
+    // с фоном, STATUS → «Фон на карте — помеха замеру»). Первый смоук сборки `--card virtual`
+    // (эпик 59 фаза 3) повесил ОТКАТ ровно на пропуске этого свойства: после снятия границы
+    // двойник в простое продолжал отдавать потолок кривой, и законный readBack «частота должна
+    // уйти с границы» честно ждал 10 с и краснил откат (R10a).
+    //
+    // ⏳ ВРЕМЯ ДВОЙНИКА В МГНОВЕННОМ РЕЖИМЕ — ЭТО ЧТЕНИЯ, И СПАД МОДЕЛИРУЕТСЯ ИМИ ЖЕ. Без
+    // `burnRealSeconds` прожиг не тратит стены, поэтому «сразу после нагрузки» и «давно в простое»
+    // различимы только счётчиком чтений — тем же способом, каким уже живут очередь устоявшихся
+    // проб и блуждание. Прожиг оставляет частоту выдачи ещё на `LOAD_CLOCK_DECAY_READS` чтений
+    // (драйвер и вправду показывает буст короткое время после нагрузки), потом карта сбрасывается:
+    // стенд, спрашивающий частоту у только что прожжённой ступени, видит ВЫДАЧУ (ловушки T6/T8),
+    // а откат, ждущий ухода частоты после снятия замка, дожидается спада (R10a). Закрепление
+    // (`min = max`) карта держит и в простое — это и есть его обещание (`targetMhz`).
+    let r;
+    if (burning || state.loadedReadsLeft > 0) {
+      r = runningMhz();
+      if (!burning && r !== null) state.loadedReadsLeft--;
+    } else {
+      r = targetMhz();
+    }
     if (r !== null) { state.reportedMhz = r; return r; }
     // Unlocked: wander. Deterministic cycle — a released card does not hold still, and a double that
     // held still would let a release read-back pass for the wrong reason.
@@ -1377,23 +1405,21 @@ export function virtualCard(cardProfile, {
       }));
     },
 
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null } = {}) {
-      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz });
-      if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
-      // THE SAME FOUR REFUSALS THE LIVE BACKEND APPLIES — one function, called by both. A mutation
-      // that removes this line must redden the parity block, and that is the block's whole job.
-      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
-      if (refusal) return refusal;
+    // ─── ⚡ СИНХРОННОЕ УСТРОЙСТВО (эпик 59 фаза 3, `plans/62`) ─────────────────────────────────────
+    //
+    // Порт runStep говорит с картой СИНХРОННО — NVAPI отвечает из процесса, — поэтому операции
+    // УСТРОЙСТВА существуют у двойника в синхронной форме, а прежние async-методы стали обёртками
+    // над ними: потребители фаз 1–2 не тронуты, поведение бит-в-бит. Арифметика вектора и отказов
+    // сюда НЕ входит (инвариант I2 эпика 59): здесь только устройство — принять сдвиги, применить
+    // классы отказов записи (C4 · C7 · applyWrite · бухгалтерию C1) и хранить.
+    //
+    // [TESTED: 2026-08-28 · vgpu --selftest после делегирования + путь порта прогнан смоуком сборки]
+
+    /** Принять и удержать вектор сдвигов — то, что на живой карте делает цикл из 127 вызовов
+     *  `writeVfOffset`. Возвращает ровно те же формы, что прежний `writeRaiseAndCap` на этих путях. */
+    holdOffsetsSync(requestedOffsetsMhz, ctx = {}) {
       writes.curveWrite++;
-      // ─── ЧТО КАРТА В ИТОГЕ ДЕРЖИТ — РЕШАЕТ КАРТА, А НЕ ВЫЗЫВАЮЩИЙ (`plans/38`) ─────────────────
-      //
-      // Здесь стояло `state.curveOffsetsMhz = vec.offsets…`, то есть карта СОХРАНЯЛА ВЕКТОР. Из-за
-      // этой строки любое последующее чтение соглашалось с движком по построению, и стенд не мог
-      // воспроизвести расхождение, которое живая карта показала 2026-08-24 (`researches/18` §1).
-      //
-      // Умолчание — точное применение: честная модель карты, которая делает, что сказано. Фаза 3
-      // подменяет `applyWrite` по классам отказа.
-      const requested = vec.offsets.slice(0, GRAPHICS_POINTS);
+      const requested = requestedOffsetsMhz.slice(0, GRAPHICS_POINTS);
       // КЛАСС C4 — отказ ВЫЗОВА, а не расхождение таблицы. Отвечает раньше всего остального: на
       // живой карте провалившийся вызов виден по статусу СРАЗУ, до всякого прожига, и карта времени
       // на него не тратит.
@@ -1416,7 +1442,7 @@ export function virtualCard(cardProfile, {
         state.driftJumpsLeft -= 1;
       }
       const held = applyWrite
-        ? applyWrite(requested, { capMhz, deltaMhz, table: P.vfTable, points: GRAPHICS_POINTS })
+        ? applyWrite(requested, { table: P.vfTable, points: GRAPHICS_POINTS, ...ctx })
         : requested;
       if (!Array.isArray(held) || held.length !== GRAPHICS_POINTS || held.some((o) => !Number.isFinite(o))) {
         // Негодный шов — это дефект ФИКСТУРЫ, и он называется вслух, а не растворяется в карте:
@@ -1430,12 +1456,11 @@ export function virtualCard(cardProfile, {
       state.curveOffsetsBeforeWrite = [...state.curveOffsetsMhz];
       state.curveReadsSinceWrite = 0;
       state.curveOffsetsMhz = held;
-      // ⚠️ `vector` — ЗАКАЗ, а не то, что легло. Вызывающий, сверяющий запись, обязан спрашивать
-      // карту (`readCurve`/`readCurveOffsets`), иначе он сверяет свою заявку сам с собой.
-      return { ok: true, vector: requested };
+      return { ok: true, held: [...held] };
     },
 
-    async readCurveOffsets() {
+    /** Что устройство держит сейчас, с бухгалтерией C1 — синхронная сердцевина `readCurveOffsets`. */
+    readOffsetsSync() {
       // ТОТ ЖЕ ШОВ C1 НА УПРАВЛЯЮЩЕМ СТРУКТЕ. На живой карте это ВТОРОЙ прибор (`readVfOffsets`
       // против `readVfCurve`), и он читает ту же аппаратную поверхность — значит и недоустаиваться
       // обязан вместе с ней. Дать ему устояться раньше значило бы подарить движку различитель,
@@ -1444,7 +1469,48 @@ export function virtualCard(cardProfile, {
         ? state.curveOffsetsBeforeWrite
         : state.curveOffsetsMhz;
       state.curveReadsSinceWrite++;
-      return { ok: true, offsets: [...held] };
+      return [...held];
+    },
+
+    /** Эффективная кривая сейчас — синхронная сердцевина `readCurve`. */
+    readCurveSync() {
+      const points = effectiveTable({ settling: true });
+      state.curveReadsSinceWrite++;
+      return points;
+    },
+
+    /** Обнуление — синхронная сердцевина `zeroCurve`. */
+    zeroCurveSync() {
+      writes.curveZero++;
+      state.curveOffsetsMhz = new Array(GRAPHICS_POINTS).fill(0);
+      return { ok: true };
+    },
+
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null } = {}) {
+      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz });
+      if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
+      // THE SAME FOUR REFUSALS THE LIVE BACKEND APPLIES — one function, called by both. A mutation
+      // that removes this line must redden the parity block, and that is the block's whole job.
+      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
+      if (refusal) return refusal;
+      // ─── ЧТО КАРТА В ИТОГЕ ДЕРЖИТ — РЕШАЕТ КАРТА, А НЕ ВЫЗЫВАЮЩИЙ (`plans/38`) ─────────────────
+      //
+      // Здесь стояло `state.curveOffsetsMhz = vec.offsets…`, то есть карта СОХРАНЯЛА ВЕКТОР. Из-за
+      // этой строки любое последующее чтение соглашалось с движком по построению, и стенд не мог
+      // воспроизвести расхождение, которое живая карта показала 2026-08-24 (`researches/18` §1).
+      //
+      // Умолчание — точное применение: честная модель карты, которая делает, что сказано. Фаза 3
+      // подменяет `applyWrite` по классам отказа. Хранение — в `holdOffsetsSync`, одном на оба пути.
+      const requested = vec.offsets.slice(0, GRAPHICS_POINTS);
+      const w = this.holdOffsetsSync(requested, { capMhz, deltaMhz });
+      if (!w.ok) return w;
+      // ⚠️ `vector` — ЗАКАЗ, а не то, что легло. Вызывающий, сверяющий запись, обязан спрашивать
+      // карту (`readCurve`/`readCurveOffsets`), иначе он сверяет свою заявку сам с собой.
+      return { ok: true, vector: requested };
+    },
+
+    async readCurveOffsets() {
+      return { ok: true, offsets: this.readOffsetsSync() };
     },
 
     /**
@@ -1456,15 +1522,11 @@ export function virtualCard(cardProfile, {
      * отвечает на ДРУГОЙ вопрос: какова таблица ДО записи. Два вопроса, два метода, как на карте.
      */
     async readCurve() {
-      const points = effectiveTable({ settling: true });
-      state.curveReadsSinceWrite++;
-      return { ok: true, points };
+      return { ok: true, points: this.readCurveSync() };
     },
 
     async zeroCurve() {
-      writes.curveZero++;
-      state.curveOffsetsMhz = new Array(GRAPHICS_POINTS).fill(0);
-      return { ok: true };
+      return this.zeroCurveSync();
     },
 
     /** A no-op that is still COUNTED: a caller who forgets it would leak the NVAPI handle on the
@@ -1708,6 +1770,8 @@ export function virtualCard(cardProfile, {
       // (Найдено 2026-08-23 при добавлении дрейфа таблицы: три блока покраснели ровно на этом.)
       const drawnAtMv = this.servingVoltageMv(mhz);
       if (!burning) telemetry.advance(seconds, { load: 1 });
+      // ⏳ Прожиг оставляет частоту выдачи ещё на несколько ЧТЕНИЙ — спад простоя, см. clockNow.
+      state.loadedReadsLeft = LOAD_CLOCK_DECAY_READS;
       const d = this.draw({ mhz, seconds, workload, voltageMv: drawnAtMv });
       const launches = Math.max(1, Math.round(seconds / P.fiction.failure.perLaunchSeconds));
       const line = (checksum, distinct) => `KAGO-WORKLOAD name=${workload} checksum=${checksum} `
@@ -1825,6 +1889,11 @@ export function virtualCard(cardProfile, {
     telemetry,
     seed,
     writes,
+    /** ЧТО КАРТА КРУТИТ ПРЯМО СЕЙЧАС — физическая правда `runningMhz`, наружу (эпик 59 фаза 3):
+     *  сэмплер сборки синтезирует пробы «под нагрузкой» из этого числа, потому что телеметрия
+     *  намеренно смотрит на ЧТЕНИЕ (`observedMhz`), а свидетелю потолка нужна выдача кремния —
+     *  ровно то, по чему `oracle.run` судит прожиг. Второй правды не заведено: это та же функция. */
+    deliveredNowMhz: () => runningMhz() ?? state.reportedMhz,
     /**
      * The CARD DESCRIPTOR the applier and the format validator expect — produced by the card about
      * itself rather than hand-built by the caller. A caller assembling this by hand is a caller who

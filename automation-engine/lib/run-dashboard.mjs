@@ -1748,7 +1748,10 @@ export async function selfTest() {
       check('ИСХОДНИК ДВИЖКА ПРОЧИТАН — без него три блока ниже судили бы пустоту',
         engineSrc.length > 1000, `${enginePath}: ${engineSrc.length} байт`);
       const atRegister = engineSrc.indexOf("process.on('exit', shutWindow)");
-      const atBranch = engineSrc.indexOf('if (!watch.ok || watch.viewers < 1) {');
+      // Игла обновлена 2026-08-28 (эпик 59 фаза 3): ветка подъёма получила виртуальный обход
+      // `!twin &&` — виртуальный прогон в карту не пишет и окна не требует. ПОРЯДОК, который этот
+      // блок сторожит (регистрация гашения ДО ветки подъёма), не менялся.
+      const atBranch = engineSrc.indexOf('if (!twin && (!watch.ok || watch.viewers < 1)) {');
       check('ГАШЕНИЕ ОКНА РЕГИСТРИРУЕТСЯ ДО ВЕТКИ «ПОДНИМАЮ САМ» — значит и для уже открытого окна',
         atRegister > 0 && atBranch > 0 && atRegister < atBranch,
         `регистрация на ${atRegister}, ветка подъёма на ${atBranch} — обработчик заводится только когда окно поднял сам прогон`);

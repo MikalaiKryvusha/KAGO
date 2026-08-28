@@ -8662,19 +8662,42 @@ async function mainSweep(argv, arg) {
   const vf = await import('./lib/vf-step.mjs');
   const watchdog = await import('./lib/watchdog.mjs');
 
-  const doc = loadCurveDoc({});
+  // ─── 🖥 ЦИФРОВОЙ ДВОЙНИК — `--card virtual` (эпик 59 фаза 3, `plans/62`) ───────────────────────
+  //
+  // Дефолт — ЖИВАЯ карта (инвариант I4): без флага ни одна строка ниже не меняет поведения.
+  // С флагом ТА ЖЕ команда проходит от конверта до отчёта на двойнике: документ и журнал — в
+  // песочнице стенда, устройство порта runStep — поверх `virtualCard()`, всадники — с журналами в
+  // песочницу. Подстановки идут строго по описи швов `researches/23` (E1–E10) и живут в сборке
+  // (`twin-assembly.mjs`), а не в `sweepRange` — он не меняется вовсе (R16a).
+  const cardArg = arg('card');
+  if (cardArg !== null && cardArg !== 'virtual') {
+    console.error(`ОШИБКА: --card принимает только «virtual», получено «${cardArg}». Без флага — живая карта.`);
+    return 2;
+  }
+  const twin = cardArg === 'virtual'
+    ? await (await import('./lib/twin-assembly.mjs')).makeTwinAssembly({})
+    : null;
+  if (twin) console.log(twin.canonLine);
+
+  const doc = twin ? twin.loadDoc() : loadCurveDoc({});
   if (!doc) {
     console.error('ОШИБКА: документа кривой нет — сначала `npm run curve -- --init`. Развёртке некуда писать,');
     console.error('        а знание, которому некуда лечь, теряется первой же перезагрузкой.');
     return 2;
   }
 
-  const nv = nvapi.openNvapi();
-  nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
-  const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
-  nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
-  const handle = handles.readBigUInt64LE(0);
-  const points = nvapi.readVfCurve(nv, handle).points;
+  const { nv, handle } = twin ? twin.device.open() : (() => {
+    const nvLive = nvapi.openNvapi();
+    nvLive.koffi.call(nvLive.resolve(0x0150E828).ptr, nvLive.protos.Initialize);
+    const handles = Buffer.alloc(64 * 8); const count = Buffer.alloc(4);
+    nvLive.koffi.call(nvLive.resolve(0xE5AC921F).ptr, nvLive.protos.EnumPhysicalGPUs, handles, count);
+    return { nv: nvLive, handle: handles.readBigUInt64LE(0) };
+  })();
+  const readPointsNow = () => (twin ? twin.device.readVfCurve(nv, handle) : nvapi.readVfCurve(nv, handle)).points;
+  const points = readPointsNow();
+  // Журнал двойника живёт в песочнице стенда (E4, инвариант I1): виртуальный ЗАВИС, севший в
+  // боевой `runs/sweep/`, родил бы настоящий пол зависания — сфабрикованную форензику (EXP-0025).
+  const jrnOpts = twin ? { dir: twin.journalDir } : {};
 
   // ---- THE CARD'S OWN ENVELOPE AND ITS CLOCK LADDER, PROBED ONCE FOR THE WHOLE SWEEP.
   //
@@ -8685,7 +8708,7 @@ async function mainSweep(argv, arg) {
   // ONCE, not per rung — re-probing inside every rung is what turned a healthy sixth rung of the
   // first live band sweep into НЕИЗВЕСТНО (EXP-0013).
   const ps = await import('./lib/profile-store.mjs');
-  const pinCard = ps.probeCard();
+  const pinCard = twin ? await twin.device.probeCard() : ps.probeCard();
   if (!pinCard.ladder?.ok) {
     console.error(`ОШИБКА: лестница частот карты недоступна — ${pinCard.ladder?.why ?? 'не прочитана'}.`);
     console.error('        Закрепить частоту не на чем, а без закрепления прожиг попал бы не на ту частоту.');
@@ -8741,8 +8764,8 @@ async function mainSweep(argv, arg) {
     // же отказе встанет, значит всё, что за ним, полосой не является, даже если держатель там есть.
     const probe = await sweepDryRun({
       curveDoc: doc, points, fromMhz, toMhz, depthCapMv,
-      hangFloors: hangFloors(readJournal(openJournal({})).records),
-      proven: provenRungs(readJournal(openJournal({})).records),
+      hangFloors: hangFloors(readJournal(openJournal(jrnOpts)).records),
+      proven: provenRungs(readJournal(openJournal(jrnOpts)).records),
     });
     const runnable = [];
     for (const g of probe.groups) {
@@ -8800,7 +8823,7 @@ async function mainSweep(argv, arg) {
     // is about WRITING, not about knowing. A hang floor absent from the plan is a wall the operator
     // discovers mid-run, i.e. exactly the `bugs/09` shape this whole artifact exists to prevent.
     // `hangFloors` counts an unclosed intent too, so no closure needs to be written to see it.
-    const jrnRecords = readJournal(openJournal({})).records;
+    const jrnRecords = readJournal(openJournal(jrnOpts)).records;
     const floors = hangFloors(jrnRecords);
     // Обе половины памяти журнала, а не одна: план обязан показывать ту же лестницу, что пройдёт
     // прогон (`bugs/09`, R16c), а прогон теперь стартует от собственной улики частоты (`bugs/31`).
@@ -8822,7 +8845,9 @@ async function mainSweep(argv, arg) {
   // fsynced here so a hang that kills the process still leaves a record, and the NEXT launch reads
   // this same file to attribute the hang and resume. A sandbox journal would forget the hang — which
   // is the one thing the owner's accepted risk depends on remembering.
-  const journal = openJournal({});
+  // (`--card virtual` — единственное исключение, и оно НЕ ослабление: у двойника СВОЙ постоянный
+  // журнал в песочнице стенда, его виртуальные полы зависания помнятся между прогонами так же.)
+  const journal = openJournal(jrnOpts);
 
   // ─── A DELIBERATE STOP IS NOT A HANG, AND THE JOURNAL MUST SAY WHICH IT WAS (`bugs/14`) ─────────
   //
@@ -8928,7 +8953,10 @@ async function mainSweep(argv, arg) {
   // The gate itself does NOT weaken: a run still may not touch the card unless somebody is watching.
   // What changes is who is asked to fix it. Refusal is now the LAST resort, not the first answer.
   const dash = await import('./lib/run-dashboard.mjs');
-  let watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+  // Окно — условие прогона, ПИШУЩЕГО В КАРТУ (слово владельца ниже говорит ровно это). Виртуальный
+  // прогон не пишет ни байта, и требовать для него браузер значило бы запретить смоук на машине
+  // без окон; двойник печатает строку канона I3 вместо этого.
+  let watch = twin ? null : await dash.viewersWatching({ port: dash.DEFAULT_PORT });
 
   // ─── ОКНО ГАСИТ САМА ОСТАНОВКА ПРОГОНА, А НЕ ПАМЯТЬ АГЕНТА — `bugs/42`, четвёртый случай класса ──
   //
@@ -8948,12 +8976,15 @@ async function mainSweep(argv, arg) {
   let dashProc = null;
   const shutWindow = () => {
     try { dashProc?.kill(); } catch { /* уже мёртв */ }
+    // Виртуальный прогон окна не открывал и потому не гасит чужое: правило «окно принадлежит
+    // ПРОГОНУ» говорит о прогоне-владельце, а этот владельцем не был.
+    if (twin) return;
     try { dash.closeWindow(); } catch { /* уже закрыто */ }
   };
   process.on('exit', shutWindow);
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { shutWindow(); process.exit(130); });
 
-  if (!watch.ok || watch.viewers < 1) {
+  if (!twin && (!watch.ok || watch.viewers < 1)) {
     console.log('ОКНО НАБЛЮДЕНИЯ: не открыто — поднимаю сам, ОТДЕЛЬНЫМ ПРОЦЕССОМ.');
     // 🔴 ОТДЕЛЬНЫМ ПРОЦЕССОМ, А НЕ ВНУТРИ СЕБЯ — `bugs/27`. Прежде сервер поднимался здесь же
     // (`raiseDashboard` возвращал живой `raised.s`), и это ломало сам прибор: развёртка синхронно
@@ -8980,7 +9011,7 @@ async function mainSweep(argv, arg) {
     await dash.waitForViewer(dash.DEFAULT_PORT);
     watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
   }
-  if (!watch.ok || watch.viewers < 1) {
+  if (!twin && (!watch.ok || watch.viewers < 1)) {
     console.error('ОТКАЗ: ОКНО НАБЛЮДЕНИЯ НЕ ОТКРЫТО, а развёртка пишет в карту.');
     console.error(`       ${watch.why}`);
     console.error('       Прогон пытался поднять его сам и не смог — значит смотреть действительно нечем.');
@@ -8996,7 +9027,8 @@ async function mainSweep(argv, arg) {
     console.error('       План прогона читается без окна и карту не трогает: добавьте --dry-run.');
     return 2;
   }
-  console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено`);
+  if (twin) console.log('ОКНО НАБЛЮДЕНИЯ: не условие виртуального прогона (карта не пишется) — E11 живёт данными сэмплера, которого у сборки пока нет');
+  else console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено`);
 
   // ─── БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: ОТКАЗ ТОЛЬКО НА ПОЛОВИНЕ (`plans/30` AC4) ─────────────────────────
   //
@@ -9009,7 +9041,10 @@ async function mainSweep(argv, arg) {
   // Сторож, краснеющий на штатном состоянии машинерии, которую он защищает, — ловушка, которую канон
   // называет трижды (R12 · R13 · R17), и проект падал в неё дважды. Опасна именно ПОЛОВИНА: машина,
   // умершая посреди взвода, выглядит как работающая, и никто не замечает, что защиты нет.
-  try {
+  if (twin) {
+    console.log('БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: ПРОПУСК — виртуальный прогон в карту не пишет и машину не '
+      + 'вешает (E5, слово владельца: «ей взвод безопасности не нужен»)');
+  } else try {
     const sm = await import('../tools/safe-mode.mjs');
     const smState = sm.safeModeState(sm.dutiesOf(sm.readMachine({})));
     if (smState.state === 'half-armed') {
@@ -9038,7 +9073,7 @@ async function mainSweep(argv, arg) {
   // this; the live path had not, so a window opened now would first paint the LAST run's ending —
   // «прогон оставлен» — and only later switch. The owner saw exactly that and named the rule:
   // *«визуализатор должен запускаться в АДЕКВАТНОМ СОСТОЯНИИ ОТРАЖАЮЩИМ СОСТОЯНИЕ ТЕКУЩЕГО ПРОГОНА»*.
-  dash.clearPulse();
+  if (!twin) dash.clearPulse();
 
   // ─── THE SIDE-CAR SAMPLER — the only thing that CAN read the card while the sweep is burning ────
   //
@@ -9065,29 +9100,36 @@ async function mainSweep(argv, arg) {
   // ARCHIVING HAPPENS HERE, AT THE START OF THE NEXT RUN, and that placement is the whole trick: the
   // runs worth keeping are the ones that end with a dead machine, and a dead machine runs no
   // cleanup. The file simply waits on disk across the reboot until somebody launches again.
-  const archived = await (async () => {
-    const mon = await import('./lib/hardware-mon.mjs');
-    return mon.archivePulseFile(dash.TELEMETRY_PATH);
-  })();
-  console.log(archived.archived
-    ? `ПУЛЬС ПРОШЛОГО ПРОГОНА: убран в ${archived.to} — не затёрт`
-    : `ПУЛЬС ПРОШЛОГО ПРОГОНА: ${archived.why}`);
-  // Whatever was not worth archiving is still in the sampler's way, and the sampler truncates on
-  // start anyway — the removal stays, it just no longer runs on evidence.
-  try { rmSync(dash.TELEMETRY_PATH, { force: true }); } catch { /* a stale file the server will age out anyway */ }
-  const sideCar = spawn(process.execPath, [
-    samplerScript, '--seconds', '36000', '--period', '1000', '--out', dash.TELEMETRY_PATH,
-  ], { windowsHide: true, stdio: 'ignore' });
-  sideCar.unref?.();
-  const stopSideCar = () => { try { sideCar.kill(); } catch { /* already gone */ } };
+  let stopSideCar = () => {};
+  if (twin) {
+    // Сэмплер полосы говорит с картой через nvidia-smi (опись E6) — на двойнике его нет; телеметрию
+    // ступени синтезирует устройство сборки в песочницу, и боевой файл пульса не трогается (I1).
+    console.log('ТЕЛЕМЕТРИЯ: сэмплер полосы не поднимается (двойник, E6) — пробы ступени синтезирует устройство сборки');
+  } else {
+    const archived = await (async () => {
+      const mon = await import('./lib/hardware-mon.mjs');
+      return mon.archivePulseFile(dash.TELEMETRY_PATH);
+    })();
+    console.log(archived.archived
+      ? `ПУЛЬС ПРОШЛОГО ПРОГОНА: убран в ${archived.to} — не затёрт`
+      : `ПУЛЬС ПРОШЛОГО ПРОГОНА: ${archived.why}`);
+    // Whatever was not worth archiving is still in the sampler's way, and the sampler truncates on
+    // start anyway — the removal stays, it just no longer runs on evidence.
+    try { rmSync(dash.TELEMETRY_PATH, { force: true }); } catch { /* a stale file the server will age out anyway */ }
+    const sideCar = spawn(process.execPath, [
+      samplerScript, '--seconds', '36000', '--period', '1000', '--out', dash.TELEMETRY_PATH,
+    ], { windowsHide: true, stdio: 'ignore' });
+    sideCar.unref?.();
+    stopSideCar = () => { try { sideCar.kill(); } catch { /* already gone */ } };
+    // ВТОРОЙ СЛОЙ: гасим на ЛЮБОМ выходе процесса, а не только на предусмотренных. `finally` покрывает
+    // возврат и исключение, обработчик сигналов — Ctrl+C; `exit` ловит всё остальное, включая
+    // `process.exit()` из чужого кода и необработанное отклонение промиса. На Windows дочерний процесс
+    // НЕ умирает вместе с родителем, поэтому «мы же вышли» здесь ничего не гарантирует. Тот же приём,
+    // что у окна наблюдения выше, и по той же причине.
+    console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
+  }
   sideCarRef = stopSideCar;
-  // ВТОРОЙ СЛОЙ: гасим на ЛЮБОМ выходе процесса, а не только на предусмотренных. `finally` покрывает
-  // возврат и исключение, обработчик сигналов — Ctrl+C; `exit` ловит всё остальное, включая
-  // `process.exit()` из чужого кода и необработанное отклонение промиса. На Windows дочерний процесс
-  // НЕ умирает вместе с родителем, поэтому «мы же вышли» здесь ничего не гарантирует. Тот же приём,
-  // что у окна наблюдения выше, и по той же причине.
-  process.on('exit', stopSideCar);
-  console.log(`ТЕЛЕМЕТРИЯ: отдельный сэмплер pid ${sideCar.pid} пишет в ${dash.TELEMETRY_PATH} раз в секунду`);
+  process.on('exit', () => stopSideCar());
 
   // ─── ⚡ THE FUSE RIDES ARMED — epic 51 phase 5 (`plans/58`): the watch that RESCUES ─────────────
   //
@@ -9101,11 +9143,15 @@ async function mainSweep(argv, arg) {
   // Wired into the sweep's own start-up so that remembering is not required (plans/52 risk (d)).
   const watchScript = join(dirname(toPath(import.meta.url)), 'lib', 'death-watch.mjs');
   const fuseScript = join(dirname(toPath(import.meta.url)), 'lib', 'fuse.mjs');
-  const fuseJudge = spawn(process.execPath, [
-    fuseScript, '--judge', '--arm-n', String(fuseMod.DERIVED_ARM_N_MS),
-    '--burn-images', 'furnace.exe,branchy.exe,sdc_fma.exe',
-    '--seconds', '36000',
-  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  // На двойнике судья идёт НЕВЗВЕДЁННЫМ (наблюдает, руки на двойника — фаза 4 эпика 59) и с
+  // журналом в песочницу этого прогона (`--out`): боевая папка `runs/death-watch/` — часть I1.
+  const fuseJudge = spawn(process.execPath, twin
+    ? [fuseScript, ...twin.riders.judgeArgs]
+    : [
+      fuseScript, '--judge', '--arm-n', String(fuseMod.DERIVED_ARM_N_MS),
+      '--burn-images', 'furnace.exe,branchy.exe,sdc_fma.exe',
+      '--seconds', '36000',
+    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   let fuseProbe = null;
   let fuseJudgeLog = '';
   fuseJudge.stdout.on('data', (d) => {
@@ -9113,11 +9159,14 @@ async function mainSweep(argv, arg) {
     const m = fuseJudgeLog.match(/порт (\d+)/u);
     if (m && !fuseProbe) {
       // The probe rises only once the judge NAMED its port — beats have an address from tick one.
-      fuseProbe = spawn(process.execPath, [
-        watchScript, '--probe', '--port', m[1], '--seconds', '36000', '--tick', '2',
-      ], { windowsHide: true, stdio: 'ignore' });
+      // Двойнику NVML-проба недоступна и не нужна: здоровый ритм даёт отправитель ударов (E7/R1;
+      // профили смертей — фаза 4 эпика 59).
+      fuseProbe = spawn(process.execPath, twin
+        ? [watchScript, '--beat-sender', '--port', m[1], '--seconds', '600', '--tick', '2']
+        : [watchScript, '--probe', '--port', m[1], '--seconds', '36000', '--tick', '2'],
+      { windowsHide: true, stdio: 'ignore' });
       fuseProbe.unref?.();
-      console.log(`ПРОБА ФЬЮЗА: pid ${fuseProbe.pid} → порт ${m[1]}, удары каждые 2 мс`);
+      console.log(`ПРОБА ФЬЮЗА: pid ${fuseProbe.pid} → порт ${m[1]}, удары каждые 2 мс${twin ? ' (виртуальная: отправитель ударов, судья невзведён)' : ''}`);
     }
   });
   fuseJudge.unref?.();
@@ -9137,14 +9186,16 @@ async function mainSweep(argv, arg) {
   // произойдёт (`bugs/33`). Источник один — `sweepBurnLadder()`.
   const sweepShapeLadder = sweepBurnLadder();
 
-  const pulse = dash.openPulse({
+  // Прибор дашборда — состояние ЖИВОГО прогона; двойник его не заводит (I1: боевые файлы прибора
+  // не трогаются). Все потребители ниже уже опциональны (`pulse?.`).
+  const pulse = twin ? null : dash.openPulse({
     source: 'ЖИВАЯ КАРТА',
     synthetic: false,
     band: `${fromMhz}…${toMhz} МГц`,
     probeSeconds: config.SWEEP_PROBE_SECONDS ?? 10,
     shapesPerRung: sweepShapeLadder[0].length,
   });
-  console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
+  if (pulse) console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
 
   let report;
   try {
@@ -9169,14 +9220,16 @@ async function mainSweep(argv, arg) {
         : `судья фьюза умер (код ${fuseJudge.exitCode}) — прогон без фьюза запрещён`)),
     // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
     // recoveries that could disagree are worse than one that cannot.
-    recover: async () => watchdog.recover(),
+    recover: async () => (twin ? twin.recover() : watchdog.recover()),
     // THE FRESH TABLE, READ THROUGH THE HANDLE THIS COMMAND ALREADY HOLDS. In-process NVAPI, no
     // subprocess — the reason this is safe per rung while `probeCard()` is not (see the seam's own
     // comment). The card is at factory at this moment: every rung's rollback zeroes the curve in a
     // `finally`, and `runRung` refuses to continue when that rollback was not clean.
-    readPointsFn: () => nvapi.readVfCurve(nv, handle).points,
-    runStepFn: (a) => vf.runStep(a),
-    saveFn: async (d) => saveCurveDoc(d),
+    readPointsFn: () => readPointsNow(),
+    // Порт устройства (эпик 59 фаза 2): на двойнике атом получает устройство сборки, живой путь —
+    // свой адаптер по умолчанию, бит-в-бит.
+    runStepFn: (a) => vf.runStep(twin ? { ...a, device: twin.device } : a),
+    saveFn: async (d) => (twin ? twin.saveDoc(d) : saveCurveDoc(d)),
     onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
     // ─── ПРОЖИГ: `furnace` С ЛЕСТНИЦЕЙ ИНТЕНСИВНОСТИ (слово владельца 2026-08-22) ──────────────
     //

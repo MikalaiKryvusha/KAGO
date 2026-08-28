@@ -931,7 +931,11 @@ export async function runTrapSuite() {
     const boostVc = virtualCard(t8card, { settleSamples: 0, seed: 31 });
     const CAP8 = 2842;
     await boostVc.curveBackend.writeRaiseAndCap(0, CAP8, { cardMaxClockMhz: t8card.card.maxGraphicsMhz });
-    const deliveredAtZero = Number(boostVc.backend.query(['clocks.gr'])['clocks.gr']);
+    // Проба — `deliveredNowMhz`, ФИЗИЧЕСКАЯ выдача под работой (тот же `runningMhz`, по которому
+    // судит оракул), а не `clocks.gr` в простое: с 2026-08-28 двойник в покое сбрасывается вниз,
+    // как живая карта (спад простоя, эпик 59 фаза 3), и чтение без нагрузки о пробое не говорит.
+    // Механизм ловушки — про то, что карта ДЕЛАЕТ под нагрузкой, и вопрос задаётся ровно ему.
+    const deliveredAtZero = Number(boostVc.deliveredNowMhz());
     await boostVc.curveBackend.zeroCurve();
     check('T8: КАРТА УХОДИТ ВЫШЕ ПОТОЛКА ДАЖЕ БЕЗ АНДЕРВОЛЬТА — это и есть механизм ловушки',
       Number.isFinite(deliveredAtZero) && deliveredAtZero > CAP8,
@@ -955,7 +959,8 @@ export async function runTrapSuite() {
     const lockedVc = virtualCard(t8card, { settleSamples: 0, seed: 31 });
     await lockedVc.curveBackend.writeRaiseAndCap(0, CAP8, { cardMaxClockMhz: t8card.card.maxGraphicsMhz });
     lockedVc.backend.lockGraphicsClocksMhz(CAP8, CAP8);
-    const deliveredLocked = Number(lockedVc.backend.query(['clocks.gr'])['clocks.gr']);
+    // Та же проба, что у блока механизма выше, и по той же причине (физика, не чтение простоя).
+    const deliveredLocked = Number(lockedVc.deliveredNowMhz());
     await lockedVc.curveBackend.zeroCurve();
     check('T8: ЗАМОК СИЛЬНЕЕ БУСТА — под замком та же карта превышения не даёт (контракт для фазы 2)',
       deliveredLocked === CAP8,
