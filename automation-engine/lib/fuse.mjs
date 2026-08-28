@@ -177,16 +177,29 @@ export function drainRing(ring) {
 // =================================================================================================
 
 /**
- * Hand 1: kill the burn process tree. `taskkill` by argv array WITHOUT a shell — EXP-0057: Git
- * Bash rewrites `/PID` as a POSIX path; a rescue that dies on argument mangling is a rescue that
- * was never tested. `/T` takes the tree (the burn may have children), `/F` because a hung process
- * ignores polite requests by definition.
+ * Hand 1: kill the burn. TWO paths, fast first — the live drill priced them (2026-08-28):
+ * spawning `taskkill` cost 131,95 мс against the N=60 budget; `process.kill` is a direct
+ * TerminateProcess syscall in microseconds. The syscall does not take a TREE, so death is
+ * VERIFIED (signal 0 probing, ≤ 40 мс) and a survivor — a burn with children — gets the
+ * `taskkill /T /F` fallback by argv array WITHOUT a shell (EXP-0057: Git Bash rewrites `/PID`
+ * as a POSIX path). «Убит» здесь — наблюдение, не отправленный сигнал.
  */
-export function makeKillHand({ spawnSyncFn }) {
+export function makeKillHand({ spawnSyncFn, killFn = process.kill.bind(process) }) {
   return (pid) => {
     const t0 = performance.now();
-    const r = spawnSyncFn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 5_000 });
-    return { ok: r.status === 0, ms: performance.now() - t0, detail: r.status === 0 ? null : `taskkill status ${r.status}` };
+    let how = 'process.kill';
+    try { killFn(pid, 'SIGKILL'); } catch { /* ESRCH — уже мёртв; это не отказ руки */ }
+    let dead = false;
+    for (let i = 0; i < 20; i++) {
+      try { killFn(pid, 0); } catch { dead = true; break; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+    }
+    if (!dead) {
+      how = 'taskkill /T fallback';
+      const r = spawnSyncFn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 5_000 });
+      dead = r.status === 0;
+    }
+    return { ok: dead, ms: performance.now() - t0, detail: how };
   };
 }
 
@@ -200,8 +213,13 @@ export function makeStockHand({ spawnFn, journalPath }) {
   const handScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fuse-rescue-hand.mjs');
   return () => {
     const t0 = performance.now();
+    // `detached: true` IS the rescue property, paid for on the first live drill (2026-08-28): the
+    // judge exits ~200 мс after a trip, and on this machine a NON-detached child dies WITH its
+    // parent — the hand was spawned (pid printed) and silently never ran. Proven both ways: parent
+    // alive 3 с → line lands; detached + parent dead in 50 мс → line lands; non-detached + parent
+    // dead → nothing. A hand that needs ~2 с of NVAPI work must own its life. (EXP-0166)
     const child = spawnFn(process.execPath, [handScript, '--journal', journalPath], {
-      windowsHide: true, stdio: 'ignore', detached: false,
+      windowsHide: true, stdio: 'ignore', detached: true,
     });
     child.unref?.();
     return { ok: child.pid !== undefined, ms: performance.now() - t0, detail: child.pid === undefined ? 'spawn failed' : `pid ${child.pid}` };
@@ -249,7 +267,7 @@ export function runTrip({ verdict, burnPid, killHand, stockHand, writeLine, dump
 export async function runJudge({
   beatPort = 0, armNMs = null, armMMs = null, burnPid = null,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
-  spawnSyncFn, spawnFn, onReady = null, log = () => {},
+  spawnSyncFn, spawnFn, killFn = process.kill.bind(process), onReady = null, log = () => {},
 }) {
   const dgram = await import('node:dgram');
   mkdirSync(path.dirname(journalPath), { recursive: true });
@@ -268,7 +286,7 @@ export async function runJudge({
     } finally { closeSync(rfd); }
   };
 
-  const killHand = makeKillHand({ spawnSyncFn });
+  const killHand = makeKillHand({ spawnSyncFn, killFn });
   const stockHand = makeStockHand({ spawnFn, journalPath });
 
   const sock = dgram.createSocket('udp4');
@@ -571,19 +589,31 @@ async function cmdSelftest() {
     return o.phase === 'intent' && o.beatSilenceMs === 61.24;
   })());
 
-  // ---- hand 1 argv shape (EXP-0057)
-  ok('рука 1 зовёт taskkill argv-МАССИВОМ без шелла: /PID /T /F на месте', (() => {
-    let seen = null;
-    const kill = makeKillHand({ spawnSyncFn: (cmd, args) => { seen = [cmd, ...args]; return { status: 0 }; } });
+  // ---- hand 1: fast syscall path, verified death, tree fallback (times priced by the live drill)
+  ok('рука 1, быстрый путь: process.kill + смерть ПОДТВЕРЖДЕНА пробой сигналом 0, taskkill не зван', (() => {
+    let sig9 = 0; let probes = 0; let taskkillCalled = false;
+    const kill = makeKillHand({
+      spawnSyncFn: () => { taskkillCalled = true; return { status: 0 }; },
+      killFn: (pid, sig) => { if (sig === 'SIGKILL') { sig9++; return; } probes++; throw new Error('ESRCH'); },
+    });
     const r = kill(777);
-    return r.ok && JSON.stringify(seen) === JSON.stringify(['taskkill', '/PID', '777', '/T', '/F']);
+    return r.ok && sig9 === 1 && probes === 1 && !taskkillCalled && r.detail === 'process.kill';
+  })());
+  ok('рука 1, откат: выживший после сисколла (дерево) добивается taskkill /PID /T /F argv-массивом (EXP-0057)', (() => {
+    let seen = null;
+    const kill = makeKillHand({
+      spawnSyncFn: (cmd, args) => { seen = [cmd, ...args]; return { status: 0 }; },
+      killFn: () => { /* и SIGKILL, и проба сигналом 0 «проходят» — процесс упрямо жив */ },
+    });
+    const r = kill(777);
+    return r.ok && JSON.stringify(seen) === JSON.stringify(['taskkill', '/PID', '777', '/T', '/F']) && r.detail === 'taskkill /T fallback';
   })());
 
-  ok('рука 2 спавнит ИЗОЛИРОВАННЫЙ процесс и НЕ ждёт его — судья не смеет виснуть на умирающем драйвере', (() => {
-    let spawned = null;
-    const stock = makeStockHand({ spawnFn: (exe, args) => { spawned = args; return { pid: 999, unref() {} }; }, journalPath: 'X.jsonl' });
+  ok('рука 2: ИЗОЛИРОВАННЫЙ процесс, судья НЕ ждёт, и он DETACHED — на этой машине недетачнутый ребёнок умирает с родителем (живой прогон 28.08, EXP-0166)', (() => {
+    let spawned = null; let opts = null;
+    const stock = makeStockHand({ spawnFn: (exe, args, o) => { spawned = args; opts = o; return { pid: 999, unref() {} }; }, journalPath: 'X.jsonl' });
     const r = stock();
-    return r.ok && spawned[0].endsWith('fuse-rescue-hand.mjs') && spawned.includes('--journal');
+    return r.ok && spawned[0].endsWith('fuse-rescue-hand.mjs') && spawned.includes('--journal') && opts.detached === true;
   })());
 
   // ---- hand 2 core, the isolated process's own logic (fake nvapi injected)
@@ -622,6 +652,7 @@ async function cmdSelftest() {
     const judgeDone = runJudge({
       beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 5,
       spawnSyncFn: (cmd, args) => ({ status: 0, cmdSeen: [cmd, ...args] }),
+      killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       spawnFn: () => ({ pid: 1, unref() {} }),
       onReady: ({ port }) => { readyPort = port; },
     });
