@@ -36,6 +36,12 @@ const ROOT = join(HERE, '..', '..');
 const BENCH_RUNS = join(ROOT, 'benches', 'runs');
 const DEFAULT_CARD_FILE = join(ROOT, 'benches', 'cards', 'rtx5070ti.json');
 
+/** Строка канона I3 — ОДИН дом (P64-AC2): сборка отдаёт её движку, CLI печатает её сам на каждой
+ *  двери. Зелёный на виртуалке — утверждение о ЛОГИКЕ; копия этой строки где-то ещё была бы парой
+ *  правда↔зеркало. */
+export const CANON_LINE = 'ЦИФРОВОЙ ДВОЙНИК — ВЫМЫСЕЛ (I3): зелёный прогон здесь доказывает ЛОГИКУ движка и '
+  + 'проводку живого пути, а не кремний, драйвер или карту владельца.';
+
 /** Локальный ISO-штамп с поясом машины — форма расписок проекта (EXP-0012: UTC уже врал). */
 function localIso(d = new Date()) {
   const pad = (n) => String(Math.abs(n)).padStart(2, '0');
@@ -272,8 +278,7 @@ export async function makeTwinAssembly({
     vc, card, device, probedCard, recover, loadDoc,
     docName, docDir, journalDir, runDir, burnPidfile,
     saveDoc: (d) => cs.saveCurveDoc(d, { name: docName, dir: docDir }),
-    canonLine: 'ЦИФРОВОЙ ДВОЙНИК — ВЫМЫСЕЛ (I3): зелёный прогон здесь доказывает ЛОГИКУ движка и '
-      + 'проводку живого пути, а не кремний, драйвер или карту владельца.',
+    canonLine: CANON_LINE,
     riders: {
       judgeArgs: ['--judge',
         // Взведённый судья на двойнике НЕ БЫВАЕТ без руки 2 двойника: --arm-n и --twin-stock —
@@ -644,6 +649,15 @@ export async function selfTest() {
       [killedShape.died, /вышла с кодом 1/u.test(killedShape.reason)], [true, true]);
   }
 
+  // 8. СТРОКА КАНОНА I3 (P64-AC2, «шаг 2» plans/64): одна печать в main() кроет все двери CLI —
+  //    доказано сквозным запуском самой дешёвой (--i1); сборка отдаёт ТУ ЖЕ константу (один дом).
+  //    Мутация-адресат: снять печать из main() → этот блок красный.
+  {
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--i1'], { encoding: 'utf8', timeout: 60_000 });
+    ok('КАНОН I3: каждая дверь CLI печатает строку канона (сквозной --i1), сборка несёт ту же константу',
+      [r.status === 0 && (r.stdout ?? '').includes(CANON_LINE), asm.canonLine === CANON_LINE], [true, true]);
+  }
+
   const after = liveFingerprint();
   ok('I1: живой документ, боевой журнал и боевая папка всадников самопроверкой не тронуты',
     after, before);
@@ -652,6 +666,9 @@ export async function selfTest() {
 }
 
 async function main(argv) {
+  // P64-AC2: строка I3 — на КАЖДОЙ двери твин-команд, одной печатью (кроме самопроверки: её вывод
+  // читает батарея построчно, и лишняя строка там — шум, а не канон). Сторож — блок по выводу --i1.
+  if (!argv.includes('--selftest')) console.log(CANON_LINE);
   if (argv.includes('--selftest')) {
     const r = await selfTest();
     for (const x of r.results) {
