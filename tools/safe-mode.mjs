@@ -128,7 +128,20 @@ export function diskOfPath(path, disks) {
  *
  * @returns {Array<{id:string, armed:boolean, what:string, undo:string|null}>}
  */
-export function dutiesOf(machine, { offline = false, receiptPath = RECEIPT_PATH } = {}) {
+export function dutiesOf(machine, { offline = false, receiptPath = RECEIPT_PATH, receipt = undefined } = {}) {
+  // РАСПИСКА ЗНАЕТ НАШИ ДЕЙСТВИЯ; ДЕТЕКТОР ЗНАЕТ УСЛОВИЯ МИРА (`bugs/51`).
+  //
+  // Признак может быть истинным сам по себе: торрент-клиент не запущен, потому что владелец его не
+  // открывал. Считать это «взведено нами» — значит объявить своим то, чего мы не делали, и режим
+  // становится НЕСНИМАЕМО-половинчатым: `--off` честно откатывает свои четыре пункта и печатает
+  // «ВЗВЕДЁН НАПОЛОВИНУ… снять: --off» — совет выполнить команду, которая только что отработала.
+  // Владелец упёрся ровно в эту петлю, и гейт прогона в ней стоит намертво.
+  //
+  // Поэтому здесь два разных вопроса разведены: «стоит ли условие» (`armed`) и «поставили ли его
+  // МЫ» (`byUs`). В оценку полноты входит только второе — см. `safeModeState`.
+  const rec = receipt === undefined ? readReceipt({ path: receiptPath }) : receipt;
+  const ours = new Set((rec?.items ?? []).map((i) => i.id));
+  const hasReceipt = rec !== null && rec !== undefined;
   const out = [];
   const ftp = machine?.ftp ?? null;
   out.push({
@@ -173,6 +186,17 @@ export function dutiesOf(machine, { offline = false, receiptPath = RECEIPT_PATH 
       diskNumber: d.number,
     });
   }
+  // Единственное место, где расписка встречается с детектором. Дежурство, которое СТОИТ, но которого
+  // в расписке НЕТ, — не наше: показываем его, но полноту им не меряем. Пока расписки нет вовсе,
+  // никакое взведённое условие не может быть нашим — мы ещё ничего не ставили.
+  for (const d of out) {
+    if (d.absent || d.refusedByGuard) continue;
+    // Нет расписки — атрибутировать нечем, и выдумывать нельзя: прежнее чтение сохраняется.
+    // Правило узкое НАМЕРЕННО: оно бьёт ровно в случай владельца — расписка ЕСТЬ, в ней четыре
+    // пункта, торрента среди них нет, и значит его «взведённость» никогда не была нашей.
+    d.byUs = d.armed ? (!hasReceipt || ours.has(d.id)) : true;
+    if (d.armed && !d.byUs) d.what += ' — НЕ НАМИ (в расписке отката его нет)';
+  }
   return out;
 }
 
@@ -189,7 +213,10 @@ export function dutiesOf(machine, { offline = false, receiptPath = RECEIPT_PATH 
  * R12 · R13 · R17 all name, and this project has fallen into it twice (`plans/30` §2.4).
  */
 export function safeModeState(duties) {
-  const applicable = (duties ?? []).filter((d) => !d.absent && !d.refusedByGuard);
+  // `bugs/51`: условие, взведённое НЕ нами, неприменимо к вопросу «сняли ли мы наш режим» ровно так
+  // же, как отсутствующая служба, — и по той же причине: ни ARMED, ни HALF-ARMED из него следовать
+  // не может, иначе состояние становится недостижимым, а гейт запирает работу навсегда.
+  const applicable = (duties ?? []).filter((d) => !d.absent && !d.refusedByGuard && d.byUs !== false);
   if (!applicable.length) return { state: 'disarmed', armed: [], disarmed: [], why: 'ни одно дежурство неприменимо на этой машине' };
   const armed = applicable.filter((d) => d.armed);
   const disarmed = applicable.filter((d) => !d.armed);
@@ -251,7 +278,18 @@ export function printStatus({ run = psRun, offline = false } = {}) {
     : '\n  расписки отката нет — режим этим инструментом не взводили');
   if (st.state === 'half-armed') {
     say('\n  ⚠️ ВЗВЕДЁН НАПОЛОВИНУ. Прогон KAGO писать в карту откажется (plans/30 AC4).');
-    say('     Снять: node tools/safe-mode.mjs --off');
+    // `bugs/51` пункт 4: СОВЕТ НЕ МОЖЕТ БЫТЬ КОМАНДОЙ, КОТОРАЯ ТОЛЬКО ЧТО ОТРАБОТАЛА. Половина,
+    // состоящая только из наших дежурств, снимается `--off`. Половина, в которой висит чужое
+    // условие, им не снимается — и сказать «снять: --off» здесь значит отправить человека по кругу.
+    // Если выхода нет, честный ответ — назвать это и объяснить, а не повторить совет.
+    const alien = st.disarmed.concat(st.armed).filter((d) => d.byUs === false);
+    if (alien.length) {
+      say(`     ⛔ ВЫХОДА ЭТОЙ КОМАНДОЙ НЕТ: ${alien.map((d) => d.id).join(', ')} — не наше дежурство,`);
+      say('        мы его не ставили и снять не можем; `--off` откатывает только записанное в расписку.');
+      say('        Полное взведение: node tools/safe-mode.mjs --on');
+    } else {
+      say('     Снять: node tools/safe-mode.mjs --off');
+    }
   }
   return st;
 }
@@ -428,6 +466,29 @@ function selftest() {
       dutiesOf(machine({ ftp: { Status: 'Running' } }), { receiptPath: onD }).find((d) => d.id === 'ftpsvc').armed,
       dutiesOf(machine({ ftp: { Status: 1 } }), { receiptPath: onD }).find((d) => d.id === 'ftpsvc').armed],
     [false, false, true]);
+
+  console.log('\n— УСЛОВИЕ, ВЗВЕДЁННОЕ НЕ НАМИ, НЕ ДЕЛАЕТ РЕЖИМ ПОЛОВИНЧАТЫМ (bugs/51) —');
+  // Случай владельца дословно: расписка от 2026-08-23 несёт ЧЕТЫРЕ пункта, торрента среди них нет —
+  // на момент взвода клиент уже был закрыт, значит тулза его не трогала. После `--off` все четыре
+  // откачены, а `torrent` по-прежнему «взведён» условием мира. Прежде это давало HALF-ARMED навсегда.
+  const recFour = { kind: 'safe-mode-receipt', at: '2026-08-23T20:49:13Z', items: [
+    { id: 'ftpsvc' }, { id: 'disk:J' }, { id: 'disk:F' }, { id: 'disk:E' },
+  ] };
+  // Машина владельца ПОСЛЕ `--off`: всё откачено, а торрент-клиент не запущен — сам по себе.
+  const afterOff = () => machine({ torrent: null });
+  ok('после --off режим читается ПОЛНОСТЬЮ СНЯТЫМ, хотя торрент не запущен',
+    safeModeState(dutiesOf(afterOff(), { receiptPath: onD, receipt: recFour })).state, 'disarmed');
+  ok('и само дежурство при этом ПОКАЗАНО, а не спрятано — с указанием, что оно не наше',
+    (() => {
+      const d = dutiesOf(afterOff(), { receiptPath: onD, receipt: recFour }).find((x) => x.id === 'torrent');
+      return [d.armed, d.byUs, /НЕ НАМИ/u.test(d.what)];
+    })(), [true, false, true]);
+  ok('НАШЕ дежурство расписка признаёт своим, и половина остаётся половиной',
+    safeModeState(dutiesOf(machine({ torrent: null, ftp: { Status: 'Stopped' } }),
+      { receiptPath: onD, receipt: recFour })).state, 'half-armed');
+  ok('без расписки атрибутировать нечем — прежнее чтение сохраняется, выдумки нет',
+    safeModeState(dutiesOf(machine({ torrent: null, ftp: { Status: 'Stopped' } }),
+      { receiptPath: onD, receipt: null })).state, 'half-armed');
 
   console.log('\n— ОТКАТ ЭТО СПИСОК, А НЕ ЦЕПЬ (R10a) —');
   ok('падение на первом пункте НЕ отменяет остальные',
