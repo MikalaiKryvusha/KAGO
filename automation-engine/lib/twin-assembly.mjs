@@ -424,8 +424,12 @@ async function collectRescueEvidence() {
   };
 }
 
-async function mainRehearseDeath(profile) {
+async function mainRehearseDeath(profile, { withWindow = true } = {}) {
   console.log(`РЕПЕТИЦИЯ СМЕРТИ «${profile}» НА ДВОЙНИКЕ (plans/63): проба играет ИЗМЕРЕННЫЙ профиль, судья взведён, руки бьют по двойнику.`);
+  // ОКНО — НОСИТЕЛЬ ПОКАЗА, ПО УМОЛЧАНИЮ (`bugs/65`, найдено владельцем: «я ничего не видел. даже
+  // визуализатор не открылся»). Вечер владельца = окно + звук, терминал — приложение. `--no-window`
+  // оставлен для безголовой отладки и назван в usage.
+  if (withWindow) console.log('ОКНО: репетиция идёт В ОКНЕ НАБЛЮДЕНИЯ — смотреть туда; терминал — приложение к нему.');
   const archived = archiveTwinSandbox();
   if (archived.moved) console.log(`песочница двойника унесена в ${archived.dest} (${archived.moved} шт.) — репетиция со свежего стока`);
   const before = liveFingerprint();
@@ -434,7 +438,8 @@ async function mainRehearseDeath(profile) {
 
   const engine = join(HERE, '..', 'engine.mjs');
   const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
-    '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', profile],
+    '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', profile,
+    ...(withWindow ? ['--twin-window'] : [])],
   { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
   const logFile = join(BENCH_RUNS, `twin-death-${profile}-${localIso().replace(/[:+]/g, '-')}.log`);
@@ -451,6 +456,11 @@ async function mainRehearseDeath(profile) {
   const lineAfter = deliveryLine();
   const i1 = JSON.stringify(before) === JSON.stringify(after) && lineBefore === lineAfter;
 
+  // Пульс прогона — в ПЕСОЧНИЦЕ этого прогона, и он обязан объявлять двойника (`bugs/65`):
+  // окно, которое нельзя отличить от живого вечера, хуже отсутствующего.
+  const twinPulse = (() => {
+    try { return JSON.parse(readFileSync(join(ev.runDir ?? '', 'live.json'), 'utf8')); } catch { return null; }
+  })();
   const checks = [
     ['трип случился (намерение в журнале судьи, причина beat-silence)', intents.length === 1 && intents[0].cause === 'beat-silence'],
     ['рука 1 отработала: носитель горна убит (pid из пид-файла)', hand1?.ok === true],
@@ -458,6 +468,11 @@ async function mainRehearseDeath(profile) {
     ['полоса ВСТАЛА до следующей ступени (stopWhen: судья вышел, код 2 — спасение)', /СПАСЕНИЕ сработало/u.test(log)],
     ['спасённая ступень провалилась дорогой оракула (нагрузка вышла с кодом / ОТКАЗ)', /вышла с кодом|ОТКАЗ/u.test(log)],
     ['кольцо судьи сброшено и читается (суб-пороговые такты на месте)', ev.ring.length >= 10],
+    ['пульс — в песочнице прогона и объявляет двойника (source I3 · карта synthetic · индикаторы не тёмные)',
+      twinPulse?.run?.source?.includes('ЦИФРОВОЙ ДВОЙНИК') === true && twinPulse?.card?.synthetic === true
+      && Number.isFinite(twinPulse?.card?.clockMhz)],
+    ...(withWindow ? [['окно наблюдения ПОДНЯЛОСЬ с песочными путями (строка подъёма в логе прогона)',
+      /ОКНО НАБЛЮДЕНИЯ \(двойник\): поднято/u.test(log)]] : []),
     ['I1: живой документ · боевой журнал · боевая папка всадников · строка доставки — не тронуты', i1],
   ];
   let bad = 0;
@@ -471,8 +486,11 @@ async function mainRehearseDeath(profile) {
  * ровно как машину убивает край. Намерение уже fsync-нуто (R15); ВТОРОЙ прогон обязан закрыть его
  * как ЗАВИС, поднять виртуальный пол зависания и не вернуться на роковую ступень.
  */
-async function mainRehearseHang() {
+async function mainRehearseHang({ withWindow = true } = {}) {
   console.log('РЕПЕТИЦИЯ ВИРТУАЛЬНОГО ЗАВИСА (plans/63): движок умирает посреди прожига, второй прогон закрывает намерение полом.');
+  // Окно по умолчанию (`bugs/65`): застывшая картинка при смерти движка — ровно тот показ, ради
+  // которого прибор существует; второй прогон перехватывает порт и доигрывает закрытие в окне.
+  if (withWindow) console.log('ОКНО: смерть и закрытие видны В ОКНЕ НАБЛЮДЕНИЯ — картинка застынет вместе с движком.');
   const archived = archiveTwinSandbox();
   if (archived.moved) console.log(`песочница двойника унесена в ${archived.dest} (${archived.moved} шт.)`);
   const before = liveFingerprint();
@@ -480,7 +498,8 @@ async function mainRehearseHang() {
   const { spawn } = await import('node:child_process');
   const engine = join(HERE, '..', 'engine.mjs');
   const child = spawn(process.execPath, [engine, '--sweep', '--card', 'virtual',
-    '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', 'hang'],
+    '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', 'hang',
+    ...(withWindow ? ['--twin-window'] : [])],
   { windowsHide: true });
   let out = '';
   child.stdout.on('data', (d) => { out += d.toString(); });
@@ -506,7 +525,8 @@ async function mainRehearseHang() {
 
   await new Promise((res) => setTimeout(res, 500));
   const r2 = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
-    '--from', '2842', '--to', '2812', '--max-depth', '300'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
+    '--from', '2842', '--to', '2812', '--max-depth', '300',
+    ...(withWindow ? ['--twin-window'] : [])], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
   const log2 = `${r2.stdout ?? ''}\n${r2.stderr ?? ''}`;
   const logFile = join(BENCH_RUNS, `twin-hang-${localIso().replace(/[:+]/g, '-')}.log`);
   writeFileSync(logFile, `=== ПЕРВЫЙ (убит) ===\n${out}\n=== ВТОРОЙ ===\n${log2}`, 'utf8');
@@ -541,6 +561,10 @@ async function mainRehearseHang() {
 //        → «ВСАДНИКИ: взведённый судья двойника НЕ БЫВАЕТ без руки 2 двойника»
 //   TA5. носитель: вернуть прожиг в процесс движка (carrierLauncher → oracle.run напрямую)
 //        → «НОСИТЕЛЬ: убитое тело прожига проваливает ступень дорогой оракула»
+//   TA6. движок: снять `path: twinPulsePath` из openPulse твин-ветки (пульс уедет в боевой файл)
+//        → «ПУЛЬС: пульс твин-прогона — в песочнице, объявляет двойника, боевой файл не тронут»
+//   TA7. движок: снять `pulse.telemetry(twin.vc.telemetry.read())` (индикаторы тёмные)
+//        → тот же блок: `card.clockMhz` в песочном пульсе обязан быть числом
 export async function selfTest() {
   const results = [];
   const ok = (what, got, want) => {
@@ -658,6 +682,27 @@ export async function selfTest() {
       [r.status === 0 && (r.stdout ?? '').includes(CANON_LINE), asm.canonLine === CANON_LINE], [true, true]);
   }
 
+  // 9. ПУЛЬС ОКНА (`bugs/65`, TA6/TA7): твин-прогон БЕЗ окна всё равно пишет пульс — в ПЕСОЧНИЦУ
+  //    своего прогона, с объявленным источником двойника и накормленными индикаторами; боевой файл
+  //    прибора (`runs/dashboard/live.json`) при этом не тронут. Узкая полоса — одна частота.
+  {
+    const livePulse = join(ROOT, 'runs', 'dashboard', 'live.json');
+    const liveBefore = existsSync(livePulse) ? `${statSync(livePulse).mtimeMs}:${statSync(livePulse).size}` : 'нет файла';
+    const engine = join(HERE, '..', 'engine.mjs');
+    const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
+      '--from', '2842', '--to', '2842', '--max-depth', '30'],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 240_000 });
+    const runDir = newestTwinRunDir();
+    const p = (() => {
+      try { return JSON.parse(readFileSync(join(runDir ?? '', 'live.json'), 'utf8')); } catch { return null; }
+    })();
+    const liveAfter = existsSync(livePulse) ? `${statSync(livePulse).mtimeMs}:${statSync(livePulse).size}` : 'нет файла';
+    ok('ПУЛЬС: пульс твин-прогона — в песочнице, объявляет двойника (source I3 · synthetic · индикаторы), боевой файл не тронут',
+      [r.status === 0, p?.run?.source?.includes('ЦИФРОВОЙ ДВОЙНИК') === true,
+        p?.card?.synthetic === true, Number.isFinite(p?.card?.clockMhz), liveAfter === liveBefore],
+      [true, true, true, true, true]);
+  }
+
   const after = liveFingerprint();
   ok('I1: живой документ, боевой журнал и боевая папка всадников самопроверкой не тронуты',
     after, before);
@@ -681,6 +726,9 @@ async function main(argv) {
     return r.ok ? 0 : 1;
   }
   if (argv.includes('--smoke')) return mainSmoke(argv);
+  // Окно — по умолчанию у РЕПЕТИЦИЙ (они для глаза владельца, `bugs/65`); `--no-window` — для
+  // безголовой отладки. Смоук остаётся безголовым: он ворота, а не показ.
+  const withWindow = !argv.includes('--no-window');
   if (argv.includes('--rehearse-death')) {
     const i = argv.indexOf('--rehearse-death');
     const profile = argv[i + 1];
@@ -688,16 +736,17 @@ async function main(argv) {
       console.error('--rehearse-death принимает strangle | instant (виртуальный ЗАВИС — --rehearse-hang).');
       return 2;
     }
-    return mainRehearseDeath(profile);
+    return mainRehearseDeath(profile, { withWindow });
   }
-  if (argv.includes('--rehearse-hang')) return mainRehearseHang();
+  if (argv.includes('--rehearse-hang')) return mainRehearseHang({ withWindow });
   if (argv.includes('--i1')) {
     const f = liveFingerprint();
     console.log(`I1: документ ${f.measuredSha} · журнал ${f.journalSha} · runs/death-watch ${f.deathWatchFiles} файлов`);
     console.log(`СТРОКА ДОСТАВКИ: ${deliveryLine()}`);
     return 0;
   }
-  console.log('Использование: --selftest | --smoke [--from МГц --to МГц] [--max-depth мВ] [--armed] | --rehearse-death strangle|instant | --rehearse-hang | --i1');
+  console.log('Использование: --selftest | --smoke [--from МГц --to МГц] [--max-depth мВ] [--armed] | --rehearse-death strangle|instant [--no-window] | --rehearse-hang [--no-window] | --i1');
+  console.log('Репетиции поднимают ОКНО НАБЛЮДЕНИЯ по умолчанию (bugs/65) — показ владельцу идёт в нём.');
   return 2;
 }
 

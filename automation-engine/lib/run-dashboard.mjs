@@ -1025,6 +1025,12 @@ export function countVisibleWindows({ titleLike = 'KAGO', waitMs = 4000 } = {}) 
  */
 export async function raiseDashboard({
   port = DEFAULT_PORT,
+  // ПУТИ ДАННЫХ — ПАРАМЕТРЫ, НЕ КОНСТАНТЫ (`bugs/65`, слово владельца: визуализатору должно быть
+  // всё равно, какую карту тюнят и чьими данными его кормят). Твин-путь развёртки поднимает ЭТОТ ЖЕ
+  // сервер с пульсом и телеметрией из своей песочницы; без прокладки флаги CLI ниже молча служили
+  // бы боевые файлы — окно двойника показывало бы живой прогон.
+  pulsePath = PULSE_PATH,
+  telemetryPath = TELEMETRY_PATH,
   withWindow = true,
   log = console.log,
   closeWindowFn = closeWindow,
@@ -1042,7 +1048,7 @@ export async function raiseDashboard({
 } = {}) {
   let viewerSeen = null;
   let windowSeen = null;
-  let started = await startFn({ port });
+  let started = await startFn({ port, pulsePath, telemetryPath });
 
   if (!started.ok && started.code === 'EADDRINUSE') {
     const probe = await probeFn(port);
@@ -1063,7 +1069,7 @@ export async function raiseDashboard({
       log(`ПОРТ:    ${port} так и не освободился. Ничего не тронуто.`);
       return { ok: false, why: 'порт не освободился', windowTouched: false };
     }
-    started = await startFn({ port });
+    started = await startFn({ port, pulsePath, telemetryPath });
   }
 
   if (!started.ok) {
@@ -1073,7 +1079,7 @@ export async function raiseDashboard({
 
   log(`ДАШБОРД: ${started.url ?? `http://127.0.0.1:${port}/`}`);
   log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — ни карты, ни журнала, ни документа кривой');
-  log(`         оно не касается. Источник — ${PULSE_PATH} (прибор, не запись).`);
+  log(`         оно не касается. Источник — ${pulsePath} (прибор, не запись).`);
 
   // THE OLD WINDOW GOES ONLY NOW — the owner's instruction while watching the first rehearsal
   // («старый браузер умей закрывать»). A second window on the same gauge is not a second view, it
@@ -1368,6 +1374,25 @@ export async function selfTest() {
       good.ok === true && closes === 1 && opens === 1,
       JSON.stringify({ ok: good.ok, closes, opens }));
     good.s?.close();
+
+    // ─── ПУТИ ДАННЫХ ДОЕЗЖАЮТ ДО СЕРВЕРА (`bugs/65`) ─────────────────────────────────────────────
+    //
+    // Слово владельца: визуализатор непредвзят и не заточен на реальную карту — чем его кормят,
+    // решают переданные пути. Твин-путь развёртки зовёт CLI с `--pulse`/`--telemetry` из своей
+    // песочницы; если прокладка отвалится, сервер молча обслужит БОЕВЫЕ файлы и окно двойника
+    // покажет живой прогон — ложь, которую глазом не отличить.
+    //   АДРЕСАТ МУТАЦИИ: AT. снять pulsePath/telemetryPath из вызова startFn → этот блок.
+    const seenOpts = [];
+    const plumbed = await raiseDashboard({
+      port: 0, log: quiet, withWindow: false,
+      pulsePath: join('песочница', 'live.json'), telemetryPath: join('песочница', 'telemetry.jsonl'),
+      startFn: async (o) => { seenOpts.push(o); return { ok: true, s: { close: () => {} }, url: 'http://127.0.0.1:0/' }; },
+    });
+    check('ПУТИ: raiseDashboard прокладывает песочные pulsePath/telemetryPath до сервера (bugs/65)',
+      plumbed.ok === true
+        && seenOpts[0]?.pulsePath === join('песочница', 'live.json')
+        && seenOpts[0]?.telemetryPath === join('песочница', 'telemetry.jsonl'),
+      JSON.stringify(seenOpts[0] ?? null));
 
     // — СПАВН БРАУЗЕРА — НЕ ОКНО НА ЭКРАНЕ. Владелец получил зелёное сообщение и пустой экран.
     //   АДРЕСАТ: AP. докладывать успех, не спросив прибор → этот блок.
@@ -1863,7 +1888,14 @@ async function main(argv) {
   const arg = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
   const port = Number(arg('port', DEFAULT_PORT));
 
-  const raised = await raiseDashboard({ port, withWindow: !argv.includes('--no-window') });
+  // Пути данных из CLI (`bugs/65`): твин-путь развёртки поднимает этот сервер над СВОЕЙ песочницей.
+  // Дефолты — боевые файлы, то есть без флагов поведение прежнее до байта.
+  const raised = await raiseDashboard({
+    port,
+    pulsePath: arg('pulse', PULSE_PATH),
+    telemetryPath: arg('telemetry', TELEMETRY_PATH),
+    withWindow: !argv.includes('--no-window'),
+  });
   if (!raised.ok) return 1;
   const s = raised.s;
   console.log('         Ctrl+C — закрыть сервер И окно.');

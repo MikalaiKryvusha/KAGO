@@ -101,7 +101,13 @@ function paint() {
   seg('seg-temp', c.tempC, 2);
   seg('seg-fan', c.fanPct, 2);
   seg('seg-pwr', c.powerW, 3);
-  $('synthetic-note').style.display = c.synthetic ? 'inline-block' : 'none';
+  // Пилюля синтетики печатает ОБЪЯВЛЕННЫЙ источник из пульса (`bugs/65`, слово владельца:
+  // визуализатор непредвзят и не заточен на реальную карту — кто его кормит, объявляют данные).
+  // Двойник шлёт «ЦИФРОВОЙ ДВОЙНИК — ВЫМЫСЕЛ (I3)», и окно нельзя прочесть как живой вечер;
+  // без источника остаётся прежнее «ВИРТУАЛЬНАЯ».
+  const synthPill = $('synthetic-note');
+  synthPill.style.display = c.synthetic ? 'inline-block' : 'none';
+  if (c.synthetic && r.source) synthPill.textContent = r.source;
 
   // ⏱ ДВОЕ ЧАСОВ, И ТИКАЮТ ОНИ ТЕПЕРЬ ОТ ОДНОГО ИСТОЧНИКА — слово владельца 2026-08-23:
   // «время прогона и локальное время не синхронно тикают. Было бы хорошо тики времени прогона

@@ -8682,8 +8682,9 @@ async function mainSweep(argv, arg) {
     console.error(`ОШИБКА: --twin-death принимает strangle | instant | hang, получено «${twinDeath}».`);
     return 2;
   }
-  if ((twinDeath !== null || process.argv.includes('--twin-arm')) && cardArg !== 'virtual') {
-    console.error('ОШИБКА: --twin-death и --twin-arm имеют смысл только с --card virtual.');
+  if ((twinDeath !== null || process.argv.includes('--twin-arm') || process.argv.includes('--twin-window'))
+    && cardArg !== 'virtual') {
+    console.error('ОШИБКА: --twin-death, --twin-arm и --twin-window имеют смысл только с --card virtual.');
     return 2;
   }
   const twin = cardArg === 'virtual'
@@ -8973,6 +8974,21 @@ async function mainSweep(argv, arg) {
   // без окон; двойник печатает строку канона I3 вместо этого.
   let watch = twin ? null : await dash.viewersWatching({ port: dash.DEFAULT_PORT });
 
+  // ─── ОКНО НА ТВИН-ПУТИ (`bugs/65`) — тот же прибор, песочные пути ────────────────────────────────
+  //
+  // 🔴 Найдено ВЛАДЕЛЬЦЕМ на первом же показе «виртуального вечера»: *«я ничего не видел. даже
+  // визуализатор не открылся»*. Репетиция прошла в терминале агента — а его прибор ОКНО, и приёмка
+  // T4 эпика 59 судится его глазом. Его слово о конструкции: визуализатору должно быть ВСЁ РАВНО,
+  // какую карту тюнят и чьими данными его кормят, — он непредвзят и не заточен на реальную карту.
+  //
+  // Поэтому окно на двойнике — ТО ЖЕ окно с ТЕМ ЖЕ сервером, различаются только ПУТИ данных:
+  // пульс и телеметрия живут в песочнице этого прогона (I1: боевые `runs/dashboard/*` не тронуты),
+  // а КТО источник — объявляет сам пульс (`source` + `synthetic`), и страница печатает это на своём
+  // лице. Флаг `--twin-window`, а не безусловно: смоук батареи и фоновые прогоны агента не должны
+  // хлопать окнами по рабочему столу владельца (класс `bugs/17`).
+  const twinWindow = twin !== null && process.argv.includes('--twin-window');
+  const twinPulsePath = twin ? join(twin.runDir, 'live.json') : null;
+
   // ─── ОКНО ГАСИТ САМА ОСТАНОВКА ПРОГОНА, А НЕ ПАМЯТЬ АГЕНТА — `bugs/42`, четвёртый случай класса ──
   //
   // 🔴 ВЕЧЕР 2026-08-23. Прогон был остановлен, а окно визуализатора осталось на экране И ПРОДОЛЖАЛО
@@ -8991,9 +9007,8 @@ async function mainSweep(argv, arg) {
   let dashProc = null;
   const shutWindow = () => {
     try { dashProc?.kill(); } catch { /* уже мёртв */ }
-    // Виртуальный прогон окна не открывал и потому не гасит чужое: правило «окно принадлежит
-    // ПРОГОНУ» говорит о прогоне-владельце, а этот владельцем не был.
-    if (twin) return;
+    // Твин без `--twin-window` окна не открывал — не гасит чужое; с флагом он владелец (`bugs/65`).
+    if (twin && !twinWindow) return;
     try { dash.closeWindow(); } catch { /* уже закрыто */ }
   };
   process.on('exit', shutWindow);
@@ -9042,7 +9057,23 @@ async function mainSweep(argv, arg) {
     console.error('       План прогона читается без окна и карту не трогает: добавьте --dry-run.');
     return 2;
   }
-  if (twin) console.log('ОКНО НАБЛЮДЕНИЯ: не условие виртуального прогона (карта не пишется) — E11 живёт данными сэмплера, которого у сборки пока нет');
+  if (twinWindow) {
+    // Сервер и окно — ОТДЕЛЬНЫМ процессом (тот же урок `bugs/27`: этот процесс блокируется в
+    // прожиге), с ПЕСОЧНЫМИ путями данных. Отказ окна прогон НЕ останавливает: окно — условие
+    // прогона, пишущего в карту, а этот не пишет ни байта; но отказ называется вслух.
+    const { spawn: spawnDash } = await import('node:child_process');
+    const { fileURLToPath: toPathDash } = await import('node:url');
+    const dashScript = join(dirname(toPathDash(import.meta.url)), 'lib', 'run-dashboard.mjs');
+    dashProc = spawnDash(process.execPath, [dashScript, '--port', String(dash.DEFAULT_PORT),
+      '--pulse', twinPulsePath, '--telemetry', join(twin.runDir, 'telemetry.jsonl')],
+    { windowsHide: true, stdio: 'ignore' });
+    dashProc.unref?.();
+    const seen = await dash.waitForViewer(dash.DEFAULT_PORT);
+    watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+    console.log(seen && watch.ok && watch.viewers >= 1
+      ? `ОКНО НАБЛЮДЕНИЯ (двойник): поднято с песочными путями, смотрящих ${watch.viewers} — источник объявляет пульс (I3)`
+      : `ОКНО НАБЛЮДЕНИЯ (двойник): НЕ ПОДНЯЛОСЬ (${watch?.why ?? 'зритель не появился'}) — виртуальный прогон идёт без окна, карта не пишется`);
+  } else if (twin) console.log('ОКНО НАБЛЮДЕНИЯ: не поднято (без --twin-window) — не условие виртуального прогона: карта не пишется');
   else console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено`);
 
   // ─── БЕЗОПАСНЫЙ РЕЖИМ ДИСКОВ: ОТКАЗ ТОЛЬКО НА ПОЛОВИНЕ (`plans/30` AC4) ─────────────────────────
@@ -9205,15 +9236,21 @@ async function mainSweep(argv, arg) {
   // произойдёт (`bugs/33`). Источник один — `sweepBurnLadder()`.
   const sweepShapeLadder = sweepBurnLadder();
 
-  // Прибор дашборда — состояние ЖИВОГО прогона; двойник его не заводит (I1: боевые файлы прибора
-  // не трогаются). Все потребители ниже уже опциональны (`pulse?.`).
-  const pulse = twin ? null : dash.openPulse({
-    source: 'ЖИВАЯ КАРТА',
-    synthetic: false,
+  // Прибор дашборда живёт на ОБОИХ путях (`bugs/65`): различаются ПУТЬ (двойник — в песочницу
+  // прогона, I1: боевой `runs/dashboard/live.json` не тронут) и объявленный ИСТОЧНИК. Строка I3
+  // едет на лицо страницы через `source` + `synthetic` — окно двойника нельзя прочесть как живой
+  // вечер. Прибор непредвзят: чем его кормят — решают эти два поля, а не его код.
+  const pulse = dash.openPulse({
+    ...(twin ? { path: twinPulsePath, source: 'ЦИФРОВОЙ ДВОЙНИК — ВЫМЫСЕЛ (I3)', synthetic: true }
+      : { source: 'ЖИВАЯ КАРТА', synthetic: false }),
     band: `${fromMhz}…${toMhz} МГц`,
     probeSeconds: config.SWEEP_PROBE_SECONDS ?? 10,
     shapesPerRung: sweepShapeLadder[0].length,
   });
+  // Индикаторы карты на двойнике кормит МОДЕЛЬ — чтение чистое и карту мира не двигает
+  // (`telemetry.read()` намеренно не трогает очередь устаивания). Первая проба сразу, чтобы окно
+  // не открывалось на тёмные циферблаты; дальше — на каждом событии движка (между прожигами).
+  if (twin) pulse.telemetry(twin.vc.telemetry.read());
   if (pulse) console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
 
   let report;
@@ -9249,7 +9286,14 @@ async function mainSweep(argv, arg) {
     // свой адаптер по умолчанию, бит-в-бит.
     runStepFn: (a) => vf.runStep(twin ? { ...a, device: twin.device } : a),
     saveFn: async (d) => (twin ? twin.saveDoc(d) : saveCurveDoc(d)),
-    onEvent: (e) => { pulse?.event(e); console.log(`  ${e.text}`); },
+    onEvent: (e) => {
+      pulse?.event(e);
+      // Двойник: показания карты — с модели, на каждом событии движка. Живой путь кормит их
+      // отдельным сэмплером, у двойника сэмплера нет (E6) — но событие движка случается между
+      // прожигами, когда модель свободна, и чтение у неё чистое (`bugs/65`).
+      if (twin) pulse?.telemetry(twin.vc.telemetry.read());
+      console.log(`  ${e.text}`);
+    },
     // ─── ПРОЖИГ: `furnace` С ЛЕСТНИЦЕЙ ИНТЕНСИВНОСТИ (слово владельца 2026-08-22) ──────────────
     //
     // Раньше здесь молчаливо действовало умолчание `runRung` — ОДНА форма `sdc_fma/transient`,
