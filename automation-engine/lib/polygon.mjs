@@ -118,6 +118,16 @@ export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDept
   ], { cwd: ROOT, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
   const seconds = (Date.now() - started) / 1000;
 
+  // ФАКТУРА ПРОЖИГОВ ЛЕЖИТ В КАТАЛОГЕ ПРОГОНА, А ЕГО ИМЯ ЗНАЕТ ТОЛЬКО САМ ПРОГОН — берём его из
+  // напечатанной строки, а не угадываем по времени: угадывание по свежести каталога подобрало бы
+  // чужой прогон при параллельных запусках, и сторож И6 судил бы не ту карту.
+  const runDir = (String(run.stdout ?? '').match(/песочниц[ае]\s+(\S+twin-[^\s]+)/u)
+    ?? String(run.stdout ?? '').match(/(\S*twin-\d{4}-\d{2}-\d{2}T[^\s\/]+)/u))?.[1] ?? null;
+  const burnsFile = runDir ? path.join(runDir.replace(/[\/]$/, ''), 'burns.jsonl') : null;
+  const burns = burnsFile && existsSync(burnsFile)
+    ? parseJournal(readFileSync(burnsFile, 'utf8'))
+    : [];
+
   const evidence = {
     // `signal` переживает таймаут: убитый прогон даёт status null, и «null === 0» ложно, а вот
     // «не 0» — правда, которую сторож И2 обязан увидеть.
@@ -126,6 +136,7 @@ export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDept
     docRows: existsSync(p.docFile) ? (JSON.parse(readFileSync(p.docFile, 'utf8')).frequencies ?? []) : [],
     reportLines: String(run.stdout ?? '').split(/\r?\n/),
     envelopeMhz: gen.card.card?.maxGraphicsMhz ?? null,
+    burns,
     fingerprintBefore: null,     // отпечаток снимается на ПАКЕТ, проставляется вызывающим
     fingerprintAfter: null,
   };

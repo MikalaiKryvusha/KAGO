@@ -67,7 +67,7 @@
 // KAGO-BENCH-OWN — this file IS the bench, so the «no branches on the bench» guard skips it. The mark
 // is inside the file rather than in a list of filenames, so a copy or a rename keeps its exemption.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
@@ -1085,6 +1085,21 @@ export const WRITE_FAILURE_CLASSES = Object.freeze({
 export function virtualCard(cardProfile, {
   settleSamples = 1, rampSamples = 0, wanderMhz = null,
   seed = 1, allowProcessDeath = false,
+  // ─── ФАКТУРА ПРОЖИГОВ — ЕДИНСТВЕННОЕ, ЧТО ЗНАЕТ ФИЗИКА И НЕ ЗНАЕТ НИ ОДИН АРТЕФАКТ ЦИКЛА ──────
+  //
+  // ЗАЧЕМ. Сторож И1 полигона сверяет ДОКУМЕНТ с ЖУРНАЛОМ — два артефакта цикла. Ложь, которую
+  // разделяют ОБА, ему невидима, и `bugs/68` (половина A) была ровно такой: пол стоял зажимом
+  // обслуживаемого напряжения, прожиг шёл на 1115 мВ, а перечитанная кривая — то есть и журнал, и
+  // документ — согласно говорили 800. Оба артефакта были «валидны» и оба врали.
+  //
+  // Поймать этот класс может только третий свидетель — САМА ФИЗИКА КАРТЫ: напряжение, на котором
+  // прожиг РИСОВАЛСЯ. У живого пути такого свидетеля нет и быть не может (в `TELEMETRY_FIELDS`
+  // напряжения нет: `nvidia-smi` его не отдаёт), и потому сторож на нём НЕ ГОДИТСЯ ДЛЯ ДВИЖКА —
+  // он был бы сторожем, который на карте не краснеет никогда. Но полигон гоняет ТОЛЬКО вымысел, и
+  // для него этот свидетель законен: он судит честность цикла, зная правду, которой цикл не знал.
+  //
+  // ⚠️ Без пути — НИ ОДНОГО системного вызова: набор двойника остаётся инертным по построению.
+  burnLedgerFile = null,
   // ─── WALL CLOCK: THE BENCH DOES NOT SPEND IT BY DEFAULT, AND THAT IS A CLAIM WORTH READING ──────
   //
   // `plans/16` §8.3 said «движок спит по-настоящему эти секунды», and MEASUREMENT contradicted it
@@ -1911,6 +1926,33 @@ export function virtualCard(cardProfile, {
       // безопасным то, что на живой карте валится на первой секунде.
       // (Найдено 2026-08-23 при добавлении дрейфа таблицы: три блока покраснели ровно на этом.)
       const drawnAtMv = this.servingVoltageMv(mhz);
+      // Фактура пишется ДО прожига и по напряжению НАЧАЛА — тем же числом, которым рисуется исход
+      // (см. абзац выше о порядке). Запись после прожига называла бы другое напряжение на карте с
+      // дрейфом и рассказывала бы о самом безопасном мгновении ступени.
+      if (burnLedgerFile) {
+        // ⚠️ ПИШУТСЯ ДВА ОТВЕТА ОДНОГО МГНОВЕНИЯ, И В ЭТОМ ВСЯ ЦЕННОСТЬ ФАКТУРЫ.
+        //   `drawnAtMv`   — на чём прожиг РИСУЕТСЯ (оракул, физика);
+        //   `readbackMv`  — что о той же частоте В ТУ ЖЕ СЕКУНДУ говорит ПЕРЕЧИТАННАЯ КРИВАЯ,
+        //                   то есть единственный прибор, который есть у цикла.
+        // Одного `drawnAtMv` НЕ ХВАТАЕТ, и это выяснилось замером, а не рассуждением: на карте с
+        // дрейфом прожиг честно идёт на 1240 мВ там, где таблица говорит 1040 — карта нагрелась, и
+        // та же частота требует больше (`bugs/63`). Документ по канону хранит «частота →
+        // напряжение» таблицы (`GOAL.md` → смещения СЧИТАЮТСЯ при применении), поэтому сторож на
+        // одном `drawnAtMv` краснел бы на КАЖДОЙ карте с дрейфом — то есть был бы шумом.
+        // Пара же ловит ровно то, что нужно: дрейф двигает ОБА числа вместе, а зажим, невидимый
+        // чтению (`bugs/68`, половина A), разводит их.
+        const rb = (() => {
+          const t = effectiveTable();
+          let best = null;
+          for (let i = 0; i < GRAPHICS_POINTS; i++) {
+            if (t[i].mhz >= mhz && (best === null || t[i].mv < best)) best = t[i].mv;
+          }
+          return best;
+        })();
+        appendFileSync(burnLedgerFile,
+          `${JSON.stringify({ mhz, drawnAtMv, readbackMv: rb, seconds, workload })}
+`, 'utf8');
+      }
       if (!burning) telemetry.advance(seconds, { load: activity });
       // ⏳ Прожиг оставляет частоту выдачи ещё на несколько ЧТЕНИЙ — спад простоя, см. clockNow.
       state.loadedReadsLeft = LOAD_CLOCK_DECAY_READS;

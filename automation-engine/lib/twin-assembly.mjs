@@ -97,8 +97,8 @@ export async function makeTwinAssembly({
   const loaded = vgpu.loadCard(cardFile);
   if (!loaded.ok) throw new Error(`карта двойника не поднялась (${cardFile}): ${loaded.why}`);
   const card = loaded.card;
-  const vc = vgpu.virtualCard(card, { seed, ...cardOpts });
-
+  // ⚠️ КАРТА ПОДНИМАЕТСЯ НИЖЕ, ЧЕМ РАНЬШЕ, И ЭТО ЕДИНСТВЕННАЯ ПРАВКА ПОРЯДКА: путь фактуры прожигов
+  // известен только после того, как выбран каталог прогона.
   const stamp = localIso().replace(/[:+]/g, '-');
   const docName = `virtual-${card.name}`;
   const docDir = BENCH_RUNS;
@@ -106,6 +106,13 @@ export async function makeTwinAssembly({
   const runDir = join(BENCH_RUNS, `twin-${stamp}`);
   mkdirSync(journalDir, { recursive: true });
   mkdirSync(runDir, { recursive: true });
+
+  // ФАКТУРА ПРОЖИГОВ — третий свидетель полигона (`plans/71`, сторож И6): напряжение, на котором
+  // прожиг РИСОВАЛСЯ. Живёт в песочнице ЭТОГО прогона (I1: живые каталоги не пополняются) и знает
+  // то, чего не знает ни документ, ни журнал — оба читают перечитанную кривую и потому могут
+  // ошибаться ВМЕСТЕ (`bugs/68`, половина A).
+  const burnLedgerFile = join(runDir, 'burns.jsonl');
+  const vc = vgpu.virtualCard(card, { seed, burnLedgerFile, ...cardOpts });
 
   const desc = vc.describe();
   // Тот же словарь полей, которым стенд уже проходит настоящую проверку штампа (vgpu selftest §16).

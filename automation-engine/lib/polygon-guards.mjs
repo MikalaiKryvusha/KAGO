@@ -70,7 +70,12 @@ export function guardClosedRowNotDeeperThanServed(ev) {
   for (const line of ev.journal ?? []) {
     if (line?.state !== 'verdict') continue;
     if (line.outcome !== 'passed') continue;      // отказ ничего не доказывает о глубине
-    const f = line.frequencyMhz ?? line.mhz;
+    // ⚠️ КЛЮЧ — ВЫДАННАЯ ЧАСТОТА, А НЕ ЗАКАЗАННАЯ. Документ закрывает строку ВЫДАННОЙ частоты
+    // (`resolveDeliveredRow`, канон `GOAL.md` → «ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ»), а журнал несёт обе.
+    // Ключ по заказу разошёлся бы с документом ровно там, где карта отдала не то, что просили, —
+    // и сторож МОЛЧА пропустил бы самые интересные строки, не найдя для них улик. Заказ остаётся
+    // запасным ключом: у ступеней, где выдача не измерена, другого нет.
+    const f = line.deliveredMhz ?? line.frequencyMhz ?? line.mhz;
     const mv = line.servingMvAfter;
     if (!Number.isFinite(f) || !Number.isFinite(mv)) continue;
     served.set(f, Math.min(served.get(f) ?? Infinity, mv));
@@ -190,13 +195,54 @@ export function guardLiveArtefactsUntouched(ev) {
       'отпечаток живых артефактов ИЗМЕНИЛСЯ за прогон на двойнике', { before: a, after: b });
 }
 
-/** Все пятеро, в порядке плана. Класс отказа карты = ИМЯ первого покрасневшего сторожа. */
+// =================================================================================================
+// И6 — ВЫМЫСЕЛ НЕ ПРЯЧЕТ ОТ ЦИКЛА СОБСТВЕННУЮ ФИЗИКУ
+// =================================================================================================
+/**
+ * ЗАЧЕМ ОН ЕСТЬ, ХОТЯ ЕСТЬ И1. И1 сверяет ДОКУМЕНТ с ЖУРНАЛОМ — два артефакта ЦИКЛА, и оба читают
+ * одну поверхность (перечитанную кривую). Ложь, которую они РАЗДЕЛЯЮТ, ему невидима — а `bugs/68`
+ * (половина A) была ровно такой: пол карты стоял зажимом обслуживаемого напряжения, прожиг шёл на
+ * 1115 мВ, и журнал, и документ согласно говорили 800. Оба «валидны», оба врут.
+ *
+ * ЧТО ИМЕННО СУДИТСЯ, И ПОЧЕМУ НЕ «ГЛУБИНА СТРОКИ». Первая редакция сравнивала закрытую строку с
+ * напряжением прожига — и ЗАМЕР её отменил: на карте с дрейфом прожиг честно идёт на 1240 мВ там,
+ * где таблица говорит 1040 (карта нагрелась, `bugs/63`), а документ по канону хранит «частота →
+ * напряжение» ТАБЛИЦЫ. Такой сторож краснел бы на каждой карте с дрейфом, то есть был бы шумом.
+ *
+ * Судится ПАРА ОТВЕТОВ ОДНОГО МГНОВЕНИЯ: на чём прожиг РИСОВАЛСЯ и что о той же частоте в ту же
+ * секунду говорит ПЕРЕЧИТАННАЯ КРИВАЯ — единственный прибор цикла. Дрейф двигает оба числа ВМЕСТЕ
+ * и молчит; зажим, невидимый чтению, их РАЗВОДИТ. Инвариант формулируется так: **вымысел не смеет
+ * знать о карте того, чего он не показывает циклу.**
+ *
+ * ⚠️ И ЭТОТ СТОРОЖ ЗАКОНЕН ТОЛЬКО ЗДЕСЬ. Он судит ВЕРНОСТЬ ВЫМЫСЛА, а не движок, и у живой карты
+ * второго числа нет вовсе (`config.TELEMETRY_FIELDS` не содержит напряжения). В движке он был бы
+ * сторожем, который никогда не краснеет.
+ */
+export function guardFictionHidesNothing(ev, toleranceMv = 0) {
+  const burns = (ev.burns ?? []).filter((b) => Number.isFinite(b?.drawnAtMv) && Number.isFinite(b?.readbackMv));
+  if (!burns.length) {
+    return verdict('И6 вымысел не прячет от цикла свою физику', true, null,
+      { skipped: 'фактура прожигов не собрана или без пары ответов' });
+  }
+  const bad = burns
+    .map((b) => ({ mhz: b.mhz, drawnMv: b.drawnAtMv, readbackMv: b.readbackMv, gapMv: b.drawnAtMv - b.readbackMv }))
+    .filter((b) => Math.abs(b.gapMv) > toleranceMv);
+  return bad.length === 0
+    ? verdict('И6 вымысел не прячет от цикла свою физику', true, null, { burns: burns.length })
+    : verdict('И6 вымысел не прячет от цикла свою физику', false,
+      `прожиг рисовался не на том, что цикл может прочитать: ${bad.length} из ${burns.length} прожигов, `
+      + `худший — ${bad[0].mhz} МГц рисовался на ${bad[0].drawnMv} мВ, а кривая в ту же секунду `
+      + `отдавала ${bad[0].readbackMv} мВ (разрыв ${bad[0].gapMv} мВ)`, bad);
+}
+
+/** Все шестеро, в порядке плана. Класс отказа карты = ИМЯ первого покрасневшего сторожа. */
 export const GUARDS = Object.freeze([
   guardClosedRowNotDeeperThanServed,
   guardStopIsNamedAndExitCodeAgrees,
   guardJournalHasNoOpenIntent,
   guardEnvelopeNotExceeded,
   guardLiveArtefactsUntouched,
+  guardFictionHidesNothing,
 ]);
 
 /** Прогнать всех. Возвращает { ok, failures, verdicts } — класс отказа берётся из `failures[0].name`. */
@@ -246,6 +292,20 @@ function cmdSelftest() {
   // вторая промахнулась по направлению оси: «глубже» — это НИЖЕ по напряжению. Ложную тревогу даёт
   // отказавшая ступень, обслуженная ВЫШЕ строки: без фильтра сторож посчитал бы 1045 доказанным и
   // объявил строку 1000 завышением, которого нет. Прожиг там ОТКАЗАЛ и не доказал ничего.
+  // 🔴 СЛЕПОЕ ПЯТНО, НАЙДЕННОЕ ЧТЕНИЕМ, А НЕ ПРОГОНОМ: карта отдала НЕ ТУ частоту, что просили.
+  // Строка документа закрывается ВЫДАННОЙ (2835), а улика в журнале несёт и заказ (2842), и
+  // выдачу. Сторож, ключующий улики по заказу, не нашёл бы для строки 2835 ничего и МОЛЧА
+  // пропустил бы её — то есть был бы слеп ровно там, где карта ведёт себя интереснее всего.
+  ok('И1 ключует улики по ВЫДАННОЙ частоте: строка 2835 судится уликой ступени, заказанной как 2842',
+    guardClosedRowNotDeeperThanServed({
+      ...healthy,
+      journal: [
+        { state: 'intent', seq: 1 },
+        { state: 'verdict', seq: 1, outcome: 'passed', frequencyMhz: 2842, deliveredMhz: 2835, servingMvAfter: 1040 },
+      ],
+      docRows: [{ mhz: 2835, voltageMv: 800 }],
+    }).ok === false);
+
   ok('И1 не судит по ОТКАЗАВШИМ ступеням: провал ничего не доказывает о глубине',
     guardClosedRowNotDeeperThanServed({
       ...healthy,
@@ -279,6 +339,27 @@ function cmdSelftest() {
     guardLiveArtefactsUntouched({ ...healthy, fingerprintAfter: { doc: 'bbb' } }).ok === false);
   ok('И5 КРАСНЕЕТ на ОТСУТСТВУЮЩЕМ отпечатке — молчаливая зелень тут запрещена',
     guardLiveArtefactsUntouched({ ...healthy, fingerprintBefore: null }).ok === false);
+
+  // ─── И6: ВЕРНОСТЬ ВЫМЫСЛА. Числа — из настоящего прогона `bugs/68` (половина A) ──────────────
+  const hidden = { ...healthy, burns: [{ mhz: 2842, drawnAtMv: 1115, readbackMv: 800, seconds: 10, workload: 'furnace' }] };
+  ok('И6 КРАСНЕЕТ там, где И1 СЛЕП: журнал и документ согласно говорят 800, а прожиг шёл на 1115',
+    (() => {
+      const both = { ...hidden,
+        docRows: [{ mhz: 2842, voltageMv: 800 }],
+        journal: [{ state: 'intent', seq: 1 }, { state: 'verdict', seq: 1, outcome: 'passed', frequencyMhz: 2842, deliveredMhz: 2842, servingMvAfter: 800 }] };
+      return [guardClosedRowNotDeeperThanServed(both).ok, guardFictionHidesNothing(both).ok];
+    })(), [true, false]);
+  // ⚠️ БЛОК, КОТОРЫЙ СТОИЛ ОТМЕНЫ ПЕРВОЙ РЕДАКЦИИ СТОРОЖА: дрейф — НЕ нарушение. Прожиг на горячей
+  // карте честно идёт на 1240 там, где холодная таблица говорила 1040, и кривая в ту же секунду
+  // говорит ТО ЖЕ 1240. Сторож на одном `drawnAtMv` покраснел бы здесь и был бы шумом.
+  ok('И6 МОЛЧИТ на дрейфе: нагрев поднял оба числа вместе — это физика, а не сокрытие',
+    guardFictionHidesNothing({ ...healthy,
+      burns: [{ mhz: 2835, drawnAtMv: 1240, readbackMv: 1240, seconds: 10, workload: 'furnace' }] }).ok === true);
+  ok('И6 краснеет и в ОБРАТНУЮ сторону: кривая обещает больше, чем рисует физика',
+    guardFictionHidesNothing({ ...healthy,
+      burns: [{ mhz: 2842, drawnAtMv: 800, readbackMv: 1115, seconds: 10, workload: 'furnace' }] }).ok === false);
+  ok('И6 без пары ответов — ПРОПУСК, названный вслух, а не молчаливая зелень',
+    guardFictionHidesNothing(healthy).evidence?.skipped !== undefined);
 
   // ─── КЛАСС ОТКАЗА = ИМЯ СТОРОЖА (P71-AC3) ───────────────────────────────────────────────────
   ok('класс отказа карты — ИМЯ сторожа, а не «что-то сломалось» (P71-AC3)',
