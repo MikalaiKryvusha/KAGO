@@ -273,6 +273,13 @@ const SUITES = [
   { id: 'shrink', npm: 'node automation-engine/lib/polygon-shrink.mjs --selftest',
     argv: ['automation-engine/lib/polygon-shrink.mjs', '--selftest'],
     what: 'сжатие ломающей карты: бисекция, зануление осей, отказ при смене класса', done: /^ИТОГ:/mu },
+  // ВОШЁЛ 2026-08-29 ВМЕСТЕ СО СВОИМ КОДОМ (эпик 67 фаза 4, plans/71 шаг 6, заказ владельца).
+  // ДОКАЗАТЕЛЬСТВО ИНЕРТНОСТИ: ветка --selftest судит СОСТАВ трёх ловушек и сверку с
+  // предсказанием — чистые данные и чистая функция. Карт не строит, прогонов не запускает:
+  // и то и другое живёт в --run, куда из набора нет ни одного вызова.
+  { id: 'polytraps', npm: 'node automation-engine/lib/polygon-traps.mjs --selftest',
+    argv: ['automation-engine/lib/polygon-traps.mjs', '--selftest'],
+    what: 'ловушки полигона: три карты, предсказание в карте, сверка «ровно, а не хотя бы»', done: /^ИТОГ:/mu },
   { id: 'polygon', npm: 'node automation-engine/lib/polygon.mjs --selftest',
     argv: ['automation-engine/lib/polygon.mjs', '--selftest'],
     what: 'полигон: пути артефактов, разбор журнала, карта покрытия, отчёт (эпик 67 фаза 4)', done: /^ИТОГ:/mu },

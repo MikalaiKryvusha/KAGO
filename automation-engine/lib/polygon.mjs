@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import { generateCard, ARCHETYPES } from './card-generator.mjs';
+import { loadCard } from './virtual-gpu.mjs';
 import { judgeRun } from './polygon-guards.mjs';
 import { liveFingerprint } from './twin-assembly.mjs';
 
@@ -111,7 +112,15 @@ export function countWithBurns(results) {
 }
 
 /** Прогнать ОДНУ карту через полный цикл и осудить. Возвращает улики и вердикт. */
-export function runOneCard({ seed, amplitude, archetype, freezeAxes = [], fromMhz, toMhz, maxDepthMv = 300, timeoutMs = 300000 }) {
+export function runOneCard({ seed, amplitude, archetype, freezeAxes = [],
+  // ГОТОВЫЙ ФАЙЛ КАРТЫ вместо генерации — дорога для ЛОВУШЕК ПОЛИГОНА (`polygon-traps.mjs`,
+  // `plans/71` шаг 6). Ловушка не выводится из тройки (семя, амплитуда, архетип): её физика
+  // назначена рукой, чтобы конкретный сторож ОБЯЗАН был покраснеть. Всё остальное — сбор улик,
+  // чистый лист, суд шестью сторожами — у неё общее с генерированной картой, и второй дороги
+  // прогона тут не заводится.
+  cardFile: givenCardFile = null,
+  fromMhz, toMhz, maxDepthMv = 300, timeoutMs = 300000 }) {
+  if (givenCardFile) return runCardFile({ cardFile: givenCardFile, fromMhz, toMhz, maxDepthMv, timeoutMs });
   const gen = generateCard({ seed, amplitude, archetype, freezeAxes });
   if (!gen.ok) return { ok: false, seed, amplitude, archetype, why: `карта не сгенерирована: ${gen.why}` };
   const cardName = gen.card.name;
@@ -130,6 +139,17 @@ export function runOneCard({ seed, amplitude, archetype, freezeAxes = [], fromMh
     return { ok: false, seed, amplitude, archetype, why: `запись карты вернула ${write.status}: ${(write.stderr ?? '').slice(0, 300)}` };
   }
 
+  // Чистый лист и сбор улик — в `sweepAndCollect`, ОДНОЙ дорогой с ловушками.
+  return { ...sweepAndCollect({ cardFile, cardName, envelopeMhz: gen.card.card?.maxGraphicsMhz ?? null, fromMhz, toMhz, maxDepthMv, timeoutMs }),
+    seed, amplitude, archetype, card: gen.card };
+}
+
+/**
+ * ОБЩАЯ ЧАСТЬ ОБЕИХ ДОРОГ — чистый лист, прогон, сбор улик. Вынесена, чтобы у сгенерированной
+ * карты и у ЛОВУШКИ был ОДИН прогон, а не два похожих: две дороги, делающие одно, разошлись бы
+ * первой же правкой, и половина сторожей судила бы другую сборку улик.
+ */
+function sweepAndCollect({ cardFile, cardName, envelopeMhz, fromMhz, toMhz, maxDepthMv, timeoutMs }) {
   // ─── ЧИСТЫЙ ЛИСТ (см. шапку): остатки прошлого прогона заставили бы сторожей судить СМЕСЬ ─────
   const p = twinArtefactPaths(cardName);
   for (const target of [p.docFile, p.journalDir]) {
@@ -167,15 +187,26 @@ export function runOneCard({ seed, amplitude, archetype, freezeAxes = [], fromMh
     // Урок общий: улики собираются со ВСЕГО, что процесс сказал, а не с того потока, о котором
     // вспомнил собиратель.
     reportLines: runVoice(run.stdout, run.stderr),
-    envelopeMhz: gen.card.card?.maxGraphicsMhz ?? null,
+    envelopeMhz,
     burns,
     fingerprintBefore: null,     // отпечаток снимается на ПАКЕТ, проставляется вызывающим
     fingerprintAfter: null,
   };
-  return {
-    ok: true, seed, amplitude, archetype, cardName, cardFile, card: gen.card,
-    seconds, evidence, killedBySignal: run.signal ?? null,
-  };
+  return { ok: true, cardName, cardFile, seconds, evidence, killedBySignal: run.signal ?? null };
+}
+
+/**
+ * ЛОВУШКА ПОЛИГОНА — прогон ГОТОВОГО файла карты (`polygon-traps.mjs`). Физика такой карты
+ * назначена рукой, чтобы конкретный сторож обязан был покраснеть; из тройки она не выводится.
+ */
+export function runCardFile({ cardFile, fromMhz, toMhz, maxDepthMv = 300, timeoutMs = 300000 }) {
+  const loaded = loadCard(cardFile);
+  if (!loaded.ok) return { ok: false, cardFile, why: `карта не поднялась: ${loaded.why}` };
+  const card = loaded.card;
+  return { ...sweepAndCollect({
+    cardFile, cardName: card.name, envelopeMhz: card.card?.maxGraphicsMhz ?? null,
+    fromMhz, toMhz, maxDepthMv, timeoutMs,
+  }), card };
 }
 
 /**
