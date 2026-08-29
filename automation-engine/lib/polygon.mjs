@@ -54,6 +54,15 @@ export function twinArtefactPaths(cardName, benchRuns = BENCH_RUNS) {
   };
 }
 
+/**
+ * ГОЛОС ПРОГОНА — ОБА ПОТОКА. Вынесено функцией ради блока: пока склейка стояла строкой внутри
+ * `runOneCard`, доказать её офлайн было нечем, а именно она отвечает за то, увидит ли сторож И2
+ * названную причину отказа (движок печатает отказы в stderr).
+ */
+export function runVoice(stdout, stderr) {
+  return [...String(stdout ?? '').split(/\r?\n/), ...String(stderr ?? '').split(/\r?\n/)];
+}
+
 /** Разобрать журнал в строки-объекты. Битую строку НЕ глотаем молча — она улика сама по себе. */
 export function parseJournal(text) {
   const out = [];
@@ -146,7 +155,14 @@ export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDept
     exitCode: run.status === null ? -1 : run.status,
     journal: existsSync(p.journalFile) ? parseJournal(readFileSync(p.journalFile, 'utf8')) : [],
     docRows: existsSync(p.docFile) ? (JSON.parse(readFileSync(p.docFile, 'utf8')).frequencies ?? []) : [],
-    reportLines: String(run.stdout ?? '').split(/\r?\n/),
+    // ⚠️ ОБА ПОТОКА, И ЭТО НАЙДЕНО ПЕРВЫМ ЖЕ НАСТОЯЩИМ СРАБАТЫВАНИЕМ ПОЛИГОНА. Карта 3009/drifty
+    // дала «код 1, но НИ ОДНА строка не называет причину» — и причина была: движок печатает её
+    // через `console.error`, то есть в STDERR (`engine.mjs`: «ОШИБКА: кривая не прочиталась», «ОТКАЗ:
+    // …» и ещё с полдюжины мест). Сборщик, читавший один stdout, был слеп к ГОЛОСУ ОТКАЗА — то есть
+    // сторож И2 краснел на моей собственной слепоте, а не на дефекте движка.
+    // Урок общий: улики собираются со ВСЕГО, что процесс сказал, а не с того потока, о котором
+    // вспомнил собиратель.
+    reportLines: runVoice(run.stdout, run.stderr),
     envelopeMhz: gen.card.card?.maxGraphicsMhz ?? null,
     burns,
     fingerprintBefore: null,     // отпечаток снимается на ПАКЕТ, проставляется вызывающим
@@ -241,6 +257,14 @@ function cmdSelftest() {
     p.docFile.includes('virtual-virtual-gpu_42.json') && p.journalFile.includes('virtual-virtual-gpu_42-journal'),
     `${p.docFile} · ${p.journalFile}`);
 
+  // 🔴 ОПЛАЧЕНО ПЕРВЫМ НАСТОЯЩИМ СРАБАТЫВАНИЕМ ПОЛИГОНА (карта 3009/drifty): движок печатает
+  // отказы в STDERR, сборщик читал один stdout, и сторож И2 краснел на слепоте собирателя.
+  ok('ГОЛОС ПРОГОНА — ОБА ПОТОКА: причина отказа из stderr доходит до сторожей',
+    (() => {
+      const v = runVoice('обычная строка', 'ОШИБКА: кривая не прочиталась');
+      return v.some((l) => l.includes('обычная строка')) && v.some((l) => l.includes('ОШИБКА: кривая не прочиталась'));
+    })());
+
   const j = parseJournal('{"state":"intent","seq":1}\n{сломано\n{"state":"verdict","seq":1}\n');
   ok('битая строка журнала НЕ глотается молча — она улика',
     j.length === 3 && j[1].state === 'НЕРАЗОБРАНО', JSON.stringify(j.map((x) => x.state)));
@@ -276,9 +300,10 @@ function cmdSelftest() {
     (() => {
       const zero = reportLines({ count: 2, amplitude: 0.7, seedBase: 1, seconds: 10, passed: 2, failedToRun: [], broken: [], coverage: cov, fingerprintHeld: true, withBurns: 0 });
       const some = reportLines({ count: 2, amplitude: 0.7, seedBase: 1, seconds: 10, passed: 2, failedToRun: [], broken: [], coverage: cov, fingerprintHeld: true, withBurns: 2 });
-      return [zero.some((l) => l.includes('НИ ОДНОЙ: сторож И6 не судил')), some.some((l) => /ФАКТУРА ПРОЖИГОВ: собрана у 2 из 2/.test(l)),
-        some.some((l) => l.includes('НИ ОДНОЙ'))];
-    })(), [true, true, false]);
+      return zero.some((l) => l.includes('НИ ОДНОЙ: сторож И6 не судил'))
+        && some.some((l) => /ФАКТУРА ПРОЖИГОВ: собрана у 2 из 2/.test(l))
+        && !some.some((l) => l.includes('НИ ОДНОЙ'));
+    })());
 
   ok('счёт собранных фактур считает ПО УЛИКАМ, а не по числу прогонов',
     countWithBurns([

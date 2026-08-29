@@ -347,8 +347,9 @@ function cmdSelftest() {
       const both = { ...hidden,
         docRows: [{ mhz: 2842, voltageMv: 800 }],
         journal: [{ state: 'intent', seq: 1 }, { state: 'verdict', seq: 1, outcome: 'passed', frequencyMhz: 2842, deliveredMhz: 2842, servingMvAfter: 800 }] };
-      return [guardClosedRowNotDeeperThanServed(both).ok, guardFictionHidesNothing(both).ok];
-    })(), [true, false]);
+      return guardClosedRowNotDeeperThanServed(both).ok === true
+        && guardFictionHidesNothing(both).ok === false;
+    })());
   // ⚠️ БЛОК, КОТОРЫЙ СТОИЛ ОТМЕНЫ ПЕРВОЙ РЕДАКЦИИ СТОРОЖА: дрейф — НЕ нарушение. Прожиг на горячей
   // карте честно идёт на 1240 там, где холодная таблица говорила 1040, и кривая в ту же секунду
   // говорит ТО ЖЕ 1240. Сторож на одном `drawnAtMv` покраснел бы здесь и был бы шумом.
