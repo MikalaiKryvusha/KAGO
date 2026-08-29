@@ -153,3 +153,13 @@ not a guard.**
 - `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` → **R14b** — the frequency axis moves with temperature, the
   voltage axis does not. This defect is that rule meeting a run long enough to feel it.
 - EXP-0053 / EXP-0068 — the same physics, found earlier on the evidence-keying question.
+
+## STATUS: DONE (2026-08-29 10:1x, session 61 backlog revision, EXP-0170 class)
+
+The header's «partially fixed» outlived the ticket's own body: the sections above record the
+CORRECTED fix landing after the refuted first attempt — re-read of the card's table per RUNG
+(engine: `readPointsFn`, «THE FRESH TABLE, READ THROUGH THE HANDLE», with the live rung-note
+«таблица уехала: … ступень считается по СВЕЖЕЙ таблице»), the halt that NAMES an unreadable
+table (`cardUndescribable` as a field), and the hollow block strengthened until mutation AS
+reddens. The drift itself is since journaled per verdict (`tableDriftMhz`, bugs/47/49 wiring)
+and the evidence keys by frequency+voltage (R14b/R15). Ticket lagged its own body.
