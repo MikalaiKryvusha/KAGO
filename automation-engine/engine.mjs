@@ -636,6 +636,10 @@ export async function runRung({
   // hang ends the process — so re-reading the journal per rung would buy nothing.
   blockedKeys = null,
   now = null,
+  // ПУЛЬС СЭМПЛЕРА КАК ВХОД СТУПЕНИ (`bugs/61`): `({fromMs, toMs}) => {observed, maxGapMs}` —
+  // окно файла сэмплера за время прожигов этой ступени. Необязателен: не передали — прежнее
+  // поведение (офлайн-фикстуры и двойник сэмплера не имеют). Прибор без данных молчит (R4b).
+  pulseWindowFn = null,
   runStepFn,
   buildVector = null,
   chooseShape = chooseWriteShape,
@@ -818,6 +822,9 @@ export async function runRung({
   // интенсивности»), а не повод записать вердикт о другой частоте.
   record.cardTouched = true;
   const ladder = (Array.isArray(shapeLadder) && shapeLadder.length) ? shapeLadder : [shapes];
+  // Окно пульса открывается ЗДЕСЬ — первый байт в карту ещё не ушёл, а всё, что сэмплер увидит
+  // дальше (включая ступор системы под прожигом), принадлежит этой ступени (`bugs/61`).
+  const burnStartedMs = Date.now();
   let atom = null;
   const attempts = [];
   for (let li = 0; li < ladder.length; li++) {
@@ -1199,6 +1206,32 @@ export async function runRung({
         : `НЕ ближайшая ступень: ${overshootMv} мВ при самом широком зазоре сетки ${config.VOLTAGE_GRID_MAX_GAP_MV} мВ, `
           + 'то есть ДРУГАЯ запись таблицы'}`
       + `. Таблица едет с нагревом ПРЯМО ВО ВРЕМЯ прожига. Меряем и пишем ВЫДАННОЕ — ${measuredMv} мВ на ${clockMhz} МГц`);
+  }
+
+  // ---- 8c. ПУЛЬС СЭМПЛЕРА — ЧЕТВЁРТОЕ НАБЛЮДЕНИЕ ДОЕХАЛО ДО ВЕРДИКТА (`bugs/61`).
+  //
+  // Слово владельца, на котором это стоит: *«я глазами на мониторе на 840 видел сильный лаг, на
+  // 835 можно было не спускаться — и избежать смерти машины»* · *«Это даёт вердикт о том, что
+  // край найден»* · его же определение края: «вот-вот начинает сбоить». Оракул смотрит на НАШУ
+  // работу; сэмплер — отдельный процесс, прожигом не заблокированный, и потерянный ИМ такт — это
+  // ступор СИСТЕМЫ. Порог не назначен, а выведен правилом «2 × максимум фона» из полного архива
+  // (разбор — у константы). `ЗАВИС` — существующий вердикт первого класса; исход `hung` кормит
+  // пол зависания (R18) и тормоз «двух подряд» без единой правки — `hangFloors` читает закрытые
+  // вердикты с этим исходом. Прибор без данных МОЛЧИТ, а не голосует (R4b): нет файла, мало проб
+  // — вердикт оракула в силе. Реальное время держит предохранитель (N=60 мс); здесь — ВЕРДИКТ и
+  // запись края: глубина обороны, а не первый рубеж.
+  if (pulseWindowFn) {
+    const pw = pulseWindowFn({ fromMs: burnStartedMs, toMs: Date.now() });
+    const stallLimitMs = config.PULSE_STALL_MS ?? Infinity;
+    if (pw?.observed === true && Number.isFinite(pw.maxGapMs) && pw.maxGapMs > stallLimitMs) {
+      record.verdict = config.VERDICT.HUNG;
+      record.decidedBy = 'пульс сэмплера';
+      const stallWhy = `ЗАВИС ПО ПУЛЬСУ СЭМПЛЕРА на ${clockMhz} МГц / ${measuredMv} мВ: зазор проб ${pw.maxGapMs} мс `
+        + `> порога ${stallLimitMs} (фон этой машины ≤ 1065 мс, правило «2 × максимум фона», bugs/61). `
+        + 'Система стояла — оракул этого не видит по построению, его вердикт этой ступени отменён';
+      onEvent?.({ kind: 'pulse-stall', frequencyMhz: clockMhz, text: stallWhy, maxGapMs: pw.maxGapMs });
+      return close({ ...record, outcome: 'hung', why: stallWhy });
+    }
   }
 
   // ---- 9. THE VERDICT, AT LAST — and a failure is a SIGNAL, never the edge (§4.6).
@@ -2957,6 +2990,8 @@ export async function sweepRange({
   toMhz = null,
   bandLabel = null,
   runStepFn,
+  // Пульс сэмплера как вход ступени (`bugs/61`) — прокладывается в каждый runRung развёртки.
+  pulseWindowFn = null,
   journal = null,
   recover = null,
   saveFn = null,
@@ -3367,7 +3402,7 @@ export async function sweepRange({
           points: livePoints, clockMhz: frequencyMhz, voltageMv,
           seconds, sustain, pinCard, canPin,
           journal, seq: seq++, blockedKeys, now,
-          runStepFn, buildVector, chooseShape, demandPin, envelopeMhz,
+          runStepFn, pulseWindowFn, buildVector, chooseShape, demandPin, envelopeMhz,
           // ЛЕСТНИЦА И СОБЫТИЯ — сюда, потому что решение об интенсивности принимается ЗДЕСЬ, где
           // видно выданную частоту. `onEvent` нужен, чтобы ослабление нагрузки было видно оператору
           // в окне, а не только в записи после прогона.
@@ -5755,6 +5790,57 @@ export function selfTest() {
         [45, 25, true, 'кривая + замок', 'raise-and-cap', 90]);
       ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
         [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
+
+      // ─── `bugs/61` — ПУЛЬС СЭМПЛЕРА КАК ВХОД СТУПЕНИ В ВЕРДИКТ ──────────────────────────────
+      //
+      // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+      //   DA. снять вызов `pulseWindowFn` из runRung        → «СТУПОР В ОКНЕ СТУПЕНИ = ЗАВИС»
+      //   DB. порог 2130 → 5000 в config                    → «ФИКСТУРЫ: обе смерти КРАСНЫ»
+      //   DC. считать `observed: false` за отказ            → «ПРИБОР БЕЗ ДАННЫХ МОЛЧИТ»
+      //   DD. исход `failed` вместо `hung`                  → «ПОЛ ЗАВИСАНИЯ ВИДИТ ЭТУ СТУПЕНЬ»
+      {
+        const jrnP = openJournal({ dir: join(journalBox, 'pulse-stall') });
+        const stalled = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, journal: jrnP, seq: 1, now: clock,
+          runStepFn: async () => atomPass(1000),
+          pulseWindowFn: () => ({ observed: true, maxGapMs: 3042, samples: 12 }),
+        });
+        ok('СТУПОР В ОКНЕ СТУПЕНИ = ЗАВИС: PASS оракула отменён, исход hung, решил пульс (bugs/61)',
+          [stalled.verdict, stalled.outcome, stalled.decidedBy],
+          [config.VERDICT.HUNG, 'hung', 'пульс сэмплера']);
+        ok('ПОЛ ЗАВИСАНИЯ ВИДИТ ЭТУ СТУПЕНЬ: закрытый вердикт исходом hung кормит hangFloors без правок (R18)',
+          hangFloors(readJournal(jrnP).records).get(2842)?.voltageMv ?? 'частоты в полу нет', 1000);
+        const fon = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped,
+          runStepFn: async () => atomPass(1000),
+          pulseWindowFn: () => ({ observed: true, maxGapMs: 1065, samples: 12 }),
+        });
+        ok('ЗАЗОР В ФОНЕ вердикта не трогает — порог из пустой зоны, а не из осторожности',
+          [fon.verdict, fon.outcome], [config.VERDICT.PASS, 'passed']);
+        const blind = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped,
+          runStepFn: async () => atomPass(1000),
+          pulseWindowFn: () => ({ observed: false, why: 'файла сэмплера нет' }),
+        });
+        ok('ПРИБОР БЕЗ ДАННЫХ МОЛЧИТ, а не голосует (R4b): нет проб — вердикт оракула в силе',
+          [blind.verdict, blind.outcome], [config.VERDICT.PASS, 'passed']);
+      }
+      // ФИКСТУРЫ AC1 — порог доказан на ЗАПИСЯХ обоих смертельных прогонов, не на синтетике:
+      // это те самые файлы, по которым порог выводился, закоммиченные (runs/ не в репозитории).
+      {
+        const monMod = await import('./lib/hardware-mon.mjs');
+        const fx = (n) => join('benches', 'fixtures', 'pulse-windows', n);
+        const gap = (n) => monMod.maxSampleGapMs(fx(n), {});
+        ok('ФИКСТУРЫ: обе записи смертельных прогонов КРАСНЫ порогу, фоновая МОЛЧИТ (bugs/61 AC1)',
+          [gap('death-2797mhz-20260823.jsonl').maxGapMs > config.PULSE_STALL_MS,
+            gap('death-2775mhz-20260826.jsonl').maxGapMs > config.PULSE_STALL_MS,
+            gap('background-20260826-2030.jsonl').maxGapMs < config.PULSE_STALL_MS,
+            gap('death-2797mhz-20260823.jsonl').observed, gap('background-20260826-2030.jsonl').observed],
+          [true, true, true, true, true]);
+      }
 
       // ─── `bugs/49` — НАМЕРЕНИЕ ЗАЯВЛЯЕТ, ВЕРДИКТ ОТЧИТЫВАЕТСЯ ────────────────────────────────
       //
@@ -9253,6 +9339,10 @@ async function mainSweep(argv, arg) {
   if (twin) pulse.telemetry(twin.vc.telemetry.read());
   if (pulse) console.log(`ДАШБОРД: прибор пишется в ${pulse.path}`);
 
+  // Модуль сэмплера — для чтения окна пульса ступенью (`bugs/61`); импорт кэширован, двойной
+  // import выше (архивация пульса) ничего не стоит.
+  const mon = await import('./lib/hardware-mon.mjs');
+
   let report;
   try {
     report = await sweepRange({
@@ -9282,6 +9372,10 @@ async function mainSweep(argv, arg) {
     // comment). The card is at factory at this moment: every rung's rollback zeroes the curve in a
     // `finally`, and `runRung` refuses to continue when that rollback was not clean.
     readPointsFn: () => readPointsNow(),
+    // ─── ПУЛЬС СЭМПЛЕРА — ВХОД СТУПЕНИ В ВЕРДИКТ (`bugs/61`) ────────────────────────────────────
+    // Живой путь: окно файла отдельного сэмплера (он и есть то, что не блокируется прожигом).
+    // Двойник: сэмплера полосы нет (E6) — прибор без данных молчит, а не голосует (R4b).
+    pulseWindowFn: twin ? null : (w) => mon.maxSampleGapMs(dash.TELEMETRY_PATH, w),
     // Порт устройства (эпик 59 фаза 2): на двойнике атом получает устройство сборки, живой путь —
     // свой адаптер по умолчанию, бит-в-бит.
     runStepFn: (a) => vf.runStep(twin ? { ...a, device: twin.device } : a),

@@ -461,6 +461,41 @@ export function parseSampleTime(t) {
 }
 
 /**
+ * МАКСИМАЛЬНЫЙ ЗАЗОР МЕЖДУ ПРОБАМИ СЭМПЛЕРА В ОКНЕ ВРЕМЕНИ (`bugs/61`).
+ *
+ * Вход ступени в вердикт: развёртка после прожига спрашивает СВОЁ окно файла сэмплера — ровно как
+ * `queryFaults` читает своё окно журнала Windows. Три состояния РАЗЛИЧЕНЫ (класс R4b: прибор без
+ * данных молчит, а не голосует): `observed: false` — файла нет, строки рваные или проб в окне
+ * меньше двух; `observed: true` — зазоры посчитаны. Окно берётся по ШТАМПАМ ПРОБ с допуском один
+ * тик сэмплера (`padMs`): сэмплер пишет с запаздыванием, и окно впритык теряло бы крайние пробы.
+ *
+ * Только чтение; рваная последняя строка — норма (кэш страниц умирает с машиной, `bugs/37`).
+ *
+ * [NOT-TESTED] при рождении — переворачивают блоки «ПУЛЬС» в `engine --selftest` (AC1/AC3
+ * оперплана `bugs/61`) на закоммиченных фикстурах обоих смертельных прогонов.
+ */
+export function maxSampleGapMs(path, { fromMs, toMs, padMs = 1500 } = {}) {
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); } catch { return { observed: false, why: `файла сэмплера нет: ${path}` }; }
+  const ts = [];
+  for (const line of raw.split('\n')) {
+    const s = line.trim(); if (!s) continue;
+    let rec; try { rec = JSON.parse(s); } catch { continue; } // рваный хвост — норма
+    if (!rec?.t || !rec?.sample) continue;
+    const ms = parseSampleTime(rec.t);
+    if (ms === null) continue;
+    if (Number.isFinite(fromMs) && ms < fromMs - padMs) continue;
+    if (Number.isFinite(toMs) && ms > toMs + padMs) continue;
+    ts.push(ms);
+  }
+  ts.sort((a, b) => a - b);
+  if (ts.length < 2) return { observed: false, why: `проб в окне ${ts.length} — зазор не существует` };
+  let maxGapMs = 0;
+  for (let i = 1; i < ts.length; i++) maxGapMs = Math.max(maxGapMs, ts[i] - ts[i - 1]);
+  return { observed: true, maxGapMs, samples: ts.length };
+}
+
+/**
  * The intervals between consecutive samples, in order.
  *
  * 🔴 ONE MEASURED QUANTITY, NOT THREE DERIVED ONES — and the cut is worth recording, because the
