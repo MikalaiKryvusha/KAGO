@@ -87,3 +87,11 @@ descent per reboot roughly DOUBLES the price of the epic.
 
 `bugs/23` (the resume path this extends) · `bugs/29` · R15 (write-ahead journal) · R18 (a recorded
 hang is a wall) · rail S2 (`GPU_TUNING_RAILS.md`) · `plans/25` шаг 1.4a
+
+## STATUS: DONE (2026-08-29 10:0x, session 61 backlog revision, EXP-0170 class)
+
+Fix commits `b9529e2` («вторая половина памяти — что частота уже ДОКАЗАЛА») and `8d2e72a`
+(«частота с уже зажатым краем ПРОПУСКАЕТСЯ, а не жжётся заново»); the engine cites this ticket
+at the wiring sites («ЧТО ЧАСТОТА УЖЕ ДОКАЗАЛА (bugs/31)», engine.mjs:3225, :3860) and
+`provenRungs` is threaded through the resume path. The follow-up refinement of the proven
+ground (deepest vs latest) was its own ticket and is closed: bugs/36 DONE. Ticket lagged the code.

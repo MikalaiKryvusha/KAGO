@@ -75,3 +75,11 @@
 
 Сторож не взведён · верх кривой 3172 (точка 125) и 3187 (точка 126) — заводские · замка нет
 (`clocks.max.graphics` 3090) · 562 МГц, P8, 20,6 Вт · **в документе кривой 0 нестоковых строк**.
+
+## STATUS: DONE (2026-08-29 10:0x, session 61 backlog revision, EXP-0170 class)
+
+Closed by verifying the CODE against the ticket, not from memory: fix commit `69d2f63`
+(«останов оператора ≠ ЗАВИС · прогон без окна ОТКАЗЫВАЕТ · умолчание формы» — names all three
+defects of this ticket); `closeAsOperatorStop` + `RUNG_OUTCOME.STOPPED` live in sweep-journal
+with their blocks; the window gate with self-raise stands in cmdSweep (reworked again by
+bugs/27 and bugs/65 since). Ticket lagged the code — bugs/25 class, found by the sweep.

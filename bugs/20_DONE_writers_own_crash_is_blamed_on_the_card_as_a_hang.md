@@ -92,3 +92,11 @@ measure that frequency again and to name this record in the run's report until i
 - `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` R15 — the write-ahead journal and the derived hang.
 - `GOAL.md` → «⚠️ ЗАВИСАНИЕ — ОСОЗНАННЫЙ РИСК» — the owner's decision that makes `ЗАВИС` first-class
   and names the two-in-a-row brake this defect can trip falsely.
+
+## STATUS: DONE (2026-08-29 10:0x, session 61 backlog revision, EXP-0170 class)
+
+Fix commit `901a123` («своя смерть писателя больше не приписывается карте вердиктом ЗАВИС»);
+`closeAsWriterDeath` + corrections machinery live in sweep-journal. The ticket's one remaining
+item — the phantom hang 2542 MHz / 895 mV — is CORRECTED on disk in the live journal
+(`correction/writer-crash`: «ЭТО БЫЛА НАША СМЕРТЬ, А НЕ КАРТЫ», session 30), by the corrections
+mechanism, not by hand-editing (R14a respected). Ticket lagged the code.
