@@ -260,6 +260,16 @@ const SUITES = [
   { id: 'polyguard', npm: 'node automation-engine/lib/polygon-guards.mjs --selftest',
     argv: ['automation-engine/lib/polygon-guards.mjs', '--selftest'],
     what: 'сторожа честности полигона: пятеро, каждый доказан красным (эпик 67 фаза 4)', done: /^ИТОГ:/mu },
+  // ВОШЁЛ 2026-08-29 ВМЕСТЕ СО СВОИМ КОДОМ (эпик 67 фаза 4, plans/71 шаг 4). ДОКАЗАТЕЛЬСТВО
+  // ИНЕРТНОСТИ, рядом с записью: ветка `--selftest` возвращает из `cmdSelftest()` ДО разбора
+  // остальных флагов и зовёт ТОЛЬКО чистые функции (`twinArtefactPaths` над подставным корнем
+  // «/b», `parseJournal` над строкой, `coverageOf` и `reportLines` над литералами). Ни `spawnSync`,
+  // ни `rmSync`, ни `liveFingerprint` из неё недостижимы: они живут в `runOneCard`/`runBatch`,
+  // куда из набора нет ни одного вызова. Сам пакетный прогон в батарею НЕ входит и не должен —
+  // он занимает минуты и запускается отдельной командой `npm run polygon`.
+  { id: 'polygon', npm: 'node automation-engine/lib/polygon.mjs --selftest',
+    argv: ['automation-engine/lib/polygon.mjs', '--selftest'],
+    what: 'полигон: пути артефактов, разбор журнала, карта покрытия, отчёт (эпик 67 фаза 4)', done: /^ИТОГ:/mu },
 ];
 
 // =================================================================================================

@@ -1,0 +1,5136 @@
+{
+  "kind": "virtual-card",
+  "name": "virtual-gpu_2004",
+  "derivedFrom": [
+    {
+      "file": "curves\\voltage-grid.json",
+      "takenAt": "2026-08-15T17:09:20+03:00"
+    },
+    {
+      "file": "curves\\frequency-grid.json",
+      "takenAt": "2026-08-15T17:09:20+03:00"
+    },
+    {
+      "file": "curves\\measured.json",
+      "takenAt": "2026-08-15T17:37:40+03:00"
+    }
+  ],
+  "derivation": {
+    "vfTable": "напряжение → САМАЯ ВЫСОКАЯ частота, чьё стоковое напряжение ≤ этого; выше самого высокого ИЗМЕРЕННОГО обслуживающего напряжения — экстраполяция местным наклоном",
+    "extrapolatedEntries": 9,
+    "measuredEntries": 118
+  },
+  "card": {
+    "name": "NVIDIA GeForce RTX 5070 Ti",
+    "maxGraphicsMhz": 3090
+  },
+  "voltageGridMv": [
+    450,
+    460,
+    465,
+    470,
+    475,
+    485,
+    490,
+    495,
+    500,
+    510,
+    515,
+    520,
+    525,
+    535,
+    540,
+    545,
+    550,
+    560,
+    565,
+    570,
+    575,
+    585,
+    590,
+    595,
+    600,
+    610,
+    615,
+    620,
+    625,
+    635,
+    640,
+    645,
+    650,
+    660,
+    665,
+    670,
+    675,
+    685,
+    690,
+    695,
+    700,
+    710,
+    715,
+    720,
+    725,
+    735,
+    740,
+    745,
+    750,
+    760,
+    765,
+    770,
+    775,
+    785,
+    790,
+    795,
+    800,
+    810,
+    815,
+    820,
+    825,
+    835,
+    840,
+    845,
+    850,
+    860,
+    865,
+    870,
+    875,
+    885,
+    890,
+    895,
+    900,
+    910,
+    915,
+    920,
+    925,
+    935,
+    940,
+    945,
+    950,
+    960,
+    965,
+    970,
+    975,
+    985,
+    990,
+    995,
+    1000,
+    1010,
+    1015,
+    1020,
+    1025,
+    1035,
+    1040,
+    1045,
+    1050,
+    1060,
+    1065,
+    1070,
+    1075,
+    1085,
+    1090,
+    1095,
+    1100,
+    1110,
+    1115,
+    1120,
+    1125,
+    1135,
+    1140,
+    1145,
+    1150,
+    1160,
+    1165,
+    1170,
+    1175,
+    1185,
+    1190,
+    1195,
+    1200,
+    1210,
+    1215,
+    1220,
+    1225,
+    1235,
+    1240
+  ],
+  "frequencyGridMhz": [
+    3090,
+    3082,
+    3075,
+    3067,
+    3060,
+    3052,
+    3045,
+    3037,
+    3030,
+    3022,
+    3015,
+    3007,
+    3000,
+    2992,
+    2985,
+    2977,
+    2970,
+    2962,
+    2955,
+    2947,
+    2940,
+    2932,
+    2925,
+    2917,
+    2910,
+    2902,
+    2895,
+    2887,
+    2880,
+    2872,
+    2865,
+    2857,
+    2850,
+    2842,
+    2835,
+    2827,
+    2820,
+    2812,
+    2805,
+    2797,
+    2790,
+    2782,
+    2775,
+    2767,
+    2760,
+    2752,
+    2745,
+    2737,
+    2730,
+    2722,
+    2715,
+    2707,
+    2700,
+    2692,
+    2685,
+    2677,
+    2670,
+    2662,
+    2655,
+    2647,
+    2640,
+    2632,
+    2625,
+    2617,
+    2610,
+    2602,
+    2595,
+    2587,
+    2580,
+    2572,
+    2565,
+    2557,
+    2550,
+    2542,
+    2535,
+    2527,
+    2520,
+    2512,
+    2505,
+    2497,
+    2490,
+    2482,
+    2475,
+    2467,
+    2460,
+    2452,
+    2445,
+    2437,
+    2430,
+    2422,
+    2415,
+    2407,
+    2400,
+    2392,
+    2385,
+    2377,
+    2370,
+    2362,
+    2355,
+    2347,
+    2340,
+    2332,
+    2325,
+    2317,
+    2310,
+    2302,
+    2295,
+    2287,
+    2280,
+    2272,
+    2265,
+    2257,
+    2250,
+    2242,
+    2235,
+    2227,
+    2220,
+    2212,
+    2205,
+    2197,
+    2190,
+    2182,
+    2175,
+    2167,
+    2160,
+    2152,
+    2145,
+    2137,
+    2130,
+    2122,
+    2115,
+    2107,
+    2100,
+    2092,
+    2085,
+    2077,
+    2070,
+    2062,
+    2055,
+    2047,
+    2040,
+    2032,
+    2025,
+    2017,
+    2010,
+    2002,
+    1995,
+    1987,
+    1980,
+    1972,
+    1965,
+    1957,
+    1950,
+    1942,
+    1935,
+    1927,
+    1920,
+    1912,
+    1905,
+    1897,
+    1890,
+    1882,
+    1875,
+    1867,
+    1860,
+    1852,
+    1845,
+    1837,
+    1830,
+    1822,
+    1815,
+    1807,
+    1800,
+    1792,
+    1785,
+    1777,
+    1770,
+    1762,
+    1755,
+    1747,
+    1740,
+    1732,
+    1725,
+    1717,
+    1710,
+    1702,
+    1695,
+    1687,
+    1680,
+    1672,
+    1665,
+    1657,
+    1650,
+    1642,
+    1635,
+    1627,
+    1620,
+    1612,
+    1605,
+    1597,
+    1590,
+    1582,
+    1575,
+    1567,
+    1560,
+    1552,
+    1545,
+    1537,
+    1530,
+    1522,
+    1515,
+    1507,
+    1500,
+    1492,
+    1485,
+    1477,
+    1470,
+    1462,
+    1455,
+    1447,
+    1440,
+    1432,
+    1425,
+    1417,
+    1410,
+    1402,
+    1395,
+    1387,
+    1380,
+    1372,
+    1365,
+    1357,
+    1350,
+    1342,
+    1335,
+    1327,
+    1320,
+    1312,
+    1305,
+    1297,
+    1290,
+    1282,
+    1275,
+    1267,
+    1260,
+    1252,
+    1245,
+    1237,
+    1230,
+    1222,
+    1215,
+    1207,
+    1200,
+    1192,
+    1185,
+    1177,
+    1170,
+    1162,
+    1155,
+    1147,
+    1140,
+    1132,
+    1125,
+    1117,
+    1110,
+    1102,
+    1095,
+    1087,
+    1080,
+    1072,
+    1065,
+    1057,
+    1050,
+    1042,
+    1035,
+    1027,
+    1020,
+    1012,
+    1005,
+    997,
+    990,
+    982,
+    975,
+    967,
+    960,
+    952,
+    945,
+    937,
+    930,
+    922,
+    915,
+    907,
+    900,
+    892,
+    885,
+    877,
+    870,
+    862,
+    855,
+    847,
+    840,
+    832,
+    825,
+    817,
+    810,
+    802,
+    795,
+    787,
+    780,
+    772,
+    765,
+    757,
+    750,
+    742,
+    735,
+    727,
+    720,
+    712,
+    705,
+    697,
+    690,
+    682,
+    675,
+    667,
+    660,
+    652,
+    645,
+    637,
+    630,
+    622,
+    615,
+    607,
+    600,
+    592,
+    585,
+    577,
+    570,
+    562,
+    555,
+    547,
+    540,
+    532,
+    525,
+    517,
+    510,
+    502,
+    495,
+    487,
+    480,
+    472,
+    465,
+    457,
+    450,
+    442,
+    435,
+    427,
+    420,
+    412,
+    405,
+    397,
+    390,
+    382,
+    375,
+    367,
+    360,
+    352,
+    345,
+    337,
+    330,
+    322,
+    315,
+    307,
+    300,
+    292,
+    285,
+    277,
+    270,
+    262,
+    255,
+    247,
+    240,
+    232,
+    225,
+    217,
+    210,
+    202,
+    195,
+    187,
+    180
+  ],
+  "stockCurve": [
+    {
+      "mhz": 3090,
+      "voltageMv": 1185
+    },
+    {
+      "mhz": 3082,
+      "voltageMv": 1175
+    },
+    {
+      "mhz": 3075,
+      "voltageMv": 1175
+    },
+    {
+      "mhz": 3067,
+      "voltageMv": 1170
+    },
+    {
+      "mhz": 3060,
+      "voltageMv": 1165
+    },
+    {
+      "mhz": 3052,
+      "voltageMv": 1160
+    },
+    {
+      "mhz": 3045,
+      "voltageMv": 1160
+    },
+    {
+      "mhz": 3037,
+      "voltageMv": 1150
+    },
+    {
+      "mhz": 3030,
+      "voltageMv": 1145
+    },
+    {
+      "mhz": 3022,
+      "voltageMv": 1145
+    },
+    {
+      "mhz": 3015,
+      "voltageMv": 1140
+    },
+    {
+      "mhz": 3007,
+      "voltageMv": 1135
+    },
+    {
+      "mhz": 3000,
+      "voltageMv": 1125
+    },
+    {
+      "mhz": 2992,
+      "voltageMv": 1125
+    },
+    {
+      "mhz": 2985,
+      "voltageMv": 1120
+    },
+    {
+      "mhz": 2977,
+      "voltageMv": 1115
+    },
+    {
+      "mhz": 2970,
+      "voltageMv": 1115
+    },
+    {
+      "mhz": 2962,
+      "voltageMv": 1110
+    },
+    {
+      "mhz": 2955,
+      "voltageMv": 1100
+    },
+    {
+      "mhz": 2947,
+      "voltageMv": 1100
+    },
+    {
+      "mhz": 2940,
+      "voltageMv": 1095
+    },
+    {
+      "mhz": 2932,
+      "voltageMv": 1090
+    },
+    {
+      "mhz": 2925,
+      "voltageMv": 1090
+    },
+    {
+      "mhz": 2917,
+      "voltageMv": 1085
+    },
+    {
+      "mhz": 2910,
+      "voltageMv": 1085
+    },
+    {
+      "mhz": 2902,
+      "voltageMv": 1075
+    },
+    {
+      "mhz": 2895,
+      "voltageMv": 1070
+    },
+    {
+      "mhz": 2887,
+      "voltageMv": 1070
+    },
+    {
+      "mhz": 2880,
+      "voltageMv": 1065
+    },
+    {
+      "mhz": 2872,
+      "voltageMv": 1060
+    },
+    {
+      "mhz": 2865,
+      "voltageMv": 1060
+    },
+    {
+      "mhz": 2857,
+      "voltageMv": 1050
+    },
+    {
+      "mhz": 2850,
+      "voltageMv": 1050
+    },
+    {
+      "mhz": 2842,
+      "voltageMv": 1045
+    },
+    {
+      "mhz": 2835,
+      "voltageMv": 1040
+    },
+    {
+      "mhz": 2827,
+      "voltageMv": 1040
+    },
+    {
+      "mhz": 2820,
+      "voltageMv": 1035
+    },
+    {
+      "mhz": 2812,
+      "voltageMv": 1035
+    },
+    {
+      "mhz": 2805,
+      "voltageMv": 1025
+    },
+    {
+      "mhz": 2797,
+      "voltageMv": 1020
+    },
+    {
+      "mhz": 2790,
+      "voltageMv": 1020
+    },
+    {
+      "mhz": 2782,
+      "voltageMv": 1020
+    },
+    {
+      "mhz": 2775,
+      "voltageMv": 1015
+    },
+    {
+      "mhz": 2767,
+      "voltageMv": 1015
+    },
+    {
+      "mhz": 2760,
+      "voltageMv": 1015
+    },
+    {
+      "mhz": 2752,
+      "voltageMv": 1010
+    },
+    {
+      "mhz": 2745,
+      "voltageMv": 1010
+    },
+    {
+      "mhz": 2737,
+      "voltageMv": 1000
+    },
+    {
+      "mhz": 2730,
+      "voltageMv": 1000
+    },
+    {
+      "mhz": 2722,
+      "voltageMv": 1000
+    },
+    {
+      "mhz": 2715,
+      "voltageMv": 1000
+    },
+    {
+      "mhz": 2707,
+      "voltageMv": 1000
+    },
+    {
+      "mhz": 2700,
+      "voltageMv": 995
+    },
+    {
+      "mhz": 2692,
+      "voltageMv": 995
+    },
+    {
+      "mhz": 2685,
+      "voltageMv": 990
+    },
+    {
+      "mhz": 2677,
+      "voltageMv": 990
+    },
+    {
+      "mhz": 2670,
+      "voltageMv": 990
+    },
+    {
+      "mhz": 2662,
+      "voltageMv": 985
+    },
+    {
+      "mhz": 2655,
+      "voltageMv": 985
+    },
+    {
+      "mhz": 2647,
+      "voltageMv": 975
+    },
+    {
+      "mhz": 2640,
+      "voltageMv": 975
+    },
+    {
+      "mhz": 2632,
+      "voltageMv": 975
+    },
+    {
+      "mhz": 2625,
+      "voltageMv": 970
+    },
+    {
+      "mhz": 2617,
+      "voltageMv": 970
+    },
+    {
+      "mhz": 2610,
+      "voltageMv": 965
+    },
+    {
+      "mhz": 2602,
+      "voltageMv": 965
+    },
+    {
+      "mhz": 2595,
+      "voltageMv": 965
+    },
+    {
+      "mhz": 2587,
+      "voltageMv": 960
+    },
+    {
+      "mhz": 2580,
+      "voltageMv": 960
+    },
+    {
+      "mhz": 2572,
+      "voltageMv": 960
+    },
+    {
+      "mhz": 2565,
+      "voltageMv": 950
+    },
+    {
+      "mhz": 2557,
+      "voltageMv": 950
+    },
+    {
+      "mhz": 2550,
+      "voltageMv": 950
+    },
+    {
+      "mhz": 2542,
+      "voltageMv": 945
+    },
+    {
+      "mhz": 2535,
+      "voltageMv": 945
+    },
+    {
+      "mhz": 2527,
+      "voltageMv": 945
+    },
+    {
+      "mhz": 2520,
+      "voltageMv": 940
+    },
+    {
+      "mhz": 2512,
+      "voltageMv": 940
+    },
+    {
+      "mhz": 2505,
+      "voltageMv": 940
+    },
+    {
+      "mhz": 2497,
+      "voltageMv": 935
+    },
+    {
+      "mhz": 2490,
+      "voltageMv": 935
+    },
+    {
+      "mhz": 2482,
+      "voltageMv": 935
+    },
+    {
+      "mhz": 2475,
+      "voltageMv": 925
+    },
+    {
+      "mhz": 2467,
+      "voltageMv": 925
+    },
+    {
+      "mhz": 2460,
+      "voltageMv": 925
+    },
+    {
+      "mhz": 2452,
+      "voltageMv": 920
+    },
+    {
+      "mhz": 2445,
+      "voltageMv": 920
+    },
+    {
+      "mhz": 2437,
+      "voltageMv": 920
+    },
+    {
+      "mhz": 2430,
+      "voltageMv": 915
+    },
+    {
+      "mhz": 2422,
+      "voltageMv": 915
+    },
+    {
+      "mhz": 2415,
+      "voltageMv": 915
+    },
+    {
+      "mhz": 2407,
+      "voltageMv": 910
+    },
+    {
+      "mhz": 2400,
+      "voltageMv": 910
+    },
+    {
+      "mhz": 2392,
+      "voltageMv": 910
+    },
+    {
+      "mhz": 2385,
+      "voltageMv": 910
+    },
+    {
+      "mhz": 2377,
+      "voltageMv": 900
+    },
+    {
+      "mhz": 2370,
+      "voltageMv": 900
+    },
+    {
+      "mhz": 2362,
+      "voltageMv": 900
+    },
+    {
+      "mhz": 2355,
+      "voltageMv": 895
+    },
+    {
+      "mhz": 2347,
+      "voltageMv": 895
+    },
+    {
+      "mhz": 2340,
+      "voltageMv": 895
+    },
+    {
+      "mhz": 2332,
+      "voltageMv": 890
+    },
+    {
+      "mhz": 2325,
+      "voltageMv": 890
+    },
+    {
+      "mhz": 2317,
+      "voltageMv": 890
+    },
+    {
+      "mhz": 2310,
+      "voltageMv": 890
+    },
+    {
+      "mhz": 2302,
+      "voltageMv": 885
+    },
+    {
+      "mhz": 2295,
+      "voltageMv": 885
+    },
+    {
+      "mhz": 2287,
+      "voltageMv": 885
+    },
+    {
+      "mhz": 2280,
+      "voltageMv": 875
+    },
+    {
+      "mhz": 2272,
+      "voltageMv": 875
+    },
+    {
+      "mhz": 2265,
+      "voltageMv": 875
+    },
+    {
+      "mhz": 2257,
+      "voltageMv": 875
+    },
+    {
+      "mhz": 2250,
+      "voltageMv": 870
+    },
+    {
+      "mhz": 2242,
+      "voltageMv": 870
+    },
+    {
+      "mhz": 2235,
+      "voltageMv": 870
+    },
+    {
+      "mhz": 2227,
+      "voltageMv": 865
+    },
+    {
+      "mhz": 2220,
+      "voltageMv": 865
+    },
+    {
+      "mhz": 2212,
+      "voltageMv": 865
+    },
+    {
+      "mhz": 2205,
+      "voltageMv": 865
+    },
+    {
+      "mhz": 2197,
+      "voltageMv": 860
+    },
+    {
+      "mhz": 2190,
+      "voltageMv": 860
+    },
+    {
+      "mhz": 2182,
+      "voltageMv": 860
+    },
+    {
+      "mhz": 2175,
+      "voltageMv": 850
+    },
+    {
+      "mhz": 2167,
+      "voltageMv": 850
+    },
+    {
+      "mhz": 2160,
+      "voltageMv": 850
+    },
+    {
+      "mhz": 2152,
+      "voltageMv": 850
+    },
+    {
+      "mhz": 2145,
+      "voltageMv": 845
+    },
+    {
+      "mhz": 2137,
+      "voltageMv": 845
+    },
+    {
+      "mhz": 2130,
+      "voltageMv": 845
+    },
+    {
+      "mhz": 2122,
+      "voltageMv": 845
+    },
+    {
+      "mhz": 2115,
+      "voltageMv": 840
+    },
+    {
+      "mhz": 2107,
+      "voltageMv": 840
+    },
+    {
+      "mhz": 2100,
+      "voltageMv": 840
+    },
+    {
+      "mhz": 2092,
+      "voltageMv": 835
+    },
+    {
+      "mhz": 2085,
+      "voltageMv": 835
+    },
+    {
+      "mhz": 2077,
+      "voltageMv": 835
+    },
+    {
+      "mhz": 2070,
+      "voltageMv": 835
+    },
+    {
+      "mhz": 2062,
+      "voltageMv": 825
+    },
+    {
+      "mhz": 2055,
+      "voltageMv": 825
+    },
+    {
+      "mhz": 2047,
+      "voltageMv": 825
+    },
+    {
+      "mhz": 2040,
+      "voltageMv": 825
+    },
+    {
+      "mhz": 2032,
+      "voltageMv": 820
+    },
+    {
+      "mhz": 2025,
+      "voltageMv": 820
+    },
+    {
+      "mhz": 2017,
+      "voltageMv": 820
+    },
+    {
+      "mhz": 2010,
+      "voltageMv": 820
+    },
+    {
+      "mhz": 2002,
+      "voltageMv": 815
+    },
+    {
+      "mhz": 1995,
+      "voltageMv": 815
+    },
+    {
+      "mhz": 1987,
+      "voltageMv": 815
+    },
+    {
+      "mhz": 1980,
+      "voltageMv": 815
+    },
+    {
+      "mhz": 1972,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1965,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1957,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1950,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1942,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1935,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1927,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1920,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1912,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1905,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1897,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1890,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1882,
+      "voltageMv": 810
+    },
+    {
+      "mhz": 1875,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1867,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1860,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1852,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1845,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1837,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1830,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1822,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1815,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1807,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1800,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1792,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1785,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1777,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1770,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1762,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1755,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1747,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1740,
+      "voltageMv": 800
+    },
+    {
+      "mhz": 1732,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1725,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1717,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1710,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1702,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1695,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1687,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1680,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1672,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1665,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1657,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1650,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1642,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1635,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1627,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1620,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1612,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1605,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1597,
+      "voltageMv": 795
+    },
+    {
+      "mhz": 1590,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1582,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1575,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1567,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1560,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1552,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1545,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1537,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1530,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1522,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1515,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1507,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1500,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1492,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1485,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1477,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1470,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1462,
+      "voltageMv": 790
+    },
+    {
+      "mhz": 1455,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1447,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1440,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1432,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1425,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1417,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1410,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1402,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1395,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1387,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1380,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1372,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1365,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1357,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1350,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1342,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1335,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1327,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1320,
+      "voltageMv": 785
+    },
+    {
+      "mhz": 1312,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1305,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1297,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1290,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1282,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1275,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1267,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1260,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1252,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1245,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1237,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1230,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1222,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1215,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1207,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1200,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1192,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1185,
+      "voltageMv": 775
+    },
+    {
+      "mhz": 1177,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1170,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1162,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1155,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1147,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1140,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1132,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1125,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1117,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1110,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1102,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1095,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1087,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1080,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1072,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1065,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1057,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1050,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1042,
+      "voltageMv": 770
+    },
+    {
+      "mhz": 1035,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 1027,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 1020,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 1012,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 1005,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 997,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 990,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 982,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 975,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 967,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 960,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 952,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 945,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 937,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 930,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 922,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 915,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 907,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 900,
+      "voltageMv": 765
+    },
+    {
+      "mhz": 892,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 885,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 877,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 870,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 862,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 855,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 847,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 840,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 832,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 825,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 817,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 810,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 802,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 795,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 787,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 780,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 772,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 765,
+      "voltageMv": 760
+    },
+    {
+      "mhz": 757,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 750,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 742,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 735,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 727,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 720,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 712,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 705,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 697,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 690,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 682,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 675,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 667,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 660,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 652,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 645,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 637,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 630,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 622,
+      "voltageMv": 750
+    },
+    {
+      "mhz": 615,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 607,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 600,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 592,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 585,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 577,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 570,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 562,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 555,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 547,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 540,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 532,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 525,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 517,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 510,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 502,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 495,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 487,
+      "voltageMv": 745
+    },
+    {
+      "mhz": 480,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 472,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 465,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 457,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 450,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 442,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 435,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 427,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 420,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 412,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 405,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 397,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 390,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 382,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 375,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 367,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 360,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 352,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 345,
+      "voltageMv": 740
+    },
+    {
+      "mhz": 337,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 330,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 322,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 315,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 307,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 300,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 292,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 285,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 277,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 270,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 262,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 255,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 247,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 240,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 232,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 225,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 217,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 210,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 202,
+      "voltageMv": 735
+    },
+    {
+      "mhz": 195,
+      "voltageMv": 725
+    },
+    {
+      "mhz": 187,
+      "voltageMv": 725
+    },
+    {
+      "mhz": 180,
+      "voltageMv": 450
+    }
+  ],
+  "vfTable": [
+    {
+      "voltageMv": 450,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 460,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 465,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 470,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 475,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 485,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 490,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 495,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 500,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 510,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 515,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 520,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 525,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 535,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 540,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 545,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 550,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 560,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 565,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 570,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 575,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 585,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 590,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 595,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 600,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 610,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 615,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 620,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 625,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 635,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 640,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 645,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 650,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 660,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 665,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 670,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 675,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 685,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 690,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 695,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 700,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 710,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 715,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 720,
+      "mhz": 180,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 725,
+      "mhz": 195,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 735,
+      "mhz": 337,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 740,
+      "mhz": 480,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 745,
+      "mhz": 615,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 750,
+      "mhz": 757,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 760,
+      "mhz": 892,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 765,
+      "mhz": 1035,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 770,
+      "mhz": 1177,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 775,
+      "mhz": 1312,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 785,
+      "mhz": 1455,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 790,
+      "mhz": 1590,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 795,
+      "mhz": 1732,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 800,
+      "mhz": 1875,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 810,
+      "mhz": 1972,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 815,
+      "mhz": 2002,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 820,
+      "mhz": 2032,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 825,
+      "mhz": 2062,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 835,
+      "mhz": 2092,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 840,
+      "mhz": 2115,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 845,
+      "mhz": 2145,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 850,
+      "mhz": 2175,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 860,
+      "mhz": 2197,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 865,
+      "mhz": 2227,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 870,
+      "mhz": 2250,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 875,
+      "mhz": 2280,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 885,
+      "mhz": 2302,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 890,
+      "mhz": 2332,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 895,
+      "mhz": 2355,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 900,
+      "mhz": 2377,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 910,
+      "mhz": 2407,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 915,
+      "mhz": 2430,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 920,
+      "mhz": 2452,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 925,
+      "mhz": 2475,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 935,
+      "mhz": 2497,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 940,
+      "mhz": 2520,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 945,
+      "mhz": 2542,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 950,
+      "mhz": 2565,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 960,
+      "mhz": 2587,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 965,
+      "mhz": 2610,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 970,
+      "mhz": 2625,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 975,
+      "mhz": 2647,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 985,
+      "mhz": 2662,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 990,
+      "mhz": 2685,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 995,
+      "mhz": 2700,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1000,
+      "mhz": 2737,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1010,
+      "mhz": 2752,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1015,
+      "mhz": 2775,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1020,
+      "mhz": 2797,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1025,
+      "mhz": 2805,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1035,
+      "mhz": 2820,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1040,
+      "mhz": 2835,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1045,
+      "mhz": 2842,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1050,
+      "mhz": 2857,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1060,
+      "mhz": 2872,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1065,
+      "mhz": 2880,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1070,
+      "mhz": 2895,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1075,
+      "mhz": 2902,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1085,
+      "mhz": 2917,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1090,
+      "mhz": 2932,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1095,
+      "mhz": 2940,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1100,
+      "mhz": 2955,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1110,
+      "mhz": 2962,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1115,
+      "mhz": 2977,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1120,
+      "mhz": 2985,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1125,
+      "mhz": 3000,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1135,
+      "mhz": 3007,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1140,
+      "mhz": 3015,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1145,
+      "mhz": 3030,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1150,
+      "mhz": 3037,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1160,
+      "mhz": 3052,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1165,
+      "mhz": 3060,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1170,
+      "mhz": 3067,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1175,
+      "mhz": 3082,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1185,
+      "mhz": 3090,
+      "from": "measured"
+    },
+    {
+      "voltageMv": 1190,
+      "mhz": 3099,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1195,
+      "mhz": 3107,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1200,
+      "mhz": 3116,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1210,
+      "mhz": 3133,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1215,
+      "mhz": 3142,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1220,
+      "mhz": 3151,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1225,
+      "mhz": 3159,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1235,
+      "mhz": 3177,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 1240,
+      "mhz": 3185,
+      "from": "extrapolated"
+    },
+    {
+      "voltageMv": 515,
+      "mhz": 405,
+      "from": "outlier (не графическая, исключается по построению)"
+    }
+  ],
+  "powerLimitW": {
+    "min": 250,
+    "default": 300,
+    "max": 300
+  },
+  "stamp": {
+    "driver": "610.88",
+    "vbios": "98.03.58.40.8b",
+    "takenAt": "2026-08-15T17:09:20+03:00"
+  },
+  "fiction": {
+    "monotonicity": {
+      "note": "край шумит, как кремний: тренд вверх, но локальные нарушения ЕСТЬ — ровно тот редкий случай, который владелец назвал сам («очень редко — выше, почти не бывает такого»). Их число опубликовано, чтобы карта не могла тихо стать другой картой.",
+      "inversions": 184,
+      "inversionShare": 0.473,
+      "maxDropMv": 16.7
+    },
+    "noise": {
+      "seed": 960621144,
+      "amplitudeMv": 9.040687186457216,
+      "driftMaxMv": 22.601717966143042
+    },
+    "note": "ВЫМЫСЕЛ. Эти края придуманы и НЕ являются утверждением о живой карте — они существуют, чтобы движку было что найти.",
+    "edgeDefinition": "край частоты = напряжение, на котором прожиг длиной 10 с отказывает в половине случаев. У вероятностного края другого честного определения нет: «напряжение, ниже которого отказывает» описывает порог, а порогом эта карта быть не должна.",
+    "edge": [
+      {
+        "mhz": 3090,
+        "edgeMv": 983.7,
+        "stockMv": 1185,
+        "headroomMv": 201.3
+      },
+      {
+        "mhz": 3082,
+        "edgeMv": 980.5,
+        "stockMv": 1175,
+        "headroomMv": 194.5
+      },
+      {
+        "mhz": 3075,
+        "edgeMv": 973.2,
+        "stockMv": 1175,
+        "headroomMv": 201.8
+      },
+      {
+        "mhz": 3067,
+        "edgeMv": 981.7,
+        "stockMv": 1170,
+        "headroomMv": 188.3
+      },
+      {
+        "mhz": 3060,
+        "edgeMv": 971.4,
+        "stockMv": 1165,
+        "headroomMv": 193.6
+      },
+      {
+        "mhz": 3052,
+        "edgeMv": 966.9,
+        "stockMv": 1160,
+        "headroomMv": 193.1
+      },
+      {
+        "mhz": 3045,
+        "edgeMv": 959.5,
+        "stockMv": 1160,
+        "headroomMv": 200.5
+      },
+      {
+        "mhz": 3037,
+        "edgeMv": 963.1,
+        "stockMv": 1150,
+        "headroomMv": 186.9
+      },
+      {
+        "mhz": 3030,
+        "edgeMv": 946.8,
+        "stockMv": 1145,
+        "headroomMv": 198.2
+      },
+      {
+        "mhz": 3022,
+        "edgeMv": 952.2,
+        "stockMv": 1145,
+        "headroomMv": 192.8
+      },
+      {
+        "mhz": 3015,
+        "edgeMv": 954.3,
+        "stockMv": 1140,
+        "headroomMv": 185.7
+      },
+      {
+        "mhz": 3007,
+        "edgeMv": 943.4,
+        "stockMv": 1135,
+        "headroomMv": 191.6
+      },
+      {
+        "mhz": 3000,
+        "edgeMv": 939.1,
+        "stockMv": 1125,
+        "headroomMv": 185.9
+      },
+      {
+        "mhz": 2992,
+        "edgeMv": 928.2,
+        "stockMv": 1125,
+        "headroomMv": 196.8
+      },
+      {
+        "mhz": 2985,
+        "edgeMv": 933,
+        "stockMv": 1120,
+        "headroomMv": 187
+      },
+      {
+        "mhz": 2977,
+        "edgeMv": 922.6,
+        "stockMv": 1115,
+        "headroomMv": 192.4
+      },
+      {
+        "mhz": 2970,
+        "edgeMv": 921,
+        "stockMv": 1115,
+        "headroomMv": 194
+      },
+      {
+        "mhz": 2962,
+        "edgeMv": 928.8,
+        "stockMv": 1110,
+        "headroomMv": 181.2
+      },
+      {
+        "mhz": 2955,
+        "edgeMv": 914.2,
+        "stockMv": 1100,
+        "headroomMv": 185.8
+      },
+      {
+        "mhz": 2947,
+        "edgeMv": 909.8,
+        "stockMv": 1100,
+        "headroomMv": 190.2
+      },
+      {
+        "mhz": 2940,
+        "edgeMv": 915.4,
+        "stockMv": 1095,
+        "headroomMv": 179.6
+      },
+      {
+        "mhz": 2932,
+        "edgeMv": 895,
+        "stockMv": 1090,
+        "headroomMv": 195
+      },
+      {
+        "mhz": 2925,
+        "edgeMv": 897.1,
+        "stockMv": 1090,
+        "headroomMv": 192.9
+      },
+      {
+        "mhz": 2917,
+        "edgeMv": 904.3,
+        "stockMv": 1085,
+        "headroomMv": 180.7
+      },
+      {
+        "mhz": 2910,
+        "edgeMv": 891.1,
+        "stockMv": 1085,
+        "headroomMv": 193.9
+      },
+      {
+        "mhz": 2902,
+        "edgeMv": 886.7,
+        "stockMv": 1075,
+        "headroomMv": 188.3
+      },
+      {
+        "mhz": 2895,
+        "edgeMv": 890.5,
+        "stockMv": 1070,
+        "headroomMv": 179.5
+      },
+      {
+        "mhz": 2887,
+        "edgeMv": 875.3,
+        "stockMv": 1070,
+        "headroomMv": 194.7
+      },
+      {
+        "mhz": 2880,
+        "edgeMv": 872,
+        "stockMv": 1065,
+        "headroomMv": 193
+      },
+      {
+        "mhz": 2872,
+        "edgeMv": 873.2,
+        "stockMv": 1060,
+        "headroomMv": 186.8
+      },
+      {
+        "mhz": 2865,
+        "edgeMv": 880.9,
+        "stockMv": 1060,
+        "headroomMv": 179.1
+      },
+      {
+        "mhz": 2857,
+        "edgeMv": 864.3,
+        "stockMv": 1050,
+        "headroomMv": 185.7
+      },
+      {
+        "mhz": 2850,
+        "edgeMv": 859.1,
+        "stockMv": 1050,
+        "headroomMv": 190.9
+      },
+      {
+        "mhz": 2842,
+        "edgeMv": 865.1,
+        "stockMv": 1045,
+        "headroomMv": 179.9
+      },
+      {
+        "mhz": 2835,
+        "edgeMv": 852.6,
+        "stockMv": 1040,
+        "headroomMv": 187.4
+      },
+      {
+        "mhz": 2827,
+        "edgeMv": 865.5,
+        "stockMv": 1040,
+        "headroomMv": 174.5
+      },
+      {
+        "mhz": 2820,
+        "edgeMv": 863.4,
+        "stockMv": 1035,
+        "headroomMv": 171.6
+      },
+      {
+        "mhz": 2812,
+        "edgeMv": 854.8,
+        "stockMv": 1035,
+        "headroomMv": 180.2
+      },
+      {
+        "mhz": 2805,
+        "edgeMv": 849.9,
+        "stockMv": 1025,
+        "headroomMv": 175.1
+      },
+      {
+        "mhz": 2797,
+        "edgeMv": 836,
+        "stockMv": 1020,
+        "headroomMv": 184
+      },
+      {
+        "mhz": 2790,
+        "edgeMv": 842.2,
+        "stockMv": 1020,
+        "headroomMv": 177.8
+      },
+      {
+        "mhz": 2782,
+        "edgeMv": 840.3,
+        "stockMv": 1020,
+        "headroomMv": 179.7
+      },
+      {
+        "mhz": 2775,
+        "edgeMv": 836.4,
+        "stockMv": 1015,
+        "headroomMv": 178.6
+      },
+      {
+        "mhz": 2767,
+        "edgeMv": 836.9,
+        "stockMv": 1015,
+        "headroomMv": 178.1
+      },
+      {
+        "mhz": 2760,
+        "edgeMv": 829.3,
+        "stockMv": 1015,
+        "headroomMv": 185.7
+      },
+      {
+        "mhz": 2752,
+        "edgeMv": 829.1,
+        "stockMv": 1010,
+        "headroomMv": 180.9
+      },
+      {
+        "mhz": 2745,
+        "edgeMv": 837.7,
+        "stockMv": 1010,
+        "headroomMv": 172.3
+      },
+      {
+        "mhz": 2737,
+        "edgeMv": 829.7,
+        "stockMv": 1000,
+        "headroomMv": 170.3
+      },
+      {
+        "mhz": 2730,
+        "edgeMv": 828.4,
+        "stockMv": 1000,
+        "headroomMv": 171.6
+      },
+      {
+        "mhz": 2722,
+        "edgeMv": 816.9,
+        "stockMv": 1000,
+        "headroomMv": 183.1
+      },
+      {
+        "mhz": 2715,
+        "edgeMv": 829.5,
+        "stockMv": 1000,
+        "headroomMv": 170.5
+      },
+      {
+        "mhz": 2707,
+        "edgeMv": 826.9,
+        "stockMv": 1000,
+        "headroomMv": 173.1
+      },
+      {
+        "mhz": 2700,
+        "edgeMv": 809.5,
+        "stockMv": 995,
+        "headroomMv": 185.5
+      },
+      {
+        "mhz": 2692,
+        "edgeMv": 815.1,
+        "stockMv": 995,
+        "headroomMv": 179.9
+      },
+      {
+        "mhz": 2685,
+        "edgeMv": 811.8,
+        "stockMv": 990,
+        "headroomMv": 178.2
+      },
+      {
+        "mhz": 2677,
+        "edgeMv": 810.1,
+        "stockMv": 990,
+        "headroomMv": 179.9
+      },
+      {
+        "mhz": 2670,
+        "edgeMv": 817.5,
+        "stockMv": 990,
+        "headroomMv": 172.5
+      },
+      {
+        "mhz": 2662,
+        "edgeMv": 818.1,
+        "stockMv": 985,
+        "headroomMv": 166.9
+      },
+      {
+        "mhz": 2655,
+        "edgeMv": 822.3,
+        "stockMv": 985,
+        "headroomMv": 162.7
+      },
+      {
+        "mhz": 2647,
+        "edgeMv": 796.9,
+        "stockMv": 975,
+        "headroomMv": 178.1
+      },
+      {
+        "mhz": 2640,
+        "edgeMv": 811.6,
+        "stockMv": 975,
+        "headroomMv": 163.4
+      },
+      {
+        "mhz": 2632,
+        "edgeMv": 799.8,
+        "stockMv": 975,
+        "headroomMv": 175.2
+      },
+      {
+        "mhz": 2625,
+        "edgeMv": 796.1,
+        "stockMv": 970,
+        "headroomMv": 173.9
+      },
+      {
+        "mhz": 2617,
+        "edgeMv": 796.8,
+        "stockMv": 970,
+        "headroomMv": 173.2
+      },
+      {
+        "mhz": 2610,
+        "edgeMv": 805.3,
+        "stockMv": 965,
+        "headroomMv": 159.7
+      },
+      {
+        "mhz": 2602,
+        "edgeMv": 808.7,
+        "stockMv": 965,
+        "headroomMv": 156.3
+      },
+      {
+        "mhz": 2595,
+        "edgeMv": 793.8,
+        "stockMv": 965,
+        "headroomMv": 171.2
+      },
+      {
+        "mhz": 2587,
+        "edgeMv": 800,
+        "stockMv": 960,
+        "headroomMv": 160
+      },
+      {
+        "mhz": 2580,
+        "edgeMv": 802.1,
+        "stockMv": 960,
+        "headroomMv": 157.9
+      },
+      {
+        "mhz": 2572,
+        "edgeMv": 793.6,
+        "stockMv": 960,
+        "headroomMv": 166.4
+      },
+      {
+        "mhz": 2565,
+        "edgeMv": 787.2,
+        "stockMv": 950,
+        "headroomMv": 162.8
+      },
+      {
+        "mhz": 2557,
+        "edgeMv": 792.6,
+        "stockMv": 950,
+        "headroomMv": 157.4
+      },
+      {
+        "mhz": 2550,
+        "edgeMv": 794.2,
+        "stockMv": 950,
+        "headroomMv": 155.8
+      },
+      {
+        "mhz": 2542,
+        "edgeMv": 777.9,
+        "stockMv": 945,
+        "headroomMv": 167.1
+      },
+      {
+        "mhz": 2535,
+        "edgeMv": 777.1,
+        "stockMv": 945,
+        "headroomMv": 167.9
+      },
+      {
+        "mhz": 2527,
+        "edgeMv": 780.8,
+        "stockMv": 945,
+        "headroomMv": 164.2
+      },
+      {
+        "mhz": 2520,
+        "edgeMv": 789.1,
+        "stockMv": 940,
+        "headroomMv": 150.9
+      },
+      {
+        "mhz": 2512,
+        "edgeMv": 785.5,
+        "stockMv": 940,
+        "headroomMv": 154.5
+      },
+      {
+        "mhz": 2505,
+        "edgeMv": 780.5,
+        "stockMv": 940,
+        "headroomMv": 159.5
+      },
+      {
+        "mhz": 2497,
+        "edgeMv": 771.8,
+        "stockMv": 935,
+        "headroomMv": 163.2
+      },
+      {
+        "mhz": 2490,
+        "edgeMv": 782.2,
+        "stockMv": 935,
+        "headroomMv": 152.8
+      },
+      {
+        "mhz": 2482,
+        "edgeMv": 777.4,
+        "stockMv": 935,
+        "headroomMv": 157.6
+      },
+      {
+        "mhz": 2475,
+        "edgeMv": 772,
+        "stockMv": 925,
+        "headroomMv": 153
+      },
+      {
+        "mhz": 2467,
+        "edgeMv": 764.7,
+        "stockMv": 925,
+        "headroomMv": 160.3
+      },
+      {
+        "mhz": 2460,
+        "edgeMv": 778.3,
+        "stockMv": 925,
+        "headroomMv": 146.7
+      },
+      {
+        "mhz": 2452,
+        "edgeMv": 775.2,
+        "stockMv": 920,
+        "headroomMv": 144.8
+      },
+      {
+        "mhz": 2445,
+        "edgeMv": 761.9,
+        "stockMv": 920,
+        "headroomMv": 158.1
+      },
+      {
+        "mhz": 2437,
+        "edgeMv": 760.1,
+        "stockMv": 920,
+        "headroomMv": 159.9
+      },
+      {
+        "mhz": 2430,
+        "edgeMv": 758.2,
+        "stockMv": 915,
+        "headroomMv": 156.8
+      },
+      {
+        "mhz": 2422,
+        "edgeMv": 773,
+        "stockMv": 915,
+        "headroomMv": 142
+      },
+      {
+        "mhz": 2415,
+        "edgeMv": 756.8,
+        "stockMv": 915,
+        "headroomMv": 158.2
+      },
+      {
+        "mhz": 2407,
+        "edgeMv": 766.2,
+        "stockMv": 910,
+        "headroomMv": 143.8
+      },
+      {
+        "mhz": 2400,
+        "edgeMv": 768.9,
+        "stockMv": 910,
+        "headroomMv": 141.1
+      },
+      {
+        "mhz": 2392,
+        "edgeMv": 755.5,
+        "stockMv": 910,
+        "headroomMv": 154.5
+      },
+      {
+        "mhz": 2385,
+        "edgeMv": 763.2,
+        "stockMv": 910,
+        "headroomMv": 146.8
+      },
+      {
+        "mhz": 2377,
+        "edgeMv": 758.1,
+        "stockMv": 900,
+        "headroomMv": 141.9
+      },
+      {
+        "mhz": 2370,
+        "edgeMv": 763,
+        "stockMv": 900,
+        "headroomMv": 137
+      },
+      {
+        "mhz": 2362,
+        "edgeMv": 750.8,
+        "stockMv": 900,
+        "headroomMv": 149.2
+      },
+      {
+        "mhz": 2355,
+        "edgeMv": 750.5,
+        "stockMv": 895,
+        "headroomMv": 144.5
+      },
+      {
+        "mhz": 2347,
+        "edgeMv": 746.1,
+        "stockMv": 895,
+        "headroomMv": 148.9
+      },
+      {
+        "mhz": 2340,
+        "edgeMv": 760.1,
+        "stockMv": 895,
+        "headroomMv": 134.9
+      },
+      {
+        "mhz": 2332,
+        "edgeMv": 757.9,
+        "stockMv": 890,
+        "headroomMv": 132.1
+      },
+      {
+        "mhz": 2325,
+        "edgeMv": 750.9,
+        "stockMv": 890,
+        "headroomMv": 139.1
+      },
+      {
+        "mhz": 2317,
+        "edgeMv": 752.3,
+        "stockMv": 890,
+        "headroomMv": 137.7
+      },
+      {
+        "mhz": 2310,
+        "edgeMv": 746.8,
+        "stockMv": 890,
+        "headroomMv": 143.2
+      },
+      {
+        "mhz": 2302,
+        "edgeMv": 754.9,
+        "stockMv": 885,
+        "headroomMv": 130.1
+      },
+      {
+        "mhz": 2295,
+        "edgeMv": 744.7,
+        "stockMv": 885,
+        "headroomMv": 140.3
+      },
+      {
+        "mhz": 2287,
+        "edgeMv": 759.7,
+        "stockMv": 885,
+        "headroomMv": 125.3
+      },
+      {
+        "mhz": 2280,
+        "edgeMv": 753.1,
+        "stockMv": 875,
+        "headroomMv": 121.9
+      },
+      {
+        "mhz": 2272,
+        "edgeMv": 741.2,
+        "stockMv": 875,
+        "headroomMv": 133.8
+      },
+      {
+        "mhz": 2265,
+        "edgeMv": 741.8,
+        "stockMv": 875,
+        "headroomMv": 133.2
+      },
+      {
+        "mhz": 2257,
+        "edgeMv": 741.6,
+        "stockMv": 875,
+        "headroomMv": 133.4
+      },
+      {
+        "mhz": 2250,
+        "edgeMv": 753.2,
+        "stockMv": 870,
+        "headroomMv": 116.8
+      },
+      {
+        "mhz": 2242,
+        "edgeMv": 750.4,
+        "stockMv": 870,
+        "headroomMv": 119.6
+      },
+      {
+        "mhz": 2235,
+        "edgeMv": 749.6,
+        "stockMv": 870,
+        "headroomMv": 120.4
+      },
+      {
+        "mhz": 2227,
+        "edgeMv": 739.2,
+        "stockMv": 865,
+        "headroomMv": 125.8
+      },
+      {
+        "mhz": 2220,
+        "edgeMv": 746.8,
+        "stockMv": 865,
+        "headroomMv": 118.2
+      },
+      {
+        "mhz": 2212,
+        "edgeMv": 752.4,
+        "stockMv": 865,
+        "headroomMv": 112.6
+      },
+      {
+        "mhz": 2205,
+        "edgeMv": 742.1,
+        "stockMv": 865,
+        "headroomMv": 122.9
+      },
+      {
+        "mhz": 2197,
+        "edgeMv": 735.3,
+        "stockMv": 860,
+        "headroomMv": 124.7
+      },
+      {
+        "mhz": 2190,
+        "edgeMv": 737.4,
+        "stockMv": 860,
+        "headroomMv": 122.6
+      },
+      {
+        "mhz": 2182,
+        "edgeMv": 746.2,
+        "stockMv": 860,
+        "headroomMv": 113.8
+      },
+      {
+        "mhz": 2175,
+        "edgeMv": 743.5,
+        "stockMv": 850,
+        "headroomMv": 106.5
+      },
+      {
+        "mhz": 2167,
+        "edgeMv": 733.3,
+        "stockMv": 850,
+        "headroomMv": 116.7
+      },
+      {
+        "mhz": 2160,
+        "edgeMv": 734.1,
+        "stockMv": 850,
+        "headroomMv": 115.9
+      },
+      {
+        "mhz": 2152,
+        "edgeMv": 746.4,
+        "stockMv": 850,
+        "headroomMv": 103.6
+      },
+      {
+        "mhz": 2145,
+        "edgeMv": 733.6,
+        "stockMv": 845,
+        "headroomMv": 111.4
+      },
+      {
+        "mhz": 2137,
+        "edgeMv": 740.9,
+        "stockMv": 845,
+        "headroomMv": 104.1
+      },
+      {
+        "mhz": 2130,
+        "edgeMv": 742.5,
+        "stockMv": 845,
+        "headroomMv": 102.5
+      },
+      {
+        "mhz": 2122,
+        "edgeMv": 742.6,
+        "stockMv": 845,
+        "headroomMv": 102.4
+      },
+      {
+        "mhz": 2115,
+        "edgeMv": 731.9,
+        "stockMv": 840,
+        "headroomMv": 108.1
+      },
+      {
+        "mhz": 2107,
+        "edgeMv": 730.7,
+        "stockMv": 840,
+        "headroomMv": 109.3
+      },
+      {
+        "mhz": 2100,
+        "edgeMv": 744.6,
+        "stockMv": 840,
+        "headroomMv": 95.4
+      },
+      {
+        "mhz": 2092,
+        "edgeMv": 741.4,
+        "stockMv": 835,
+        "headroomMv": 93.6
+      },
+      {
+        "mhz": 2085,
+        "edgeMv": 740,
+        "stockMv": 835,
+        "headroomMv": 95
+      },
+      {
+        "mhz": 2077,
+        "edgeMv": 731.8,
+        "stockMv": 835,
+        "headroomMv": 103.2
+      },
+      {
+        "mhz": 2070,
+        "edgeMv": 742.9,
+        "stockMv": 835,
+        "headroomMv": 92.1
+      },
+      {
+        "mhz": 2062,
+        "edgeMv": 723.3,
+        "stockMv": 825,
+        "headroomMv": 101.7
+      },
+      {
+        "mhz": 2055,
+        "edgeMv": 724.9,
+        "stockMv": 825,
+        "headroomMv": 100.1
+      },
+      {
+        "mhz": 2047,
+        "edgeMv": 729.3,
+        "stockMv": 825,
+        "headroomMv": 95.7
+      },
+      {
+        "mhz": 2040,
+        "edgeMv": 727.6,
+        "stockMv": 825,
+        "headroomMv": 97.4
+      },
+      {
+        "mhz": 2032,
+        "edgeMv": 725,
+        "stockMv": 820,
+        "headroomMv": 95
+      },
+      {
+        "mhz": 2025,
+        "edgeMv": 728.2,
+        "stockMv": 820,
+        "headroomMv": 91.8
+      },
+      {
+        "mhz": 2017,
+        "edgeMv": 722.6,
+        "stockMv": 820,
+        "headroomMv": 97.4
+      },
+      {
+        "mhz": 2010,
+        "edgeMv": 722.8,
+        "stockMv": 820,
+        "headroomMv": 97.2
+      },
+      {
+        "mhz": 2002,
+        "edgeMv": 725.5,
+        "stockMv": 815,
+        "headroomMv": 89.5
+      },
+      {
+        "mhz": 1995,
+        "edgeMv": 731.7,
+        "stockMv": 815,
+        "headroomMv": 83.3
+      },
+      {
+        "mhz": 1987,
+        "edgeMv": 733.2,
+        "stockMv": 815,
+        "headroomMv": 81.8
+      },
+      {
+        "mhz": 1980,
+        "edgeMv": 737.6,
+        "stockMv": 815,
+        "headroomMv": 77.4
+      },
+      {
+        "mhz": 1972,
+        "edgeMv": 724.9,
+        "stockMv": 810,
+        "headroomMv": 85.1
+      },
+      {
+        "mhz": 1965,
+        "edgeMv": 721.4,
+        "stockMv": 810,
+        "headroomMv": 88.6
+      },
+      {
+        "mhz": 1957,
+        "edgeMv": 725.2,
+        "stockMv": 810,
+        "headroomMv": 84.8
+      },
+      {
+        "mhz": 1950,
+        "edgeMv": 731.9,
+        "stockMv": 810,
+        "headroomMv": 78.1
+      },
+      {
+        "mhz": 1942,
+        "edgeMv": 727.2,
+        "stockMv": 810,
+        "headroomMv": 82.8
+      },
+      {
+        "mhz": 1935,
+        "edgeMv": 724.5,
+        "stockMv": 810,
+        "headroomMv": 85.5
+      },
+      {
+        "mhz": 1927,
+        "edgeMv": 722.7,
+        "stockMv": 810,
+        "headroomMv": 87.3
+      },
+      {
+        "mhz": 1920,
+        "edgeMv": 724.9,
+        "stockMv": 810,
+        "headroomMv": 85.1
+      },
+      {
+        "mhz": 1912,
+        "edgeMv": 735.1,
+        "stockMv": 810,
+        "headroomMv": 74.9
+      },
+      {
+        "mhz": 1905,
+        "edgeMv": 733.4,
+        "stockMv": 810,
+        "headroomMv": 76.6
+      },
+      {
+        "mhz": 1897,
+        "edgeMv": 722,
+        "stockMv": 810,
+        "headroomMv": 88
+      },
+      {
+        "mhz": 1890,
+        "edgeMv": 719.3,
+        "stockMv": 810,
+        "headroomMv": 90.7
+      },
+      {
+        "mhz": 1882,
+        "edgeMv": 726.4,
+        "stockMv": 810,
+        "headroomMv": 83.6
+      },
+      {
+        "mhz": 1875,
+        "edgeMv": 723.8,
+        "stockMv": 800,
+        "headroomMv": 76.2
+      },
+      {
+        "mhz": 1867,
+        "edgeMv": 728.8,
+        "stockMv": 800,
+        "headroomMv": 71.2
+      },
+      {
+        "mhz": 1860,
+        "edgeMv": 718.3,
+        "stockMv": 800,
+        "headroomMv": 81.7
+      },
+      {
+        "mhz": 1852,
+        "edgeMv": 724.2,
+        "stockMv": 800,
+        "headroomMv": 75.8
+      },
+      {
+        "mhz": 1845,
+        "edgeMv": 724.4,
+        "stockMv": 800,
+        "headroomMv": 75.6
+      },
+      {
+        "mhz": 1837,
+        "edgeMv": 730.8,
+        "stockMv": 800,
+        "headroomMv": 69.2
+      },
+      {
+        "mhz": 1830,
+        "edgeMv": 718.1,
+        "stockMv": 800,
+        "headroomMv": 81.9
+      },
+      {
+        "mhz": 1822,
+        "edgeMv": 730.6,
+        "stockMv": 800,
+        "headroomMv": 69.4
+      },
+      {
+        "mhz": 1815,
+        "edgeMv": 726.2,
+        "stockMv": 800,
+        "headroomMv": 73.8
+      },
+      {
+        "mhz": 1807,
+        "edgeMv": 717.9,
+        "stockMv": 800,
+        "headroomMv": 82.1
+      },
+      {
+        "mhz": 1800,
+        "edgeMv": 715.8,
+        "stockMv": 800,
+        "headroomMv": 84.2
+      },
+      {
+        "mhz": 1792,
+        "edgeMv": 719.5,
+        "stockMv": 800,
+        "headroomMv": 80.5
+      },
+      {
+        "mhz": 1785,
+        "edgeMv": 719.5,
+        "stockMv": 800,
+        "headroomMv": 80.5
+      },
+      {
+        "mhz": 1777,
+        "edgeMv": 726.4,
+        "stockMv": 800,
+        "headroomMv": 73.6
+      },
+      {
+        "mhz": 1770,
+        "edgeMv": 724.1,
+        "stockMv": 800,
+        "headroomMv": 75.9
+      },
+      {
+        "mhz": 1762,
+        "edgeMv": 725.4,
+        "stockMv": 800,
+        "headroomMv": 74.6
+      },
+      {
+        "mhz": 1755,
+        "edgeMv": 720.5,
+        "stockMv": 800,
+        "headroomMv": 79.5
+      },
+      {
+        "mhz": 1747,
+        "edgeMv": 720.8,
+        "stockMv": 800,
+        "headroomMv": 79.2
+      },
+      {
+        "mhz": 1740,
+        "edgeMv": 719,
+        "stockMv": 800,
+        "headroomMv": 81
+      },
+      {
+        "mhz": 1732,
+        "edgeMv": 711.5,
+        "stockMv": 795,
+        "headroomMv": 83.5
+      },
+      {
+        "mhz": 1725,
+        "edgeMv": 711,
+        "stockMv": 795,
+        "headroomMv": 84
+      },
+      {
+        "mhz": 1717,
+        "edgeMv": 726,
+        "stockMv": 795,
+        "headroomMv": 69
+      },
+      {
+        "mhz": 1710,
+        "edgeMv": 710.3,
+        "stockMv": 795,
+        "headroomMv": 84.7
+      },
+      {
+        "mhz": 1702,
+        "edgeMv": 709.9,
+        "stockMv": 795,
+        "headroomMv": 85.1
+      },
+      {
+        "mhz": 1695,
+        "edgeMv": 725.3,
+        "stockMv": 795,
+        "headroomMv": 69.7
+      },
+      {
+        "mhz": 1687,
+        "edgeMv": 713.1,
+        "stockMv": 795,
+        "headroomMv": 81.9
+      },
+      {
+        "mhz": 1680,
+        "edgeMv": 712.7,
+        "stockMv": 795,
+        "headroomMv": 82.3
+      },
+      {
+        "mhz": 1672,
+        "edgeMv": 709.2,
+        "stockMv": 795,
+        "headroomMv": 85.8
+      },
+      {
+        "mhz": 1665,
+        "edgeMv": 720.3,
+        "stockMv": 795,
+        "headroomMv": 74.7
+      },
+      {
+        "mhz": 1657,
+        "edgeMv": 713,
+        "stockMv": 795,
+        "headroomMv": 82
+      },
+      {
+        "mhz": 1650,
+        "edgeMv": 712.9,
+        "stockMv": 795,
+        "headroomMv": 82.1
+      },
+      {
+        "mhz": 1642,
+        "edgeMv": 723.1,
+        "stockMv": 795,
+        "headroomMv": 71.9
+      },
+      {
+        "mhz": 1635,
+        "edgeMv": 724.2,
+        "stockMv": 795,
+        "headroomMv": 70.8
+      },
+      {
+        "mhz": 1627,
+        "edgeMv": 718.2,
+        "stockMv": 795,
+        "headroomMv": 76.8
+      },
+      {
+        "mhz": 1620,
+        "edgeMv": 720.5,
+        "stockMv": 795,
+        "headroomMv": 74.5
+      },
+      {
+        "mhz": 1612,
+        "edgeMv": 706.5,
+        "stockMv": 795,
+        "headroomMv": 88.5
+      },
+      {
+        "mhz": 1605,
+        "edgeMv": 714,
+        "stockMv": 795,
+        "headroomMv": 81
+      },
+      {
+        "mhz": 1597,
+        "edgeMv": 707.6,
+        "stockMv": 795,
+        "headroomMv": 87.4
+      },
+      {
+        "mhz": 1590,
+        "edgeMv": 715.3,
+        "stockMv": 790,
+        "headroomMv": 74.7
+      },
+      {
+        "mhz": 1582,
+        "edgeMv": 707.5,
+        "stockMv": 790,
+        "headroomMv": 82.5
+      },
+      {
+        "mhz": 1575,
+        "edgeMv": 704.4,
+        "stockMv": 790,
+        "headroomMv": 85.6
+      },
+      {
+        "mhz": 1567,
+        "edgeMv": 712.1,
+        "stockMv": 790,
+        "headroomMv": 77.9
+      },
+      {
+        "mhz": 1560,
+        "edgeMv": 714.3,
+        "stockMv": 790,
+        "headroomMv": 75.7
+      },
+      {
+        "mhz": 1552,
+        "edgeMv": 704.7,
+        "stockMv": 790,
+        "headroomMv": 85.3
+      },
+      {
+        "mhz": 1545,
+        "edgeMv": 708.4,
+        "stockMv": 790,
+        "headroomMv": 81.6
+      },
+      {
+        "mhz": 1537,
+        "edgeMv": 702.1,
+        "stockMv": 790,
+        "headroomMv": 87.9
+      },
+      {
+        "mhz": 1530,
+        "edgeMv": 704,
+        "stockMv": 790,
+        "headroomMv": 86
+      },
+      {
+        "mhz": 1522,
+        "edgeMv": 702.5,
+        "stockMv": 790,
+        "headroomMv": 87.5
+      },
+      {
+        "mhz": 1515,
+        "edgeMv": 694,
+        "stockMv": 790,
+        "headroomMv": 96
+      },
+      {
+        "mhz": 1507,
+        "edgeMv": 706.1,
+        "stockMv": 790,
+        "headroomMv": 83.9
+      },
+      {
+        "mhz": 1500,
+        "edgeMv": 701.9,
+        "stockMv": 790,
+        "headroomMv": 88.1
+      },
+      {
+        "mhz": 1492,
+        "edgeMv": 690.8,
+        "stockMv": 790,
+        "headroomMv": 99.2
+      },
+      {
+        "mhz": 1485,
+        "edgeMv": 698.5,
+        "stockMv": 790,
+        "headroomMv": 91.5
+      },
+      {
+        "mhz": 1477,
+        "edgeMv": 692.1,
+        "stockMv": 790,
+        "headroomMv": 97.9
+      },
+      {
+        "mhz": 1470,
+        "edgeMv": 702,
+        "stockMv": 790,
+        "headroomMv": 88
+      },
+      {
+        "mhz": 1462,
+        "edgeMv": 688.2,
+        "stockMv": 790,
+        "headroomMv": 101.8
+      },
+      {
+        "mhz": 1455,
+        "edgeMv": 683.2,
+        "stockMv": 785,
+        "headroomMv": 101.8
+      },
+      {
+        "mhz": 1447,
+        "edgeMv": 682.9,
+        "stockMv": 785,
+        "headroomMv": 102.1
+      },
+      {
+        "mhz": 1440,
+        "edgeMv": 680.6,
+        "stockMv": 785,
+        "headroomMv": 104.4
+      },
+      {
+        "mhz": 1432,
+        "edgeMv": 681.3,
+        "stockMv": 785,
+        "headroomMv": 103.7
+      },
+      {
+        "mhz": 1425,
+        "edgeMv": 690.9,
+        "stockMv": 785,
+        "headroomMv": 94.1
+      },
+      {
+        "mhz": 1417,
+        "edgeMv": 687.4,
+        "stockMv": 785,
+        "headroomMv": 97.6
+      },
+      {
+        "mhz": 1410,
+        "edgeMv": 680.2,
+        "stockMv": 785,
+        "headroomMv": 104.8
+      },
+      {
+        "mhz": 1402,
+        "edgeMv": 690.6,
+        "stockMv": 785,
+        "headroomMv": 94.4
+      },
+      {
+        "mhz": 1395,
+        "edgeMv": 690.4,
+        "stockMv": 785,
+        "headroomMv": 94.6
+      },
+      {
+        "mhz": 1387,
+        "edgeMv": 680.8,
+        "stockMv": 785,
+        "headroomMv": 104.2
+      },
+      {
+        "mhz": 1380,
+        "edgeMv": 675.7,
+        "stockMv": 785,
+        "headroomMv": 109.3
+      },
+      {
+        "mhz": 1372,
+        "edgeMv": 690.2,
+        "stockMv": 785,
+        "headroomMv": 94.8
+      },
+      {
+        "mhz": 1365,
+        "edgeMv": 685.3,
+        "stockMv": 785,
+        "headroomMv": 99.7
+      },
+      {
+        "mhz": 1357,
+        "edgeMv": 683.6,
+        "stockMv": 785,
+        "headroomMv": 101.4
+      },
+      {
+        "mhz": 1350,
+        "edgeMv": 674.3,
+        "stockMv": 785,
+        "headroomMv": 110.7
+      },
+      {
+        "mhz": 1342,
+        "edgeMv": 676.8,
+        "stockMv": 785,
+        "headroomMv": 108.2
+      },
+      {
+        "mhz": 1335,
+        "edgeMv": 680.2,
+        "stockMv": 785,
+        "headroomMv": 104.8
+      },
+      {
+        "mhz": 1327,
+        "edgeMv": 679,
+        "stockMv": 785,
+        "headroomMv": 106
+      },
+      {
+        "mhz": 1320,
+        "edgeMv": 683.1,
+        "stockMv": 785,
+        "headroomMv": 101.9
+      },
+      {
+        "mhz": 1312,
+        "edgeMv": 665.5,
+        "stockMv": 775,
+        "headroomMv": 109.5
+      },
+      {
+        "mhz": 1305,
+        "edgeMv": 660.3,
+        "stockMv": 775,
+        "headroomMv": 114.7
+      },
+      {
+        "mhz": 1297,
+        "edgeMv": 667.5,
+        "stockMv": 775,
+        "headroomMv": 107.5
+      },
+      {
+        "mhz": 1290,
+        "edgeMv": 670.4,
+        "stockMv": 775,
+        "headroomMv": 104.6
+      },
+      {
+        "mhz": 1282,
+        "edgeMv": 667.5,
+        "stockMv": 775,
+        "headroomMv": 107.5
+      },
+      {
+        "mhz": 1275,
+        "edgeMv": 664.6,
+        "stockMv": 775,
+        "headroomMv": 110.4
+      },
+      {
+        "mhz": 1267,
+        "edgeMv": 670.9,
+        "stockMv": 775,
+        "headroomMv": 104.1
+      },
+      {
+        "mhz": 1260,
+        "edgeMv": 665.9,
+        "stockMv": 775,
+        "headroomMv": 109.1
+      },
+      {
+        "mhz": 1252,
+        "edgeMv": 654.2,
+        "stockMv": 775,
+        "headroomMv": 120.8
+      },
+      {
+        "mhz": 1245,
+        "edgeMv": 665.3,
+        "stockMv": 775,
+        "headroomMv": 109.7
+      },
+      {
+        "mhz": 1237,
+        "edgeMv": 665.7,
+        "stockMv": 775,
+        "headroomMv": 109.3
+      },
+      {
+        "mhz": 1230,
+        "edgeMv": 652.6,
+        "stockMv": 775,
+        "headroomMv": 122.4
+      },
+      {
+        "mhz": 1222,
+        "edgeMv": 650.9,
+        "stockMv": 775,
+        "headroomMv": 124.1
+      },
+      {
+        "mhz": 1215,
+        "edgeMv": 662.6,
+        "stockMv": 775,
+        "headroomMv": 112.4
+      },
+      {
+        "mhz": 1207,
+        "edgeMv": 655.6,
+        "stockMv": 775,
+        "headroomMv": 119.4
+      },
+      {
+        "mhz": 1200,
+        "edgeMv": 662.7,
+        "stockMv": 775,
+        "headroomMv": 112.3
+      },
+      {
+        "mhz": 1192,
+        "edgeMv": 662.4,
+        "stockMv": 775,
+        "headroomMv": 112.6
+      },
+      {
+        "mhz": 1185,
+        "edgeMv": 654.8,
+        "stockMv": 775,
+        "headroomMv": 120.2
+      },
+      {
+        "mhz": 1177,
+        "edgeMv": 655.8,
+        "stockMv": 770,
+        "headroomMv": 114.2
+      },
+      {
+        "mhz": 1170,
+        "edgeMv": 641.3,
+        "stockMv": 770,
+        "headroomMv": 128.7
+      },
+      {
+        "mhz": 1162,
+        "edgeMv": 657.4,
+        "stockMv": 770,
+        "headroomMv": 112.6
+      },
+      {
+        "mhz": 1155,
+        "edgeMv": 655,
+        "stockMv": 770,
+        "headroomMv": 115
+      },
+      {
+        "mhz": 1147,
+        "edgeMv": 643.3,
+        "stockMv": 770,
+        "headroomMv": 126.7
+      },
+      {
+        "mhz": 1140,
+        "edgeMv": 651.2,
+        "stockMv": 770,
+        "headroomMv": 118.8
+      },
+      {
+        "mhz": 1132,
+        "edgeMv": 652.5,
+        "stockMv": 770,
+        "headroomMv": 117.5
+      },
+      {
+        "mhz": 1125,
+        "edgeMv": 641.4,
+        "stockMv": 770,
+        "headroomMv": 128.6
+      },
+      {
+        "mhz": 1117,
+        "edgeMv": 650,
+        "stockMv": 770,
+        "headroomMv": 120
+      },
+      {
+        "mhz": 1110,
+        "edgeMv": 654.3,
+        "stockMv": 770,
+        "headroomMv": 115.7
+      },
+      {
+        "mhz": 1102,
+        "edgeMv": 649.7,
+        "stockMv": 770,
+        "headroomMv": 120.3
+      },
+      {
+        "mhz": 1095,
+        "edgeMv": 655.4,
+        "stockMv": 770,
+        "headroomMv": 114.6
+      },
+      {
+        "mhz": 1087,
+        "edgeMv": 652.6,
+        "stockMv": 770,
+        "headroomMv": 117.4
+      },
+      {
+        "mhz": 1080,
+        "edgeMv": 645,
+        "stockMv": 770,
+        "headroomMv": 125
+      },
+      {
+        "mhz": 1072,
+        "edgeMv": 654.4,
+        "stockMv": 770,
+        "headroomMv": 115.6
+      },
+      {
+        "mhz": 1065,
+        "edgeMv": 643.4,
+        "stockMv": 770,
+        "headroomMv": 126.6
+      },
+      {
+        "mhz": 1057,
+        "edgeMv": 649.1,
+        "stockMv": 770,
+        "headroomMv": 120.9
+      },
+      {
+        "mhz": 1050,
+        "edgeMv": 645.9,
+        "stockMv": 770,
+        "headroomMv": 124.1
+      },
+      {
+        "mhz": 1042,
+        "edgeMv": 649.6,
+        "stockMv": 770,
+        "headroomMv": 120.4
+      },
+      {
+        "mhz": 1035,
+        "edgeMv": 638.4,
+        "stockMv": 765,
+        "headroomMv": 126.6
+      },
+      {
+        "mhz": 1027,
+        "edgeMv": 643.8,
+        "stockMv": 765,
+        "headroomMv": 121.2
+      },
+      {
+        "mhz": 1020,
+        "edgeMv": 631.4,
+        "stockMv": 765,
+        "headroomMv": 133.6
+      },
+      {
+        "mhz": 1012,
+        "edgeMv": 646.8,
+        "stockMv": 765,
+        "headroomMv": 118.2
+      },
+      {
+        "mhz": 1005,
+        "edgeMv": 638.3,
+        "stockMv": 765,
+        "headroomMv": 126.7
+      },
+      {
+        "mhz": 997,
+        "edgeMv": 647.1,
+        "stockMv": 765,
+        "headroomMv": 117.9
+      },
+      {
+        "mhz": 990,
+        "edgeMv": 646.8,
+        "stockMv": 765,
+        "headroomMv": 118.2
+      },
+      {
+        "mhz": 982,
+        "edgeMv": 646,
+        "stockMv": 765,
+        "headroomMv": 119
+      },
+      {
+        "mhz": 975,
+        "edgeMv": 640,
+        "stockMv": 765,
+        "headroomMv": 125
+      },
+      {
+        "mhz": 967,
+        "edgeMv": 650.9,
+        "stockMv": 765,
+        "headroomMv": 114.1
+      },
+      {
+        "mhz": 960,
+        "edgeMv": 638.2,
+        "stockMv": 765,
+        "headroomMv": 126.8
+      },
+      {
+        "mhz": 952,
+        "edgeMv": 648.2,
+        "stockMv": 765,
+        "headroomMv": 116.8
+      },
+      {
+        "mhz": 945,
+        "edgeMv": 648.3,
+        "stockMv": 765,
+        "headroomMv": 116.7
+      },
+      {
+        "mhz": 937,
+        "edgeMv": 649.7,
+        "stockMv": 765,
+        "headroomMv": 115.3
+      },
+      {
+        "mhz": 930,
+        "edgeMv": 641.5,
+        "stockMv": 765,
+        "headroomMv": 123.5
+      },
+      {
+        "mhz": 922,
+        "edgeMv": 644.1,
+        "stockMv": 765,
+        "headroomMv": 120.9
+      },
+      {
+        "mhz": 915,
+        "edgeMv": 645.9,
+        "stockMv": 765,
+        "headroomMv": 119.1
+      },
+      {
+        "mhz": 907,
+        "edgeMv": 643.9,
+        "stockMv": 765,
+        "headroomMv": 121.1
+      },
+      {
+        "mhz": 900,
+        "edgeMv": 638.1,
+        "stockMv": 765,
+        "headroomMv": 126.9
+      },
+      {
+        "mhz": 892,
+        "edgeMv": 639.3,
+        "stockMv": 760,
+        "headroomMv": 120.7
+      },
+      {
+        "mhz": 885,
+        "edgeMv": 644.9,
+        "stockMv": 760,
+        "headroomMv": 115.1
+      },
+      {
+        "mhz": 877,
+        "edgeMv": 634.5,
+        "stockMv": 760,
+        "headroomMv": 125.5
+      },
+      {
+        "mhz": 870,
+        "edgeMv": 647.3,
+        "stockMv": 760,
+        "headroomMv": 112.7
+      },
+      {
+        "mhz": 862,
+        "edgeMv": 636,
+        "stockMv": 760,
+        "headroomMv": 124
+      },
+      {
+        "mhz": 855,
+        "edgeMv": 635.4,
+        "stockMv": 760,
+        "headroomMv": 124.6
+      },
+      {
+        "mhz": 847,
+        "edgeMv": 639.8,
+        "stockMv": 760,
+        "headroomMv": 120.2
+      },
+      {
+        "mhz": 840,
+        "edgeMv": 644.3,
+        "stockMv": 760,
+        "headroomMv": 115.7
+      },
+      {
+        "mhz": 832,
+        "edgeMv": 645.7,
+        "stockMv": 760,
+        "headroomMv": 114.3
+      },
+      {
+        "mhz": 825,
+        "edgeMv": 639.3,
+        "stockMv": 760,
+        "headroomMv": 120.7
+      },
+      {
+        "mhz": 817,
+        "edgeMv": 644,
+        "stockMv": 760,
+        "headroomMv": 116
+      },
+      {
+        "mhz": 810,
+        "edgeMv": 641.2,
+        "stockMv": 760,
+        "headroomMv": 118.8
+      },
+      {
+        "mhz": 802,
+        "edgeMv": 647.8,
+        "stockMv": 760,
+        "headroomMv": 112.2
+      },
+      {
+        "mhz": 795,
+        "edgeMv": 634,
+        "stockMv": 760,
+        "headroomMv": 126
+      },
+      {
+        "mhz": 787,
+        "edgeMv": 639.2,
+        "stockMv": 760,
+        "headroomMv": 120.8
+      },
+      {
+        "mhz": 780,
+        "edgeMv": 638,
+        "stockMv": 760,
+        "headroomMv": 122
+      },
+      {
+        "mhz": 772,
+        "edgeMv": 646.8,
+        "stockMv": 760,
+        "headroomMv": 113.2
+      },
+      {
+        "mhz": 765,
+        "edgeMv": 650.3,
+        "stockMv": 760,
+        "headroomMv": 109.7
+      },
+      {
+        "mhz": 757,
+        "edgeMv": 630.9,
+        "stockMv": 750,
+        "headroomMv": 119.1
+      },
+      {
+        "mhz": 750,
+        "edgeMv": 639.5,
+        "stockMv": 750,
+        "headroomMv": 110.5
+      },
+      {
+        "mhz": 742,
+        "edgeMv": 629.6,
+        "stockMv": 750,
+        "headroomMv": 120.4
+      },
+      {
+        "mhz": 735,
+        "edgeMv": 633.5,
+        "stockMv": 750,
+        "headroomMv": 116.5
+      },
+      {
+        "mhz": 727,
+        "edgeMv": 643.3,
+        "stockMv": 750,
+        "headroomMv": 106.7
+      },
+      {
+        "mhz": 720,
+        "edgeMv": 633.6,
+        "stockMv": 750,
+        "headroomMv": 116.4
+      },
+      {
+        "mhz": 712,
+        "edgeMv": 637,
+        "stockMv": 750,
+        "headroomMv": 113
+      },
+      {
+        "mhz": 705,
+        "edgeMv": 643.8,
+        "stockMv": 750,
+        "headroomMv": 106.2
+      },
+      {
+        "mhz": 697,
+        "edgeMv": 632,
+        "stockMv": 750,
+        "headroomMv": 118
+      },
+      {
+        "mhz": 690,
+        "edgeMv": 629,
+        "stockMv": 750,
+        "headroomMv": 121
+      },
+      {
+        "mhz": 682,
+        "edgeMv": 644.9,
+        "stockMv": 750,
+        "headroomMv": 105.1
+      },
+      {
+        "mhz": 675,
+        "edgeMv": 629.9,
+        "stockMv": 750,
+        "headroomMv": 120.1
+      },
+      {
+        "mhz": 667,
+        "edgeMv": 642.6,
+        "stockMv": 750,
+        "headroomMv": 107.4
+      },
+      {
+        "mhz": 660,
+        "edgeMv": 630.7,
+        "stockMv": 750,
+        "headroomMv": 119.3
+      },
+      {
+        "mhz": 652,
+        "edgeMv": 638.2,
+        "stockMv": 750,
+        "headroomMv": 111.8
+      },
+      {
+        "mhz": 645,
+        "edgeMv": 641.8,
+        "stockMv": 750,
+        "headroomMv": 108.2
+      },
+      {
+        "mhz": 637,
+        "edgeMv": 632.3,
+        "stockMv": 750,
+        "headroomMv": 117.7
+      },
+      {
+        "mhz": 630,
+        "edgeMv": 634.2,
+        "stockMv": 750,
+        "headroomMv": 115.8
+      },
+      {
+        "mhz": 622,
+        "edgeMv": 636.6,
+        "stockMv": 750,
+        "headroomMv": 113.4
+      },
+      {
+        "mhz": 615,
+        "edgeMv": 637.9,
+        "stockMv": 745,
+        "headroomMv": 107.1
+      },
+      {
+        "mhz": 607,
+        "edgeMv": 632.2,
+        "stockMv": 745,
+        "headroomMv": 112.8
+      },
+      {
+        "mhz": 600,
+        "edgeMv": 638.8,
+        "stockMv": 745,
+        "headroomMv": 106.2
+      },
+      {
+        "mhz": 592,
+        "edgeMv": 640.8,
+        "stockMv": 745,
+        "headroomMv": 104.2
+      },
+      {
+        "mhz": 585,
+        "edgeMv": 632.4,
+        "stockMv": 745,
+        "headroomMv": 112.6
+      },
+      {
+        "mhz": 577,
+        "edgeMv": 635.8,
+        "stockMv": 745,
+        "headroomMv": 109.2
+      },
+      {
+        "mhz": 570,
+        "edgeMv": 641.5,
+        "stockMv": 745,
+        "headroomMv": 103.5
+      },
+      {
+        "mhz": 562,
+        "edgeMv": 631.2,
+        "stockMv": 745,
+        "headroomMv": 113.8
+      },
+      {
+        "mhz": 555,
+        "edgeMv": 640,
+        "stockMv": 745,
+        "headroomMv": 105
+      },
+      {
+        "mhz": 547,
+        "edgeMv": 635.7,
+        "stockMv": 745,
+        "headroomMv": 109.3
+      },
+      {
+        "mhz": 540,
+        "edgeMv": 638.2,
+        "stockMv": 745,
+        "headroomMv": 106.8
+      },
+      {
+        "mhz": 532,
+        "edgeMv": 629.1,
+        "stockMv": 745,
+        "headroomMv": 115.9
+      },
+      {
+        "mhz": 525,
+        "edgeMv": 637.4,
+        "stockMv": 745,
+        "headroomMv": 107.6
+      },
+      {
+        "mhz": 517,
+        "edgeMv": 639.4,
+        "stockMv": 745,
+        "headroomMv": 105.6
+      },
+      {
+        "mhz": 510,
+        "edgeMv": 638.6,
+        "stockMv": 745,
+        "headroomMv": 106.4
+      },
+      {
+        "mhz": 502,
+        "edgeMv": 627.9,
+        "stockMv": 745,
+        "headroomMv": 117.1
+      },
+      {
+        "mhz": 495,
+        "edgeMv": 628.8,
+        "stockMv": 745,
+        "headroomMv": 116.2
+      },
+      {
+        "mhz": 487,
+        "edgeMv": 645.5,
+        "stockMv": 745,
+        "headroomMv": 99.5
+      },
+      {
+        "mhz": 480,
+        "edgeMv": 646,
+        "stockMv": 740,
+        "headroomMv": 94
+      },
+      {
+        "mhz": 472,
+        "edgeMv": 643.6,
+        "stockMv": 740,
+        "headroomMv": 96.4
+      },
+      {
+        "mhz": 465,
+        "edgeMv": 633.9,
+        "stockMv": 740,
+        "headroomMv": 106.1
+      },
+      {
+        "mhz": 457,
+        "edgeMv": 640,
+        "stockMv": 740,
+        "headroomMv": 100
+      },
+      {
+        "mhz": 450,
+        "edgeMv": 652.9,
+        "stockMv": 740,
+        "headroomMv": 87.1
+      },
+      {
+        "mhz": 442,
+        "edgeMv": 643.6,
+        "stockMv": 740,
+        "headroomMv": 96.4
+      },
+      {
+        "mhz": 435,
+        "edgeMv": 657.2,
+        "stockMv": 740,
+        "headroomMv": 82.8
+      },
+      {
+        "mhz": 427,
+        "edgeMv": 662.4,
+        "stockMv": 740,
+        "headroomMv": 77.6
+      },
+      {
+        "mhz": 420,
+        "edgeMv": 651.1,
+        "stockMv": 740,
+        "headroomMv": 88.9
+      },
+      {
+        "mhz": 412,
+        "edgeMv": 654.2,
+        "stockMv": 740,
+        "headroomMv": 85.8
+      },
+      {
+        "mhz": 405,
+        "edgeMv": 663.1,
+        "stockMv": 740,
+        "headroomMv": 76.9
+      },
+      {
+        "mhz": 397,
+        "edgeMv": 661.4,
+        "stockMv": 740,
+        "headroomMv": 78.6
+      },
+      {
+        "mhz": 390,
+        "edgeMv": 663.1,
+        "stockMv": 740,
+        "headroomMv": 76.9
+      },
+      {
+        "mhz": 382,
+        "edgeMv": 671.9,
+        "stockMv": 740,
+        "headroomMv": 68.1
+      },
+      {
+        "mhz": 375,
+        "edgeMv": 673.4,
+        "stockMv": 740,
+        "headroomMv": 66.6
+      },
+      {
+        "mhz": 367,
+        "edgeMv": 683.5,
+        "stockMv": 740,
+        "headroomMv": 56.5
+      },
+      {
+        "mhz": 360,
+        "edgeMv": 673.4,
+        "stockMv": 740,
+        "headroomMv": 66.6
+      },
+      {
+        "mhz": 352,
+        "edgeMv": 678.2,
+        "stockMv": 740,
+        "headroomMv": 61.8
+      },
+      {
+        "mhz": 345,
+        "edgeMv": 677.2,
+        "stockMv": 740,
+        "headroomMv": 62.8
+      },
+      {
+        "mhz": 337,
+        "edgeMv": 688.3,
+        "stockMv": 735,
+        "headroomMv": 46.7
+      },
+      {
+        "mhz": 330,
+        "edgeMv": 677.4,
+        "stockMv": 735,
+        "headroomMv": 57.6
+      },
+      {
+        "mhz": 322,
+        "edgeMv": 686.6,
+        "stockMv": 735,
+        "headroomMv": 48.4
+      },
+      {
+        "mhz": 315,
+        "edgeMv": 691.7,
+        "stockMv": 735,
+        "headroomMv": 43.3
+      },
+      {
+        "mhz": 307,
+        "edgeMv": 685.5,
+        "stockMv": 735,
+        "headroomMv": 49.5
+      },
+      {
+        "mhz": 300,
+        "edgeMv": 689.6,
+        "stockMv": 735,
+        "headroomMv": 45.4
+      },
+      {
+        "mhz": 292,
+        "edgeMv": 696.7,
+        "stockMv": 735,
+        "headroomMv": 38.3
+      },
+      {
+        "mhz": 285,
+        "edgeMv": 704.7,
+        "stockMv": 735,
+        "headroomMv": 30.3
+      },
+      {
+        "mhz": 277,
+        "edgeMv": 694.1,
+        "stockMv": 735,
+        "headroomMv": 40.9
+      },
+      {
+        "mhz": 270,
+        "edgeMv": 703.2,
+        "stockMv": 735,
+        "headroomMv": 31.8
+      },
+      {
+        "mhz": 262,
+        "edgeMv": 708.7,
+        "stockMv": 735,
+        "headroomMv": 26.3
+      },
+      {
+        "mhz": 255,
+        "edgeMv": 714.9,
+        "stockMv": 735,
+        "headroomMv": 20.1
+      },
+      {
+        "mhz": 247,
+        "edgeMv": 712.3,
+        "stockMv": 735,
+        "headroomMv": 22.7
+      },
+      {
+        "mhz": 240,
+        "edgeMv": 714.1,
+        "stockMv": 735,
+        "headroomMv": 20.9
+      },
+      {
+        "mhz": 232,
+        "edgeMv": 713.5,
+        "stockMv": 735,
+        "headroomMv": 21.5
+      },
+      {
+        "mhz": 225,
+        "edgeMv": 724.2,
+        "stockMv": 735,
+        "headroomMv": 10.8
+      },
+      {
+        "mhz": 217,
+        "edgeMv": 721.6,
+        "stockMv": 735,
+        "headroomMv": 13.4
+      },
+      {
+        "mhz": 210,
+        "edgeMv": 727,
+        "stockMv": 735,
+        "headroomMv": 8
+      },
+      {
+        "mhz": 202,
+        "edgeMv": 724.7,
+        "stockMv": 735,
+        "headroomMv": 10.3
+      },
+      {
+        "mhz": 195,
+        "edgeMv": 711.4,
+        "stockMv": 725,
+        "headroomMv": 13.6
+      },
+      {
+        "mhz": 187,
+        "edgeMv": 725,
+        "stockMv": 725,
+        "headroomMv": 0
+      },
+      {
+        "mhz": 180,
+        "edgeMv": 450,
+        "stockMv": 450,
+        "headroomMv": 0
+      }
+    ],
+    "failure": {
+      "scaleMv": 5.678946626372635,
+      "referenceSeconds": 10,
+      "classDepthMv": {
+        "sdcUntil": 10,
+        "crashUntil": 25
+      },
+      "shapeFactor": {
+        "sdc_fma": 1,
+        "branchy": 1.35
+      },
+      "perLaunchSeconds": 0.132,
+      "hangAtOrBelowMv": null
+    }
+  },
+  "physics": {
+    "origin": "СГЕНЕРИРОВАНО: семя 2004 · амплитуда 0.7 · архетип drifty — карточки ширин в card-generator.AXES",
+    "power": {
+      "limitW": 320,
+      "staticW": 37.863,
+      "perMhzVolt2": 0.093538
+    },
+    "tableDriftMhzPerC": -2.544,
+    "edgeShift": {
+      "mvPerC": 2.428,
+      "refC": 41
+    }
+  },
+  "provenance": "СГЕНЕРИРОВАНО семенем 2004, амплитуда 0.7, архетип drifty — ВЫМЫСЕЛ²: этой карты не существует и как замера; зелёный цикл на ней — утверждение о ЛОГИКЕ движка"
+}
