@@ -133,6 +133,15 @@
 **Trigger:** негативный тест не срабатывает → прогони его с заведомо избыточным параметром, прежде чем искать «правильный» · завёл сторожа → спроси, кто во всей системе способен его покраснить сквозным путём · упёрся в закрытый словарь → это write-gate, а не задача.
 → link: `bugs/69` · `automation-engine/lib/virtual-gpu.mjs` → `deliveredUnderCurve` · [[EXP-0181]] · [[EXP-0178]].
 
+### EXP-0186 · 2026-08-29 · ❌→✅ · #line-endings #silent-rewrite #tooling-lies #byte-comparing-guards
+**Context:** editing canon `.md` files through a python helper (`io.open(p,'w').write(s)`) during the session-65 backlog work.
+**Tried / did:** eight documents rewritten that way; then `npm run selftest:all` went RED on `check` — «МОЛИТВА РАЗОШЛАСЬ с PHILOSOPHY.md».
+**Result:** ❌ the prayer had NOT drifted by a single character. Python's text mode translates `\n` to `os.linesep` on write, so every touched file silently became **fully CRLF** (STATUS.md: 1956 CRLF / 0 lone LF) while `PHILOSOPHY.md` stayed LF — and the prayer guard compares BYTES. ✅ cured by the guard's own prescription (`node tools/prayer.mjs --apply`); the repository was never damaged (`core.autocrlf=true`, blobs hold 0 CR).
+**Lesson:** **an editing helper that does not name its line-ending policy has one anyway, and it is the platform's.** Open with `newline=''` on BOTH read and write when editing existing files — a whole-file ending flip is invisible in a diff (git normalizes it) and surfaces far away, as a false red in a byte-comparing guard. Corollary for reading a red: when a guard says two texts differ and they visibly do not, compare their BYTES before believing the content drifted.   → link: `tools/prayer.mjs` · `bugs/KAIF/06` (same family, opposite direction) · [[EXP-0012]]
+**Repro:** `python -c "import io;p='X.md';io.open(p,'w',encoding='utf-8').write(io.open(p,encoding='utf-8').read())"` then `node tools/prayer.mjs --check` → РАЗОШЛАСЬ, with the text identical.
+**Trigger:** any script-driven edit of a canon `.md` → `newline=''`, and re-run `npm run check` before committing.
+**Not for:** files the project deliberately keeps CRLF; the rule is *preserve what was there*, not *force LF*.
+
 ### EXP-0182 · 2026-08-29 · ❌→✅ · #diagnosis-from-evidence #inherited-diagnosis #reproduce-first
 **Context:** эстафета несла готовый диагноз по ловушке P1: «спуск до 1000 мВ не дошёл — придуманный край карты лежит ВЫШЕ напряжения зависания», и готовое действие: увести край глубже, якоря как у `T4`. Соблазн был исполнить его сразу — оно расписано, измерено, осталось напечатать.
 **Tried / did:** сперва воспроизвёл. Край карты на полосе оказался 861…872 мВ — на 130 мВ НИЖЕ зависания, то есть уводить нечего. А прогон показал `1010 мВ … ПРОШЛО` и следом `1000 мВ … CRASH`: спуск ДОШЁЛ, граница легла РОВНО на объявленную ступень зависания, и отказ нёс текст «зависшее ядро». Это невзведённая ветка ЗАВИСа: она возвращает `ETIMEDOUT`, а слой вердикта честно называет такое CRASH-ем.

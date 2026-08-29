@@ -335,6 +335,14 @@ const PAGE_CSS = [
   '.bar{margin-top:9px;display:flex;flex-wrap:wrap;gap:10px;font-size:13px}',
   '.note{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card)}',
   '.note.warn{border-color:var(--err);color:var(--err)}',
+  // bugs/66: the ask block — the first thing the owner reads.
+  '.ask{margin:14px 0 4px;padding:14px 16px;border-radius:12px;',
+  'background:var(--acc-soft);border:1px solid var(--acc)}',
+  '.ask .what{font-weight:700;font-size:16px;margin:0 0 6px}',
+  '.ask .why{margin:0 0 8px;color:var(--fg)}',
+  '.ask .todo{margin:0;font-weight:600}',
+  '.ask .lbl{font-size:12px;letter-spacing:.14em;text-transform:uppercase;',
+  'color:var(--acc);font-weight:700;margin:0 0 6px}',
   '.note.good{border-color:var(--st-answered);color:var(--st-answered)}',
   '.docsec{margin:0 0 34px}',
   '.docsec h2.dt{font-size:17px;margin:0 0 4px;font-weight:650}',
@@ -815,15 +823,30 @@ function buildPage(model) {
   out.push('<header class="hdr">');
   out.push('<div class="proj">Проект ' + attr(PROJECT) + ' · вопросы к владельцу</div>');
   out.push('<h1>' + inlineMd(headline) + '</h1>');
-  out.push('<div class="sum">');
-  out.push('<span class="pill ok">отвечено ' + totalAnswered + '</span>');
-  out.push('<span class="pill await">ждёт вас ' + totalAwaiting + '</span>');
-  out.push('<span class="pill none">всего вопросов ' + totalQ + '</span>');
-  if (noticeDocs.length) {
-    out.push('<span class="pill none">уведомлений ' + noticeDocs.length + '</span>');
+  // `bugs/66`: with no questions the three counters read «всего вопросов 0» — a report that the
+  // page has nothing to say, shown to a man who came to be asked something. On that route the
+  // counters give way to the ПОСТАНОВКА; where there ARE questions, the questions themselves say it.
+  const askRoute = !model.batch && totalQ === 0;
+  if (askRoute) {
+    const a = askFor(model.docs[0], model.ask);
+    out.push('<div class="ask">');
+    out.push('<p class="lbl">Агент просит вас</p>');
+    out.push('<p class="what">' + inlineMd(a.what) + '</p>');
+    out.push('<p class="why">' + inlineMd(a.why) + '</p>');
+    out.push('<p class="todo">' + inlineMd(a.todo) + '</p>');
+    out.push('</div>');
+    out.push('<div class="sum"><span id="drafted"></span></div>');
+  } else {
+    out.push('<div class="sum">');
+    out.push('<span class="pill ok">отвечено ' + totalAnswered + '</span>');
+    out.push('<span class="pill await">ждёт вас ' + totalAwaiting + '</span>');
+    out.push('<span class="pill none">всего вопросов ' + totalQ + '</span>');
+    if (noticeDocs.length) {
+      out.push('<span class="pill none">уведомлений ' + noticeDocs.length + '</span>');
+    }
+    out.push('<span id="drafted"></span>');
+    out.push('</div>');
   }
-  out.push('<span id="drafted"></span>');
-  out.push('</div>');
   out.push('<div class="bar">');
   out.push('<span id="pulse" class="note">Проверяю связь с агентом…</span>');
   out.push('<span id="restored" class="note" hidden></span>');
@@ -1047,6 +1070,50 @@ function chooseSignalRoute({ platform, quiet, enabled }) {
 }
 
 /**
+ * ПОСТАНОВКА — the SINGLE source of "what is wanted of the owner" (`bugs/66`).
+ *
+ * The defect this removes: the contour KNEW what it wanted — the voice said «нужна ваша вычитка» —
+ * while the PAGE the owner was looking at stayed silent, showing three zero counters instead. The
+ * owner asked twice, verbatim: «Что от меня нужно?» and «Зачем показываешь мне это? Что хочешь?».
+ *
+ * The fix is not a second text. Both outputs — the page block and the spoken phrase — are built
+ * from THIS function, so they cannot drift: a pair REMOVED rather than watched
+ * (`AGENT_GUIDE.md` → the truth<->mirror pairs registry).
+ *
+ * Three parts, always: what this is · why it is in front of you · what closes it.
+ * `askText` is the caller's own line (`--ask "…"`); with none, an honest general formula.
+ */
+function askFor(d, askText) {
+  const title = plainText(d.title);
+  const why = (askText || '').trim();
+
+  if (d.isNotice) {
+    return {
+      what: 'Уведомление: ' + title,
+      why: why || 'Агент показывает это, чтобы вы знали — решения от вас не ждут.',
+      todo: 'Ответ не требуется, нужно только прочитать.',
+    };
+  }
+
+  const q = d.awaiting;
+  if (q > 0) {
+    return {
+      what: 'Интервью: ' + title,
+      why: why || 'Это развилки, которые агент не имеет права решать за вас.',
+      todo: 'Без ответа ' + q + ' ' + plural(q, 'вопрос', 'вопроса', 'вопросов') +
+        ' — ответьте на них на этой странице.',
+    };
+  }
+
+  return {
+    what: 'Вычитка: ' + title,
+    why: why || 'Вопросов в документе нет — агент просит вашу вычитку: согласны ли вы с текстом.',
+    todo: 'Согласны — напишите это одной строкой в поле внизу; не согласны — оставьте замечание, ' +
+      'и агент переработает. Достаточно одного комментария.',
+  };
+}
+
+/**
  * The call phrase: document type + name + the COUNT of unanswered questions. The owner decides
  * "now or after the current task" BEFORE opening the page. Markdown symbols are stripped — in the
  * field markdown leaked into the voice (C8).
@@ -1068,15 +1135,9 @@ function callPhrase(model) {
     return say(s);
   }
 
-  const d = model.docs[0];
-  if (d.isNotice) {
-    return say(head + 'Уведомление: ' + d.title + '. Ответ не требуется, нужно только прочитать.');
-  }
-  const q = d.awaiting;
-  return say(head + 'Интервью: ' + d.title + '. ' +
-    (q > 0
-      ? ('Без ответа ' + q + ' ' + plural(q, 'вопрос', 'вопроса', 'вопросов') + '.')
-      : 'Вопросов без ответа нет, нужна ваша вычитка.'));
+  // ONE source with the page (`bugs/66`): the voice no longer writes its own wording.
+  const a = askFor(model.docs[0], model.ask);
+  return say(head + a.what + '. ' + a.todo);
 }
 
 /** Spawn a detached child with a hard deadline. Never awaited by the caller (I32). */
@@ -1554,6 +1615,8 @@ function parseArgs(argv) {
     target: null, serve: true, out: null, signal: true, batch: false,
     timeoutS: DEF5_TIMEOUT_S, by: OWNER, open: true,
     quietFrom: QUIET_FROM, quietTo: QUIET_TO,
+    // bugs/66: the caller's own «why this is in front of you». Absent — an honest general formula.
+    ask: '',
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -1563,6 +1626,7 @@ function parseArgs(argv) {
     else if (a === '--batch') o.batch = true;
     else if (a === '--out') o.out = argv[++i];
     else if (a === '--by') o.by = argv[++i];
+    else if (a === '--ask') o.ask = argv[++i] || '';
     else if (a === '--timeout') o.timeoutS = Number(argv[++i]) || 0;
     else if (a === '--quiet-from') o.quietFrom = argv[++i];
     else if (a === '--quiet-to') o.quietTo = argv[++i];
@@ -1683,6 +1747,7 @@ function main(argv) {
     batch: opts.batch,
     serve: opts.serve,
     by: opts.by,
+    ask: opts.ask,
     // The draft key must NOT contain the port: the port changes on every launch (I30) and a
     // port-keyed draft would be lost every time (T6/I12).
     storageKey: key + ':' + docs.map((d) => d.name).join('|'),
@@ -1760,4 +1825,4 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   main(process.argv.slice(2));
 }
 
-export { buildPage, callPhrase, chooseSignalRoute, collectDocs, loadDoc, readMeta, isWaiting, splitDocument };
+export { askFor, buildPage, callPhrase, chooseSignalRoute, collectDocs, loadDoc, readMeta, isWaiting, splitDocument };

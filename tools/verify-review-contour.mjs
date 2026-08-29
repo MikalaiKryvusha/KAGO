@@ -33,6 +33,9 @@ import { fileURLToPath } from 'node:url';
 import * as core from './lib/review-core.mjs';
 import { repoFromTarget, sendUpstream } from './send-upstream.mjs';
 import { scanDocumentForOwnerQuestions } from './questions-guard.mjs';
+// bugs/66: the ask block and the spoken phrase must come from ONE function; the blocks
+// below compare the two OUTPUTS against each other, never against a written constant.
+import { askFor, callPhrase, loadDoc } from './review.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REVIEW = join(HERE, 'review.mjs');
@@ -277,9 +280,10 @@ function postSave(url, payload) {
 }
 
 /** Render a document to HTML without a server — the cheap path for the page-content checks. */
-async function renderOnly(docPath) {
+async function renderOnly(docPath, extraArgs) {
   const out = join(dirname(docPath), 'preview.html');
-  const child = spawn(process.execPath, [REVIEW, docPath, '--no-serve', '--no-signal', '--out', out], { windowsHide: true });
+  const args = [REVIEW, docPath, '--no-serve', '--no-signal', '--out', out].concat(extraArgs || []);
+  const child = spawn(process.execPath, args, { windowsHide: true });
   let log = '';
   child.stdout.on('data', (c) => { log += c.toString('utf8'); });
   child.stderr.on('data', (c) => { log += c.toString('utf8'); });
@@ -634,6 +638,89 @@ block('ANSWERABLE', 'the page is refused over a document the owner could not ans
   must(code === 2, `the raise did not refuse: exit ${code} · ${tail(out)}`);
   must(/СТРАНИЦА НЕ ПОДНЯТА/u.test(out), `the refusal is not the one we mean: ${tail(out)}`);
   must(!/СТРАНИЦА: http/u.test(out), `a page was raised anyway: ${tail(out)}`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// bugs/66 — ПОСТАНОВКА: страница обязана сказать владельцу, ЧТО от него нужно.
+//
+// АДРЕСНОСТЬ МУТАЦИЙ ОБЪЯВЛЕНА ДО ПРОГОНА (канон судьи, KAIF 2.1):
+//   мутант «снять блок .ask из buildPage»          → краснеет РОВНО N1 (и N3 как следствие чтения
+//                                                     страницы), никакой другой блок набора;
+//   мутант «вернуть голосу собственную формулировку» → краснеет РОВНО N3;
+//   мутант «игнорировать --ask»                     → краснеет РОВНО N2;
+//   целый код                                       → 0 красных.
+// ---------------------------------------------------------------------------------------------
+
+/** A document with prose and NOT ONE question — the route bugs/66 was found on. */
+function docWithNoQuestions() {
+  return [
+    '# Тихий документ без вопросов',
+    '',
+    'Это текст, который агент показывает владельцу на вычитку.',
+    'Вопросов в нём нет ни одного.',
+    '',
+  ].join('\n');
+}
+
+block('N1', 'a page with NO questions says what is wanted of the owner (bugs/66)', async () => {
+  const dir = freshDir('n1');
+  const docPath = join(dir, 'notice_910_silent.md');
+  writeFileSync(docPath, docWithNoQuestions(), 'utf8');
+  const html = await renderOnly(docPath);
+
+  must(/<div class="ask">/u.test(html),
+    'the page carries no ПОСТАНОВКА block at all — this is exactly bugs/66: the owner asked ' +
+    '«Что от меня нужно?» and the page had no answer');
+
+  const askBlock = (html.match(/<div class="ask">[\s\S]*?<\/div>/u) || [''])[0];
+  must(/class="what"/u.test(askBlock), 'ПОСТАНОВКА does not say WHAT this document is');
+  must(/class="why"/u.test(askBlock), 'ПОСТАНОВКА does not say WHY it is in front of the owner');
+  must(/class="todo"/u.test(askBlock), 'ПОСТАНОВКА does not say WHAT CLOSES it');
+
+  // The three zero counters are what stood there instead of an ask — they must give way, because
+  // «всего вопросов 0» reports the absence of a request to a man who came to be asked something.
+  must(!/class="pill/u.test(html),
+    'the zero counters are still on a page that has no questions (bugs/66 symptom)');
+});
+
+block('N2', 'the caller can put its own line into the ask, and without it a formula stands', async () => {
+  const dir = freshDir('n2');
+  const docPath = join(dir, 'notice_911_ask.md');
+  writeFileSync(docPath, docWithNoQuestions(), 'utf8');
+
+  const mine = 'Это оперативный слой определений, без вашего утверждения он не действует.';
+  const withAsk = await renderOnly(docPath, ['--ask', mine]);
+  must(withAsk.includes(mine), '--ask did not reach the page — the caller cannot say why it asks');
+
+  const without = await renderOnly(docPath);
+  must(!without.includes(mine), 'the page carries the caller line that was never passed');
+  const block2 = (without.match(/<div class="ask">[\s\S]*?<\/div>/u) || [''])[0];
+  must(/\S/u.test(block2.replace(/<[^>]+>/gu, '').trim()),
+    'with no --ask the ПОСТАНОВКА is empty — a general formula must stand there, not a hole');
+});
+
+block('N3', 'the page and the VOICE say the same thing, because one function feeds both', async () => {
+  const dir = freshDir('n3');
+  const docPath = join(dir, 'notice_912_pair.md');
+  writeFileSync(docPath, docWithNoQuestions(), 'utf8');
+  const html = await renderOnly(docPath);
+
+  const queue = core.readQueue(dir);
+  const d = loadDoc(docPath, queue);
+  const a = askFor(d, '');
+  const phrase = callPhrase({ batch: false, docs: [d], ask: '' });
+
+  // Compared against EACH OTHER, never against a literal: a block that asserted a written string
+  // would go green on any text and prove nothing about the pair (risk 2 of the plan).
+  must(phrase.includes(a.what),
+    'the spoken phrase no longer carries what askFor() says the document is — the voice has ' +
+    'started writing its own wording, and the pair bugs/66 removed is back');
+  must(phrase.includes(a.todo),
+    'the spoken phrase no longer carries what askFor() says closes the document');
+
+  const plain = html.replace(/<[^>]+>/gu, ' ').replace(/\s+/gu, ' ');
+  must(plain.includes(a.what), 'the PAGE no longer carries what askFor() says the document is');
+  must(plain.includes(a.todo), 'the PAGE no longer carries what askFor() says closes the document');
 });
 
 block('GATE', 'an artifact approval survives the owner\'s next answer, and the refusal names the truth', async () => {
