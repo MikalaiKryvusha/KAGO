@@ -555,6 +555,9 @@ async function mainTuneN(argv) {
           ...(scenario === 'healthy' ? ['--twin-arm'] : ['--twin-death', scenario])],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
         const ev = await collectRescueEvidence();
+        // Лог прогона кладётся В ПЕСОЧНИЦУ этого прогона, а не теряется: разбор первой же аномалии
+        // сетки (`bugs/67`) начался с того, что лога не было и пришлось воспроизводить руками.
+        if (ev.runDir) writeFileSync(join(ev.runDir, 'engine.log'), `${r.stdout ?? ''}\n${r.stderr ?? ''}`, 'utf8');
         const intents = ev.fuse.filter((l) => l.phase === 'intent');
         const stallsSurvived = fuseMod.countStallsBeforeTrip(ev.ring);
         const outcome = fuseMod.classifyTuneOutcome({
