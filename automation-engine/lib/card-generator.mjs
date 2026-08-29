@@ -66,7 +66,14 @@ const mul = (rng, width, A) => 1 + (rng() * 2 - 1) * width * A;
  * ДЕТЕРМИНИЗМ: единственный источник случайности — mulberry32(seed); перевыборка продолжает ТОТ ЖЕ
  * поток, поэтому (seed, A, archetype) → байты файла воспроизводятся всегда (P70-AC1).
  */
-export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir = 'curves' } = {}) {
+export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir = 'curves',
+  // ШОВ ВАЛИДАТОРА — ЗАВЕДЁН РАДИ СТОРОЖА, А НЕ РАДИ ГИБКОСТИ (`plans/70` шаг 5, риск 1 плана).
+  // Счётчик перевыборок существует против «генератор научится обходить валидатор»: молчаливая
+  // подгонка до зелёного прячет кривой генератор. Но на здоровых картах перевыборок НОЛЬ — то есть
+  // счётчик не краснел НИ РАЗУ, а сторож, который никогда не срабатывал, не доказывает ничего
+  // (`BUG_FIXING_FRAMEWORK.md` → Guards). Подставной валидатор — единственный способ прогнать
+  // ветку перевыборки, не подделывая карту. В бою параметр не передаётся никогда.
+  validate = validateCard } = {}) {
   const arch = ARCHETYPES[archetype];
   if (!arch) return { ok: false, why: `нет такого архетипа: ${archetype} (есть: ${Object.keys(ARCHETYPES).join(', ')})` };
   if (!(amplitude >= 0 && amplitude <= 1)) return { ok: false, why: `амплитуда ${amplitude} вне [0,1]` };
@@ -116,7 +123,7 @@ export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir
     card.provenance = `СГЕНЕРИРОВАНО семенем ${seed}, амплитуда ${A}, архетип ${archetype} — `
       + 'ВЫМЫСЕЛ²: этой карты не существует и как замера; зелёный цикл на ней — утверждение о ЛОГИКЕ движка';
 
-    const chk = validateCard(card);
+    const chk = validate(card);
     if (chk.ok) return { ok: true, card, redraws: attempt, lastRefusal: null };
     // Перевыборка продолжает тот же поток — детерминизм сохранён; причина копится для сводки.
     if (attempt === REDRAW_CAP) {
@@ -209,6 +216,30 @@ function cmdSelftest() {
     batch.spans.limitW.min >= 250 && batch.spans.limitW.max <= 350
     && batch.spans.driftMhzPerC.min >= -3 && batch.spans.driftMhzPerC.max <= -0.5
     && batch.spans.scaleMv.min >= 2 && batch.spans.scaleMv.max <= 6);
+
+  // ─── СЧЁТЧИК ПЕРЕВЫБОРОК СУДИТСЯ ТЕМ, ЧТО ЕГО ЗАСТАВЛЯЕТ СЧИТАТЬ (`plans/70` шаг 5) ────────────
+  // Прежний блок пакета проверял `Number.isFinite(batch.redraws)` — то есть ЛЮБОЕ число, включая
+  // намертво зашитый ноль. На здоровых картах перевыборок и правда ноль, поэтому счётчик не
+  // краснел ни разу и охранял риск 1 плана («генератор научится обходить валидатор») только на
+  // словах. Подставной валидатор отказывает ровно N первых раз — и счётчик обязан назвать N.
+  {
+    const refuseFirst = (n) => { let seen = 0; return (card) => (seen++ < n ? { ok: false, field: 'проба', why: 'подставной отказ' } : validateCard(card)); };
+    const twice = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky', validate: refuseFirst(2) });
+    ok('счётчик перевыборок СЧИТАЕТ: два отказа валидатора — два счёта, карта всё равно годна (P70-AC2)',
+      twice.ok === true && twice.redraws === 2, `ok=${twice.ok} redraws=${twice.redraws}`);
+    // И перевыборка не ломает детерминизм: тот же посев и тот же отказывающий валидатор дают тот же файл.
+    const twiceAgain = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky', validate: refuseFirst(2) });
+    ok('перевыборка НЕ ломает детерминизм: та же тройка и тот же отказ — байт-идентичная карта',
+      twice.ok && twiceAgain.ok && sha(twice.card) === sha(twiceAgain.card));
+    // ⚠️ И перевыбранная карта ОТЛИЧАЕТСЯ от невыбраной: поток случайности продолжается, а не
+    // перезапускается. Иначе «перевыборка» была бы тем же броском под другим именем.
+    ok('перевыборка ПРОДОЛЖАЕТ поток: карта после двух отказов НЕ равна карте без отказов',
+      twice.ok && a.ok && sha(twice.card) !== sha(a.card));
+    const never = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky', validate: () => ({ ok: false, field: 'проба', why: 'всегда отказ' }) });
+    ok('вечный отказ — ГРОМКИЙ отказ на потолке перевыборок, а не тихая выдача негодной карты',
+      never.ok === false && never.redraws === REDRAW_CAP && /СДАЛСЯ/u.test(never.why),
+      `ok=${never.ok} redraws=${never.redraws}`);
+  }
 
   ok('происхождение: каждый файл несёт строку «вымысел²» и семя (P70-AC4)',
     /ВЫМЫСЕЛ²/u.test(a.card.provenance) && a.card.provenance.includes('семенем 42')
