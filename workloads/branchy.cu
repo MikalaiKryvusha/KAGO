@@ -138,10 +138,15 @@ static uint64_t fnv1a(const void *data, size_t bytes) {
 int main(int argc, char **argv) {
     // Flags and positionals kept apart; positionals 0..2 keep their old meaning exactly.
     int sustain_s = 0;
+    // ⚡ ВХОД 2 ПРЕДОХРАНИТЕЛЯ (эпик 51 фаза 5в, `plans/66`, разведка `researches/24`) — та же
+    // правка, что в `furnace.cu`, и по той же причине: хостовый цикл знает момент отгрузки работы.
+    // БЕЗ АРГУМЕНТА — НИ ОДНОГО СИСТЕМНОГО ВЫЗОВА, дефолт бит-в-бит прежний.
+    const char *progress_file = NULL;   // [NOT-TESTED]
     int pos[3] = { 20000, 256, 256 };
     int npos = 0;
     for (int a = 1; a < argc; ++a) {
         if (strcmp(argv[a], "--sustain") == 0 && a + 1 < argc) { sustain_s = atoi(argv[++a]); continue; }
+        if (strcmp(argv[a], "--progress-file") == 0 && a + 1 < argc) { progress_file = argv[++a]; continue; }
         if (npos < 3) pos[npos++] = atoi(argv[a]);
     }
     const int steps   = pos[0];
@@ -241,6 +246,13 @@ int main(int argc, char **argv) {
         for (int k = 0; k < ndistinct; ++k) { if (seen[k] == c) { known = true; break; } }
         if (!known && ndistinct < MAX_DISTINCT) seen[ndistinct++] = c;
         launches++;
+
+        // ⚡ Сердцебиение прогресса — после сверки запуска с эталоном, а не до неё: удар обязан
+        // докладывать об отгруженной и проверенной работе, а не о намерении (`plans/66`).
+        if (progress_file) {
+            FILE *pf = fopen(progress_file, "w");
+            if (pf) { fprintf(pf, "%lld\n", launches); fclose(pf); }
+        }
 
         if (sustain_s <= 0) break;
         const long long elapsed_us =

@@ -237,6 +237,13 @@ static void no_spaces(char *dst, size_t cap, const char *src) {
 
 int main(int argc, char **argv) {
     int sustain_s = 0;
+    // ⚡ ВХОД 2 ПРЕДОХРАНИТЕЛЯ (эпик 51 фаза 5в, `plans/66`, разведка `researches/24`).
+    // Судья-предохранитель умеет два входа: живость системы (удары пробы) и ПРОГРЕСС нашей
+    // собственной работы. У второго не было источника — а он всё это время был здесь: цикл
+    // `--sustain` ХОСТОВЫЙ, и после `cudaEventSynchronize` + `memcpy` + сверки хост ТОЧНО знает,
+    // что запуск отгружен. Не хватало одного — сказать об этом вслух.
+    // БЕЗ ЭТОГО АРГУМЕНТА НЕ ДЕЛАЕТСЯ НИ ОДНОГО СИСТЕМНОГО ВЫЗОВА: дефолт бит-в-бит прежний.
+    const char *progress_file = NULL;   // [NOT-TESTED]
     // THE DEFAULTS ARE THE MEASURED WINNER, not a guess (EXP-0078 — a shape that lives in an
     // argument someone must remember to type is a hope with a citation). Grid of 2026-08-22, 10 s
     // per point, sampler and workload measured independently:
@@ -254,6 +261,7 @@ int main(int argc, char **argv) {
     int npos = 0;
     for (int a = 1; a < argc; ++a) {
         if (strcmp(argv[a], "--sustain") == 0 && a + 1 < argc) { sustain_s = atoi(argv[++a]); continue; }
+        if (strcmp(argv[a], "--progress-file") == 0 && a + 1 < argc) { progress_file = argv[++a]; continue; }
         if (npos < 4) pos[npos++] = atoi(argv[a]);
     }
     const int iters      = pos[0];
@@ -342,6 +350,16 @@ int main(int argc, char **argv) {
         for (int k = 0; k < ndistinct; ++k) { if (seen[k] == sum) { known = true; break; } }
         if (!known && ndistinct < MAX_DISTINCT) seen[ndistinct++] = sum;
         launches++;
+
+        // ⚡ Сердцебиение прогресса — ЗДЕСЬ и нигде раньше: выше по циклу стоят event-sync, memcpy
+        // и сверка с эталоном, то есть к этой строке работа РЕАЛЬНО отгружена картой и проверена.
+        // Удар, поставленный до сверки, докладывал бы о намерении, а не о прогрессе.
+        if (progress_file) {
+            FILE *pf = fopen(progress_file, "w");
+            if (pf) { fprintf(pf, "%lld\n", launches); fclose(pf); }
+            // Отказ открытия НАМЕРЕННО молчалив: прожиг — измерительный прибор, и он не смеет
+            // упасть из-за диагностики. Судья увидит замерший счётчик и решит сам.
+        }
 
         timespec_get(&t1, TIME_UTC);
     } while ((t1.tv_sec - t0.tv_sec) < sustain_s);
