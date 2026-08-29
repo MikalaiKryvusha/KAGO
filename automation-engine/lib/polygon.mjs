@@ -89,6 +89,18 @@ export function coverageOf(cards) {
   return { axes, byArch, cards: cards.filter(Boolean).length };
 }
 
+/**
+ * У скольких прогонов ФАКТУРА ПРОЖИГОВ вообще собралась.
+ *
+ * ⚠️ ВЫНЕСЕНО ИЗ `runBatch` РАДИ ПРОВЕРЯЕМОСТИ, и это оплачено мутацией: пока счёт стоял строкой
+ * внутри пакетного прогона, мутация «вернуть 99» проходила ЗЕЛЁНОЙ — блок судил ОТЧЁТ, а до самого
+ * счёта офлайн было не добраться (нужен был настоящий прогон). Число, которое никто не может
+ * покрасить, — не сторож, а украшение.
+ */
+export function countWithBurns(results) {
+  return results.filter((r) => (r?.evidence?.burns ?? []).length > 0).length;
+}
+
 /** Прогнать ОДНУ карту через полный цикл и осудить. Возвращает улики и вердикт. */
 export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDepthMv = 300, timeoutMs = 300000 }) {
   const gen = generateCard({ seed, amplitude, archetype });
@@ -176,6 +188,7 @@ export function runBatch({ count = 30, amplitude = 0.7, seedBase = 1000,
     count, amplitude, seedBase, seconds,
     passed: results.filter((r) => r.judged?.ok).length,
     broken, failedToRun, results,
+    withBurns: countWithBurns(results),
     coverage: coverageOf(results.map((r) => (r.ok ? r : null))),
     fingerprintHeld: JSON.stringify(before) === JSON.stringify(liveFingerprint()),
   };
@@ -188,6 +201,12 @@ export function reportLines(batch) {
   L.push(`ПОЛИГОН: карт ${batch.count} · пройдено ${batch.passed} · сломано ${batch.broken.length}`
     + `${batch.failedToRun.length ? ` · не запустилось ${batch.failedToRun.length}` : ''}`);
   L.push(`ВРЕМЯ: ${batch.seconds.toFixed(1)} с (${(batch.seconds / batch.count).toFixed(1)} с на карту)`);
+  // ⚠️ ТИХАЯ ДЕГРАДАЦИЯ ОБЪЯВЛЯЕТСЯ ВСЛУХ. Путь песочницы полигон берёт из НАПЕЧАТАННОЙ строки
+  // прогона; поменяется формулировка — фактура не соберётся, и сторож И6 будет молча пропускать
+  // карту за картой, оставаясь зелёным. Число собранных фактур в отчёте превращает эту поломку
+  // из невидимой в заметную с первого взгляда.
+  L.push(`ФАКТУРА ПРОЖИГОВ: собрана у ${batch.withBurns ?? 0} из ${batch.passed + batch.broken.length} прогнанных карт`
+    + `${(batch.withBurns ?? 0) === 0 ? ' — 🔴 НИ ОДНОЙ: сторож И6 не судил НИЧЕГО' : ''}`);
   L.push(`ЖИВЫЕ АРТЕФАКТЫ: отпечаток ${batch.fingerprintHeld ? 'СОШЁЛСЯ' : '🔴 РАЗОШЁЛСЯ'} до и после пакета`);
   L.push('ПОКРЫТИЕ ПО ОСЯМ (иначе «30 карт» неотличимо от «30 раз одна карта»):');
   for (const [axis, a] of Object.entries(batch.coverage.axes)) {
@@ -251,6 +270,25 @@ function cmdSelftest() {
     rep.some((l) => l.includes('ВЫМЫСЕЛ²')) && rep.some((l) => l.includes('правильного края у вымысла нет')));
   ok('отчёт называет ВРЕМЯ числом, и на карту тоже',
     rep.some((l) => /ВРЕМЯ: 10\.0 с \(5\.0 с на карту\)/.test(l)));
+  // ⚠️ ТИХАЯ ДЕГРАДАЦИЯ ОБЯЗАНА БЫТЬ ГРОМКОЙ. Ноль собранных фактур означает, что сторож И6 не
+  // судил НИЧЕГО и полигон зелен по пустоте — это самый опасный вид зелёного, и он называется.
+  ok('отчёт называет, у скольких карт собрана ФАКТУРА, и кричит на нуле',
+    (() => {
+      const zero = reportLines({ count: 2, amplitude: 0.7, seedBase: 1, seconds: 10, passed: 2, failedToRun: [], broken: [], coverage: cov, fingerprintHeld: true, withBurns: 0 });
+      const some = reportLines({ count: 2, amplitude: 0.7, seedBase: 1, seconds: 10, passed: 2, failedToRun: [], broken: [], coverage: cov, fingerprintHeld: true, withBurns: 2 });
+      return [zero.some((l) => l.includes('НИ ОДНОЙ: сторож И6 не судил')), some.some((l) => /ФАКТУРА ПРОЖИГОВ: собрана у 2 из 2/.test(l)),
+        some.some((l) => l.includes('НИ ОДНОЙ'))];
+    })(), [true, true, false]);
+
+  ok('счёт собранных фактур считает ПО УЛИКАМ, а не по числу прогонов',
+    countWithBurns([
+      { evidence: { burns: [{ mhz: 1 }] } },
+      { evidence: { burns: [] } },
+      { evidence: {} },
+      { ok: false },
+      null,
+    ]) === 1);
+
   ok('отчёт называет судьбу отпечатка живых артефактов',
     rep.some((l) => l.includes('ЖИВЫЕ АРТЕФАКТЫ') && l.includes('СОШЁЛСЯ')));
 
