@@ -22,12 +22,12 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.9-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9)
+[![Version](https://img.shields.io/badge/Version-0.9.1-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9.1)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
 [![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
-<p align="center"><strong>Version 0.9</strong> · 2026-08-22</p>
+<p align="center"><strong>Version 0.9.1</strong> · 2026-08-29</p>
 
 <p align="center">
   <a href="#1-general">General</a> · <a href="#2-where-the-project-actually-is">Status</a> · <a href="#3-the-method">The method</a> · <a href="#4-the-four-modes">Modes</a> · <a href="#5-requirements">Requirements</a> · <a href="#6-built-with-kaif">KAIF</a>
@@ -306,12 +306,12 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Версия](https://img.shields.io/badge/Версия-0.9-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9)
+[![Версия](https://img.shields.io/badge/Версия-0.9.1-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9.1)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
 [![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
-<p align="center"><strong>Версия 0.9</strong> · 2026-08-22</p>
+<p align="center"><strong>Версия 0.9.1</strong> · 2026-08-29</p>
 
 <p align="center">
   <a href="#1-общие-сведения">Общие сведения</a> · <a href="#2-где-проект-находится-на-самом-деле">Состояние</a> · <a href="#3-методика">Методика</a> · <a href="#4-четыре-режима">Режимы</a> · <a href="#5-что-нужно">Что нужно</a> · <a href="#6-собран-на-kaif">KAIF</a>

@@ -1,6 +1,6 @@
 {
   "name": "kago",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Krinik Automated GPU Orchestrator — automated undervolting and tuning for NVIDIA GPUs",
   "license": "MIT",
   "author": "Mikalai Kryvusha (KOT KRINIK)",
