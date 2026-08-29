@@ -269,8 +269,11 @@ export function parseQuestionBlock(blockLines, index) {
   flush();
 
   q.bodyText = q.body.join('\n').trim();
-  // A comment WITHOUT an answer never closes a question (C6): answered-ness is the answer alone.
-  q.answered = q.answer !== null;
+  // A comment WITHOUT an answer never closes a question (C6): answered-ness is the answer alone —
+  // and a TEMPLATE PLACEHOLDER is not an answer either (`bugs/04`). Closing the question here, at
+  // the parser, is what makes the page unable to show it as answered in the first place; the
+  // refusal in answerabilityRefusals is the second strike, aimed at the agent.
+  q.answered = q.answer !== null && !isPlaceholderAnswer(q.answer);
   return q;
 }
 
@@ -294,6 +297,30 @@ export function parseQuestionBlock(blockLines, index) {
  *  `interviews/012` (zero recognised questions) as they stood at the moment of the incident; green
  *  after both were repaired. Block «отвечаемость» in tools/verify-review-contour.mjs.]
  */
+/**
+ * IS THIS ANSWER SLOT A TEMPLATE PLACEHOLDER RATHER THAN AN ANSWER? — `bugs/04`.
+ *
+ * On 2026-08-14 the contour was raised over a draft whose answer slot still held the template's own
+ * instruction; the page rendered that question as ALREADY ANSWERED, and the owner — who had answered
+ * nothing — saw it that way. The tool was honest about everything else and still showed him a lie.
+ *
+ * The rule is the one shape a real answer never has: the WHOLE slot wrapped in emphasis. An owner
+ * choosing a variant types `A`; the template speaks in italics — `_(впишите A, B, C…)_`, `_…_`.
+ * Deliberately narrow: emphasis INSIDE an answer is untouched, only a slot that is nothing but
+ * emphasis counts. The refusal reaches the AGENT before the owner is ever called, and the fix is to
+ * empty the slot.
+ */
+export function isPlaceholderAnswer(text) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t) return false;
+  if (t.includes('\n')) return false;                       // a real answer may be long; a slot is one line
+  const m = /^([_*]{1,2})([\s\S]+)\1$/u.exec(t);
+  if (!m) return false;
+  const inner = m[2];
+  if (inner.includes(m[1])) return false;                   // emphasis inside emphasis — not a bare slot
+  return true;
+}
+
 export function answerabilityRefusals(doc) {
   const out = [];
   if (!doc.questions.length) {
@@ -313,6 +340,16 @@ export function answerabilityRefusals(doc) {
         what: 'нет поля «Ответ:»',
         why: 'ответ владельца записывать некуда — он уедет в комментарий, а документ останется «ждёт владельца»',
         fix: 'добавить в блок вопроса строку «**Ответ:**» (пустую) — контур впишет ответ ровно в неё',
+      });
+      continue;
+    }
+    if (isPlaceholderAnswer(q.answer)) {
+      out.push({
+        where: `${doc.file} → ${q.id}`,
+        what: 'в слоте ответа стоит ЗАГЛУШКА ШАБЛОНА, а не ответ',
+        why: 'контур считает такой вопрос ОТВЕЧЕННЫМ и покажет его владельцу закрытым — ровно то, '
+          + 'что случилось 14 августа (`bugs/04`): он увидел отвеченным то, чего не отвечал',
+        fix: 'очистить слот до «**Ответ:**» — подсказку владельцу класть в текст вопроса, не в слот ответа',
       });
     }
   }

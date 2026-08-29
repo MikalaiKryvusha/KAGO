@@ -38,6 +38,7 @@ import { scanDocumentForOwnerQuestions } from './questions-guard.mjs';
 import { askFor, callPhrase, loadDoc } from './review.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const LF = String.fromCharCode(10);
 const REVIEW = join(HERE, 'review.mjs');
 
 // A contour run must never outlive the check that started it (C9 in spirit).
@@ -721,6 +722,45 @@ block('N3', 'the page and the VOICE say the same thing, because one function fee
   const plain = html.replace(/<[^>]+>/gu, ' ').replace(/\s+/gu, ' ');
   must(plain.includes(a.what), 'the PAGE no longer carries what askFor() says the document is');
   must(plain.includes(a.todo), 'the PAGE no longer carries what askFor() says closes the document');
+});
+
+/** A draft whose answer slot still holds the template's own instruction (`bugs/04`). */
+function docWithPlaceholderAnswer() {
+  return [
+    '# Интервью 913 — заглушка в слоте ответа',
+    '',
+    '## Q1. Первый вопрос владельцу?',
+    '',
+    '- **A.** Первый вариант (Рекомендовано)',
+    '- **B.** Второй вариант',
+    '',
+    '**Ответ:** _(впишите A, B, C или свой вариант в D)_',
+    '',
+  ].join(LF);
+}
+
+block('N4', 'a template placeholder in the answer slot is refused, never shown as answered (bugs/04)', async () => {
+  const dir = freshDir('n4');
+  const docPath = join(dir, 'interview_913_placeholder.md');
+  writeFileSync(docPath, docWithPlaceholderAnswer(), 'utf8');
+
+  // The refusal must reach the AGENT before the owner is ever called — that is the whole point of
+  // this family of guards, so the block reads the EXIT CODE, not the rendered page.
+  const out = join(dir, 'preview.html');
+  const child = spawn(process.execPath, [REVIEW, docPath, '--no-serve', '--no-signal', '--out', out], { windowsHide: true });
+  let log = '';
+  child.stdout.on('data', (c) => { log += c.toString('utf8'); });
+  child.stderr.on('data', (c) => { log += c.toString('utf8'); });
+  const code = await new Promise((res) => child.on('close', res));
+
+  must(code !== 0, 'the page was raised over a slot holding the template instruction — bugs/04 verbatim: ' + tail(log));
+  must(/ЗАГЛУШКА ШАБЛОНА/u.test(log), 'the refusal does not say WHAT is wrong: ' + tail(log));
+  must(/Q1/u.test(log), 'the refusal does not say WHICH question: ' + tail(log));
+
+  // The narrowness of the rule is half of it: emphasis INSIDE a real answer must stay an answer.
+  must(!core.isPlaceholderAnswer('A, и именно _его_ я выбираю'), 'emphasis inside a real answer read as a placeholder');
+  must(!core.isPlaceholderAnswer('A'), 'a bare variant letter read as a placeholder');
+  must(core.isPlaceholderAnswer('_…_'), 'the bare template slot is not recognised as one');
 });
 
 block('GATE', 'an artifact approval survives the owner\'s next answer, and the refusal names the truth', async () => {
