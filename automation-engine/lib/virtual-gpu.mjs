@@ -251,7 +251,8 @@ export function validateCard(c) {
     const ph = c.physics;
     if (typeof ph !== 'object' || ph === null) return bad('physics', 'блок physics обязан быть объектом');
     const KNOWN = new Set(['origin', 'power', 'floor', 'edgeShift', 'tableDriftMhzPerC',
-      'governorBelowCeilingMhz', 'boostStepsAboveCeiling', 'deliverStepsAboveEnvelope']);
+      'governorBelowCeilingMhz', 'boostStepsAboveCeiling', 'deliverStepsAboveEnvelope',
+      'pulseStallMsAtEdge']);
     for (const k of Object.keys(ph)) {
       if (!KNOWN.has(k)) return bad(`physics.${k}`, `неизвестное свойство физики «${k}» — словарь закрыт, новая физика = новая строка словаря`);
     }
@@ -272,7 +273,7 @@ export function validateCard(c) {
     if (ph.floor !== undefined && !num(ph.floor.baseMv)) return bad('physics.floor.baseMv', 'пол карты без базового напряжения — не пол');
     if (ph.edgeShift !== undefined && !num(ph.edgeShift.mvPerC)) return bad('physics.edgeShift.mvPerC', 'сдвиг края без коэффициента — не сдвиг');
     for (const k of ['tableDriftMhzPerC', 'governorBelowCeilingMhz', 'boostStepsAboveCeiling',
-      'deliverStepsAboveEnvelope']) {
+      'deliverStepsAboveEnvelope', 'pulseStallMsAtEdge']) {
       if (ph[k] !== undefined && ph[k] !== null && !num(ph[k])) return bad(`physics.${k}`, 'не число и не null');
     }
   }
@@ -714,6 +715,11 @@ export function buildFiction(card, {
   // величины взяты у измеренного соседа — целое число ступеней сетки, — сам факт железом не
   // подтверждён. Живой замер, если он когда-нибудь появится, отменяет эту строку, а не наоборот.
   deliverStepsAboveEnvelope = null,
+  // ─── ЗАЗОР ПРОБ ТЕЛЕМЕТРИИ У КРАЯ (`bugs/61`, `plans/72` шаг 4) ───────────────────────────────
+  // Сколько миллисекунд длится максимальный зазор между пробами, когда прожиг достал до края.
+  // ЗАМЕР: 4490 мс на 845 мВ при крае 844,8 (роковой прогон 2797 МГц), против фона 1100-1130 мс на
+  // трёх ступенях выше. n = 1 — одна машина, один прогон; слабость выборки названа, а не скрыта.
+  pulseStallMsAtEdge = null,
   // The declaration the validator demands for such a card. It is a SEPARATE flag rather than being
   // implied by `inversionAt`, and deliberately so: the validator's job is to refuse a non-monotone
   // card nobody meant to build, and a flag that sets itself would refuse nothing.
@@ -827,6 +833,7 @@ export function buildFiction(card, {
     // вовсе, и её файл не меняется ни на байт (та же гарантия, что F1-AC2 даёт трём предыдущим).
     ...(Number.isFinite(deliverStepsAboveEnvelope) && deliverStepsAboveEnvelope > 0
       ? { deliverStepsAboveEnvelope } : {}),
+    ...(Number.isFinite(pulseStallMsAtEdge) && pulseStallMsAtEdge > 0 ? { pulseStallMsAtEdge } : {}),
     note: 'ВЫМЫСЕЛ. Эти края придуманы и НЕ являются утверждением о живой карте — они существуют, '
       + 'чтобы движку было что найти.',
     edgeDefinition: 'край частоты = напряжение, на котором прожиг длиной 10 с отказывает в половине случаев. '
@@ -1100,6 +1107,45 @@ export const WRITE_FAILURE_CLASSES = Object.freeze({
     applyWrite: (requested) => [0, ...requested.slice(0, requested.length - 1)],
   }),
 });
+
+/**
+ * ФОНОВЫЙ ЗАЗОР МЕЖДУ ПРОБАМИ ТЕЛЕМЕТРИИ, мс — НАШ ЗАМЕР, а не назначение.
+ *
+ * `bugs/61`, роковой прогон 2797 МГц: на 865 · 860 · 850 мВ зазоры дали 0,11-0,13 с СВЕРХ обещанной
+ * секунды, то есть фон машины держится около 1100-1130 мс. Взято 1120 — середина замеренного, — и
+ * оно с большим запасом НИЖЕ порога вердикта (`config.PULSE_STALL_MS` = 2130 мс), иначе фоновая
+ * ступень объявлялась бы зависшей.
+ *
+ * ⚠️ n = 1. Это ОДИН прогон одной машины. Слабость выборки названа здесь, чтобы через месяц число
+ * не читалось как многократно подтверждённое.
+ */
+export const PULSE_BACKGROUND_GAP_MS = 1120;
+
+/**
+ * ШИРИНА ПОЛОСЫ У КРАЯ, в которой зазоры проб растягиваются, мВ — ОДНА СТУПЕНЬ СЕТКИ.
+ *
+ * Не назначено: замер `bugs/61` разделяется этим числом ровно. Ступор 4,49 с наблюдался на 845 мВ
+ * при крае 844,8 (0,2 мВ ВЫШЕ края); фон 0,11-0,13 с — на 850, 860, 865 (5,2 · 15,2 · 20,2 выше).
+ * Минимальный шаг сетки напряжений этой карты — 5 мВ, и он кладёт границу между единственным
+ * ступорным наблюдением и всеми фоновыми, не деля ни одну пару.
+ *
+ * ⚠️ n = 1, и это ОДНА точка ступора. Число разделяет то, что измерено, и не претендует на большее.
+ */
+export const PULSE_STALL_BAND_MV = 5;
+
+/**
+ * ЗАЗОР ПРОБ ДЛЯ ОДНОГО ПРОЖИГА — правило одной строкой, вынесенное РАДИ БЛОКА.
+ *
+ * Внутри модели его было не покрасить: чтобы прожиг лёг в полосу у края, нужен записанный вектор
+ * кривой, то есть половина прогона. Функция принимает готовое «на сколько выше края» и потому
+ * судится мутацией за секунды — а модель зовёт ЕЁ ЖЕ, второго правила не заведено.
+ *
+ * `overEdgeMv` — насколько напряжение прожига ВЫШЕ края (отрицательное = ниже края).
+ */
+export function pulseGapMsFor({ overEdgeMv, stallMs }) {
+  if (!Number.isFinite(stallMs) || stallMs <= 0) return null;   // карта зазоров не моделирует
+  return overEdgeMv <= PULSE_STALL_BAND_MV ? stallMs : PULSE_BACKGROUND_GAP_MS;
+}
 
 export function virtualCard(cardProfile, {
   settleSamples = 1, rampSamples = 0, wanderMhz = null,
@@ -2052,6 +2098,35 @@ export function virtualCard(cardProfile, {
           `${JSON.stringify({ mhz, drawnAtMv, readbackMv: rb, seconds, workload })}
 `, 'utf8');
       }
+      // ─── ЗАЗОР ПРОБ ТЕЛЕМЕТРИИ У КРАЯ (`bugs/61`, эпик 67 фаза 5, `plans/72` шаг 4) ────────────
+      //
+      // ЗАЧЕМ. У движка есть вердикт «ЗАВИС ПО ПУЛЬСУ СЭМПЛЕРА»: система стояла, оракул этого не
+      // видит по построению, и вердикт ступени отменяется зазором проб. На двойнике эта ветка не
+      // проверялась ВООБЩЕ — вход был прибит (`pulseWindowFn: twin ? null : …`), потому что двойник
+      // зазоры лагать не умел. Строка паритета висела красной с 2026-08-29.
+      //
+      // ЧИСЛА — ЖИВОЙ ЗАМЕР, А НЕ НАЗНАЧЕНИЕ (`bugs/61`, роковой прогон 2797 МГц): 865 · 860 · 850 мВ
+      // дали 0,11-0,13 с сверх обещания, а 845 мВ — **4,49 с**, и оракул на всех четырёх сказал
+      // PASS. ⚠️ **n = 1**: это ОДИН прогон, и слабость выборки названа здесь, а не спрятана.
+      //
+      // ПОЧЕМУ ЭТО НЕ ВТОРАЯ МОДЕЛЬ ВРЕМЕНИ (риск 2 `plans/72`). Никакой новой шкалы не заводится:
+      // переключатель — СУЩЕСТВУЮЩАЯ модель края. Пока прожиг идёт выше края, зазор фоновый; как
+      // только напряжение достаёт до края, система начинает стоять, и зазор становится замеренным
+      // ступорным. Одно число, один порог, обе величины из одного замера.
+      //
+      // ⚠️ ОПТ-ИН, КАК ВСЯ ОСТАЛЬНАЯ ФИЗИКА КАРТЫ. Карта без поля не получает зазоров вовсе, и её
+      // прогон остаётся бит-в-бит прежним (E67-AC5 — ворота КАЖДОЙ фазы эпика).
+      const stallMs = Number(PH?.pulseStallMsAtEdge ?? P.fiction.pulseStallMsAtEdge);
+      if (Number.isFinite(stallMs) && stallMs > 0) {
+        // ⚠️ ПОЛОСА У КРАЯ, А НЕ «НИЖЕ КРАЯ», И ЭТО ПРАВКА ПО ЗАМЕРУ, А НЕ ПО ВКУСУ. Первая
+        // редакция ставила условие `drawnAtMv <= edge` и оказалась НЕДОСТИЖИМОЙ: спуск не жжёт ниже
+        // края вовсе — оракул отказывает раньше и спуск встаёт (прогон: глубже 885 мВ при крае
+        // 880,4 не пошло ни разу). Сторож, который не может сработать, — украшение.
+        // Живой замер говорит ровно то же самое: ступор случился на 845 мВ при крае 844,8 — то есть
+        // на 0,2 мВ ВЫШЕ края, — а фон держался на 850 (5,2 выше). Полоса шириной в ОДНУ ступень
+        // сетки напряжений разделяет эти два наблюдения ровно и без подгонки.
+        lastPulseGapMs = pulseGapMsFor({ overEdgeMv: drawnAtMv - this.edgeMvFor(mhz), stallMs });
+      }
       if (!burning) telemetry.advance(seconds, { load: activity });
       // ⏳ Прожиг оставляет частоту выдачи ещё на несколько ЧТЕНИЙ — спад простоя, см. clockNow.
       state.loadedReadsLeft = LOAD_CLOCK_DECAY_READS;
@@ -2119,6 +2194,9 @@ export function virtualCard(cardProfile, {
   // wrong voltage is shown drawing the wrong watts, because the watts come from what the card
   // actually serves rather than from what the caller believed it ordered.
   let burning = false;
+  // Зазор проб ПОСЛЕДНЕГО прожига. `null` — карта зазоров не моделирует (поля нет), и прибор тогда
+  // МОЛЧИТ, а не голосует (R4b): «нет данных» и «данные хорошие» обязаны быть разными ответами.
+  let lastPulseGapMs = null;
 
   // THE INSTRUMENT MUST NOT PERTURB THE SYSTEM. `clockNow()` DRAINS the settle queue and advances
   // the idle wander — that is the modelled behaviour «a read straight after a write returns the
@@ -2126,6 +2204,16 @@ export function virtualCard(cardProfile, {
   // engine's next read is supposed to meet. So telemetry looks at where the clock IS HEADED, and
   // leaves the queue for the engine.
   const observedMhz = () => targetMhz() ?? state.reportedMhz;
+
+  /**
+   * ОКНО ПУЛЬСА СЭМПЛЕРА — ТА ЖЕ ФОРМА ОТВЕТА, ЧТО У ЖИВОГО `hardware-mon.maxSampleGapMs`.
+   * Форма скопирована намеренно и это не дублирование: движок обязан получить от двойника ровно то,
+   * что получает от живого прибора, иначе ветка проверялась бы на другом контракте.
+   * `observed: false` — карта зазоров не моделирует; прибор без данных МОЛЧИТ (R4b).
+   */
+  const pulseWindow = () => (lastPulseGapMs === null
+    ? { observed: false, why: 'карта не моделирует зазоры проб (поля pulseStallMsAtEdge нет)' }
+    : { observed: true, maxGapMs: lastPulseGapMs, samples: 12 });
 
   const telemetry = {
     /** One sample, as a monitor would read it. Pure with respect to the card's state. */
@@ -2192,6 +2280,9 @@ export function virtualCard(cardProfile, {
     curveBackend,
     oracle,
     telemetry,
+    // Окно пульса — наружу, чтобы сборка отдала его движку тем же входом, каким живой путь отдаёт
+    // показания настоящего сэмплера (`plans/72` шаг 4).
+    pulseWindow,
     seed,
     writes,
     /** ЧТО КАРТА КРУТИТ ПРЯМО СЕЙЧАС — физическая правда `runningMhz`, наружу (эпик 59 фаза 3):
@@ -3135,6 +3226,58 @@ export async function selfTest() {
         && sdcLine.checksum !== burn.stampChecksum('furnace', ['2400', '8192', '256', '64'], GOLDEN_CHECKSUM),
         sdcLine ? `bad=${sdcLine.bad_launches} distinct=${sdcLine.distinct}` : 'SDC не выпал за бюджет розыгрышей');
     }
+  }
+
+  // ---- 18б. ЗАЗОР ПРОБ ТЕЛЕМЕТРИИ У КРАЯ (`bugs/61`, эпик 67 фаза 5, `plans/72` шаг 4).
+  //      МУТАЦИОННЫЕ АДРЕСАТЫ, НАЗВАННЫЕ ДО ПРОГОНА: полоса у края (а не «ниже края») ·
+  //      оптность (карта без поля не получает прибора) · молчание прибора без данных.
+  {
+    const base = JSON.parse(readFileSync(join('benches', 'cards', 'rtx5070ti.json'), 'utf8'));
+    const lagCard = { ...base, fiction: { ...base.fiction, pulseStallMsAtEdge: 4490 } };
+
+    // (а) КАРТА БЕЗ ПОЛЯ НЕ ПОЛУЧАЕТ ПРИБОРА ВОВСЕ. Это и есть гарантия E67-AC5: обычный прогон
+    //     не меняется ни на байт, потому что движку нечего провести.
+    const plain = virtualCard(base, { seed: 5 });
+    plain.oracle.run('furnace', ['--sustain', '1']);
+    check('ПУЛЬС: карта БЕЗ поля не моделирует зазоров — прибор МОЛЧИТ, а не голосует (R4b)',
+      plain.pulseWindow().observed === false, JSON.stringify(plain.pulseWindow()));
+
+    // (б) ПРИБОР МОЛЧИТ И У КАРТЫ С ПОЛЕМ, ПОКА ПРОЖИГА НЕ БЫЛО. «Нет данных» и «данные хорошие» —
+    //     разные ответы, и путать их нельзя даже на карте, которая зазоры умеет.
+    const fresh = virtualCard(lagCard, { seed: 5 });
+    check('ПУЛЬС: до первого прожига прибор МОЛЧИТ даже у карты с полем',
+      fresh.pulseWindow().observed === false, JSON.stringify(fresh.pulseWindow()));
+
+    // (в) ФОН ДАЛЕКО ОТ КРАЯ — и он ОБЯЗАН быть ниже порога вердикта, иначе каждая здоровая
+    //     ступень объявлялась бы зависшей.
+    const far = virtualCard(lagCard, { seed: 5 });
+    far.oracle.run('furnace', ['--sustain', '1']);          // простой: напряжение много выше края
+    const farW = far.pulseWindow();
+    check('ПУЛЬС: далеко от края зазор ФОНОВЫЙ и НИЖЕ порога вердикта (иначе здоровая ступень «зависла» бы)',
+      farW.observed === true && farW.maxGapMs === PULSE_BACKGROUND_GAP_MS
+      && farW.maxGapMs < config.PULSE_STALL_MS,
+      `${farW.maxGapMs} против порога ${config.PULSE_STALL_MS}`);
+
+    // (г) 🔴 ГЛАВНЫЙ БЛОК: ПОЛОСА У КРАЯ, А НЕ «НИЖЕ КРАЯ». Первая редакция модели ставила
+    //     `drawnAtMv <= edge` и была НЕДОСТИЖИМА: спуск не жжёт ниже края — оракул отказывает
+    //     раньше. Живой замер `bugs/61` фиксирует ступор на 0,2 мВ ВЫШЕ края. Блок судит ровно это:
+    //     ступень В ПОЛОСЕ обязана дать ступорный зазор, ступень на шаг ДАЛЬШЕ — фоновый.
+    // (г) 🔴 ПРАВИЛО ПОЛОСЫ СУДИТСЯ НА ЧИСЛАХ САМОГО ЗАМЕРА `bugs/61`. Край того прогона 844,8 мВ:
+    //     ступор наблюдался на 845 (0,2 выше), фон — на 850, 860, 865 (5,2 · 15,2 · 20,2 выше).
+    //     Блок требует, чтобы модель разложила эти четыре наблюдения ровно так, как они измерены.
+    const EDGE_0061 = 844.8;
+    const gapAt = (mv) => pulseGapMsFor({ overEdgeMv: mv - EDGE_0061, stallMs: 4490 });
+    check('ПУЛЬС: правило полосы раскладывает ЗАМЕР bugs/61 ровно — 845 ступор, 850/860/865 фон',
+      [gapAt(845), gapAt(850), gapAt(860), gapAt(865)].join() === [4490, 1120, 1120, 1120].join(),
+      [gapAt(845), gapAt(850), gapAt(860), gapAt(865)].join(' · '));
+    check('ПУЛЬС: НИЖЕ края тоже ступор — полоса включает край, а не начинается за ним',
+      gapAt(840) === 4490 && gapAt(EDGE_0061) === 4490);
+    check('ПУЛЬС: карта без ступорного числа не получает зазора вовсе (оптность — в самом правиле)',
+      pulseGapMsFor({ overEdgeMv: 0, stallMs: null }) === null
+      && pulseGapMsFor({ overEdgeMv: 0, stallMs: NaN }) === null);
+    check('ПУЛЬС: ступорный зазор из замера и он ВЫШЕ порога вердикта — иначе ветка bugs/61 не проверялась бы',
+      lagCard.fiction.pulseStallMsAtEdge === 4490 && 4490 > config.PULSE_STALL_MS,
+      `${lagCard.fiction.pulseStallMsAtEdge} против порога ${config.PULSE_STALL_MS}`);
   }
 
   // ---- 18в. ФИЗИКА «ВСЕГДА-ВКЛ» (эпик 67 фаза 2, `plans/69`) — мутационные адресаты:

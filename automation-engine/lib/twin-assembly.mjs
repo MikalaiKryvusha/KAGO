@@ -323,6 +323,12 @@ export async function makeTwinAssembly({
   if (mDecision && !mDecision.armed) throw new Error(mDecision.why);
   return {
     vc, card, device, probedCard, recover, loadDoc,
+    // ─── ВХОД ПУЛЬСА СЭМПЛЕРА (`bugs/61`, `plans/72` шаг 4) ───────────────────────────────────────
+    // Живой путь читает файл настоящего сэмплера; двойник отдаёт СВОЙ прибор той же формы ответа.
+    // `null`, когда карта зазоров не моделирует, — тогда движок вход не проводит вовсе, и прогон
+    // обычной карты остаётся бит-в-бит прежним (E67-AC5, ворота каждой фазы эпика).
+    pulseWindowFn: (Number.isFinite(card?.fiction?.pulseStallMsAtEdge)
+      || Number.isFinite(card?.physics?.pulseStallMsAtEdge)) ? () => vc.pulseWindow() : null,
     docName, docDir, journalDir, runDir, burnPidfile,
     saveDoc: (d) => cs.saveCurveDoc(d, { name: docName, dir: docDir }),
     canonLine: CANON_LINE,
