@@ -1088,7 +1088,11 @@ export function closePoint(doc, {
       // frequency reached, or the safe direction somebody raised it to?» — and that is exactly the
       // question the owner's outlier idea will need answered (`plans/23` phase 3).
       tags: [...new Set([...(Array.isArray(r.tags) ? r.tags : []), CURVE_TAGS.ORIGIN_RATCHETED])],
-      provenBy: `${r.provenBy ?? 'сток'} · ПОДНЯТО ХРАПОВИКОМ до ${effectiveMv} мВ измерением на ${mhz} МГц: `
+      // ПРЕЖНЕЕ ЗНАЧЕНИЕ — В САМОЙ СТРОКЕ («с X до Y»), симметрично точке (2) выше. Хвост
+      // `bugs/57`: семь строк раннего прогона восстановить было НЕЧЕМ — подъём назывался только
+      // в сводке возврата, а сводка живёт в вызвавшей сессии и умирает с ней. Улика в строке
+      // делает урон обратимым без снимков.
+      provenBy: `${r.provenBy ?? 'сток'} · ПОДНЯТО ХРАПОВИКОМ с ${r.voltageMv} до ${effectiveMv} мВ измерением на ${mhz} МГц: `
         + 'более низкая частота потребовала больше, а более высокой не может хватать меньшего',
       editedAt: stamp,
     };
@@ -1751,6 +1755,12 @@ function cmdSelftest() {
         && edgeUp.doc.frequencies[3].voltageMv === 850
         && (edgeUp.doc.frequencies[3].tags ?? []).includes(CURVE_TAGS.ORIGIN_RATCHETED),
       JSON.stringify({ raised: edgeUp.raised, mv3: edgeUp.doc.frequencies[3].voltageMv }));
+    // ПРЕЖНЕЕ ЗНАЧЕНИЕ ЖИВЁТ В САМОЙ ПОДНЯТОЙ СТРОКЕ — хвост `bugs/57`: семь строк раннего
+    // прогона восстановить было нечем, потому что «с чего подняли» жило только в сводке возврата.
+    // Мутация-адресат: убрать «с ${r.voltageMv}» из улики подъёма → этот блок.
+    ok('...и поднятая строка несёт ПРЕЖНЕЕ значение в своей улике («с 800 до 850») — урон обратим без снимков',
+      /ПОДНЯТО ХРАПОВИКОМ с 800 до 850 мВ измерением на 2400/.test(edgeUp.doc.frequencies[3].provenBy ?? ''),
+      JSON.stringify({ provenBy3: edgeUp.doc.frequencies[3].provenBy }));
     // И СВОДКА ОБЯЗАНА НАЗЫВАТЬ ПОДЪЁМ, когда он был: по этой строке владелец видит, что документ
     // тронули не только там, где заказывали.
     ok('...и сводка называет подъём числом — по ней подъём видно без разбора документа',
