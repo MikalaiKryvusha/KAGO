@@ -125,6 +125,50 @@ export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs
   };
 }
 
+// =================================================================================================
+// 2b. Настройка порога на двойнике — словарь исходов (фаза 5б эпика 51, `plans/65`)
+// =================================================================================================
+
+/**
+ * ЗАКРЫТЫЙ словарь исходов настроечного прогона. Закрыт по той же причине, что словарь тегов кривой
+ * (R14d): читатель сетки должен различать успех здорового сценария и пропуск смертельного, а не
+ * гадать по слову «нет трипа».
+ */
+export const TUNE_OUTCOME = Object.freeze({
+  RESCUED: 'спасено',
+  PREMATURE: 'преждевременно',
+  MISSED: 'пропущено',
+  FALSE: 'ложно',
+  CLEAN: 'чисто',
+});
+
+/**
+ * Сколько ОСТАНОВОВ пережил судья до трипа — по своему же чёрному ящику.
+ *
+ * ⚠️ Различить «трип на перелёте деградации» и «трип на роковом останове» по `beatSilenceMs` строки
+ * намерения НЕЛЬЗЯ, и это ловушка, в которую легко попасть: судья трипает, как только тишина
+ * достигла N, поэтому записанная тишина всегда ≈ N — что при останове 29 мс, что при 2070.
+ * Различает ИСТОРИЯ: кольцо держит закрытые зазоры ударов, и их счёт до трипа говорит, сколько
+ * перелётов порог пережил. Порог счёта — тот же `RECORD_THRESHOLD_MS` = 10 мс, которым сторож
+ * смерти отделяет промах от такта; пол канала (max 9,73 мс, замер 2026-08-29) лежит ПОД ним.
+ */
+export function countStallsBeforeTrip(ringRows, { thresholdMs = 10 } = {}) {
+  return gapsFromRing(ringRows).filter((g) => g >= thresholdMs).length;
+}
+
+/**
+ * Исход одного настроечного прогона. Чистая функция: сетка кормит её тем, что прочитала с диска.
+ *
+ * `degradationStalls` — сколько перелётов деградации несёт сыгранный профиль. Число берётся ИЗ
+ * ФИКСТУРЫ (`strangleStallsFromPulse`), а не назначается здесь: назначенное разошлось бы с
+ * профилем в первый же день, когда фикстуру уточнят.
+ */
+export function classifyTuneOutcome({ scenario, tripped, stallsSurvived = 0, degradationStalls = 0 }) {
+  if (scenario === 'healthy') return tripped ? TUNE_OUTCOME.FALSE : TUNE_OUTCOME.CLEAN;
+  if (!tripped) return TUNE_OUTCOME.MISSED;
+  return stallsSurvived >= degradationStalls ? TUNE_OUTCOME.RESCUED : TUNE_OUTCOME.PREMATURE;
+}
+
 /**
  * The rescue programme for a trip. ALWAYS both hands, ALWAYS this order — the owner's word
  * («снимают нагрузку, поднимают напряжение») backed by physics: hand 1 needs no driver and cannot
@@ -433,7 +477,11 @@ async function cmdJitterFloor({ seconds, tickMs }) {
   const dgram = await import('node:dgram');
   const { spawn } = await import('node:child_process');
   console.log(`ПОЛ ДЖИТТЕРА КАНАЛА УДАРОВ: loopback-датаграммы · такт отправителя ${tickMs} мс · ${seconds} с`);
-  console.log('Отправитель — ТОТ ЖЕ цикл, что у пробы сторожа (Atomics.wait): меряем реальность, не идеал.');
+  // ⚠️ Здесь до 2026-08-29 стояло «ТОТ ЖЕ цикл, что у пробы сторожа (Atomics.wait)». Это перестало
+  // быть правдой в тот же вечер, когда писалось: EXP-0165 перевёл и пробу с ударами, и её двойника
+  // `--beat-sender` на УСТУПАЮЩИЙ сон (setTimeout) — блокированный цикл доставлял 12,72 % датаграмм.
+  // Прибор спавнит именно `--beat-sender`, значит меряет уступающую форму. Класс `bugs/62`.
+  console.log('Отправитель — ТОТ ЖЕ `--beat-sender`, что едет в прогоне (уступающий сон, EXP-0165): меряем реальность, не идеал.');
 
   const sock = dgram.createSocket('udp4');
   const gaps = [];
@@ -544,7 +592,8 @@ async function cmdSelftest() {
   console.log('САМОПРОВЕРКА fuse — deadman-судья, руки, кольцо; карта не трогается, порт только эфемерный');
   console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона: включительная граница N · невзведённый не трипает · '
     + 'непроведённый прогресс не трипает · порядок рук · намерение раньше рук · кольцо переживает трип · судья слышит настоящие удары · '
-    + 'пид-файл читается В МОМЕНТ трипа · рука 2 двойника несёт --twin');
+    + 'пид-файл читается В МОМЕНТ трипа · рука 2 двойника несёт --twin · '
+    + 'граница «спасено ↔ преждевременно» по счёту остановов · порог счёта остановов 10 мс');
 
   // ---- judgeLiveness: the deadman core (P55-AC1)
   ok('тишина РОВНО N — трип (граница включительная, канон classifyTick)',
@@ -843,6 +892,36 @@ async function cmdSelftest() {
     const e = distStats([]);
     return d.medianMs === 3 && d.maxMs === 100 && e.maxMs === null && e.n === 0;
   })());
+
+  // ---- настройка на двойнике (P65-AC3/AC5): словарь исходов и различитель «на чём трипнуло»
+  ok('перелёт и роковой останов НЕ различаются по тишине трипа — различает счёт зазоров в кольце', (() => {
+    // Один и тот же порог, две разные смерти: записанная тишина в обоих случаях ≈ N.
+    const atPremature = judgeLiveness({ nowMs: 1000, lastBeatMs: 1000 - 62, armNMs: 60 });
+    const atFatal = judgeLiveness({ nowMs: 9000, lastBeatMs: 9000 - 62, armNMs: 60 });
+    return atPremature.tripped && atFatal.tripped
+      && atPremature.beatSilenceMs === atFatal.beatSilenceMs;
+  })());
+  ok('счёт остановов до трипа: зазоры ≥ 10 мс считаются, пол канала (≤ 9,73 мс) — нет', (() => {
+    const rows = [0, 2, 4, 9.7, 0.5, 2, 15, 0.5, 2, 26, 1].map((v) => ({ beatSilenceMs: v }));
+    return countStallsBeforeTrip(rows) === 2; // 15 и 26; 9,7 — пол канала, не останов
+  })());
+  ok('удушение: трип ПОСЛЕ всех перелётов деградации — спасено; раньше — преждевременно', (() => {
+    const late = classifyTuneOutcome({ scenario: 'strangle', tripped: true, stallsSurvived: 18, degradationStalls: 18 });
+    const early = classifyTuneOutcome({ scenario: 'strangle', tripped: true, stallsSurvived: 3, degradationStalls: 18 });
+    return late === TUNE_OUTCOME.RESCUED && early === TUNE_OUTCOME.PREMATURE;
+  })());
+  ok('смертельный сценарий без трипа — ПРОПУЩЕНО; здоровый без трипа — ЧИСТО (успех, а не пропуск)', (() => {
+    const missed = classifyTuneOutcome({ scenario: 'strangle', tripped: false, degradationStalls: 18 });
+    const clean = classifyTuneOutcome({ scenario: 'healthy', tripped: false });
+    return missed === TUNE_OUTCOME.MISSED && clean === TUNE_OUTCOME.CLEAN;
+  })());
+  ok('здоровый сценарий с трипом — ЛОЖНО, и счёт остановов на это не влияет', (() => {
+    const a = classifyTuneOutcome({ scenario: 'healthy', tripped: true, stallsSurvived: 0 });
+    const b = classifyTuneOutcome({ scenario: 'healthy', tripped: true, stallsSurvived: 99 });
+    return a === TUNE_OUTCOME.FALSE && b === TUNE_OUTCOME.FALSE;
+  })());
+  ok('словарь исходов ЗАКРЫТ: пять имён, все различны (R14d — читатель не гадает)',
+    new Set(Object.values(TUNE_OUTCOME)).size === 5 && Object.isFrozen(TUNE_OUTCOME));
 
   // ---- --out (P56-AC4): the REAL CLI, a sandbox journal, and the combat dir left untouched
   {

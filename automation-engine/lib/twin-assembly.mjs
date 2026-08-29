@@ -26,7 +26,7 @@
 // [TESTED: 2026-08-28 · `--smoke`: полоса на двойнике от старта до отчёта, отпечаток I1 совпал]
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +78,12 @@ export async function makeTwinAssembly({
   //   её запись держит журнал упреждающей записи (R15).
   armJudge = false,
   deathRehearsal = null,
+  // ─── ФАЗА 5б ЭПИКА 51 — настройка порога на двойнике (`plans/65`) ─────────────────────────────
+  // `armNMs` — порог судьи ПАРАМЕТРОМ, а не константой: сетка гоняет одну и ту же репетицию при
+  //   разных N, чтобы у порога появилась КРИВАЯ вместо одной точки. `null` = прежняя выведенная
+  //   рекомендация `DERIVED_ARM_N_MS`, и без флага аргументы всадников обязаны остаться бит-в-бит
+  //   (I4) — на это стоит свой блок в самопроверке.
+  armNMs = null,
 } = {}) {
   const vgpu = await import('./virtual-gpu.mjs');
   const nvapi = await import('./nvapi.mjs');
@@ -274,6 +280,8 @@ export async function makeTwinAssembly({
   const { DERIVED_ARM_N_MS } = await import('./fuse.mjs');
   const armed = armJudge || deathRehearsal === 'strangle' || deathRehearsal === 'instant';
   const playsProfile = deathRehearsal === 'strangle' || deathRehearsal === 'instant';
+  // Порог: заказанный сеткой или выведенная рекомендация. Одно место, где число берётся.
+  const armN = armNMs === null ? DERIVED_ARM_N_MS : armNMs;
   return {
     vc, card, device, probedCard, recover, loadDoc,
     docName, docDir, journalDir, runDir, burnPidfile,
@@ -283,7 +291,7 @@ export async function makeTwinAssembly({
       judgeArgs: ['--judge',
         // Взведённый судья на двойнике НЕ БЫВАЕТ без руки 2 двойника: --arm-n и --twin-stock —
         // одна дверь, не две (см. комментарий у armJudge выше).
-        ...(armed ? ['--arm-n', String(DERIVED_ARM_N_MS), '--burn-pidfile', burnPidfile, '--twin-stock', cardFile] : []),
+        ...(armed ? ['--arm-n', String(armN), '--burn-pidfile', burnPidfile, '--twin-stock', cardFile] : []),
         '--seconds', '600', '--out', join(runDir, 'fuse.jsonl')],
       probeArgs: ['--beat-sender', '--seconds', '600', '--tick', '2',
         ...(playsProfile ? ['--play-profile', deathRehearsal, '--after-pidfile', burnPidfile] : [])],
@@ -351,6 +359,16 @@ function readJsonl(file) {
   }).filter(Boolean);
 }
 
+/**
+ * Фаза 5б эпика 51 (`plans/65`): `--arm-n <мс>` у твин-команд едет до движка одним аргументом.
+ * БЕЗ флага возвращается ПУСТОЙ массив — командная строка развёртки остаётся бит-в-бит прежней
+ * (I4), а порог берётся из `DERIVED_ARM_N_MS` там же, где брался всегда.
+ */
+export function armNArgs(argv) {
+  const i = argv.indexOf('--arm-n');
+  return i >= 0 && argv[i + 1] ? ['--twin-arm-n', argv[i + 1]] : [];
+}
+
 async function mainSmoke(argv) {
   const arg = (name, fallback) => {
     const i = argv.indexOf(`--${name}`);
@@ -374,7 +392,7 @@ async function mainSmoke(argv) {
   const engine = join(HERE, '..', 'engine.mjs');
   const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
     '--from', from, '--to', to, '--max-depth', maxDepth,
-    ...(armed ? ['--twin-arm'] : [])], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    ...(armed ? ['--twin-arm', ...armNArgs(argv)] : [])], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
   const logFile = join(BENCH_RUNS, `twin-smoke-${localIso().replace(/[:+]/g, '-')}.log`);
   mkdirSync(BENCH_RUNS, { recursive: true });
@@ -424,7 +442,7 @@ async function collectRescueEvidence() {
   };
 }
 
-async function mainRehearseDeath(profile, { withWindow = true } = {}) {
+async function mainRehearseDeath(profile, { withWindow = true, armNMs = null } = {}) {
   console.log(`РЕПЕТИЦИЯ СМЕРТИ «${profile}» НА ДВОЙНИКЕ (plans/63): проба играет ИЗМЕРЕННЫЙ профиль, судья взведён, руки бьют по двойнику.`);
   // ОКНО — НОСИТЕЛЬ ПОКАЗА, ПО УМОЛЧАНИЮ (`bugs/65`, найдено владельцем: «я ничего не видел. даже
   // визуализатор не открылся»). Вечер владельца = окно + звук, терминал — приложение. `--no-window`
@@ -439,6 +457,7 @@ async function mainRehearseDeath(profile, { withWindow = true } = {}) {
   const engine = join(HERE, '..', 'engine.mjs');
   const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
     '--from', '2842', '--to', '2812', '--max-depth', '300', '--twin-death', profile,
+    ...(armNMs === null ? [] : ['--twin-arm-n', String(armNMs)]),
     ...(withWindow ? ['--twin-window'] : [])],
   { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
@@ -479,6 +498,97 @@ async function mainRehearseDeath(profile, { withWindow = true } = {}) {
   for (const [what, okc] of checks) { console.log(`${okc ? '✅' : '🔴'} ${what}`); if (!okc) bad += 1; }
   console.log(`журнал судьи: ${ev.runDir ?? '—'}\\fuse.jsonl · кольцо: fuse-ring.jsonl (${ev.ring.length} тактов)`);
   return bad === 0 ? 0 : 1;
+}
+
+/**
+ * НАСТРОЙКА ПОРОГА НА ДВОЙНИКЕ — фаза 5б эпика 51 (`plans/65`, P65-AC2/AC4).
+ *
+ * Живая карта даёт по одной точке за смерть машины; двойник играет ИЗМЕРЕННУЮ смерть сколько
+ * угодно раз. Сетка гоняет одну и ту же репетицию при разных N и снимает кривую «N → исход».
+ *
+ * Окно намеренно НЕ поднимается: это замер, а не показ (показ — `--rehearse-death`).
+ */
+async function mainTuneN(argv) {
+  const arg = (name, fallback) => {
+    const i = argv.indexOf(`--${name}`);
+    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+  };
+  const values = arg('values', '20,40,60,90,150').split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
+  const repeats = Number(arg('repeats', '3'));
+  const scenarios = arg('scenarios', 'strangle,healthy').split(',').map((s) => s.trim()).filter(Boolean);
+  if (values.length === 0 || !Number.isFinite(repeats) || repeats < 1) {
+    console.error('--tune-n: --values принимает список положительных чисел, --repeats — целое ≥ 1.');
+    return 2;
+  }
+  const fuseMod = await import('./fuse.mjs');
+  const dw = await import('./death-watch.mjs');
+  const stalls = dw.strangleProfileStalls();
+  // Перелёты деградации — те останова профиля, что НЕ роковые. Граница берётся из самой записи:
+  // между группами пусто (11…29 против 2070/2366), поэтому «меньше секунды» её не размывает.
+  const degradationStalls = stalls.filter((s) => s < 1000).length;
+  const fatal = stalls.filter((s) => s >= 1000);
+
+  console.log(CANON_LINE);
+  console.log(`НАСТРОЙКА ПОРОГА (plans/65): N ∈ {${values.join(', ')}} мс · сценарии ${scenarios.join(', ')} · повторов ${repeats}`);
+  console.log(`ПРОФИЛЬ УДУШЕНИЯ ИЗ ФИКСТУРЫ: перелётов деградации ${degradationStalls} (${Math.min(...stalls.filter((s) => s < 1000))}…${Math.max(...stalls.filter((s) => s < 1000))} мс), роковых ${fatal.length} (${fatal.join(', ')} мс).`);
+  console.log(`ОКНО РЕШЕНИЯ ИЗ АРИФМЕТИКИ: N ∈ (${Math.max(...stalls.filter((s) => s < 1000))} · ${Math.min(...fatal)}) мс — сетка проверяет, держится ли оно на сквозном прогоне.`);
+
+  const before = liveFingerprint();
+  const lineBefore = deliveryLine();
+  console.log(`I1 ДО:    документ ${before.measuredSha} · журнал ${before.journalSha} · runs/death-watch ${before.deathWatchFiles} файлов`);
+
+  const engine = join(HERE, '..', 'engine.mjs');
+  mkdirSync(BENCH_RUNS, { recursive: true });
+  const outFile = join(BENCH_RUNS, `tune-n-${localIso().replace(/[:+]/g, '-')}.jsonl`);
+  const rows = [];
+  let n = 0;
+  const total = values.length * scenarios.length * repeats;
+  for (const armN of values) {
+    for (const scenario of scenarios) {
+      for (let rep = 1; rep <= repeats; rep++) {
+        n += 1;
+        archiveTwinSandbox(); // каждый прогон — со свежего стока, иначе жечь нечего и профилю не на чем играть
+        const startedAt = localIso();
+        const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
+          '--from', '2842', '--to', '2812', '--max-depth', '300',
+          '--twin-arm-n', String(armN),
+          ...(scenario === 'healthy' ? ['--twin-arm'] : ['--twin-death', scenario])],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
+        const ev = await collectRescueEvidence();
+        const intents = ev.fuse.filter((l) => l.phase === 'intent');
+        const stallsSurvived = fuseMod.countStallsBeforeTrip(ev.ring);
+        const outcome = fuseMod.classifyTuneOutcome({
+          scenario, tripped: intents.length > 0, stallsSurvived, degradationStalls,
+        });
+        const row = {
+          startedAt, armNMs: armN, scenario, rep, outcome,
+          exitCode: r.status, intents: intents.length,
+          beatSilenceMs: intents[0]?.beatSilenceMs ?? null,
+          stallsSurvived, degradationStalls, ringTicks: ev.ring.length,
+          runDir: ev.runDir,
+        };
+        rows.push(row);
+        appendFileSync(outFile, `${JSON.stringify(row)}\n`, 'utf8');
+        console.log(`[${n}/${total}] N=${armN} · ${scenario} · попытка ${rep} → ${outcome.toUpperCase()} (остановов пережито ${stallsSurvived}/${degradationStalls}, тактов в кольце ${ev.ring.length}, код ${r.status})`);
+      }
+    }
+  }
+
+  const after = liveFingerprint();
+  const i1 = JSON.stringify(before) === JSON.stringify(after) && lineBefore === deliveryLine();
+  console.log(`\nСВОДКА (сырьё: ${outFile})`);
+  for (const armN of values) {
+    const parts = scenarios.map((s) => {
+      const mine = rows.filter((x) => x.armNMs === armN && x.scenario === s);
+      const tally = mine.reduce((m, x) => ({ ...m, [x.outcome]: (m[x.outcome] ?? 0) + 1 }), {});
+      return `${s}: ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(' · ') || '—'}`;
+    });
+    console.log(`  N=${String(armN).padStart(4)} мс │ ${parts.join(' │ ')}`);
+  }
+  console.log(i1
+    ? '✅ I1 ДЕРЖИТСЯ: живой документ, боевой журнал и боевая папка всадников не тронуты, строка доставки не сдвинулась.'
+    : '🔴 I1 НАРУШЕН — разбирать до любых выводов из сетки.');
+  return i1 ? 0 : 1;
 }
 
 /**
@@ -649,6 +759,24 @@ export async function selfTest() {
     [asmHang.riders.judgeArgs.includes('--arm-n'), asmHang.riders.probeArgs.includes('--play-profile')],
     [false, false]);
 
+  // 6б. ПОРОГ ПАРАМЕТРОМ (фаза 5б эпика 51, `plans/65`): сетка задаёт N, а БЕЗ заказа аргументы
+  //     всадников обязаны остаться прежними до байта — иначе настройка тихо переписала бы боевой
+  //     дефолт (I4). Мутация «проброс снят» краснеет именно этот блок.
+  {
+    const { DERIVED_ARM_N_MS } = await import('./fuse.mjs');
+    const asmTuned = await makeTwinAssembly({ seed: 7, armJudge: true, armNMs: 25 });
+    const nOf = (a) => a.judgeArgs[a.judgeArgs.indexOf('--arm-n') + 1];
+    ok('ПОРОГ: без --arm-n аргументы судьи БИТ-В-БИТ прежние (N = выведенная рекомендация)',
+      nOf(asmArmed.riders), String(DERIVED_ARM_N_MS));
+    ok('ПОРОГ: заказанный N доезжает до аргументов судьи, остальная строка не меняется',
+      [nOf(asmTuned.riders), JSON.stringify(asmTuned.riders.probeArgs) === JSON.stringify(asmArmed.riders.probeArgs)],
+      ['25', true]);
+    ok('ПОРОГ: --arm-n твин-команды переводится в --twin-arm-n движка; без флага — пусто',
+      [JSON.stringify(armNArgs(['--rehearse-death', 'strangle', '--arm-n', '40'])),
+        JSON.stringify(armNArgs(['--rehearse-death', 'strangle']))],
+      ['["--twin-arm-n","40"]', '[]']);
+  }
+
   // 7. НОСИТЕЛЬ (TA5): счастливый путь служит время и отдаёт вердикт оракулу; убитое тело
   //    проваливает ступень ДОРОГОЙ ОРАКУЛА — «нагрузка вышла с кодом …», без нового кода записи.
   {
@@ -736,6 +864,7 @@ async function main(argv) {
     return r.ok ? 0 : 1;
   }
   if (argv.includes('--smoke')) return mainSmoke(argv);
+  if (argv.includes('--tune-n')) return mainTuneN(argv);
   // Окно — по умолчанию у РЕПЕТИЦИЙ (они для глаза владельца, `bugs/65`); `--no-window` — для
   // безголовой отладки. Смоук остаётся безголовым: он ворота, а не показ.
   const withWindow = !argv.includes('--no-window');
@@ -746,7 +875,8 @@ async function main(argv) {
       console.error('--rehearse-death принимает strangle | instant (виртуальный ЗАВИС — --rehearse-hang).');
       return 2;
     }
-    return mainRehearseDeath(profile, { withWindow });
+    const n = argv.indexOf('--arm-n');
+    return mainRehearseDeath(profile, { withWindow, armNMs: n >= 0 && argv[n + 1] ? argv[n + 1] : null });
   }
   if (argv.includes('--rehearse-hang')) return mainRehearseHang({ withWindow });
   if (argv.includes('--i1')) {
@@ -755,7 +885,9 @@ async function main(argv) {
     console.log(`СТРОКА ДОСТАВКИ: ${deliveryLine()}`);
     return 0;
   }
-  console.log('Использование: --selftest | --smoke [--from МГц --to МГц] [--max-depth мВ] [--armed] | --rehearse-death strangle|instant [--no-window] | --rehearse-hang [--no-window] | --i1');
+  console.log('Использование: --selftest | --smoke [--from МГц --to МГц] [--max-depth мВ] [--armed] [--arm-n мс] | --rehearse-death strangle|instant [--no-window] [--arm-n мс] | --rehearse-hang [--no-window] | --i1');
+  console.log('               | --tune-n [--values 20,40,60,90,150] [--scenarios strangle,healthy] [--repeats 3] — сетка порога (plans/65)');
+  console.log('--arm-n — порог судьи для НАСТРОЙКИ на двойнике (plans/65); без флага — выведенная рекомендация 60 мс.');
   console.log('Репетиции поднимают ОКНО НАБЛЮДЕНИЯ по умолчанию (bugs/65) — показ владельцу идёт в нём.');
   return 2;
 }

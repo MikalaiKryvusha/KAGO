@@ -389,6 +389,15 @@ export const DEATH_PROFILES = Object.freeze({
   }),
 });
 
+/**
+ * Останова СЫГРАННОГО профиля удушения — из той же фикстуры, что играет проба (`plans/65`).
+ * Настройке порога нужно знать, сколько перелётов деградации несёт профиль, и это число обязано
+ * приходить ИЗ ФИКСТУРЫ: назначенное разошлось бы с профилем в первый же день уточнения записи.
+ */
+export function strangleProfileStalls() {
+  return strangleStallsFromPulse(readStrangleFixtureRows());
+}
+
 /** Read the strangle fixture from disk (NUL-tail and blank lines skipped — the tail IS the death). */
 function readStrangleFixtureRows() {
   const { readFileSync } = require('node:fs');

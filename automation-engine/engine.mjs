@@ -8768,15 +8768,25 @@ async function mainSweep(argv, arg) {
     console.error(`ОШИБКА: --twin-death принимает strangle | instant | hang, получено «${twinDeath}».`);
     return 2;
   }
-  if ((twinDeath !== null || process.argv.includes('--twin-arm') || process.argv.includes('--twin-window'))
+  // Фаза 5б эпика 51 (`plans/65`): `--twin-arm-n <мс>` — порог судьи ПАРАМЕТРОМ, чтобы сетка сняла
+  // кривую «N → спасений/ложных» на репетициях. Только на двойнике: боевой N на живой карте меняется
+  // не флагом командной строки, а решением владельца по замеру.
+  const twinArmNRaw = arg('twin-arm-n');
+  const twinArmN = twinArmNRaw === null ? null : Number(twinArmNRaw);
+  if (twinArmNRaw !== null && (!Number.isFinite(twinArmN) || twinArmN <= 0)) {
+    console.error(`ОШИБКА: --twin-arm-n принимает положительное число миллисекунд, получено «${twinArmNRaw}».`);
+    return 2;
+  }
+  if ((twinDeath !== null || twinArmNRaw !== null || process.argv.includes('--twin-arm') || process.argv.includes('--twin-window'))
     && cardArg !== 'virtual') {
-    console.error('ОШИБКА: --twin-death, --twin-arm и --twin-window имеют смысл только с --card virtual.');
+    console.error('ОШИБКА: --twin-death, --twin-arm, --twin-arm-n и --twin-window имеют смысл только с --card virtual.');
     return 2;
   }
   const twin = cardArg === 'virtual'
     ? await (await import('./lib/twin-assembly.mjs')).makeTwinAssembly({
       armJudge: process.argv.includes('--twin-arm'),
       deathRehearsal: twinDeath,
+      armNMs: twinArmN,
     })
     : null;
   if (twin) console.log(twin.canonLine);
@@ -9312,7 +9322,10 @@ async function mainSweep(argv, arg) {
   // One ref stops all riders on the operator-stop and writer-death paths above.
   sideCarRef = () => { stopSideCar(); stopDeathWatch(); };
   console.log(twin
-    ? `⚡ ПРЕДОХРАНИТЕЛЬ (двойник): судья pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЁН N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: пид-файл носителя → сток ДВОЙНИКА` : 'невзведён (наблюдение)'}; журнал в песочнице ${twin.runDir}`
+    // N печатается ИЗ АРГУМЕНТОВ, которые судья реально получил, а не из константы: с фазой 5б
+    // порог стал параметром, и печать константы стала бы парой «правда↔зеркало» — её лучше
+    // схлопнуть, чем сторожить (R14a).
+    ? `⚡ ПРЕДОХРАНИТЕЛЬ (двойник): судья pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЁН N=${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-n') + 1]} мс, руки: пид-файл носителя → сток ДВОЙНИКА` : 'невзведён (наблюдение)'}; журнал в песочнице ${twin.runDir}`
     : `⚡ ПРЕДОХРАНИТЕЛЬ: судья pid ${fuseJudge.pid}, N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: образы горна → сток; журнал в runs/death-watch/*-fuse.jsonl`);
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
