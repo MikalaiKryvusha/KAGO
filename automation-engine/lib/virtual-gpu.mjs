@@ -73,6 +73,11 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
 import { buildRaiseAndCapVector, CLK_VF_POINT_COUNT, classifyWriteFailure } from './nvapi.mjs';
 import { curveWriteRefusal } from './profile-manager.mjs';
+// ⚠️ БЕРЁТСЯ ПРАВИЛО ДВИЖКА, А НЕ ЕГО КОПИЯ (`bugs/68`). Блок «пол виден чтению» судит согласие
+// оракула карты с ТЕМ САМЫМ `voltageForClock`, которым движок читает кривую живой карты; своя
+// копия этого правила была бы парой «правда↔зеркало» и зеленела бы вместе с дефектом.
+// Импорт чист: `vf-step.mjs` на верхнем уровне не трогает ни карты, ни диска.
+import { voltageForClock } from './vf-step.mjs';
 // Модель нагрузки (эпик 67 фаза 1, `plans/68`): измеренные ватты по форме, каденция запусков,
 // доля GPU-времени, сумма по штампу. Таблицы там, ФОРМУЛА активности — здесь (у владельца
 // телеметрии): один факт в одном месте.
@@ -1689,9 +1694,38 @@ export function virtualCard(cardProfile, {
     const held = (settling && state.curveReadsSinceWrite < curveSettleReads)
       ? state.curveOffsetsBeforeWrite
       : state.curveOffsetsMhz;
+    // ─── ПОЛ КАРТЫ (`physics.floor`, `plans/69`; ПЕРЕЕХАЛ СЮДА ПО `bugs/68` 2026-08-29) ──────────
+    // Пол — это НЕ зажим обслуживаемого напряжения (там он стоял, и там он НЕВИДИМ перечитанной
+    // кривой: прожиг шёл на 1115 мВ, а `voltageForClock` отдавал 800, и документ закрывал строку
+    // числом, которого кремний не видел ни секунды). Пол — это ОТКАЗ ПОДПОЛЬНОЙ ТОЧКИ ПРЕДЛАГАТЬ
+    // ПОДНЯТУЮ ЧАСТОТУ: сдвиг в неё ложится, чтение сдвигов отдаёт ровно записанное, а частота,
+    // которую точка ПРЕДЛАГАЕТ, остаётся стоковой.
+    //
+    // МЕСТО ВЫБРАНО ПО ЖИВЫМ УЛИКАМ, А НЕ ПО УДОБСТВУ. Сшивка `runs/sweep/journal.jsonl` по `seq`
+    // (784 пары намерение↔вердикт, замер 2026-08-29): ступеней с выдачей ВЫШЕ заказа — 191, и у
+    // 183 из них НЕТ НИ ОДНОГО класса отказа записи. То есть на живой карте сдвиги ЛОЖАТСЯ, а
+    // выдача всё равно выше. Первая редакция этой починки морозила сдвиги в `holdOffsetsSync` —
+    // и фабриковала класс C2 («часть записей молча инертна»), которого живая карта не даёт:
+    // движок останавливал бы ступень там, где карта просто стоит на своём полу.
+    //
+    // Отсюда пол виден ОБОИМ приборам сразу и одним числом: `servingVoltageMv` и перечитанная
+    // кривая читают ЭТУ таблицу, а `readOffsetsSync` — по-прежнему записанное. Простой не ломается:
+    // стоковая частота подпольной точки сохраняется, поэтому 180 МГц обслуживают её же 450 мВ.
+    const fl = PH?.floor;
+    const floorMv = fl
+      ? fl.baseMv + (fl.perC ?? 0) * Math.max(0, thermal.tempC - (fl.refC ?? TM.tempFloorC))
+      : null;
     const out = [];
     for (let i = 0; i < GRAPHICS_POINTS; i++) {
-      const mhz = P.vfTable[i].mhz + held[i] + drift;
+      // Подпольная точка не даёт себя ПОДНЯТЬ: её положительный сдвиг в таблице не действует, и
+      // она предлагает стоковую частоту. ОТРИЦАТЕЛЬНЫЙ сдвиг действует — иначе пол отменял бы и
+      // ПОДРЕЗКУ ПОТОЛКА (вектор отгружаемой формы опускает верх кривой отрицательными сдвигами),
+      // и кривая предлагала бы выше заказанного потолка: ровно класс C3, которым это и вскрылось
+      // на первом же прогоне после переноса. Дрейф от нагрева остаётся — он свойство кремния, а не
+      // записи, и пол его не отменяет.
+      const belowFloor = floorMv !== null && P.vfTable[i].voltageMv < floorMv;
+      const offset = belowFloor ? Math.min(held[i], 0) : held[i];
+      const mhz = P.vfTable[i].mhz + offset + drift;
       out.push({
         i,
         mhz,
@@ -1725,15 +1759,14 @@ export function virtualCard(cardProfile, {
       for (let i = 0; i < GRAPHICS_POINTS; i++) {
         if (table[i].mhz >= mhz) { mv = table[i].mv; break; }
       }
-      // ⚠️ ПОЛ КАРТЫ (`plans/69`, свойство physics.floor): ниже пола карта НЕ ОБСЛУЖИВАЕТ — выдаёт
-      // выше заказа, ровно как живая (`bugs/58`/`63`: +40…75 мВ, словарь `origin:overshot`).
-      // Движок видит это существующими сверками «ЗАКАЗ↔ВЫДАЧА разошлись» — правок движка нет.
-      // У образца пола НЕТ (null): его число не измерено, а выдуманный пол ломал бы репетиции спуска.
-      const fl = PH?.floor;
-      if (fl) {
-        const floorMv = fl.baseMv + (fl.perC ?? 0) * Math.max(0, thermal.tempC - (fl.refC ?? TM.tempFloorC));
-        if (mv < floorMv) mv = floorMv;
-      }
+      // ⚠️ ПОЛА ЗДЕСЬ НЕТ, И ЭТО ИСПРАВЛЕНИЕ ПО СУЩЕСТВУ (`bugs/68`, первая находка полигона).
+      // До 2026-08-29 пол стоял ровно тут — зажимом обслуживаемого напряжения, — и это делало его
+      // НЕВИДИМЫМ для перечитанной кривой: прожиг шёл на 1115 мВ, а `voltageForClock` по кривой
+      // отдавал 800, и документ закрывал строку числом, которого кремний не видел ни секунды.
+      // Живая карта так себя НЕ ведёт: `bugs/63` мерит выдачу с пола ЧЕРЕЗ перечитанную кривую
+      // («заказ 835 → выдача 910», 127 ступеней), и `origin:overshot` на таких строках уже стоит.
+      // Пол живёт там, где он живёт у карты — в отказе держать подъём на точках ниже пола
+      // (`holdOffsetsSync`). Оттуда он виден и оракулу, и чтению, одним числом.
       return mv;
     },
 
@@ -2987,15 +3020,75 @@ export async function selfTest() {
       eq250.cappedByPowerLimit === true && eq250.powerW === 250,
       `capped=${eq250.cappedByPowerLimit}, ${eq250.powerW} Вт`);
 
-    // AC4: пол карты — заказ ниже пола ОБСЛУЖИВАЕТСЯ выше заказа; выдача честно расходится с заказом.
+    // ─── AC4: ПОЛ КАРТЫ. БЛОКИ ПЕРЕПИСАНЫ 2026-08-29 ПО `bugs/68` ───────────────────────────────
+    // Прежний блок сторожил ДРУГУЮ модель: он спрашивал `servingVoltageMv(2842)` У КАРТЫ БЕЗ ЕДИНОЙ
+    // ЗАПИСИ и ждал, что пол зажмёт выдачу прямо на стоке. Он был зелёным — и слепым ровно к тому,
+    // что нашёл полигон: зажим выдачи НЕ ВИДЕН перечитанной кривой, поэтому движок закрывал строку
+    // напряжением, которого кремний не видел. Пол — это отказ ПОДНИМАТЬ точки ниже пола, и три
+    // блока ниже судят три разных следствия этого, а не одно трижды.
     const plain = virtualCard(CARD, { settleSamples: 0, seed: 5 });
     const servedStock = plain.oracle.servingVoltageMv(2842);
-    const fl = clone(); fl.physics = { origin: 'блок 18в: пол', floor: { baseMv: servedStock + 30 } };
+    // Пол МЕЖДУ краем и стоком верхней частоты — то есть он съедает ЧАСТЬ спуска, а не весь.
+    const floorMv = servedStock - 60;
+    const fl = clone(); fl.physics = { origin: 'блок 18в: пол', floor: { baseMv: floorMv } };
     const vcFloor = virtualCard(fl, { settleSamples: 0, seed: 5 });
-    check('ФИЗИКА: пол карты — обслуживаемое НЕ опускается ниже пола, выдача выше заказа (P69-AC4)',
-      vcFloor.oracle.servingVoltageMv(2842) === servedStock + 30
-      && plain.oracle.servingVoltageMv(2842) === servedStock,
-      `пол ${servedStock + 30}, выдано ${vcFloor.oracle.servingVoltageMv(2842)}`);
+    const raise = new Array(GRAPHICS_POINTS).fill(400);   // подъём заведомо глубже пола
+    vcFloor.curveBackend.holdOffsetsSync(raise);
+    plain.curveBackend.holdOffsetsSync(raise);
+    // ⚠️ БЛОК ТРЕБУЕТ РАВЕНСТВА, А НЕ НЕРАВЕНСТВА — и это оплачено собственной мутацией. Первая
+    // редакция спрашивала `serving >= floorMv`, и мутация «морозить ВСЕ точки, а не подпольные»
+    // прошла ЗЕЛЁНОЙ: карта, которая не сдвинулась вовсе, тоже стоит «не ниже пола». «Упёрлось в
+    // пол» и «не поехало» — разные вещи, и различает их только то, что спуск ДОШЁЛ до пола.
+    check('ФИЗИКА: пол карты — спуск доходит РОВНО до пола и не глубже; без пола та же запись идёт глубже (P69-AC4)',
+      vcFloor.oracle.servingVoltageMv(2842) === floorMv
+      && plain.oracle.servingVoltageMv(2842) < floorMv,
+      `с полом ${vcFloor.oracle.servingVoltageMv(2842)}, без пола ${plain.oracle.servingVoltageMv(2842)}, пол ${floorMv}`);
+
+    // 🔴 СТОРОЖ САМОГО `bugs/68`: пол обязан быть ВИДЕН ПЕРЕЧИТАННОЙ КРИВОЙ. Это единственный
+    // прибор движка о том, «на чём шёл прожиг» (`engine.mjs` → «the card's own re-read table is the
+    // only authority»), и на живой карте пол через него и меряется (`bugs/63`: заказ 835 → выдача
+    // 910). Пока пол стоял зажимом выдачи, эти два числа расходились на 315 мВ и молчали.
+    check('ФИЗИКА: пол ВИДЕН ЧТЕНИЮ — оракул и перечитанная кривая называют одно напряжение (bugs/68)',
+      (() => {
+        const pts = vcFloor.curveBackend.readCurveSync();
+        return [2842, 2820, 2400, 1800, 180].every((f) => {
+          const r = voltageForClock(pts, f);
+          return r !== null && r.mv === vcFloor.oracle.servingVoltageMv(f);
+        });
+      })(),
+      (() => {
+        const pts = vcFloor.curveBackend.readCurveSync();
+        return [2842, 2820, 2400, 1800, 180]
+          .map((f) => `${f}:${vcFloor.oracle.servingVoltageMv(f)}/${voltageForClock(pts, f)?.mv}`).join(' ');
+      })());
+
+    // ПРОСТОЙ НЕ ЗАЖИМАЕТСЯ. Старая редакция клала пол на ВСЕ частоты, и карта с полом 1115 мВ
+    // «простаивала» на 1115 — физическая нелепость, прожившая ровно до первого прогона полигона.
+    check('ФИЗИКА: пол НЕ трогает простой — 180 МГц обслуживается своими стоковыми мВ, как без пола',
+      vcFloor.oracle.servingVoltageMv(180) === plain.oracle.servingVoltageMv(180),
+      `с полом ${vcFloor.oracle.servingVoltageMv(180)}, без пола ${plain.oracle.servingVoltageMv(180)}`);
+
+    // 🔴 ПОЛ НЕ СМЕЕТ ВЫГЛЯДЕТЬ ОТКАЗОМ ЗАПИСИ. Первая редакция починки `bugs/68` морозила сдвиги
+    // в `holdOffsetsSync`, и движок читал это как класс C2 («часть записей молча инертна») —
+    // ступень краснела там, где карта просто стоит на своём полу. Живые улики это опровергли
+    // ЧИСЛОМ: сшивка `runs/sweep/journal.jsonl` по `seq` даёт 191 ступень с выдачей выше заказа,
+    // и у 183 из них нет НИ ОДНОГО класса отказа записи. Сдвиги обязаны лечь ровно как записаны.
+    check('ФИЗИКА: пол НЕ фабрикует отказ записи — чтение сдвигов отдаёт РОВНО записанное (bugs/68)',
+      (() => {
+        const want = new Array(GRAPHICS_POINTS).fill(400);
+        vcFloor.curveBackend.holdOffsetsSync(want);
+        const got = vcFloor.curveBackend.readOffsetsSync();
+        const arr = Array.isArray(got) ? got : (got.offsets ?? got);
+        return arr.length === GRAPHICS_POINTS && arr.every((o, i) => o === want[i]);
+      })(), true);
+
+    // ОТКАТ НЕ ЗАПРЕЩЁН: карта отказывается ПОДНИМАТЬ, а не отпускать. Иначе первый же откат
+    // оставил бы карту в состоянии, которое никто не может назвать.
+    check('ФИЗИКА: пол не мешает ОТКАТУ — запись нулей возвращает карту на сток',
+      (() => {
+        vcFloor.curveBackend.holdOffsetsSync(new Array(GRAPHICS_POINTS).fill(0));
+        return vcFloor.oracle.servingVoltageMv(2842) === servedStock;
+      })(), true);
 
     // temp↔край: нагрев поднимает край на mvPerC·ΔT; у образца сдвига нет.
     const es = clone(); es.physics = { origin: 'блок 18в: сдвиг края', edgeShift: { mvPerC: 2, refC: 41 } };
