@@ -77,6 +77,14 @@
 
 ## Entries
 
+### EXP-0170 · 2026-08-29 · ❌→✅ · #backlog #ticket-code-drift #bug-selection #done-tag
+**Context:** the guarded loop picked `bugs/57` (🔴 ОТКРЫТ in its header) as the next item — a data-destroying ratchet defect worth protecting the next live run from.
+**Tried / did:** before coding, checked the CODE against the ticket (grep the named function + git log of the module). The fix had been landed FOUR DAYS earlier (commit `5364271`), with selftest blocks — the ticket header was never updated and the file never renamed DONE. The actual remaining work was one small tail the ticket named in prose («прежнее значение нигде не записано»).
+**Result:** ❌→✅ half a session of re-implementing an existing fix avoided; the tail was done in minutes and the ticket closed honestly. Same session, the mirror case: `bugs/61`'s plan step 5 was already done by session 60 — again found by checking, not remembered.
+**Lesson:** an OPEN ticket is a CLAIM about the code, and claims rot exactly like status summaries (`bugs/25` class — headers vs repository). Picking a backlog item = first verify the claim: grep the named construct, `git log --oneline -- <module>`, run the module's selftest. Two minutes of checking beat re-doing or double-fixing; and a ticket found stale is itself a finding to close on the spot.
+**Trigger:** taking ANY open `bugs/`/`plans/` item into work in a session that did not file it · a ticket whose «Где» names a function — grep it before writing a line.
+→ link: `bugs/57` (закрыт этим способом) · `bugs/25` (родительский класс расхождения) · `/check-backlog` (механическая половина).
+
 ### EXP-0169 · 2026-08-29 · ❌ · #false-cannot #canon-assertion #mirror-of-false-tested #instrument-capability
 **Context:** the canon (`R4a-pulse` in the internal map, the pulse tool's header) stated «ВЕРДИКТА ЭТО ПОКА НЕ ДАЁТ И ПРОГОН НЕ ОСТАНАВЛИВАЕТ» about the sampler-pulse instrument. The TRUE argument behind it (n = 1 cannot pick a precise threshold, `ideas/10` §5.1) was about a DIFFERENT question; meanwhile the instrument distinguished background (1008…1053 ms) from precursors (3042/4490 ms) with NOTHING between them.
 **Tried \ did:** the statement was read as «nothing to look at here» — and nobody looked. On 2026-08-26 the sampler stalled 3.04 s on a rung, the oracle said PASS, the descent continued and killed the owner's machine; the owner saw the precursor with his own eyes and named the written claim «ложь и пиздеж» (`bugs/62`).
