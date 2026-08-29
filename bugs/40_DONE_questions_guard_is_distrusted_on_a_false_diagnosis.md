@@ -194,3 +194,15 @@ whose entire output is understood, one line at a time** — which is a different
   incident that proves the rule matters.
 - `EXPERIENCE.md` EXP-0126 — a guard's value is (does it go red) × (does anyone run it); this is the
   third factor: **does anyone believe it.**
+
+## STATUS: DONE (2026-08-29 10:1x, session 61 backlog revision, EXP-0170 class)
+
+All three halves verified, not remembered: (1) the REAL finding this ticket ordered closed first —
+the three sound questions of `researches/12` §7 — moved to `interviews/011` (the section says so,
+2026-08-23 17:2x) and the owner CLOSED 011 the same day (Q1 «90» · Q2 «А» · Q3 «хватает»);
+(2) the guard is back in service and trusted: it runs in live sessions (this one included: «ИТОГ:
+ЧИСТО»), carries a frozen debt baseline (`interviews/decisions/guard-baseline.json`, 10 items),
+and the former false classes are downgraded to «подсказка, не нарушение» (axis I21 seen live) —
+the retirement sentence this ticket corrected is long gone from STATUS; (3) the guard's own bar
+(≈10 false per 1 real) stands in the canon and this instrument measures 8:1. Ticket lagged the
+repository.
