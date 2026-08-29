@@ -8783,12 +8783,16 @@ async function mainSweep(argv, arg) {
     console.error('ОШИБКА: --twin-death, --twin-arm, --twin-arm-n, --twin-arm-m и --twin-window имеют смысл только с --card virtual.');
     return 2;
   }
+  // Фаза 3 эпика 67 (`plans/70` шаг 6): `--twin-card <файл>` — виртуальный прогон на ЧУЖОЙ карте
+  // (сгенерированной генератором или варианте с физикой). Дефолт — образец, как был.
+  const twinCardFile = arg('twin-card');
   const twin = cardArg === 'virtual'
     ? await (await import('./lib/twin-assembly.mjs')).makeTwinAssembly({
       armJudge: process.argv.includes('--twin-arm'),
       armM: process.argv.includes('--twin-arm-m'),
       deathRehearsal: twinDeath,
       armNMs: twinArmN,
+      ...(twinCardFile ? { cardFile: twinCardFile } : {}),
     })
     : null;
   if (twin) console.log(twin.canonLine);
