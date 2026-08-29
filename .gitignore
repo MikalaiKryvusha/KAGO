@@ -80,3 +80,5 @@ assets/logo/preview128.png
 # frozen numbers, so it is a run artefact and never history.
 assets/dashboard/_preview.html
 .kaif/update-journal.json
+.kaif/loop-guard.log
+.kaif/loop-guard.lock
