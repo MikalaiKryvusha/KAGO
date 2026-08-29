@@ -2189,7 +2189,24 @@ export async function sweepFrequency({
         ownEvidence: out.seedFromOwnEvidence,
       },
     });
-    out.rungs.push({ voltageMv: seedMv, seed: true, outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null });
+    // ⚠️ ЗАТРАВОЧНАЯ СТУПЕНЬ ПИШЕТ ВЫДАННОЕ, А НЕ ЗАКАЗАННОЕ (`bugs/68`, вторая половина).
+    // Здесь стояло `voltageMv: seedMv` — то есть ЗАКАЗ, — и это была единственная асимметрия против
+    // обычных ступеней, которые с эпика 47 пишут `provedMv = r.measuredMv`. Цена, воспроизведённая
+    // на полигоне: на карте с полом затравка 800 мВ обслуживалась 1045 мВ, прожиг шёл на 1045, а в
+    // документ ложилось 800 — завышение доказанной глубины на 245 мВ. Сторож пола (`bugs/58`) сюда
+    // не доставал: на ОДНОЙ частоте он срабатывает и закрывает строку честными 1045, а через
+    // затравку от соседа ложь входила мимо него.
+    // Ветка была внутренне противоречива и до правки: `provenHere` и `groundMv` ниже УЖЕ берут
+    // `servingMvAfter`, и только улика со ступенью держались за заказ.
+    const seedProvedMv = Number.isFinite(sr?.measuredMv) ? sr.measuredMv : seedMv;
+    out.rungs.push({
+      // `orderedMv` — вторая половина пары: без неё `overshootMarkFor` не найдёт ступень и строка
+      // уедет в документ без тега `origin:overshot`, то есть неотличимо от чистого замера.
+      voltageMv: seedProvedMv, orderedMv: seedMv, seed: true,
+      outcome: sr?.outcome ?? null, verdict: sr?.verdict ?? null,
+      deliveredMhz: sr?.deliveredMhz ?? null, deliveredMaxMhz: sr?.deliveredMaxMhz ?? null,
+      servingMvAfter: sr?.servingMvAfter ?? null,
+    });
     const decision = seedOutcome({
       verdict: sr?.outcome === 'passed' ? sr?.verdict : null,
       seedMv, stockVoltageMv, neighbourMhz: seed?.neighbourMhz ?? null, frequencyMhz,
@@ -2203,7 +2220,9 @@ export async function sweepFrequency({
     if (decision.seeded) {
       out.seeded = true;
       seedTaken = true;
-      lastPass = seedMv;
+      // ЗЕМЛЯ — ВЫДАННОЕ, как и на обычной ступени (:2509). Земля на заказе означала бы, что спуск
+      // отмеряет следующий шаг от напряжения, которого прожиг не видел.
+      lastPass = seedProvedMv;
       // ─── ЗАТРАВКА — ТОЖЕ ПРОЖИГ, И ОНА ТОЖЕ ПЕРЕДВИГАЕТ ЦЕЛЬ (эпик 47 фаза 2) ──────────────────
       //
       // 🔴 НАЙДЕНО ЗАМЕРОМ УЖЕ ПОСЛЕ ПЕРВОЙ РЕДАКЦИИ ЭТОЙ ЖЕ ФАЗЫ, и это ровно класс EXP-0147:
@@ -6967,6 +6986,40 @@ export function selfTest() {
     ok('ЗАТРАВКА СОСЕДКОЙ: спуск НАЧИНАЕТСЯ с её напряжения и продолжается НИЖЕ него',
       [seeded.seeded, seenRungs[0], seenRungs[1], seenRungs.every((mv) => mv <= 1000)],
       [true, 1000, 995, true]);
+
+    // — 🔴 `bugs/68` (вторая половина): ЗАТРАВКА, ОБСЛУЖЕННАЯ ВЫШЕ ЗАКАЗА, ПИШЕТ ВЫДАННОЕ.
+    //   Дыра, которую этот блок закрывает, была НЕВИДИМА для всех 375 блоков набора: правка
+    //   «затравка пишет заказ» не покраснила ни одного, потому что улику затравочной ступени не
+    //   сторожил никто. Нашёл её полигон эпика 67 — на карте с полом заказ 800 мВ обслуживался
+    //   1045, прожиг шёл на 1045, а в документ ложилось 800 (завышение 245 мВ). Сторож пола
+    //   (`bugs/58`) сюда не доставал: он живёт в ветке ОДНОЙ частоты, а ложь входила через
+    //   затравку от соседки, мимо него.
+    //   Три числа судятся сразу, и это РАЗНЫЕ обещания: улика ступени · вторая половина пары
+    //   (`orderedMv`, без неё `overshootMarkFor` не найдёт ступень и тег не поедет) · ЗЕМЛЯ, от
+    //   которой отмеряется следующий шаг.
+    const overservedOrders = [];
+    const overservedSeed = await freqOK({
+      curveDoc: seededDoc,
+      // Карта подставляет 1045 мВ на любой заказ — ровно как живая, стоящая на своём полу.
+      runRungFn: async ({ voltageMv }) => {
+        overservedOrders.push(voltageMv);
+        return { outcome: 'passed', verdict: P, measuredMv: 1045, servingMvAfter: 1045, deliveredMhz: 2842 };
+      },
+    });
+    ok('ЗАТРАВКА, ОБСЛУЖЕННАЯ ВЫШЕ ЗАКАЗА: улика несёт ВЫДАННОЕ и называет заказ (bugs/68)',
+      (() => {
+        const seedRung = overservedSeed.rungs.find((r) => r.seed === true) ?? null;
+        return [seedRung?.voltageMv ?? null, seedRung?.orderedMv ?? null, seedRung?.servingMvAfter ?? null];
+      })(),
+      [1045, 1000, 1045]);
+
+    // 🟡 ЗЕМЛЯ (`lastPass = seedProvedMv`) ОСТАЁТСЯ БЕЗ СВОЕГО СТОРОЖА, И ЭТО НАЗВАНО, А НЕ СКРЫТО.
+    // Правка симметрична обычной ступени (:2509 берёт `provedMv`), но блока у неё нет: `lastPass`
+    // наружу не выходит, а обе попытки судить её через наблюдаемое следствие не различили мутацию
+    // «земля на заказе» — следующий заказ на этой фикстуре равен 1020 в ОБОИХ случаях, потому что
+    // лестница спуска приходит из плана, а земля правит только проверку стены. Блок, который не
+    // может покраснеть, здесь не ставится: он был бы ложным `[TESTED]`. Долг записан в `bugs/68`.
+    void overservedOrders;
 
     // — E2-AC11 and trap T3: a non-PASS on the seed CANCELS it, drops the descent back to stock, and
     // the event is SPOKEN. Silence here is the whole defect: the owner's rare case absorbed unnoticed.
