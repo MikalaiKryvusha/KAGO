@@ -238,6 +238,38 @@ export function validateCard(c) {
         + 'этой длительности не называет — определение и константа обязаны быть одним и тем же');
     }
   }
+  // ─── БЛОК `physics` (эпик 67 фаза 2, `plans/69`) — параметрическая физика карты ────────────────
+  // Правила: НЕИЗВЕСТНЫЙ ключ — отказ ПО ИМЕНИ (свободные ключи — задокументированный порок таких
+  // словарей, R14d); блок без `origin` — отказ (параметр без источника не существует — правило
+  // эпика 67); число не число — отказ. Отсутствие блока целиком — законный дефолт (образец).
+  if (c.physics !== undefined) {
+    const ph = c.physics;
+    if (typeof ph !== 'object' || ph === null) return bad('physics', 'блок physics обязан быть объектом');
+    const KNOWN = new Set(['origin', 'power', 'floor', 'edgeShift', 'tableDriftMhzPerC',
+      'governorBelowCeilingMhz', 'boostStepsAboveCeiling']);
+    for (const k of Object.keys(ph)) {
+      if (!KNOWN.has(k)) return bad(`physics.${k}`, `неизвестное свойство физики «${k}» — словарь закрыт, новая физика = новая строка словаря`);
+    }
+    if (typeof ph.origin !== 'string' || !ph.origin.trim()) {
+      return bad('physics.origin', 'блок физики без карточки происхождения не существует (правило эпика 67)');
+    }
+    const num = (v) => typeof v === 'number' && Number.isFinite(v);
+    if (ph.power !== undefined) {
+      const POWER_KNOWN = new Set(['staticW', 'perMhzVolt2', 'limitW', 'ambientC', 'cPerWatt', 'fan', 'tau']);
+      for (const k of Object.keys(ph.power)) {
+        if (!POWER_KNOWN.has(k)) return bad(`physics.power.${k}`, `неизвестный лист пакета мощности «${k}»`);
+      }
+      for (const k of ['staticW', 'perMhzVolt2', 'limitW', 'ambientC', 'cPerWatt']) {
+        if (ph.power[k] !== undefined && !num(ph.power[k])) return bad(`physics.power.${k}`, 'не число');
+      }
+      if (ph.power.limitW !== undefined && ph.power.limitW <= 0) return bad('physics.power.limitW', 'предел мощности обязан быть положительным');
+    }
+    if (ph.floor !== undefined && !num(ph.floor.baseMv)) return bad('physics.floor.baseMv', 'пол карты без базового напряжения — не пол');
+    if (ph.edgeShift !== undefined && !num(ph.edgeShift.mvPerC)) return bad('physics.edgeShift.mvPerC', 'сдвиг края без коэффициента — не сдвиг');
+    for (const k of ['tableDriftMhzPerC', 'governorBelowCeilingMhz', 'boostStepsAboveCeiling']) {
+      if (ph[k] !== undefined && ph[k] !== null && !num(ph[k])) return bad(`physics.${k}`, 'не число и не null');
+    }
+  }
   return { ok: true };
 }
 
@@ -918,8 +950,8 @@ export const MEASURED_THERMAL_LADDER = Object.freeze([
  * @param {number} [a.loadFactor] 1 while a stress test runs, `idleLoadFactor` between rungs
  * @param {number} [a.powerLimitW] the card's ceiling — a real card clamps, and so does this one
  */
-export function telemetryEquilibrium({ clockMhz, voltageMv, loadFactor = 1, powerLimitW = null } = {}) {
-  const M = TELEMETRY_MODEL;
+export function telemetryEquilibrium({ clockMhz, voltageMv, loadFactor = 1, powerLimitW = null, model = TELEMETRY_MODEL } = {}) {
+  const M = model; // пакет КАРТЫ (plans/69); дефолт — глобальные константы, та же ссылка
   const volts = voltageMv / 1000;
   const dynamic = M.powerPerMhzVolt2 * clockMhz * volts * volts * loadFactor;
   const rawW = M.powerStaticW + dynamic;
@@ -941,6 +973,9 @@ export function telemetryEquilibrium({ clockMhz, voltageMv, loadFactor = 1, powe
  * единицу.
  */
 export function activityForShape(workload, args = []) {
+  // ГЛОБАЛЬНЫЕ константы намеренно: активность — свойство ФОРМЫ, откалиброванное к опорной точке
+  // замера, а не к пакету конкретной карты; карта со своим пакетом получит из той же активности
+  // ДРУГИЕ ватты — и это физика, а не рассинхрон.
   const M = TELEMETRY_MODEL;
   const ref = burn.REFERENCE_POINT;
   const volts = ref.voltageMv / 1000;
@@ -1139,8 +1174,25 @@ export function virtualCard(cardProfile, {
   // сбросится в простой (спад — см. clockNow; в мгновенном режиме время двойника меряется чтениями).
   const LOAD_CLOCK_DECAY_READS = 6;
 
+  // ─── ФИЗИКА «ВСЕГДА-ВКЛ» — блок `physics` файла карты (эпик 67 фаза 2, `plans/69`) ─────────────
+  // Без блока TM — ТА ЖЕ ССЫЛКА на глобальные константы (байт-путь образца, P69-AC2: дефолт —
+  // ссылка, не копия, пара невозможна). С блоком — слияние: каждый лист из physics.power, недостающие
+  // — из дефолта. Выбирает из этих свойств генератор фазы 3; образец rtx5070ti блока не несёт.
+  const PH = P.physics ?? null;
+  const TM = !PH?.power ? TELEMETRY_MODEL : Object.freeze({
+    ...TELEMETRY_MODEL,
+    ...(PH.power.staticW !== undefined ? { powerStaticW: PH.power.staticW } : {}),
+    ...(PH.power.perMhzVolt2 !== undefined ? { powerPerMhzVolt2: PH.power.perMhzVolt2 } : {}),
+    ...(PH.power.ambientC !== undefined ? { tempAmbientC: PH.power.ambientC } : {}),
+    ...(PH.power.cPerWatt !== undefined ? { tempCPerWatt: PH.power.cPerWatt } : {}),
+    ...(PH.power.fan?.floorPct !== undefined ? { fanFloorPct: PH.power.fan.floorPct } : {}),
+    ...(PH.power.fan?.anchorC !== undefined ? { fanAnchorC: PH.power.fan.anchorC } : {}),
+    ...(PH.power.fan?.pctPerC !== undefined ? { fanPctPerC: PH.power.fan.pctPerC } : {}),
+    ...(PH.power.tau?.thermalS !== undefined ? { thermalTauSeconds: PH.power.tau.thermalS } : {}),
+    ...(PH.power.tau?.fanS !== undefined ? { fanTauSeconds: PH.power.tau.fanS } : {}),
+  });
   const state = {
-    powerLimitW: P.powerLimitW.default,
+    powerLimitW: PH?.power?.limitW ?? P.powerLimitW.default,
     lock: null,                                   // { min, max } | null
     curveOffsetsMhz: new Array(GRAPHICS_POINTS).fill(0),
     // Класс C1 (`plans/39`): что таблица показывала до последней записи, и сколько раз её с тех пор
@@ -1162,7 +1214,7 @@ export function virtualCard(cardProfile, {
   // from — and it is the ONLY telemetry quantity that is remembered rather than computed: clock,
   // voltage and watts are functions of the card's state at the instant they are asked for, while
   // heat is a function of the state's HISTORY. That difference is the whole reason a plateau exists.
-  const thermal = { tempC: TELEMETRY_MODEL.tempFloorC, fanPct: TELEMETRY_MODEL.fanFloorPct, secondsUnderLoad: 0 };
+  const thermal = { tempC: TM.tempFloorC, fanPct: TM.fanFloorPct, secondsUnderLoad: 0 };
 
   /** Where the clock is HEADED. Computed from the state, never stored beside it — two sources for
    *  one fact is how a double drifts from itself.
@@ -1239,7 +1291,7 @@ export function virtualCard(cardProfile, {
     // температурой, поэтому к потолку кривой может не подходить вплотную (`GOAL.md` →
     // «УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ»; замерено на живой карте — 2820 МГц заказано, 2760…2805 выдано).
     // У обычных карт поля нет, и тогда ограничителя нет вовсе.
-    const gov = Number(P.fiction.governorBelowCeilingMhz);
+    const gov = Number(PH?.governorBelowCeilingMhz ?? P.fiction.governorBelowCeilingMhz);
     if (Number.isFinite(gov) && gov > 0) ceiling -= gov;
     // ─── И ТРЕТИЙ, ПРОТИВОПОЛОЖНЫЙ: КАРТА УХОДИТ ВЫШЕ ПОТОЛКА СОБСТВЕННОЙ КРИВОЙ (`plans/44`) ────
     //
@@ -1253,7 +1305,7 @@ export function virtualCard(cardProfile, {
     //
     // ⚠️ ОГИБАЮЩАЯ ЭКЗЕМПЛЯРА ОСТАЁТСЯ ПОСЛЕДНИМ СЛОВОМ (R13): выше неё карта не идёт ни при какой
     // кривой и ни при каком бусте, поэтому `Math.min` стоит ПОСЛЕ подъёма, а не до него.
-    const boostSteps = Number(P.fiction.boostStepsAboveCeiling);
+    const boostSteps = Number(PH?.boostStepsAboveCeiling ?? P.fiction.boostStepsAboveCeiling);
     if (Number.isFinite(boostSteps) && boostSteps > 0) {
       // Сетка идёт по УБЫВАНИЮ, значит «вверх» — это к меньшим индексам.
       const at = P.frequencyGridMhz.findIndex((f) => f <= ceiling);
@@ -1599,7 +1651,7 @@ export function virtualCard(cardProfile, {
   // ДРЕЙФ = ТЕПЛОВОЙ (симметричный, был всегда) ПЛЮС НАКОПЛЕННЫЙ СКАЧОК КЛАССА C7 (асимметричный).
   // Скачок прибавляется В МОМЕНТ ЗАПИСИ, то есть ПОСЛЕ того, как вызывающий прочитал таблицу и
   // посчитал по ней сдвиг, — этим он и отличается от теплового, который оба видят одинаково.
-  const tableDriftMhz = () => (P.fiction?.tableDriftMhzPerC ?? 0) * (thermal.tempC - TELEMETRY_MODEL.tempFloorC)
+  const tableDriftMhz = () => (PH?.tableDriftMhzPerC ?? P.fiction?.tableDriftMhzPerC ?? 0) * (thermal.tempC - TM.tempFloorC)
     + state.extraDriftMhz;
 
   /**
@@ -1669,10 +1721,20 @@ export function virtualCard(cardProfile, {
      *  removed beats a pair that must be watched. */
     servingVoltageMv(mhz) {
       const table = effectiveTable();
+      let mv = table[GRAPHICS_POINTS - 1].mv;
       for (let i = 0; i < GRAPHICS_POINTS; i++) {
-        if (table[i].mhz >= mhz) return table[i].mv;
+        if (table[i].mhz >= mhz) { mv = table[i].mv; break; }
       }
-      return table[GRAPHICS_POINTS - 1].mv;
+      // ⚠️ ПОЛ КАРТЫ (`plans/69`, свойство physics.floor): ниже пола карта НЕ ОБСЛУЖИВАЕТ — выдаёт
+      // выше заказа, ровно как живая (`bugs/58`/`63`: +40…75 мВ, словарь `origin:overshot`).
+      // Движок видит это существующими сверками «ЗАКАЗ↔ВЫДАЧА разошлись» — правок движка нет.
+      // У образца пола НЕТ (null): его число не измерено, а выдуманный пол ломал бы репетиции спуска.
+      const fl = PH?.floor;
+      if (fl) {
+        const floorMv = fl.baseMv + (fl.perC ?? 0) * Math.max(0, thermal.tempC - (fl.refC ?? TM.tempFloorC));
+        if (mv < floorMv) mv = floorMv;
+      }
+      return mv;
     },
 
     /** The invented edge of `mhz` — the nearest frequency of the card's own grid. */
@@ -1681,7 +1743,12 @@ export function virtualCard(cardProfile, {
       if (!f || !f.length) throw new Error('у этой карты нет вымышленного края — она из фазы 1 (fiction пуст)');
       let best = f[0];
       for (const row of f) if (Math.abs(row.mhz - mhz) < Math.abs(best.mhz - mhz)) best = row;
-      return best.edgeMv;
+      // Связь temp↔край (`plans/69`, physics.edgeShift): нагрев поднимает край. У ОБРАЗЦА null —
+      // наш замер (`bugs/63`: 1,85 мВ/°C при r = 0,22) связь направленно НЕ доказал; механизм —
+      // для карт полигона, где «неизвестный GPU» имеет право быть злее.
+      const es = PH?.edgeShift;
+      if (!es) return best.edgeMv;
+      return best.edgeMv + es.mvPerC * Math.max(0, thermal.tempC - (es.refC ?? TM.tempFloorC));
     },
 
     /**
@@ -1891,8 +1958,8 @@ export function virtualCard(cardProfile, {
     read() {
       const clockMhz = observedMhz();
       const voltageMv = oracle.servingVoltageMv(clockMhz);
-      const loadFactor = burning ? 1 : TELEMETRY_MODEL.idleLoadFactor;
-      const eq = telemetryEquilibrium({ clockMhz, voltageMv, loadFactor, powerLimitW: state.powerLimitW });
+      const loadFactor = burning ? 1 : TM.idleLoadFactor;
+      const eq = telemetryEquilibrium({ clockMhz, voltageMv, loadFactor, powerLimitW: state.powerLimitW, model: TM });
       return {
         clockMhz,
         voltageMv,
@@ -1909,17 +1976,17 @@ export function virtualCard(cardProfile, {
     },
 
     /** Move the card's heat forward by `dt` seconds at this load. */
-    advance(dtSeconds, { load = TELEMETRY_MODEL.idleLoadFactor } = {}) {
+    advance(dtSeconds, { load = TM.idleLoadFactor } = {}) {
       const clockMhz = observedMhz();
       const voltageMv = oracle.servingVoltageMv(clockMhz);
-      const eq = telemetryEquilibrium({ clockMhz, voltageMv, loadFactor: load, powerLimitW: state.powerLimitW });
-      thermal.tempC = approach(thermal.tempC, eq.tempC, dtSeconds, TELEMETRY_MODEL.thermalTauSeconds);
+      const eq = telemetryEquilibrium({ clockMhz, voltageMv, loadFactor: load, powerLimitW: state.powerLimitW, model: TM });
+      thermal.tempC = approach(thermal.tempC, eq.tempC, dtSeconds, TM.thermalTauSeconds);
       // The fan chases the CARD'S CURRENT TEMPERATURE, not the equilibrium — that is what a fan
       // curve is, and it is why a ramp is visible at all (EXP-0028: a ramping quantity has plateaus
       // of its own, so the two lags are separate on purpose).
-      const wantPct = Math.min(100, Math.max(TELEMETRY_MODEL.fanFloorPct,
-        TELEMETRY_MODEL.fanFloorPct + TELEMETRY_MODEL.fanPctPerC * (thermal.tempC - TELEMETRY_MODEL.fanAnchorC)));
-      thermal.fanPct = approach(thermal.fanPct, wantPct, dtSeconds, TELEMETRY_MODEL.fanTauSeconds);
+      const wantPct = Math.min(100, Math.max(TM.fanFloorPct,
+        TM.fanFloorPct + TM.fanPctPerC * (thermal.tempC - TM.fanAnchorC)));
+      thermal.fanPct = approach(thermal.fanPct, wantPct, dtSeconds, TM.fanTauSeconds);
       if (load >= 1) thermal.secondsUnderLoad += dtSeconds;
       return this.read();
     },
@@ -1933,13 +2000,14 @@ export function virtualCard(cardProfile, {
      * this function answer a different question depending on when it was called, and two of this
      * file's own blocks read one answer as the other (caught 2026-08-16 03:1x).
      */
-    equilibrium({ load = burning ? 1 : TELEMETRY_MODEL.idleLoadFactor } = {}) {
+    equilibrium({ load = burning ? 1 : TM.idleLoadFactor } = {}) {
       const clockMhz = observedMhz();
       return telemetryEquilibrium({
         clockMhz,
         voltageMv: oracle.servingVoltageMv(clockMhz),
         loadFactor: load,
         powerLimitW: state.powerLimitW,
+        model: TM,
       });
     },
   };
@@ -2893,6 +2961,64 @@ export async function selfTest() {
         && sdcLine.checksum !== burn.stampChecksum('furnace', ['2400', '8192', '256', '64'], GOLDEN_CHECKSUM),
         sdcLine ? `bad=${sdcLine.bad_launches} distinct=${sdcLine.distinct}` : 'SDC не выпал за бюджет розыгрышей');
     }
+  }
+
+  // ---- 18в. ФИЗИКА «ВСЕГДА-ВКЛ» (эпик 67 фаза 2, `plans/69`) — мутационные адресаты:
+  //      проброс предела пакета · пол карты
+  {
+    const clone = () => JSON.parse(JSON.stringify(CARD));
+    // AC1: валидатор отказывает ПО ИМЕНИ — неизвестный ключ, блок без происхождения, кривое число.
+    const badKey = clone(); badKey.physics = { origin: 'блок 18в', выдумка: 1 };
+    const noOrigin = clone(); noOrigin.physics = { power: { limitW: 250 } };
+    const badNum = clone(); badNum.physics = { origin: 'блок 18в', floor: { baseMv: 'много' } };
+    check('ФИЗИКА: валидатор отказывает по имени — неизвестный ключ · без origin · не число (P69-AC1)',
+      validateCard(badKey).field === 'physics.выдумка'
+      && validateCard(noOrigin).field === 'physics.origin'
+      && validateCard(badNum).field === 'physics.floor.baseMv',
+      `поля: ${validateCard(badKey).field} · ${validateCard(noOrigin).field} · ${validateCard(badNum).field}`);
+
+    // AC5+AC3: пакет мощности ДЕЙСТВУЕТ — предел 250 зажимает форму 64 fma на 250, не на 300.
+    const pkg = clone(); pkg.physics = { origin: 'блок 18в: пакет-250', power: { limitW: 250 } };
+    check('ФИЗИКА: файл карты годен с блоком physics', validateCard(pkg).ok === true, validateCard(pkg).why);
+    const vc250 = virtualCard(pkg, { settleSamples: 0, seed: 5 });
+    vc250.backend.lockGraphicsClocksMhz(2842, 2842);
+    const eq250 = vc250.telemetry.equilibrium({ load: activityForShape('furnace', [2400, 8192, 256, 64]) });
+    check('ФИЗИКА: пакет карты действует — предел 250 Вт зажимает прожиг на 250 (P69-AC5)',
+      eq250.cappedByPowerLimit === true && eq250.powerW === 250,
+      `capped=${eq250.cappedByPowerLimit}, ${eq250.powerW} Вт`);
+
+    // AC4: пол карты — заказ ниже пола ОБСЛУЖИВАЕТСЯ выше заказа; выдача честно расходится с заказом.
+    const plain = virtualCard(CARD, { settleSamples: 0, seed: 5 });
+    const servedStock = plain.oracle.servingVoltageMv(2842);
+    const fl = clone(); fl.physics = { origin: 'блок 18в: пол', floor: { baseMv: servedStock + 30 } };
+    const vcFloor = virtualCard(fl, { settleSamples: 0, seed: 5 });
+    check('ФИЗИКА: пол карты — обслуживаемое НЕ опускается ниже пола, выдача выше заказа (P69-AC4)',
+      vcFloor.oracle.servingVoltageMv(2842) === servedStock + 30
+      && plain.oracle.servingVoltageMv(2842) === servedStock,
+      `пол ${servedStock + 30}, выдано ${vcFloor.oracle.servingVoltageMv(2842)}`);
+
+    // temp↔край: нагрев поднимает край на mvPerC·ΔT; у образца сдвига нет.
+    const es = clone(); es.physics = { origin: 'блок 18в: сдвиг края', edgeShift: { mvPerC: 2, refC: 41 } };
+    const vcEs = virtualCard(es, { settleSamples: 0, seed: 5 });
+    const edgeCold = vcEs.oracle.edgeMvFor(2842);
+    vcEs.backend.lockGraphicsClocksMhz(2842, 2842);
+    vcEs.telemetry.advance(600, { load: 1 });
+    const dT = vcEs.telemetry.read().tempC - 41;
+    check('ФИЗИКА: edgeShift — нагрев поднял край ровно на mvPerC·ΔT; холодный равен базовому (P69-AC3)',
+      Math.abs(vcEs.oracle.edgeMvFor(2842) - (edgeCold + 2 * dT)) < 0.5
+      && plain.oracle.edgeMvFor(2842) === edgeCold,
+      `край ${edgeCold} → ${vcEs.oracle.edgeMvFor(2842)} при ΔT=${dT.toFixed(1)}`);
+
+    // Ловушечные ручки — теперь и свойством файла: дрейф из physics двигает таблицу под нагревом.
+    const dr = clone(); dr.physics = { origin: 'блок 18в: дрейф', tableDriftMhzPerC: -1.7 };
+    const vcDr = virtualCard(dr, { settleSamples: 0, seed: 5 });
+    const coldServe = vcDr.oracle.servingVoltageMv(2700);
+    vcDr.backend.lockGraphicsClocksMhz(2700, 2700);
+    vcDr.telemetry.advance(600, { load: 1 });
+    check('ФИЗИКА: дрейф таблицы задаётся ФАЙЛОМ карты — горячая таблица обслуживает ту же частоту иначе',
+      vcDr.oracle.servingVoltageMv(2700) !== coldServe
+      && plain.oracle.servingVoltageMv(2700) === plain.oracle.servingVoltageMv(2700),
+      `сток ${coldServe} → ${vcDr.oracle.servingVoltageMv(2700)}`);
   }
 
   // ---- 19. nothing was written outside the sandbox (EXP-0025)

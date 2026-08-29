@@ -864,6 +864,10 @@ export async function selfTest() {
   {
     const livePulse = join(ROOT, 'runs', 'dashboard', 'live.json');
     const liveBefore = existsSync(livePulse) ? `${statSync(livePulse).mtimeMs}:${statSync(livePulse).size}` : 'нет файла';
+    // СО СВЕЖЕГО СТОКА — тем же движением, что репетиции. Оплачено 2026-08-29 15:37: репетиция
+    // ЗАВИСА законно оставила в постоянной песочнице закрытый «ЗАВИС 2842/1020», и узкая полоса
+    // этого блока встала на пол зависания — блок зависел от ПОРЯДКА прогонов, чего блок не смеет.
+    archiveTwinSandbox();
     const engine = join(HERE, '..', 'engine.mjs');
     const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
       '--from', '2842', '--to', '2842', '--max-depth', '30'],
