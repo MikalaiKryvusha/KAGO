@@ -111,3 +111,14 @@ evening, a false finding about the silicon would have been written down and beli
 `bugs/28` (the intensity ladder this defect rides on) · `bugs/27` (same class: one channel carrying two
 facts) · `bugs/30` (the silence budget, found the same evening) · EXP-0104 (two correct rules disabling
 each other) · R10a · `GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ»
+
+## STATUS: DONE (2026-08-29 10:1x, session 61 backlog revision, EXP-0170 class)
+
+The defect's CARRIER is gone and the CLASS is closed, both verified in code: (1)
+`sweepBurnLadder()` returns a SINGLE attempt (`[sweepBurnShape(0)]`, engine.mjs:3948) — the
+intensity ladder was retired by the owner's canon of 2026-08-22 («УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ —
+НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА»; the dry run itself prints «ПЕРЕИГРЫВАНИЯ НЕТ: недобор частоты — это
+ЗАМЕР»), so ladder exhaustion cannot occur on the sweep path; (2) the wider class — a measurement
+outcome halting the band — was closed by the owner's «ЗДАНИЕ ВАЖНЕЕ ЛЕСОВ» rework (2026-08-24):
+a frequency closes with its named reason and the band continues; the only remaining halts are the
+three machine barriers he left. Ticket lagged the canon.
