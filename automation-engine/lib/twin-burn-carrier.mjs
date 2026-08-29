@@ -33,6 +33,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const str = (f, dflt) => { const i = argv.indexOf(f); return i !== -1 && argv[i + 1] !== undefined ? argv[i + 1] : dflt; };
   const seconds = num('--seconds', 1);
   const pidfile = str('--pidfile', null);
+  // ⚡ ВХОД 2 НА ДВОЙНИКЕ (фаза 5в эпика 51, `plans/66`). Живой прожиг трогает файл сердцебиения
+  // раз в запуск; носитель обязан делать то же самое, иначе репетиция идёт по дороге, которой на
+  // живом пути нет (паритет стендов, эпик 59). Такт передаёт сборка — она знает форму;
+  // по умолчанию берётся МАКСИМАЛЬНЫЙ измеренный такт `furnace`, и это осознанно консервативно:
+  // предохранитель, не давший ложного трипа на самом медленном такте, не даст его на быстром.
+  const progressFile = str('--progress-file', null);
+  const progressTickMs = num('--progress-tick-ms', 331);
+  // Профиль «прогресс встал при живой машине»: носитель ЖИВ и удары идут, но работа больше не
+  // отгружается — это и есть отказ, которого вход 1 не видит по построению.
+  const stallAfterMs = num('--progress-stall-after-ms', null);
 
   const run = async () => {
     if (pidfile) {
@@ -43,12 +53,27 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // Yielding sleep in one-second slices — the same pulse the twin oracle's own real-seconds burn
     // keeps (`virtual-gpu.mjs` → «SLICED INTO SECONDS»): a body that can say nothing for ten
     // seconds would be a worse model of the burn than one that breathes between slices.
+    // Сердцебиение прогресса — на СВОЁМ таймере, как у живого прожига оно висит на своём цикле
+    // запусков: тело носителя держит время стены и не должно ни ускоряться, ни замедляться от
+    // того, ведём мы счёт запусков или нет.
+    let ticks = 0;
+    const startedAt = Date.now();
+    const progressTimer = progressFile
+      ? setInterval(() => {
+        if (stallAfterMs !== null && Date.now() - startedAt >= stallAfterMs) return; // работа встала
+        ticks += 1;
+        const fd = openSync(progressFile, 'w');
+        try { writeSync(fd, `${ticks}\n`); } finally { closeSync(fd); }
+      }, progressTickMs)
+      : null;
+
     let left = seconds;
     while (left > 0) {
       const slice = Math.min(1, left);
       await new Promise((res) => setTimeout(res, Math.round(slice * 1000)));
       left -= slice;
     }
+    if (progressTimer) clearInterval(progressTimer);
     if (pidfile) { try { rmSync(pidfile, { force: true }); } catch { /* the trip may already own it */ } }
     return 0;
   };

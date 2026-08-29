@@ -84,7 +84,10 @@ export async function makeTwinAssembly({
   //   рекомендация `DERIVED_ARM_N_MS`, и без флага аргументы всадников обязаны остаться бит-в-бит
   //   (I4) — на это стоит свой блок в самопроверке.
   armNMs = null,
+  // `armM` — вход 2 взводится на ЗДОРОВОМ прогоне ради замера ложных срабатываний (P66-AC6).
+  armM = false,
 } = {}) {
+  const fuse = await import('./fuse.mjs');
   const vgpu = await import('./virtual-gpu.mjs');
   const nvapi = await import('./nvapi.mjs');
   const stress = await import('./stress-tester.mjs');
@@ -149,11 +152,20 @@ export async function makeTwinAssembly({
   // («нагрузка вышла с кодом …»), ровно как taskkill валит furnace на живом пути (фаза 5 эпика 51).
   const carrierScript = join(HERE, 'twin-burn-carrier.mjs');
   const burnPidfile = join(runDir, 'burn-carrier.pid');
+  // ⚡ Вход 2 (фаза 5в, `plans/66`): файл сердцебиения прогресса живёт в песочнице прогона, как и
+  // всё остальное имущество двойника. Такт носителя — МАКСИМАЛЬНЫЙ измеренный такт `furnace`:
+  // консервативно, потому что ложных трипов на самом медленном такте быть не должно тем более.
+  const progressFile = join(runDir, 'burn-progress.txt');
   const carrierLauncher = (binary, argv) => {
     const i = argv.indexOf('--sustain');
     const secs = i === -1 ? 1 : Number(argv[i + 1]);
-    const r = spawnSync(process.execPath, [carrierScript, '--seconds', String(secs), '--pidfile', burnPidfile],
-      { encoding: 'utf8', windowsHide: true });
+    const r = spawnSync(process.execPath, [carrierScript, '--seconds', String(secs), '--pidfile', burnPidfile,
+      '--progress-file', progressFile, '--progress-tick-ms', String(Math.ceil(fuse.PROGRESS_TICK_MAX_MS.furnace)),
+      // Профиль «прогресс встал»: носитель ЖИВ, удары идут, работа перестаёт отгружаться на
+      // ПЕРВОЙ секунде прожига — раньше, чем истечёт время ступени, иначе замирание совпадёт с
+      // законным концом работы и репетиция ничего не докажет.
+      ...(deathRehearsal === 'progress-stall' ? ['--progress-stall-after-ms', '1000'] : [])],
+    { encoding: 'utf8', windowsHide: true });
     if (r.status !== 0) return r; // убит рукой 1 — дорога оракула, без нового кода записи
     return vc.oracle.run(binary, argv);
   };
@@ -164,7 +176,10 @@ export async function makeTwinAssembly({
     const stampOk = stress.checkGoldenStamp(golden, probedCard, args);
     const burst = stress.runBurst({
       name, args, sustainSeconds: Math.max(1, sustain || seconds),
-      run: deathRehearsal ? carrierLauncher : (b, a) => vc.oracle.run(b, a),
+      // Носитель едет и при взведённом входе 2: он и есть ИСТОЧНИК прогресса на двойнике. Без
+      // него «ложных срабатываний 0» было бы пустым числом — судья не трипал бы просто потому,
+      // что кормить его нечем, а сторож `progressWired` честно молчал бы весь прогон.
+      run: (deathRehearsal || armM) ? carrierLauncher : (b, a) => vc.oracle.run(b, a),
     });
     if (onBurst) onBurst(burst);
     const decision = stress.decideVerdict({ bursts: [burst], golden, stamp: stampOk, faults: { providers: [], faults: [] } });
@@ -277,11 +292,21 @@ export async function makeTwinAssembly({
   };
 
   // ─── ВСАДНИКИ (фаза 4): взведение и профили — только по явному заказу, дефолт прежний ──────────
-  const { DERIVED_ARM_N_MS } = await import('./fuse.mjs');
-  const armed = armJudge || deathRehearsal === 'strangle' || deathRehearsal === 'instant';
+  const { DERIVED_ARM_N_MS } = fuse;
+  const armed = armJudge || deathRehearsal === 'strangle' || deathRehearsal === 'instant'
+    || deathRehearsal === 'progress-stall';
   const playsProfile = deathRehearsal === 'strangle' || deathRehearsal === 'instant';
   // Порог: заказанный сеткой или выведенная рекомендация. Одно место, где число берётся.
   const armN = armNMs === null ? DERIVED_ARM_N_MS : armNMs;
+  // ⚡ ВХОД 2 (фаза 5в): взводится ТОЛЬКО по явному заказу репетиции «прогресс встал». На здоровом
+  // смоуке и на профилях смерти он молчит — не потому, что не работает, а потому, что каждая
+  // репетиция обязана доказывать РОВНО свой отказ; два взведённых входа сразу не дали бы сказать,
+  // который из них сработал. Решение о взведении — `fuse.armMDecision`, оно же называет причину
+  // отказа вслух (форма быстрее наблюдателя).
+  // `armM` — та же дверь для ЗАМЕРА: без неё «ложных срабатываний 0» нечем проверить, потому что
+  // здоровый прогон вход 2 не взводит по правилу выше. Правило про репетиции, замер — не репетиция.
+  const mDecision = (armM || deathRehearsal === 'progress-stall') ? fuse.armMDecision('furnace') : null;
+  if (mDecision && !mDecision.armed) throw new Error(mDecision.why);
   return {
     vc, card, device, probedCard, recover, loadDoc,
     docName, docDir, journalDir, runDir, burnPidfile,
@@ -292,8 +317,13 @@ export async function makeTwinAssembly({
         // Взведённый судья на двойнике НЕ БЫВАЕТ без руки 2 двойника: --arm-n и --twin-stock —
         // одна дверь, не две (см. комментарий у armJudge выше).
         ...(armed ? ['--arm-n', String(armN), '--burn-pidfile', burnPidfile, '--twin-stock', cardFile] : []),
+        ...(mDecision?.armed ? ['--arm-m', String(mDecision.armMMs)] : []),
         '--seconds', '600', '--out', join(runDir, 'fuse.jsonl')],
       probeArgs: ['--beat-sender', '--seconds', '600', '--tick', '2',
+        // Ретранслятор прогресса едет только там, где вход 2 взведён: непроведённый источник и
+        // застывший — РАЗНЫЕ вещи, и сторож `progressWired` различает их только если мы не
+        // проводим канал зря.
+        ...(mDecision?.armed ? ['--progress-file', progressFile] : []),
         ...(playsProfile ? ['--play-profile', deathRehearsal, '--after-pidfile', burnPidfile] : [])],
       probeMode: 'beat-sender',
     },
@@ -392,7 +422,9 @@ async function mainSmoke(argv) {
   const engine = join(HERE, '..', 'engine.mjs');
   const r = spawnSync(process.execPath, [engine, '--sweep', '--card', 'virtual',
     '--from', from, '--to', to, '--max-depth', maxDepth,
-    ...(armed ? ['--twin-arm', ...armNArgs(argv)] : [])], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    ...(armed ? ['--twin-arm', ...armNArgs(argv)] : []),
+    // `--arm-m` у смоука — замер ложных срабатываний входа 2 на ЗДОРОВОМ прогоне (P66-AC6).
+    ...(argv.includes('--arm-m') ? ['--twin-arm-m'] : [])], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
   const logFile = join(BENCH_RUNS, `twin-smoke-${localIso().replace(/[:+]/g, '-')}.log`);
   mkdirSync(BENCH_RUNS, { recursive: true });
@@ -481,7 +513,11 @@ async function mainRehearseDeath(profile, { withWindow = true, armNMs = null } =
     try { return JSON.parse(readFileSync(join(ev.runDir ?? '', 'live.json'), 'utf8')); } catch { return null; }
   })();
   const checks = [
-    ['трип случился (намерение в журнале судьи, причина beat-silence)', intents.length === 1 && intents[0].cause === 'beat-silence'],
+    // Причина трипа — ЧАСТЬ проверки, а не украшение: репетиция входа 2 обязана доказать, что
+    // сработал ИМЕННО он. Трип по живости на профиле «прогресс встал» означал бы, что мы
+    // отрепетировали не тот отказ (`plans/66`, P66-AC5).
+    [`трип случился (намерение в журнале судьи, причина ${profile === 'progress-stall' ? 'progress-stall' : 'beat-silence'})`,
+      intents.length === 1 && intents[0].cause === (profile === 'progress-stall' ? 'progress-stall' : 'beat-silence')],
     ['рука 1 отработала: носитель горна убит (pid из пид-файла)', hand1?.ok === true],
     ['рука 2 запущена детачнуто и сама подтвердила СТОК ДВОЙНИКА чтением', hand2spawn?.ok === true && hand2done?.ok === true],
     ['полоса ВСТАЛА до следующей ступени (stopWhen: судья вышел, код 2 — спасение)', /СПАСЕНИЕ сработало/u.test(log)],
@@ -874,8 +910,9 @@ async function main(argv) {
   if (argv.includes('--rehearse-death')) {
     const i = argv.indexOf('--rehearse-death');
     const profile = argv[i + 1];
-    if (!['strangle', 'instant'].includes(profile)) {
-      console.error('--rehearse-death принимает strangle | instant (виртуальный ЗАВИС — --rehearse-hang).');
+    if (!['strangle', 'instant', 'progress-stall'].includes(profile)) {
+      console.error('--rehearse-death принимает strangle | instant | progress-stall (виртуальный ЗАВИС — --rehearse-hang).');
+      console.error('progress-stall — ВХОД 2 (plans/66): удары идут ровно, работа перестаёт отгружаться.');
       return 2;
     }
     const n = argv.indexOf('--arm-n');

@@ -46,11 +46,15 @@
 //  4.71 ms, zero misses ≥ 10 ms · GPU writes 0. AC6 (a captured death) rides on future authorised
 //  runs and cannot be scheduled.]
 
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+// Такт наблюдения за прогрессом живёт ОДНИМ фактом у того, кто по нему решает (`fuse.deriveArmMMs`
+// сравнивает выведенный порог с тремя его тактами). Импорт безопасен: у `fuse.mjs` есть сторож
+// главного модуля, при импорте он ничего не запускает.
+import { PROGRESS_POLL_MS } from './fuse.mjs';
 import { performance } from 'node:perf_hooks';
 
 const require = createRequire(import.meta.url);
@@ -174,7 +178,7 @@ async function openDriverProbe() {
   };
 }
 
-async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, beatPort = null }) {
+async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, beatPort = null, progressFile = null }) {
   const driver = role === 'driver' ? await openDriverProbe() : null;
   // ⚡ THE FUSE'S LIVENESS FEED (epic 51 phase 2, `plans/55`): after every SUCCESSFUL probe return,
   // one datagram to the judge on loopback — in memory, fire-and-forget, no disk in the loop (the
@@ -189,6 +193,14 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
     beatSock.unref?.();
     beatBuf = Buffer.from([0x01]);
   }
+  // ⚡ Вход 2 (`plans/66`): ретранслятор прогресса на СВОЁМ таймере — такт живости он не трогает.
+  const progressTimer = beatSock
+    ? startProgressRelay({
+      file: progressFile, port: beatPort, pollMs: PROGRESS_POLL_MS,
+      sendFn: (b, p, h) => beatSock.send(b, p, h),
+    })
+    : null;
+  progressTimer?.unref?.();
   mkdirSync(path.dirname(outPath), { recursive: true });
   const fd = openSync(outPath, 'a');
   const overshoots = [];
@@ -241,6 +253,7 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
   } finally {
     closeSync(fd);
     if (driver) driver.close();
+    if (progressTimer) clearInterval(progressTimer);
     if (beatSock) { try { beatSock.close(); } catch { /* the watch is over either way */ } }
   }
   return summarize({ role, tickMs, startMs, endMs: performance.now(), overshoots, missCount });
@@ -306,7 +319,7 @@ async function cmdFloor({ seconds, tickMs, recordThresholdMs }) {
  * would idealize it; a datagram that fails to leave a blocked-loop process would show up HERE, as
  * zero received, before it could ever silently disarm the live fuse.
  */
-async function cmdBeatSender({ port, seconds, tickMs }) {
+async function cmdBeatSender({ port, seconds, tickMs, progressFile = null }) {
   const dgram = await import('node:dgram');
   const sock = dgram.createSocket('udp4');
   const buf = Buffer.from([0x01]);
@@ -318,6 +331,10 @@ async function cmdBeatSender({ port, seconds, tickMs }) {
   const mm = loadWinmm();
   const granted = mm.begin(1);
   if (granted !== 0) console.error(`⚠️ timeBeginPeriod(1) отказал (код ${granted}) — такт будет зернистым ~15,6 мс`);
+  // ⚡ Вход 2 на двойнике — тот же ретранслятор, что у живой пробы (паритет стендов, эпик 59).
+  const progressTimer = startProgressRelay({
+    file: progressFile, port, pollMs: PROGRESS_POLL_MS, sendFn: (b, p, h) => sock.send(b, p, h),
+  });
   try {
   const startMs = performance.now();
   const endTarget = startMs + seconds * 1000;
@@ -336,7 +353,7 @@ async function cmdBeatSender({ port, seconds, tickMs }) {
   await new Promise((res) => setTimeout(res, 100)); // let the loop drain the send queue before close
   sock.close();
   return 0;
-  } finally { mm.end(1); }
+  } finally { mm.end(1); if (progressTimer) clearInterval(progressTimer); }
 }
 
 // =================================================================================================
@@ -396,6 +413,36 @@ export const DEATH_PROFILES = Object.freeze({
  */
 export function strangleProfileStalls() {
   return strangleStallsFromPulse(readStrangleFixtureRows());
+}
+
+/**
+ * ⚡ ВХОД 2 ПРЕДОХРАНИТЕЛЯ — ретранслятор прогресса (фаза 5в эпика 51, `plans/66`).
+ *
+ * Прожиг трогает файл сердцебиения раз в запуск (`--progress-file`); проба подсматривает файл
+ * ПОДВЫБОРКОЙ и превращает продвижение счётчика в удар `0x02`. Три решения, каждое с причиной:
+ *
+ * 1. **Читает ПРОБА, а не судья.** У судьи одна дверь — память и датаграммы; диск в его такте был
+ *    бы ровно тем, что владелец запретил («НЕ ДИСК РАЗ В СЕКУНДУ»).
+ * 2. **Отдельный таймер, а не тело цикла ударов.** Порог входа 2 на три порядка грубее порога
+ *    входа 1, и наблюдение за прогрессом не смеет сдвинуть такт живости ни на такт.
+ * 3. **Удар шлётся ТОЛЬКО на ИЗМЕНЕНИЕ счётчика.** Файл, лежащий неподвижно, — это и есть
+ *    остановившийся прогресс; повторять по нему удары значило бы усыпить предохранитель трупом
+ *    (тот же довод, по которому удары живости шлются лишь на успешный возврат пробы).
+ *
+ * Нет файла (ещё не создан) — молчим: «источника нет» ≠ «прогресс застыл», и судья различает эти
+ * два случая сторожем `progressWired` с фазы 2.
+ */
+export function startProgressRelay({ file, port, pollMs, sendFn, readFn = null, setIntervalFn = setInterval }) {
+  if (!file || port === null || port === undefined) return null;
+  const read = readFn || ((p) => { try { return readFileSync(p, 'utf8').trim(); } catch { return null; } });
+  const buf = Buffer.from([0x02]);
+  let last = null;
+  return setIntervalFn(() => {
+    const v = read(file);
+    if (v === null || v === '' || v === last) return;
+    last = v;
+    sendFn(buf, port, '127.0.0.1');
+  }, pollMs);
 }
 
 /** Read the strangle fixture from disk (NUL-tail and blank lines skipped — the tail IS the death). */
@@ -592,7 +639,11 @@ if (!isMainThread && workerData?.deathWatchRole) {
           betweenMs: num('--between-ms', 200),
         });
       }
-      return cmdBeatSender({ port: num('--port', 0), seconds: num('--seconds', 60), tickMs: num('--tick', DEFAULT_TICK_MS) });
+      const pf = argv.indexOf('--progress-file');
+      return cmdBeatSender({
+        port: num('--port', 0), seconds: num('--seconds', 60), tickMs: num('--tick', DEFAULT_TICK_MS),
+        progressFile: pf !== -1 ? argv[pf + 1] : null,
+      });
     }
     if (has('--probe')) {
       // The LIVE probe with beats — the fuse's driver-role process (phases 4-5 wire the engine to
@@ -607,12 +658,15 @@ if (!isMainThread && workerData?.deathWatchRole) {
           outPath: path.join(DEATH_WATCH_DIR, `${stamp}-driver.jsonl`),
           recordThresholdMs: num('--record-threshold', RECORD_THRESHOLD_MS),
           beatPort: argv.includes('--port') ? num('--port', null) : null,
+          // ⚡ Вход 2 (`plans/66`): путь файла сердцебиения прожига, если он проведён.
+          progressFile: argv.includes('--progress-file') ? argv[argv.indexOf('--progress-file') + 1] : null,
         });
         console.log(`ПРОБА ЗАКОНЧИЛА: тактов ${s.delivered}/${s.expected} (${s.deliveredPct} %) · промахов ${s.missCount}`);
         return 0;
       } finally { mm.end(1); }
     }
-    console.log('Использование: --floor [--seconds 60] [--tick 2] [--record-threshold 10] | --probe [--port P] [--seconds S] | --beat-sender --port P [--seconds S] [--play-profile strangle|instant [--after-pidfile F] [--warmup-ms 500] [--between-ms 200]] | --selftest');
+    console.log('Использование: --floor [--seconds 60] [--tick 2] [--record-threshold 10] | --probe [--port P] [--seconds S] [--progress-file F] | --beat-sender --port P [--seconds S] [--progress-file F] [--play-profile strangle|instant [--after-pidfile F] [--warmup-ms 500] [--between-ms 200]] | --selftest');
+    console.log('--progress-file — файл сердцебиения прожига (вход 2 предохранителя, plans/66): продвижение счётчика едет судье ударом 0x02.');
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });
