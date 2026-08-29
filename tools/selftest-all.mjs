@@ -267,6 +267,12 @@ const SUITES = [
   // ни `rmSync`, ни `liveFingerprint` из неё недостижимы: они живут в `runOneCard`/`runBatch`,
   // куда из набора нет ни одного вызова. Сам пакетный прогон в батарею НЕ входит и не должен —
   // он занимает минуты и запускается отдельной командой `npm run polygon`.
+  // ВОШЁЛ 2026-08-29 ВМЕСТЕ СО СВОИМ КОДОМ (эпик 67 фаза 4, plans/71 шаг 5). ДОКАЗАТЕЛЬСТВО
+  // ИНЕРТНОСТИ: модуль — чистая логика над ВНЕДРЯЕМЫМ оракулом; в наборе оракул подставной
+  // (функция от объекта), поэтому ни прогонов, ни карт, ни диска.
+  { id: 'shrink', npm: 'node automation-engine/lib/polygon-shrink.mjs --selftest',
+    argv: ['automation-engine/lib/polygon-shrink.mjs', '--selftest'],
+    what: 'сжатие ломающей карты: бисекция, зануление осей, отказ при смене класса', done: /^ИТОГ:/mu },
   { id: 'polygon', npm: 'node automation-engine/lib/polygon.mjs --selftest',
     argv: ['automation-engine/lib/polygon.mjs', '--selftest'],
     what: 'полигон: пути артефактов, разбор журнала, карта покрытия, отчёт (эпик 67 фаза 4)', done: /^ИТОГ:/mu },

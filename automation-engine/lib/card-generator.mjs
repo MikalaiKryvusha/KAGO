@@ -73,7 +73,14 @@ export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir
   // счётчик не краснел НИ РАЗУ, а сторож, который никогда не срабатывал, не доказывает ничего
   // (`BUG_FIXING_FRAMEWORK.md` → Guards). Подставной валидатор — единственный способ прогнать
   // ветку перевыборки, не подделывая карту. В бою параметр не передаётся никогда.
-  validate = validateCard } = {}) {
+  validate = validateCard,
+  // ─── ЗАМОРОЗКА ОСЕЙ — ДЛЯ СЖАТИЯ ЛОМАЮЩЕЙ КАРТЫ (`polygon-shrink.mjs`, `plans/71` шаг 5) ──────
+  // Замороженная ось берёт ЦЕНТР архетипа вместо выборки. ⚠️ БРОСОК ВСЁ РАВНО ДЕЛАЕТСЯ и просто
+  // отбрасывается: иначе заморозка сдвинула бы посеянный поток, и (семя, A, архетип) перестали бы
+  // воспроизводить карту — сжатие ломало бы ровно то свойство, ради которого минимизируется ВХОД,
+  // а не файл. Имена осей — `SHRINKABLE_AXES`.
+  freezeAxes = [] } = {}) {
+  const frozen = new Set(freezeAxes);
   const arch = ARCHETYPES[archetype];
   if (!arch) return { ok: false, why: `нет такого архетипа: ${archetype} (есть: ${Object.keys(ARCHETYPES).join(', ')})` };
   if (!(amplitude >= 0 && amplitude <= 1)) return { ok: false, why: `амплитуда ${amplitude} вне [0,1]` };
@@ -89,11 +96,17 @@ export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir
     const limitW = A === 0 ? 300 : AXES.limitW.values[Math.floor(rng() * AXES.limitW.values.length)];
     const staticW = 40.669 * mul(rng, AXES.packagePct.width, A);
     const perMhzVolt2 = 0.091223 * mul(rng, AXES.packagePct.width, A);
-    const drift = arch.drift ? (A === 0 ? -1.7 : pick(rng, AXES.tableDriftMhzPerC.lo, AXES.tableDriftMhzPerC.hi)) : null;
-    const edgeShift = arch.edgeShift ? pick(rng, AXES.edgeShiftMvPerC.lo, AXES.edgeShiftMvPerC.hi) : null;
-    const boost = A === 0 ? 2 : AXES.boostSteps.values[Math.floor(rng() * AXES.boostSteps.values.length)];
-    const governor = arch.governor ? Math.round(pick(rng, AXES.governorMhz.lo, AXES.governorMhz.hi)) : null;
-    const floorShare = arch.floor ? pick(rng, AXES.floorDepthShare.lo, AXES.floorDepthShare.hi) : null;
+    // Бросок делается ВСЕГДА (см. замечание о потоке у `freezeAxes`), заморозка правит только исход.
+    const driftDrawn = arch.drift ? (A === 0 ? -1.7 : pick(rng, AXES.tableDriftMhzPerC.lo, AXES.tableDriftMhzPerC.hi)) : null;
+    const drift = frozen.has('tableDrift') ? null : driftDrawn;
+    const edgeShiftDrawn = arch.edgeShift ? pick(rng, AXES.edgeShiftMvPerC.lo, AXES.edgeShiftMvPerC.hi) : null;
+    const edgeShift = frozen.has('edgeShift') ? null : edgeShiftDrawn;
+    const boostDrawn = A === 0 ? 2 : AXES.boostSteps.values[Math.floor(rng() * AXES.boostSteps.values.length)];
+    const boost = frozen.has('boost') ? 2 : boostDrawn;
+    const governorDrawn = arch.governor ? Math.round(pick(rng, AXES.governorMhz.lo, AXES.governorMhz.hi)) : null;
+    const governor = frozen.has('governor') ? null : governorDrawn;
+    const floorShareDrawn = arch.floor ? pick(rng, AXES.floorDepthShare.lo, AXES.floorDepthShare.hi) : null;
+    const floorShare = frozen.has('floor') ? null : floorShareDrawn;
     const noiseSeed = Math.floor(rng() * 0xFFFFFFFF);
 
     // ─── сборка: геометрия ОБРАЗЦА (консервативно, риск 3 плана), край и физика — выборкой ──────
@@ -112,7 +125,11 @@ export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir
     const card = d.card;
 
     card.physics = {
-      origin: `СГЕНЕРИРОВАНО: семя ${seed} · амплитуда ${A} · архетип ${archetype} — карточки ширин в card-generator.AXES`,
+      // ⚠️ ЗАМОРОЗКА ВХОДИТ В РАСПИСКУ. Без неё две РАЗНЫЕ карты (одна с полом, другая без) несли бы
+      // ОДНО происхождение — а расписка, по которой карту нельзя воспроизвести, хуже отсутствующей.
+      origin: `СГЕНЕРИРОВАНО: семя ${seed} · амплитуда ${A} · архетип ${archetype}`
+        + `${freezeAxes.length ? ` · ЗАМОРОЖЕНЫ ОСИ: ${[...freezeAxes].join(', ')}` : ''}`
+        + ' — карточки ширин в card-generator.AXES',
       power: { limitW, staticW: round3(staticW), perMhzVolt2: round6(perMhzVolt2) },
       ...(drift !== null ? { tableDriftMhzPerC: round3(drift) } : {}),
       ...(edgeShift !== null ? { edgeShift: { mvPerC: round3(edgeShift), refC: 41 } } : {}),
@@ -120,7 +137,8 @@ export function generateCard({ seed, amplitude = 0.5, archetype = 'typical', dir
       ...(governor !== null ? { governorBelowCeilingMhz: governor } : {}),
       ...(floorShare !== null ? { floor: { baseMv: floorBaseMv(card, floorShare) } } : {}),
     };
-    card.provenance = `СГЕНЕРИРОВАНО семенем ${seed}, амплитуда ${A}, архетип ${archetype} — `
+    card.provenance = `СГЕНЕРИРОВАНО семенем ${seed}, амплитуда ${A}, архетип ${archetype}`
+      + `${freezeAxes.length ? `, ЗАМОРОЖЕНЫ ОСИ: ${[...freezeAxes].join(', ')}` : ''} — `
       + 'ВЫМЫСЕЛ²: этой карты не существует и как замера; зелёный цикл на ней — утверждение о ЛОГИКЕ движка';
 
     const chk = validate(card);
@@ -241,6 +259,32 @@ function cmdSelftest() {
       `ok=${never.ok} redraws=${never.redraws}`);
   }
 
+  // ─── ЗАМОРОЗКА ОСЕЙ (`plans/71` шаг 5): ось берёт центр, а ПОТОК не сдвигается ───────────────
+  {
+    const frozenFloor = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky', freezeAxes: ['floor'] });
+    ok('заморозка оси УБИРАЕТ её из карты: у hot-unlucky без floor пола нет',
+      frozenFloor.ok && frozenFloor.card.physics.floor === undefined,
+      JSON.stringify(frozenFloor.card?.physics?.floor));
+    ok('и трогает ТОЛЬКО свою ось: дрейф у той же карты остался на месте',
+      frozenFloor.ok && Number.isFinite(frozenFloor.card.physics.tableDriftMhzPerC)
+      && frozenFloor.card.physics.tableDriftMhzPerC === a.card.physics.tableDriftMhzPerC,
+      `${frozenFloor.card?.physics?.tableDriftMhzPerC} против ${a.card.physics.tableDriftMhzPerC}`);
+    // ⚠️ ГЛАВНОЕ СВОЙСТВО ЗАМОРОЗКИ: посеянный поток не сдвигается — бросок делается и отбрасывается.
+    // Иначе сжатие ломало бы воспроизводимость ВХОДА, ради которой оно и минимизирует вход, а не файл.
+    const frozenDrift = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky', freezeAxes: ['tableDrift'] });
+    // РАСПИСКА ОБЯЗАНА РАЗЛИЧАТЬ. Без этого блока две разные карты несли бы одно происхождение,
+    // и «воспроизводится по расписке» было бы неправдой (E67-AC6).
+    ok('заморозка ВХОДИТ в расписку карты — иначе две разные карты неразличимы по происхождению',
+      /ЗАМОРОЖЕНЫ ОСИ: floor/u.test(frozenFloor.card.provenance)
+      && /ЗАМОРОЖЕНЫ ОСИ: floor/u.test(frozenFloor.card.physics.origin)
+      && !/ЗАМОРОЖЕНЫ/u.test(a.card.provenance),
+      frozenFloor.card.provenance.slice(0, 120));
+    ok('заморозка НЕ сдвигает посеянный поток: остальная карта бит-в-бит прежняя',
+      frozenDrift.ok && frozenDrift.card.physics.power.limitW === a.card.physics.power.limitW
+      && frozenDrift.card.fiction.failure.scaleMv === a.card.fiction.failure.scaleMv
+      && frozenDrift.card.physics.floor.baseMv === a.card.physics.floor.baseMv);
+  }
+
   ok('происхождение: каждый файл несёт строку «вымысел²» и семя (P70-AC4)',
     /ВЫМЫСЕЛ²/u.test(a.card.provenance) && a.card.provenance.includes('семенем 42')
     && /СГЕНЕРИРОВАНО/u.test(a.card.physics.origin));
@@ -261,6 +305,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const num = (f, d) => { const i = argv.indexOf(f); return i !== -1 ? Number(argv[i + 1]) : d; };
   const str = (f, d) => { const i = argv.indexOf(f); return i !== -1 ? argv[i + 1] : d; };
   if (argv.includes('--selftest')) process.exit(cmdSelftest());
+  const freezeArg = str('--freeze', '');
   if (argv.includes('--batch')) {
     const r = generateBatch({ count: num('--batch', 100), amplitude: num('--amplitude', 0.5), seedBase: num('--seed', 1000) });
     console.log(JSON.stringify(r, null, 2));
@@ -268,7 +313,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (argv.includes('--seed')) {
     const seed = num('--seed', 1);
-    const r = generateCard({ seed, amplitude: num('--amplitude', 0.5), archetype: str('--archetype', 'typical') });
+    const r = generateCard({ seed, amplitude: num('--amplitude', 0.5), archetype: str('--archetype', 'typical'),
+      freezeAxes: freezeArg ? freezeArg.split(',').map((x) => x.trim()).filter(Boolean) : [] });
     if (!r.ok) { console.error(`ОТКАЗ: ${r.why} (перевыборок ${r.redraws})`); process.exit(1); }
     const outDir = str('--out', join('benches', 'cards', 'generated'));
     mkdirSync(outDir, { recursive: true });
@@ -278,6 +324,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`ЗАПИСАН: ${file} (перевыборок ${r.redraws})`);
     process.exit(0);
   }
-  console.log('Использование: --selftest | --seed N [--amplitude 0..1] [--archetype typical|cold-lucky|hot-unlucky|angry-governor|drifty] [--out dir] | --batch 100 [--amplitude A] [--seed base]');
+  console.log('Использование: --selftest | --seed N [--amplitude 0..1] [--archetype typical|cold-lucky|hot-unlucky|angry-governor|drifty] [--freeze floor,tableDrift,…] [--out dir] | --batch 100 [--amplitude A] [--seed base]');
   process.exit(2);
 }
