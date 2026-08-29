@@ -140,10 +140,14 @@ export async function makeTwinAssembly({
   // лаунчером двойника, НАСТОЯЩИЙ `decideVerdict`, настоящая проверка штампа. ОДИН прожиг на
   // форму, экспозиция — в секундах модели отказа (B2-AC3): боевой цикл `stressTest` меряет
   // ВРЕМЯ СТЕНЫ, которого у двойника нет по построению (см. шапку `burnRealSeconds`).
-  const goldenFor = (args) => ({
+  // Сумма эталона — ПО ШТАМПУ, той же функцией, что печатает её прожиг двойника (`plans/68`,
+  // P68-AC4): другая интенсивность — другой эталон, дефолт (args=[]) — прежняя базовая сумма.
+  // Двигаются обе стороны одной функцией — пара «правда↔зеркало» не существует.
+  const burnModel = await import('./burn-model.mjs');
+  const goldenFor = (args, name = 'sdc_fma') => ({
     gpu: { driver: desc.driver, vbios: desc.vbios },
     args,
-    checksum: card.fiction?.goldenChecksum ?? vgpu.GOLDEN_CHECKSUM,
+    checksum: burnModel.stampChecksum(name, args, card.fiction?.goldenChecksum ?? vgpu.GOLDEN_CHECKSUM),
   });
   // ─── НОСИТЕЛЬ ГОРНА (фаза 4): тело прожига — процесс, вердикт — внутрипроцессный оракул ────────
   // Состояние модели (тепло, последовательность ГСЧ, удержанные смещения) НЕ форкается в ребёнка —
@@ -160,7 +164,10 @@ export async function makeTwinAssembly({
     const i = argv.indexOf('--sustain');
     const secs = i === -1 ? 1 : Number(argv[i + 1]);
     const r = spawnSync(process.execPath, [carrierScript, '--seconds', String(secs), '--pidfile', burnPidfile,
-      '--progress-file', progressFile, '--progress-tick-ms', String(Math.ceil(fuse.PROGRESS_TICK_MAX_MS.furnace)),
+      // Такт сердцебиения — МЕДИАНА каденции формы (`plans/68` шаг 5): живой .cu трогает файл раз
+      // в запуск (~302 мс furnace), и носитель мимикрирует ему; максимумы остаются порогам
+      // предохранителя (fuse.PROGRESS_TICK_MAX_MS — другой факт, другой потребитель).
+      '--progress-file', progressFile, '--progress-tick-ms', String(Math.round(burnModel.LAUNCH_PERIOD_MS.furnace)),
       // Профиль «прогресс встал»: носитель ЖИВ, удары идут, работа перестаёт отгружаться на
       // ПЕРВОЙ секунде прожига — раньше, чем истечёт время ступени, иначе замирание совпадёт с
       // законным концом работы и репетиция ничего не докажет.
@@ -172,7 +179,7 @@ export async function makeTwinAssembly({
   const twinStressTest = async ({
     name = 'sdc_fma', seconds = 10, sustain = 0, args = [], onBurst = null,
   } = {}) => {
-    const golden = goldenFor(args);
+    const golden = goldenFor(args, name);
     const stampOk = stress.checkGoldenStamp(golden, probedCard, args);
     const burst = stress.runBurst({
       name, args, sustainSeconds: Math.max(1, sustain || seconds),

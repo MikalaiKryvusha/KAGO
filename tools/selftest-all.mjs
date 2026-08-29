@@ -115,6 +115,8 @@ const SUITES = [
     what: 'спуск по лестнице частот, кандидат и откат', done: /^САМОПРОВЕРКА:/mu },
   { id: 'vgpu', npm: 'npm run vgpu -- --selftest', argv: ['automation-engine/lib/virtual-gpu.mjs', '--selftest'],
     what: 'виртуальная видеокарта: край, шум, три исхода', done: /^САМОПРОВЕРКА ВИРТУАЛЬНОЙ КАРТЫ:/mu },
+  { id: 'burn', npm: 'node automation-engine/lib/burn-model.mjs --selftest', argv: ['automation-engine/lib/burn-model.mjs', '--selftest'],
+    what: 'модель нагрузки: ватты по форме, каденция, штамп суммы (plans/68)', done: /^ИТОГ:/mu },
   { id: 'gfx', npm: 'npm run gfx -- --selftest', argv: ['automation-engine/lib/graphics-load.mjs', '--selftest'],
     what: 'игровой стенд и разбор кадров', done: /^САМОПРОВЕРКА:/mu },
   { id: 'nvapi', npm: 'npm run nvapi -- --selftest-shape', argv: ['automation-engine/lib/nvapi.mjs', '--selftest-shape'],

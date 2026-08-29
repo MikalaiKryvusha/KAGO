@@ -73,6 +73,10 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
 import { buildRaiseAndCapVector, CLK_VF_POINT_COUNT, classifyWriteFailure } from './nvapi.mjs';
 import { curveWriteRefusal } from './profile-manager.mjs';
+// Модель нагрузки (эпик 67 фаза 1, `plans/68`): измеренные ватты по форме, каденция запусков,
+// доля GPU-времени, сумма по штампу. Таблицы там, ФОРМУЛА активности — здесь (у владельца
+// телеметрии): один факт в одном месте.
+import * as burn from './burn-model.mjs';
 
 /** The graphics half of the V/F table. One definition, shared with the write path. */
 const GRAPHICS_POINTS = CLK_VF_POINT_COUNT - 1;
@@ -812,9 +816,11 @@ export function buildFiction(card, {
 export const GOLDEN_CHECKSUM = 'fd7d452ce569c9d7';
 
 /** A wrong answer, derived from the draw so it is reproducible with the seed like everything else. */
-function sdcChecksum(r) {
-  const flipped = (parseInt(GOLDEN_CHECKSUM.slice(0, 8), 16) ^ Math.floor(r * 0xFFFF)) >>> 0;
-  return flipped.toString(16).padStart(8, '0') + GOLDEN_CHECKSUM.slice(8);
+function sdcChecksum(r, base = GOLDEN_CHECKSUM) {
+  // Порченая сумма строится от суммы СВОЕГО ШТАМПА (plans/68): SDC на нестандартной интенсивности
+  // обязан расходиться со СВОИМ эталоном, а не с чужим дефолтным.
+  const flipped = (parseInt(base.slice(0, 8), 16) ^ Math.floor(r * 0xFFFF)) >>> 0;
+  return flipped.toString(16).padStart(8, '0') + base.slice(8);
 }
 
 export function mulberry32(seed) {
@@ -924,6 +930,24 @@ export function telemetryEquilibrium({ clockMhz, voltageMv, loadFactor = 1, powe
   const tempC = Math.max(M.tempFloorC, M.tempAmbientC + M.tempCPerWatt * powerW);
   const fanPct = Math.min(100, Math.max(M.fanFloorPct, M.fanFloorPct + M.fanPctPerC * (tempC - M.fanAnchorC)));
   return { powerW, tempC, fanPct, cappedByPowerLimit: powerLimitW !== null && rawW > powerLimitW };
+}
+
+/**
+ * АКТИВНОСТЬ ФОРМЫ НАГРУЗКИ — доля динамического члена, которую эта форма реально включает.
+ * Выводится из ИЗМЕРЕННЫХ ватт (`burn-model.mjs`) обращением формулы телеметрии в опорной точке
+ * замера: a = (W − P₀) / (k · f · V²). Проверка обратным ходом — блоки «модель нагрузки» ниже:
+ * каждая строка сетки восстанавливается через `telemetryEquilibrium` с точностью ±5 % (P68-AC1).
+ * Форма без измеренных ватт получает провизорную активность С НАЗВАННЫМ происхождением, не тихую
+ * единицу.
+ */
+export function activityForShape(workload, args = []) {
+  const M = TELEMETRY_MODEL;
+  const ref = burn.REFERENCE_POINT;
+  const volts = ref.voltageMv / 1000;
+  const denom = M.powerPerMhzVolt2 * ref.clockMhz * volts * volts;
+  const w = burn.targetWattsFor(workload, args);
+  if (w === null) return burn.SHAPE_WATTS[workload]?.provisionalActivity ?? 1;
+  return (w - M.powerStaticW) / denom;
 }
 
 /** One step of the first-order lag: how far `now` moves toward `target` over `dt` with constant `tau`. */
@@ -1732,6 +1756,22 @@ export function virtualCard(cardProfile, {
       const workload = String(binary).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '');
       const i = argv.indexOf('--sustain');
       const seconds = i === -1 ? P.fiction.failure.perLaunchSeconds : Number(argv[i + 1]);
+      // ШТАМП — позиционные аргументы без флагов, тем же решением, что в `runBurst`
+      // («sustainSeconds is deliberately NOT part of args»): интенсивность — это штамп, длительность
+      // — нет. Флаги с значением выкидываются парами.
+      const VALUED_FLAGS = new Set(['--sustain', '--progress-file']);
+      const stampArgs = [];
+      for (let k = 0; k < argv.length; k++) {
+        const a = String(argv[k]);
+        if (VALUED_FLAGS.has(a)) { k++; continue; }
+        if (a.startsWith('--')) continue;
+        stampArgs.push(a);
+      }
+      // Модель нагрузки (`plans/68`): каденция и доля времени — медианы архива; неизвестной форме —
+      // прежние константы (чужое имя не должно тихо получить чужую физику).
+      const periodMs = burn.LAUNCH_PERIOD_MS[workload] ?? P.fiction.failure.perLaunchSeconds * 1000;
+      const duty = burn.DUTY[workload] ?? null;
+      const activity = activityForShape(workload, stampArgs.map(Number));
       // The seconds, bought back on request. `Atomics.wait` and not a promise: `runBurst`'s launcher
       // is SYNCHRONOUS (it stands in for `spawnSync`), so an async sleep here would return instantly
       // and quietly lie — the shape of the seam decides the shape of the wait.
@@ -1748,7 +1788,9 @@ export function virtualCard(cardProfile, {
           const slice = Math.min(1, left);
           Atomics.wait(sleeper, 0, 0, Math.round(slice * 1000));
           left -= slice;
-          telemetry.advance(slice, { load: 1 });
+          // Нагрев — ОТ АКТИВНОСТИ ФОРМЫ (P68-AC5): fma=0 греет к ~207 Вт, fma=64 — к зажиму
+          // предела; бинарная единица грела все формы одинаково, чего живая сетка не показывает.
+          telemetry.advance(slice, { load: activity });
           if (onTick) onTick(telemetry.read());
         }
         burning = false;
@@ -1769,22 +1811,43 @@ export function virtualCard(cardProfile, {
       // безопасным то, что на живой карте валится на первой секунде.
       // (Найдено 2026-08-23 при добавлении дрейфа таблицы: три блока покраснели ровно на этом.)
       const drawnAtMv = this.servingVoltageMv(mhz);
-      if (!burning) telemetry.advance(seconds, { load: 1 });
+      if (!burning) telemetry.advance(seconds, { load: activity });
       // ⏳ Прожиг оставляет частоту выдачи ещё на несколько ЧТЕНИЙ — спад простоя, см. clockNow.
       state.loadedReadsLeft = LOAD_CLOCK_DECAY_READS;
       const d = this.draw({ mhz, seconds, workload, voltageMv: drawnAtMv });
-      const launches = Math.max(1, Math.round(seconds / P.fiction.failure.perLaunchSeconds));
-      const line = (checksum, distinct) => `KAGO-WORKLOAD name=${workload} checksum=${checksum} `
-        + `distinct=${distinct} launches=${launches} gpu_us=${launches * 900} work_per_launch=100000 `
-        + `bad_launches=0 bad_elems_max=0\n`;
+      // Счёт запусков — из КАДЕНЦИИ ФОРМЫ (P68-AC2): 302,32 мс furnace против 0,78 мс sdc_fma —
+      // прежняя одна константа на всех рассказывала сказку про 400-кратно различающиеся формы.
+      const launches = Math.max(1, Math.round((seconds * 1000) / periodMs));
+      const gpuUs = duty === null ? launches * 900 : Math.round(seconds * 1e6 * duty);
+      const line = (checksum, distinct, badLaunches = 0, badElemsMax = 0) =>
+        `KAGO-WORKLOAD name=${workload} checksum=${checksum} `
+        + `distinct=${distinct} launches=${launches} gpu_us=${gpuUs} work_per_launch=100000 `
+        + `bad_launches=${badLaunches} bad_elems_max=${badElemsMax}\n`;
+      // Сумма — ПО ШТАМПУ (P68-AC4): другая интенсивность — другая сумма; пустые аргументы — прежняя
+      // базовая (эталоны не сдвигаются). Эталонную половину двигает ТА ЖЕ функция в goldenFor
+      // сборки двойника — одна сумма, два потребителя, ноль пар «правда↔зеркало».
+      const stampGolden = burn.stampChecksum(workload, stampArgs, P.fiction.goldenChecksum ?? GOLDEN_CHECKSUM);
 
       switch (d.outcome) {
         case 'PASS':
-          return { status: 0, stdout: line(P.fiction.goldenChecksum ?? GOLDEN_CHECKSUM, 1), stderr: '' };
-        case 'SDC':
+          return { status: 0, stdout: line(stampGolden, 1), stderr: '' };
+        case 'SDC': {
           // A checksum that differs — the failure mode that does NOT announce itself, and the whole
           // reason the oracle has a checksum half at all.
-          return { status: 0, stdout: line(sdcChecksum(d.r), launches > 1 ? 2 : 1), stderr: '' };
+          //
+          // ПО-ЗАПУСКОВО (P68-AC3): порча множится на запуски через интенсивность отказа САМОЙ
+          // модели края (никакой второй вероятности). Счёт выводится из УЖЕ вытянутого d.r —
+          // ноль дополнительных обращений к ГСЧ, посеянная последовательность розыгрышей не
+          // сдвигается ни на шаг (её стабильность охраняет комментарий у ловушечной ступени draw).
+          const pLaunch = this.failureProbability({
+            mhz, voltageMv: drawnAtMv, seconds: periodMs / 1000, workload,
+          });
+          const badLaunches = Math.max(1, Math.min(launches,
+            Math.round(pLaunch * launches + (d.r - 0.5) * 2)));
+          const distinct = 1 + Math.min(badLaunches, 7);
+          const badElemsMax = 1 + Math.floor(d.r * 4);
+          return { status: 0, stdout: line(sdcChecksum(d.r, stampGolden), distinct, badLaunches, badElemsMax), stderr: '' };
+        }
         case 'CRASH':
           return { status: 3221225477, stdout: '', stderr: 'Access violation — драйвер сбросился' };
         default: {
@@ -2752,6 +2815,85 @@ export async function selfTest() {
   check('ПУЛЬС: без настоящих секунд прожиг всё равно НАГРЕВАЕТ карту',
     fastHeat.telemetry.read().tempC > coldC + 1,
     `было ${coldC} °C, стало ${fastHeat.telemetry.read().tempC} °C`);
+
+  // ---- 18б. МОДЕЛЬ НАГРУЗКИ (эпик 67 фаза 1, `plans/68`) — мутационные адресаты: строка сетки
+  //      ватт · снятый по-запусковый розыгрыш · штамп, переставший различать аргументы
+  {
+    // P68-AC1: каждая из 10 строк измеренной сетки восстанавливается через telemetryEquilibrium
+    // с активностью, выведенной из НЕЁ ЖЕ, — обратный ход ±5 % ловит дрейф любой константы цепочки.
+    let worstPct = 0; let worstRow = '';
+    for (const [fma, watts] of burn.FURNACE_WATTS_BY_FMA) {
+      const a = activityForShape('furnace', [2400, 8192, 256, fma]);
+      const eq = telemetryEquilibrium({
+        clockMhz: burn.REFERENCE_POINT.clockMhz, voltageMv: burn.REFERENCE_POINT.voltageMv,
+        loadFactor: a, powerLimitW: null,
+      });
+      const pct = Math.abs(eq.powerW - watts) / watts * 100;
+      if (pct > worstPct) { worstPct = pct; worstRow = `fma=${fma}: модель ${eq.powerW.toFixed(1)} против ${watts}`; }
+    }
+    check('НАГРУЗКА: все 10 строк сетки ватт восстанавливаются обратным ходом ±5 % (P68-AC1)',
+      worstPct <= 5, `худшая ${worstPct.toFixed(2)} % — ${worstRow}`);
+    const eq64 = telemetryEquilibrium({
+      clockMhz: burn.REFERENCE_POINT.clockMhz, voltageMv: burn.REFERENCE_POINT.voltageMv,
+      loadFactor: activityForShape('furnace', [2400, 8192, 256, 64]), powerLimitW: 300,
+    });
+    check('НАГРУЗКА: форма 64 fma упирается в предел мощности — как живая (факт 16)',
+      eq64.cappedByPowerLimit === true && eq64.powerW === 300,
+      `capped=${eq64.cappedByPowerLimit}, ${eq64.powerW} Вт`);
+    check('НАГРУЗКА: активность форм различается и упорядочена (fma64 > sdc_fma > fma0)', (() => {
+      const a64 = activityForShape('furnace', [2400, 8192, 256, 64]);
+      const a0 = activityForShape('furnace', [2400, 8192, 256, 0]);
+      const asdc = activityForShape('sdc_fma', []);
+      return a64 > asdc && asdc > a0 && a64 <= 1.05;
+    })());
+
+    // P68-AC2: счёт запусков — из каденции формы, доля GPU-времени — из измеренной duty.
+    const cadence = virtualCard(CARD, { settleSamples: 0, seed: 11 });
+    cadence.backend.lockGraphicsClocksMhz(1500, 1500); // глубоко над краем — исход PASS гарантирован
+    const rr = cadence.oracle.run('furnace.exe', ['2400', '8192', '256', '64', '--sustain', '3']);
+    const f = Object.fromEntries(rr.stdout.trim().split(/\s+/).slice(1).map((p) => p.split('=')));
+    check('НАГРУЗКА: launches по каденции формы — 3 с furnace ≈ 10 запусков ±10 % (P68-AC2)',
+      Math.abs(Number(f.launches) - 3000 / 302.32) / (3000 / 302.32) <= 0.10,
+      `launches=${f.launches}`);
+    check('НАГРУЗКА: gpu_us/wall = duty формы ±1 п.п. (furnace 0,934)',
+      Math.abs(Number(f.gpu_us) / 3e6 - 0.934) <= 0.01, `gpu_us=${f.gpu_us}`);
+    const rrS = cadence.oracle.run('sdc_fma.exe', ['--sustain', '1']);
+    const fS = Object.fromEntries(rrS.stdout.trim().split(/\s+/).slice(1).map((p) => p.split('=')));
+    check('НАГРУЗКА: та же секунда sdc_fma — на три порядка больше запусков (форма не потерялась)',
+      Number(fS.launches) > 1000 && Number(fS.launches) < 1500, `launches=${fS.launches}`);
+
+    // P68-AC4: сумма по штампу — дефолт золотой, интенсивность различима, SDC портит СВОЮ сумму.
+    check('НАГРУЗКА: сумма дефолтных аргументов — прежний золотой (эталоны не сдвинуты, P68-AC4)',
+      fS.checksum === (CARD.fiction.goldenChecksum ?? GOLDEN_CHECKSUM), `checksum=${fS.checksum}`);
+    check('НАГРУЗКА: сумма НЕдефолтного штампа отличается от золотой и стабильна',
+      f.checksum !== GOLDEN_CHECKSUM
+      && f.checksum === burn.stampChecksum('furnace', ['2400', '8192', '256', '64'], GOLDEN_CHECKSUM));
+
+    // P68-AC3: по-запусковый SDC — bad_launches ⇔ distinct, порча от суммы СВОЕГО штампа.
+    // Напряжение заводится в SDC-полосу ДЕТЕРМИНИРОВАННО (raiseBelowEdge: обслуживающее садится на
+    // 5 мВ ниже края — середина полосы sdcUntil=10); карта сеяна, розыгрыши воспроизводимы,
+    // бюджет попыток конечен и мал (p в полосе высока по построению крутизны 3,5 мВ).
+    {
+      const sdcCard = virtualCard(CARD, { settleSamples: 0, seed: 13 });
+      await raiseBelowEdge(sdcCard, 2842, 5, CARD);
+      sdcCard.backend.lockGraphicsClocksMhz(2842, 2842);
+      let sdcLine = null;
+      for (let t = 0; t < 40 && !sdcLine; t++) {
+        const r = stress.runBurst({
+          name: 'furnace', args: [2400, 8192, 256, 64], sustainSeconds: 3,
+          run: (b, a) => sdcCard.oracle.run(b, a.map(String)),
+        });
+        if (r.fields && Number(r.fields.bad_launches) > 0) sdcLine = r.fields;
+        if (r.died) break; // глубже полосы уйти не должны — честно встанем, блок покраснеет
+      }
+      check('НАГРУЗКА: SDC по-запусково — bad_launches ≥ 1, distinct = 1 + min(bad, 7), сумма ≠ штампу (P68-AC3)',
+        sdcLine !== null
+        && Number(sdcLine.bad_launches) >= 1
+        && Number(sdcLine.distinct) === 1 + Math.min(Number(sdcLine.bad_launches), 7)
+        && sdcLine.checksum !== burn.stampChecksum('furnace', ['2400', '8192', '256', '64'], GOLDEN_CHECKSUM),
+        sdcLine ? `bad=${sdcLine.bad_launches} distinct=${sdcLine.distinct}` : 'SDC не выпал за бюджет розыгрышей');
+    }
+  }
 
   // ---- 19. nothing was written outside the sandbox (EXP-0025)
   check('ПЕСОЧНИЦА: самопроверка ничего не пишет на диск',
