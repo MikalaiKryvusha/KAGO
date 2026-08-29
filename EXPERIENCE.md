@@ -77,6 +77,24 @@
 
 ## Entries
 
+### EXP-0191 · 2026-08-30 · ❌❌→✅ · #quoting-layers #heredoc #generated-code #two-strikes
+**Context:** generating JavaScript guard blocks by piping a python script into `python - <<'PY'` from bash — twice in one session.
+**Tried / did:** the generated JS contained `'\\n'` (a two-character escape the JS engine must see); the python source said `"\\n"`, which python turns into the two characters `\` + `n`.
+**Result:** ❌ both times the written file held a REAL newline inside a string literal — `SyntaxError: Invalid or unexpected token`, once at `].join('` and once at `console.log('`. The quoted heredoc did not preserve the backslash pair the way the reasoning assumed. Fixed by writing the python to a FILE with the editor tool and running it by path.
+**Lesson:** **every quoting layer you pipe through can eat a backslash, and the count is not verifiable by reading — only by running.** When generated content must contain an escape sequence, do not pass it through a shell heredoc: write the generator to a file with the editor and execute it by path (zero shell layers). Cheaper still where it fits: build the escape in the TARGET language (`String.fromCharCode(10)`, a `const LF`) so no backslash ever crosses a layer. Two strikes in one evening is the canon's threshold for a mechanism, and the mechanism is «generator scripts live in files, never in heredocs».   → link: `tools/verify-review-contour.mjs` · `tools/safe-mode.mjs` · [[EXP-0190]] · [[EXP-0180]]
+**Repro:** any `python - <<'PY'` whose emitted text must contain `\n` as two characters — check the written file with `node --check` before believing it landed.
+**Trigger:** about to generate code containing escape sequences → write the generator to a file first.
+**Not for:** plain data with no backslashes — a heredoc is fine there and stays the cheapest tool.
+
+### EXP-0190 · 2026-08-29 · ❌→✅ · #line-endings #silent-rewrite #tooling-lies #byte-comparing-guards
+**Context:** editing canon `.md` files through a python helper (`io.open(p,'w').write(s)`) during the session-65 backlog work.
+**Tried / did:** eight documents rewritten that way; then `npm run selftest:all` went RED on `check` — «МОЛИТВА РАЗОШЛАСЬ с PHILOSOPHY.md».
+**Result:** ❌ the prayer had NOT drifted by a single character. Python's text mode translates `\n` to `os.linesep` on write, so every touched file silently became **fully CRLF** (STATUS.md: 1956 CRLF / 0 lone LF) while `PHILOSOPHY.md` stayed LF — and the prayer guard compares BYTES. ✅ cured by the guard's own prescription (`node tools/prayer.mjs --apply`); the repository was never damaged (`core.autocrlf=true`, blobs hold 0 CR).
+**Lesson:** **an editing helper that does not name its line-ending policy has one anyway, and it is the platform's.** Open with `newline=''` on BOTH read and write when editing existing files — a whole-file ending flip is invisible in a diff (git normalizes it) and surfaces far away, as a false red in a byte-comparing guard. Corollary for reading a red: when a guard says two texts differ and they visibly do not, compare their BYTES before believing the content drifted.   → link: `tools/prayer.mjs` · `bugs/KAIF/06` (same family, opposite direction) · [[EXP-0012]]
+**Repro:** `python -c "import io;p='X.md';io.open(p,'w',encoding='utf-8').write(io.open(p,encoding='utf-8').read())"` then `node tools/prayer.mjs --check` → РАЗОШЛАСЬ, with the text identical.
+**Trigger:** any script-driven edit of a canon `.md` → `newline=''`, and re-run `npm run check` before committing.
+**Not for:** files the project deliberately keeps CRLF; the rule is *preserve what was there*, not *force LF*.
+
 ### EXP-0189 · 2026-08-29 · ❌→✅ · #unreachable-condition #read-the-measurement-again #model-from-existing-model #extract-to-test
 **Context:** учил двойника растягивать зазоры проб телеметрии у края, чтобы ветка вердикта «ЗАВИС ПО ПУЛЬСУ СЭМПЛЕРА» впервые прошла на вымысле. Замер `bugs/61` был на руках.
 **Tried / did:** написал условие «прожиг НИЖЕ края → ступорный зазор» — казалось очевидным. Сквозной прогон не сработал ни разу. Инструментировал модель и увидел: **спуск не жжёт ниже края вовсе** — оракул отказывает раньше и спуск встаёт; глубже 885 мВ при крае 880,4 не пошло НИ РАЗУ. Вернулся к замеру и прочитал внимательнее: ступор случился на 845 мВ при крае 844,8, то есть на 0,2 мВ **ВЫШЕ** края, а фон — на 850, 860, 865. Условие стало полосой шириной в одну ступень сетки. Правило вынес отдельной функцией, потому что внутри модели его было не покрасить: чтобы прожиг лёг в полосу, нужен записанный вектор кривой.
@@ -132,15 +150,6 @@
 **Lesson:** **когда ловушка не ловит, следующий ход — не подбирать параметр, а взять его ЗАВЕДОМО ИЗБЫТОЧНЫМ и посмотреть, упрётся ли.** Один зонд с десятикратным запасом отвечает на вопрос, на который подбор полосы отвечал бы весь вечер и всё равно неубедительно («может, не там искали»). И второе, дороже первого: **у сторожа надо спрашивать не «верен ли он», а «что во ВСЁМ мире способно его покраснить»** — И4 корректен и краснеет на своих блоках, но СКВОЗНОЙ причины для него не существует, а это два разных факта, и опись их различает. Третье: невозможность, упёршаяся в закрытый словарь сущностей, — это развилка владельца, а не место для правдоподобной выдумки.
 **Trigger:** негативный тест не срабатывает → прогони его с заведомо избыточным параметром, прежде чем искать «правильный» · завёл сторожа → спроси, кто во всей системе способен его покраснить сквозным путём · упёрся в закрытый словарь → это write-gate, а не задача.
 → link: `bugs/69` · `automation-engine/lib/virtual-gpu.mjs` → `deliveredUnderCurve` · [[EXP-0181]] · [[EXP-0178]].
-
-### EXP-0186 · 2026-08-29 · ❌→✅ · #line-endings #silent-rewrite #tooling-lies #byte-comparing-guards
-**Context:** editing canon `.md` files through a python helper (`io.open(p,'w').write(s)`) during the session-65 backlog work.
-**Tried / did:** eight documents rewritten that way; then `npm run selftest:all` went RED on `check` — «МОЛИТВА РАЗОШЛАСЬ с PHILOSOPHY.md».
-**Result:** ❌ the prayer had NOT drifted by a single character. Python's text mode translates `\n` to `os.linesep` on write, so every touched file silently became **fully CRLF** (STATUS.md: 1956 CRLF / 0 lone LF) while `PHILOSOPHY.md` stayed LF — and the prayer guard compares BYTES. ✅ cured by the guard's own prescription (`node tools/prayer.mjs --apply`); the repository was never damaged (`core.autocrlf=true`, blobs hold 0 CR).
-**Lesson:** **an editing helper that does not name its line-ending policy has one anyway, and it is the platform's.** Open with `newline=''` on BOTH read and write when editing existing files — a whole-file ending flip is invisible in a diff (git normalizes it) and surfaces far away, as a false red in a byte-comparing guard. Corollary for reading a red: when a guard says two texts differ and they visibly do not, compare their BYTES before believing the content drifted.   → link: `tools/prayer.mjs` · `bugs/KAIF/06` (same family, opposite direction) · [[EXP-0012]]
-**Repro:** `python -c "import io;p='X.md';io.open(p,'w',encoding='utf-8').write(io.open(p,encoding='utf-8').read())"` then `node tools/prayer.mjs --check` → РАЗОШЛАСЬ, with the text identical.
-**Trigger:** any script-driven edit of a canon `.md` → `newline=''`, and re-run `npm run check` before committing.
-**Not for:** files the project deliberately keeps CRLF; the rule is *preserve what was there*, not *force LF*.
 
 ### EXP-0182 · 2026-08-29 · ❌→✅ · #diagnosis-from-evidence #inherited-diagnosis #reproduce-first
 **Context:** эстафета несла готовый диагноз по ловушке P1: «спуск до 1000 мВ не дошёл — придуманный край карты лежит ВЫШЕ напряжения зависания», и готовое действие: увести край глубже, якоря как у `T4`. Соблазн был исполнить его сразу — оно расписано, измерено, осталось напечатать.
