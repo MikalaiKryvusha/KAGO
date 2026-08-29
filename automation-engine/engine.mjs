@@ -3002,6 +3002,19 @@ export function resolveDeliveredRow(doc, deliveredMhz) {
  *  Mutations 54, 55, 58, 59, 63 each redden their own blocks. **NOT TESTED: the LIVE wiring in
  *  `mainSweep` — real NVAPI, a real watchdog, a real card — has never run.**]
  */
+/**
+ * ГДЕ ЛЕЖИТ ЖУРНАЛ СУДЬИ — ОДНО ЗНАЧЕНИЕ НА ДВУХ ЧИТАТЕЛЕЙ: строку подъёма предохранителя и причину
+ * остановки полосы. Вынесено функцией НЕ ради красоты, а ради блока: пока это была константа внутри
+ * причины стопа, доказать её было нечем, и она пять дней посылала читателя мимо улики.
+ *
+ * Вторая половина `bugs/67`: текст звал в `runs/death-watch/*-fuse.jsonl` — папку ЖИВОГО пути, —
+ * а на двойнике журнал судьи лежит в песочнице прогона, и боевая папка не пополняется вовсе
+ * (инвариант I1, EXP-0025). Пару «правда↔зеркало» лучше СХЛОПНУТЬ, чем сторожить (R14a).
+ */
+export function fuseJournalHintFor(twin) {
+  return twin ? `песочнице ${twin.runDir}` : 'runs/death-watch/*-fuse.jsonl';
+}
+
 export async function sweepRange({
   curveDoc = null,
   points = [],
@@ -3051,9 +3064,19 @@ export async function sweepRange({
   clockMs = () => Date.now(),
   onEvent = null,
   // ⚡ ВНЕШНИЙ СТОП ПЕРЕД СТУПЕНЬЮ (эпик 51 фаза 5, `plans/58` P58-AC3). Возвращает null — идём;
-  // строку-причину — полоса встаёт ДО ступени, остаток не жжётся. Родился для трипа предохранителя:
-  // судья вышел (спасение или собственная смерть) — прогон без фьюза ЗАПРЕЩЁН той же фазой, и оба
-  // случая останавливают одинаково. Дефолт null — прежнее поведение, ни один старый вызов не задет.
+  // `{ why, rescue }` — полоса встаёт ДО ступени, остаток не жжётся. Родился для трипа
+  // предохранителя: судья вышел (спасение или собственная смерть) — прогон без фьюза ЗАПРЕЩЁН той
+  // же фазой. Дефолт null — прежнее поведение, ни один старый вызов не задет.
+  //
+  // ⚠️ ПОЛЕ `rescue` ДОБАВЛЕНО 2026-08-29 ПОЧИНКОЙ `bugs/67`, И ОНО НЕ УКРАШЕНИЕ. Прежде обе
+  // причины стопа были схлопнуты в одну, и прогон, остановленный СПАСЕНИЕМ, возвращал КОД 0:
+  // человек в терминале строку видел, а скрипт, ночной прогон и планировщик получали ровно тот же
+  // ноль, что от чистого завершения. Эпик 51 существует ради прогонов, где человека за машиной
+  // НЕТ, — значит «сработало спасение» обязано жить в коде возврата, а не только в тексте.
+  //
+  // Различать по СЛОВАМ причины (регулярка по `why`) было бы парой «правда↔зеркало» ровно там, где
+  // её легче всего завести: текст правят ради читателя, и классификация тихо разъезжается с ним.
+  // Поэтому признак — отдельное поле, которое ставит тот, кто ЗНАЕТ причину.
   stopWhen = null,
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ, СИЛЬНЕЙШИЙ НАБОР ПЕРВЫМ (слово владельца 2026-08-22: прожиг обязан
   // идти на настраиваемой частоте). `null` — прежнее поведение: одна попытка формой по умолчанию.
@@ -3273,10 +3296,19 @@ export async function sweepRange({
     // is gone. The reason is recorded as the sweep's stop, not invented into any rung's verdict.
     const externalStop = stopWhen ? stopWhen() : null;
     if (externalStop) {
-      report.ok = report.closed > 0;
-      report.stoppedBy = 'external-stop';
-      report.why = `ПОЛОСА ОСТАНОВЛЕНА ВНЕШНИМ СТОПОМ ПЕРЕД ${g.topMhz} МГц: ${externalStop}`;
-      say('external-stop', report.why, { frequencyMhz: g.topMhz, reason: externalStop });
+      // СПАСЕНИЕ — ПРОИСШЕСТВИЕ, А НЕ ИСХОД (`bugs/67`). Полоса встала потому, что предохранитель
+      // решил: машина умирает. Для стопа «оператор попросил» прежнее правило верно — закрытое
+      // закрыто, прогон успешен; для трипа — нет: по канону эпика 51 спасённая ступень ОТКАЗ, а
+      // спасённый прогон происшествие, и вызывающий обязан узнать это КОДОМ, а не чтением.
+      //
+      // ⚠️ УЖЕ ДОБЫТОЕ НЕ ТЕРЯЕТСЯ И ЭТИМ НЕ ЗАТРАГИВАЕТСЯ: закрытые до трипа частоты уже лежат в
+      // документе кривой, и следующий прогон стартует с них. Меняется вердикт ПРОГОНА, а не судьба
+      // знания — две разные вещи, которые прежняя строка схлопывала в одну.
+      const rescue = externalStop.rescue === true;
+      report.ok = rescue ? false : report.closed > 0;
+      report.stoppedBy = rescue ? 'fuse-rescue' : 'external-stop';
+      report.why = `ПОЛОСА ОСТАНОВЛЕНА ВНЕШНИМ СТОПОМ ПЕРЕД ${g.topMhz} МГц: ${externalStop.why}`;
+      say(report.stoppedBy, report.why, { frequencyMhz: g.topMhz, reason: externalStop.why, rescue });
       break;
     }
     const already = bracketedEdge(g.topMhz);
@@ -7282,7 +7314,9 @@ export function selfTest() {
         buildVector: vectorPinned,
         saveFn: async () => ({ ok: true }),
         // The judge «exits» the moment the first rung has burned: the NEXT rung must never start.
-        stopWhen: () => (burnedUnderStop.length ? 'судья вышел (код 2 — спасение сработало)' : null),
+        // `rescue: true` — это ТРИП, а не просьба оператора (`bugs/67`): различитель едет полем.
+        stopWhen: () => (burnedUnderStop.length
+          ? { why: 'судья вышел (код 2 — спасение сработало)', rescue: true } : null),
         now: () => '2026-08-16T02:00:00+03:00',
         clockMs: (() => { let t = 0; return () => (t += 1000); })(),
       });
@@ -7292,9 +7326,47 @@ export function selfTest() {
       // inheritance the full-band block above shows (5 closed from 2 burns). The stop stops BURNS,
       // never the bookkeeping of what the last burn honestly proved.
       ok('остановка названа СВОИМ именем, а не подделана в вердикт ступени',
-        [stopped.stoppedBy, /судья вышел/.test(stopped.why ?? ''), stopped.closed], ['external-stop', true, 3]);
-      ok('закрытая до трипа частота — успех прогона: спасение не крадёт уже добытое',
-        stopped.ok, true);
+        [stopped.stoppedBy, /судья вышел/.test(stopped.why ?? ''), stopped.closed], ['fuse-rescue', true, 3]);
+      // ⚠️ ЭТОТ БЛОК ПЕРЕВЁРНУТ ПОЧИНКОЙ `bugs/67`, И ПЕРЕВЁРНУТ ПО СУЩЕСТВУ, А НЕ ПОД РЕЗУЛЬТАТ.
+      // Прежде он утверждал: «закрытая до трипа частота — успех прогона: спасение не крадёт уже
+      // добытое», и это схлопывало ДВЕ разные вещи. Добытое действительно не крадётся — закрытые
+      // частоты лежат в документе кривой и это проверяет соседний блок (`closed` = 3). Но вердикт
+      // ПРОГОНА — другой вопрос: полоса встала потому, что предохранитель решил, что машина
+      // умирает. Возвращая ноль, прогон говорил скрипту, ночному прогону и планировщику ровно то
+      // же, что говорит чистое завершение, — а эпик 51 существует ради прогонов, где человека за
+      // машиной нет.
+      ok('СПАСЕНИЕ — происшествие: прогон НЕ успешен, и вызывающий узнаёт это кодом, а не чтением',
+        stopped.ok, false);
+      ok('добытое до трипа НЕ потеряно — закрытые частоты остались закрытыми',
+        stopped.closed, 3);
+
+      // ─── ВТОРАЯ ПОЛОВИНА, БЕЗ КОТОРОЙ ПОЧИНКА НЕДОКАЗУЕМА: стоп ОПЕРАТОРА не изменился ────────
+      // Сторож, который краснеет на всём, ничем не лучше слепого. Тот же внешний стоп с
+      // `rescue: false` обязан вести себя РОВНО как прежде: имя `external-stop`, успех по числу
+      // закрытых. Иначе «спасение → ненулевой код» нельзя отличить от «любой стоп → ненулевой».
+      const burnedUnderAsk = [];
+      const asked = await sweepRange({
+        envelopeMhz: 3090,
+        curveDoc: sweepDoc(bandRows), points: sweepPoints,
+        runStepFn: async (args) => { burnedUnderAsk.push(args.pinMhz ?? args.capMhz); return sweepAtom(-1)(args); },
+        buildVector: vectorPinned,
+        saveFn: async () => ({ ok: true }),
+        stopWhen: () => (burnedUnderAsk.length
+          ? { why: 'оператор попросил остановиться', rescue: false } : null),
+        now: () => '2026-08-16T02:00:00+03:00',
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('стоп ОПЕРАТОРА: имя прежнее и прогон успешен по числу закрытых — починка не задела соседа',
+        [asked.stoppedBy, asked.ok, asked.closed], ['external-stop', true, 3]);
+
+      // ─── ВТОРАЯ ПОЛОВИНА `bugs/67`: причина стопа ведёт ТУДА, ГДЕ СУДЬЯ ПИШЕТ ─────────────────
+      // Живой путь — боевая папка; двойник — песочница ЭТОГО прогона. Пять дней текст звал в
+      // боевую папку и на двойнике посылал мимо улики, потому что был константой, а не значением.
+      ok('подсказка журнала судьи: живой путь ведёт в боевую папку',
+        fuseJournalHintFor(null), 'runs/death-watch/*-fuse.jsonl');
+      ok('подсказка журнала судьи: двойник ведёт в ПЕСОЧНИЦУ ЭТОГО прогона, а не в боевую папку',
+        [fuseJournalHintFor({ runDir: 'benches/runs/twin-XYZ' }).includes('benches/runs/twin-XYZ'),
+          fuseJournalHintFor({ runDir: 'benches/runs/twin-XYZ' }).includes('death-watch')], [true, false]);
     }
     // The order proof, and it is the point of «before the next frequency»: the document is on disk
     // before a single rung of the next rung is written.
@@ -9395,14 +9467,20 @@ async function mainSweep(argv, arg) {
   process.on('exit', stopDeathWatch);
   // One ref stops all riders on the operator-stop and writer-death paths above.
   sideCarRef = () => { stopSideCar(); stopDeathWatch(); };
+  // ГДЕ ЛЕЖИТ ЖУРНАЛ СУДЬИ — ОДНО ЗНАЧЕНИЕ НА ДВУХ ЧИТАТЕЛЕЙ (строка подъёма и причина стопа).
+  // Пара «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить (R14a): вторая половина
+  // `bugs/67` была ровно ею — причина стопа несла константу «runs/death-watch/*-fuse.jsonl»,
+  // написанную для живого пути, а на двойнике боевая папка не пополняется вовсе (I1, EXP-0025),
+  // и текст посылал читателя мимо улики.
+  const fuseJournalHint = fuseJournalHintFor(twin);
   console.log(twin
     // N печатается ИЗ АРГУМЕНТОВ, которые судья реально получил, а не из константы: с фазой 5б
     // порог стал параметром, и печать константы стала бы парой «правда↔зеркало» — её лучше
     // схлопнуть, чем сторожить (R14a).
     // Оба входа печатаются ИЗ АРГУМЕНТОВ, которые судья реально получил. Вход 2 назван отдельно:
     // молчащая строка про взведённый M читалась бы как «его нет» — ровно ложное «нельзя» (EXP-0169).
-    ? `⚡ ПРЕДОХРАНИТЕЛЬ (двойник): судья pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЁН N=${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-n') + 1]} мс${twin.riders.judgeArgs.includes('--arm-m') ? ` · ВХОД 2 ВЗВЕДЁН M=${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-m') + 1]} мс (прогресс прожига)` : ' · вход 2 не проведён'}, руки: пид-файл носителя → сток ДВОЙНИКА` : 'невзведён (наблюдение)'}; журнал в песочнице ${twin.runDir}`
-    : `⚡ ПРЕДОХРАНИТЕЛЬ: судья pid ${fuseJudge.pid}, N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: образы горна → сток; журнал в runs/death-watch/*-fuse.jsonl`);
+    ? `⚡ ПРЕДОХРАНИТЕЛЬ (двойник): судья pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЁН N=${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-n') + 1]} мс${twin.riders.judgeArgs.includes('--arm-m') ? ` · ВХОД 2 ВЗВЕДЁН M=${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-m') + 1]} мс (прогресс прожига)` : ' · вход 2 не проведён'}, руки: пид-файл носителя → сток ДВОЙНИКА` : 'невзведён (наблюдение)'}; журнал в ${fuseJournalHint}`
+    : `⚡ ПРЕДОХРАНИТЕЛЬ: судья pid ${fuseJudge.pid}, N=${fuseMod.DERIVED_ARM_N_MS} мс, руки: образы горна → сток; журнал в ${fuseJournalHint}`);
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
@@ -9450,9 +9528,16 @@ async function mainSweep(argv, arg) {
     haltOnAnomaly: process.argv.includes('--halt-on-anomaly'),
     // ⚡ Трип (или собственная смерть) судьи останавливает полосу ДО следующей ступени — оба случая
     // одинаково: прогон без фьюза запрещён фазой 5 (plans/58), различается только текст причины.
+    // ⚡ ДВЕ ПРИЧИНЫ, И ОНИ РАЗНЫЕ ПО ПОСЛЕДСТВИЯМ (`bugs/67`). Код 2 — судья СПАСАЛ машину: это
+    // происшествие, и прогон обязан выйти ненулевым. Любой другой код — судья умер сам; полоса тоже
+    // встаёт (прогон без фьюза запрещён фазой 5), но это отказ ПРИБОРА, а не срабатывание спасения.
+    // Путь журнала берётся из `fuseJournalHint` — того же значения, что напечатала строка подъёма
+    // предохранителя: константа посылала читателя в боевую папку, которой на двойнике не касается
+    // никто (I1), то есть мимо улики.
     stopWhen: () => (fuseJudge.exitCode === null ? null
-      : (fuseJudge.exitCode === 2 ? `судья вышел (код 2 — СПАСЕНИЕ сработало): читай runs/death-watch/*-fuse.jsonl`
-        : `судья фьюза умер (код ${fuseJudge.exitCode}) — прогон без фьюза запрещён`)),
+      : (fuseJudge.exitCode === 2
+        ? { why: `судья вышел (код 2 — СПАСЕНИЕ сработало): читай журнал судьи в ${fuseJournalHint}`, rescue: true }
+        : { why: `судья фьюза умер (код ${fuseJudge.exitCode}) — прогон без фьюза запрещён`, rescue: false })),
     // ONE recovery for the whole sweep: the atom does its own preflight on every rung, and two
     // recoveries that could disagree are worse than one that cannot.
     recover: async () => (twin ? twin.recover() : watchdog.recover()),
