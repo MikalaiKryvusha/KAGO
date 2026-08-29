@@ -519,6 +519,32 @@ function cmdSelftest() {
   console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона: якорь расписания · перелёт от обещания · '
     + 'ноль на раннем приходе · граница порога записи · класс зависшего вызова · медиана и максимум вместе · ожидаемые такты из времени');
 
+  // ---- ретранслятор прогресса (вход 2, `plans/66`): удар шлётся ТОЛЬКО на продвижение счётчика
+  {
+    const sent = [];
+    let value = null;                       // что «лежит в файле» прямо сейчас
+    const timers = [];
+    const fakeInterval = (fn) => { timers.push(fn); return { id: timers.length }; };
+    const relay = startProgressRelay({
+      file: 'файл', port: 1234, pollMs: 50,
+      sendFn: (b) => sent.push(b[0]), readFn: () => value, setIntervalFn: fakeInterval,
+    });
+    const tickRelay = () => timers[0]();
+    tickRelay();                            // файла ещё нет — молчим
+    ok('прогресс: файла нет — ударов нет («источника нет» ≠ «прогресс застыл», сторож фазы 2)', sent.length === 0);
+    value = '1'; tickRelay();
+    value = '2'; tickRelay();
+    ok('прогресс: каждое продвижение счётчика — один удар 0x02', sent.length === 2 && sent.every((b) => b === 0x02));
+    tickRelay(); tickRelay(); tickRelay();  // счётчик не двигается — прожиг встал
+    ok('прогресс: НЕПОДВИЖНЫЙ счётчик ударов НЕ РОЖДАЕТ — иначе предохранитель уснёт на трупе',
+      sent.length === 2, `ударов стало ${sent.length}`);
+    value = '3'; tickRelay();
+    ok('прогресс: работа возобновилась — удары пошли снова', sent.length === 3);
+    ok('прогресс: без пути файла ретранслятор не заводится вовсе (дефолт бит-в-бит)',
+      startProgressRelay({ file: null, port: 1234, pollMs: 50, sendFn: () => {}, setIntervalFn: fakeInterval }) === null
+      && relay !== null);
+  }
+
   ok('расписание — арифметика от старта: обещание такта N не зависит от фактических пробуждений',
     promisedTick(1000, 2, 5) === 1010 && promisedTick(1000, 2, 1500) === 4000);
 
