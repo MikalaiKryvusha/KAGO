@@ -181,7 +181,14 @@ function cmdSelftest() {
   console.log('САМОПРОВЕРКА card-generator — детерминизм, валидность, границы осей; карта не трогается');
   console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона: посев потока · счётчик перевыборок · строка вымысел²');
 
-  const sha = (c) => createHash('sha256').update(JSON.stringify(c)).digest('hex');
+  // Хеш ВЫБОРКИ, не этикеток: name, provenance и physics.origin несут СЕМЯ текстом и различали бы
+  // карты при мёртвом посеве (вскрыто мутацией посева: 7/0 на мутанте, пока хеш их включал —
+  // детектор этикетки, не выборки).
+  const sha = (c) => {
+    const { name, provenance, ...rest } = c;
+    if (rest.physics) { const { origin, ...p } = rest.physics; rest.physics = p; }
+    return createHash('sha256').update(JSON.stringify(rest)).digest('hex');
+  };
   const a = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky' });
   const b = generateCard({ seed: 42, amplitude: 0.7, archetype: 'hot-unlucky' });
   ok('детерминизм: одно (семя, A, архетип) дважды — байт-идентичная карта (P70-AC1)',
