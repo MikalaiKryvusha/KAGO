@@ -763,6 +763,47 @@ block('N4', 'a template placeholder in the answer slot is refused, never shown a
   must(core.isPlaceholderAnswer('_…_'), 'the bare template slot is not recognised as one');
 });
 
+block('N5', 'a heading that CITES an answered question is not a new question (bugs/70)', async () => {
+  // The shape that cost the owner a phantom obligation: an agent's write-up of what the answers
+  // changed heads its sections with the question it is talking about.
+  const doc = [
+    '# Интервью 914 — две развилки',
+    '',
+    '## Q1. Первый вопрос?',
+    '',
+    '- **A.** Вариант A (Рекомендовано)',
+    '',
+    '**Ответ:** A',
+    '',
+    '## Q2. Второй вопрос?',
+    '',
+    '- **A.** Вариант A (Рекомендовано)',
+    '',
+    '**Ответ:** A',
+    '',
+    '## Что ответы меняют — разбор агента, написан ПОСЛЕ ответов',
+    '',
+    '### Q1 = A, и вот что из этого следует',
+    '',
+    'Разбор первого ответа.',
+    '',
+    '### Q2 = A — движемся сразу',
+    '',
+    'Разбор второго ответа.',
+  ].join(LF);
+
+  const parsed = core.parseInterview(doc, { file: 'interview_914.md' });
+  must(parsed.questions.length === 2,
+    'the write-up headings were counted as questions: ' + parsed.questions.length + ' instead of 2 — ' +
+    'this is bugs/70, the phantom that put «Q6-Q7 ждут владельца» into the baton');
+  must(parsed.questions.every((q) => q.answered),
+    'a document whose every question is answered still reads as waiting');
+
+  // The narrow half: a genuinely NEW number still opens a question.
+  const three = core.parseInterview(doc.replace('### Q2 = A — движемся сразу', '## Q3. Третий вопрос?'), { file: 'i.md' });
+  must(three.questions.length === 3, 'a real third question was swallowed by the de-duplication');
+});
+
 block('GATE', 'an artifact approval survives the owner\'s next answer, and the refusal names the truth', async () => {
   const dir = freshDir('gate');
   const docPath = join(dir, 'interview_903_single.md');

@@ -123,8 +123,19 @@ const RE_QUESTION_HEADING = /^#{2,4}\s*(Вопрос|Question|Q)\s*(\d+)/iu;
 export function questionBlockRanges(text) {
   const lines = normalize(text).split('\n');
   const ranges = [];
+  // A NUMBER MAY OPEN A QUESTION ONLY ONCE (`bugs/70`). An agent writing up what the answers changed
+  // heads its own sections «### Q4 = B, и владелец переписал вариант…» — and that heading matches
+  // RE_QUESTION_HEADING word for word. Those two REFERENCES became questions six and seven of a
+  // five-question document; both had no answer slot, so the whole interview refused to raise, and the
+  // baton carried «interviews/014 Q6-Q7 ждут владельца» — an obligation on the owner to answer
+  // questions that do not exist. A document cannot hold two Q4s: the second mention is a citation.
+  const seen = new Set();
   for (let i = 0; i < lines.length; i++) {
-    if (!RE_QUESTION_HEADING.test(lines[i])) continue;
+    const m = RE_QUESTION_HEADING.exec(lines[i]);
+    if (!m) continue;
+    const number = m[2];
+    if (seen.has(number)) continue;
+    seen.add(number);
     let end = lines.length;
     for (let j = i + 1; j < lines.length; j++) {
       if (RE_HEADING.test(lines[j]) || RE_HRULE.test(lines[j])) { end = j; break; }
