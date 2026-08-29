@@ -251,7 +251,7 @@ export function validateCard(c) {
     const ph = c.physics;
     if (typeof ph !== 'object' || ph === null) return bad('physics', 'блок physics обязан быть объектом');
     const KNOWN = new Set(['origin', 'power', 'floor', 'edgeShift', 'tableDriftMhzPerC',
-      'governorBelowCeilingMhz', 'boostStepsAboveCeiling']);
+      'governorBelowCeilingMhz', 'boostStepsAboveCeiling', 'deliverStepsAboveEnvelope']);
     for (const k of Object.keys(ph)) {
       if (!KNOWN.has(k)) return bad(`physics.${k}`, `неизвестное свойство физики «${k}» — словарь закрыт, новая физика = новая строка словаря`);
     }
@@ -271,7 +271,8 @@ export function validateCard(c) {
     }
     if (ph.floor !== undefined && !num(ph.floor.baseMv)) return bad('physics.floor.baseMv', 'пол карты без базового напряжения — не пол');
     if (ph.edgeShift !== undefined && !num(ph.edgeShift.mvPerC)) return bad('physics.edgeShift.mvPerC', 'сдвиг края без коэффициента — не сдвиг');
-    for (const k of ['tableDriftMhzPerC', 'governorBelowCeilingMhz', 'boostStepsAboveCeiling']) {
+    for (const k of ['tableDriftMhzPerC', 'governorBelowCeilingMhz', 'boostStepsAboveCeiling',
+      'deliverStepsAboveEnvelope']) {
       if (ph[k] !== undefined && ph[k] !== null && !num(ph[k])) return bad(`physics.${k}`, 'не число и не null');
     }
   }
@@ -699,6 +700,20 @@ export function buildFiction(card, {
   // никогда дробное. Механизм — выпрямленный подъёмом верх кривой: широкая полоса напряжений
   // предлагает одну и ту же частоту, и арбитраж буста сходит с этого плато вверх.
   boostStepsAboveCeiling = null,
+  // ─── КАРТА ВЫДАЁТ ВЫШЕ, ЧЕМ ОБЪЯВЛЯЕТ (`interviews/019` Q1 = A, владелец 2026-08-29) ──────────
+  //
+  // ⚠️ ЭТО ТРЕТЬЯ, ОТДЕЛЬНАЯ ВЕЩЬ, а не разновидность двух предыдущих, и границу стоит держать в
+  // голове: `governorBelowCeilingMhz` — карта не доходит до потолка КРИВОЙ; `boostStepsAboveCeiling`
+  // — карта уходит за потолок КРИВОЙ, оставаясь под объявленным максимумом; это — карта уходит за
+  // САМ ОБЪЯВЛЕННЫЙ МАКСИМУМ, то есть врёт о своей огибающей.
+  //
+  // 🔴 ПРОИСХОЖДЕНИЕ, НАЗВАННОЕ ЧЕСТНО И БЕЗ СМЯГЧЕНИЯ: на кремнии НЕ ИЗМЕРЕНО. Проект мерил
+  // выход за потолок КРИВОЙ (`bugs/50`, 9 из 9), а за объявленный максимум экземпляра — никогда.
+  // Свойство заведено решением владельца при объявленной цене: без него сторож конверта И4 не
+  // краснеет НИ ОТ КАКОЙ карты, что измерено зондом с перелётом ×10 (`bugs/69`). Форма и порядок
+  // величины взяты у измеренного соседа — целое число ступеней сетки, — сам факт железом не
+  // подтверждён. Живой замер, если он когда-нибудь появится, отменяет эту строку, а не наоборот.
+  deliverStepsAboveEnvelope = null,
   // The declaration the validator demands for such a card. It is a SEPARATE flag rather than being
   // implied by `inversionAt`, and deliberately so: the validator's job is to refuse a non-monotone
   // card nobody meant to build, and a flag that sets itself would refuse nothing.
@@ -808,6 +823,10 @@ export function buildFiction(card, {
     // гарантия F1-AC2, что обычная карта не получает поля вовсе и её файл не меняется.
     ...(Number.isFinite(boostStepsAboveCeiling) && boostStepsAboveCeiling > 0
       ? { boostStepsAboveCeiling } : {}),
+    // И четвёртое — той же проводкой и с тем же условием `> 0`: карта без свойства не получает поля
+    // вовсе, и её файл не меняется ни на байт (та же гарантия, что F1-AC2 даёт трём предыдущим).
+    ...(Number.isFinite(deliverStepsAboveEnvelope) && deliverStepsAboveEnvelope > 0
+      ? { deliverStepsAboveEnvelope } : {}),
     note: 'ВЫМЫСЕЛ. Эти края придуманы и НЕ являются утверждением о живой карте — они существуют, '
       + 'чтобы движку было что найти.',
     edgeDefinition: 'край частоты = напряжение, на котором прожиг длиной 10 с отказывает в половине случаев. '
@@ -1250,10 +1269,34 @@ export function virtualCard(cardProfile, {
     return Math.min(Math.max(snapped, state.lock.min), P.card.maxGraphicsMhz);
   };
 
-  /** ВЕРХНЯЯ ГРАНИЦА, ЕСЛИ ЗАМОК ДИАПАЗОННЫЙ. `null` — границы нет (не заперта или заперта пином). */
+  /**
+   * ВЕРХНЯЯ ГРАНИЦА, ЕСЛИ ЗАМОК ДИАПАЗОННЫЙ. `null` — границы нет (не заперта или заперта пином).
+   *
+   * ─── КАРТА, КОТОРАЯ ВЫДАЁТ ВЫШЕ, ЧЕМ ЕЙ СКАЗАНО (`interviews/019` Q1 = A) ──────────────────────
+   *
+   * ⚠️ ЗАЧЕМ СВОЙСТВО ДОСТАЁТ И ДО ЗАМКА, А НЕ ТОЛЬКО ДО ОБЪЯВЛЕННОГО МАКСИМУМА. Замер показал
+   * ТРИ зажима подряд, и первые два свойство уже снимает, а третьим оказалась ГРАНИЦА ЧАСТОТЫ —
+   * лекарство эпика 43. Пока она безусловна, выдача не может превысить заказанное НИКОГДА, и
+   * сторож конверта И4 остаётся недоказуемым (`bugs/69`).
+   *
+   * И это не расширение вымысла, а ровно тот отказ, который ИЗМЕРЕН на живой карте: `bugs/50`,
+   * половина «КАРТА» — запись легла безупречно, кривая после неё предлагала ровно потолок
+   * (`writeSettled: true`, поточечная сверка зелёная), **а карта под нагрузкой ушла выше на целое
+   * число ступеней сетки: 2 в семи случаях, 3 в двух**. Держит ли граница эпика 43 такую карту на
+   * кремнии — ОТКРЫТЫЙ вопрос (E43-AC5: «доказывает ДВИЖОК, а не кремний»). Карта с этим свойством
+   * и есть модель того, что граница НЕ удержала: сторож обязан такое увидеть, а не поверить.
+   *
+   * Карта без свойства ведёт себя бит-в-бит как раньше.
+   */
   const lockCeilingMhz = () => {
     if (!state.lock || state.lock.min === state.lock.max) return null;
-    return snapToLadder(P.frequencyGridMhz, state.lock.max);
+    const snapped = snapToLadder(P.frequencyGridMhz, state.lock.max);
+    const above = Number(PH?.deliverStepsAboveEnvelope ?? P.fiction.deliverStepsAboveEnvelope);
+    if (!Number.isFinite(above) || above <= 0) return snapped;
+    // Поднимаем по ПРОДОЛЖЕННОЙ лестнице карты — теми же её зазорами, а не на выдуманные мегагерцы.
+    const ladder = [...rungsAboveEnvelope(above), ...P.frequencyGridMhz];
+    const at = ladder.indexOf(snapped);
+    return at < 0 ? snapped : ladder[Math.max(0, at - Math.round(above))];
   };
 
   /** Queue the stale reads and the ramp that a write produces. */
@@ -1294,6 +1337,32 @@ export function virtualCard(cardProfile, {
    * факт 38). Карта фазы 1 (`fiction` пуст) края не имеет, и просадки у неё нет — так и должно быть:
    * «края ещё нет» и «край не сработал» разные состояния.
    */
+  /**
+   * СТУПЕНИ ВЫШЕ ОБЪЯВЛЕННОГО МАКСИМУМА — продолжение собственной лестницы карты, а не новые числа.
+   *
+   * ⚠️ НИ ОДНОГО ВЫДУМАННОГО ЧИСЛА, И ЭТО ГЛАВНОЕ СВОЙСТВО ФУНКЦИИ. Шаг сетки этой карты не
+   * постоянен — 7 и 8 МГц вперемешку, — поэтому «плюс 15 МГц» попало бы мимо ступени на половине
+   * диапазона. Продолжение берёт ЗАЗОРЫ САМОЙ КАРТЫ, считанные вниз от верха её лестницы, и
+   * зеркалит их вверх в том же порядке: первая ступень выше = верх + (верх − соседка снизу).
+   * Значит на любой карте получится ЕЁ шаг, а не наш.
+   *
+   * Возвращает ступени по УБЫВАНИЮ, как и вся остальная лестница, чтобы обходчик не менял форму.
+   */
+  const rungsAboveEnvelope = (steps) => {
+    const g = P.frequencyGridMhz;
+    if (!Array.isArray(g) || g.length < 2) return [];
+    const out = [];
+    let top = g[0];
+    for (let k = 0; k < Math.round(steps); k++) {
+      // Зазор берётся ЦИКЛИЧЕСКИ по началу лестницы: у этой карты чередование 7/8, и оно
+      // продолжается ровно тем же рисунком, каким карта идёт под своим верхом.
+      const gap = g[k % (g.length - 1)] - g[(k % (g.length - 1)) + 1];
+      top += gap;
+      out.push(top);
+    }
+    return out.reverse();                                       // по УБЫВАНИЮ: самая высокая первой
+  };
+
   const deliveredUnderCurve = () => {
     if (!P.fiction || !Array.isArray(P.fiction.edge) || !P.fiction.edge.length) return null;
     // ПОТОЛОК — самое высокое, что предлагает записанная кривая, но не выше максимума экземпляра
@@ -1306,7 +1375,28 @@ export function virtualCard(cardProfile, {
       if (e.mhz > ceiling) ceiling = e.mhz;
     }
     if (!Number.isFinite(ceiling)) return null;
-    ceiling = Math.min(ceiling, P.card.maxGraphicsMhz);
+    // ─── КАРТА ВЫДАЁТ ВЫШЕ, ЧЕМ ОБЪЯВЛЯЕТ (эпик 67 фаза 4, `interviews/019` Q1 = A) ──────────────
+    //
+    // ⚠️ ЧТО ИМЕННО ОБЪЯВЛЕНО ВЛАДЕЛЬЦЕМ, И ЧЕМ ЭТО НЕ ЯВЛЯЕТСЯ. `maxGraphicsMhz` — число, которое
+    // карта О СЕБЕ СООБЩАЕТ, и до сих пор двойник считал его же и физическим пределом. Свойство
+    // разводит два разных факта: объявленный максимум остаётся тем, что читает цикл (и по чему
+    // судит R13), а НАСТОЯЩИЙ потолок выдачи лежит на N ступеней сетки выше. Без этого свойства
+    // сторож конверта И4 не мог покраснеть НИ ОТ КАКОЙ карты — измерено, `bugs/69`.
+    //
+    // 🔴 ПРОИСХОЖДЕНИЕ, НАЗВАННОЕ ЧЕСТНО: на кремнии это НЕ ЗАМЕРЕНО. `bugs/50` мерил выход за
+    // потолок КРИВОЙ (9 из 9, 2-3 ступени), а не за объявленный максимум экземпляра. То есть форма
+    // и порядок величины взяты у измеренного соседа, а сам факт — решение владельца от 2026-08-29
+    // (`interviews/019` Q1 = A) с ОБЪЯВЛЕННОЙ ценой: вымысел честный, железом не подтверждённый.
+    //
+    // ⚠️ ЗАЖИМ R13 НЕ СНЯТ, А ПЕРЕАДРЕСОВАН. Раньше он стоял на объявленном максимуме; теперь — на
+    // настоящем потолке карты. Карта без этого свойства (все прочие) ведёт себя бит-в-бит как
+    // раньше: `above` = 0 даёт ровно прежний `Math.min(ceiling, maxGraphicsMhz)`.
+    const above = Number(PH?.deliverStepsAboveEnvelope ?? P.fiction.deliverStepsAboveEnvelope);
+    const extra = Number.isFinite(above) && above > 0 ? rungsAboveEnvelope(above) : [];
+    // Лестница выдачи = дополнительные ступени + собственная лестница карты. У карты без свойства
+    // `extra` пуст, и это ТА ЖЕ лестница и тот же зажим, что были до правки.
+    const ladder = extra.length ? [...extra, ...P.frequencyGridMhz] : P.frequencyGridMhz;
+    ceiling = Math.min(ceiling, extra.length ? extra[0] : P.card.maxGraphicsMhz);
     // ВТОРОЙ ОГРАНИЧИТЕЛЬ, И ОН НЕ КРЕМНИЙ: регулятор буста связан ещё бюджетом мощности и
     // температурой, поэтому к потолку кривой может не подходить вплотную (`GOAL.md` →
     // «УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ»; замерено на живой карте — 2820 МГц заказано, 2760…2805 выдано).
@@ -1328,10 +1418,19 @@ export function virtualCard(cardProfile, {
     const boostSteps = Number(PH?.boostStepsAboveCeiling ?? P.fiction.boostStepsAboveCeiling);
     if (Number.isFinite(boostSteps) && boostSteps > 0) {
       // Сетка идёт по УБЫВАНИЮ, значит «вверх» — это к меньшим индексам.
-      const at = P.frequencyGridMhz.findIndex((f) => f <= ceiling);
+      //
+      // ⚠️ ИЩЕТСЯ ПО `ladder`, А НЕ ПО СЕТКЕ, И ЭТО НАЙДЕНО ЗАМЕРОМ 2026-08-29 21:4x. Пока подъём
+      // считался по голой сетке, `Math.max(0, …)` упирал его в ВЕРХ ЛЕСТНИЦЫ: карта, которой
+      // владелец разрешил выдавать выше объявленного, всё равно не могла туда подняться — зонд
+      // `deliverStepsAboveEnvelope: 2` на полосе 3082 давал максимум выдачи 3082 из 58 вердиктов,
+      // выдач выше конверта ноль. Две ручки обязаны смотреть на ОДНУ лестницу, иначе вторая
+      // отменяет первую молча.
+      const at = ladder.findIndex((f) => f <= ceiling);
       if (at >= 0) {
         const raisedAt = Math.max(0, at - Math.round(boostSteps));
-        ceiling = Math.min(P.frequencyGridMhz[raisedAt], P.card.maxGraphicsMhz);
+        // Последнее слово — НАСТОЯЩИЙ потолок карты: у обычной карты это её объявленный максимум
+        // (прежнее поведение бит-в-бит), у карты со свойством — верх продолженной лестницы.
+        ceiling = Math.min(ladder[raisedAt], extra.length ? extra[0] : P.card.maxGraphicsMhz);
       }
     }
     // ⚠️ НАПРЯЖЕНИЕ КАНДИДАТА — ЭТО `servingVoltageMv(f)`, А НЕ НАПРЯЖЕНИЕ ТОЧКИ КРИВОЙ. Первая
@@ -1341,7 +1440,7 @@ export function virtualCard(cardProfile, {
     // напряжение, при котором кривая уже предлагает нужную частоту, и это ровно та функция, по
     // которой оракул считает вероятность отказа. Модель обязана спрашивать её же, иначе прожиг и
     // выдача судятся по разным напряжениям.
-    for (const f of P.frequencyGridMhz) {                       // лестница идёт по УБЫВАНИЮ
+    for (const f of ladder) {                                   // лестница идёт по УБЫВАНИЮ
       if (f > ceiling) continue;
       if (oracle.edgeMvFor(f) <= oracle.servingVoltageMv(f)) return f;
     }
