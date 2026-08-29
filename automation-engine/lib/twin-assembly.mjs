@@ -707,6 +707,16 @@ export async function selfTest() {
   ok('I1: живой документ, боевой журнал и боевая папка всадников самопроверкой не тронуты',
     after, before);
 
+  // УБОРКА ЗА СОБОЙ (находка судьи сессии 60): каждая makeTwinAssembly заводит twin-<штамп>
+  // каталог, и у сборок без прожига он остаётся ПУСТЫМ мусором. Пустой каталог улик не несёт —
+  // сносим только пустые, и только на выходе набора (каталог с файлами — чья-то форензика).
+  const { rmdirSync } = await import('node:fs');
+  for (const name of readdirSync(BENCH_RUNS)) {
+    if (!name.startsWith('twin-')) continue;
+    const dir = join(BENCH_RUNS, name);
+    try { if (statSync(dir).isDirectory() && readdirSync(dir).length === 0) rmdirSync(dir); } catch { /* занят — не мусор */ }
+  }
+
   return { ok: results.every((r) => r.ok), results };
 }
 
