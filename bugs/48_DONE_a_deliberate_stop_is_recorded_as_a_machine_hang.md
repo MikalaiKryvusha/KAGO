@@ -103,3 +103,11 @@
 `bugs/20` (родительский класс, `writer-crash`) · `sweep-journal.writeCorrection` (лекарство) ·
 `runs/sweep/journal.jsonl` seq 695 (сама ложная запись) · `engine.mjs` (обработчики `SIGINT`/`SIGTERM`,
 `process.exit(130)`) · R15 (долговечность записи)
+
+## STATUS: DONE (2026-08-29 10:0x, session 61 backlog revision, EXP-0170 class)
+
+Verified against artifacts, not memory: (1) the false hang of seq 695 carries a CORRECTION in the
+live journal («2355 МГц / 845 мВ: ЭТО БЫЛА ОСТАНОВКА ПО СЛОВУ ВЛАДЕЛЬЦА, А НЕ ЗАВИСАНИЕ МАШИНЫ»)
+— applied 2026-08-24 by the owner's word «1 - снимай» (recorded in STATUS then); (2) the CLASS is
+closed by the deliberate-stop machinery: `closeAsOperatorStop` + `RUNG_OUTCOME.STOPPED`
+(sweep-journal), which the two-in-a-row brake ignores by construction. Ticket lagged the code.

@@ -87,3 +87,13 @@ The script used for this report is one-off by convention; the inputs are the two
 - `bugs/10` (DONE) · EXP-0053 — the «key by the axis that does not move» lesson
 - `bugs/16` — rungs planned against a cold table while the card warms (the table's frequency-axis drift)
 - STATUS fact 16 — the whole stability base taken at half the card's envelope
+
+## STATUS: DONE (2026-08-29 10:0x, session 61 backlog revision, EXP-0170 class)
+
+Superseded-and-closed by the owner's canon of 2026-08-22 («УПРАВЛЯЕМАЯ ВЕЛИЧИНА СТУПЕНИ —
+НАПРЯЖЕНИЕ, А НЕ ЧАСТОТА»): the row is now FILED UNDER THE DELIVERED frequency, so evidence can
+no longer land under a frequency the card did not run. In code: the delivered clock rides every
+verdict line of the journal (bugs/54 DONE), the harvest keys pairs by delivered (plans/41 phase
+1-2, proven in the twin smoke — «притяжение к ВЫДАННОЙ частоте»), and the intensity ladder this
+ticket spawned was retired for exactly this reason (engine, «РАЗВЁРТКА ЖЖЁТ ОДНИМ НАБОРОМ»).
+Ticket lagged the canon it had already won.

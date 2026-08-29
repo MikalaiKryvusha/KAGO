@@ -173,3 +173,14 @@ value. Read until two consecutive samples agree»* — замерено на э�
 
 `runs/sweep/journal.jsonl` seq 691 и 698 (оба случая) · `bugs/47` (дрейф оси, тот же механизм) ·
 `bugs/48` (2355 МГц выбыла ложным зависанием) · `bugs/42` (аргумент «закрывать частоту, а не полосу»)
+
+## STATUS: DONE (2026-08-29 10:0x, session 61 backlog revision, EXP-0170 class)
+
+The two halves both stand in the code and were seen working live: (1) the rung no longer stays
+verdict-less and the band no longer halts — the closed vocabulary gained `stop:not-served`
+(epic 33 phase 1, commit `45a1ed7`) and the live run of session 58 closed 2167 MHz exactly that
+way («2167 закрыта, 840 мВ, not-served, +2 наследницы»); (2) the breach carries its holder as a
+FIELD — `ceilingBreachHolder` (ЗАПИСЬ/КАРТА/НЕИЗВЕСТНО) rides intent and verdict (engine + R11
+wiring), so the two distinct failures under one message are countable. The §3 fork («закрывать
+частоту, а не полосу») was answered by the owner in GOAL («ЗДАНИЕ ВАЖНЕЕ ЛЕСОВ»). Ticket lagged
+the code.
