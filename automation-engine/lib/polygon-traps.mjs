@@ -38,6 +38,25 @@ import { buildTrapCard } from './virtual-gpu.mjs';
 export const G_JOURNAL = 'И3 журнал цел';
 export const G_ENVELOPE = 'И4 конверт не превышен';
 
+/**
+ * 🔴 ЗАПЕРТАЯ ПРИЧИНА — ОДНА КАРТОЧКА НА ДВЕ КАРТЫ, ЧТОБЫ ЗАМЕР НЕ РАЗЪЕХАЛСЯ (DRY).
+ *
+ * Выход за конверт на двойнике НЕ ПРОИЗВОДИТСЯ НИКАКОЙ картой, и это ЗАМЕР, а не рассуждение:
+ * `deliveredUnderCurve` перебирает СЕТКУ ЧАСТОТ карты, верх которой И ЕСТЬ конверт (3090 МГц), а
+ * сверху стоит ещё `Math.min` по конверту. Зонд с перелётом в 20 ступеней — вдесятеро больше
+ * ловушечных двух — дал максимум выдачи 3082 МГц и НОЛЬ строк документа выше конверта. Щель над
+ * конвертом существует только в ТАБЛИЦЕ карты (верх 3185 МГц) и закрывается R13 ещё при записи.
+ *
+ * Пока поле стоит, прогон вычитает названного сторожа из предсказания и ГОВОРИТ ЭТО ВСЛУХ, а не
+ * выдаёт расхождение за находку о сторожах. Снимается ровно тогда, когда причина станет
+ * достижимой. Разбор и что именно её отопрёт — `bugs/69`.
+ */
+export const BLOCKED_ENVELOPE = Object.freeze({
+  guards: Object.freeze([G_ENVELOPE]),
+  why: 'выдача перебирает сетку частот карты, верх которой И ЕСТЬ конверт 3090 МГц; зонд с '
+    + 'перелётом 20 ступеней дал максимум 3082 МГц и ноль строк документа выше конверта (bugs/69)',
+});
+
 export const POLYGON_TRAPS = Object.freeze([
   {
     name: 'P1_hangs_and_leaves_an_open_intent',
@@ -68,6 +87,11 @@ export const POLYGON_TRAPS = Object.freeze([
     // 9 из 9 при безупречной записи. Две ступени сетки (7-8 МГц) дают ровно этот порядок.
     fiction: { boostStepsAboveCeiling: 2, noiseSeed: 20260930 },
     band: { fromMhz: 3082, toMhz: 3060 },
+    // ─── 🔴 ПРИЧИНА ДОКАЗАННО НЕДОСТИЖИМА — ЗАМЕР 2026-08-29 21:1x, `bugs/69` ────────────────────
+    // Ловушка, которая не ловит, ХУЖЕ отсутствующей (EXP-0181): пока это поле стоит, прогон НЕ
+    // считает карту проверкой и говорит это вслух, вместо того чтобы выдавать расхождение за находку
+    // о сторожах. Снимается ровно тогда, когда причина станет достижимой, — и не раньше.
+    blocked: BLOCKED_ENVELOPE,
   },
   {
     name: 'P3_hangs_AND_overshoots',
@@ -81,6 +105,10 @@ export const POLYGON_TRAPS = Object.freeze([
     judgedBy: 'polygon-guards → judgeRun (весь список failures, не только первый)',
     fiction: { hangAtOrBelowMv: 1000, boostStepsAboveCeiling: 2, noiseSeed: 20260931 },
     band: { fromMhz: 3082, toMhz: 3060 },
+    // Обе половины остаются В КАРТЕ, заперта только вторая: когда конверт станет достижим, карта
+    // снова начнёт судить СЛОЖЕНИЕ без единой правки своей физики. До тех пор она судит первую
+    // половину и честно говорит, что вторую не судит.
+    blocked: BLOCKED_ENVELOPE,
   },
 ]);
 
@@ -95,9 +123,24 @@ export function deriveAll({ from = 'curves', outDir = path.join('benches', 'card
     r.card.trap.breaks = t.breaks;
     r.card.trap.mustRedden = [...t.mustRedden];
     r.card.trap.band = { ...t.band };
+    // Запертая причина едет В КАРТУ вместе с предсказанием: читатель файла через месяц обязан
+    // узнать не только что ловушка обещала, но и что из обещанного сегодня не проверяется и почему.
+    if (t.blocked) r.card.trap.blocked = { guards: [...t.blocked.guards], why: t.blocked.why };
     out.push({ name: t.name, ok: true, card: r.card, outDir });
   }
   return out;
+}
+
+/**
+ * ЧТО ИЗ ОБЕЩАННОГО СЕГОДНЯ ВООБЩЕ СУДИТСЯ. Запертая причина вычитается из предсказания — но
+ * ВЫЧИТАЕТСЯ ЯВНО, отдельной функцией и отдельной строкой отчёта, а не тихой правкой `mustRedden`.
+ * Разница принципиальная: подгонка ожидания под результат запрещена (P71-AC10), а объявление
+ * «этого мы не проверяем и вот замер» — обязательно (EXP-0181).
+ */
+export function effectivePrediction(trap) {
+  const blocked = new Set(trap?.blocked?.guards ?? []);
+  const want = (trap?.mustRedden ?? []).filter((g) => !blocked.has(g));
+  return { want, dropped: (trap?.mustRedden ?? []).filter((g) => blocked.has(g)), isCheck: want.length > 0 };
 }
 
 /** Совпало ли наблюдение с предсказанием. Множества, а не списки: порядок сторожей тут не смысл. */
@@ -149,6 +192,30 @@ function cmdSelftest() {
   ok('сверка: порядок сторожей на совпадение НЕ влияет',
     verdictAgainstPrediction([G_JOURNAL, G_ENVELOPE], [G_ENVELOPE, G_JOURNAL]).ok === true);
 
+  // ─── ЗАПЕРТАЯ ПРИЧИНА (замер 2026-08-29 21:1x, `bugs/69`) ───────────────────────────────────
+  // Адресаты мутаций: вычитание запертого · «карта без судимого — НЕ проверка» · незапертая цела.
+  ok('запертого сторожа вычитают из предсказания, и вычет НАЗВАН',
+    (() => {
+      const e = effectivePrediction({ mustRedden: [G_JOURNAL, G_ENVELOPE], blocked: BLOCKED_ENVELOPE });
+      return e.want.length === 1 && e.want[0] === G_JOURNAL && e.dropped.length === 1 && e.dropped[0] === G_ENVELOPE;
+    })());
+  ok('карта, у которой заперто ВСЁ обещанное, проверкой НЕ считается',
+    effectivePrediction({ mustRedden: [G_ENVELOPE], blocked: BLOCKED_ENVELOPE }).isCheck === false);
+  ok('карта без запертого поля не теряет НИ ОДНОГО сторожа (инвариант незатронутых)',
+    (() => {
+      const e = effectivePrediction({ mustRedden: [G_JOURNAL] });
+      return e.isCheck === true && e.want.length === 1 && e.dropped.length === 0;
+    })());
+  ok('запертая причина названа ЗАМЕРОМ, а не мнением — числа зонда стоят в самой карточке',
+    BLOCKED_ENVELOPE.why.includes('3082') && BLOCKED_ENVELOPE.why.includes('3090') && BLOCKED_ENVELOPE.why.includes('20 ступеней'));
+  ok('P2 заперта целиком, P3 — только вторая половина: первая у неё судится',
+    (() => {
+      const [, p2, p3] = POLYGON_TRAPS;
+      return effectivePrediction(p2).isCheck === false
+        && effectivePrediction(p3).isCheck === true
+        && effectivePrediction(p3).want.join() === G_JOURNAL;
+    })());
+
   console.log(`ИТОГ: блоков ${pass + fail}, зелёных ${pass}, красных ${fail}`);
   return fail === 0 ? 0 : 1;
 }
@@ -166,7 +233,7 @@ async function cmdRun() {
   console.log('⚠️ КРАСНЫЙ ЗДЕСЬ ДОКАЗЫВАЕТ, ЧТО ПОЛИГОН УМЕЕТ ЛОВИТЬ, а НЕ дефект движка.\n');
 
   const derived = deriveAll({ from: 'curves' });
-  let bad = 0;
+  let bad = 0; let blockedCount = 0;
   for (const d of derived) {
     if (!d.ok) { bad++; console.log(`🔴 ${d.name}: не собралась — ${d.why}`); continue; }
     mkdirSync(d.outDir, { recursive: true });
@@ -181,12 +248,23 @@ async function cmdRun() {
     r.evidence.fingerprintAfter = { trap: true };
     const j = judgeRun(r.evidence);
     const actual = j.failures.map((f) => f.name);
-    const v = verdictAgainstPrediction(d.card.trap.mustRedden, actual);
+    const eff = effectivePrediction(d.card.trap);
+    const v = verdictAgainstPrediction(eff.want, actual);
+    // Карта, у которой судить нечего, ПРОВЕРКОЙ НЕ СЧИТАЕТСЯ — ни зелёной, ни красной. Молчаливо
+    // зазеленить её значило бы ровно то, за что заплачено уроком EXP-0181.
+    const mark = !eff.isCheck ? '⛔' : (v.ok ? '✅' : '🔴');
 
-    console.log(`${v.ok ? '✅' : '🔴'} ${d.name} (${d.card.trap.breaks}) — ${r.seconds.toFixed(1)} с`);
+    console.log(`${mark} ${d.name} (${d.card.trap.breaks}) — ${r.seconds.toFixed(1)} с`);
     console.log(`     ОБЕЩАНО: ${d.card.trap.mustRedden.join(' + ') || '—'}`);
+    if (eff.dropped.length) {
+      console.log(`     ⛔ ЗАПЕРТО (не судится): ${eff.dropped.join(' · ')}`);
+      console.log(`        причина, ЗАМЕРЕННАЯ: ${d.card.trap.blocked.why}`);
+    }
+    console.log(`     СУДИТСЯ: ${eff.want.join(' + ') || '— НИЧЕГО: эта карта сейчас НЕ ПРОВЕРКА'}`);
     console.log(`     ВЫШЛО:   ${actual.join(' + ') || '— (все сторожа зелёные)'}`);
-    if (!v.ok) {
+    if (!eff.isCheck) {
+      blockedCount++;
+    } else if (!v.ok) {
       bad++;
       if (v.missing.length) console.log(`     🔴 НЕ СРАБОТАЛ: ${v.missing.join(' · ')} — сторож слеп ЛИБО карта не ломает обещанного`);
       if (v.extra.length) console.log(`     🔴 ЛИШНИЙ: ${v.extra.join(' · ')} — сторож ловит ЧУЖОЕ, независимость нарушена`);
@@ -194,9 +272,13 @@ async function cmdRun() {
     for (const f of j.failures) console.log(`     улика [${f.name}]: ${f.why}`);
     console.log('');
   }
+  const checked = derived.length - blockedCount;
   console.log(bad === 0
-    ? 'ИТОГ: все три ловушки сработали РОВНО как обещано — полигон умеет ловить.'
+    ? `ИТОГ: сработали РОВНО как обещано — ${checked} из ${derived.length}. Полигон умеет ловить то, что ему дали поймать.`
     : `ИТОГ: расхождений ${bad} — и каждое есть НАХОДКА, а не повод подогнать ожидание.`);
+  if (blockedCount) {
+    console.log(`⛔ КАРТ БЕЗ СУДИМОЙ ПРИЧИНЫ: ${blockedCount} — они НЕ доказывают ничего и не выдают себя за доказательство (bugs/69).`);
+  }
   return bad === 0 ? 0 : 1;
 }
 

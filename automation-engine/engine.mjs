@@ -8830,10 +8830,23 @@ async function mainSweep(argv, arg) {
     console.error(`ОШИБКА: --twin-arm-n принимает положительное число миллисекунд, получено «${twinArmNRaw}».`);
     return 2;
   }
+  // Фаза 4 эпика 67 (`plans/71` шаг 6): `--twin-hang-kills` — ступень зависания карты
+  // (`fiction.hangAtOrBelowMv`) УБИВАЕТ ЭТОТ ПРОЦЕСС по-настоящему, а не возвращает `ETIMEDOUT`.
+  //
+  // ⚠️ ЗАЧЕМ ОТДЕЛЬНЫЙ ФЛАГ, А НЕ ВЫВОД ИЗ САМОЙ КАРТЫ. Соблазн «карта объявила зависание — значит
+  // взводим» отвергнут: `virtualCard` держит смерть правилом ARMED, NEVER DEFAULT, потому что набор,
+  // чей оракул вправе убить бегуна, не может доложить собственные результаты. Ловушки T2 и T5 несут
+  // то же поле и гоняются ВНУТРИ процесса набора (`trap-suite`) — вывод из карты убил бы набор.
+  // Смерть законна там, где движок поднят ОТДЕЛЬНЫМ процессом, а это знает вызывающий, а не карта.
+  //
+  // ⚠️ И ПОЧЕМУ ЭТО НЕ `--twin-death hang`. Тот флаг убивает движок СНАРУЖИ (репетиция руки 1
+  // предохранителя, `plans/63`). Здесь умирает САМА КАРТА на названной ступени — то есть проверяется
+  // журнал упреждающей записи, а не судья всадников. Два разных отказа, два разных флага.
+  const twinHangKills = process.argv.includes('--twin-hang-kills');
   if ((twinDeath !== null || twinArmNRaw !== null || process.argv.includes('--twin-arm')
-    || process.argv.includes('--twin-arm-m') || process.argv.includes('--twin-window'))
+    || process.argv.includes('--twin-arm-m') || process.argv.includes('--twin-window') || twinHangKills)
     && cardArg !== 'virtual') {
-    console.error('ОШИБКА: --twin-death, --twin-arm, --twin-arm-n, --twin-arm-m и --twin-window имеют смысл только с --card virtual.');
+    console.error('ОШИБКА: --twin-death, --twin-arm, --twin-arm-n, --twin-arm-m, --twin-window и --twin-hang-kills имеют смысл только с --card virtual.');
     return 2;
   }
   // Фаза 3 эпика 67 (`plans/70` шаг 6): `--twin-card <файл>` — виртуальный прогон на ЧУЖОЙ карте
@@ -8846,6 +8859,8 @@ async function mainSweep(argv, arg) {
       deathRehearsal: twinDeath,
       armNMs: twinArmN,
       ...(twinCardFile ? { cardFile: twinCardFile } : {}),
+      // Без флага НИ ОДНОГО байта аргументов сборки не меняется (инвариант I4) — оттого условный спред.
+      ...(twinHangKills ? { cardOpts: { allowProcessDeath: true } } : {}),
     })
     : null;
   if (twin) console.log(twin.canonLine);

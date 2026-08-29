@@ -105,6 +105,18 @@ export function guardClosedRowNotDeeperThanServed(ev) {
  * видит, скрипт — нет, и ночной прогон считает такую карту пройденной.
  *
  * Сторож судит СОГЛАСИЕ двух свидетельств, а не наличие одного: код выхода и слова отчёта.
+ *
+ * ⚠️ ВТОРАЯ ВЕТКА СУЖЕНА 2026-08-29 21:0x — ПО ПРОГОНУ, А НЕ ПО РАССУЖДЕНИЮ, и это находка ловушки
+ * P1. Требование «ненулевой код обязан быть объяснён СЛОВАМИ отчёта» ложно ровно для того отказа,
+ * ради которого построен журнал упреждающей записи: карта умерла посреди ступени, процесс убит,
+ * напечатать он не мог НИЧЕГО — а причина названа поимённо, намерением без вердикта («намерение без
+ * вердикта И ЕСТЬ ответ», R15). Улика: `--twin-hang-kills` на P1 даёт КОД 70, ноль стоп-слов и
+ * ровно одно открытое намерение на 2842 МГц / 995 мВ. Прежняя редакция краснела на КАЖДОМ честном
+ * зависании и тем разрушала независимость сторожей: класс карты назывался бы И2 вместо И3.
+ *
+ * Сужение НИЧЕГО не прячет, и это проверяемо: замолчать И2 может ТОЛЬКО открытое намерение, а оно
+ * само есть безусловный красный И3 — и там ступень названа частотой и напряжением. Ветка `bugs/67`
+ * (остановка объявлена, код 0) не тронута ни на байт.
  */
 export function guardStopIsNamedAndExitCodeAgrees(ev, stopMarkers = DEFAULT_STOP_MARKERS) {
   const lines = ev.reportLines ?? [];
@@ -116,11 +128,30 @@ export function guardStopIsNamedAndExitCodeAgrees(ev, stopMarkers = DEFAULT_STOP
       + `пройденной (bugs/67). Строка: «${String(hit).trim().slice(0, 160)}»`, { exitCode: code, line: hit });
   }
   if (!hit && code !== 0) {
-    return verdict('И2 стоп именован и код выхода согласен', false,
-      `прогон вернул КОД ${code}, но НИ ОДНА строка отчёта не называет причину — отказ без имени `
-      + 'нельзя ни воспроизвести, ни сжать', { exitCode: code });
+    // ВТОРОЙ СПОСОБ НАЗВАТЬ ПРИЧИНУ — журнал. Смерть посреди ступени слов не оставляет по построению.
+    const named = openIntentSeqs(ev).length > 0;
+    if (!named) {
+      return verdict('И2 стоп именован и код выхода согласен', false,
+        `прогон вернул КОД ${code}, но причину не называет НИ строка отчёта, НИ открытое намерение `
+        + 'в журнале — отказ без имени нельзя ни воспроизвести, ни сжать', { exitCode: code });
+    }
   }
   return verdict('И2 стоп именован и код выхода согласен', true);
+}
+
+/**
+ * НОМЕРА СТУПЕНЕЙ, НАЧАТЫХ И НЕ ЗАКРЫТЫХ. Одна функция на двух сторожей — И3 краснеет от неё, И2
+ * ею молчит; будь их две, они разошлись бы первой же правкой формы журнала, и тогда одна и та же
+ * смерть читалась бы двумя разными классами (реестр пар «правда↔зеркало», `AGENT_GUIDE.md`).
+ */
+export function openIntentSeqs(ev) {
+  const intents = new Set();
+  const closed = new Set();
+  for (const line of ev.journal ?? []) {
+    if (line?.state === 'intent' && Number.isFinite(line.seq)) intents.add(line.seq);
+    if (line?.state === 'verdict' && Number.isFinite(line.seq)) closed.add(line.seq);
+  }
+  return [...intents].filter((s) => !closed.has(s));
 }
 
 /** Слова, которыми прогон объявляет остановку. Список ЗАКРЫТ и живёт здесь одним местом. */
@@ -137,13 +168,7 @@ export const DEFAULT_STOP_MARKERS = Object.freeze([
  * намерений быть не должно: если они есть, прогон потерял ступень молча.
  */
 export function guardJournalHasNoOpenIntent(ev) {
-  const intents = new Set();
-  const closed = new Set();
-  for (const line of ev.journal ?? []) {
-    if (line?.state === 'intent' && Number.isFinite(line.seq)) intents.add(line.seq);
-    if (line?.state === 'verdict' && Number.isFinite(line.seq)) closed.add(line.seq);
-  }
-  const open = [...intents].filter((s) => !closed.has(s));
+  const open = openIntentSeqs(ev);
   return open.length === 0
     ? verdict('И3 журнал цел', true)
     : verdict('И3 журнал цел', false,
@@ -324,6 +349,23 @@ function cmdSelftest() {
     guardStopIsNamedAndExitCodeAgrees({ ...healthy, exitCode: 3 }).ok === false);
   ok('И2 зелен, когда код и слова согласны (остановка + ненулевой код)',
     guardStopIsNamedAndExitCodeAgrees({ ...b67, exitCode: 3 }).ok === true);
+  // ─── СУЖЕНИЕ ВТОРОЙ ВЕТКИ (находка ловушки P1, замер 2026-08-29 21:0x) ───────────────────────
+  // Обе стороны, иначе сужение недоказуемо: молчать И2 обязан ТОЛЬКО когда причину называет журнал.
+  const hangEv = {
+    ...healthy, exitCode: 70, reportLines: ['  2842 МГц ← 995 мВ · ШАГ 25 мВ'],
+    journal: [...healthy.journal, { state: 'intent', seq: 2, mhz: 2842, voltageMv: 995 }],
+  };
+  ok('И2 МОЛЧИТ на честном зависании: код 70, слов нет, но открытое намерение называет ступень',
+    guardStopIsNamedAndExitCodeAgrees(hangEv).ok === true);
+  ok('И3 при этом КРАСНЕЕТ — класс такой карты остаётся И3, а не И2 (независимость сохранена)',
+    guardJournalHasNoOpenIntent(hangEv).ok === false);
+  ok('И2 КРАСНЕЕТ, если то же намерение ЗАКРЫТО: код 70 без слов и без открытого намерения — отказ без имени',
+    guardStopIsNamedAndExitCodeAgrees({
+      ...hangEv,
+      journal: [...hangEv.journal, { state: 'verdict', seq: 2, outcome: 'hung' }],
+    }).ok === false);
+  ok('счёт открытых намерений — ОДНА функция на обоих сторожей, и она их и различает',
+    openIntentSeqs(hangEv).length === 1 && openIntentSeqs(healthy).length === 0);
 
   // ─── И3 · И4 · И5 ───────────────────────────────────────────────────────────────────────────
   ok('И3 КРАСНЕЕТ на намерении без вердикта',
