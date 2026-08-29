@@ -373,6 +373,13 @@ int main(int argc, char **argv) {
     const long long reads_per_launch = (long long)n * iters * INNER_READS;
     const long long bytes_read = reads_per_launch * 4LL * launches;
 
+    // ⚡ Файл сердцебиения УДАЛЯЕТСЯ при штатном выходе — и это не уборка, а ПРИЗНАК (`plans/66`).
+    // Между ступенями прожига нет, прогрессу взяться неоткуда, и предохранитель обязан отличать
+    // «работа встала» от «работы сейчас нет». Отсутствие файла и есть «прожига нет», одинаково на
+    // живом пути и на двойнике (носитель удаляет свой так же). Оплачено ложным трипом 2026-08-29:
+    // тишина 994,9 мс при идеальных ударах 0,87 мс, руке 1 некого было убивать.
+    if (progress_file) remove(progress_file);
+
     printf("KAGO-WORKLOAD name=furnace checksum=%016llx elements=%zu iters=%d ms=%lld launches=%lld "
            "distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld table_mb=%lld read_gb=%lld "
            "bad_launches=%lld bad_elems_max=%lld bit_dist_min=%d first_bad_index=%lld\n",

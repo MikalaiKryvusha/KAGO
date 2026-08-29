@@ -1,6 +1,6 @@
 {
   "note": "Бинарники едут в репозиторий по решению владельца (интервью 001, Q3 = B). Манифест — способ проверить их, не веря байтам: пересоберите и сверьте.",
-  "built_at": "2026-08-29T12:01:43+03:00",
+  "built_at": "2026-08-29T12:18:53+03:00",
   "toolchain": "nvcc C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.3\\bin\\nvcc.exe (found by PATH) + MSVC env C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat [host x64 -> x64]",
   "gpu": {
     "name": "NVIDIA GeForce RTX 5070 Ti",
@@ -14,31 +14,31 @@
       "name": "branchy",
       "source": "branchy.cu",
       "binary": "branchy.exe",
-      "source_sha256": "5aa83474b4bc861320040825998a69c120b66e4e4ea084ed85c6be1dc14eb2f9",
-      "binary_sha256": "364d822fc288ec086f218fcab5269ed886aefd249422b0a644b1da260a501465",
+      "source_sha256": "19341f376f0d27e578231e29c97fb08f32fba70d4565167e911223e6b28f6304",
+      "binary_sha256": "c1dd6ee1b53ba6ef82674fcc263d95fd5abfe181632e3f1ae721fd3c0621318c",
       "run_checksum": "67e95c85bb6299a2",
       "repeats": 5,
-      "size_bytes": 188416
+      "size_bytes": 188928
     },
     {
       "name": "furnace",
       "source": "furnace.cu",
       "binary": "furnace.exe",
-      "source_sha256": "20dc389ff71680517dea88726081b4bcbf301261e167dbd45f8ba218241cc5ee",
-      "binary_sha256": "5f638a0683c74f8454fb7201253bbd39e8d0bb8f29268aaeba6a4bf48f33c9ae",
+      "source_sha256": "9f2a534354ce077ad3a2f0ff9d295d8b66037b0a9aaabd69ba3205008d570505",
+      "binary_sha256": "900643af4392825ab297900d1ebbf1fd516248a5865f9dd2d3a87490e250fe72",
       "run_checksum": "2fa22073660f99b5",
       "repeats": 5,
-      "size_bytes": 202240
+      "size_bytes": 202752
     },
     {
       "name": "sdc_fma",
       "source": "sdc_fma.cu",
       "binary": "sdc_fma.exe",
-      "source_sha256": "60d86c383bafa3012d06e589779948d6e11f91f4e19211a2a8f6071fa26f945e",
-      "binary_sha256": "36572caea2b32b3c997f6b01e72e3badb0b7ff2414cfefe228113a8469459a2f",
+      "source_sha256": "7d51f729e05caf229917f11f94aa284d82a49644e9df705baa00c1cae9bc15df",
+      "binary_sha256": "b5085790f9f652529675653407bf89a070862bcefa2de366d245c96420acbbdf",
       "run_checksum": "e27ec24a82d509d7",
       "repeats": 5,
-      "size_bytes": 184832
+      "size_bytes": 185344
     }
   ]
 }

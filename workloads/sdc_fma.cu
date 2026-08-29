@@ -297,6 +297,9 @@ int main(int argc, char **argv) {
 
     // The checksum reported is the FIRST launch's, so the golden comparison keeps its meaning even
     // when `distinct > 1` — and `distinct` is what tells the harness the run disagreed with itself.
+    // ⚡ Удаление файла сердцебиения при штатном выходе — ПРИЗНАК «прожига нет» (`plans/66`).
+    if (progress_file) remove(progress_file);
+
     printf("KAGO-WORKLOAD name=sdc_fma checksum=%016llx elements=%zu iters=%d ms=%lld "
            "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld "
            "bad_launches=%lld bad_elems_max=%lld bit_dist_min=%d first_bad_index=%lld\n",

@@ -265,6 +265,9 @@ int main(int argc, char **argv) {
     const long long ms = wall_us / 1000;
     const long long work_per_launch = (long long)n * (long long)steps;
 
+    // ⚡ Удаление файла сердцебиения при штатном выходе — ПРИЗНАК «прожига нет» (`plans/66`).
+    if (progress_file) remove(progress_file);
+
     printf("KAGO-WORKLOAD name=branchy checksum=%016llx elements=%zu steps=%d ms=%lld "
            "launches=%lld distinct=%d gpu_us=%lld wall_us=%lld work_per_launch=%lld "
            "bad_launches=%lld bad_elems_max=%lld bit_dist_min=%d first_bad_index=%lld\n",

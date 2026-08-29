@@ -317,7 +317,9 @@ export async function makeTwinAssembly({
         // Взведённый судья на двойнике НЕ БЫВАЕТ без руки 2 двойника: --arm-n и --twin-stock —
         // одна дверь, не две (см. комментарий у armJudge выше).
         ...(armed ? ['--arm-n', String(armN), '--burn-pidfile', burnPidfile, '--twin-stock', cardFile] : []),
-        ...(mDecision?.armed ? ['--arm-m', String(mDecision.armMMs)] : []),
+        // Судье путь файла нужен НЕ для чтения прогресса (его несёт проба ударом 0x02), а для
+        // ворот «идёт ли прожиг»: существование файла и есть признак.
+        ...(mDecision?.armed ? ['--arm-m', String(mDecision.armMMs), '--progress-file', progressFile] : []),
         '--seconds', '600', '--out', join(runDir, 'fuse.jsonl')],
       probeArgs: ['--beat-sender', '--seconds', '600', '--tick', '2',
         // Ретранслятор прогресса едет только там, где вход 2 взведён: непроведённый источник и

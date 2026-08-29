@@ -75,6 +75,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     if (progressTimer) clearInterval(progressTimer);
     if (pidfile) { try { rmSync(pidfile, { force: true }); } catch { /* the trip may already own it */ } }
+    // Файл сердцебиения снимается при штатном выходе — тем же признаком и по той же причине, что
+    // на живом пути (`plans/66`): между ступенями прожига нет, и предохранитель обязан отличать
+    // «работа встала» от «работы сейчас нет». Паритет дорог важнее экономии одной строки.
+    if (progressFile) { try { rmSync(progressFile, { force: true }); } catch { /* уже снят */ } }
     return 0;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });

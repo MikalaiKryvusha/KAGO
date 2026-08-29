@@ -60,7 +60,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { isMainThread } from 'node:worker_threads';
 
 export const FUSE_DIR = fileURLToPath(new URL('../../runs/death-watch/', import.meta.url));
@@ -435,6 +435,9 @@ export function runTrip({ verdict, burnPid, burnImages = null, killHand, imageKi
 export async function runJudge({
   beatPort = 0, armNMs = null, armMMs = null, burnPid = null, burnImages = null,
   burnPidFile = null, twinStockCard = null,
+  // ⚡ Вход 2 (`plans/66`): путь файла сердцебиения прожига. Судья его НЕ ЧИТАЕТ в такте — он лишь
+  // спрашивает о его СУЩЕСТВОВАНИИ, и только когда вход 2 уже собрался трипнуть.
+  progressFile = null, existsFn = existsSync,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
   spawnSyncFn, spawnFn, killFn = process.kill.bind(process), onReady = null, log = () => {},
 }) {
@@ -484,6 +487,10 @@ export async function runJudge({
   const endMs = seconds === null ? Infinity : startMs + seconds * 1000;
   let tripOutcomes = null;
   let lastTickMs = startMs;
+  // Идёт ли прожиг ПРЯМО СЕЙЧАС. Признак — существование файла сердцебиения: его создаёт прожиг и
+  // снимает при штатном выходе (и `.cu`, и носитель двойника). Источника не проведено — ворота
+  // открыты, и это верно: тогда вход 2 не взведён и трипать нечему.
+  const burnInFlight = () => (progressFile === null ? true : existsFn(progressFile));
 
   await new Promise((resolve) => {
     const tick = () => {
@@ -501,6 +508,26 @@ export async function runJudge({
         // The pidfile is read HERE, at the trip, never at judge start: the carrier of the fatal
         // burst is spawned long after the judge was, and a pid cached at start would name a corpse.
         const pidNow = burnPid ?? readBurnPidfile(burnPidFile);
+        // ⚡ ВОРОТА ВХОДА 2: ПРОГРЕСС ЖДУТ ТОЛЬКО ОТ ИДУЩЕГО ПРОЖИГА (`plans/66`, оплачено замером).
+        //
+        // Между ступенями прожига нет — и прогрессу взяться неоткуда. Вход 1 этой дыры не имеет:
+        // проба бьёт непрерывно, независимо от того, жжём мы сейчас или считаем. Первый же замер
+        // ложных срабатываний поймал это на здоровом прогоне: `progress-stall` при тишине
+        // 994,9 мс, удары при этом идеальны (0,87 мс), а рука 1 сама назвала причину — «no burn
+        // pid — nothing to kill». Трип на пустом месте.
+        //
+        // Ворота стоят ЗДЕСЬ, а не в такте: обращение к диску — не дело такта судьи, он обязан
+        // жить в памяти. Здесь оно случается не чаще одного раза за окно M, и только для
+        // КАНДИДАТА в трип. Тишина, накопленная без прожига, не считается: таймер перезаводится.
+        //
+        // ПРИЗНАК — САМ ФАЙЛ СЕРДЦЕБИЕНИЯ, а не пид-файл, и это важно: пид-файл есть только у
+        // двойника (на живом пути pid прожига заперт внутри `spawnSync`), и ворота на нём молча
+        // выключили бы вход 2 там, где он и нужен. Файл же снимают ОБА — и `.cu`, и носитель.
+        if (verdict.cause === 'progress-stall' && !burnInFlight()) {
+          lastProgressMs = now;
+          setTimeout(tick, JUDGE_TICK_MS);
+          return;
+        }
         tripOutcomes = runTrip({ verdict, burnPid: pidNow, burnImages, killHand, imageKillHand, stockHand, writeLine, dumpRing });
         log(`⚡ ТРИП: ${verdict.cause} — тишина ${round2(verdict.beatSilenceMs ?? -1)} мс. Руки отработали: ${tripOutcomes.map((o) => `${o.action}=${o.ok}`).join(' · ')}`);
         resolve(); // one trip ends this judge: the step is over either way, a second trip would fire on a corpse
@@ -988,6 +1015,46 @@ async function cmdSelftest() {
     const m = deriveArmMMs('furnace');
     return m > PROGRESS_TICK_MAX_MS.furnace && m < 2070;
   })());
+  // ---- ворота входа 2 сквозным прогоном судьи (оплачено ложным трипом 2026-08-29)
+  {
+    const os = await import('node:os');
+    const outDir = path.join(os.tmpdir(), `fuse-gate-${process.pid}`);
+    // Прогресс молчит ВСЁ время прогона, вход 2 взведён на 100 мс — трипнуть обязано, если бы не
+    // ворота. Файла сердцебиения нет: «прожига нет» ⇒ тишина законна.
+    const noBurn = await runJudge({
+      beatPort: 0, armNMs: null, armMMs: 100, burnPid: null,
+      progressFile: path.join(outDir, 'нет-такого-файла.txt'),
+      journalPath: path.join(outDir, 'gate-a.jsonl'), seconds: 0.6,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+      onReady: ({ port }) => {
+        // Один удар прогресса в начале — источник ПРОВЕДЁН (иначе сторож `progressWired` закроет
+        // вопрос сам, и блок доказал бы не то).
+        const dgram = require('node:dgram'); const s = dgram.createSocket('udp4');
+        s.send(Buffer.from([0x02]), port, '127.0.0.1', () => s.close());
+      },
+    });
+    ok('ВОРОТА входа 2: прогресс молчит, но прожига НЕТ — трипа нет (тишина между ступенями законна)',
+      noBurn.tripped === false, `трипнул: ${JSON.stringify(noBurn.tripOutcomes)}`);
+
+    // ПАРНЫЙ блок, и без него первый ничего не стоит: он прошёл бы и на вовсе сломанном входе 2.
+    // Та же тишина, но файл сердцебиения СУЩЕСТВУЕТ — прожиг идёт, и молчание работы есть отказ.
+    mkdirSync(outDir, { recursive: true });
+    const live = path.join(outDir, 'burn-progress.txt');
+    closeSync(openSync(live, 'w'));
+    const inFlight = await runJudge({
+      beatPort: 0, armNMs: null, armMMs: 100, burnPid: null,
+      progressFile: live,
+      journalPath: path.join(outDir, 'gate-b.jsonl'), seconds: 2,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+      onReady: ({ port }) => {
+        const dgram = require('node:dgram'); const s = dgram.createSocket('udp4');
+        s.send(Buffer.from([0x02]), port, '127.0.0.1', () => s.close());
+      },
+    });
+    ok('ВХОД 2 РАБОТАЕТ: тот же простой прогресса при ИДУЩЕМ прожиге — трип с причиной progress-stall',
+      inFlight.tripped === true && inFlight.tripOutcomes?.[0]?.cause === 'progress-stall',
+      `исход: ${JSON.stringify(inFlight.tripOutcomes)}`);
+  }
   ok('форма БЫСТРЕЕ наблюдателя не взводится вовсе, и причина НАЗВАНА (sdc_fma: 3 мс < 150 мс)', (() => {
     const d = armMDecision('sdc_fma');
     return d.armed === false && d.armMMs === null && /мельче трёх тактов наблюдения/u.test(d.why);
@@ -1104,6 +1171,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           burnImages: str('--burn-images', null)?.split(',').map((x) => x.trim()).filter(Boolean) ?? null,
           burnPidFile: str('--burn-pidfile', null),
           twinStockCard: str('--twin-stock', null),
+          progressFile: str('--progress-file', null),
           // --out: the sandbox door (P56-AC4, the phase-2 verdict's caveat). A rehearsal that can
           // only write into runs/death-watch/ plants fixtures among real post-mortems (EXP-0025).
           journalPath: str('--out', null) ?? path.join(FUSE_DIR, `${stamp}-fuse.jsonl`),
