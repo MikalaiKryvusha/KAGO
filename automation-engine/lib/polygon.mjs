@@ -111,8 +111,8 @@ export function countWithBurns(results) {
 }
 
 /** Прогнать ОДНУ карту через полный цикл и осудить. Возвращает улики и вердикт. */
-export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDepthMv = 300, timeoutMs = 300000 }) {
-  const gen = generateCard({ seed, amplitude, archetype });
+export function runOneCard({ seed, amplitude, archetype, freezeAxes = [], fromMhz, toMhz, maxDepthMv = 300, timeoutMs = 300000 }) {
+  const gen = generateCard({ seed, amplitude, archetype, freezeAxes });
   if (!gen.ok) return { ok: false, seed, amplitude, archetype, why: `карта не сгенерирована: ${gen.why}` };
   const cardName = gen.card.name;
   const cardFile = path.join(GEN_DIR, `${cardName}.json`);
@@ -121,6 +121,10 @@ export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDept
   const write = spawnSync(process.execPath, [
     path.join(ROOT, 'automation-engine', 'lib', 'card-generator.mjs'),
     '--seed', String(seed), '--amplitude', String(amplitude), '--archetype', archetype,
+    // ⚠️ ЗАМОРОЗКА ЕДЕТ И В CLI: файл на диске обязан быть ТЕМ ЖЕ, что вернул `generateCard` выше.
+    // Иначе сжатие судило бы кандидата, которого на диске не существует, — пара «правда↔зеркало»
+    // ровно в том месте, где мы ищем минимальный ВОСПРОИЗВОДИМЫЙ вход.
+    ...(freezeAxes.length ? ['--freeze', freezeAxes.join(',')] : []),
   ], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
   if (write.status !== 0) {
     return { ok: false, seed, amplitude, archetype, why: `запись карты вернула ${write.status}: ${(write.stderr ?? '').slice(0, 300)}` };
@@ -171,6 +175,38 @@ export function runOneCard({ seed, amplitude, archetype, fromMhz, toMhz, maxDept
   return {
     ok: true, seed, amplitude, archetype, cardName, cardFile, card: gen.card,
     seconds, evidence, killedBySignal: run.signal ?? null,
+  };
+}
+
+/**
+ * ОРАКУЛ СЖАТИЯ — настоящий прогон под сторожами, свёрнутый в один вопрос: «каким КЛАССОМ ломается
+ * этот вход?». Дорогой (минуты на кандидата) и потому живёт здесь, а не в наборе: логика сжатия
+ * доказана мутациями на подставном оракуле (`polygon-shrink.mjs`), а это — только проводка.
+ * Разделение не эстетическое: иначе сжатие было бы недоказуемо офлайн.
+ *
+ * ⚠️ ОТПЕЧАТОК ПОДСТАВЛЯЕТСЯ ОДИН И ТОТ ЖЕ. Сторож И5 сравнивает «до» и «после»; сжатие гоняет
+ * десятки кандидатов, и снимать отпечаток на каждого значило бы кормить И5 шумом файловой системы
+ * вместо ответа о карте. И5 — свойство ПАКЕТА, и пакетом он уже проверен.
+ */
+export function breakClassOracle({ seed, fromMhz, toMhz, maxDepthMv, fingerprint,
+  // ШОВ ПРОГОНА — ради блока, а не ради гибкости: без него проводка «класс = имя сторожа»
+  // проверялась бы только настоящими минутами, то есть не проверялась бы вовсе.
+  runFn = runOneCard, judgeFn = judgeRun } = {}) {
+  return (cand) => {
+    const r = runFn({
+      seed: cand.seed ?? seed,
+      amplitude: cand.amplitude,
+      archetype: cand.archetype,
+      freezeAxes: cand.frozenAxes ?? [],
+      fromMhz, toMhz, maxDepthMv,
+    });
+    // «НЕ ЗАПУСТИЛОСЬ» — ОТДЕЛЬНЫЙ КЛАСС, А НЕ «не ломается». Слить его с null значило бы, что
+    // бисекция примет несобравшуюся карту за успешно сжатую и уедет в пустоту.
+    if (!r.ok) return 'НЕ ЗАПУСТИЛОСЬ';
+    r.evidence.fingerprintBefore = fingerprint;
+    r.evidence.fingerprintAfter = fingerprint;
+    const j = judgeFn(r.evidence);
+    return j.ok ? null : j.failures[0].name;
   };
 }
 
@@ -304,6 +340,25 @@ function cmdSelftest() {
         && some.some((l) => /ФАКТУРА ПРОЖИГОВ: собрана у 2 из 2/.test(l))
         && !some.some((l) => l.includes('НИ ОДНОЙ'));
     })());
+
+  // ─── ОРАКУЛ СЖАТИЯ: три исхода, и они РАЗНЫЕ ────────────────────────────────────────────────
+  {
+    const seen = [];
+    const mk = (judgeResult, runOk = true) => breakClassOracle({
+      seed: 1, fromMhz: 2842, toMhz: 2842, maxDepthMv: 300, fingerprint: { x: 1 },
+      runFn: (c) => { seen.push(c); return runOk ? { ok: true, evidence: {} } : { ok: false, why: 'карта не легла' }; },
+      judgeFn: () => judgeResult,
+    });
+    ok('оракул: чистый прогон — НЕ ломается (null), а не «какой-то класс»',
+      mk({ ok: true, failures: [] })({ amplitude: 0.5, archetype: 'typical' }) === null);
+    ok('оракул: класс = ИМЯ первого сторожа, а не «сломалось»',
+      mk({ ok: false, failures: [{ name: 'И2 стоп именован и код выхода согласен' }] })({ amplitude: 0.5, archetype: 'typical' })
+      === 'И2 стоп именован и код выхода согласен');
+    ok('оракул: карта, которая не собралась, — ОТДЕЛЬНЫЙ класс, а не «не ломается»',
+      mk({ ok: true, failures: [] }, false)({ amplitude: 0.5, archetype: 'typical' }) === 'НЕ ЗАПУСТИЛОСЬ');
+    ok('оракул доносит до прогона замороженные оси кандидата',
+      (seen[seen.length - 1] ?? {}).freezeAxes !== undefined);
+  }
 
   ok('счёт собранных фактур считает ПО УЛИКАМ, а не по числу прогонов',
     countWithBurns([
