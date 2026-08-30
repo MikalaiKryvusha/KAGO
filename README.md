@@ -88,20 +88,34 @@ and the three working modes refuse honestly until phase 6 qualifies their number
 an unproven undervolt cannot be applied by a double-click. The search engine exists, judges a
 candidate by three different load shapes at once and takes the worst verdict — and **it has now found
 this card's edge on live silicon**: at the top of the range the card survives 870 mV and hangs the
-machine at 865, reproduced on two adjacent frequencies in independent sittings. A hang is a planned
-path here, not an accident: the intent is written and `fsync`-ed before the first byte reaches the
-card, so the rung that killed the machine names itself on the next launch.
+machine at 865, reproduced on two adjacent frequencies in independent sittings. A hang is survivable
+by design — the intent is written and `fsync`-ed before the first byte reaches the card, so the rung
+that killed the machine names itself on the next launch — but **since 2026-08-30 it is no longer
+called a normal path.** The owner's ruling: a hang is possible and tolerated, and it counts as OUR
+failure in the fuse and the oracle; every one of them owes a defect analysis, and their number per
+evening is a quality figure that must fall.
 
 **The undervolt is measured, not claimed.** With the whole voltage/frequency curve raised and nothing
 offered above the clock the card already delivered, it draws **7.71 W (5.6 %) less and runs 5 °C cooler at
 exactly the stock clock** — and no clock lock is used, so the card still boosts and still drops to idle
 speeds. One number from one pair of runs; two independent series are what will make it a result.
 
-**Every live sweep now rides under an armed fuse.** A deadman judge in its own process listens to
-millisecond liveness beats from a driver probe; N ms of silence — the threshold derived from a
-measured floor under load, not invented — and it kills the burn (0.26 ms, syscall), returns the
-card to factory voltage in a detached hand that verifies by read-back, and stops the sweep before
-the next rung. Rehearsed live end-to-end: trip at 61 ms, load gone, stock confirmed. The card also
+**Every live sweep rides under an armed fuse — and here is exactly what that does and does not
+buy.** A deadman judge in its own process listens to millisecond liveness beats from a driver probe;
+N ms of silence — the threshold derived from a measured floor under load, not invented — and it
+kills the burn (0.26 ms, syscall), returns the card to factory voltage in a detached hand that
+verifies by read-back, and stops the sweep before the next rung. Rehearsed end-to-end against the
+death of the WRITER: trip at 61 ms, load gone, stock confirmed.
+
+🔴 **What it does NOT catch, stated plainly because it was paid for.** On 2026-08-30 the owner's
+machine hung mid-sweep and the fuse recorded **zero** trips. The judge is a process on the same OS:
+when the OS stops, the judge stops with it, and a deadman that shares fate with the patient cannot
+pronounce death. Everything it had been proved against was a *simulated process death* on the twin —
+and a twin cannot freeze its host, so that class was never merely untested, it was untestable on the
+stand where "proved" was pronounced. The prediction side is a different matter and is achievable:
+the machine recorded driver errors **110 seconds** before it died. Work is tracked in the blocking
+epic — a guard must now declare, next to itself, the threat it exists for, what it was actually
+proved against, and the gap between the two, or the build reddens. The card also
 has a **digital twin** (the owner's term): a virtual card derived from this card's own measured
 dictionaries, deep enough to burn rungs, find edges and die by the machine's real death profiles —
 the seam inventory and device port are done, and the sweep engine is being assembled onto it so
@@ -370,9 +384,12 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 пока фаза 6 не примет их числа, — недоказанный андервольт двойным кликом не применяется. Движок
 поиска написан, судит кандидата сразу тремя разными формами нагрузки и берёт худший вердикт — и
 **край этой карты он уже нашёл на живом кремнии**: наверху диапазона карта выдерживает 870 мВ и вешает
-машину на 865, воспроизведено на двух соседних частотах в независимых заходах. Зависание здесь —
-штатный путь, а не авария: намерение записывается и `fsync`-ится до первого байта в карту, поэтому
-ступень, убившая машину, называет себя сама на следующем запуске.
+машину на 865, воспроизведено на двух соседних частотах в независимых заходах. Зависание здесь
+**переживаемо по устройству** — намерение записывается и `fsync`-ится до первого байта в карту,
+поэтому ступень, убившая машину, называет себя сама на следующем запуске, — **но с 2026-08-30 оно
+больше не называется штатным путём.** Решение владельца: зависание возможно и допустимо, и оно
+считается НАШИМ провалом в предохранителе и оракуле; каждое требует разбора, а их число за вечер —
+показатель качества, который обязан падать.
 
 **Андервольт измерен, а не заявлен.** Когда вся кривая «напряжение — частота» поднята, а выше той частоты,
 которую карта и так выдавала, не предлагается ничего, она берёт **на 7,71 Вт (5,6 %) меньше и работает на
@@ -380,12 +397,22 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 карта по-прежнему разгоняется и по-прежнему сбрасывается на простое. Это одно число из одной пары
 прогонов; результатом его сделают две независимые серии.
 
-**Каждый живой прогон теперь идёт под взведённым предохранителем.** Судья-deadman в отдельном
-процессе слушает миллисекундные удары живости от пробы драйвера; N мс тишины — порог выведен из
-измеренного пола под нагрузкой, не выдуман — и он убивает прожиг (0,26 мс, сисколл), возвращает
-карте заводское напряжение отдельной рукой с проверкой чтением и останавливает развёртку до
-следующей ступени. Отрепетировано живьём конец-в-конец: трип на 61 мс, нагрузка снята, сток
-подтверждён. У карты есть и **цифровой двойник** (термин владельца): виртуальная карта, выведенная
+**Каждый живой прогон идёт под взведённым предохранителем — и вот что именно это даёт, а чего
+не даёт.** Судья-deadman в отдельном процессе слушает миллисекундные удары живости от пробы
+драйвера; N мс тишины — порог выведен из измеренного пола под нагрузкой, не выдуман — и он убивает
+прожиг (0,26 мс, сисколл), возвращает карте заводское напряжение отдельной рукой с проверкой
+чтением и останавливает развёртку до следующей ступени. Отрепетировано конец-в-конец против смерти
+ПИСАТЕЛЯ: трип на 61 мс, нагрузка снята, сток подтверждён.
+
+🔴 **Чего он НЕ ловит — сказано прямо, потому что за это заплачено.** 2026-08-30 машина владельца
+зависла посреди прогона, и предохранитель записал **ноль** трипов. Судья — процесс на той же ОС:
+встала ОС — встал судья, а deadman, делящий судьбу с пациентом, смерть пациента не констатирует.
+Всё, против чего он был доказан, — это *смоделированная смерть процесса* на двойнике, а двойник по
+построению не может заморозить свой хост: класс был не просто не проверен, он был недоказуем на том
+стенде, где произносилось слово «доказан». Сторона предсказания — другое дело и достижима: машина
+записала ошибки драйвера **за 110 секунд** до собственной смерти. Работа идёт в блокирующем эпике —
+сторож обязан теперь объявить рядом с собой угрозу, против чего он доказан на самом деле и зазор
+между этими двумя, иначе сборка краснеет. У карты есть и **цифровой двойник** (термин владельца): виртуальная карта, выведенная
 из измеренных словарей именно этого экземпляра, — достаточно глубокая, чтобы жечь ступени, находить
 края и умирать по настоящим профилям смертей этой машины; опись швов и порт устройства готовы,
 движок развёртки собирается на двойника, чтобы предохранители и развёртки репетировались с нулевым
