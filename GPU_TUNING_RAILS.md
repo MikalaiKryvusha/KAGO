@@ -29,6 +29,29 @@ Above all three sits **THE OWNER'S-MACHINE RULE** (`AGENT_GUIDE.md`): look the f
 name the rollback BEFORE the write · smallest reversible form · re-read state until stable ·
 report numbers. A permission entry in settings is not a reason to act.
 
+### S4 — A HANG IS A DEFECT OF OURS, NOT A NORMAL PATH (owner's word, 2026-08-30 evening)
+
+> *«отныне зависание машины при тюнинге и поиске края мы не считаем нормальным событием. Оно
+> возможно, оно допустимо, но мы считаем это плохим нежелательным событием — нашим провалом в
+> разработке предохранителя и оракула»* (`GOAL.md` → «🔴 ЗАВИСАНИЕ — НЕ НОРМАЛЬНОЕ СОБЫТИЕ»).
+
+This does NOT change what the machinery may do: a hang is still survivable, `ЗАВИС` is still a
+first-class verdict, the sweep still resumes by itself, and the run does not stop being allowed.
+It changes what a session may CONCLUDE about one. The 2026-08-15 framing — a hang is «the normal
+path of a verdict» — is history with a date; the standing framing is: the path is passable and
+BAD.
+
+| Your duty when a run hangs | Not enough |
+|---|---|
+| File the defect: WHY did the fuse not save, and WHY did the oracle not warn (both are our code) | A `ЗАВИС` line in the journal with the frequency it closed |
+| Count hangs per evening as a quality number of the fuse + oracle, expected to FALL | «Reached the end of the band, through a hang» reported as success |
+| Never write «штатный / нормальный / ожидаемый» next to a hang in any report, plan or summary | Calling it as-designed because the verdict path handled it |
+
+**STOP line, and it is narrow:** this is not a reason to make the fuse stricter at the price of
+refusals — the owner's other standing word governs that («🏗 ЗДАНИЕ ВАЖНЕЕ ЛЕСОВ»: *«сторож должен
+не ронять инструмент, а подсказывать»*). S4 changes the VERDICT ON THE EVENT, never the run's
+right to continue.
+
 ## 1. Session start — always, in this order
 
 ```
