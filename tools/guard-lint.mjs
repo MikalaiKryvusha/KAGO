@@ -49,12 +49,19 @@
  * @guard guard-lint
  * THREAT:         сторож заводится или закрывается без названной угрозы, зазора доказательства и
  *                 наблюдения на реальном пути — класс `bugs/76`, четыре экземпляра за один вечер
- * PROVED-AGAINST: 100 фикстур в `--selftest` (50 позитивных · 50 негативных) по осям: отсутствие
- *                 поля · пустота · самообман · форма блока · кодировка · запрещённые DURABLE-AT ·
- *                 ЧЕТЫРЕ ИСТОРИЧЕСКИХ экземпляра класса в их реальной форме
+ * PROVED-AGAINST: набор `--selftest` по осям: отсутствие поля · пустота · самообман · форма блока ·
+ *                 кодировка · запрещённые DURABLE-AT · неаудируемый ON-REAL-PATH · ЧЕТЫРЕ
+ *                 ИСТОРИЧЕСКИХ экземпляра класса в их реальной форме. ЧИСЛО ФИКСТУР ЗДЕСЬ НЕ
+ *                 ПИШЕТСЯ НАМЕРЕННО: его печатает прогон, и оно одно. Прежняя редакция обещала
+ *                 «100 фикстур (50 позитивных · 50 негативных)» и отстала в тот же вечер, когда их
+ *                 стало 202 — ярлык с числом врёт молча, а `--selftest` не врёт никогда.
  * GAP:            не ловит `GAP: none`, написанный не думая, — это суждение, машине недоступное
  *                 (риск «г» эпика 76, записан как непокрытый). Не ищет сторожей без маркера.
- * ON-REAL-PATH:   NOT YET — врезка в `npm run check` идёт шагом 4.4 плана 75
+ *                 Доля механизма у ПОЗИТИВНЫХ фикстур объявляется автором и сверяется лишь с
+ *                 наличием поля в тексте — что фикстура ПОГРАНИЧНАЯ для этого поля, машина не судит.
+ * ON-REAL-PATH:   2026-08-30 — врезан пятыми воротами в `npm run check`, наблюдён в прогоне ворот
+ *                 (строка «декларация угроз сторожей», код 0); проводка доказана в обе стороны:
+ *                 подложенный сторож без `GAP` роняет ворота в код 1, снятие возвращает 0
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
@@ -84,6 +91,30 @@ export const REQUIRED = {
   guard: ['THREAT', 'PROVED-AGAINST', 'GAP', 'ON-REAL-PATH'],
   forensic: ['EXPLAINS', 'DURABLE-AT'],
 };
+
+/**
+ * ПОЛЕ → МЕХАНИЗМ ЭПИКА 76. Три механизма — это три вопроса из блок-схемы эпика, и у каждого
+ * вопроса свои поля:
+ *
+ *   М1 «против ЧЕГО доказан?»          THREAT · PROVED-AGAINST · GAP
+ *   М2 «ВИДЕЛИ ли на реальном пути?»   ON-REAL-PATH
+ *   М3 «переживёт ли улика СОБЫТИЕ?»   EXPLAINS · DURABLE-AT
+ *
+ * Зачем карта существует. Владелец потребовал «100 тестов на каждый механизм, 50 позитивных,
+ * 50 негативных» (E76-AC1), и прибором назвал счётчик набора. Счётчик слова «механизм» не знал,
+ * поэтому доля механизма считалась арифметикой в голове сессии и попадала в эстафету числом,
+ * которое нечем перепроверить. Непроверяемый доклад о проверке — это ровно тот класс, против
+ * которого написано правило R7; критерий эпика не имеет права им меряться (`plans/77` §1).
+ */
+export const MECH_OF_FIELD = {
+  'THREAT': 'М1', 'PROVED-AGAINST': 'М1', 'GAP': 'М1',
+  'ON-REAL-PATH': 'М2',
+  'EXPLAINS': 'М3', 'DURABLE-AT': 'М3',
+};
+
+/** Порядок печати механизмов в отчёте и порог владельца на каждый из них. */
+export const MECHANISMS = ['М1', 'М2', 'М3'];
+export const MECH_TARGET = { neg: 50, pos: 50 };
 
 /**
  * Значения `DURABLE-AT`, означающие «улика становится долговечной только при штатном конце».
@@ -151,25 +182,35 @@ export function parseBlocks(text) {
   return blocks;
 }
 
-/** Проверить один блок. Возвращает список нарушений — по одному на каждую отдельную причину. */
+/**
+ * Проверить один блок. Возвращает список нарушений — по одному на каждую отдельную причину.
+ *
+ * Каждое нарушение несёт `field` — ПОЛЕ, из-за которого оно возникло. Поле здесь не украшение
+ * отчёта: по нему выводится механизм, к которому относится фикстура (`MECH_OF_FIELD` ниже), и
+ * благодаря этому доля механизма в наборе СЧИТАЕТСЯ ПРОГОНОМ, а не объявляется автором.
+ * До 2026-08-30 имя поля жило только внутри человеческой фразы `why`, и счётчику пришлось бы
+ * выковыривать его регулярным выражением из текста — прибор, читающий прозу, ломается от правки
+ * этой прозы и молча начинает считать не то (`plans/77` §1).
+ */
 export function checkBlock(block, file = '<memory>') {
   const out = [];
-  const add = (rule, why, line = block.line) => out.push({ rule, file, line, name: block.name, kind: block.kind, why });
+  const add = (rule, field, why, line = block.line) =>
+    out.push({ rule, field, file, line, name: block.name, kind: block.kind, why });
   const required = REQUIRED[block.kind] || [];
   const seen = new Map();
 
   for (const f of block.fields) {
-    if (seen.has(f.key)) add('R5-duplicate', `поле «${f.key}» объявлено дважды`, f.line);
+    if (seen.has(f.key)) add('R5-duplicate', f.key, `поле «${f.key}» объявлено дважды`, f.line);
     else seen.set(f.key, f);
   }
 
   for (const key of required) {
     const f = seen.get(key);
-    if (!f) { add('R1-missing', `нет обязательного поля «${key}»`); continue; }
+    if (!f) { add('R1-missing', key, `нет обязательного поля «${key}»`); continue; }
     const v = f.value.trim();
-    if (v === '') { add('R2-empty', `поле «${key}» пустое — «нет зазора» пишется словом, а не пустотой`, f.line); continue; }
+    if (v === '') { add('R2-empty', key, `поле «${key}» пустое — «нет зазора» пишется словом, а не пустотой`, f.line); continue; }
     if (EVASIONS.has(v.toLowerCase())) {
-      add('R3-evasion', `поле «${key}» заполнено отговоркой «${v}» — это плейсхолдер, а не ответ`, f.line);
+      add('R3-evasion', key, `поле «${key}» заполнено отговоркой «${v}» — это плейсхолдер, а не ответ`, f.line);
     }
   }
 
@@ -189,7 +230,7 @@ export function checkBlock(block, file = '<memory>') {
     const rp = seen.get('ON-REAL-PATH');
     const v = rp ? rp.value.trim() : '';
     if (v && !/^not\s*yet\b/iu.test(v) && !/\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4}/u.test(v)) {
-      add('R7-unauditable',
+      add('R7-unauditable', 'ON-REAL-PATH',
         `ON-REAL-PATH: «${v.slice(0, 60)}» — ни даты, ни честного «NOT YET». Наблюдение без даты `
         + 'нельзя перепроверить, а непроверяемое заявление о проверке — это чинимый класс', rp.line);
     }
@@ -198,7 +239,7 @@ export function checkBlock(block, file = '<memory>') {
   if (block.kind === 'forensic') {
     const d = seen.get('DURABLE-AT');
     if (d && d.value && FORBIDDEN_DURABLE.has(d.value.trim().toLowerCase())) {
-      add('R4-late-durable',
+      add('R4-late-durable', 'DURABLE-AT',
         `DURABLE-AT: «${d.value.trim()}» — улика становится долговечной только при штатном конце. `
         + 'Событие, ради которого она существует, штатного конца не даёт (bugs/78)', d.line);
     }
@@ -288,7 +329,19 @@ export function buildFixtures() {
   const neg = [];
   const pos = [];
   const n = (axis, why, text) => neg.push({ axis, why, text });
-  const p = (axis, why, text) => pos.push({ axis, why, text });
+  /**
+   * Позитивная фикстура называет ПОЛЕ, которое варьирует, — из него выводится её механизм.
+   *
+   * Почему негативные выводятся сами, а позитивные объявляют. У негативной есть объективный
+   * свидетель: правило, которое на ней краснеет, и поле, из-за которого оно краснеет. У позитивной
+   * свидетеля нет по определению — она требует МОЛЧАНИЯ, а молчание поля не называет.
+   *
+   * Умолчание `'—'` — общая фикстура (стиль комментария, порядок полей, соседство блоков): она
+   * доказывает разбор блока, а не механизм, и не засчитывается НИКОМУ. Направление ошибки выбрано
+   * намеренно: забытая метка ЗАНИЖАЕТ долю механизма. Счётчик, умеющий ошибаться только вниз,
+   * не может объявить порог владельца взятым там, где он не взят.
+   */
+  const p = (axis, why, text, field = '—') => pos.push({ axis, why, text, field });
 
   // ─ ОСЬ A · нет обязательного поля у @guard (4) ─────────────────────────────────────────────────
   for (const key of REQUIRED.guard) n('A-missing-guard', `нет поля ${key}`, G('g', ...without(OK4, key)));
@@ -414,29 +467,29 @@ export function buildFixtures() {
   p('P1-style', 'markdown без префикса', ['@guard g', ...OK4].join('\n'));
   p('P1-style', 'решётка (ps1/sh)', ['# @guard g', ...OK4.map((f) => `# ${f}`)].join('\n'));
   // ─ ОСЬ P2 · законные значения (8) ──────────────────────────────────────────────────────────────
-  p('P2-value', 'GAP: none — законный ответ, написанный СЛОВОМ', G('g', ...withVal(OK4, 'GAP', 'none')));
-  p('P2-value', 'GAP: none с точкой', G('g', ...withVal(OK4, 'GAP', 'none.')));
-  p('P2-value', 'ON-REAL-PATH: NOT YET', G('g', ...withVal(OK4, 'ON-REAL-PATH', 'NOT YET')));
-  p('P2-value', 'двоеточие внутри значения', G('g', ...withVal(OK4, 'THREAT', 'класс: зависание машины')));
+  p('P2-value', 'GAP: none — законный ответ, написанный СЛОВОМ', G('g', ...withVal(OK4, 'GAP', 'none')), 'GAP');
+  p('P2-value', 'GAP: none с точкой', G('g', ...withVal(OK4, 'GAP', 'none.')), 'GAP');
+  p('P2-value', 'ON-REAL-PATH: NOT YET', G('g', ...withVal(OK4, 'ON-REAL-PATH', 'NOT YET')), 'ON-REAL-PATH');
+  p('P2-value', 'двоеточие внутри значения', G('g', ...withVal(OK4, 'THREAT', 'класс: зависание машины')), 'THREAT');
   p('P2-value', '«n/a» ЧАСТЬЮ текста, а не всем значением',
-    G('g', ...withVal(OK4, 'GAP', 'поле n/a в отчёте драйвера не заполняется — отдельный предмет')));
-  p('P2-value', '«none» частью текста', G('g', ...withVal(OK4, 'GAP', 'none of the twin scenarios freeze the host')));
-  p('P2-value', 'очень длинное значение', G('g', ...withVal(OK4, 'THREAT', 'x'.repeat(400))));
-  p('P2-value', 'кириллица и эмодзи', G('g', ...withVal(OK4, 'THREAT', '🔴 зависание машины владельца')));
+    G('g', ...withVal(OK4, 'GAP', 'поле n/a в отчёте драйвера не заполняется — отдельный предмет')), 'GAP');
+  p('P2-value', '«none» частью текста', G('g', ...withVal(OK4, 'GAP', 'none of the twin scenarios freeze the host')), 'GAP');
+  p('P2-value', 'очень длинное значение', G('g', ...withVal(OK4, 'THREAT', 'x'.repeat(400))), 'THREAT');
+  p('P2-value', 'кириллица и эмодзи', G('g', ...withVal(OK4, 'THREAT', '🔴 зависание машины владельца')), 'THREAT');
   // ─ ОСЬ P3 · законные DURABLE-AT (6) ────────────────────────────────────────────────────────────
   for (const v of ['every-second', 'immediate', 'per-tick', 'on-write', 'every-100ms', 'append-and-fsync']) {
-    p('P3-durable', `DURABLE-AT: ${v}`, F('f', ...withVal(OK2, 'DURABLE-AT', v)));
+    p('P3-durable', `DURABLE-AT: ${v}`, F('f', ...withVal(OK2, 'DURABLE-AT', v)), 'DURABLE-AT');
   }
   // ─ ОСЬ P4 · многострочные поля (4) ─────────────────────────────────────────────────────────────
   p('P4-multiline', 'THREAT переносом', ['// @guard g', '// THREAT: зависание машины,',
     '//   и особенно при глубине более 150 мВ от стока',
-    ...without(OK4, 'THREAT').map((f) => `// ${f}`)].join('\n'));
+    ...without(OK4, 'THREAT').map((f) => `// ${f}`)].join('\n'), 'THREAT');
   p('P4-multiline', 'GAP переносом', ['// @guard g', ...without(OK4, 'GAP').map((f) => `// ${f}`),
-    '// GAP: двойник не морозит хост,', '//   поэтому класс остаётся недоказанным'].join('\n'));
+    '// GAP: двойник не морозит хост,', '//   поэтому класс остаётся недоказанным'].join('\n'), 'GAP');
   p('P4-multiline', 'три строки подряд', ['// @guard g', '// THREAT: а,', '//   б,', '//   в',
-    ...without(OK4, 'THREAT').map((f) => `// ${f}`)].join('\n'));
+    ...without(OK4, 'THREAT').map((f) => `// ${f}`)].join('\n'), 'THREAT');
   p('P4-multiline', 'перенос в @forensic', ['// @forensic f', '// EXPLAINS: поведение судьи',
-    '//   в момент смерти машины', '// DURABLE-AT: every-second'].join('\n'));
+    '//   в момент смерти машины', '// DURABLE-AT: every-second'].join('\n'), 'EXPLAINS');
   // ─ ОСЬ P5 · порядок и лишние поля (4) ──────────────────────────────────────────────────────────
   p('P5-order', 'обратный порядок', G('g', ...[...OK4].reverse()));
   p('P5-order', 'перемешанный порядок', G('g', OK4[2], OK4[0], OK4[3], OK4[1]));
@@ -469,79 +522,120 @@ export function buildFixtures() {
   // ─ ОСЬ P11 · честное признание долга (5) ───────────────────────────────────────────────────────
   for (const v of ['NOT YET', 'not yet', 'NOT YET — врезка идёт шагом 4.4', 'NOTYET',
     'Not Yet, ждёт живого прогона']) {
-    p('P11-notyet', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
+    p('P11-notyet', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
   }
   // ─ ОСЬ P12 · дата в разных законных формах (10) ────────────────────────────────────────────────
   for (const v of ['2026-08-30', '30.08.2026', '2026-08-30 живой прогон полосы 2887…2745',
     'наблюдён 2026-08-30, трипов 0', '2026-08-15 поймал третье срабатывание за день (EXP-0067)',
     '2026-08-30T21:48:21+03:00', 'с 2026-08-15 и по сей день', 'дважды: 2026-08-15 и 2026-08-30',
     'ловит с 30.08.2026', 'прогон 2026-08-30, seq 815']) {
-    p('P12-date', `ON-REAL-PATH = «${v.slice(0, 34)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
+    p('P12-date', `ON-REAL-PATH = «${v.slice(0, 34)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
   }
   // ─ ОСЬ P14 · дата на строке ПРОДОЛЖЕНИЯ, а не в самом поле (5) ─────────────────────────────────
   // Поле законно переносится; правило обязано смотреть на СКЛЕЕННОЕ значение, а не на первую строку.
   p('P14-continuation', 'дата на второй строке', ['// @guard g',
     ...without(OK4, 'ON-REAL-PATH').map((f) => `// ${f}`),
-    '// ON-REAL-PATH: наблюдён на живом прогоне полосы,', '//   2026-08-30, трипов 0'].join('\n'));
+    '// ON-REAL-PATH: наблюдён на живом прогоне полосы,', '//   2026-08-30, трипов 0'].join('\n'), 'ON-REAL-PATH');
   p('P14-continuation', 'NOT YET на второй строке', ['// @guard g',
     ...without(OK4, 'ON-REAL-PATH').map((f) => `// ${f}`),
-    '// ON-REAL-PATH: NOT YET —', '//   ждёт первого живого прогона'].join('\n'));
+    '// ON-REAL-PATH: NOT YET —', '//   ждёт первого живого прогона'].join('\n'), 'ON-REAL-PATH');
   p('P14-continuation', 'дата на третьей строке', ['// @guard g',
     ...without(OK4, 'ON-REAL-PATH').map((f) => `// ${f}`),
-    '// ON-REAL-PATH: наблюдение отложено,', '//   потому что нужен владелец,', '//   исполнено 2026-08-30'].join('\n'));
-  p('P14-continuation', 'дата и ссылка вместе', G('g', ...withVal(OK4, 'ON-REAL-PATH', '2026-08-30, см. bugs/76')));
-  p('P14-continuation', 'дата после отрицания', G('g', ...withVal(OK4, 'ON-REAL-PATH', 'не сработал 2026-08-30 — bugs/76')));
+    '// ON-REAL-PATH: наблюдение отложено,', '//   потому что нужен владелец,', '//   исполнено 2026-08-30'].join('\n'), 'ON-REAL-PATH');
+  p('P14-continuation', 'дата и ссылка вместе', G('g', ...withVal(OK4, 'ON-REAL-PATH', '2026-08-30, см. bugs/76')), 'ON-REAL-PATH');
+  p('P14-continuation', 'дата после отрицания', G('g', ...withVal(OK4, 'ON-REAL-PATH', 'не сработал 2026-08-30 — bugs/76')), 'ON-REAL-PATH');
   // ─ ОСЬ P15 · законные даты в чужих раскладках (5) ──────────────────────────────────────────────
   for (const v of ['2026-08-30 · 2026-08-15', 'с 15.08.2026', '2026-08-30 23:59',
     'дважды, последний раз 30.08.2026', 'наблюдался 2026-08-30 и будет ещё']) {
-    p('P15-date-form', `ON-REAL-PATH = «${v.slice(0, 30)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
+    p('P15-date-form', `ON-REAL-PATH = «${v.slice(0, 30)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
   }
   // ─ ОСЬ P13 · @forensic не подпадает под R7 (3) ─────────────────────────────────────────────────
-  p('P13-forensic-exempt', 'у @forensic нет ON-REAL-PATH и это законно', F('f', ...OK2));
+  p('P13-forensic-exempt', 'у @forensic нет ON-REAL-PATH и это законно', F('f', ...OK2), 'DURABLE-AT');
   p('P13-forensic-exempt', '@forensic с лишним ON-REAL-PATH без даты — не его правило',
-    F('f', ...OK2, 'ON-REAL-PATH: да'));
-  p('P13-forensic-exempt', '@forensic с датой', F('f', ...OK2, 'SINCE: 2026-08-30'));
+    F('f', ...OK2, 'ON-REAL-PATH: да'), 'ON-REAL-PATH');
+  p('P13-forensic-exempt', '@forensic с датой', F('f', ...OK2, 'SINCE: 2026-08-30'), 'DURABLE-AT');
   // ─ ОСЬ P10 · реальные исправленные формы (3) ───────────────────────────────────────────────────
   p('P10-repaired', 'предохранитель ПОСЛЕ починки — зазор назван',
     G('fuse-deadman', 'THREAT: зависание машины при спуске (bugs/03, bugs/76)',
       'PROVED-AGAINST: убийство процесса горна на двойнике',
       'GAP: двойник не может заморозить свой хост — класс НЕ доказан',
-      'ON-REAL-PATH: 2026-08-30 — наблюдён на живом прогоне, трипов 0 (bugs/76)'));
+      'ON-REAL-PATH: 2026-08-30 — наблюдён на живом прогоне, трипов 0 (bugs/76)'), 'GAP');
   p('P10-repaired', 'кольцо ПОСЛЕ починки — секундный сброс',
-    F('fuse-ring', 'EXPLAINS: поведение судьи в момент смерти машины', 'DURABLE-AT: every-second'));
+    F('fuse-ring', 'EXPLAINS: поведение судьи в момент смерти машины', 'DURABLE-AT: every-second'), 'DURABLE-AT');
   p('P10-repaired', 'сторож без зазора — честное none',
     G('encoding-guard', 'THREAT: UTF-8 прочитан как windows-1251, текст испорчен при зелёном коде',
       'PROVED-AGAINST: --selftest-encoding на испорченном файле', 'GAP: none',
-      'ON-REAL-PATH: 2026-08-15 поймал третье срабатывание за день (EXP-0067)'));
+      'ON-REAL-PATH: 2026-08-15 поймал третье срабатывание за день (EXP-0067)'), 'GAP');
 
   return { neg, pos };
 }
 
 /**
- * Прогнать все 100 фикстур. Возвращает отчёт; печатает CLI, не эта функция.
+ * Прогнать весь набор. Возвращает отчёт; печатает CLI, не эта функция.
  *
  * Отчёт несёт ЧИСЛО ОСЕЙ, а не только число тестов: требование владельца — «сильно разнообразными»,
- * и разнообразие должно быть измеримым, а не заявленным.
+ * и разнообразие должно быть измеримым, а не заявленным. И несёт ДОЛЮ КАЖДОГО МЕХАНИЗМА, потому
+ * что владелец потребовал «100 тестов на каждый механизм», а прибором назвал этот счётчик
+ * (E76-AC1). Пока счётчик слова «механизм» не знал, критерий эпика мерился арифметикой в голове
+ * сессии — то есть неперепроверяемым числом (`plans/77` §1).
+ *
+ * Механизм фикстуры:
+ *   · негативная — ВЫВОДИТСЯ из поля, на котором она краснеет. Автор не участвует, дрейф невозможен.
+ *   · позитивная — ОБЪЯВЛЕН при вызове и тут же СВЕРЯЕТСЯ: объявленное поле обязано в фикстуре
+ *     присутствовать. Метка, разошедшаяся с фикстурой, идёт в `fails` наравне с пропущенным
+ *     нарушением: заявление, которое никто не сверяет, — это то самое «доказан», с которого
+ *     начался эпик.
  */
 export function selftest() {
   const { neg, pos } = buildFixtures();
   const fails = [];
+  const byMech = {};
+  for (const m of MECHANISMS) byMech[m] = { neg: 0, pos: 0, axes: new Set() };
+  const shared = { pos: 0, axes: new Set() };
+
   for (const c of neg) {
-    if (!checkText(c.text, `<neg:${c.axis}>`).length) {
-      fails.push(`НЕГАТИВНЫЙ ПРОПУЩЕН [${c.axis}] ${c.why}`);
+    const violations = checkText(c.text, `<neg:${c.axis}>`);
+    if (!violations.length) { fails.push(`НЕГАТИВНЫЙ ПРОПУЩЕН [${c.axis}] ${c.why}`); continue; }
+    // Фикстура засчитывается КАЖДОМУ механизму, чьё поле она ломает: блок, потерявший разом `GAP`
+    // и `ON-REAL-PATH`, честно доказывает оба. Двойного счёта внутри одного механизма нет — Set.
+    const mechs = new Set();
+    for (const v of violations) {
+      const m = MECH_OF_FIELD[v.field];
+      if (m) mechs.add(m);
     }
+    if (!mechs.size) fails.push(`НЕГАТИВНЫЙ БЕЗ МЕХАНИЗМА [${c.axis}] ${c.why} — поле не в MECH_OF_FIELD`);
+    for (const m of mechs) { byMech[m].neg += 1; byMech[m].axes.add(c.axis); }
   }
+
   for (const c of pos) {
     const v = checkText(c.text, `<pos:${c.axis}>`);
     if (v.length) fails.push(`ЛОЖНАЯ ТРЕВОГА [${c.axis}] ${c.why} → ${v.map((x) => x.rule).join(' · ')}`);
+    if (c.field === '—') { shared.pos += 1; shared.axes.add(c.axis); continue; }
+    const mech = MECH_OF_FIELD[c.field];
+    if (!mech) { fails.push(`МЕТКА НЕ ПОЛЕ [${c.axis}] ${c.why} → «${c.field}»`); continue; }
+    // Сверка P77-AC3: объявленное поле обязано в фикстуре БЫТЬ.
+    const present = parseBlocks(c.text).some((b) => b.fields.some((f) => f.key === c.field));
+    if (!present) { fails.push(`МЕТКА РАЗОШЛАСЬ С ФИКСТУРОЙ [${c.axis}] ${c.why} → «${c.field}» в тексте нет`); continue; }
+    byMech[mech].pos += 1;
+    byMech[mech].axes.add(c.axis);
   }
+
   const negAxes = new Set(neg.map((c) => c.axis));
   const posAxes = new Set(pos.map((c) => c.axis));
   const rules = new Set();
   for (const c of neg) for (const v of checkText(c.text)) rules.add(v.rule);
+  const mech = {};
+  for (const m of MECHANISMS) {
+    mech[m] = {
+      neg: byMech[m].neg, pos: byMech[m].pos, axes: byMech[m].axes.size,
+      gapNeg: Math.max(0, MECH_TARGET.neg - byMech[m].neg),
+      gapPos: Math.max(0, MECH_TARGET.pos - byMech[m].pos),
+    };
+  }
   return {
     neg: neg.length, pos: pos.length, total: neg.length + pos.length,
-    negAxes: negAxes.size, posAxes: posAxes.size, rulesCovered: [...rules].sort(), fails,
+    negAxes: negAxes.size, posAxes: posAxes.size, rulesCovered: [...rules].sort(),
+    mech, shared: { pos: shared.pos, axes: shared.axes.size }, fails,
   };
 }
 
@@ -607,6 +701,17 @@ function main(argv) {
     console.log(`САМОПРОВЕРКА GUARD-LINT: фикстур ${r.total} — негативных ${r.neg}, позитивных ${r.pos}`);
     console.log(`  осей: ${r.negAxes} негативных + ${r.posAxes} позитивных = ${r.negAxes + r.posAxes}`);
     console.log(`  правил покрыто: ${r.rulesCovered.join(' · ')}`);
+    // ДОЛЯ КАЖДОГО МЕХАНИЗМА — прибор для E76-AC1. Порог владельца: 50 негативных и 50 позитивных
+    // на механизм. Разрыв печатается ЧИСЛОМ: «недобрано» видно без арифметики читающего.
+    console.log(`  по механизмам эпика 76 (порог владельца ${MECH_TARGET.neg}− / ${MECH_TARGET.pos}+ на каждый):`);
+    for (const m of MECHANISMS) {
+      const x = r.mech[m];
+      const gap = (x.gapNeg || x.gapPos)
+        ? `🔴 недобрано ${x.gapNeg ? `${x.gapNeg} негативных` : ''}${x.gapNeg && x.gapPos ? ' и ' : ''}${x.gapPos ? `${x.gapPos} позитивных` : ''}`
+        : '✅ порог взят';
+      console.log(`    ${m}: негативных ${String(x.neg).padStart(3)} · позитивных ${String(x.pos).padStart(3)} · осей ${String(x.axes).padStart(2)} — ${gap}`);
+    }
+    console.log(`    общих (разбор блока, механизму не засчитаны): позитивных ${r.shared.pos} · осей ${r.shared.axes}`);
     if (r.fails.length) {
       console.log(`ПРОВАЛ: ${r.fails.length}`);
       for (const f of r.fails) console.log(`   ✗ ${f}`);
