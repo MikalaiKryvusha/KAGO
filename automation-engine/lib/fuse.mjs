@@ -432,6 +432,23 @@ export function runTrip({ verdict, burnPid, burnImages = null, killHand, imageKi
  * honest alternative; the judge's own late wake-ups are data (they ARE the timer-role
  * observation), recorded into the ring like everything else.
  */
+/**
+ * @guard fuse-deadman
+ * THREAT:         зависание машины владельца при спуске по напряжению — класс, оплаченный дважды
+ *                 (`bugs/03`, 5 ч 40 мин; `bugs/76`, 2026-08-30)
+ * PROVED-AGAINST: смерть ПРОЦЕССА горна на цифровом двойнике (`--rehearse-death strangle` и
+ *                 `instant`), 9/9 проверок репетиции, вход 1 и вход 2
+ * GAP:            🔴 ЗАВИСАНИЕ МАШИНЫ НЕ ДОКАЗАНО И НА ДВОЙНИКЕ НЕДОКАЗУЕМО. Судья — процесс на
+ *                 той же ОС; встала ОС — встал судья. Двойник по построению не может заморозить
+ *                 свой хост. 2026-08-30 машина зависла, трипов записано НОЛЬ. Роль «констатация
+ *                 смерти» изнутри ОС невыполнима в принципе; роль «предсказание» выполнима и
+ *                 закрывается фазами 3–4 эпика `plans/73` (`researches/26`)
+ * ON-REAL-PATH:   2026-08-30 — наблюдён на живом прогоне полосы 2887…2745: взведён, N=60 мс,
+ *                 трипов 0, машина зависла на 2752 МГц / 825 мВ (`bugs/76`)
+ *
+ * Строка `GAP`, написанная 28 августа, сняла бы инцидент 30-го: владелец прочитал бы «доказан»
+ * правильно, а не так, как агент ему это подал. Ради этого и заведён механизм М1 (`plans/76`).
+ */
 export async function runJudge({
   beatPort = 0, armNMs = null, armMMs = null, burnPid = null, burnImages = null,
   burnPidFile = null, twinStockCard = null,
@@ -448,6 +465,22 @@ export async function runJudge({
   const ring = makeRing(ringCapacity);
   const ringPath = journalPath.replace(/\.jsonl$/u, '-ring.jsonl');
   let ringDumped = false;
+  /**
+   * @forensic fuse-ring
+   * EXPLAINS:   поведение судьи в секунды перед смертью машины — жил ли он и что видел
+   * DURABLE-AT: trip-only
+   *
+   * 🔴 ЭТО НАРУШЕНИЕ, И ОНО ОБЪЯВЛЕНО НАМЕРЕННО. `DURABLE-AT: trip-only` запрещено линтером
+   * `tools/guard-lint.mjs` (правило R4): улика, становящаяся долговечной только при трипе или
+   * штатном закрытии, не переживает событие, ради которого существует. Замерено 2026-08-30:
+   * машина владельца зависла, трипа не случилось, штатного закрытия не случилось — файла кольца
+   * не появилось ВООБЩЕ, и разбор `bugs/76` остался без единственной улики, способной ответить,
+   * жил ли судья в момент события.
+   *
+   * Строка стоит здесь как ЗАПИСЬ ДОЛГА с адресом: чинится в `bugs/78` (фаза 1 эпика `plans/73`),
+   * лечение — секундная строка жизни с немедленным `fsync`. До починки нарушение живёт в
+   * замороженном долге линтера и сборку не валит; новое такое же — валит.
+   */
   const dumpRing = () => {
     // On-trip and on-close only — NEVER per tick: the ring is forensics, not the control loop.
     const rfd = openSync(ringPath, 'a');

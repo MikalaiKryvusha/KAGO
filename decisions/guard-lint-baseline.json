@@ -1,0 +1,11 @@
+{
+  "frozenAt": "2026-08-30T19:36:00.997Z",
+  "keys": {
+    "9f14ed4d1dfd942d": {
+      "file": "automation-engine/lib/fuse.mjs",
+      "rule": "R4-late-durable",
+      "name": "fuse-ring",
+      "why": "DURABLE-AT: «trip-only» — улика становится долговечной только при штатном конце. Событие, ради которого она существует, штатного конца не даёт (bugs/78)"
+    }
+  }
+}
