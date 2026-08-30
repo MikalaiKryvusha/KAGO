@@ -491,6 +491,62 @@ export async function runJudge({
     } finally { closeSync(rfd); }
   };
 
+  /**
+   * @forensic fuse-alive
+   * EXPLAINS:   жил ли судья в последние секунды перед смертью машины и что он видел — единственный
+   *             вопрос, на который 30 августа ответить было нечем (`bugs/76`, `bugs/78`)
+   * DURABLE-AT: every-second
+   *
+   * СТРОКА ЖИЗНИ — второй слой чёрного ящика, и он существует ровно потому, что первый не пережил
+   * событие. Кольцо выше даёт разрешение 2 мс, но становится долговечным только при трипе или
+   * штатном закрытии; зависание машины не даёт НИ ТОГО, НИ ДРУГОГО, и 30 августа файла кольца не
+   * появилось вовсе. Здесь — дешёвая непрерывная запись: одна строка в секунду с немедленным
+   * `fsync`, то есть улика на диске ДО того, как случится то, ради чего она нужна.
+   *
+   * Так решает отрасль, и это не наше изобретение: бортовые самописцы, аварийные дампы ядра и
+   * журналы упреждающей записи баз данных сбрасывают буфер НЕПРЕРЫВНО. Развилку «каждый такт или
+   * в конце» 28 августа я принял за исчерпывающую и выбрал «в конце» — цена записана в EXP-0200.
+   *
+   * ⚠️ Кольцо НИЧЕГО не теряет: полный дамп остаётся ровно таким, как был. Слой добавлен, не
+   * заменён — там, где есть кому записать, разрешение 2 мс никуда не делось.
+   */
+  const alivePath = journalPath.replace(/\.jsonl$/u, '-alive.jsonl');
+  const ALIVE_WINDOW_MS = 1000;
+  let aliveFd = null;
+  // Конец текущего окна. `null` до первого такта: `startMs` берётся ниже, и заводить окно здесь
+  // значило бы держать два источника времени вместо одного.
+  let aliveWindowEndMs = null;
+  let aliveTicks = 0;
+  let aliveWorstGap = 0;
+  let aliveWorstBeat = null;
+  let aliveWorstProgress = null;
+
+  const flushAlive = (nowMs, tStartMs) => {
+    // 🔴 ЧЕСТНЫЙ `null` ВМЕСТО ВЫДУМАННОГО НУЛЯ. Пока канал не проведён (ударов не было ни одного,
+    // прогресс не подключён), «худшее молчание» не равно нулю — оно НЕИЗВЕСТНО. Ноль здесь читался
+    // бы как «молчания не было», то есть как утверждение о канале, которого никто не слышал.
+    // Выдуманное число в улике хуже отсутствующего (`PHILOSOPHY.md` → три двери), а разбор,
+    // построенный на нём, тем опаснее, чем стройнее.
+    const line = `${JSON.stringify({
+      atIso: new Date().toISOString(),
+      t: round2(nowMs - tStartMs),
+      ticks: aliveTicks,
+      worstGapMs: round2(aliveWorstGap),
+      worstBeatSilenceMs: aliveWorstBeat === null ? null : round2(aliveWorstBeat),
+      worstProgressSilenceMs: aliveWorstProgress === null ? null : round2(aliveWorstProgress),
+    })}\n`;
+    if (aliveFd === null) aliveFd = openSync(alivePath, 'a');
+    writeSync(aliveFd, line);
+    // `fsync` — весь смысл слоя. Без него строка живёт в кэше страниц и умирает вместе с машиной
+    // ровно так же, как умерло кольцо (семья `bugs/37`: архив пульса терялся в кэше именно тогда,
+    // когда был нужен).
+    fsyncSync(aliveFd);
+    aliveTicks = 0;
+    aliveWorstGap = 0;
+    aliveWorstBeat = null;
+    aliveWorstProgress = null;
+  };
+
   const killHand = makeKillHand({ spawnSyncFn, killFn });
   const imageKillHand = makeImageKillHand({ spawnSyncFn });
   const stockHand = makeStockHand({ spawnFn, journalPath, extraArgs: twinStockCard ? ['--twin', twinStockCard] : [] });
@@ -536,6 +592,30 @@ export async function runJudge({
         beatSilenceMs: verdict.beatSilenceMs === null ? null : round2(verdict.beatSilenceMs),
         progressSilenceMs: verdict.progressSilenceMs === null ? null : round2(verdict.progressSilenceMs),
       });
+      // ── СТРОКА ЖИЗНИ: накопление идёт ЗДЕСЬ ЖЕ, в такте, без второго таймера ──────────────────
+      // Второй таймер — вторая сущность и второй источник расхождения: он способен жить, когда
+      // такт уже встал, и написать «судья жив» про мёртвого судью. Накопитель едет на самом такте,
+      // поэтому строка жизни физически не может пережить его остановку.
+      if (aliveWindowEndMs === null) aliveWindowEndMs = startMs + ALIVE_WINDOW_MS;
+      aliveTicks += 1;
+      const gapNow = now - lastTickMs;
+      if (gapNow > aliveWorstGap) aliveWorstGap = gapNow;
+      if (verdict.beatSilenceMs !== null && (aliveWorstBeat === null || verdict.beatSilenceMs > aliveWorstBeat)) {
+        aliveWorstBeat = verdict.beatSilenceMs;
+      }
+      if (verdict.progressSilenceMs !== null && (aliveWorstProgress === null || verdict.progressSilenceMs > aliveWorstProgress)) {
+        aliveWorstProgress = verdict.progressSilenceMs;
+      }
+      if (now >= aliveWindowEndMs) {
+        flushAlive(now, startMs);
+        // Окно двигается ОТ ПРЕДЫДУЩЕЙ ГРАНИЦЫ, а не от `now`: иначе задержка такта накапливалась
+        // бы в дрейф, и «строка в секунду» незаметно стала бы строкой в полторы.
+        aliveWindowEndMs += ALIVE_WINDOW_MS;
+        // Если судья проспал целые окна (система встала), не пишем строку за каждое пропущенное —
+        // пустые строки не улика. Догоняем до ближайшей будущей границы, а сам факт проспанного
+        // времени виден в `worstGapMs` следующей строки.
+        while (now >= aliveWindowEndMs) aliveWindowEndMs += ALIVE_WINDOW_MS;
+      }
       lastTickMs = now;
       if (verdict.tripped && !tripOutcomes) {
         // The pidfile is read HERE, at the trip, never at judge start: the carrier of the fatal
@@ -573,6 +653,10 @@ export async function runJudge({
   });
 
   if (!ringDumped) dumpRing(); // graceful close = step close: the black box lands either way
+  // Последнее окно строки жизни — только если в нём БЫЛИ такты. Пустая строка не улика, а шум,
+  // и в разборе она читалась бы как «секунда прошла, судья молчал».
+  if (aliveTicks > 0) flushAlive(performance.now(), startMs);
+  if (aliveFd !== null) closeSync(aliveFd);
   closeSync(fd);
   sock.close();
   return { port: boundPort, beats, tripped: tripOutcomes !== null, tripOutcomes, ringPath };
@@ -1173,6 +1257,77 @@ async function cmdSelftest() {
     // ≥ 30, not ~500: without timeBeginPeriod the sender's Atomics.wait ticks at Windows' default
     // granularity. The count proves the CHANNEL end-to-end; the cadence is the jitter floor's job.
     ok(`отправитель ударов (настоящий процесс, цикл пробы) дошёл до судьи по loopback — получено ${got}`, got >= 30);
+  }
+
+  // ---- C1 (`testcases/TC_fuse_blackbox_survives_death.md`): СЛЕД СУДЬИ ПЕРЕЖИВАЕТ СМЕРТЬ БЕЗ
+  // ШТАТНОГО ЗАКРЫТИЯ. Настоящий процесс судьи, настоящее убийство дерева, чтение с диска.
+  //
+  // 🔴 ПОЧЕМУ БЛОК НАПИСАН ДО ПОЧИНКИ И ОБЯЗАН БЫЛ УПАСТЬ. 30 августа машина владельца зависла:
+  // трипа не было, штатного закрытия не было, и кольца судьи не появилось ВООБЩЕ — разбор
+  // `bugs/76` остался без единственной улики, способной ответить, жил ли судья в момент события.
+  // Блок воспроизводит ровно это: смерть без трипа и без закрытия. Зелёный блок на коде ДО правки
+  // означал бы, что он проверяет не то ([[EXP-0181]]: ловушка обязана ловить), и тогда переписывать
+  // надо блок, а не радоваться.
+  //
+  // ⚠️ ГРАНИЦА ЧЕСТНОСТИ: `taskkill /T /F` — это смерть ПРОЦЕССА, а не заморозка ХОСТА. По
+  // отношению к чёрному ящику эффект тот же (ни трипа, ни закрытия), но класс «машина замёрзла»
+  // этим НЕ доказан, и говорить обратное — ровно та ошибка, за которую заплачено 30 августа
+  // (матрица покрытия тест-документа, строка «Способ смерти»).
+  {
+    const { spawn, spawnSync } = await import('node:child_process');
+    const os = await import('node:os');
+    const fs = await import('node:fs');
+    // Артефакты блока — в ПЕСОЧНИЦЕ, никогда в runs/death-watch/: фикстура среди настоящих
+    // посмертных разборов это сфабрикованная улика (EXP-0025).
+    const sandbox = path.join(os.tmpdir(), `fuse-alive-${process.pid}-${Date.now()}`);
+    fs.mkdirSync(sandbox, { recursive: true });
+    const out = path.join(sandbox, 'fuse.jsonl');
+    const alivePath = out.replace(/\.jsonl$/u, '-alive.jsonl');
+    // НЕ взведён (`--arm-n` не передан) — трипа быть не должно: нам нужна смерть БЕЗ трипа.
+    // Порт фиксируем, чтобы к судье можно было привести ЖИВУЮ пробу.
+    const beatPort = 54999;
+    const judge = spawn(process.execPath, [fileURLToPath(import.meta.url), '--judge', '--out', out,
+      '--seconds', '60', '--beat-port', String(beatPort)], { windowsHide: true, stdio: 'ignore' });
+    // 🔴 ПРОБА ОБЯЗАТЕЛЬНА, И ЭТО НЕ УКРАШЕНИЕ БЛОКА. Без неё судья никогда не слышал удара, поле
+    // `worstBeatSilenceMs` честно пусто, и C2 проверял бы форму строки вместо её содержания —
+    // ровно та ошибка (проверка формы вместо существа), за которую заплачено в `bugs/81` и
+    // `bugs/82` этой же ночью. С живой пробой поле несёт настоящее число, и проверка различает.
+    const watchScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'death-watch.mjs');
+    const prober = spawn(process.execPath, [watchScript, '--beat-sender', '--port', String(beatPort), '--seconds', '10'],
+      { windowsHide: true, stdio: 'ignore' });
+    await new Promise((res) => setTimeout(res, 3500));
+    const killedAtMs = Date.now();
+    spawnSync('taskkill', ['/PID', String(judge.pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 5_000 });
+    try { prober.kill(); } catch { /* проба могла выйти сама по --seconds */ }
+    await new Promise((res) => setTimeout(res, 300));
+
+    const aliveExists = fs.existsSync(alivePath);
+    const rows = aliveExists
+      ? fs.readFileSync(alivePath, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+      : [];
+    const last = rows.length ? rows[rows.length - 1] : null;
+    const ageMs = last && last.atIso ? killedAtMs - Date.parse(last.atIso) : Infinity;
+    ok(`C1 след судьи ПЕРЕЖИЛ смерть без штатного закрытия — строк ${rows.length}, возраст последней ${Number.isFinite(ageMs) ? `${ageMs} мс` : 'файла нет'} (порог 1500 мс)`,
+      aliveExists && rows.length >= 2 && ageMs <= 1500);
+    // C2 — строка отвечает на вопрос разбора. Шесть полей ПРИСУТСТВУЮТ; четыре всегда-знаемых
+    // несут число; молчание карты несёт число, потому что проба живая.
+    //
+    // 🔴 `worstProgressSilenceMs` проверяется на РОВНО `null`, и это не поблажка, а самая
+    // разборчивая часть блока: канал прогресса здесь не проведён, и честный ответ о нём —
+    // «не слышал», а не ноль. Ноль читался бы как «молчания не было» — утверждение о канале,
+    // которого никто не слушал. Выдуманное число в улике хуже отсутствующего, и мутант, решивший
+    // «заполнить нулями, чтобы было шесть из шести», покраснеет ЗДЕСЬ.
+    const sixKeys = ['atIso', 't', 'ticks', 'worstGapMs', 'worstBeatSilenceMs', 'worstProgressSilenceMs'];
+    ok('C2 строка жизни несёт шесть полей разбора; молчание непроведённого канала — честный null, а не ноль',
+      Boolean(last)
+      && sixKeys.every((k) => k in last)
+      && Number.isFinite(Date.parse(last.atIso)) && last.t > 0 && last.ticks > 0 && last.worstGapMs > 0
+      && Number.isFinite(last.worstBeatSilenceMs)
+      && last.worstProgressSilenceMs === null);
+    // C7 (R5) — кольца после убийства НЕТ, и это ОЖИДАЕМО, а не дефект: честная граница приёма.
+    ok('C7 кольца после смерти без закрытия НЕТ — потеря признана, а не замаскирована',
+      !fs.existsSync(out.replace(/\.jsonl$/u, '-ring.jsonl')));
+    try { fs.rmSync(sandbox, { recursive: true, force: true }); } catch { /* песочница во временных */ }
   }
 
   console.log(`\nИТОГ: ${pass} зелёных, ${fail} красных.`);
