@@ -155,7 +155,11 @@ export const AXIS_AUTHOR = {
   // М4 — развилка не собственность агента.
   'AA-missing-fork': 'М4', 'AB-empty-fork': 'М4', 'AC-single-option': 'М4',
   'AD-recon-no-address': 'М4', 'AE-dead-recon': 'М4', 'AF-fork-evasion': 'М4',
-  'AG-historic-fork': 'М4', 'P31-fork-legal': 'М4',
+  'AG-historic-fork': 'М4', 'AH-fork-duplicate': 'М4', 'AI-recon-wrong-home': 'М4',
+  'AJ-fork-form': 'М4', 'AK-near-notyet-recon': 'М4',
+  'P31-fork-legal': 'М4', 'P32-fork-many-options': 'М4', 'P33-fork-recon-legal': 'М4',
+  'P34-fork-cost-legal': 'М4', 'P34-fork-decided-legal': 'М4', 'P35-fork-style': 'М4',
+  'P36-fork-multiline': 'М4', 'P37-fork-dictionary-inside': 'М4',
   'Z1-punctuation-durable': 'М3', 'Z2-separator-durable': 'М3', 'Z3-russian-durable': 'М3',
   'P22-durable-lookalike': 'М3', 'P24-explains-legal': 'М3', 'P28-durable-period': 'М3',
   'P29-explains-prefix': 'М3', 'P30-forensic-form': 'М3',
@@ -818,6 +822,27 @@ export function buildFixtures() {
     FK('OPTIONS: честный null · ноль · пропустить поле', 'COST: выдуманное число в улике',
       'RECON: три двери запрещают выдумывать', 'DECIDED: null'));
 
+  // ─ ОСЬ AH · дубль поля в развилке (4) ──────────────────────────────────────────────────────────
+  for (const key of REQUIRED.fork) n('AH-fork-duplicate', `${key} дважды`, FK(...OKF, `${key}: и ещё раз`));
+  // ─ ОСЬ AI · RECON указывает НЕ В researches (5) ────────────────────────────────────────────────
+  // Разведдок живёт в одном месте. Ссылка на план, тикет или чат — это не разведка: план говорит,
+  // что мы решили, а разведдок — что об этом знает отрасль.
+  for (const v of ['plans/78', 'bugs/76', 'STATUS.md', 'см. чат владельца', 'EXPERIENCE.md EXP-0200']) {
+    n('AI-recon-wrong-home', `RECON = «${v}»`, FK(...setF('RECON', v)));
+  }
+  // ─ ОСЬ AJ · форма блока развилки (4) ───────────────────────────────────────────────────────────
+  n('AJ-fork-form', 'блок разорван пустой строкой — два поля потеряны',
+    ['// @fork f', `// ${OKF[0]}`, `// ${OKF[1]}`, '//', `// ${OKF[2]}`, `// ${OKF[3]}`].join('\n'));
+  n('AJ-fork-form', 'CRLF и нет RECON', FK(...without(OKF, 'RECON')).replace(/\n/gu, '\r\n'));
+  n('AJ-fork-form', 'BOM и нет COST', `﻿${FK(...without(OKF, 'COST'))}`);
+  n('AJ-fork-form', '@fork без полей вовсе', '// @fork f\n\n// прочий текст');
+  // ─ ОСЬ AK · почти-NOT YET в RECON (5) ──────────────────────────────────────────────────────────
+  // «Скоро проведу» обещает будущее вместо признания настоящего — та же ось, что Q у механизма М2.
+  for (const v of ['скоро проведу', 'в планах разведка', 'будет разведдок', 'разведка не нужна',
+    'потом посмотрю']) {
+    n('AK-near-notyet-recon', `RECON = «${v}»`, FK(...setF('RECON', v)));
+  }
+
   // ═══ ПОЗИТИВНЫЕ — линтер обязан МОЛЧАТЬ ═══════════════════════════════════════════════════════
   // ─ ОСЬ P1 · стили комментариев (5) ─────────────────────────────────────────────────────────────
   p('P1-style', 'двойной слэш', G('g', ...OK4));
@@ -1061,6 +1086,60 @@ export function buildFixtures() {
     FK(...setF('RECON', 'researches/27_how_the_industry_forces_recon_before_a_decision.md')), 'RECON');
   p('P31-fork-legal', 'COST длинным объяснением с цифрами',
     FK(...setF('COST', 'разбор невозможен: 110 секунд между криком драйвера и смертью машины')), 'COST');
+  // ─ ОСЬ P32 · много вариантов и их законные записи (8, М4) ──────────────────────────────────────
+  for (const v of ['a · b · c · d · e', 'каждый такт · в конце · секундный агрегат · WAL',
+    'A | B | C', 'нормализация / перечисление / словарь по языку',
+    'Сутки запаса, Ноль запаса, Трое суток', 'null · ноль · пропустить поле',
+    'три варианта: A · B · C', 'по частоте · по напряжению · по времени · смешанный']) {
+    p('P32-fork-many-options', `OPTIONS = «${v.slice(0, 28)}»`, FK(...setF('OPTIONS', v)), 'OPTIONS');
+  }
+  // ─ ОСЬ P33 · законные RECON во всех формах ссылки (8, М4) ──────────────────────────────────────
+  for (const v of ['researches/27', 'researches/01', 'см. researches/02 §4.3',
+    'researches/27 — самописцы и WAL', 'NOT YET', 'not yet — решение временное',
+    'researches/26 и researches/27 вместе', 'разведка: researches/03, вывод — брать готовое']) {
+    p('P33-fork-recon-legal', `RECON = «${v.slice(0, 28)}»`, FK(...setF('RECON', v)), 'RECON');
+  }
+  // ─ ОСЬ P34 · законные COST и DECIDED (9, М4) ───────────────────────────────────────────────────
+  for (const v of ['зависание машины владельца и потерянный вечер', 'порча тома на диске J:',
+    'улика не переживает событие', 'ложная тревога на здоровом дереве (bugs/75)',
+    'потеря 45 мВ глубины на всей полосе']) {
+    p('P34-fork-cost-legal', `COST = «${v.slice(0, 28)}»`, FK(...setF('COST', v)), 'COST');
+  }
+  for (const v of ['секундный агрегат с fsync — непрерывный сброс это определение улики',
+    'сутки запаса: в сторону молчания сторожа, цена ложной тревоги измерена',
+    'нормализация: список форм устареет так же, как устарел прошлый',
+    'вынесено владельцу — развилка уровня видения']) {
+    p('P34-fork-decided-legal', `DECIDED = «${v.slice(0, 28)}»`, FK(...setF('DECIDED', v)), 'DECIDED');
+  }
+  // ─ ОСЬ P35 · развилка в разных стилях комментария и с лишними полями (8, М4) ───────────────────
+  p('P35-fork-style', 'блочный комментарий', ['/**', ' * @fork f', ...OKF.map((f) => ` * ${f}`), ' */'].join('\n'), 'OPTIONS');
+  p('P35-fork-style', 'markdown цитатой', ['> @fork f', ...OKF.map((f) => `> ${f}`)].join('\n'), 'OPTIONS');
+  p('P35-fork-style', 'markdown без префикса', ['@fork f', ...OKF].join('\n'), 'OPTIONS');
+  p('P35-fork-style', 'решётка (ps1/sh)', ['# @fork f', ...OKF.map((f) => `# ${f}`)].join('\n'), 'OPTIONS');
+  p('P35-fork-style', 'CRLF', FK(...OKF).replace(/\n/gu, '\r\n'), 'OPTIONS');
+  p('P35-fork-style', 'BOM в начале', `﻿${FK(...OKF)}`, 'OPTIONS');
+  p('P35-fork-style', 'лишние необязательные поля', FK(...OKF, 'TICKET: bugs/78', 'OWNER: агент'), 'OPTIONS');
+  p('P35-fork-style', 'развилка среди живого кода',
+    `const a = 1;\n\n${FK(...OKF)}\n\nexport default a;`, 'OPTIONS');
+  // ─ ОСЬ P36 · многострочные поля развилки (5, М4) ───────────────────────────────────────────────
+  p('P36-fork-multiline', 'OPTIONS переносом', ['// @fork f', '// OPTIONS: каждый такт ·',
+    '//   в конце · секундный агрегат', ...without(OKF, 'OPTIONS').map((f) => `// ${f}`)].join('\n'), 'OPTIONS');
+  p('P36-fork-multiline', 'COST переносом', ['// @fork f', ...without(OKF, 'COST').map((f) => `// ${f}`),
+    '// COST: улика не переживает событие,', '//   и разбор инцидента становится невозможен'].join('\n'), 'COST');
+  p('P36-fork-multiline', 'RECON переносом', ['// @fork f', ...without(OKF, 'RECON').map((f) => `// ${f}`),
+    '// RECON: researches/27 —', '//   самописцы, аварийные дампы, WAL'].join('\n'), 'RECON');
+  p('P36-fork-multiline', 'DECIDED тремя строками', ['// @fork f', ...without(OKF, 'DECIDED').map((f) => `// ${f}`),
+    '// DECIDED: секундный агрегат,', '//   потому что непрерывный сброс —', '//   это определение улики'].join('\n'), 'DECIDED');
+  p('P36-fork-multiline', 'NOT YET переносом', ['// @fork f', ...without(OKF, 'RECON').map((f) => `// ${f}`),
+    '// RECON: NOT YET —', '//   разведка идёт, решение временное'].join('\n'), 'RECON');
+  // ─ ОСЬ P37 · слово словаря внутри законного поля развилки (5, М4) ─────────────────────────────
+  for (const [k, v] of [['COST', 'нет данных о цене на живой карте — но на двойнике это потеря полосы'],
+    ['DECIDED', 'потом расширим до трёх вариантов; сейчас взят секундный агрегат'],
+    ['COST', 'не знаю точной цифры, но порядок — вечер владельца'],
+    ['DECIDED', 'см. выше по файлу разбор, решение — нормализация'],
+    ['COST', 'tbd-заглушки в профиле сюда не относятся: цена — зависание машины']]) {
+    p('P37-fork-dictionary-inside', `${k} = «${v.slice(0, 26)}…»`, FK(...setF(k, v)), k);
+  }
   // ─ ОСЬ P13 · @forensic не подпадает под R7 (3) ─────────────────────────────────────────────────
   p('P13-forensic-exempt', 'у @forensic нет ON-REAL-PATH и это законно', F('f', ...OK2), 'DURABLE-AT');
   p('P13-forensic-exempt', '@forensic с лишним ON-REAL-PATH без даты — не его правило',
