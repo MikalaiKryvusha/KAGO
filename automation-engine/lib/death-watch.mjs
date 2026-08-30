@@ -206,6 +206,46 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
   const overshoots = [];
   let missCount = 0;
 
+  /**
+   * @forensic driver-alive
+   * EXPLAINS:   жила ли ПРОБА в секунды перед смертью машины — вопрос, на который 30 августа
+   *             ответить было нечем (`bugs/83`)
+   * DURABLE-AT: every-second
+   * GAP:        `fsync` не доказан стендом — убийство ПРОЦЕССА не теряет кэш страниц, теряет его
+   *             только смерть МАШИНЫ. Тот же зазор, что у `@forensic fuse-alive` (`bugs/78`)
+   *
+   * ЗАЧЕМ. Этот журнал писал ТОЛЬКО промахи > порога, и каждый честно `fsync`-ал. Записи не
+   * терялись — их не было: за четыре минуты до смерти ни один такт не промахнулся на 10 мс.
+   * И ровно поэтому канал был бесполезен для разбора: **журнал, пишущий только аномалии, не
+   * отличает «аномалий не было» от «проба умерла»**. В те 110 секунд между первым криком
+   * драйвера и смертью машины его молчание означало одно из двух, и сказать какое нечем.
+   * Итоговая сводка печатается при ШТАТНОМ выходе, то есть ровно тогда, когда она не нужна.
+   *
+   * Секундная строка делает молчание читаемым: пустое окно теперь значит «проба мертва».
+   */
+  const alivePath = outPath.replace(/\.jsonl$/u, '-alive.jsonl');
+  let aliveFd = null;
+  let aliveWindowEndMs = null;
+  let aliveTicks = 0;
+  let aliveMisses = 0;
+  let aliveWorstOvershoot = 0;
+  let aliveWorstCallMs = 0;
+  const flushDriverAlive = (nowMs, tStartMs) => {
+    const line = `${JSON.stringify({
+      atIso: new Date().toISOString(),
+      role,
+      t: Math.round((nowMs - tStartMs) * 100) / 100,
+      ticks: aliveTicks,
+      misses: aliveMisses,
+      worstOvershootMs: Math.round(aliveWorstOvershoot * 100) / 100,
+      worstCallMs: Math.round(aliveWorstCallMs * 100) / 100,
+    })}\n`;
+    if (aliveFd === null) aliveFd = openSync(alivePath, 'a');
+    writeSync(aliveFd, line);
+    fsyncSync(aliveFd);
+    aliveTicks = 0; aliveMisses = 0; aliveWorstOvershoot = 0; aliveWorstCallMs = 0;
+  };
+
   const startMs = performance.now();
   const endTarget = startMs + seconds * 1000;
   let nextIndex = 1;
@@ -234,6 +274,19 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
 
       const verdict = classifyTick({ promisedMs, actualMs: wokeMs, callMs, recordThresholdMs });
       overshoots.push(verdict.overshootMs);
+      // ── СЕКУНДНАЯ СТРОКА ЖИЗНИ (`bugs/83`) — накопление в САМОМ такте, без второго таймера ──────
+      // Второй таймер способен жить, когда такт уже встал, и написать «проба жива» про мёртвую.
+      if (aliveWindowEndMs === null) aliveWindowEndMs = startMs + 1000;
+      aliveTicks += 1;
+      if (verdict.record) aliveMisses += 1;
+      if (Number.isFinite(verdict.overshootMs) && verdict.overshootMs > aliveWorstOvershoot) aliveWorstOvershoot = verdict.overshootMs;
+      if (Number.isFinite(callMs) && callMs > aliveWorstCallMs) aliveWorstCallMs = callMs;
+      if (wokeMs >= aliveWindowEndMs) {
+        flushDriverAlive(wokeMs, startMs);
+        // Окно двигается ОТ ГРАНИЦЫ, а не от `now`: иначе задержка такта копилась бы в дрейф.
+        aliveWindowEndMs += 1000;
+        while (wokeMs >= aliveWindowEndMs) aliveWindowEndMs += 1000;
+      }
       if (verdict.record) {
         missCount += 1;
         // fsync per miss (P52-AC3): a machine death takes the page cache with it; the line must not.
@@ -251,6 +304,10 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
       nextIndex = Math.max(nextIndex + 1, Math.floor(elapsedTicks) + 1);
     }
   } finally {
+    // Последнее окно — только если в нём БЫЛИ такты: пустая строка не улика, а шум, и в разборе
+    // читалась бы как «секунда прошла, проба молчала».
+    if (aliveTicks > 0) flushDriverAlive(performance.now(), startMs);
+    if (aliveFd !== null) closeSync(aliveFd);
     closeSync(fd);
     if (driver) driver.close();
     if (progressTimer) clearInterval(progressTimer);
