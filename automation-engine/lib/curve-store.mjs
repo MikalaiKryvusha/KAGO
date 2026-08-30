@@ -853,7 +853,8 @@ export function firstInversion(rows) {
  *   and a back door into it is worth more than the front door is worth keeping shut.
  * @param {number} [a.inheritDownToMhz]  the bottom of this rung; rows in [that, mhz) inherit
  * @param {string} [a.at]           the stamp; defaults to now, local ISO
- * @returns {{ok:boolean, doc:object, closed:number, inherited:Array, raised:Array, why:string}}
+ * @returns {{ok:boolean, doc:object, closed:number, inherited:Array, raised:Array,
+ *            ratchetWithheld:{mhz:number, reason:string, rows:Array}|null, why:string}}
  *
  * [TESTED: 2026-08-16 00:3x, OFFLINE · 7 blocks in `engine --selftest` (inheritance down the rung and
  *  its witness, the refusal of upward inheritance, the ratchet naming every frequency it moved, the
@@ -1066,7 +1067,36 @@ export function closePoint(doc, {
   // поднимал — наблюдённый отказ на ЭТОЙ частоте сильнее любого унаследованного прохода.
   // `closeDemandsVoltage` вычислен выше и здесь только ЧИТАЕТСЯ: второе определение «что есть
   // требование» было бы парой «истина ↔ зеркало» внутри одного модуля (EXP-0077).
+  // ─── ВОРОТА ВЛАДЕЛЬЦА: ПРОМАХНУВШИЙСЯ ЗАМЕР НЕ КОРМИТ ХРАПОВИК (`bugs/63`, interviews/018 = A) ──
+  //
+  // Решение владельца 2026-08-30 11:51 через контур, вариант A. Разбор — в самом интервью, там же
+  // рисунок и графики, по которым он его принимал. Короткая версия, чтобы её не пришлось искать:
+  //
+  // Когда карта отказывается идти ниже своего пола, она подставляет СВОЁ напряжение вместо
+  // заказанного. Замерено по 805 ступеням боевого журнала: 26 ступеней с разрывом ≥ 30 мВ, и выдача
+  // на них садится всего на ЧЕТЫРЕ значения (915 ×13 · 910 ×6 · 840 ×5 · 890 ×2) при РАЗНЫХ заказах
+  // от 810 до 885 мВ. Так выглядит пол, а не дрейф таблицы: дрейф размазал бы выдачу по сетке, пол
+  // собирает её в точки. Температура проверена и не объясняет (наклон 2,56 мВ/°C при r = 0,27, все
+  // 26 сняты при обычных 49…54 °C); решающее число — средний ЗАКАЗ у широких разрывов 855 мВ против
+  // 936 у остальных: широкий разрыв там, где мы просим ГЛУБОКО, а не там, где карта горячая.
+  //
+  // Значит такая строка честна про СЕБЯ («частоту обслуживало 915 мВ, и это прошло прожиг») и
+  // ничего не говорит о ПОТРЕБНОСТИ частоты — это замер состояния карты в ту минуту. Основание
+  // храповика (Vmin не убывает с частотой) сравнивает ПОТРЕБНОСТИ, поэтому кормить его таким
+  // замером незаконно: 26 августа он так отобрал 45 мВ у 15 частот, каждая с пройденным прожигом.
+  //
+  // ⚠️ ЧЕГО ВОРОТА НЕ ТРОГАЮТ, И ЭТО ПОЛОВИНА ОТВЕТА: строка САМА пишется как писалась (пункт (1),
+  // канон владельца «тюним то, что карта выдаёт»), и правило монотонности не отменяется (пункт (2)).
+  // Отключается ровно распространение НА ЧУЖИЕ СТРОКИ. `edge-found` без промаха поднимает как
+  // поднимал.
+  //
+  // ⚠️ И УДЕРЖАНИЕ НАЗЫВАЕТСЯ ВСЛУХ, А НЕ ПРОГЛАТЫВАЕТСЯ. Тихий пропуск оставил бы документ в
+  // противоречии, о котором никто не знает, — это возражение варианта C, и владелец выбрал не его.
+  // Поэтому считается, КОГО храповик поднял бы, и это едет полем к вызывающему: монотонность
+  // восстановит следующий честный прожиг, а до тех пор долг виден и счётен.
+  const closeIsOvershot = measuredTags.includes(CURVE_TAGS.ORIGIN_OVERSHOT);
   const raised = [];
+  const withheld = [];
   for (let k = idx - 1; closeDemandsVoltage && k >= 0; k--) {
     const r = rows[k];
     // A row still at its FACTORY value is not a measurement, and the ratchet exists to reconcile two
@@ -1075,6 +1105,13 @@ export function closePoint(doc, {
     // at least as much as this frequency's stock, hence at least as much as anything we ship for it.
     if (isUnmeasured(r)) continue;
     if (!Number.isFinite(r.voltageMv) || r.voltageMv >= effectiveMv) continue;
+    if (closeIsOvershot) {
+      // СЧИТАЕМ, НО НЕ ДВИГАЕМ. Отказ «выше стока не поднимаем» ниже сюда НЕ переносится намеренно:
+      // он ловит противоречие замера со стоковой таблицей, а промахнувшийся замер противоречить ей
+      // не уполномочен — из него вообще не следует утверждения о потребности этой частоты.
+      withheld.push({ mhz: r.mhz, fromMv: r.voltageMv, wouldBeMv: effectiveMv });
+      continue;
+    }
     if (Number.isFinite(r.stockVoltageMv) && effectiveMv > r.stockVoltageMv) {
       return no(`храповик хотел поднять ${r.mhz} МГц до ${effectiveMv} мВ, а её сток всего ${r.stockVoltageMv} мВ — `
         + 'выше стока не поднимаем, и молча оставить инверсию тоже нельзя. Замер противоречит стоковой таблице');
@@ -1108,9 +1145,15 @@ export function closePoint(doc, {
     closed,
     inherited,
     raised,
+    // ПОЛЕ, А НЕ ПРОЗА (`bugs/63`): сводке и сторожам нужно СЧИТАТЬ удержанные подъёмы, а по прозе
+    // считать нельзя — тот же довод, по которому классом стал отказ записи и `kept` выше.
+    ratchetWithheld: withheld.length ? { mhz, reason: CURVE_TAGS.ORIGIN_OVERSHOT, rows: withheld } : null,
     why: `${mhz} МГц закрыта: ${voltageMv} мВ, статус «${status}»`
       + (inherited.length ? ` · ступень унаследовали ${inherited.length} частот(ы) до ${inheritDownToMhz} МГц` : '')
-      + (raised.length ? ` · ⚠️ ХРАПОВИК ПОДНЯЛ ${raised.length} частот(у) выше: ${raised.map((x) => `${x.mhz} МГц ${x.fromMv}→${x.toMv} мВ`).join(', ')}` : ''),
+      + (raised.length ? ` · ⚠️ ХРАПОВИК ПОДНЯЛ ${raised.length} частот(у) выше: ${raised.map((x) => `${x.mhz} МГц ${x.fromMv}→${x.toMv} мВ`).join(', ')}` : '')
+      + (withheld.length ? ` · 🔒 ХРАПОВИК УДЕРЖАН (замер с промахом, ${CURVE_TAGS.ORIGIN_OVERSHOT}, решение владельца interviews/018 = A): `
+        + `не поднято ${withheld.length} частот(а) — ${withheld.map((x) => `${x.mhz} МГц осталась ${x.fromMv} мВ вместо ${x.wouldBeMv}`).join(', ')}`
+        + '. Монотонность здесь восстановит следующий честный прожиг' : ''),
   };
 }
 
@@ -1766,6 +1809,51 @@ function cmdSelftest() {
     ok('...и сводка называет подъём числом — по ней подъём видно без разбора документа',
       /ХРАПОВИК ПОДНЯЛ 1 частот/.test(edgeUp.why ?? '') && !/ХРАПОВИК ПОДНЯЛ/.test(cut.why ?? ''),
       JSON.stringify({ edgeWhy: edgeUp.why, cutWhy: cut.why }));
+
+    // ─── ВОРОТА ВЛАДЕЛЬЦА (`bugs/63`, interviews/018 = A): ПРОМАХ НЕ КОРМИТ ХРАПОВИК ────────────
+    //
+    // Фикстура — ТОТ ЖЕ `edgeUp`, но замер помечен `origin:overshot`. Пара выбрана так, что
+    // сломанный и правильный код дают РАЗНЫЙ ответ (EXP-0176): без ворот подъём происходит и
+    // `raised.length === 1`, с воротами — 0, а строка 2800 МГц остаётся на своих 800.
+    // АДРЕСАТЫ МУТАЦИЙ: EE — снять условие `closeIsOvershot` (подъём вернётся) ·
+    // EF — удерживать МОЛЧА (обнулить `ratchetWithheld`) · EG — удерживать и САМУ строку не писать.
+    const overshot = closePoint(higherIsDeeper(), {
+      mhz: 2400, voltageMv: 850, status: CURVE_STATUS.EDGE_FOUND,
+      extraTags: [CURVE_TAGS.ORIGIN_OVERSHOT],
+      provenBy: 'прожиг: карта подставила своё напряжение вместо заказанного', at: '2026-08-30T12:00:00+03:00',
+    });
+    ok('ПРОМАХНУВШИЙСЯ ЗАМЕР НЕ ПОДНИМАЕТ ЧУЖИЕ СТРОКИ: 2800 МГц остаётся на измеренных 800 мВ',
+      overshot.ok === true && overshot.raised.length === 0
+        && overshot.doc.frequencies[3].voltageMv === 800
+        && (overshot.doc.frequencies[3].tags ?? []).includes(CURVE_TAGS.ORIGIN_RATCHETED) === false,
+      JSON.stringify({ ok: overshot.ok, raised: overshot.raised, mv3: overshot.doc.frequencies[3].voltageMv }));
+    // ⚠️ ПОЛОВИНА ОТВЕТА, БЕЗ КОТОРОЙ ВОРОТА СТАЛИ БЫ ВАРИАНТОМ C: СВОЯ строка пишется как писалась.
+    // Мутация EG (не писать вовсе) зеленела бы вместе с правильной, если бы этого блока не было.
+    ok('...но СВОЮ строку он пишет как писал — канон «тюним то, что карта выдаёт» цел',
+      overshot.doc.frequencies[4].voltageMv === 850
+        && (overshot.doc.frequencies[4].tags ?? []).includes(CURVE_TAGS.ORIGIN_OVERSHOT)
+        && (overshot.doc.frequencies[4].tags ?? []).includes(CURVE_TAGS.ORIGIN_MEASURED),
+      JSON.stringify({ mv4: overshot.doc.frequencies[4].voltageMv, tags4: overshot.doc.frequencies[4].tags }));
+    // УДЕРЖАНИЕ НАЗВАНО ПОЛЕМ И СЧЁТНО. Тихий пропуск — это вариант C, которого владелец не выбрал:
+    // документ остался бы в противоречии, о котором никто не знает.
+    ok('...и удержание НАЗВАНО полем: кого не подняли, с чего и до чего — счётно, а не прозой',
+      overshot.ratchetWithheld !== null
+        && overshot.ratchetWithheld.reason === CURVE_TAGS.ORIGIN_OVERSHOT
+        && overshot.ratchetWithheld.rows.length === 1
+        && overshot.ratchetWithheld.rows[0].mhz === 2800
+        && overshot.ratchetWithheld.rows[0].fromMv === 800
+        && overshot.ratchetWithheld.rows[0].wouldBeMv === 850,
+      JSON.stringify({ withheld: overshot.ratchetWithheld }));
+    ok('...и сводка говорит об удержании вслух, со ссылкой на решение владельца',
+      /ХРАПОВИК УДЕРЖАН/.test(overshot.why ?? '') && /interviews\/018/.test(overshot.why ?? '')
+        && !/ХРАПОВИК ПОДНЯЛ/.test(overshot.why ?? ''),
+      JSON.stringify({ why: overshot.why }));
+    // И ОБРАТНАЯ СТОРОНА, БЕЗ КОТОРОЙ СТОРОЖ БЫЛ БЫ СТЕНОЙ: чистый замер поле НЕ заводит.
+    // Сторож, который «удерживает» всегда, отключил бы храповик насовсем — потеря безопасного
+    // направления, тот же класс, что R12 · R13 · R17.
+    ok('ЧИСТЫЙ ЗАМЕР ВОРОТ НЕ ЗАМЕЧАЕТ: поля удержания нет, подъём прошёл',
+      edgeUp.ratchetWithheld === null && edgeUp.raised.length === 1,
+      JSON.stringify({ withheld: edgeUp.ratchetWithheld, raised: edgeUp.raised }));
   }
 
   console.log('\n— ОБЛАКО ТЕГОВ: словарь, классы, накопление (эпик 04 фаза 1) —');

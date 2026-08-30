@@ -3208,6 +3208,11 @@ export async function sweepRange({
     // it named (`GOAL.md` → «🎚 ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ», consequence 2).
     delivered: [],
     raised: [],
+    // ДОЛГ МОНОТОННОСТИ: подъёмы, которые храповик НЕ сделал, потому что замер промахнулся мимо
+    // заказа (`bugs/63`, решение владельца interviews/018 = A). Считается ровно по той же причине,
+    // что `skipped` и `keptDeeper` выше: удержание — это не «ничего не произошло», а отложенное
+    // согласование, и следующая сессия обязана видеть, сколько строк ждут честного прожига.
+    ratchetWithheld: [],
     // ЧАСТОТЫ, ПРОПУЩЕННЫЕ ПОТОМУ ЧТО ИХ КРАЙ УЖЕ ЗАЖАТ ЖУРНАЛОМ (`bugs/31`). Считаются, а не
     // умалчиваются: пропуск это не покрытие, и следующая сессия обязана видеть, какие строки ждут
     // закрытия скриптом.
@@ -3670,6 +3675,14 @@ export async function sweepRange({
     if (closed.raised.length) {
       report.raised.push(...closed.raised);
       say('ratchet', closed.why, { frequencyMhz: g.topMhz });
+    }
+    // ⚠️ УДЕРЖАНИЕ ХРАПОВИКА ГОВОРИТСЯ ТАК ЖЕ ГРОМКО, КАК ПОДЪЁМ (`bugs/63`, interviews/018 = A).
+    // Тихое удержание оставило бы документ в противоречии, о котором оператор не знает, — это
+    // возражение варианта C, которого владелец не выбрал. Копится и в отчёт, чтобы сводка полосы
+    // могла назвать долг монотонности ЧИСЛОМ: строк, ждущих следующего честного прожига.
+    if (closed.ratchetWithheld) {
+      report.ratchetWithheld.push(closed.ratchetWithheld);
+      say('ratchet-withheld', closed.why, { frequencyMhz: g.topMhz });
     }
     if (saveFn) {
       const saved = await saveFn(doc);
@@ -4292,6 +4305,16 @@ export function sweepReportLines(report) {
   if (report.raised.length) {
     lines.push(`ХРАПОВИК ПОДНЯЛ ${report.raised.length} частот(у): `
       + report.raised.map((r) => `${r.mhz} МГц ${r.fromMv}→${r.toMv} мВ`).join(', '));
+  }
+  // ДОЛГ МОНОТОННОСТИ ПЕЧАТАЕТСЯ РЯДОМ С ПОДЪЁМОМ, А НЕ ВМЕСТО НЕГО (`bugs/63`, interviews/018 = A).
+  // Оператор обязан видеть ОБА числа: сколько строк храповик подвинул и сколько НЕ подвинул, потому
+  // что замер промахнулся. Второе — не «ничего не произошло», а отложенное согласование.
+  if (report.ratchetWithheld?.length) {
+    const rows = report.ratchetWithheld.flatMap((w) => w.rows ?? []);
+    lines.push(`🔒 ХРАПОВИК УДЕРЖАН на ${report.ratchetWithheld.length} закрыти(ях) — не поднято ${rows.length} строк(и): `
+      + rows.slice(0, 6).map((r) => `${r.mhz} МГц осталась ${r.fromMv} мВ`).join(', ')
+      + `${rows.length > 6 ? ' …' : ''}. Замер промахнулся мимо заказа (${'origin:overshot'}), а такой `
+      + 'не говорит о потребности частоты. Монотонность восстановит следующий честный прожиг');
   }
   if (report.hung.length) {
     lines.push(`ЗАВИСАНИЙ ПРИПИСАНО: ${report.hung.length} — `
