@@ -19,6 +19,15 @@
 // 4101, `WHEA-Logger` is empty over its entire history, and `nvlddmkm` holds 129 events over 34
 // days — two of them INSIDE the rung that killed the machine on 2026-08-23, each seconds before the
 // sampler pulse noticed (researches/15 §0).
+// ⚠️ ОБНОВЛЕНО 2026-08-31 (`bugs/79`): У КАНАЛА ПОЯВИЛСЯ ГОЛОС — НО НЕ ЗДЕСЬ.
+// Серия его событий (два и более за 120 с) теперь ПРЕКРАЩАЕТ СТУПЕНЬ развёртки. Решение приняло
+// правило `lib/driver-voice.mjs` по разведке `researches/30`; ЭТОТ модуль не тронут ни строкой:
+// `classifyEvent` по-прежнему возвращает `fault: false` для класса SIGNAL, `verdictFor` о нём
+// по-прежнему молчит, и оба существующих потребителя (`stress-tester`, `graphics-load`) канала
+// не видят. Голос берёт события ОТДЕЛЬНЫМ швом (`runRung.driverEventsFn`), потому что смешать
+// «наблюдение» и «вердикт оракула» в одном возврате значило бы отдать голос тем, кто его не
+// просил. Абзац ниже остаётся ВЕРНЫМ описанием того, почему канал не вердикт САМ ПО СЕБЕ.
+//
 // It is an INPUT and not a verdict because the same research scored it against ALL TWELVE deaths of
 // this machine and found it SPECIFIC but NOT SENSITIVE (§2): three deaths carried a driver error
 // within 10 minutes, the canonical BSOD of fact 39 carried none for two days, and lone errors on

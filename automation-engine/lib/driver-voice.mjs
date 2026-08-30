@@ -37,9 +37,15 @@
 //
 // [NOT-TESTED] на момент рождения; маркеры по функциям ниже.
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Рука 1 — та же, что у предохранителя, а не своя копия: две руки, убивающие прожиг по именам,
+// разошлись бы молча при первой правке списка образов (DRY, и это не косметика — это писатель).
+// Импорт безопасен: у `fuse.mjs` есть сторож главного модуля, при импорте он ничего не запускает.
+import { makeImageKillHand } from './fuse.mjs';
 
 // =================================================================================================
 // 1. Порог — форма из отрасли, числа из своего замера
@@ -164,6 +170,61 @@ export function driverEventsInWindow({ fromMs, toMs }, queryFn) {
 }
 
 // =================================================================================================
+// 1b. ЯРУС 2 — наблюдатель реального времени, прекращающий СТУПЕНЬ
+// =================================================================================================
+
+/**
+ * Разбор одной строки наблюдателя. Чистая функция — доказуема без процессов.
+ *
+ * Четыре рода строк, и «не разобрана» — ПЯТЫЙ род, а не молчание: строка, которую наблюдатель
+ * напечатал, а мы не поняли, обязана быть видна в разборе, иначе изменившийся формат тихо
+ * превратит канал в пустой.
+ *
+ * [NOT-TESTED]
+ */
+export function parseWatchLine(line) {
+  const s = String(line ?? '').trim();
+  if (s.startsWith('EVENT ')) {
+    try { return { kind: 'event', event: JSON.parse(s.slice(6)) }; } catch { return { kind: 'unparsed', raw: s }; }
+  }
+  if (s.startsWith('ALIVE ')) return { kind: 'alive', at: s.slice(6) };
+  if (s.startsWith('READY ')) return { kind: 'ready', detail: s.slice(6) };
+  if (s.startsWith('FAILED ')) return { kind: 'failed', detail: s.slice(7) };
+  if (s === '') return { kind: 'blank' };
+  return { kind: 'unparsed', raw: s };
+}
+
+/**
+ * СОСТОЯНИЕ НАБЛЮДАТЕЛЯ — чистое, чтобы правило «сработать один раз на вспышку» было доказуемо
+ * без процессов, портов и часов.
+ *
+ * ПОЧЕМУ СБРОС ПОСЛЕ СРАБАТЫВАНИЯ. Прожиг убит, ступень кончилась; следующая ступень — новое
+ * наблюдение. Без сброса вспышка из сорока трёх событий (такие в архиве есть: 08-14 и 08-28)
+ * убивала бы каждый следующий прожиг подряд, то есть один отказ машины превращался бы в
+ * бесконечный отказ инструмента — ровно то, что владелец запретил словом «сторож должен не
+ * ронять инструмент».
+ *
+ * [NOT-TESTED]
+ */
+export function makeVoiceState(limits = DRIVER_VOICE) {
+  let cries = [];
+  return {
+    /** @returns {{fire:boolean, why:string|null, count:number}} */
+    saw(event, nowMs) {
+      cries.push({ atMs: nowMs });
+      // Окно скользит: всё, что старше окна, к решению отношения не имеет и только растит память.
+      cries = cries.filter((c) => nowMs - c.atMs <= limits.windowMs);
+      const v = driverVoiceVerdict(cries, limits);
+      if (!v.stop) return { fire: false, why: null, count: cries.length };
+      const count = cries.length;
+      cries = [];
+      return { fire: true, why: v.why, count };
+    },
+    pending() { return cries.length; },
+  };
+}
+
+// =================================================================================================
 // 2. Разбор снятого архива — тем же правилом, которым судит прогон
 // =================================================================================================
 
@@ -209,8 +270,153 @@ export function burstIsTerminal(burst, freezes) {
 }
 
 // =================================================================================================
+// 2b. Наблюдатель как процесс — тонкая обвязка над чистыми функциями выше
+// =================================================================================================
+
+/**
+ * @guard driver-voice-watch
+ * THREAT:         серия ошибок драйвера во время ступени, на которую никто не успевает ответить:
+ *                 30.08 движок был заблокирован `spawnSync` прожига и не мог сделать НИЧЕГО до
+ *                 конца ступени, а машина умерла внутри неё
+ * PROVED-AGAINST: правило и его сброс — блоки `driver-voice --selftest` (включая счёт по СНЯТОМУ
+ *                 архиву 179 событий); задержка доставки — замер `--bench-latency` на живом
+ *                 `EventLogWatcher`, канал «Windows PowerShell», событие подкладывается запуском
+ *                 процесса и время меряется от запуска до решения
+ * GAP:            🔴 замер задержки снят на ДРУГОМ провайдере: канал `nvlddmkm` невозможно вызвать
+ *                 по требованию, не сломав карту. Доказана дорога доставки, а НЕ то, что драйвер
+ *                 пишет в журнал сразу. Второе: рука здесь ОДНА — убить прожиг; возврат напряжения
+ *                 делает откат самой ступени, который отрабатывает, как только `spawnSync` вернул
+ *                 управление. Если движок уже замер, не отработает ни то, ни другое — и на
+ *                 инциденте 30.08 окно было 0,134 с, то есть не отработало бы (`researches/30` §3)
+ * ON-REAL-PATH:   NOT YET — включается флагом `--driver-voice-watch` и по умолчанию ВЫКЛЮЧЕН;
+ *                 первый живой прогон с флагом обязан оставить строку `READY` в журнале наблюдателя
+ *
+ * @forensic driver-voice-watch-journal
+ * EXPLAINS:    что канал драйвера говорил во время прогона и что по этому поводу было сделано
+ * DURABLE-AT:  every-line — `fsync` на каждой строке, включая секундную строку жизни: молчание
+ *              канала обязано отличаться от смерти наблюдателя (`bugs/83`), а улика — переживать
+ *              событие, а не штатный конец (`bugs/78`)
+ */
+export function watchLoop({ spawnFn, killImages, images, writeLine, nowFn = () => Date.now(), onReady = null }) {
+  const state = makeVoiceState();
+  const script = new URL('driver-voice-watch.ps1', import.meta.url);
+  const child = spawnFn('powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', fileURLToPath(script)],
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+
+  let carry = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    carry += chunk;
+    const lines = carry.split(/\r?\n/);
+    carry = lines.pop() ?? '';
+    for (const raw of lines) {
+      const p = parseWatchLine(raw);
+      if (p.kind === 'blank') continue;
+      if (p.kind === 'ready') { writeLine({ kind: 'ready', detail: p.detail }); onReady?.(p); continue; }
+      if (p.kind === 'failed') { writeLine({ kind: 'failed', detail: p.detail }); continue; }
+      if (p.kind === 'alive') { writeLine({ kind: 'alive', at: p.at }); continue; }
+      if (p.kind === 'unparsed') { writeLine({ kind: 'unparsed', raw: p.raw }); continue; }
+      const now = nowFn();
+      const d = state.saw(p.event, now);
+      writeLine({ kind: 'event', event: p.event, pending: d.count, fired: d.fire });
+      if (d.fire) {
+        const killed = killImages(images);
+        // РУКА ЗДЕСЬ ОДНА — УБИТЬ ПРОЖИГ, и это решение, а не упущение. Напряжение возвращает откат
+        // самой ступени, который отрабатывает сразу, как только `spawnSync` вернул управление; второй
+        // возвращающий был бы вторым писателем в карту при живом первом (R1 — писатель один).
+        writeLine({ kind: 'fired', why: d.why, count: d.count, killed: killed.detail, killOk: killed.ok, ms: killed.ms });
+      }
+    }
+  });
+  return child;
+}
+
+// =================================================================================================
 // 3. CLI
 // =================================================================================================
+
+/** Строка журнала наблюдателя — `fsync` на каждой, тем же приёмом, что у сэмплера (`bugs/37`). */
+function makeJournalWriter(path) {
+  mkdirSync(dirname(path), { recursive: true });
+  return (record) => {
+    const fd = openSync(path, 'a');
+    try {
+      writeSync(fd, `${JSON.stringify({ at: new Date().toISOString(), ...record })}\n`);
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+  };
+}
+
+/** Живой наблюдатель: процесс, который прекращает СТУПЕНЬ, убивая прожиг. */
+async function watch(argv) {
+  const images = (argv.find((a) => a.startsWith('--burn-images='))?.split('=')[1]
+    ?? 'furnace.exe,branchy.exe,sdc_fma.exe').split(',').filter(Boolean);
+  const out = argv.find((a) => a.startsWith('--out='))?.split('=')[1]
+    ?? join('runs', 'death-watch', `${new Date().toISOString().replace(/[:.]/gu, '-')}-drivervoice.jsonl`);
+  const write = makeJournalWriter(out);
+  const kill = makeImageKillHand({ spawnSyncFn: spawnSync });
+  console.log(`ГОЛОС ДРАЙВЕРА: наблюдатель поднят · журнал ${out} · руки: ${images.join(',')} · `
+    + `порог ${DRIVER_VOICE.minCount} события за ${DRIVER_VOICE.windowMs / 1000} с`);
+  const child = watchLoop({ spawnFn: spawn, killImages: kill, images, writeLine: write });
+  await new Promise((resolve) => child.once('exit', resolve));
+  console.log('ГОЛОС ДРАЙВЕРА: наблюдатель завершился');
+}
+
+/**
+ * ЗАМЕР ЗАДЕРЖКИ ДОСТАВКИ — единственный честный способ получить число для P79-AC1.
+ *
+ * Канал `nvlddmkm` по требованию не вызвать, не сломав карту. Поэтому та же дорога
+ * (`EventLogWatcher` → строка → правило → решение) меряется на канале, который вызывается
+ * непривилегированно: журнал «Windows PowerShell» получает событие на КАЖДЫЙ запуск движка
+ * PowerShell. Часы — наши, от момента запуска процесса до момента решения.
+ */
+async function benchLatency() {
+  const script = fileURLToPath(new URL('driver-voice-watch.ps1', import.meta.url));
+  const child = spawn('powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, 'PowerShell', 'Windows PowerShell'],
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const state = makeVoiceState();
+  let ready = false;
+  let firedAtMs = null;
+  let seen = 0;
+  let carry = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (c) => {
+    carry += c;
+    const lines = carry.split(/\r?\n/); carry = lines.pop() ?? '';
+    for (const raw of lines) {
+      const p = parseWatchLine(raw);
+      if (p.kind === 'ready') { ready = true; console.log(`  наблюдатель готов: ${p.detail}`); }
+      if (p.kind === 'failed') console.log(`  ❌ ПЛОХО  наблюдатель не поднялся: ${p.detail}`);
+      if (p.kind === 'event') {
+        seen += 1;
+        const d = state.saw(p.event, Date.now());
+        if (d.fire && firedAtMs === null) firedAtMs = Date.now();
+      }
+    }
+  });
+  const waitFor = async (cond, ms) => {
+    const t0 = Date.now();
+    while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 25));
+    return cond();
+  };
+  if (!await waitFor(() => ready, 20_000)) { console.log('❌ ПЛОХО  наблюдатель не поднялся за 20 с'); child.kill(); return 1; }
+  // Пауза после READY: подписка уже принята, но дадим каналу устояться, чтобы в замер не попали
+  // события, порождённые самим наблюдателем.
+  await new Promise((r) => setTimeout(r, 1500));
+  const t0 = Date.now();
+  for (let i = 0; i < DRIVER_VOICE.minCount; i += 1) {
+    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'exit'], { windowsHide: true, timeout: 20_000 });
+  }
+  const got = await waitFor(() => firedAtMs !== null, 20_000);
+  child.kill();
+  if (!got) { console.log(`❌ ПЛОХО  решение не принято за 20 с (событий получено ${seen})`); return 1; }
+  const ms = firedAtMs - t0;
+  console.log(`ЗАМЕР ЗАДЕРЖКИ: от подложенных событий до РЕШЕНИЯ ${ms} мс (событий получено ${seen}); порог P79-AC1 — 5000 мс`);
+  console.log(ms <= 5000 ? '✅  P79-AC1 ВЗЯТ на живой дороге доставки' : '❌ ПЛОХО  порог не взят');
+  return ms <= 5000 ? 0 : 1;
+}
 
 function archive() {
   const events = readJsonl(FIXTURE_EVENTS);
@@ -285,6 +491,57 @@ function selftest() {
   ok('порог Microsoft (5 за 60 с) НЕ поймал бы 30.08 — довод, по которому взяты свои числа',
     driverVoiceVerdict(bursts[bursts.length - 1].events, { windowMs: 60_000, minCount: 5 }).stop, false);
 
+  // ── ЯРУС 2: разбор строк наблюдателя и правило «один раз на вспышку» ────────────────────────
+  ok('строка события разбирается', parseWatchLine('EVENT {"at":"2026-08-30T21:48:34+03:00","id":153}').kind, 'event');
+  ok('строка жизни разбирается — молчание канала обязано отличаться от смерти наблюдателя',
+    parseWatchLine('ALIVE 2026-08-30T21:48:34+03:00').kind, 'alive');
+  ok('отказ подъёма разбирается отдельным родом, а не молчанием',
+    parseWatchLine('FAILED access denied').kind, 'failed');
+  ok('НЕПОНЯТНАЯ строка — ПЯТЫЙ род, а не тишина: сменившийся формат обязан быть виден',
+    [parseWatchLine('нечто').kind, parseWatchLine('EVENT не-json').kind], ['unparsed', 'unparsed']);
+
+  {
+    const st = makeVoiceState();
+    ok('первое событие не решает', st.saw({}, 1000).fire, false);
+    ok('второе в окне — РЕШАЕТ', st.saw({}, 4000).fire, true);
+    ok('и счётчик СБРОШЕН: вспышка из сорока трёх не убивает сорок два прожига подряд',
+      [st.pending(), st.saw({}, 5000).fire], [0, false]);
+  }
+  {
+    const st = makeVoiceState();
+    ok('два события ЗА окном не решают — старое выпадает из окна, а не копится вечно',
+      [st.saw({}, 0).fire, st.saw({}, DRIVER_VOICE.windowMs + 1).fire, st.pending()], [false, false, 1]);
+  }
+
+  // ── ЯРУС 2: ПРОВОДКА — рука зовётся ровно тогда, когда правило сработало, и не раньше ───────
+  {
+    const killed = [];
+    const written = [];
+    const fake = { stdout: { setEncoding() {}, on(_, cb) { this._cb = cb; } }, once() {} };
+    const child = watchLoop({
+      spawnFn: () => fake,
+      killImages: (imgs) => { killed.push(imgs); return { ok: true, ms: 1, detail: 'furnace.exe:убит' }; },
+      images: ['furnace.exe'],
+      writeLine: (r) => written.push(r),
+      nowFn: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    child.stdout._cb('READY 2026-08-31T01:00:00+03:00\nALIVE 2026-08-31T01:00:01+03:00\n');
+    ok('до событий рука НЕ зовётся, а строки жизни пишутся',
+      [killed.length, written.map((w) => w.kind)], [0, ['ready', 'alive']]);
+    child.stdout._cb('EVENT {"id":153}\n');
+    ok('ОДНО событие руки не поднимает', killed.length, 0);
+    child.stdout._cb('EVENT {"id":14}\n');
+    ok('ДВА события в окне — прожиг убит, и это записано с причиной',
+      [killed, written.at(-1).kind, /КАНАЛ ДРАЙВЕРА/u.test(written.at(-1).why || '')],
+      [[['furnace.exe']], 'fired', true]);
+    // Строка приходит РАЗОРВАННОЙ по границе куска — обычное дело для потока; склейка обязана
+    // работать, иначе половина событий станет «непонятными строками» на живом прогоне.
+    const before = killed.length;
+    child.stdout._cb('EVE');
+    child.stdout._cb('NT {"id":153}\nEVENT {"id":153}\n');
+    ok('РАЗОРВАННАЯ строка склеивается, а не теряется', killed.length, before + 1);
+  }
+
   console.log(`\nСАМОПРОВЕРКА: блоков ${blocks}, провалов ${bad}`);
   return bad === 0 ? 0 : 1;
 }
@@ -294,5 +551,8 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const argv = process.argv.slice(2);
   if (argv.includes('--archive')) archive();
   else if (argv.includes('--selftest')) process.exit(selftest());
-  else console.log(`Голос драйвера (bugs/79). Режимы: --selftest · --archive\nКаталог модуля: ${HERE}`);
+  else if (argv.includes('--watch')) await watch(argv);
+  else if (argv.includes('--bench-latency')) process.exit(await benchLatency());
+  else console.log('Голос драйвера (bugs/79). Режимы: --selftest · --archive · --watch · --bench-latency\n'
+    + `Каталог модуля: ${HERE}`);
 }

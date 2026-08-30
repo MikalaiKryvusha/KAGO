@@ -10202,9 +10202,35 @@ async function mainSweep(argv, arg) {
     }
   });
   fuseJudge.unref?.();
+
+  // ─── 🗣 ГОЛОС ДРАЙВЕРА, ЯРУС 2 (`bugs/79`, `plans/79` шаг 3.6) — ПО ФЛАГУ, ПО УМОЛЧАНИЮ ВЫКЛЮЧЕН ─
+  //
+  // Наблюдатель прекращает СТУПЕНЬ (убивает прожиг), а не полосу. Предохранитель для этого не
+  // годится и не трогается: его трип завершает судью, а полоса без судьи встаёт — то есть голос
+  // через него означал бы ОСТАНОВКУ ПОЛОСЫ, а замер архива говорит, что это дало бы две ложные
+  // остановки за семь дней прогонов (`researches/30` §2.1). Напряжение возвращает откат самой
+  // ступени, отрабатывающий сразу, как только `spawnSync` прожига вернул управление.
+  //
+  // ВЫКЛЮЧЕН ПО УМОЛЧАНИЮ НАМЕРЕННО: это новый процесс, который УБИВАЕТ работу на карте владельца,
+  // и наблюдения на реальном пути у него ещё нет (`@guard driver-voice-watch` → ON-REAL-PATH).
+  // Ярус 1 работает всегда и от флага не зависит.
+  const driverVoiceScript = join(dirname(toPath(import.meta.url)), 'lib', 'driver-voice.mjs');
+  const driverVoiceOut = join('runs', 'death-watch', `${new Date().toISOString().replace(/[:.]/gu, '-')}-drivervoice.jsonl`);
+  const driverVoiceWatch = (process.argv.includes('--driver-voice-watch') && !twin)
+    ? spawn(process.execPath, [driverVoiceScript, '--watch', `--out=${driverVoiceOut}`,
+      '--burn-images=furnace.exe,branchy.exe,sdc_fma.exe'], { windowsHide: true, stdio: 'ignore' })
+    : null;
+  driverVoiceWatch?.unref?.();
+  console.log(driverVoiceWatch
+    ? `🗣 ГОЛОС ДРАЙВЕРА, ЯРУС 2: наблюдатель pid ${driverVoiceWatch.pid} · журнал ${driverVoiceOut} · `
+      + 'серия прекращает СТУПЕНЬ, полосу решает накопитель'
+    : '🗣 ГОЛОС ДРАЙВЕРА: ярус 1 (граница ступени) РАБОТАЕТ; ярус 2 (реальное время) выключен — '
+      + 'поднимается флагом --driver-voice-watch');
+
   const stopDeathWatch = () => {
     try { fuseJudge.kill(); } catch { /* already gone */ }
     try { fuseProbe?.kill(); } catch { /* already gone */ }
+    try { driverVoiceWatch?.kill(); } catch { /* already gone */ }
   };
   process.on('exit', stopDeathWatch);
   // One ref stops all riders on the operator-stop and writer-death paths above.
