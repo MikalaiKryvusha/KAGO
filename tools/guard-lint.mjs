@@ -139,6 +139,55 @@ export const EVASIONS = new Set([
 const RE_MARKER = /@(guard|forensic)\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s*$/u;
 const RE_FIELD = /^([A-Z][A-Z-]{1,30}):\s*(.*)$/u;
 
+/** Две законные раскладки даты наблюдения: `ГГГГ-ММ-ДД` и `ДД.ММ.ГГГГ`. */
+const RE_DATE_ISO = /(\d{4})-(\d{2})-(\d{2})/u;
+const RE_DATE_DOT = /(\d{2})\.(\d{2})\.(\d{4})/u;
+
+/**
+ * Запас на часовой пояс, в СУТКАХ. Дата дальше этого запаса в будущем наблюдением быть не могла.
+ *
+ * ⚠️ ЧИСЛО ВЫБРАНО В СТОРОНУ МОЛЧАНИЯ СТОРОЖА, И ЭТО НЕ НЕБРЕЖНОСТЬ. Машина владельца стоит в
+ * `+03:00`, прогон может случиться в другом поясе, и «завтра» по календарю сторожа бывает
+ * «сегодня» по календарю автора. Ложная тревога на здоровом дереве в этом проекте оплачена
+ * ТРИЖДЫ (`bugs/75`), пропуск даты «завтра» — не оплачен ничем. Сутки не объясняются никаким
+ * поясом, значит дальше суток — уже не пояс, а выдумка.
+ */
+const FUTURE_GRACE_DAYS = 1;
+
+/**
+ * Разобрать дату наблюдения из значения поля. Возвращает `null`, если даты нет вовсе;
+ * `{ valid: false }`, если она есть по форме, но такого дня не существует.
+ *
+ * Зачем существует (bugs/81). Правило R7 спрашивало у строки «похожа ли ты на дату» и на этом
+ * останавливалось. `2099-01-01`, `2026-13-45` и `0000-00-00` проходили ворота молча — то есть
+ * механизм, заведённый против недоказуемого «доказан», делал поддельную дату УДОБНЕЕ честного
+ * `NOT YET`. Сторож был доказан против модели угрозы («строка, не похожая на дату») вместо самой
+ * угрозы («заявление о наблюдении, которого не было») — тот же класс, который чинит весь эпик 76.
+ */
+export function parseObservationDate(value) {
+  const s = String(value);
+  let y; let m; let d;
+  const iso = RE_DATE_ISO.exec(s);
+  if (iso) { [, y, m, d] = iso; } else {
+    const dot = RE_DATE_DOT.exec(s);
+    if (!dot) return null;
+    [, d, m, y] = dot;
+  }
+  const Y = Number(y); const M = Number(m); const D = Number(d);
+  const dt = new Date(Y, M - 1, D);
+  // Сверка обратным чтением: `new Date(2026, 12, 45)` молча уезжает в другой месяц, а не падает.
+  const valid = M >= 1 && M <= 12 && D >= 1
+    && dt.getFullYear() === Y && dt.getMonth() === M - 1 && dt.getDate() === D;
+  return { text: iso ? iso[0] : `${d}.${m}.${y}`, valid, date: valid ? dt : null };
+}
+
+/** Лежит ли день дальше запаса в будущем. `now` вынесен параметром, чтобы фикстуры не зависели от календаря. */
+export function isFutureDate(dt, now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const limit = new Date(today.getFullYear(), today.getMonth(), today.getDate() + FUTURE_GRACE_DAYS);
+  return dt.getTime() > limit.getTime();
+}
+
 /** Снять префиксы комментариев, чтобы блок читался одинаково в `.mjs`, `.md` и `.ps1`. */
 function strip(line) {
   return String(line)
@@ -192,7 +241,7 @@ export function parseBlocks(text) {
  * выковыривать его регулярным выражением из текста — прибор, читающий прозу, ломается от правки
  * этой прозы и молча начинает считать не то (`plans/77` §1).
  */
-export function checkBlock(block, file = '<memory>') {
+export function checkBlock(block, file = '<memory>', { now = new Date() } = {}) {
   const out = [];
   const add = (rule, field, why, line = block.line) =>
     out.push({ rule, field, file, line, name: block.name, kind: block.kind, why });
@@ -229,10 +278,30 @@ export function checkBlock(block, file = '<memory>') {
   if (block.kind === 'guard') {
     const rp = seen.get('ON-REAL-PATH');
     const v = rp ? rp.value.trim() : '';
-    if (v && !/^not\s*yet\b/iu.test(v) && !/\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4}/u.test(v)) {
+    const notYet = /^not\s*yet\b/iu.test(v);
+    const parsed = v ? parseObservationDate(v) : null;
+    if (v && !notYet && !parsed) {
       add('R7-unauditable', 'ON-REAL-PATH',
         `ON-REAL-PATH: «${v.slice(0, 60)}» — ни даты, ни честного «NOT YET». Наблюдение без даты `
         + 'нельзя перепроверить, а непроверяемое заявление о проверке — это чинимый класс', rp.line);
+    }
+    // ── R8 (bugs/81): дата обязана быть НАСТОЯЩИМ днём и не лежать в будущем ────────────────────
+    //
+    // R7 спрашивал у строки «похожа ли ты на дату» и на этом останавливался, поэтому `2099-01-01`,
+    // `2026-13-45` и `0000-00-00` проходили ворота молча. Поддельная дата при этом выглядит в
+    // ревью честнее, чем `NOT YET`, — механизм, заведённый против недоказуемого «доказан», делал
+    // ложь УДОБНЕЕ правды. Форма даты — модель угрозы; угроза — заявление о наблюдении, которого
+    // не было.
+    if (v && !notYet && parsed) {
+      if (!parsed.valid) {
+        add('R8-impossible-date', 'ON-REAL-PATH',
+          `ON-REAL-PATH: «${parsed.text}» — такого дня не существует. Наблюдение датируется днём, `
+          + 'который был, иначе это не улика, а её форма', rp.line);
+      } else if (isFutureDate(parsed.date, now)) {
+        add('R8-impossible-date', 'ON-REAL-PATH',
+          `ON-REAL-PATH: «${parsed.text}» — дата в будущем. Наблюдение — событие, которое УЖЕ `
+          + 'случилось; будущей датой закрывается долг, а не подтверждается проверка', rp.line);
+      }
     }
   }
 
@@ -260,9 +329,12 @@ export function checkBlock(block, file = '<memory>') {
   return out;
 }
 
-/** Проверить целый текст. */
-export function checkText(text, file = '<memory>') {
-  return parseBlocks(text).flatMap((b) => checkBlock(b, file));
+/**
+ * Проверить целый текст. `now` пробрасывается, чтобы фикстуры границы «будущего» не зависели от
+ * календаря машины: тест, зеленеющий или краснеющий от того, какой сегодня день, — не тест.
+ */
+export function checkText(text, file = '<memory>', opts = {}) {
+  return parseBlocks(text).flatMap((b) => checkBlock(b, file, opts));
 }
 
 // =================================================================================================
@@ -311,6 +383,15 @@ export { BASELINE, ROOT };
 //
 // 🔴 ПОЗИТИВНЫЕ ВАЖНЕЕ НЕГАТИВНЫХ. Ложная тревога здесь = красная сборка на здоровом коде, а за
 // это в проекте уже заплачено трижды (`bugs/75`): сторож, кричащий впустую, приучает не смотреть.
+
+/**
+ * ЧАСЫ НАБОРА ПРИБИТЫ. Правило R8 сравнивает дату наблюдения с сегодняшним днём, а тест, который
+ * зеленеет или краснеет от того, какой сегодня день, — не тест: он молча перестанет различать
+ * ровно тогда, когда календарь дойдёт до его фикстур. Все фикстуры считаются от 2026-08-30 —
+ * дня, когда правило написано. Запас FUTURE_GRACE_DAYS = 1 делает 2026-08-31 последним законным
+ * днём, а 2026-09-01 — первым будущим; обе границы стоят в наборе.
+ */
+const FIXTURE_NOW = new Date(2026, 7, 30);
 
 const G = (name, ...fields) => [`// @guard ${name}`, ...fields.map((f) => `// ${f}`)].join('\n');
 const F = (name, ...fields) => [`// @forensic ${name}`, ...fields.map((f) => `// ${f}`)].join('\n');
@@ -445,6 +526,26 @@ export function buildFixtures() {
   for (const v of ['не требуется', 'неприменимо', 'не нужно', 'карты нет', 'офлайн-сторож']) {
     n('V-dismissal', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
   }
+  // ─ ОСЬ W · такого ДНЯ не существует (8) — bugs/81 ──────────────────────────────────────────────
+  // Форма даты идеальна, дня нет. Прежнее правило смотрело только на форму и молчало.
+  for (const v of ['2026-13-45', '2026-02-30', '0000-00-00', '2026-00-15', '2026-08-32',
+    '31.02.2026', '00.08.2026', '2026-04-31']) {
+    n('W-impossible-day', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
+  }
+  // ─ ОСЬ X · дата в БУДУЩЕМ (7) — bugs/81 ────────────────────────────────────────────────────────
+  // Наблюдение — событие, которое УЖЕ случилось. Будущей датой закрывают долг, а не подтверждают
+  // проверку, и в ревью такая строка выглядит честнее, чем `NOT YET`, — то есть ложь удобнее правды.
+  for (const v of ['2099-01-01', '2026-12-31', '2027-01-01', '31.12.2099', 'наблюдён 2030-05-05',
+    'с 2026-09-15', '2026-09-01 — по плану']) {
+    n('X-future-date', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
+  }
+  // ─ ОСЬ Y · ЧАСТОТА вместо события (6) ──────────────────────────────────────────────────────────
+  // Отдельный подкласс от оси N: там утверждали «да, видели», здесь описывают РАСПИСАНИЕ. «Сторож
+  // работает ежедневно» — заявление о регламенте, а не о наблюдении; перепроверить его нечем.
+  for (const v of ['каждый прогон', 'ежедневно', 'при каждом запуске', 'постоянно', 'регулярно',
+    'на каждом коммите']) {
+    n('Y-frequency', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)));
+  }
   // ─ ОСЬ S · исторические формы механизма М2 (4) ─────────────────────────────────────────────────
   n('S-historic-m2', 'предохранитель: «доказан» без даты наблюдения',
     G('fuse-deadman', 'THREAT: зависание машины', 'PROVED-AGAINST: двойник, 9/9 проверок',
@@ -549,6 +650,49 @@ export function buildFixtures() {
     'дважды, последний раз 30.08.2026', 'наблюдался 2026-08-30 и будет ещё']) {
     p('P15-date-form', `ON-REAL-PATH = «${v.slice(0, 30)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
   }
+  // ─ ОСЬ P16 · граница запаса и настоящие прошлые дни (6) — bugs/81 ──────────────────────────────
+  // 🔴 ОБЕ СТОРОНЫ ГРАНИЦЫ СТОЯТ В НАБОРЕ: 2026-08-31 — последний законный день (запас в сутки),
+  // 2026-09-01 лежит в оси X как первый будущий. Граница, у которой в наборе только одна сторона,
+  // не проверена: она различает лишь то, что и без неё различалось ([[EXP-0176]]).
+  for (const v of ['2026-08-31', '2026-08-30', '2026-08-29', '2020-01-01', '29.08.2026', '2024-02-29']) {
+    p('P16-date-boundary', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
+  }
+  // ─ ОСЬ P17 · часовые пояса и время рядом с датой (5) ───────────────────────────────────────────
+  for (const v of ['2026-08-30 21:48 UTC', '2026-08-30T18:48:21Z', '2026-08-30 21:48 MSK',
+    '2026-08-30 (UTC+3)', '30.08.2026 21:48 +0300']) {
+    p('P17-timezone', `ON-REAL-PATH = «${v}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
+  }
+  // ─ ОСЬ P18 · дата внутри длинной записи наблюдения (5) ─────────────────────────────────────────
+  // Поле наблюдения — место для подробностей, и дата в нём стоит где придётся. Правило обязано
+  // смотреть на ВСЁ значение, а не на его начало.
+  const long = 'наблюдение снято на живом прогоне полосы 2887…2745 при владельце за машиной, '
+    + 'предохранитель взведён, безопасный режим дисков взведён, фон с карты снят, '.repeat(4);
+  p('P18-long-value', 'дата в самом конце длинной записи',
+    G('g', ...withVal(OK4, 'ON-REAL-PATH', `${long} исполнено 2026-08-30`)), 'ON-REAL-PATH');
+  p('P18-long-value', 'дата в самом начале длинной записи',
+    G('g', ...withVal(OK4, 'ON-REAL-PATH', `2026-08-30 — ${long}`)), 'ON-REAL-PATH');
+  p('P18-long-value', 'дата в середине длинной записи',
+    G('g', ...withVal(OK4, 'ON-REAL-PATH', `${long} 2026-08-30 ${long}`)), 'ON-REAL-PATH');
+  p('P18-long-value', 'запись из нескольких предложений',
+    G('g', ...withVal(OK4, 'ON-REAL-PATH',
+      'Сторож врезан в ворота сборки. Прогон ворот 2026-08-30 показал строку отчёта. Код 0.')), 'ON-REAL-PATH');
+  p('P18-long-value', 'значение длиннее 500 символов с датой',
+    G('g', ...withVal(OK4, 'ON-REAL-PATH', `${'подробность, '.repeat(45)}2026-08-30`)), 'ON-REAL-PATH');
+  // ─ ОСЬ P19 · несколько дат, диапазоны и повторные наблюдения (5) ───────────────────────────────
+  for (const v of ['с 2026-08-15 по 2026-08-30', '2026-08-15, 2026-08-22, 2026-08-30',
+    '2026-08-30 и раньше 15.08.2026', 'трижды: 15.08.2026, 22.08.2026, 30.08.2026',
+    '2026-08-15 (первое) … 2026-08-30 (последнее)']) {
+    p('P19-multi-date', `ON-REAL-PATH = «${v.slice(0, 30)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
+  }
+  // ─ ОСЬ P20 · наблюдение с ОТРИЦАТЕЛЬНЫМ исходом — тоже наблюдение (4) ──────────────────────────
+  // «Смотрели и он НЕ сработал» — полноценная улика, и именно она была бы у предохранителя 30.08.
+  // Сторож, краснеющий на честном отрицательном результате, учит писать только хорошее.
+  for (const v of ['2026-08-30 — наблюдён, НЕ сработал, трипов 0 (bugs/76)',
+    '2026-08-30: сработал ложно, разбор в bugs/75',
+    'смотрели 30.08.2026 — молчал, хотя должен был кричать',
+    '2026-08-30 наблюдался; результат отрицательный']) {
+    p('P20-negative-outcome', `ON-REAL-PATH = «${v.slice(0, 30)}»`, G('g', ...withVal(OK4, 'ON-REAL-PATH', v)), 'ON-REAL-PATH');
+  }
   // ─ ОСЬ P13 · @forensic не подпадает под R7 (3) ─────────────────────────────────────────────────
   p('P13-forensic-exempt', 'у @forensic нет ON-REAL-PATH и это законно', F('f', ...OK2), 'DURABLE-AT');
   p('P13-forensic-exempt', '@forensic с лишним ON-REAL-PATH без даты — не его правило',
@@ -589,12 +733,16 @@ export function buildFixtures() {
 export function selftest() {
   const { neg, pos } = buildFixtures();
   const fails = [];
+  // Часы набора прибиты (FIXTURE_NOW): правило R8 сравнивает дату с сегодняшним днём, и без
+  // прибитых часов фикстуры границы «будущего» перестали бы различать, как только календарь до
+  // них дойдёт. Тест, зеленеющий от смены даты на машине, не тест.
+  const AT = { now: FIXTURE_NOW };
   const byMech = {};
   for (const m of MECHANISMS) byMech[m] = { neg: 0, pos: 0, axes: new Set() };
   const shared = { pos: 0, axes: new Set() };
 
   for (const c of neg) {
-    const violations = checkText(c.text, `<neg:${c.axis}>`);
+    const violations = checkText(c.text, `<neg:${c.axis}>`, AT);
     if (!violations.length) { fails.push(`НЕГАТИВНЫЙ ПРОПУЩЕН [${c.axis}] ${c.why}`); continue; }
     // Фикстура засчитывается КАЖДОМУ механизму, чьё поле она ломает: блок, потерявший разом `GAP`
     // и `ON-REAL-PATH`, честно доказывает оба. Двойного счёта внутри одного механизма нет — Set.
@@ -608,7 +756,7 @@ export function selftest() {
   }
 
   for (const c of pos) {
-    const v = checkText(c.text, `<pos:${c.axis}>`);
+    const v = checkText(c.text, `<pos:${c.axis}>`, AT);
     if (v.length) fails.push(`ЛОЖНАЯ ТРЕВОГА [${c.axis}] ${c.why} → ${v.map((x) => x.rule).join(' · ')}`);
     if (c.field === '—') { shared.pos += 1; shared.axes.add(c.axis); continue; }
     const mech = MECH_OF_FIELD[c.field];
@@ -623,7 +771,7 @@ export function selftest() {
   const negAxes = new Set(neg.map((c) => c.axis));
   const posAxes = new Set(pos.map((c) => c.axis));
   const rules = new Set();
-  for (const c of neg) for (const v of checkText(c.text)) rules.add(v.rule);
+  for (const c of neg) for (const v of checkText(c.text, '<memory>', AT)) rules.add(v.rule);
   const mech = {};
   for (const m of MECHANISMS) {
     mech[m] = {
@@ -689,12 +837,13 @@ function main(argv) {
     // Без них она напечатала бы «блоков 0», а ноль в сводке читается как «ничего не проверено» —
     // ровно та ложь о собственном покрытии, которую этот механизм и заведён устранять.
     const { neg, pos } = buildFixtures();
+    const AT = { now: FIXTURE_NOW };
     for (const c of neg) {
-      const hit = checkText(c.text, `<neg:${c.axis}>`).length > 0;
+      const hit = checkText(c.text, `<neg:${c.axis}>`, AT).length > 0;
       console.log(`${hit ? 'OK  ' : 'ПЛОХО'} [-] ${c.axis} · ${c.why}`);
     }
     for (const c of pos) {
-      const quiet = checkText(c.text, `<pos:${c.axis}>`).length === 0;
+      const quiet = checkText(c.text, `<pos:${c.axis}>`, AT).length === 0;
       console.log(`${quiet ? 'OK  ' : 'ПЛОХО'} [+] ${c.axis} · ${c.why}`);
     }
     const r = selftest();
