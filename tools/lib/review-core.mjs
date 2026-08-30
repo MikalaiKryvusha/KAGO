@@ -89,6 +89,14 @@ const RE_HRULE = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
 // and in the field two options out of three silently did not show under a green counting check.
 const RE_OPTION_START = /^\s*[-*]?\s*\*\*\s*([A-Za-zА-Яа-я])(?!\p{L})/u;
 
+// `bugs/71`: the SAME letter, in the one place RE_OPTION_START deliberately does not look — the
+// first cell of a table row. This is not a second legal shape for a variant (step 4 of that fix
+// plan refuses to teach the parser tables); it is the EVIDENCE that somebody wrote variants in a
+// shape the page cannot render. Lives here, next to the regex it mirrors, because the guard
+// (`questions-guard` G12a) and the raise gate (`answerabilityRefusals`) must never drift apart —
+// one fact, one place.
+const RE_OPTION_IN_CELL = /^\s*\|\s*\*\*\s*([A-Za-zА-Яа-я])(?!\p{L})/u;
+
 // The answer field, in either working language. Rule 2: a field labelled as a COUNTER-question is
 // not an answer — those labels are listed separately and excluded.
 const RE_ANSWER_FIELD = /^\s*\*\*\s*(Ответ|Answer)\s*:?\s*\*\*\s*:?\s*(.*)$/iu;
@@ -332,6 +340,30 @@ export function isPlaceholderAnswer(text) {
   return true;
 }
 
+/**
+ * THE LETTERS THE OWNER WAS SUPPOSED TO SEE AND WILL NOT — `bugs/71`, the evidence half.
+ *
+ * Returns the DISTINCT variant letters found in table cells inside a question's body, sorted. An
+ * empty array means there is no evidence that anything was lost — a question with no options is a
+ * perfectly legal free-text question, and that is the whole reason the original defect was silent.
+ *
+ * The caller decides what to do with the evidence; both callers demand **TWO different letters**
+ * before acting, and that boundary is G9, not timidity: a single `**A**` legitimately lives in
+ * prose referring to an earlier answer («владелец выбрал **A**»), and a guard that fires on the
+ * states the work legitimately passes through is describing an assumption, not catching a defect.
+ *
+ * [TESTED: 2026-08-30 · red on `interviews/018` @ 666e17c through both callers — the guard's G12a
+ *  block and the raise gate's «варианты-таблица» block in tools/verify-review-contour.mjs.]
+ */
+export function unreachableVariantLetters(q) {
+  const letters = new Set();
+  for (const line of q.body ?? []) {
+    const m = RE_OPTION_IN_CELL.exec(line);
+    if (m) letters.add(m[1].toUpperCase());
+  }
+  return [...letters].sort();
+}
+
 export function answerabilityRefusals(doc) {
   const out = [];
   if (!doc.questions.length) {
@@ -361,6 +393,30 @@ export function answerabilityRefusals(doc) {
         why: 'контур считает такой вопрос ОТВЕЧЕННЫМ и покажет его владельцу закрытым — ровно то, '
           + 'что случилось 14 августа (`bugs/04`): он увидел отвеченным то, чего не отвечал',
         fix: 'очистить слот до «**Ответ:**» — подсказку владельцу класть в текст вопроса, не в слот ответа',
+      });
+    }
+    // `bugs/71` шаг 3 — ТРЕТЬЯ форма «нечем ответить», и она добралась сюда позже двух первых,
+    // потому что стоила владельцу вечера прежде, чем была названа. 30 августа `interviews/018`
+    // нёс четыре варианта СТРОКАМИ ТАБЛИЦЫ; страница показала владельцу поле для текста, он
+    // ответил «Не понимаю вопрос…», а расписка сохранила `choice: null`. Ворота молчали: вопрос
+    // разобран, слот ответа на месте, заглушки нет — по всем прежним меркам документ отвечаем.
+    //
+    // Почему это место, а не только сторож (`questions-guard` G12a): сторож судит, когда его
+    // кто-то запускает, а подъём происходит КАЖДЫЙ раз. Отказ здесь приходит агенту до звонка —
+    // в этом весь смысл ворот `bugs/41`, и цена ошибки прежняя: одно лишнее сообщение агенту
+    // против вечера владельца перед страницей, которой нельзя воспользоваться.
+    //
+    // Ветка «ноль ВОПРОСОВ» (G12b) сюда не добавлена намеренно: её несёт первый отказ этой же
+    // функции с 23 августа — документ без разобранных вопросов не поднимается вовсе.
+    const unreachable = q.options.length === 0 ? unreachableVariantLetters(q) : [];
+    if (unreachable.length >= 2) {
+      out.push({
+        where: `${doc.file} → ${q.id}`,
+        what: `варианты есть, но контуру они не видны — разобрано 0, а в теле ячейки «**${unreachable[0]}**» (${unreachable.join(', ')})`,
+        why: 'владельцу нечего нажать: страница покажет поле для текста вместо кнопок, и его выбор '
+          + 'не станет записанным `choice` — ровно то, что случилось 30 августа (`bugs/71`)',
+        fix: 'переписать варианты строками списка — «- **A. …**» — а НЕ учить разбор таблицам: '
+          + 'вторая законная форма одного понятия это пара «истина ↔ зеркало» внутри формата',
       });
     }
   }

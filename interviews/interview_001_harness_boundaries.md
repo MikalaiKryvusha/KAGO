@@ -91,7 +91,7 @@ TimeSpy и SpeedWay, 20 циклов. Прогонять 3DMark **из скри�
 - **C.** Считать CUDA Toolkit жёстким требованием: без него KAGO не запускается вообще.
 - **D.** Свой вариант.
 
-<!-- owner-review:target plans/02_epic01_phase1_harness_and_baseline.md -->
+<!-- owner-review:target plans/02_DONE_epic01_phase1_harness_and_baseline.md -->
 **Ответ:** B
 <!-- owner-review:answer at="2026-08-09T23:23:45+03:00" by="Mikalai Kryvusha" -->
 

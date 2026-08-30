@@ -1667,13 +1667,21 @@ function collectDocs(opts) {
 }
 
 /**
- * THE GATE OF `bugs/41` — the page is not raised over a document the owner cannot answer on.
+ * THE GATE OF `bugs/41` — the page is not raised over a document the owner cannot USE.
  *
  * On 2026-08-23 the contour called the owner to a page carrying two documents, and BOTH of his
  * answers had nowhere to land: one interview had no `**Ответ:**` fields, the other no numbered
  * question heading and therefore no input at all. Every refusal was truthful and every one of them
  * arrived AFTER the call, at the human. This turns the same two checks around: they run before the
  * beep, they name the document, the address and the repair, and the run STOPS.
+ *
+ * 🆕 A THIRD FORM JOINED THEM ON 2026-08-30 (`bugs/71`, step 3 of its fix plan), and it cost the
+ * same currency to find: `interviews/018` carried four variants as TABLE ROWS, the parser saw
+ * none, and the owner was shown a text box where four buttons belonged. Nothing was missing by
+ * the old measures — the question parsed, the slot was there — so the gate stayed silent and the
+ * receipt kept `choice: null`. «Нечем ответить» and «нечего нажать» are one class: a page the
+ * owner cannot use. The check itself lives with the parser (`review-core.answerabilityRefusals`),
+ * one place for all three forms.
  *
  * No `--force`. A hatch here is the hole through which this class returns — and the cost of being
  * wrong is one more chat message to the owner, while the cost of the hatch is his time in front of
@@ -1698,7 +1706,7 @@ function refuseUnanswerable(docs) {
     for (const r of core.answerabilityRefusals(d.doc)) refusals.push({ name: d.name, ...r });
   }
   if (!refusals.length) return;
-  const lines = ['СТРАНИЦА НЕ ПОДНЯТА: владельцу нечем было бы ответить (bugs/41).', ''];
+  const lines = ['СТРАНИЦА НЕ ПОДНЯТА: владельцу нечем было бы ответить или нечего нажать (bugs/41 · bugs/71).', ''];
   for (const r of refusals) {
     lines.push('  ' + (r.where && r.where.includes('→') ? r.name + ' ' + r.where.slice(r.where.indexOf('→')) : r.name) + ' — ' + r.what);
     lines.push('    почему: ' + r.why);

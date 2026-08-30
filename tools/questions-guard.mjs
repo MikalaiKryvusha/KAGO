@@ -35,7 +35,7 @@ import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSy
 import { resolve, relative, dirname, basename, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalize, listInterviews, humanTime, isoLocal } from './lib/review-core.mjs';
+import { normalize, listInterviews, humanTime, isoLocal, unreachableVariantLetters } from './lib/review-core.mjs';
 
 // =================================================================================================
 // 0. Layout
@@ -511,8 +511,11 @@ export function checkOptionCounts(interviews, root = ROOT) {
 // 8a. AXIS 5 — ВЛАДЕЛЬЦУ НЕЧЕГО НАЖАТЬ (G12), `bugs/71`
 // =================================================================================================
 
-/** Ячейка таблицы, начинающаяся с `**A**` — та же буква, что ищет разбор, но там, где он не смотрит. */
-const RE_OPTION_IN_CELL = /^\s*\|\s*\*\*\s*([A-Za-zА-Яа-я])(?!\p{L})/u;
+// Улику «варианты написаны ячейками таблицы» этот сторож БОЛЬШЕ НЕ ДЕРЖИТ У СЕБЯ: она уехала в
+// ядро разбора (`review-core.unreachableVariantLetters`), потому что с 30 августа у неё ДВА
+// потребителя — эта ось и отказ ПОДЪЁМА (`bugs/71` шаг 3). Две копии одного распознавания
+// разошлись бы молча и ровно в тот день, когда одна из них понадобилась бы: один факт живёт в
+// одном месте, и это место — рядом с регулярным выражением, которое улика зеркалит.
 /** Слот ответа. Его ставят только там, где спрашивают, — значит вопрос ЗАДУМАН. */
 const RE_ANSWER_SLOT = /^\s*\*\*\s*Ответ\s*:?\s*\*\*|owner-review:answer/u;
 
@@ -582,16 +585,12 @@ export function checkUnreachableChoices(interviews, root = ROOT) {
     // G12a — вопрос за вопросом: вариантов ноль, а улики вариантов в теле есть.
     for (const q of doc.questions) {
       if (q.options.length > 0) continue;
-      const letters = new Set();
-      for (const line of q.body ?? []) {
-        const m = RE_OPTION_IN_CELL.exec(line);
-        if (m) letters.add(m[1].toUpperCase());
-      }
-      if (letters.size < 2) continue;            // одна буква — это проза, а не список вариантов (G9)
+      const letters = unreachableVariantLetters(q);
+      if (letters.length < 2) continue;          // одна буква — это проза, а не список вариантов (G9)
       findings.push({
         axis: 'G12', file: rel, line: locateHeadingLine(lines, q.heading), text: q.heading,
-        why: `${q.id}: разобрано вариантов 0, а в теле ${letters.size} ячейк(и) таблицы вида «**A**» `
-          + `(${[...letters].sort().join(', ')}) — владелец увидит поле для текста вместо кнопок. `
+        why: `${q.id}: разобрано вариантов 0, а в теле ${letters.length} ячейк(и) таблицы вида «**A**» `
+          + `(${letters.join(', ')}) — владелец увидит поле для текста вместо кнопок. `
           + 'Варианты пишутся строками списка: «- **A. …**»',
       });
     }
