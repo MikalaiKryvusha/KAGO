@@ -600,6 +600,66 @@ export const SHORT_PROBE = Object.freeze([
  *  the sampler, the rollback — is proved only to the extent phase 5 proved it; what these blocks
  *  prove is the DECISION, which is this module's whole job.]
  */
+/**
+ * НАКОПИТЕЛЬ ПОДСТОЕВ — шесть предупреждений обязаны сложиться в решение (`bugs/80`).
+ *
+ * 30 августа оракул увидел подстой ПЯТЬ раз и ни разу не имел права ни на что повлиять: каждый
+ * обрабатывался поодиночке и забывался, и шесть сигналов отличались от одного только числом строк
+ * в логе. Через полосу после них машина умерла.
+ *
+ * ПОРОГ ВЫВЕДЕН ИЗ АРХИВА, А НЕ ИЗ ГОЛОВЫ. `runs/sweep/journal.jsonl`, 1638 строк за всю историю:
+ * подстоев РОВНО ПЯТЬ, и все пять — 2026-08-30, в день смерти машины. На каждом здоровом прогоне
+ * архива их НОЛЬ. Значит любой порог ≥ 2 лежит выше всей здоровой истории; взято ТРИ — два подстоя
+ * прощаются, потому что владелец прямо запретил лечить это строгостью («сторож должен не ронять
+ * инструмент, а подсказывать»), и всё равно полоса встаёт вдвое раньше шести.
+ *
+ * ДВА КЛАССА, И ЭТО ВТОРАЯ ПОЛОВИНА ПОЧИНКИ (`bugs/80` Д2). Подстой при глубине менее 50 мВ от
+ * стока — сообщение о МАШИНЕ, а не о крае точки: 30 августа два таких случая (1035 мВ при стоке
+ * 1060 и 1020 при 1040) были закрыты тем же способом, что подстой на −165 мВ. Мелкий счётчик
+ * тяжелее: у него порог ДВА, потому что подстой у самого стока не объясняется андервольтом вовсе.
+ *
+ * @fork stall-accumulator-threshold
+ * OPTIONS:  порог 2 · порог 3 · порог 5 · без порога, только отчёт
+ * COST:     полоса идёт дальше по больной машине (30.08 — зависание) либо встаёт на здоровой
+ * RECON:    архив `runs/sweep/journal.jsonl` — 5 подстоев за всю историю, все в день смерти,
+ *           на здоровых прогонах ноль. Веб-разведки о порогах накопителей НЕ проводилось
+ * DECIDED:  3 подряд по прогону (2 для подстоев у стока). Выше всей здоровой истории архива,
+ *           вдвое раньше шести, и два подстоя прощаются по запрету лечить строгостью
+ */
+export const STALL_LEDGER = { runLimit: 3, nearStockLimit: 2, nearStockDepthMv: 50 };
+
+/**
+ * Решение накопителя по списку подстоев прогона. Чистая функция — доказуема без карты и без
+ * прогона, и обе её стороны обязаны быть проверены (EXP-0194: сторож, доказанный в одну сторону,
+ * это стена).
+ *
+ * @param {Array<{frequencyMhz:number, depthMv:number|null}>} stalls — подстои прогона по порядку
+ * @returns {{stop:boolean, why:string|null, count:number, nearStock:number}}
+ */
+export function stallLedgerVerdict(stalls, limits = STALL_LEDGER) {
+  const list = Array.isArray(stalls) ? stalls : [];
+  const nearStock = list.filter((s) => Number.isFinite(s?.depthMv) && s.depthMv < limits.nearStockDepthMv);
+  if (nearStock.length >= limits.nearStockLimit) {
+    return {
+      stop: true, count: list.length, nearStock: nearStock.length,
+      why: `МАШИНА ПОДСТАИВАЕТ У САМОГО СТОКА ${nearStock.length} раз(а) (глубина < ${limits.nearStockDepthMv} мВ: `
+        + `${nearStock.map((s) => `${s.frequencyMhz} МГц на −${s.depthMv} мВ`).join(' · ')}). Это сообщение о `
+        + 'ЗДОРОВЬЕ МАШИНЫ, а не о крае точки — андервольтом такой подстой не объясняется. '
+        + 'Полоса остановлена, зову владельца (bugs/80 Д2)',
+    };
+  }
+  if (list.length >= limits.runLimit) {
+    return {
+      stop: true, count: list.length, nearStock: nearStock.length,
+      why: `ПОДСТОЕВ ЗА ПРОГОН ${list.length} при пороге ${limits.runLimit} `
+        + `(${list.map((s) => `${s.frequencyMhz} МГц`).join(' · ')}). За всю историю архива здоровые `
+        + 'прогоны давали НОЛЬ подстоев; накопление — это решение, а не строка в журнале. '
+        + 'Полоса остановлена, зову владельца (bugs/80 Д1)',
+    };
+  }
+  return { stop: false, why: null, count: list.length, nearStock: nearStock.length };
+}
+
 export async function runRung({
   points = [],
   clockMhz = null,
@@ -1259,6 +1319,9 @@ export async function runRung({
   // запись края: глубина обороны, а не первый рубеж.
   if (pulseWindowFn) {
     const pw = pulseWindowFn({ fromMs: burnStartedMs, toMs: Date.now() });
+    // Глубина ОТ СТОКА нужна накопителю (`bugs/80` Д2): подстой у самого стока — находка о МАШИНЕ,
+    // а не о свойстве точки, и путать их нельзя. `depthMv` приходит параметром — считать нечего.
+    record.stallDepthMv = Number.isFinite(depthMv) ? depthMv : null;
     const stallLimitMs = config.PULSE_STALL_MS ?? Infinity;
     if (pw?.observed === true && Number.isFinite(pw.maxGapMs) && pw.maxGapMs > stallLimitMs) {
       record.verdict = config.VERDICT.HUNG;
@@ -3268,6 +3331,9 @@ export async function sweepRange({
     closedOutsideBand: 0,
     hung: resume.hung ?? [],
     blocked: resume.blocked ?? [],
+    // ПОДСТОИ ПРОГОНА — накопитель `bugs/80`. Список, а не счётчик: решение принимает НАКОПЛЕНИЕ,
+    // и в отчёте их надо ВИДЕТЬ, а не считать грепом по логу (Д3 тикета).
+    stalls: [],
     // Every floor this journal knows, in the report so it lands in the run's own summary rather than
     // only in the event stream a watcher may not have been open for.
     hangFloors: [...hangFloorsByMhz].map(([mhz, f]) => ({ frequencyMhz: mhz, voltageMv: f.voltageMv })),
@@ -3621,6 +3687,27 @@ export async function sweepRange({
         why: outcome.why,
       };
       report.skipped.push(note);
+      // ── НАКОПИТЕЛЬ ПОДСТОЕВ (`bugs/80`): шесть предупреждений обязаны сложиться в решение ──────
+      //
+      // 30 августа каждый подстой обрабатывался поодиночке и забывался: «ступень ПРОПУЩЕНА, полоса
+      // продолжается» × 5, а через полосу машина умерла. Одиночный подстой по-прежнему пропускает
+      // ступень — владелец запретил лечить это строгостью. Решение принимает НАКОПЛЕНИЕ.
+      if (outcome.outcome === 'hung' && outcome.decidedBy === 'пульс сэмплера') {
+        report.stalls.push({ frequencyMhz: g.topMhz, depthMv: outcome.stallDepthMv ?? null });
+        const led = stallLedgerVerdict(report.stalls);
+        if (led.stop) {
+          report.ok = false;
+          report.haltedBy = 'накопитель подстоев';
+          report.haltWhy = led.why;
+          say('stall-ledger-halt', `🔴 ПОЛОСА ОСТАНОВЛЕНА НАКОПИТЕЛЕМ: ${led.why}`,
+            { count: led.count, nearStock: led.nearStock, stalls: report.stalls });
+          break;
+        }
+        say('stall-counted',
+          `подстой ${led.count} из ${STALL_LEDGER.runLimit} (у стока ${led.nearStock} из ${STALL_LEDGER.nearStockLimit}) — `
+          + 'ступень пропущена, полоса продолжается; накопитель считает',
+          { count: led.count, nearStock: led.nearStock });
+      }
       say('frequency-skipped',
         `${g.topMhz} МГц ПРОПУЩЕНА (строка в документ не пишется), полоса продолжается: ${outcome.why}`,
         note);
@@ -5552,6 +5639,36 @@ export function selfTest() {
     bisectPlan(75, 150).every((m) => m > 75 && m < 150), true);
   ok('перевёрнутая вилка не уводит в бесконечный цикл', bisectPlan(150, 75), []);
   ok('вилка шириной в один шаг делить нечего', bisectPlan(75, 90), []);
+
+  // --- НАКОПИТЕЛЬ ПОДСТОЕВ (`bugs/80`): шесть предупреждений обязаны сложиться в решение.
+  //
+  // ОБЕ СТОРОНЫ ОБЯЗАТЕЛЬНЫ. Сторож, доказанный только в сторону «останавливает», — это стена
+  // (EXP-0194); сторож, доказанный только в сторону «молчит», — это украшение. Здесь проверены
+  // обе, и граница порога — с ДВУХ сторон, а не с одной.
+  const deep = (mhz) => ({ frequencyMhz: mhz, depthMv: 165 });
+  const nearStock = (mhz) => ({ frequencyMhz: mhz, depthMv: 25 });
+  ok('здоровый прогон: НОЛЬ подстоев — накопитель молчит',
+    stallLedgerVerdict([]).stop, false);
+  ok('один глубокий подстой — ступень пропущена, полоса идёт (владелец запретил лечить строгостью)',
+    stallLedgerVerdict([deep(2872)]).stop, false);
+  ok('ДВА глубоких подстоя — ещё не решение, порог 3 (граница снизу)',
+    stallLedgerVerdict([deep(2872), deep(2857)]).stop, false);
+  ok('ТРИ глубоких подстоя — ПОЛОСА ВСТАЁТ (граница сверху)',
+    stallLedgerVerdict([deep(2872), deep(2857), deep(2835)]).stop, true);
+  // Д2 тикета: подстой у самого стока — сообщение о МАШИНЕ, и он тяжелее. Реальные числа 30.08:
+  // 1035 мВ при стоке 1060 (−25) и 1020 при 1040 (−20). Оба были закрыты как «край точки».
+  ok('ОДИН подстой у стока — ещё не решение',
+    stallLedgerVerdict([nearStock(2872)]).stop, false);
+  ok('ДВА подстоя у стока — ВСТАЁТ РАНЬШЕ, чем по общему порогу: это про машину, не про точку',
+    stallLedgerVerdict([nearStock(2872), nearStock(2835)]).stop, true);
+  ok('ИСТОРИЧЕСКИЙ ВЕЧЕР 30.08 — шесть подстоев обязаны были остановить полосу',
+    stallLedgerVerdict([deep(2872), nearStock(2872), deep(2857), deep(2835), nearStock(2835)]).stop, true);
+  ok('останавливает ДВА подстоя у стока, а не пять любых — причина названа верно',
+    stallLedgerVerdict([deep(2872), nearStock(2872), deep(2857), deep(2835), nearStock(2835)]).why
+      .includes('У САМОГО СТОКА'), true);
+  ok('глубокие подстои НЕ считаются за подстои у стока',
+    stallLedgerVerdict([deep(2872), deep(2857)]).nearStock, 0);
+  ok('мусор вместо списка не роняет накопитель', stallLedgerVerdict(null).stop, false);
 
   // --- the search, driven by a scripted oracle
   const P = config.VERDICT.PASS;
