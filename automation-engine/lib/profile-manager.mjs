@@ -816,6 +816,75 @@ export async function apply(backend, profile, {
 }
 
 /**
+ * IS THE CARD AT FACTORY RIGHT NOW? — the judge, pure, over readings the caller took (`bugs/45`).
+ *
+ * WHY THIS EXISTS. The sweep probes the envelope, the clock ladder, the watch window, the watchdog's
+ * stale records and the journal — and never asked the one question every number it is about to take
+ * depends on. On 2026-08-23 the `⚖️ Optimised` profile was live on the card for a whole live run: the
+ * sweep read the RAISED curve and compared it against a document whose stock column was captured on
+ * the FACTORY curve, ~80 mV apart. R12 tripped and saved that run — but only because those offsets
+ * were large. **A SMALLER applied profile shifts the curve by a few MHz, R12 stays silent, and the
+ * sweep writes rows whose voltages were measured against a baseline the document does not describe.**
+ * Those rows would be perfectly well-formed and wrong — the `bugs/02` shape.
+ *
+ * TWO AXES, AND WHY EXACTLY THESE TWO. The curve's per-point offsets are what poisons the
+ * MEASUREMENT (every frequency→voltage pair is read off a table we did not mean to be reading); the
+ * power limit is what poisons the BURN (a card held at 250 W does not deliver what it delivers at
+ * 300). Both are read-only probes the caller already has in hand.
+ *
+ * WHAT IS DELIBERATELY NOT COVERED, said rather than left to be discovered: a clock LOCK (`-lgc`).
+ * `nvidia-smi` publishes no "am I locked" field — the project detects a lock only by the clock
+ * HOLDING STILL, which an idle card does anyway, so a probe for it would be a guess wearing a
+ * measurement's clothes (`PHILOSOPHY.md` → the three doors). It is also the axis least likely to
+ * bite: no shipped mode pins the clock (the owner's requirement), so a lock could only be a leftover
+ * from a measurement tool, and the sweep pins clocks itself below the ceiling floor.
+ *
+ * «COULD NOT LOOK» IS NOT «FOUND NOTHING» (the same rule `events` runs on): an unreadable axis
+ * returns `factory: null`, never a quiet `true`. A caller that cannot see the card's state must say
+ * so, not proceed as if the state were good.
+ *
+ * @param {object}  r
+ * @param {number}  r.powerLimitW    what the card reports now
+ * @param {number}  r.powerDefaultW  what the card calls its factory default
+ * @param {number}  r.curveNonZero   count of NON-ZERO per-point offsets in the curve control struct
+ * @param {string}  [r.curveWhy]     why the curve could not be read, when it could not
+ * @returns {{factory:boolean|null, parts:Array<{axis:string, factory:boolean|null, why:string}>, why:string}}
+ *
+ * [TESTED: 2026-08-30 · `profile-manager --selftest` — factory · a raised curve · a power limit ·
+ *  both · an unreadable curve; mutations EA-EC each reddening their own block. Pure function, no GPU.]
+ */
+export function factoryStateVerdict({
+  powerLimitW = null, powerDefaultW = null, curveNonZero = null, curveWhy = null,
+} = {}) {
+  const parts = [];
+
+  // --- the curve ------------------------------------------------------------------------------
+  if (Number.isFinite(curveNonZero)) {
+    parts.push(curveNonZero === 0
+      ? { axis: 'кривая', factory: true, why: 'ненулевых сдвигов 0 — кривая заводская' }
+      : { axis: 'кривая', factory: false, why: `на кривой ${curveNonZero} ненулевых сдвиг(ов) — применён профиль` });
+  } else {
+    parts.push({ axis: 'кривая', factory: null, why: `кривая НЕ ПРОЧИТАНА (${curveWhy ?? 'причина не названа'})` });
+  }
+
+  // --- the power limit ------------------------------------------------------------------------
+  if (Number.isFinite(powerLimitW) && Number.isFinite(powerDefaultW)) {
+    const off = Math.abs(powerLimitW - powerDefaultW) >= WATT_EPSILON;
+    parts.push(off
+      ? { axis: 'мощность', factory: false, why: `предел ${powerLimitW} Вт при заводских ${powerDefaultW} Вт` }
+      : { axis: 'мощность', factory: true, why: `предел ${powerLimitW} Вт — заводской` });
+  } else {
+    parts.push({ axis: 'мощность', factory: null, why: 'предел мощности НЕ ПРОЧИТАН' });
+  }
+
+  // A single unreadable axis makes the whole answer UNKNOWN even when the other says factory:
+  // "three quarters of the state is clean" is not the claim the caller needs.
+  const factory = parts.some((p) => p.factory === null) ? null : parts.every((p) => p.factory);
+  const why = parts.map((p) => p.why).join(' · ');
+  return { factory, parts, why };
+}
+
+/**
  * Return the card to factory. Always available, and it is what "the third shortcut" applies.
  *
  * `knownLockMhz` is what THIS process locked, when it knows: with it, release is PROVED (the clock
@@ -2138,6 +2207,66 @@ async function cmdSelftest() {
     const b = fakeBackend();
     const r = await resetToFactory(b, { timing: FAST });
     if (!r.steps.some((s) => s.includes('НЕ трогалась'))) return 'сброс промолчал о том, что кривую не трогал';
+    return null;
+  });
+
+  // ─── `bugs/45`: ЗАВОДСКОЕ СОСТОЯНИЕ КАРТЫ — СУДЬЯ, И ОН ЧИСТАЯ ФУНКЦИЯ ────────────────────────
+  //
+  // Фикстуры подобраны так, чтобы СЛОМАННЫЙ вариант давал ДРУГОЙ ответ, а не тот же самый
+  // (EXP-0176): у заводского случая обе оси заводские, у каждого дефектного — ровно одна ось не
+  // заводская, поэтому мутация, убирающая проверку одной оси, краснит свой блок и только свой.
+  // АДРЕСАТЫ МУТАЦИЙ: EA — убрать ветку кривой · EB — убрать ветку мощности ·
+  // EC — считать непрочитанную ось заводской (`factory: null` → `true`).
+
+  block('bugs/45: заводская карта — обе оси заводские, вердикт ЗАВОДСКАЯ', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 300, powerDefaultW: 300, curveNonZero: 0 });
+    if (v.factory !== true) return `заводская карта названа незаводской: ${v.why}`;
+    if (v.parts.length !== 2) return `осей должно быть две, а их ${v.parts.length}`;
+    return null;
+  });
+
+  block('bugs/45: ПОДНЯТАЯ КРИВАЯ при заводской мощности — вердикт НЕ заводская, и названа ось', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 300, powerDefaultW: 300, curveNonZero: 65 });
+    if (v.factory !== false) return `поднятая кривая пропущена как заводское состояние: ${v.why}`;
+    if (!/65/u.test(v.why)) return `отказ не назвал ЧИСЛО ненулевых сдвигов: ${v.why}`;
+    const curve = v.parts.find((p) => p.axis === 'кривая');
+    if (curve?.factory !== false) return 'ось кривой не названа незаводской';
+    if (v.parts.find((p) => p.axis === 'мощность')?.factory !== true) return 'ось мощности оболгана — она заводская';
+    return null;
+  });
+
+  block('bugs/45: ПОТОЛОК МОЩНОСТИ 250 при заводских 300 и чистой кривой — вердикт НЕ заводская', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 250, powerDefaultW: 300, curveNonZero: 0 });
+    if (v.factory !== false) return `применённый предел мощности пропущен: ${v.why}`;
+    if (!/250/u.test(v.why) || !/300/u.test(v.why)) return `отказ не назвал ОБА числа: ${v.why}`;
+    if (v.parts.find((p) => p.axis === 'кривая')?.factory !== true) return 'ось кривой оболгана — она заводская';
+    return null;
+  });
+
+  block('bugs/45: ровно тот случай 2026-08-23 — Optimised целиком: 250 Вт И 65 сдвигов', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 250, powerDefaultW: 300, curveNonZero: 65 });
+    if (v.factory !== false) return `состояние живого прогона 23.08 признано заводским: ${v.why}`;
+    if (v.parts.filter((p) => p.factory === false).length !== 2) return 'незаводскими названы не обе оси';
+    return null;
+  });
+
+  block('bugs/45: НЕПРОЧИТАННАЯ кривая — вердикт НЕИЗВЕСТНО, а не «заводская» («не смогли посмотреть» ≠ «не нашли»)', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 300, powerDefaultW: 300, curveNonZero: null, curveWhy: 'ClkVfPointsGetControl не разрешился' });
+    if (v.factory !== null) return `непрочитанная ось выдана за ответ: ${v.factory} (${v.why})`;
+    if (!/НЕ ПРОЧИТАНА/u.test(v.why)) return `вердикт не сказал, что смотреть не удалось: ${v.why}`;
+    if (!/не разрешился/u.test(v.why)) return `вердикт не донёс ПРИЧИНУ до вызывающего: ${v.why}`;
+    return null;
+  });
+
+  block('bugs/45: одна непрочитанная ось делает НЕИЗВЕСТНЫМ весь ответ, даже когда вторая ось грязная', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 250, powerDefaultW: 300, curveNonZero: null });
+    if (v.factory !== null) return `ответ выдан по половине состояния: ${v.factory}`;
+    return null;
+  });
+
+  block('bugs/45: допуск по ваттам тот же, что у сброса — 0,3 Вт дрожания не делают карту незаводской', async () => {
+    const v = factoryStateVerdict({ powerLimitW: 300.3, powerDefaultW: 300, curveNonZero: 0 });
+    if (v.factory !== true) return `дрожание телеметрии в ${WATT_EPSILON} Вт принято за применённый профиль: ${v.why}`;
     return null;
   });
 

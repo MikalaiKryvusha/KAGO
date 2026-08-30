@@ -1,6 +1,13 @@
 # Bug 45 — the sweep never checks that the card is at factory state, and measured against an applied profile
 
-**Status:** 🔴 OPEN — reproduced on the owner's card 2026-08-23 22:0x, first live run after the
+**Status:** 🔧 FIXED 2026-08-30 11:5x, OFFLINE-PROVED AND LIVE-PROVED ON THE POSITIVE BRANCH —
+awaiting one live refusal to be called DONE. The precondition stands before the band derivation and
+before the dry-run exit; the judge is mutation-proved three ways; the misnamed cause is fixed. What
+is NOT yet observed is the REFUSAL on a real applied profile — proving it would mean applying a
+profile to the owner's card, which is his state to change, not a measurement's convenience. It will
+be observed the next time a mode is live and a run is started; until then the negative branch rests
+on the fixtures. See «✅ The fix» below.
+**Was:** 🔴 OPEN — reproduced on the owner's card 2026-08-23 22:0x, first live run after the
 `bugs/42` fixes. **Nothing was written to the GPU**: the engine refused before the first burn.
 **Version/build:** `main` @ `d4fd39a` · **When/context:** `plans/32` step 3 — the live sweep of a
 single hole at 2775 MHz, which ended with coverage 0 of 1 and a refusal nobody expected
@@ -83,6 +90,55 @@ the record mentions.
 3. **Fix the misnamed cause** (§ «Why the guard's diagnosis was wrong»): when the refusal fires while
    the card is not at stock, the reason must say so instead of accusing the silicon.
 4. Guard for each, proved red by mutation.
+
+## ✅ The fix — 2026-08-30 11:5x, session 66
+
+**Item 1 — the precondition.** `profile-manager.factoryStateVerdict()` is a PURE judge over two
+readings the caller already holds; `engine.mjs` takes them through `factoryStateReadings()` and
+refuses with exit 2. Placed right after the clock-ladder check, i.e. **before the band derivation**
+— which matters more than it looks: the band is derived FROM THE LIVE CURVE, so on a raised card the
+sweep would have planned the wrong work before ever reaching a write.
+
+**Item 2 — the dry run.** Satisfied by placement rather than by a second check: the gate sits ABOVE
+the dry-run exit, so `--dry-run` refuses on the same state the live path refuses on. One computation,
+not a pair to watch (R16c).
+
+**Item 3 — the misnamed cause.** Two halves, and the first was already closed: `seedOutcome`
+distinguishes «the oracle judged and failed» (a finding about SILICON) from «the rung was never
+judged» (a finding about the WRITE PATH) since `plans/28`, 2026-08-25. The half still open was
+`planRung`'s serving-mismatch refusal, which offered exactly ONE explanation — «НЕМОНОТОННАЯ
+таблица» — for an observation with two. It now names both doors and says outright that it cannot
+tell which, with the probe command for the first. `planRung` is a pure function over the table and
+has no business claiming to know the card's state.
+
+**Item 4 — the guards.**
+
+| what | where | proved |
+|---|---|---|
+| the judge, five shapes + the watt tolerance | `profile-manager --selftest`, 55 → **62 blocks** | mutations **EA** (curve axis always factory) · **EB** (power axis never fires) · **EC** (unreadable counts as factory) — each reddening only its own blocks |
+| the WIRING — that the gate reads the fields the two probes actually return | `engine --selftest`, 381 → **387 blocks** | mutation **ED** (one probe field renamed) reddens exactly those 6 and nothing else |
+| the positive branch on real silicon | `--sweep --from 2400 --to 2380 --dry-run`, read-only | **«ЗАВОДСКОЕ СОСТОЯНИЕ КАРТЫ: подтверждено — ненулевых сдвигов 0 — кривая заводская · предел 300 Вт — заводской»**, exit 0 |
+
+**Why the wiring needed its own block, stated because it is the non-obvious half.** A renamed probe
+field does not produce a loud failure: it yields `undefined`, the judge honestly answers «НЕ
+ПРОЧИТАНО», and the sweep then refuses **every** run — including on a perfectly factory card. That is
+the guard-causes-the-regression trap the canon names three times (R12 · R13 · R17) and this project
+has fallen into twice. Worse, the five verdict blocks would have AGREED with each other under that
+mutation, because both sides read the same broken mapping — the EXP-0176 blindness. The block that
+actually catches it asserts the readings are NUMBERS, not verdicts.
+
+**What is deliberately NOT covered, and why.** A clock lock (`-lgc`): `nvidia-smi` publishes no
+"am I locked" field, and the project detects a lock only by the clock holding still — which an idle
+card does anyway. A probe for it would be a guess wearing a measurement's clothes (the three-doors
+rule). It is also the axis least likely to bite: no shipped mode pins the clock (the owner's
+requirement), so a lock could only be a leftover from a measurement tool.
+
+**Two field notes for the next session, both paid for during this fix.** The engine's pulse-fixture
+block resolves `benches/fixtures/...` against the **process CWD**, so a mutant run started from
+inside `automation-engine/` reddens it for a reason that has nothing to do with the mutation — run
+mutants of `engine.mjs` from the repository ROOT. And the first reading of that red was wrong
+(«the block is not copy-safe»); measuring an UNMUTATED copy is what corrected it, and cost one
+command.
 
 ## What this bug does NOT excuse
 

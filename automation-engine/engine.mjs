@@ -429,6 +429,32 @@ export function servingAfterRaise(points, deltaMhz, clockMhz) {
  *  wall as its own outcome, and the non-monotone refusal that names BOTH entries; mutations 34–35.
  *  **NOT TESTED on a live card.**]
  */
+/**
+ * WHAT THE GATE READS OFF THE TWO PROBES — one computation, two callers (`bugs/45`).
+ *
+ * Exists so the block that proves the gate is not a COPY of the gate's expression. The risk this
+ * closes is dull and expensive: the gate reads `pinCard.power.current`, and a probe whose shape
+ * drifts (or a caller reaching for `powerLimitW`, which `probeCard` does not have) hands the judge
+ * `undefined` — and the judge, correctly, answers «НЕ ПРОЧИТАН» and refuses every run. A gate that
+ * refuses on the NORMAL state is the trap the canon names three times (R12 · R13 · R17) and this
+ * project has fallen into twice, so the mapping gets a block instead of a comment.
+ *
+ * @param {object} pinCard  as returned by `profile-store.probeCard()`
+ * @param {object} ctl      as returned by `nvapi.readVfOffsets()`
+ *
+ * [TESTED: 2026-08-30 · `engine --selftest` — the factory pair passes, an applied profile refuses on
+ *  the named axis, an unreadable control struct is UNKNOWN; mutation ED. And LIVE, read-only, on the
+ *  owner's factory card the same day.]
+ */
+export function factoryStateReadings(pinCard, ctl) {
+  return {
+    powerLimitW: pinCard?.power?.current,
+    powerDefaultW: pinCard?.power?.default,
+    curveNonZero: ctl?.ok ? ctl.nonZero : null,
+    curveWhy: ctl?.ok ? null : (ctl?.why ?? (ctl?.status !== undefined ? `статус ${ctl.status}` : 'структура управления не прочитана')),
+  };
+}
+
 export function planRung({
   points = [],
   clockMhz = null,
@@ -466,9 +492,20 @@ export function planRung({
   if (serving.mv !== voltageMv) {
     return {
       ok: false, deltaMhz, entry, serving,
+      // ⚠️ ДВЕ ПРИЧИНЫ, И НАЗЫВАТЬ НАДО ОБЕ (`bugs/45`, пункт 3). Прежняя редакция предлагала ОДНО
+      // объяснение — «немонотонная таблица», то есть находку о КРЕМНИИ. Живой прогон 2026-08-23 дал
+      // ровно этот отказ по совсем другой причине: на карте стоял применённый профиль, движок читал
+      // ПОДНЯТУЮ кривую, и сводка объявила «монотонность на этом кремнии НАРУШЕНА» — утверждение,
+      // которого никто не мерил, с авторитетом остановленного прогона за спиной (EXP-0127). Гейт
+      // «карта заводская» теперь ловит этот случай ДО планирования, но `planRung` — чистая функция
+      // над таблицей и о состоянии карты знать не может; значит она обязана назвать обе двери, а не
+      // выбирать за читателя ту, которая звучит научнее.
       why: `СТУПЕНЬ НЕ ИЗМЕРЯЛА БЫ ТО, ЧТО ЗАКАЗАНО: при сдвиге ${deltaMhz} МГц частоту ${clockMhz} МГц `
         + `обслуживало бы ${serving.mv} мВ (запись ${serving.i}), а мерить заказано ${voltageMv} мВ `
-        + `(запись ${entry.i}). Такое возможно на НЕМОНОТОННОЙ таблице, и вердикт был бы о чужом напряжении`,
+        + `(запись ${entry.i}), и вердикт был бы о чужом напряжении. ДВЕ ВОЗМОЖНЫЕ ПРИЧИНЫ, и о том, `
+        + 'какая здесь, эта проверка судить не может: (1) на карте применён профиль, и мы читаем '
+        + 'ПОДНЯТУЮ кривую вместо заводской (проверить: npm run nvapi -- --control, ненулевых сдвигов '
+        + 'должно быть 0) — это НЕ находка о кремнии; (2) таблица действительно немонотонна',
     };
   }
 
@@ -8591,6 +8628,51 @@ export function selfTest() {
         [noWindow.viewers < 1, dead.viewers < 1], [true, true]);
     }
 
+    // ═══ ГЕЙТ «КАРТА ЗАВОДСКАЯ» (`bugs/45`) ═══════════════════════════════════════════════════════
+    // Судья живёт в `profile-manager` и доказан там мутациями EA-EC. Здесь доказывается ПРОВОДКА:
+    // что гейт снимает показания с ТЕХ ЖЕ полей, которые отдают два реальных щупа. Ошибка проводки
+    // не громкая — она делает `undefined`, судья честно отвечает «НЕ ПРОЧИТАН», и прогон отказывает
+    // ВСЕГДА, в том числе на нормальной заводской карте. Поэтому блок судит ПО ОБЕ СТОРОНЫ, как гейт
+    // безопасного режима ниже. АДРЕСАТ МУТАЦИИ ED: подменить имя поля в `factoryStateReadings`.
+    {
+      const pm = await import('./lib/profile-manager.mjs');
+      // Форма — та, что реально отдаёт `profile-store.probeCard()` и `nvapi.readVfOffsets()`.
+      const probeFactory = { power: { current: 300, default: 300, min: 250, max: 300 }, ladder: { ok: true } };
+      const probeApplied = { power: { current: 250, default: 300, min: 250, max: 300 }, ladder: { ok: true } };
+      const ctlClean = { ok: true, offsets: new Array(128).fill(0), nonZero: 0 };
+      const ctlRaised = { ok: true, offsets: new Array(128).fill(0), nonZero: 65 };
+      const ctlDead = { ok: false, why: 'ClkVfPointsGetControl не разрешился' };
+
+      const vFactory = pm.factoryStateVerdict(factoryStateReadings(probeFactory, ctlClean));
+      ok('ЗАВОДСКАЯ КАРТА → ворота ПРОПУСКАЮТ (сторож, краснящий на норме, будет снят руками — R12·R13·R17)',
+        vFactory.factory, true);
+
+      const vRaised = pm.factoryStateVerdict(factoryStateReadings(probeFactory, ctlRaised));
+      ok('ПОДНЯТАЯ КРИВАЯ при заводских ваттах → ОТКАЗ, и названа ось кривой',
+        [vRaised.factory, vRaised.parts.find((p) => p.axis === 'кривая')?.factory], [false, false]);
+
+      const vPl = pm.factoryStateVerdict(factoryStateReadings(probeApplied, ctlClean));
+      ok('ПРЕДЕЛ 250 при заводских 300 → ОТКАЗ, и оба числа доехали из щупа до вердикта',
+        [vPl.factory, /250/.test(vPl.why), /300/.test(vPl.why)], [false, true, true]);
+
+      // Ровно состояние живого прогона 2026-08-23: `Optimised` целиком.
+      ok('СОСТОЯНИЕ 23.08 (Optimised: 250 Вт И 65 сдвигов) → ОТКАЗ по ОБЕИМ осям',
+        pm.factoryStateVerdict(factoryStateReadings(probeApplied, ctlRaised)).parts.filter((p) => p.factory === false).length, 2);
+
+      const vDead = pm.factoryStateVerdict(factoryStateReadings(probeFactory, ctlDead));
+      ok('СТРУКТУРА УПРАВЛЕНИЯ НЕ ПРОЧИТАНА → НЕИЗВЕСТНО с причиной, а не тихое «заводская»',
+        [vDead.factory, /не разрешился/.test(vDead.why)], [null, true]);
+
+      // ⚠️ БЛОК, КОТОРЫЙ И ЛОВИТ ОПЕЧАТКУ В ИМЕНИ ПОЛЯ. Без него мутация ED прошла бы зелёной:
+      // подменённое имя даёт `undefined` ОБОИМ вызывающим одинаково, и все блоки выше согласились бы
+      // между собой на ответе «НЕ ПРОЧИТАНО» (та же слепота, что EXP-0176 — обе стороны врут вместе).
+      ok('щуп ДОЕХАЛ: заводская пара читается как ЧИСЛА, а не как «не прочитано»',
+        [factoryStateReadings(probeFactory, ctlClean).powerLimitW,
+          factoryStateReadings(probeFactory, ctlClean).powerDefaultW,
+          factoryStateReadings(probeFactory, ctlClean).curveNonZero],
+        [300, 300, 0]);
+    }
+
     // ═══ ГЕЙТ БЕЗОПАСНОГО РЕЖИМА ДИСКОВ (`plans/30` AC4 · AC5) ══════════════════════════════════════
     // Сторож судится ПО ОБЕ СТОРОНЫ: он обязан останавливать половину И обязан НЕ трогать штатные
     // состояния. Вторая половина важнее первой — сторож, краснеющий на нормальной работе, будет снят
@@ -9008,6 +9090,66 @@ async function mainSweep(argv, arg) {
     console.error(`ОШИБКА: лестница частот карты недоступна — ${pinCard.ladder?.why ?? 'не прочитана'}.`);
     console.error('        Закрепить частоту не на чем, а без закрепления прожиг попал бы не на ту частоту.');
     return 1;
+  }
+
+  // ─── ЗАВОДСКОЕ ЛИ СОСТОЯНИЕ КАРТЫ — ПРЕДУСЛОВИЕ, КОТОРОГО НЕ БЫЛО (`bugs/45`) ──────────────────
+  //
+  // 🔴 ЖИВОЙ ПРОГОН 2026-08-23: профиль `⚖️ Optimised` стоял на карте ВСЮ развёртку. Движок прочитал
+  // ПОДНЯТУЮ кривую и сверял её с документом, чья стоковая колонка снята на ЗАВОДСКОЙ — расхождение
+  // ~80 мВ. R12 тогда сработал и спас прогон, но спас его СЛУЧАЙНО: сдвиги были крупные. Профиль
+  // помельче двигает кривую на несколько мегагерц, R12 молчит, и в документ ложатся строки, чьи
+  // напряжения измерены против базы, которую документ не описывает. Такие строки безупречны по форме
+  // и неверны по существу — форма `bugs/02`, самая дорогая в этом проекте.
+  //
+  // ⚠️ ПРОВЕРКА СТОИТ ЗДЕСЬ, ДО ВЫВОДА ПОЛОСЫ И ДО ВЫХОДА СУХОГО ПРОГОНА, и это не придирка: полосу
+  // движок выводит ИЗ ЖИВОЙ КРИВОЙ (`points`), то есть на поднятой карте он спланировал бы не ту
+  // работу. Сухой прогон, отчитавшийся кодом 0 о полосе, которую живой путь пройти не может, — это
+  // ровно болезнь `bugs/09`: план, отмывающий догадку в разрешение.
+  //
+  // 🔴 И МЫ НЕ СБРАСЫВАЕМ КАРТУ САМИ — ЭТО РЕШЕНИЕ ВЛАДЕЛЬЦА, А НЕ ПОБОЧНЫЙ ЭФФЕКТ ЗАМЕРА.
+  // Канон (`AGENT_GUIDE.md` → правило машины владельца) прямо разводит «занимать машину» и «менять её
+  // состояние». Применённый профиль — его состояние; «замеру так удобнее» авторитетом не является.
+  // Это ИМЕННО ТОТ случай, который EXP-0084 выносит в исключение из своего же правила «предусловие,
+  // выполнимое самим процессом, не требуют от человека»: там речь о состояниях, которыми не владеет
+  // никто, а этим владеет владелец. Поэтому — отказ с командой в руки, а не тихий сброс.
+  //
+  // Двойник пропускается: у него своё состояние на каждую сборку, живой карты он не касается вовсе
+  // (I1), а `probeCard` двойника не несёт заводского предела мощности как факта кремния.
+  if (twin) {
+    console.log('ЗАВОДСКОЕ СОСТОЯНИЕ: ПРОПУСК — двойник собирается заново каждый прогон и живой карты не касается (I1)');
+  } else {
+    const pm = await import('./lib/profile-manager.mjs');
+    const factoryState = pm.factoryStateVerdict(
+      factoryStateReadings(pinCard, nvapi.readVfOffsets(nv, handle)));
+    if (factoryState.factory !== true) {
+      const unknown = factoryState.factory === null;
+      console.error(unknown
+        ? 'ОТКАЗ: СОСТОЯНИЕ КАРТЫ НЕ ПРОЧИТАНО, а развёртка мерит против него.'
+        : 'ОТКАЗ: КАРТА НЕ В ЗАВОДСКОМ СОСТОЯНИИ, а развёртка мерит против заводской кривой.');
+      for (const p of factoryState.parts) {
+        console.error(`       ${p.factory === true ? '✓' : p.factory === null ? '?' : '✗'} ${p.axis}: ${p.why}`);
+      }
+      console.error('');
+      if (unknown) {
+        console.error('       «Не смогли посмотреть» — это не «ничего не нашли». Прогон против состояния,');
+        console.error('       которое никто не может назвать, дал бы правдоподобные и неверные строки.');
+      } else {
+        console.error('       Документ кривой хранит стоковые напряжения, снятые на ЗАВОДСКОЙ карте.');
+        console.error('       На применённом профиле каждая пара «частота → напряжение» будет измерена');
+        console.error('       против другой базы, и строки лягут в документ безупречными по форме (bugs/45).');
+      }
+      console.error('');
+      console.error('       ЧТО СДЕЛАТЬ — снять профиль, и это ВАШЕ решение, не моё:');
+      console.error('         ярлык  🔄 Stock Default   (то же, что делает трей пунктом Exit)');
+      console.error('         либо   npm run profile -- --reset');
+      console.error('       Развёртка карту сама не сбрасывает: применённый профиль — состояние вашей');
+      console.error('       машины, и снимать его решаете вы (правило машины владельца).');
+      console.error('');
+      console.error('       План прогона без карты не читается: полоса выводится из ЖИВОЙ кривой,');
+      console.error('       поэтому --dry-run на применённом профиле спланировал бы не ту работу.');
+      return 2;
+    }
+    console.log(`ЗАВОДСКОЕ СОСТОЯНИЕ КАРТЫ: подтверждено — ${factoryState.why}`);
   }
   // ONE SOURCE FOR THE ENVELOPE — the curve document's own `card.maxGraphicsMhz`, which is the very
   // field `curve-store`'s R13 check reads. Deriving it a second time from the clock ladder here would
