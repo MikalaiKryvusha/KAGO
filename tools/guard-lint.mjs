@@ -117,6 +117,37 @@ export const MECHANISMS = ['М1', 'М2', 'М3'];
 export const MECH_TARGET = { neg: 50, pos: 50 };
 
 /**
+ * ЛИНЕЙКА B — «по авторскому блоку»: ось принадлежит тому механизму, РАДИ КОТОРОГО заведена.
+ *
+ * Решение владельца 2026-08-30: печатать ОБЕ линейки, а порог брать по строгой A (по полю, которое
+ * фикстура ломает). Линейка B грубее — целая ось уезжает одному механизму, даже если отдельные её
+ * фикстуры трогают чужое поле, — поэтому она справочная. Обе рядом, чтобы спор «а по какой мы
+ * считаем» не возник ни в одной следующей сессии: он уже стоил одной эстафеты с числами, которые
+ * нечем было перепроверить (`plans/77` §1, EXP-0201).
+ *
+ * ⚠️ Ось, которой здесь нет, роняет самопроверку. Молчаливый недосчёт линейки B — это ровно тот
+ * непроверяемый доклад о покрытии, против которого написан весь эпик.
+ */
+export const AXIS_AUTHOR = {
+  // М1 — декларация угрозы: наличие и честность THREAT · PROVED-AGAINST · GAP, форма блока.
+  'A-missing-guard': 'М1', 'C-empty': 'М1', 'D-evasion-gap': 'М1', 'E-duplicate': 'М1',
+  'F-bare-marker': 'М1', 'I-form': 'М1', 'J-evasion-other': 'М1', 'K-historic': 'М1',
+  'L-multiple': 'М1', 'M-in-context': 'М1',
+  'P1-style': 'М1', 'P2-value': 'М1', 'P4-multiline': 'М1', 'P5-order': 'М1', 'P5-extra': 'М1',
+  'P6-name': 'М1', 'P7-encoding': 'М1', 'P8-neighbours': 'М1', 'P9-nonmarker': 'М1',
+  'P10-repaired': 'М1',
+  // М2 — наблюдение на реальном пути: ON-REAL-PATH.
+  'N-unauditable': 'М2', 'O-partial-date': 'М2', 'Q-near-notyet': 'М2', 'R-numbers-no-date': 'М2',
+  'S-historic-m2': 'М2', 'T-lookalike': 'М2', 'U-reference': 'М2', 'V-dismissal': 'М2',
+  'W-impossible-day': 'М2', 'X-future-date': 'М2', 'Y-frequency': 'М2',
+  'P11-notyet': 'М2', 'P12-date': 'М2', 'P13-forensic-exempt': 'М2', 'P14-continuation': 'М2',
+  'P15-date-form': 'М2', 'P16-date-boundary': 'М2', 'P17-timezone': 'М2', 'P18-long-value': 'М2',
+  'P19-multi-date': 'М2', 'P20-negative-outcome': 'М2',
+  // М3 — долговечность улики: EXPLAINS · DURABLE-AT.
+  'B-missing-forensic': 'М3', 'G-late-durable': 'М3', 'H-case': 'М3', 'P3-durable': 'М3',
+};
+
+/**
  * Значения `DURABLE-AT`, означающие «улика становится долговечной только при штатном конце».
  * Ровно это убило разбор 30 августа: кольцо судьи сбрасывалось на трипе и при закрытии, а зависание
  * не даёт ни того, ни другого.
@@ -768,6 +799,17 @@ export function selftest() {
     byMech[mech].axes.add(c.axis);
   }
 
+  // ── ЛИНЕЙКА B (справочная, решение владельца 2026-08-30): счёт по авторскому блоку оси ────────
+  const byAuthor = {};
+  for (const m of MECHANISMS) byAuthor[m] = { neg: 0, pos: 0 };
+  for (const [list, key] of [[neg, 'neg'], [pos, 'pos']]) {
+    for (const c of list) {
+      const m = AXIS_AUTHOR[c.axis];
+      if (!m) { fails.push(`ОСЬ БЕЗ АВТОРСКОГО МЕХАНИЗМА [${c.axis}] — добавь её в AXIS_AUTHOR`); continue; }
+      byAuthor[m][key] += 1;
+    }
+  }
+
   const negAxes = new Set(neg.map((c) => c.axis));
   const posAxes = new Set(pos.map((c) => c.axis));
   const rules = new Set();
@@ -778,6 +820,9 @@ export function selftest() {
       neg: byMech[m].neg, pos: byMech[m].pos, axes: byMech[m].axes.size,
       gapNeg: Math.max(0, MECH_TARGET.neg - byMech[m].neg),
       gapPos: Math.max(0, MECH_TARGET.pos - byMech[m].pos),
+      // Линейка B — справочная: порога не несёт, разрыва не считает.
+      authorNeg: byAuthor[m].neg, authorPos: byAuthor[m].pos,
+      authorTotal: byAuthor[m].neg + byAuthor[m].pos,
     };
   }
   return {
@@ -852,15 +897,20 @@ function main(argv) {
     console.log(`  правил покрыто: ${r.rulesCovered.join(' · ')}`);
     // ДОЛЯ КАЖДОГО МЕХАНИЗМА — прибор для E76-AC1. Порог владельца: 50 негативных и 50 позитивных
     // на механизм. Разрыв печатается ЧИСЛОМ: «недобрано» видно без арифметики читающего.
-    console.log(`  по механизмам эпика 76 (порог владельца ${MECH_TARGET.neg}− / ${MECH_TARGET.pos}+ на каждый):`);
+    // ДВЕ ЛИНЕЙКИ РЯДОМ — решение владельца 2026-08-30. Порог берётся по СТРОГОЙ A (по полю,
+    // которое фикстура ломает); B (по авторской оси) стоит справочно, чтобы спор «а по какой мы
+    // считаем» не возник ни в одной следующей сессии — он уже стоил эстафеты с непроверяемыми
+    // числами (EXP-0201).
+    console.log(`  по механизмам эпика 76 — ПОРОГ ПО ЛИНЕЙКЕ A (${MECH_TARGET.neg}− / ${MECH_TARGET.pos}+ на каждый):`);
     for (const m of MECHANISMS) {
       const x = r.mech[m];
       const gap = (x.gapNeg || x.gapPos)
         ? `🔴 недобрано ${x.gapNeg ? `${x.gapNeg} негативных` : ''}${x.gapNeg && x.gapPos ? ' и ' : ''}${x.gapPos ? `${x.gapPos} позитивных` : ''}`
         : '✅ порог взят';
-      console.log(`    ${m}: негативных ${String(x.neg).padStart(3)} · позитивных ${String(x.pos).padStart(3)} · осей ${String(x.axes).padStart(2)} — ${gap}`);
+      console.log(`    ${m}: A → негативных ${String(x.neg).padStart(3)} · позитивных ${String(x.pos).padStart(3)} · осей ${String(x.axes).padStart(2)} — ${gap}`);
+      console.log(`        B → негативных ${String(x.authorNeg).padStart(3)} · позитивных ${String(x.authorPos).padStart(3)} · всего ${String(x.authorTotal).padStart(3)} (справочно, порога не несёт)`);
     }
-    console.log(`    общих (разбор блока, механизму не засчитаны): позитивных ${r.shared.pos} · осей ${r.shared.axes}`);
+    console.log(`    общих у линейки A (разбор блока, механизму не засчитаны): позитивных ${r.shared.pos} · осей ${r.shared.axes}`);
     if (r.fails.length) {
       console.log(`ПРОВАЛ: ${r.fails.length}`);
       for (const f of r.fails) console.log(`   ✗ ${f}`);
