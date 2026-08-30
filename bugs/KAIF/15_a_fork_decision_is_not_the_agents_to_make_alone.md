@@ -12,7 +12,7 @@ kaif-fp: `PHILOSOPHY.md` три двери + `AGENT_GUIDE.md` границы а�
 > давать ИИ агенту авторитеты в области из сети на основе разведки - это КРАСНЫМ ЦВЕТОМ заводи к
 > KAIF тикетом»*
 
-**Delivered upstream:** NOT YET — awaiting the owner's word (outward action).
+**Delivered upstream:** ✅ **https://github.com/MikalaiKryvusha/KAIF/issues/36** — sent 2026-08-30 under the KAIF owner's standing authorization (`/report-bug` step 4), reinforced the same night by his explicit order: a KAIF defect goes to origin immediately, with no approval round.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.4 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0
