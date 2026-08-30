@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as core from './lib/review-core.mjs';
 import { repoFromTarget, sendUpstream } from './send-upstream.mjs';
-import { scanDocumentForOwnerQuestions } from './questions-guard.mjs';
+import { scanDocumentForOwnerQuestions, checkUnreachableChoices } from './questions-guard.mjs';
 // bugs/66: the ask block and the spoken phrase must come from ONE function; the blocks
 // below compare the two OUTPUTS against each other, never against a written constant.
 import { askFor, callPhrase, loadDoc } from './review.mjs';
@@ -839,6 +839,120 @@ block('GATE', 'an artifact approval survives the owner\'s next answer, and the r
   must(after.artifacts && after.artifacts.art1 && after.artifacts.art1.status === 'approved',
     `the owner's answer destroyed the artifact approval — the send gate can never pass again. Record now: ${tail(JSON.stringify(after), 240)}`);
   must(after.answers && after.answers.Q1, 'the answer itself did not survive the merge');
+});
+
+// ---------------------------------------------------------------------------------------------
+// bugs/71 — ВЛАДЕЛЬЦУ НЕЧЕГО НАЖАТЬ: ось G12 сторожа вопросов, обе ветки и обратная сторона.
+//
+// Оплачено ДВАЖДЫ за один день, 2026-08-30: интервью 018 ушло владельцу с вариантами-таблицей, и он
+// увидел поле для текста вместо кнопок (`choice: null`); в тот же день агент, ЗНАЯ про тикет, написал
+// интервью 020 с заголовком «## Вопрос Q1 — …», и разбор не увидел вопроса ВООБЩЕ.
+//
+// АДРЕСНОСТЬ МУТАЦИЙ ОБЪЯВЛЕНА ДО ПРОГОНА:
+//   мутант «снять ветку таблицы (RE_OPTION_IN_CELL)»        → краснеет РОВНО G12a;
+//   мутант «снять ветку слота ответа»                       → краснеет РОВНО G12b;
+//   мутант «убрать порог в две буквы (letters.size < 1)»    → краснеет РОВНО G12c;
+//   мутант «снять область statusIsWaiting»                  → краснеет РОВНО G12d;
+//   целый код                                               → 0 красных.
+// ---------------------------------------------------------------------------------------------
+
+/** Waiting document whose variants are TABLE ROWS — the shipped shape of interview 018. */
+function docWithTableVariants({ waiting = true } = {}) {
+  return [
+    '# Интервью 902 — варианты таблицей',
+    '',
+    '**Topic:** проверочный документ',
+    waiting ? '**Status:** 🔴 ждёт владельца' : '**Status:** ✅ ЗАКРЫТО 2026-08-01 — вариант A',
+    '',
+    '---',
+    '',
+    '## Вопрос 1. Чем закрыть развилку?',
+    '',
+    'Тело вопроса.',
+    '',
+    '| вариант | что получаем |',
+    '|---|---|',
+    '| **A** первый | что-то |',
+    '| **B** второй | что-то ещё |',
+    '',
+    '**Ответ:**',
+    '',
+  ].join(LF);
+}
+
+/** Waiting document with an answer slot whose question heading the parser cannot see. */
+function docWithUnparsableHeading() {
+  return [
+    '# Интервью 903 — заголовок, которого разбор не видит',
+    '',
+    '**Topic:** проверочный документ',
+    '**Status:** 🔴 ждёт владельца',
+    '',
+    '---',
+    '',
+    '## Вопрос Q1 — считать ли это вопросом?',
+    '',
+    'Тело вопроса.',
+    '',
+    '- **A. Первый вариант** — что-то',
+    '- **B. Второй вариант** — что-то ещё',
+    '',
+    '**Ответ:**',
+    '',
+  ].join(LF);
+}
+
+/** Run axis G12 over a directory of fixtures, the same way `npm run questions` does. */
+function g12(dir) {
+  return checkUnreachableChoices(core.listInterviews(dir), dir).findings;
+}
+
+block('G12a', 'варианты ТАБЛИЦЕЙ дают ноль кнопок — и сторож это НАЗЫВАЕТ (bugs/71)', async () => {
+  const dir = freshDir('g12a');
+  writeFileSync(join(dir, 'interview_902_table.md'), docWithTableVariants(), 'utf8');
+  const found = g12(dir);
+  must(found.length === 1,
+    `ожидалась ровно одна находка, получено ${found.length}: ${tail(JSON.stringify(found), 240)}`);
+  must(/разобрано вариантов 0/u.test(found[0].why),
+    `находка не про потерянные варианты: ${found[0].why}`);
+  must(/A, B/u.test(found[0].why),
+    `находка не называет БУКВЫ, которые владелец должен был увидеть: ${found[0].why}`);
+});
+
+block('G12b', 'слот ответа есть, а разобранных вопросов НОЛЬ — вопрос исчез бы молча (bugs/71)', async () => {
+  const dir = freshDir('g12b');
+  writeFileSync(join(dir, 'interview_903_heading.md'), docWithUnparsableHeading(), 'utf8');
+  // Сначала — САМ МЕХАНИЗМ: разбор действительно не видит этого заголовка, иначе блок ниже
+  // зеленел бы по чужой причине (EXP-0016).
+  const parsed = core.listInterviews(dir);
+  must(parsed.length === 1 && parsed[0].questions.length === 0,
+    `фикстура не воспроизводит дефект: разобрано вопросов ${parsed[0] ? parsed[0].questions.length : '—'}`);
+  const found = g12(dir);
+  must(found.length === 1, `ожидалась ровно одна находка, получено ${found.length}`);
+  must(/разобранных вопросов НОЛЬ/u.test(found[0].why), `находка не та: ${found[0].why}`);
+});
+
+block('G12c', 'ОДНА буква в прозе сторожа не поднимает — ложная тревога хуже пропуска (G9)', async () => {
+  const dir = freshDir('g12c');
+  const doc = [
+    '# Интервью 904 — одна буква в прозе',
+    '', '**Topic:** проверочный документ', '**Status:** 🔴 ждёт владельца', '', '---', '',
+    '## Вопрос 1. Свободный вопрос без вариантов?',
+    '', 'Владелец прежде выбрал вариант A, и это ссылка на прошлый ответ, а не список.', '',
+    '| поле | значение |', '|---|---|', '| **A** прежний ответ | принят |', '',
+    '**Ответ:**', '',
+  ].join(LF);
+  writeFileSync(join(dir, 'interview_904_prose.md'), doc, 'utf8');
+  must(g12(dir).length === 0,
+    'сторож поднялся на ОДНОЙ букве в прозе — это ровно тот ложный сигнал, что приучает не смотреть');
+});
+
+block('G12d', 'ЗАКРЫТОЕ интервью сторож не трогает — по нему всё равно нельзя действовать', async () => {
+  const dir = freshDir('g12d');
+  writeFileSync(join(dir, 'interview_905_closed.md'), docWithTableVariants({ waiting: false }), 'utf8');
+  must(g12(dir).length === 0,
+    'сторож нашёл дефект в ЗАКРЫТОМ интервью: закрытый оригинал не переписывают, значит находка '
+    + 'ложная по построению — и в первом прогоне она дала 23 таких на 19 документах');
 });
 
 // ---------------------------------------------------------------------------------------------

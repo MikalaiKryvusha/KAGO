@@ -7,11 +7,12 @@
 // tail of a plan are cheaper in the moment; a guard surfaced two questions nobody saw, hanging 5
 // and 13 days (`/owner-reviews` → rake 2).
 //
-// FOUR AXES, one run, one exit code:
+// FIVE AXES, one run, one exit code:
 //   1. G1  — a question addressed to the owner living OUTSIDE interviews/
 //   2. G3  — a document whose status still reads "waiting" while every question is answered
 //   3. I20 — the RETURN leg: an answered question whose declared target does not cite the interview
 //   4. G11 — the option-count cross-check across every live interview document
+//   5. G12 — the owner has nothing to click: options that did not parse, or a question that did not (bugs/71)
 //
 // Design constraints paid for in the field and obeyed here:
 //   G1  — TWO strong signs, never ten weak ones; exceptions explicit, with the reason on the line
@@ -506,6 +507,98 @@ export function checkOptionCounts(interviews, root = ROOT) {
   return { findings, checkedQuestions };
 }
 
+// =================================================================================================
+// 8a. AXIS 5 — ВЛАДЕЛЬЦУ НЕЧЕГО НАЖАТЬ (G12), `bugs/71`
+// =================================================================================================
+
+/** Ячейка таблицы, начинающаяся с `**A**` — та же буква, что ищет разбор, но там, где он не смотрит. */
+const RE_OPTION_IN_CELL = /^\s*\|\s*\*\*\s*([A-Za-zА-Яа-я])(?!\p{L})/u;
+/** Слот ответа. Его ставят только там, где спрашивают, — значит вопрос ЗАДУМАН. */
+const RE_ANSWER_SLOT = /^\s*\*\*\s*Ответ\s*:?\s*\*\*|owner-review:answer/u;
+
+/**
+ * ДВЕ ФОРМЫ ОДНОГО ОТКАЗА: документ выглядит как вопрос, а нажать владельцу нечего.
+ *
+ * ─── ПОЧЕМУ ЭТОГО НЕ ВИДИТ G11, И ЭТО НЕ ЕЁ ВИНА ─────────────────────────────────────────────────
+ *
+ * G11 сверяет ДВА СЧЁТЧИКА: строк-кандидатов в варианты и разобранных вариантов. Она отвечает на
+ * вопрос «не потерялся ли вариант по дороге». Когда варианты свёрстаны ТАБЛИЦЕЙ, кандидатов ноль и
+ * разобранных ноль — счётчики согласны, и G11 честно зелена. **Сторож, сверяющий два числа, слеп,
+ * когда оба нуля по одной причине** (`bugs/71`, семья [[EXP-0176]]).
+ *
+ * ─── ДВЕ ВЕТКИ, И ВТОРАЯ ХУЖЕ ПЕРВОЙ ─────────────────────────────────────────────────────────────
+ *
+ * **G12a — вопрос есть, вариантов ноль, а улики вариантов в теле ЕСТЬ.** Ровно `interviews/018`
+ * 30 августа: четыре варианта строками таблицы, на странице — поле для текста, ответ владельца
+ * `choice: null`.
+ *
+ * **G12b — слот ответа есть, а вопросов НОЛЬ.** Оплачено в тот же день второй раз: заголовок
+ * написан как «## Вопрос Q1 — …» вместо «## Q1. …», и разбор не увидел вопроса ВООБЩЕ. Это хуже
+ * первой ветки: при нуле вариантов владелец хотя бы знает, что его спрашивают, а при нуле вопросов
+ * контур докладывает «без ответа 0» и считает документ не ждущим владельца — вопрос исчезает молча.
+ *
+ * ─── ГРАНИЦЫ, ЧТОБЫ СТОРОЖ НЕ КРИЧАЛ ВПУСТУЮ (G9) ────────────────────────────────────────────────
+ *
+ * · В G12a нужно **ДВЕ РАЗНЫЕ буквы**: одиночное `**A**` законно живёт в прозе, ссылающейся на
+ *   прежний ответ («владелец выбрал **A**»), и одна буква сторожа не поднимает.
+ * · В G12b нужен слот ответа: документ БЕЗ вопросов и БЕЗ слота — это не сломанный вопрос, а
+ *   заметка, и трогать её нечего.
+ * · Лечение — переписать варианты строками, а НЕ учить разбор таблицам: вторая законная форма
+ *   одного понятия это пара «истина ↔ зеркало» внутри формата (`bugs/71`, шаг 4 плана).
+ *
+ * [NOT-TESTED] at birth — блоки G12a/G12b/G12c в `verify:contour` — это то, что переворачивает метку.
+ */
+export function checkUnreachableChoices(interviews, root = ROOT) {
+  const findings = [];
+  let checkedDocs = 0;
+  for (const doc of interviews) {
+    // ⚠️ ОБЛАСТЬ: ТОЛЬКО ТО, ЧТО ЕЩЁ ЖДЁТ ВЛАДЕЛЬЦА — и это не послабление, а G9.
+    //
+    // Первый прогон оси нашёл 23 находки в 19 документах, и они НАСТОЯЩИЕ: старые интервью
+    // (011 · 012 · 013 · 014 · 016 …) действительно вёрстаны таблицами, и владелец действительно
+    // отвечал на них ТЕКСТОМ, потому что кнопок ему не показывали. Но все они ЗАКРЫТЫ, а закрытый
+    // оригинал не переписывают (`AGENT_GUIDE.md`: «an original is not rewritten to match today's
+    // vocabulary»). **Находка, по которой никто не вправе действовать, — ложная тревога по
+    // построению**, и это первый принцип этого сторожа.
+    //
+    // Тот же приём, что у `EXCLUDED_FILES` выше, и по той же причине: ОБЛАСТЬ, а не список
+    // подавления — поддерживать нечего, и новый сломанный вопрос загорится сам.
+    if (!doc.statusIsWaiting) continue;
+    checkedDocs++;
+    const rel = relPath(root, doc.file);
+    let lines = [];
+    try { lines = normalize(readFileSync(doc.file, 'utf8')).split('\n'); } catch { lines = []; }
+
+    // G12b — документ целиком: слот ответа есть, разобранных вопросов ноль.
+    if (doc.questions.length === 0 && lines.some((l) => RE_ANSWER_SLOT.test(l))) {
+      findings.push({
+        axis: 'G12', file: rel, line: 1, text: `${rel}: слот ответа без вопроса`,
+        why: 'в документе есть слот ответа, а разобранных вопросов НОЛЬ — контур покажет владельцу '
+          + 'пустую страницу и посчитает документ не ждущим его. Заголовок вопроса пишется как «Q1. …»',
+      });
+      continue;                                  // тела вопросов нет — ветке G12a не с чем работать
+    }
+
+    // G12a — вопрос за вопросом: вариантов ноль, а улики вариантов в теле есть.
+    for (const q of doc.questions) {
+      if (q.options.length > 0) continue;
+      const letters = new Set();
+      for (const line of q.body ?? []) {
+        const m = RE_OPTION_IN_CELL.exec(line);
+        if (m) letters.add(m[1].toUpperCase());
+      }
+      if (letters.size < 2) continue;            // одна буква — это проза, а не список вариантов (G9)
+      findings.push({
+        axis: 'G12', file: rel, line: locateHeadingLine(lines, q.heading), text: q.heading,
+        why: `${q.id}: разобрано вариантов 0, а в теле ${letters.size} ячейк(и) таблицы вида «**A**» `
+          + `(${[...letters].sort().join(', ')}) — владелец увидит поле для текста вместо кнопок. `
+          + 'Варианты пишутся строками списка: «- **A. …**»',
+      });
+    }
+  }
+  return { findings, checkedDocs };
+}
+
 /** Find where a known heading text sits, for the report only. */
 function locateHeadingLine(lines, headingText) {
   for (let i = 0; i < lines.length; i++) {
@@ -575,8 +668,9 @@ export function runGuard({ root = ROOT, baselinePath = BASELINE_PATH } = {}) {
   const g3 = checkStaleStatus(interviews, root);
   const leg = checkReturnLeg(interviews, docs, root);
   const opt = checkOptionCounts(interviews, root);
+  const reach = checkUnreachableChoices(interviews, root);
 
-  const all = [...g1, ...g3, ...leg.findings, ...opt.findings];
+  const all = [...g1, ...g3, ...leg.findings, ...opt.findings, ...reach.findings];
   const baseline = loadBaseline(baselinePath);
   const known = new Set(baseline.items.map((it) => it.key));
 
@@ -610,6 +704,7 @@ export function runGuard({ root = ROOT, baselinePath = BASELINE_PATH } = {}) {
       interviews: interviews.length,
       questions: interviews.reduce((n, d) => n + d.questions.length, 0),
       optionChecks: opt.checkedQuestions,
+      reachChecks: reach.checkedDocs,
       returnLegChecks: leg.checked,
       answeredWithoutTarget: leg.answeredWithoutTarget,
       openQuestions: waiting.reduce((n, w) => n + w.open, 0),
@@ -634,6 +729,7 @@ const AXIS_TITLE = {
   I20: 'возвратное плечо',
   I21: 'возвратное плечо (эвристика для старых интервью)',
   G11: 'сверка числа вариантов',
+  G12: 'владельцу нечего нажать',
 };
 
 function formatFinding(f) {
@@ -657,7 +753,7 @@ export function formatReport(r) {
   }
 
   const byAxis = (list, axis) => list.filter((f) => f.axis === axis);
-  for (const axis of ['G1', 'G3', 'I20', 'G11']) {
+  for (const axis of ['G1', 'G3', 'I20', 'G11', 'G12']) {
     const fresh = byAxis(r.fresh, axis);
     const old = byAxis(r.inherited, axis);
     out.push(`[${axis}] ${AXIS_TITLE[axis]} — новых: ${fresh.length} · в долге: ${old.length}`);
@@ -689,6 +785,7 @@ export function formatReport(r) {
   out.push('');
 
   out.push(`СВЕРКА ВАРИАНТОВ (G11): проверено вопросов ${r.counts.optionChecks} — расхождений новых ${r.fresh.filter((f) => f.axis === 'G11').length}.`);
+  out.push(`НЕЧЕГО НАЖАТЬ (G12): проверено документов ${r.counts.reachChecks} — новых ${r.fresh.filter((f) => f.axis === 'G12').length}.`);
   out.push('');
 
   // G2: the debt number prints on EVERY run — and it must go down.
