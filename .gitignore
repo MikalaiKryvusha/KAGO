@@ -90,3 +90,4 @@ assets/dashboard/_preview.html
 # её положила сессия 62 намеренно, как улику bugs/68, и она остаётся под версией.
 benches/cards/generated/*
 !benches/cards/generated/virtual-gpu_42.json
+.kaif/loop-guard.out
