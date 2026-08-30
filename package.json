@@ -19,6 +19,7 @@
     "profiles": "node automation-engine/lib/profile-store.mjs",
     "profile": "node automation-engine/lib/profile-manager.mjs",
     "events": "node automation-engine/lib/event-logger.mjs",
+    "drivervoice": "node automation-engine/lib/driver-voice.mjs",
     "stress": "node automation-engine/lib/stress-tester.mjs",
     "power": "node automation-engine/lib/power-baseline.mjs",
     "descend": "node automation-engine/lib/ladder-descent.mjs",

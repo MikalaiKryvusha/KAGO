@@ -64,6 +64,10 @@ import { marginAboveLastStableMv } from './config.mjs';
 import { ASCENT_COARSE_MHZ, ASCENT_FINE_MHZ, chooseWriteShape } from './lib/vf-step.mjs';
 import { DIVERSE_SET, furnaceSetAtLevel, FURNACE_LADDER, sweepBurnShape, burnLoadSeconds, OWNER_BURN_BUDGET_SECONDS } from './lib/stress-tester.mjs';
 import { localIso } from './lib/card-grids.mjs';
+// Голос драйвера (`bugs/79`): правило живёт в одном модуле, потому что потребителей у него ДВА —
+// движок на границе ступени и наблюдатель реального времени, кормящий предохранитель. Два
+// потребителя, считающие порог каждый у себя, — это два порога, которые разойдутся молча.
+import { driverVoiceVerdict, driverEventsInWindow } from './lib/driver-voice.mjs';
 // The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
 // measured; `curve-store` decides what the artifact may hold, and there is no second writer.
 import {
@@ -675,11 +679,36 @@ export function liveRunBlockers(bugsDir = null, readdirFn = null) {
 }
 
 /**
- * Решение накопителя по списку подстоев прогона. Чистая функция — доказуема без карты и без
+ * ДВА РОДА ПРЕДУПРЕЖДЕНИЙ В ОДНОМ НАКОПИТЕЛЕ (`bugs/79`, `plans/79` шаг 3.3).
+ *
+ * Накопитель заведён под подстои пульса (`bugs/80`). Голос драйвера — второе независимое
+ * предупреждение о том же: машине плохо. Считать его ОТДЕЛЬНЫМ счётчиком значило бы потерять ровно
+ * то свойство, ради которого накопитель существует: два РАЗНЫХ предупреждения — довод сильнее, чем
+ * два одинаковых, и складываться они обязаны в один счёт (Оккам: одна сущность, не две).
+ *
+ * Поэтому запись накопителя несёт `kind`, а порог остаётся один. Запись БЕЗ `kind` ведёт себя ровно
+ * как прежде — старые блоки не правились вовсе, и это условие правки: если хоть один потребовал
+ * правки, это находка, а не работа.
+ */
+export const STALL_KIND = Object.freeze({ pulse: 'подстой пульса', driver: 'крик драйвера' });
+
+/** Как назвать состав накопленного, чтобы причина остановки не врала «три подстоя» про два и крик. */
+function stallComposition(list) {
+  const counted = new Map();
+  for (const s of list) {
+    const k = s?.kind ?? STALL_KIND.pulse;
+    counted.set(k, (counted.get(k) ?? 0) + 1);
+  }
+  return [...counted.entries()].map(([k, n]) => `${k} ×${n}`).join(' · ');
+}
+
+/**
+ * Решение накопителя по списку предупреждений прогона. Чистая функция — доказуема без карты и без
  * прогона, и обе её стороны обязаны быть проверены (EXP-0194: сторож, доказанный в одну сторону,
  * это стена).
  *
- * @param {Array<{frequencyMhz:number, depthMv:number|null}>} stalls — подстои прогона по порядку
+ * @param {Array<{frequencyMhz:number, depthMv:number|null, kind?:string}>} stalls — предупреждения
+ *   прогона по порядку; `kind` отсутствует — читается как подстой пульса
  * @returns {{stop:boolean, why:string|null, count:number, nearStock:number}}
  */
 export function stallLedgerVerdict(stalls, limits = STALL_LEDGER) {
@@ -688,7 +717,8 @@ export function stallLedgerVerdict(stalls, limits = STALL_LEDGER) {
   if (nearStock.length >= limits.nearStockLimit) {
     return {
       stop: true, count: list.length, nearStock: nearStock.length,
-      why: `МАШИНА ПОДСТАИВАЕТ У САМОГО СТОКА ${nearStock.length} раз(а) (глубина < ${limits.nearStockDepthMv} мВ: `
+      why: `МАШИНА ЖАЛУЕТСЯ У САМОГО СТОКА ${nearStock.length} раз(а) — ${stallComposition(nearStock)} `
+        + `(глубина < ${limits.nearStockDepthMv} мВ: `
         + `${nearStock.map((s) => `${s.frequencyMhz} МГц на −${s.depthMv} мВ`).join(' · ')}). Это сообщение о `
         + 'ЗДОРОВЬЕ МАШИНЫ, а не о крае точки — андервольтом такой подстой не объясняется. '
         + 'Полоса остановлена, зову владельца (bugs/80 Д2)',
@@ -697,7 +727,7 @@ export function stallLedgerVerdict(stalls, limits = STALL_LEDGER) {
   if (list.length >= limits.runLimit) {
     return {
       stop: true, count: list.length, nearStock: nearStock.length,
-      why: `ПОДСТОЕВ ЗА ПРОГОН ${list.length} при пороге ${limits.runLimit} `
+      why: `ПРЕДУПРЕЖДЕНИЙ ЗА ПРОГОН ${list.length} при пороге ${limits.runLimit} — ${stallComposition(list)} `
         + `(${list.map((s) => `${s.frequencyMhz} МГц`).join(' · ')}). За всю историю архива здоровые `
         + 'прогоны давали НОЛЬ подстоев; накопление — это решение, а не строка в журнале. '
         + 'Полоса остановлена, зову владельца (bugs/80 Д1)',
@@ -783,6 +813,10 @@ export async function runRung({
   // окно файла сэмплера за время прожигов этой ступени. Необязателен: не передали — прежнее
   // поведение (офлайн-фикстуры и двойник сэмплера не имеют). Прибор без данных молчит (R4b).
   pulseWindowFn = null,
+  // ГОЛОС ДРАЙВЕРА КАК ВХОД СТУПЕНИ (`bugs/79`, ярус 1): `({fromMs, toMs}) => Array<событие>` —
+  // события канала `nvlddmkm` за время прожигов этой ступени. Тот же шов и та же необязательность,
+  // что у пульса: не передали — прежнее поведение, прибор без данных молчит (R4b).
+  driverEventsFn = null,
   runStepFn,
   buildVector = null,
   chooseShape = chooseWriteShape,
@@ -1377,6 +1411,36 @@ export async function runRung({
         + 'Система стояла — оракул этого не видит по построению, его вердикт этой ступени отменён';
       onEvent?.({ kind: 'pulse-stall', frequencyMhz: clockMhz, text: stallWhy, maxGapMs: pw.maxGapMs });
       return close({ ...record, outcome: 'hung', why: stallWhy });
+    }
+  }
+
+  // ---- 8d. ГОЛОС ДРАЙВЕРА — ПЯТЫЙ ВХОД ДОЕХАЛ ДО ВЕРДИКТА (`bugs/79`, ЯРУС 1).
+  //
+  // До 2026-08-31 канал ошибок драйвера читался и печатался, но проголосовать не мог, и это было
+  // записанным свойством КОДА (R4b-signal). 30 августа он закричал — и полоса пошла дальше.
+  //
+  // ⚠️ ЭТОТ ЯРУС МЕДЛЕННЫЙ ПО УСТРОЙСТВУ, и это надо знать читателю: прожиг зовётся через
+  // `spawnSync`, цикл событий движка на время ступени заблокирован, и раньше её конца движок не
+  // может НИЧЕГО. Быстрый ярус — отдельный процесс (наблюдатель → предохранитель, `plans/79` §2).
+  // Ярус 1 существует потому, что наблюдатель может не запуститься, а невзведённый вход
+  // предохранителя не срабатывает никогда по построению: тогда голос обязан остаться хотя бы
+  // медленным. На архиве проекта ярус 1 успевал один раз из четырёх (08-23 11:52 — окно 28 с,
+  // и прогон потратил его на шаг ВГЛУБЬ), `researches/30` §3.
+  //
+  // ПУЛЬС РЕШАЕТ РАНЬШЕ, и порядок здесь — это приоритет: ступор системы есть прямое наблюдение
+  // нашей машины, крик драйвера — самый косвенный из входов. Тот же порядок держит судья
+  // предохранителя (`beat-silence` побеждает как более конкретный факт).
+  if (driverEventsFn) {
+    const cries = driverEventsFn({ fromMs: burnStartedMs, toMs: Date.now() });
+    record.driverCries = Array.isArray(cries) ? cries.length : null;
+    const voice = driverVoiceVerdict(cries);
+    if (voice.stop) {
+      record.verdict = config.VERDICT.HUNG;
+      record.decidedBy = 'канал драйвера';
+      record.stallDepthMv = Number.isFinite(depthMv) ? depthMv : null;
+      const cryWhy = `СТУПЕНЬ ПРЕКРАЩЕНА ГОЛОСОМ ДРАЙВЕРА на ${clockMhz} МГц / ${measuredMv} мВ: ${voice.why}`;
+      onEvent?.({ kind: 'driver-cry', frequencyMhz: clockMhz, text: cryWhy, count: voice.count });
+      return close({ ...record, outcome: 'hung', why: cryWhy });
     }
   }
 
@@ -2865,6 +2929,18 @@ export async function sweepFrequency({
     // ровно та ошибка, от которой этот же движок защищается полем `blocked`.
     out.undoClean = r?.undoClean ?? null;
     out.cardUndescribable = r?.cardUndescribable === true;
+    // ─── ПРИЧИНА ЗАВИСАНИЯ СТУПЕНИ ЕДЕТ НАВЕРХ ПОЛЕМ (`bugs/84`, найдено мутацией 2026-08-31) ────
+    //
+    // Накопитель предупреждений (`bugs/80`) читал `outcome.outcome === 'hung'` — поле УРОВНЯ
+    // СТУПЕНИ, которого на уровне ЧАСТОТЫ не существует: сюда исход ступени приезжает как
+    // `halted: true`, а `outcome` не выставляется вовсе. То есть накопитель, закрытый десятью
+    // блоками, на живом пути не получал НИ ОДНОЙ записи. Ровно класс `bugs/76`: доказан против
+    // фикстуры, не проведён до пути, по которому ходит владелец.
+    //
+    // Поле, а не подстрока причины: формулировки правятся, поля нет — тот же довод, которым здесь
+    // же едут `blocked` и `undoClean`.
+    out.hungBy = r?.outcome === 'hung' ? (r?.decidedBy ?? null) : null;
+    out.stallDepthMv = r?.stallDepthMv ?? null;
     // АДРЕС СДАВШЕГОСЯ БЛОКА — едет наверх вместе с остановкой. Без него журнал пропущенных говорит
     // «не получилось», а чинить надо МЕСТО.
     out.stopSite = r?.stopSite ?? null;
@@ -3215,6 +3291,8 @@ export async function sweepRange({
   runStepFn,
   // Пульс сэмплера как вход ступени (`bugs/61`) — прокладывается в каждый runRung развёртки.
   pulseWindowFn = null,
+  // Голос драйвера как вход ступени (`bugs/79`) — прокладывается туда же и тем же способом.
+  driverEventsFn = null,
   journal = null,
   recover = null,
   saveFn = null,
@@ -3652,7 +3730,7 @@ export async function sweepRange({
           points: livePoints, clockMhz: frequencyMhz, voltageMv,
           seconds, sustain, pinCard, canPin,
           journal, seq: seq++, blockedKeys, now,
-          runStepFn, pulseWindowFn, buildVector, chooseShape, demandPin, envelopeMhz,
+          runStepFn, pulseWindowFn, driverEventsFn, buildVector, chooseShape, demandPin, envelopeMhz,
           // ЛЕСТНИЦА И СОБЫТИЯ — сюда, потому что решение об интенсивности принимается ЗДЕСЬ, где
           // видно выданную частоту. `onEvent` нужен, чтобы ослабление нагрузки было видно оператору
           // в окне, а не только в записи после прогона.
@@ -3738,21 +3816,31 @@ export async function sweepRange({
       // 30 августа каждый подстой обрабатывался поодиночке и забывался: «ступень ПРОПУЩЕНА, полоса
       // продолжается» × 5, а через полосу машина умерла. Одиночный подстой по-прежнему пропускает
       // ступень — владелец запретил лечить это строгостью. Решение принимает НАКОПЛЕНИЕ.
-      if (outcome.outcome === 'hung' && outcome.decidedBy === 'пульс сэмплера') {
-        report.stalls.push({ frequencyMhz: g.topMhz, depthMv: outcome.stallDepthMv ?? null });
+      // ДВА ИСТОЧНИКА, ОДИН НАКОПИТЕЛЬ (`bugs/79`): к подстою пульса добавился крик драйвера. Оба
+      // говорят одно — машине плохо, — и складываться обязаны в ОДИН счёт: два РАЗНЫХ
+      // предупреждения довод сильнее, чем два одинаковых. Различает их поле `kind`, чтобы причина
+      // остановки не врала «три подстоя» про два подстоя и крик.
+      const LEDGER_SOURCES = { 'пульс сэмплера': STALL_KIND.pulse, 'канал драйвера': STALL_KIND.driver };
+      if (LEDGER_SOURCES[outcome.hungBy]) {
+        report.stalls.push({
+          frequencyMhz: g.topMhz,
+          depthMv: outcome.stallDepthMv ?? null,
+          kind: LEDGER_SOURCES[outcome.hungBy],
+        });
         const led = stallLedgerVerdict(report.stalls);
         if (led.stop) {
           report.ok = false;
-          report.haltedBy = 'накопитель подстоев';
+          report.haltedBy = 'накопитель предупреждений';
           report.haltWhy = led.why;
           say('stall-ledger-halt', `🔴 ПОЛОСА ОСТАНОВЛЕНА НАКОПИТЕЛЕМ: ${led.why}`,
             { count: led.count, nearStock: led.nearStock, stalls: report.stalls });
           break;
         }
         say('stall-counted',
-          `подстой ${led.count} из ${STALL_LEDGER.runLimit} (у стока ${led.nearStock} из ${STALL_LEDGER.nearStockLimit}) — `
+          `${LEDGER_SOURCES[outcome.hungBy]}: предупреждение ${led.count} из ${STALL_LEDGER.runLimit} `
+          + `(у стока ${led.nearStock} из ${STALL_LEDGER.nearStockLimit}) — `
           + 'ступень пропущена, полоса продолжается; накопитель считает',
-          { count: led.count, nearStock: led.nearStock });
+          { count: led.count, nearStock: led.nearStock, kind: LEDGER_SOURCES[outcome.hungBy] });
       }
       say('frequency-skipped',
         `${g.topMhz} МГц ПРОПУЩЕНА (строка в документ не пишется), полоса продолжается: ${outcome.why}`,
@@ -5716,6 +5804,29 @@ export function selfTest() {
     stallLedgerVerdict([deep(2872), deep(2857)]).nearStock, 0);
   ok('мусор вместо списка не роняет накопитель', stallLedgerVerdict(null).stop, false);
 
+  // --- ГОЛОС ДРАЙВЕРА В ТОМ ЖЕ НАКОПИТЕЛЕ (`bugs/79`, `plans/79` шаг 3.3).
+  //
+  // Ключевая проверка здесь — НЕ «складывается ли», а «не сломалось ли прежнее»: записи без `kind`
+  // обязаны вести себя ровно как до правки, иначе накопитель `bugs/80` переписан, а не расширен.
+  // Все девять блоков выше стоят на записях без `kind` и не правились ни одной буквой.
+  const cry = (mhz, depth = 165) => ({ frequencyMhz: mhz, depthMv: depth, kind: STALL_KIND.driver });
+  ok('ОДИН крик драйвера — ступень прекращена, полоса идёт (та же снисходительность, что к подстою)',
+    stallLedgerVerdict([cry(2872)]).stop, false);
+  ok('ДВА крика драйвера подряд — ещё не решение, порог тот же',
+    stallLedgerVerdict([cry(2872), cry(2857)]).stop, false);
+  ok('ДВА подстоя и ОДИН крик — ВСТАЁТ: разные предупреждения складываются в один счёт',
+    stallLedgerVerdict([deep(2872), deep(2857), cry(2835)]).stop, true);
+  ok('причина НЕ врёт «три подстоя» про два и крик — состав назван',
+    stallLedgerVerdict([deep(2872), deep(2857), cry(2835)]).why
+      .includes('подстой пульса ×2 · крик драйвера ×1'), true);
+  ok('крик У САМОГО СТОКА тяжелее так же, как подстой: два — и полоса встаёт',
+    stallLedgerVerdict([cry(2872, 25), cry(2835, 20)]).stop, true);
+  // P79-AC2 — ЛОЖНЫХ ОСТАНОВОК ПОЛОСЫ НОЛЬ, и это счёт по СНЯТОМУ архиву, а не суждение.
+  // Две безобидные вспышки 2026-08-22 (14:57 — пять событий, 15:00 — два) прошли внутри одного
+  // прогона и обе сработали бы правилом голоса. В накопителе это два счёта при пороге три.
+  ok('P79-AC2: две ложные вспышки 08-22 внутри одного прогона — полоса НЕ встаёт',
+    stallLedgerVerdict([cry(2820), cry(2820)]).stop, false);
+
   // --- ЗАПРЕТ ВЛАДЕЛЬЦА НА ЖИВОЙ ПРОГОН (слово 2026-08-31: «Без них прогон НЕДОПУСТИМ»).
   //
   // Гейт держится на ИМЕНАХ ФАЙЛОВ в `bugs/`, поэтому доказуем без диска — каталог подставляется.
@@ -6179,6 +6290,72 @@ export function selfTest() {
             gap('background-20260826-2030.jsonl').maxGapMs < config.PULSE_STALL_MS,
             gap('death-2797mhz-20260823.jsonl').observed, gap('background-20260826-2030.jsonl').observed],
           [true, true, true, true, true]);
+      }
+
+      // ─── `bugs/79` — ГОЛОС ДРАЙВЕРА КАК ВХОД СТУПЕНИ, ЯРУС 1 ────────────────────────────────
+      //
+      // Проверяется ПРОВОДКА, а не правило: само правило доказано у себя дома
+      // (`driver-voice --selftest`, включая счёт по снятому архиву). Здесь вопрос другой и он
+      // дороже — доезжает ли решение правила до вердикта ступени и до накопителя ([[EXP-0193]]:
+      // доказанный судья плюс недоказанная проводка — недоказанные ворота, и отказывает такая
+      // конструкция в сторону СТЕНЫ).
+      //
+      // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+      //   EA. снять вызов `driverEventsFn` из runRung        → «СЕРИЯ В ОКНЕ СТУПЕНИ = СТУПЕНЬ ПРЕКРАЩЕНА»
+      //   EB. поставить голос ВЫШЕ пульса                    → «ПУЛЬС РЕШАЕТ РАНЬШЕ ГОЛОСА»
+      //   EC. считать одиночное событие серией               → «ОДИНОЧНАЯ ОШИБКА ВЕРДИКТА НЕ ТРОГАЕТ»
+      //   ED. класть в накопитель без `kind`                 → «СОСТАВ НАКОПЛЕННОГО НАЗВАН ВЕРНО»
+      {
+        const cries = (n) => () => Array.from({ length: n }, (_, i) => ({ at: new Date(1_756_000_000_000 + i * 3000).toISOString() }));
+        const jrnD = openJournal({ dir: join(journalBox, 'driver-cry') });
+        const cried = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped, journal: jrnD, seq: 1, now: clock, depthMv: 165,
+          runStepFn: async () => atomPass(1000),
+          driverEventsFn: cries(2),
+        });
+        ok('СЕРИЯ В ОКНЕ СТУПЕНИ = СТУПЕНЬ ПРЕКРАЩЕНА: PASS оракула отменён, решил канал драйвера (bugs/79)',
+          [cried.verdict, cried.outcome, cried.decidedBy],
+          [config.VERDICT.HUNG, 'hung', 'канал драйвера']);
+        ok('и глубина ОТ СТОКА доехала до записи — накопителю она нужна, чтобы отличить машину от края точки',
+          cried.stallDepthMv, 165);
+        const lone = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped,
+          runStepFn: async () => atomPass(1000),
+          driverEventsFn: cries(1),
+        });
+        ok('ОДИНОЧНАЯ ОШИБКА ВЕРДИКТА НЕ ТРОГАЕТ: по архиву 0 из 9 одиночек предшествовали замиранию',
+          [lone.verdict, lone.outcome, lone.driverCries], [config.VERDICT.PASS, 'passed', 1]);
+        const silent = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped,
+          runStepFn: async () => atomPass(1000),
+          driverEventsFn: () => [],
+        });
+        ok('ТИШИНА В КАНАЛЕ вердикта не трогает — сторож, краснящий на норме, будет снят руками',
+          [silent.verdict, silent.outcome], [config.VERDICT.PASS, 'passed']);
+        // ПРИОРИТЕТ: ступор системы — прямое наблюдение нашей машины, крик драйвера — самый
+        // косвенный из входов. Тот же порядок держит судья предохранителя.
+        const both = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped,
+          runStepFn: async () => atomPass(1000),
+          pulseWindowFn: () => ({ observed: true, maxGapMs: 3042, samples: 12 }),
+          driverEventsFn: cries(5),
+        });
+        ok('ПУЛЬС РЕШАЕТ РАНЬШЕ ГОЛОСА, когда говорят оба — более конкретный факт о машине',
+          both.decidedBy, 'пульс сэмплера');
+        // Прибор без шва МОЛЧИТ — то же структурное правило, что у пульса (R4b): наблюдатель не
+        // запустился, значит голоса нет, а не «нарушений нет».
+        const unwired = await runRung({
+          envelopeMhz: 3090, points: tablePoints, clockMhz: 2842, voltageMv: 1000,
+          buildVector: vectorCapped,
+          runStepFn: async () => atomPass(1000),
+        });
+        ok('ШВА НЕТ — ГОЛОСА НЕТ: невзведённый вход не голосует и не выдумывает наблюдение',
+          [unwired.verdict, unwired.outcome, unwired.driverCries ?? 'не наблюдалось'],
+          [config.VERDICT.PASS, 'passed', 'не наблюдалось']);
       }
 
       // ─── `bugs/49` — НАМЕРЕНИЕ ЗАЯВЛЯЕТ, ВЕРДИКТ ОТЧИТЫВАЕТСЯ ────────────────────────────────
@@ -7626,6 +7803,62 @@ export function selfTest() {
     // HARDEST member of the rung is the one that must be proved before the others inherit (E2-AC3).
     ok('СТУПЕНЬ ПРОЖИГАЕТСЯ НА САМОЙ ВЫСОКОЙ СВОЕЙ ЧАСТОТЕ — она самая трудная, остальные наследуют от неё',
       [...new Set(burned)].sort((a, b) => b - a), [2842, 2820]);
+
+    // =============================================================================================
+    // 🗣 `bugs/79` — ГОЛОС ДРАЙВЕРА ДОЕЗЖАЕТ ДО НАКОПИТЕЛЯ, И ИМЕННО СВОИМ РОДОМ
+    //
+    // ЭТОТ БЛОК РОДИЛСЯ ИЗ ЗЕЛЁНОЙ МУТАЦИИ, и это стоит записать: мутация «класть в накопитель без
+    // `kind`» прошла ЗЕЛЁНОЙ на всей батарее. Девять блоков накопителя судят чистую функцию на
+    // записях, которые делает сам блок, — и потому не видят ПРОВОДКИ от исхода ступени к роду
+    // записи. Ровно класс [[EXP-0194]]: фикстура, чья форма делает отказ невозможным, — это не
+    // проходящая проверка, а отсутствующая. Здесь путь пройден целиком: ступень → исход →
+    // накопитель → остановка полосы.
+    {
+      const cry = { at: '2026-08-16T02:00:00+03:00' };
+      const cryAgain = { at: '2026-08-16T02:00:03+03:00' };
+      const cried = await sweepRange({
+        envelopeMhz: 3090,
+        curveDoc: sweepDoc(bandRows), points: sweepPoints,
+        runStepFn: async (args) => sweepAtom(980)(args),
+        buildVector: vectorPinned,
+        saveFn: async () => ({ ok: true }),
+        driverEventsFn: () => [cry, cryAgain],
+        now: () => '2026-08-16T02:00:00+03:00',
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('ГОЛОС ДОЕЗЖАЕТ ДО НАКОПИТЕЛЯ, И ИМЕННО СВОИМ РОДОМ (`bugs/84`: путь ступень → частота → накопитель)',
+        cried.stalls.map((x) => x.kind), [STALL_KIND.driver, STALL_KIND.driver]);
+      ok('и накопленные крики ОСТАНАВЛИВАЮТ полосу, а причина называет источник, а не безымянный счёт',
+        [cried.ok, cried.haltedBy, /крик драйвера ×2/u.test(cried.haltWhy || '')],
+        [false, 'накопитель предупреждений', true]);
+      const quiet = await sweepRange({
+        envelopeMhz: 3090,
+        curveDoc: sweepDoc(bandRows), points: sweepPoints,
+        runStepFn: async (args) => sweepAtom(980)(args),
+        buildVector: vectorPinned,
+        saveFn: async () => ({ ok: true }),
+        driverEventsFn: () => [cry],
+        now: () => '2026-08-16T02:00:00+03:00',
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('ЗДОРОВЫЙ ПРОГОН С ОДИНОЧКАМИ ИДЁТ ДО КОНЦА: ноль записей в накопителе, полоса закрыта (P79-AC2)',
+        [quiet.stalls.length, quiet.ok], [0, true]);
+      // И ТА ЖЕ ДОРОГА ДЛЯ ПУЛЬСА — потому что `bugs/84` сломал её ОБОИМ источникам, а починка,
+      // доказанная только на новом, оставила бы старый мёртвым и молча.
+      const pulsed = await sweepRange({
+        envelopeMhz: 3090,
+        curveDoc: sweepDoc(bandRows), points: sweepPoints,
+        runStepFn: async (args) => sweepAtom(980)(args),
+        buildVector: vectorPinned,
+        saveFn: async () => ({ ok: true }),
+        pulseWindowFn: () => ({ observed: true, maxGapMs: 6043, samples: 12 }),
+        now: () => '2026-08-16T02:00:00+03:00',
+        clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+      });
+      ok('ПОДСТОЙ ПУЛЬСА ТОЖЕ ДОЕЗЖАЕТ (bugs/80 на живом пути, а не только на фикстуре)',
+        [pulsed.stalls.map((x) => x.kind), pulsed.haltedBy],
+        [[STALL_KIND.pulse, STALL_KIND.pulse], 'накопитель предупреждений']);
+    }
 
     // =============================================================================================
     // ⚡ `plans/58` P58-AC3 — THE FUSE'S VOICE: an external stop ends the band BEFORE the next rung
@@ -10018,6 +10251,8 @@ async function mainSweep(argv, arg) {
   // Модуль сэмплера — для чтения окна пульса ступенью (`bugs/61`); импорт кэширован, двойной
   // import выше (архивация пульса) ничего не стоит.
   const mon = await import('./lib/hardware-mon.mjs');
+  // Журнал Windows — для голоса драйвера на границе ступени (`bugs/79`, ярус 1).
+  const evt = await import('./lib/event-logger.mjs');
 
   let report;
   try {
@@ -10062,6 +10297,10 @@ async function mainSweep(argv, arg) {
     // `null`, и вход не проводится вовсе: прибор без данных МОЛЧИТ, а не голосует (R4b), а прогон
     // обычной карты остаётся бит-в-бит прежним (E67-AC5).
     pulseWindowFn: twin ? twin.pulseWindowFn : (w) => mon.maxSampleGapMs(dash.TELEMETRY_PATH, w),
+    // ГОЛОС ДРАЙВЕРА, ЯРУС 1 (`bugs/79`). У двойника канала драйвера нет и быть не может — журнал
+    // Windows принадлежит ЭТОЙ машине, а не выдуманной карте; шов остаётся невзведённым, и по
+    // структурному правилу невзведённый вход не голосует никогда.
+    driverEventsFn: twin ? null : (w) => driverEventsInWindow(w, evt.queryFaults),
     // Порт устройства (эпик 59 фаза 2): на двойнике атом получает устройство сборки, живой путь —
     // свой адаптер по умолчанию, бит-в-бит.
     runStepFn: (a) => vf.runStep(twin ? { ...a, device: twin.device } : a),
