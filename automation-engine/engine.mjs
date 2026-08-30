@@ -250,6 +250,31 @@ export function refuseWithoutUndervolt(out, result, offsetMhz) {
  *  proved by a BYTE-EXACT golden over 1152 ladder configurations (empty diff), and the ceiling half by
  *  its own blocks with addressees DN–DP.]
  */
+/**
+ * ШАГ ЗОНЫ ДЛЯ ГЛУБИНЫ ОТ СТОКА — ОДНА функция, и вызовов у неё РОВНО ДВА (`bugs/77`).
+ *
+ * Слово владельца, 2026-08-31, дословно: *«Шаг всегда должен отмеряться от стока... это же
+ * очевидно... Я разочарован.»* Решение принято им, обсуждению не подлежит.
+ *
+ * ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ ВЫРАЖЕНИЕ ПО МЕСТУ. До 2026-08-31 выбор зоны жил ВНУТРИ
+ * `nextRungFrom`, то есть только на дороге ПЕРЕСЧЁТА. Плановая дорога — «взять следующую ступень
+ * лестницы» — зону не спрашивала вовсе, и когда часть ступеней лестницы пропускалась (карта отдала
+ * глубже заказа, земля уехала), фактический шаг оказывался крупнее шага зоны, а никто не сверял.
+ * 30 августа это дало 10 мВ там, где политика владельца требует 5, и следующим шагом машина умерла.
+ * Две базы отсчёта в одном вычислении — семья `bugs/47`; лечится ОДНОЙ базой и одним вызовом.
+ *
+ * Глубина считается от `stockVoltageMv` и НИ ОТ ЧЕГО ДРУГОГО. `currentMv` — только место, ОТ
+ * которого отмеряется сам шаг; зону оно не выбирает.
+ *
+ * [NOT-TESTED]
+ */
+export function zoneStepFor({ stockVoltageMv, currentMv, zones = config.DESCENT_ZONES } = {}) {
+  if (!Number.isFinite(stockVoltageMv) || !Number.isFinite(currentMv)) return null;
+  if (!Array.isArray(zones) || zones.length === 0) return null;
+  const depthMv = stockVoltageMv - currentMv;
+  return (zones.find((z) => depthMv < z.untilDepthMv) ?? zones[zones.length - 1]).stepMv;
+}
+
 export function nextRungFrom({
   gridDesc = [],
   currentMv = null,
@@ -260,10 +285,7 @@ export function nextRungFrom({
   if (!Array.isArray(gridDesc) || gridDesc.length === 0) return null;
   if (!Number.isFinite(currentMv) || !Number.isFinite(stockVoltageMv)) return null;
   if (!Array.isArray(zones) || zones.length === 0) return null;
-  // The policy step for a given depth: the first zone whose boundary the depth has not yet reached.
-  // The depth is that of where we STAND, which is how the ladder has always read it — the target's own
-  // depth cannot be the key, because the target is what this function is computing.
-  const zoneStepMv = (zones.find((z) => stockVoltageMv - currentMv < z.untilDepthMv) ?? zones[zones.length - 1]).stepMv;
+  const zoneStepMv = zoneStepFor({ stockVoltageMv, currentMv, zones });
   const allowedMv = Math.min(zoneStepMv, maxStepMv);
   const want = currentMv - allowedMv;
   // Candidates: strictly below where we stand, and no deeper than the policy allows.
@@ -756,6 +778,9 @@ export async function runRung({
   // whether the descent had been seeded at this frequency (§4.2).
   depthMv = null,
   zoneStepMv = null,
+  // Вынудила ли шаг СЕТКА КАРТЫ (`bugs/77`). Едет ПОЛЕМ до строки оператора: без него расхождение
+  // фактического шага с шагом зоны объяснялось ложной причиной.
+  forcedByGrid = false,
   seeded = false,
   // ДОКАЗАННАЯ ЗЕМЛЯ И СТЕНА ОТ НЕЁ — `interviews/009`, слово владельца 2026-08-16:
   // *«Ты знаешь сетку напряжений видеокарты? Если знаешь, то ты знаешь, какого размера ты шаг можешь
@@ -2544,7 +2569,27 @@ export async function sweepFrequency({
     const mhzBefore = targetMhz;
     let targetMv = rung.mv;
     let rebased = false;
-    if (ground - targetMv > cliff) {
+    let rebasePick = null;
+    // ─── ШАГ КРУПНЕЕ ЗОНЫ ПЕРЕСЧИТЫВАЕТСЯ, А НЕ ТОЛЬКО ШАГ ЗА СТЕНОЙ (`bugs/77`) ─────────────────
+    //
+    // Слово владельца: *«Шаг всегда должен отмеряться от стока»*. До 2026-08-31 пересчёт запускала
+    // ОДНА причина — плановая ступень дальше стены `bugs/03` (35 мВ). Шаг, который стену не пробил,
+    // но крупнее шага зоны, проходил молча: лестница считается один раз от стока, а ступени из неё
+    // ПРОПУСКАЮТСЯ (карта отдала глубже заказа, земля уехала вниз), и тогда следующая плановая
+    // ступень оказывается от места стояния дальше, чем разрешает политика.
+    //
+    // 30 августа это и случилось: 835 → 825 мВ, шаг 10 при шаге зоны 5 на глубине −185 мВ. Прибор
+    // НАЗЫВАЛ расхождение вслух («шаг зоны 5 мВ здесь НЕ применён») и всё равно его делал — то есть
+    // код, который знает, что нарушает договор, и печатает это справкой.
+    //
+    // Сторож первого шага (`bugs/03`, `firstStep > cliff` выше) стерёг ПЕРВЫЙ шаг; этот стережёт
+    // ЛЮБОЙ — ровно та разница, за которую заплачено (`bugs/76`: сторож доказан против первого
+    // шага, а угроза была любым).
+    const standBeforeMv = Math.min(ground, lastOrderedMv ?? ground);
+    const zoneStepNowMv = zoneStepFor({ stockVoltageMv: targetStockMv, currentMv: standBeforeMv, zones });
+    const stepOverZone = Number.isFinite(zoneStepNowMv) && Number.isFinite(standBeforeMv)
+      && standBeforeMv - targetMv > zoneStepNowMv;
+    if (ground - targetMv > cliff || stepOverZone) {
       // ⚠️ THE REBASE PICKS A VOLTAGE THE LADDER NEVER PROPOSED — it reads the card's grid directly —
       // so it is the second place that could walk onto a recorded hang (`bugs/23`). It CANNOT, and the
       // reason is arithmetic rather than a guard: this branch runs only when `ground − rung.mv > cliff`,
@@ -2588,8 +2633,12 @@ export async function sweepFrequency({
       }
       targetMv = pick.mv;
       rebased = true;
-      say('rebase', `${frequencyMhz} МГц: план звал на ${rung.mv} мВ, но доказано ${ground} мВ — это ${ground - rung.mv} мВ `
-        + `при стене ${cliff}. Пересчитываю от доказанного по лестнице: ${targetMv} мВ `
+      rebasePick = pick;
+      say('rebase', `${frequencyMhz} МГц: ${stepOverZone && !(ground - rung.mv > cliff)
+        ? `план звал на ${rung.mv} мВ — это ${standBeforeMv - rung.mv} мВ от ${standBeforeMv} мВ при шаге зоны `
+          + `${zoneStepNowMv} мВ (bugs/77: шаг отмеряется от стока и крупнее зоны быть не может)`
+        : `план звал на ${rung.mv} мВ, но доказано ${ground} мВ — это ${ground - rung.mv} мВ при стене ${cliff}`}. `
+        + `Пересчитываю от доказанного по лестнице: ${targetMv} мВ `
         + `(шаг ${ground - targetMv} мВ при шаге зоны ${pick.zoneStepMv} мВ и стене ${cliff} мВ`
         + `${pick.forcedByGrid ? ', сетка вынудила глубже политики' : ''})`,
       { voltageMv: targetMv, stepMv: ground - targetMv, zoneStepMv: pick.zoneStepMv, forcedByGrid: pick.forcedByGrid });
@@ -2683,6 +2732,10 @@ export async function sweepFrequency({
       frequencyMhz, voltageMv: targetMv, depthMv: stockVoltageMv - targetMv,
       zoneStepMv: rung.zoneStepMv, seeded: out.seeded, rebased,
       stepMv: actualStepMv, standMv: standNowMv,
+      // ПРИЗНАК «СЕТКА ВЫНУДИЛА» ЕДЕТ ПОЛЕМ (`bugs/77`): без него строка ступени объясняла
+      // расхождение шага с зоной НЕВЕРНОЙ причиной, и это ложное объяснение стоило проекту тикета,
+      // фазы эпика и указания владельца, данного по ошибочному диагнозу.
+      forcedByGrid: rebased ? (rebasePick?.forcedByGrid ?? false) : (rung.forcedByGrid ?? false),
       // THE PROVEN GROUND, HANDED DOWN (`interviews/009`). `lastPass` is the deepest voltage this
       // frequency has actually SURVIVED; before the first PASS it is the descent's start — stock, or
       // the seed, which the neighbour above already proved. The wall is the same `bugs/03` cliff the
@@ -3633,7 +3686,7 @@ export async function sweepRange({
       // Пара, которую можно УБРАТЬ, лучше пары, за которой надо следить: теперь новое поле у
       // источника доезжает само, а не ждёт, пока кто-то вспомнит про второй список.
       runRungFn: async (rungArgs) => {
-        const { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded, stepMv, standMv, seedJump } = rungArgs;
+        const { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded, stepMv, standMv, seedJump, forcedByGrid } = rungArgs;
         // THE RUNG IS ANNOUNCED BEFORE THE CARD IS TOUCHED (`ideas/06` §3, `plans/20` §4.2). A frozen
         // screen shows the LAST thing drawn, so a rung published after its own burn would make the
         // frozen frame accuse the PREVIOUS rung — the exact misattribution the write-ahead journal
@@ -3666,13 +3719,35 @@ export async function sweepRange({
           : 'шаг не назван';
         // Где сделанный шаг РАСХОДИТСЯ с шагом зоны — сказать ПОЧЕМУ, одной оговоркой. Именно это
         // расхождение и было прочитано как «неверный шаг»: 5 против 25 на 2355 МГц.
-        const zonePart = !seedJump && Number.isFinite(zoneStepMv) && Number.isFinite(stepMv) && zoneStepMv !== stepMv
-          ? ` · шаг зоны ${zoneStepMv} мВ здесь НЕ применён: спуск отмеряет от того, где стоит`
-            + `${Number.isFinite(standMv) ? ` (${standMv} мВ)` : ''}, а не от стока`
-          : (!seedJump && Number.isFinite(zoneStepMv) ? ` · шаг зоны ${zoneStepMv} мВ` : '');
+        // 🔴 ПРИЧИНА РАСХОЖДЕНИЯ НАЗЫВАЕТСЯ ВЕРНО (`bugs/77`, исправлено 2026-08-31).
+        //
+        // Здесь стояло «спуск отмеряет от того, где стоит, а не от стока» — И ЭТО БЫЛО НЕВЕРНО.
+        // Зона всегда выбиралась глубиной ОТ СТОКА (`zoneStepFor`), журнал 30 августа это и
+        // показывает: на глубине 175 мВ напечатана зона 5. Шаг 835 → 825 был 10 мВ по ДРУГОЙ
+        // причине: **у этой карты нет 830 мВ.** Сетка снята с карты 2026-08-15 (127 точек,
+        // `curves/voltage-grid.json`, 94 зазора по 5 мВ и 32 по 10) — 830, 855, 880, 805
+        // отсутствуют физически.
+        //
+        // ЦЕНА ЛОЖНОГО ОБЪЯСНЕНИЯ, ЗАПЛАЧЕННАЯ ЦЕЛИКОМ: эта строка стала диагнозом `bugs/76` P2,
+        // из него родился тикет `bugs/77`, из него — фаза 2 эпика, и владелец дал по нему
+        // указание. Прибор, называющий неверную причину, дороже прибора, молчащего о причине:
+        // молчание заставляет смотреть, ложное объяснение — верить.
+        // ТРИ СЛУЧАЯ, И ОНИ РАЗНЫЕ ПО ОПАСНОСТИ — поэтому у каждого своё слово:
+        //   шаг КРУПНЕЕ зоны и вынужден сеткой  — карта не даёт точки мельче, это её свойство;
+        //   шаг КРУПНЕЕ зоны и сеткой не вынужден — НАХОДКА: пересчёт (`bugs/77`) обязан был не
+        //                                            дать этому случиться, и раз он здесь — это дефект;
+        //   шаг КОРОЧЕ зоны                      — законно и безопасно: спуск просто стоит между
+        //                                            ступенями лестницы (затравка, пересчёт, пол карты).
+        const zonePart = seedJump || !Number.isFinite(zoneStepMv) ? ''
+          : (!Number.isFinite(stepMv) || zoneStepMv === stepMv ? ` · шаг зоны ${zoneStepMv} мВ`
+            : (stepMv > zoneStepMv
+              ? (forcedByGrid
+                ? ` · шаг зоны ${zoneStepMv} мВ СЕТКА КАРТЫ НЕ ДАЁТ: между ${standMv} и ${voltageMv} мВ у неё нет точки`
+                : ` · 🔴 ШАГ КРУПНЕЕ ЗОНЫ (${zoneStepMv} мВ) И СЕТКОЙ НЕ ВЫНУЖДЕН — это находка, а не режим`)
+              : ` · шаг зоны ${zoneStepMv} мВ, спуск стоит между ступенями лестницы (${standMv} мВ)`));
         say('rung-start', `${frequencyMhz} МГц ← ${voltageMv} мВ · ${stepPart}`
           + `${zonePart} (глубина ОТ СТОКА −${depthMv} мВ)`,
-          { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded, stepMv, standMv, seedJump: seedJump ?? null });
+          { frequencyMhz, voltageMv, depthMv, zoneStepMv, seeded, stepMv, standMv, forcedByGrid: forcedByGrid ?? null, seedJump: seedJump ?? null });
 
         // ─── THE TABLE IS RE-READ BEFORE THIS RUNG, AND THAT IS THE FIX FOR THE 2026-08-16 STALL ────
         //
@@ -5433,6 +5508,34 @@ export function selfTest() {
     forced.rungs.every((r) => r.stepMv <= (config.ASCENT_STEP_MAX_MV ?? 35)), true);
   ok('первый шаг не глубже потолка первого шага владельца (25 мВ)',
     forced.rungs[0].stepMv <= (config.ASCENT_FIRST_STEP_MAX_MV ?? 25), true);
+
+  // ─── `bugs/77` — ИНВАРИАНТ ШАГА НА НАСТОЯЩЕЙ СЕТКЕ ЭТОЙ КАРТЫ, А НЕ НА ВЫДУМАННОЙ ──────────────
+  //
+  // 30 августа спуск шёл 850 → 845 → 840 → 835 → **825** при шаге зоны 5. Тикет `bugs/77` объяснил
+  // это «спуск отмеряет от того, где стоит, а не от стока» — объяснение взято из строки, которую
+  // печатал сам прибор, и оно НЕВЕРНО: журнал того вечера показывает зону 5, посчитанную от глубины
+  // 175 мВ ОТ СТОКА, то есть база отсчёта была верной всегда.
+  //
+  // НАСТОЯЩАЯ ПРИЧИНА — СЕТКА КАРТЫ, и она снята с карты, а не рассуждена: `curves/voltage-grid.json`,
+  // 127 точек, зазоры 5 мВ × 94 и 10 мВ × 32. **830 мВ у этой карты НЕТ** (как нет 855, 880, 805).
+  // Пятимилливольтовой ступени между 835 и 825 не существует физически.
+  {
+    const realGrid = JSON.parse(readFileSync(join('curves', 'voltage-grid.json'), 'utf8')).values;
+    ok('СЕТКА СНЯТА С КАРТЫ и в ней ровно те дыры, из-за которых шаг стал 10: 830 нет, 835 и 825 есть',
+      [realGrid.includes(830), realGrid.includes(835), realGrid.includes(825), realGrid.length],
+      [false, true, true, 127]);
+    // Сток 1010 — тот, при котором 825 мВ даёт глубину 185, как в журнале 30 августа.
+    const real = descentLadder({ voltageGridMv: realGrid, stockVoltageMv: 1010, availableDepthMv: 200 });
+    ok('ИНВАРИАНТ (E73-AC2, исправленный замером): ступеней с шагом крупнее зоны И НЕ вынужденных сеткой — НОЛЬ',
+      real.rungs.filter((r) => r.stepMv > r.zoneStepMv && !r.forcedByGrid).map((r) => `${r.mv}мВ шаг ${r.stepMv} при зоне ${r.zoneStepMv}`),
+      []);
+    ok('и РОКОВАЯ ступень воспроизведена: 835 → 825 это 10 мВ при зоне 5, ВЫНУЖДЕННЫЕ СЕТКОЙ',
+      (() => { const r = real.rungs.find((x) => x.mv === 825);
+        return r ? [r.stepMv, r.zoneStepMv, r.forcedByGrid] : 'ступени 825 в лестнице нет'; })(),
+      [10, 5, true]);
+    ok('ни один вынужденный сеткой шаг не пробивает стену bugs/03 — сторож обрыва по-прежнему старше',
+      real.rungs.every((r) => r.stepMv <= (config.ASCENT_STEP_MAX_MV ?? 35)), true);
+  }
 
   // — the lever wall truncates; the policy does not
   const walled = descentLadder({ voltageGridMv: uniform5, stockVoltageMv: 1045, availableDepthMv: 60 });
@@ -7303,6 +7406,35 @@ export function selfTest() {
     ok('ДОКАЗАННАЯ ЗЕМЛЯ ДОЕЗЖАЕТ ДО СТУПЕНИ: на первой это сток, дальше — каждое прошедшее напряжение',
       handed.slice(0, 3), [[1020, 1045, 35], [995, 1020, 35], [970, 995, 35]]);
 
+    // ─── `bugs/77` — ШАГ КРУПНЕЕ ЗОНЫ ПЕРЕСЧИТЫВАЕТСЯ, А НЕ БЕРЁТСЯ ─────────────────────────────
+    //
+    // Лестница считается ОДИН РАЗ от стока ЗАКАЗАННОЙ частоты. Но зона отмеряется от стока той
+    // частоты, где карта РАБОТАЕТ (F5), а он другой: у выданной 2820 МГц сток 1120, и на том же
+    // напряжении глубина БОЛЬШЕ, то есть зона МЕЛЬЧЕ. Плановая ступень в 25 мВ оказывается крупнее
+    // зоны — и до 2026-08-31 бралась как есть, потому что пересчёт запускала одна причина: шаг за
+    // стеной `bugs/03` (35 мВ). Шаг, стену не пробивший, проходил молча.
+    //
+    // АДРЕСАТ МУТАЦИИ, НАЗВАННЫЙ ДО ПРОГОНА: FA. вернуть условие пересчёта к одной причине
+    // (`ground - targetMv > cliff`) → краснеет блок ниже.
+    {
+      const orderedAt = [];
+      const drift = await sweepFrequency({
+        frequencyMhz: 2842, stockVoltageMv: 1045, voltageGridMv: sweepGrid,
+        availableDepthMv: 115,
+        curveDoc: sweepDoc([sweepRow(2842, 1045), sweepRow(2820, 1120)]),
+        runRungFn: async (a) => {
+          orderedAt.push(a.voltageMv);
+          return { outcome: 'passed', verdict: P, why: '', measuredMv: a.voltageMv, deliveredMhz: 2820 };
+        },
+      });
+      const zoneOf = (mv) => zoneStepFor({ stockVoltageMv: 1120, currentMv: mv, zones: config.DESCENT_ZONES });
+      const overZone = orderedAt.slice(1).filter((mv, i) => orderedAt[i] - mv > zoneOf(orderedAt[i]));
+      ok('ШАГ НИКОГДА НЕ КРУПНЕЕ ЗОНЫ, посчитанной от стока ТОЙ частоты, где карта работает (bugs/77)',
+        overZone.map((mv, i) => `${mv} мВ`), []);
+      ok('и фикстура ДЕЙСТВИТЕЛЬНО создаёт случай: без пересчёта лестница предложила бы шаг крупнее зоны',
+        [drift.rungs.length > 3, zoneOf(970) < 25], [true, true]);
+    }
+
     // ─── ПОЛ КАРТЫ: ЗАКАЗАЛИ ГЛУБЖЕ — ПОЛУЧИЛИ УЖЕ ДОКАЗАННОЕ (`bugs/58`) ───────────────────────
     //
     // 🔴 ФИКСТУРА — ЖИВАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ, А НЕ ВЫДУМКА. Приёмка 2026-08-25 22:0x при владельце,
@@ -8644,13 +8776,58 @@ export function selfTest() {
       ok('bugs/46: расхождение с шагом зоны СУЩЕСТВУЕТ на этой фикстуре — иначе блок ниже пустой',
         offLines.some((e) => Number.isFinite(e.zoneStepMv) && Number.isFinite(e.stepMv) && e.zoneStepMv !== e.stepMv),
         true);
-      ok('bugs/46: и оно ОБЪЯСНЕНО в тексте, а не показано молча',
+      // ⚠️ ОЖИДАНИЕ ЭТОГО БЛОКА ИЗМЕНЕНО 2026-08-31 (`bugs/77`), И ВОТ ПОЧЕМУ.
+      //
+      // Он требовал в тексте слов «шаг зоны N мВ здесь НЕ применён … а не от стока». Эта
+      // формулировка НЕВЕРНА: зона всегда выбиралась глубиной от стока, и здесь шаг КОРОЧЕ зоны
+      // (5 против 25) — то есть спуск просто стоит между ступенями лестницы, что законно и
+      // безопасно. Блок сторожил ложное объяснение и тем закреплял его; ложное объяснение стоило
+      // проекту тикета `bugs/77`, фазы эпика и указания владельца, данного по неверному диагнозу.
+      // Сторожится ТО ЖЕ ТРЕБОВАНИЕ (расхождение обязано быть объяснено в ТЕКСТЕ, а не показано
+      // молча) — но объяснение теперь обязано быть ВЕРНЫМ и называть, какой это из трёх случаев.
+      // ─── `bugs/77` — СТРОКА НАЗЫВАЕТ СЕТКУ, КОГДА ШАГ ВЫНУДИЛА СЕТКА ───────────────────────────
+      //
+      // ЭТОТ БЛОК РОДИЛСЯ ИЗ ЗЕЛЁНОЙ МУТАЦИИ (FC: «признак сетки не едет до строки» прошла зелёной).
+      // Поле `forcedByGrid` считалось верно и никуда не доезжало — тот же класс, что `bugs/84`.
+      // Сетка здесь с ДЫРОЙ шире шага зоны: 940 и 935 мВ убраны, как у настоящей карты убраны
+      // 830 · 855 · 880 · 805 (`curves/voltage-grid.json`, 32 зазора по 10 мВ из 127 точек).
+      {
+        const holed = sweepGrid.filter((v) => v !== 940 && v !== 935);
+        const box = mkdtempSync(join(tmpdir(), 'kago-grid-hole-'));
+        let lines = [];
+        try {
+          const sj = openJournal({ dir: box });
+          const evs = [];
+          await sweepRange({
+            curveDoc: { ...sweepDoc([sweepRow(2842, 1045)]), voltageGridMv: holed },
+            points: sweepPoints, envelopeMhz: 3090, fromMhz: 2842, toMhz: 2842,
+            journal: sj, buildVector: vectorPinned, depthCapMv: 120,
+            runStepFn: async (a) => sweepAtom(0)(a),
+            saveFn: async () => ({ ok: true }), onEvent: (e) => evs.push(e),
+            now: () => '2026-08-23T09:00:00+03:00', clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+          });
+          lines = evs.filter((e) => e.kind === 'rung-start' && !e.seedJump);
+        } finally {
+          rmSync(assertJournalSandbox({ dir: box }), { recursive: true, force: true });
+        }
+        const forcedLine = lines.find((e) => e.forcedByGrid === true);
+        ok('ФИКСТУРА ДАЁТ ВЫНУЖДЕННЫЙ СЕТКОЙ ШАГ — иначе блок ниже пустой (EXP-0194)',
+          forcedLine ? [forcedLine.stepMv > forcedLine.zoneStepMv] : 'вынужденной сеткой ступени не случилось',
+          [true]);
+        ok('bugs/77: строка НАЗЫВАЕТ СЕТКУ, а не ложную причину «отмеряет от того, где стоит»',
+          (() => { const t = String(forcedLine?.text ?? '');
+            return [/СЕТКА КАРТЫ НЕ ДАЁТ/.test(t), /у неё нет точки/.test(t), /а не от стока/.test(t)]; })(),
+          [true, true, false]);
+      }
+
+      ok('bugs/46: и оно ОБЪЯСНЕНО в тексте, а не показано молча (bugs/77: объяснение верное)',
         (() => {
           const d = offLines.find((e) => Number.isFinite(e.zoneStepMv) && Number.isFinite(e.stepMv)
             && e.zoneStepMv !== e.stepMv);
           const t = String(d?.text ?? '');
-          return [/ШАГ \d+ мВ/.test(t), /шаг зоны \d+ мВ здесь НЕ применён/.test(t), /а не от стока/.test(t)];
-        })(), [true, true, true]);
+          return [/ШАГ \d+ мВ/.test(t), /шаг зоны \d+ мВ/.test(t),
+            /спуск стоит между ступенями лестницы/.test(t), /а не от стока/.test(t)];
+        })(), [true, true, true, false]);
     }
 
     // ─── ПЛАН И ПРОГОН ЖГУТ ОДНИМ И ТЕМ ЖЕ (`bugs/33`) ───────────────────────────────────────────
