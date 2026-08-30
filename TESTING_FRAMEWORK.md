@@ -183,6 +183,20 @@ ships, walk the gates that apply:
    the product has authenticated state, an unauthenticated smoke is NOT evidence about the
    product. (Field-paid: three deploys in one night served an application that did not start at
    all, with every local instrument green — origin issue #18.)
+6a. **A GUARD is not done until it has been seen on the REAL path — «is the engine mounted?»**
+   Gate 6 says a deploy is only real when you enter the deployed product as a user. The same is
+   true one level down, and it was paid for on 2026-08-30: a fuse built over two days, with a
+   green suite and mutations reddening exactly their own blocks, recorded ZERO trips when the
+   owner's machine actually hung — because everything it was ever proved against was a SIMULATED
+   process death on a test double, and the double cannot freeze its host. The owner named the
+   class better than any definition: *«the engine passed its burn test, all tests green — you
+   just forgot to mount it on the rocket, and the countdown has started»*.
+   **The obligation:** a guard's own suite is evidence about the SUITE. Before «done», observe the
+   guard on the path the owner actually runs, and record WHEN — an observation without a date
+   cannot be re-checked, and an uncheckable claim about checking is the very class this rule
+   exists for. Honest debt («not yet») is legal and visible; a bare «yes / works / verified» is
+   not. Where the agent system supports it, this is a lint, not prose (KAIF ticket 14/15).
+
 7. **Artifact integrity before shipping.** "It built" and "it is one build" are different claims:
    the shipped bundle carries exactly ONE build identity, asserted mechanically before upload. An
    output directory that is not cleaned between builds ships a mixture of two builds — every
