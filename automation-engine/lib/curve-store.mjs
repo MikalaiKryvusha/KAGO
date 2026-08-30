@@ -396,7 +396,31 @@ export function demandsVoltage(row) {
   //
   // Ограничение при этом НЕ ТЕРЯЕТСЯ: настоящий источник требования по-прежнему стоит в таблице и
   // действует напрямую на всех, кто выше. Мы убираем ретранслятор, а не правило.
-  return !tags.includes(CURVE_TAGS.ORIGIN_RATCHETED);
+  if (tags.includes(CURVE_TAGS.ORIGIN_RATCHETED)) return false;
+  // ⚠️ И ПРОМАХНУВШИЙСЯ ЗАМЕР НЕ ТРЕБУЕТ НИЧЕГО — он замер СОСТОЯНИЯ КАРТЫ, а не потребности
+  // частоты (`bugs/72`, решение владельца `interviews/018` = A).
+  //
+  // Довод — тот же самый, что двумя строками выше, и в этом всё дело. Когда карта отказывается идти
+  // ниже своего пола, она подставляет СВОЁ напряжение вместо заказанного: замерено по 805 ступеням
+  // боевого журнала — 26 ступеней с разрывом ≥ 30 мВ, и выдача на них садится всего на ЧЕТЫРЕ
+  // значения (915 ×13 · 910 ×6 · 840 ×5 · 890 ×2) при заказах от 810 до 885 мВ. Такая строка честна
+  // про СЕБЯ («частоту обслуживало 915 мВ, и это прошло прожиг») и не утверждает, что частоте
+  // столько НУЖНО.
+  //
+  // ПОЧЕМУ ЗДЕСЬ, А НЕ ТРЕТЬИМ СТОРОЖЕМ. 30 августа ворота варианта A встали ОДНИМ условием
+  // (`closeIsOvershot`) в ОДНОМ из двух циклов храповика, и это завело второе определение понятия
+  // «утверждение о потребности» — при том, что в модуле оно уже было, ровно здесь. Цена измерена
+  // пробами и записана в `bugs/72`: (а) второй цикл (нижняя соседка поднимает ЗАКРЫВАЕМУЮ строку)
+  // о новом условии не знал и пропускал ту же кражу 45 мВ на СВЕЖЕМ честном замере; (б) удержанная
+  // строка оставалась «требующей», документ становился противоречивым, `validateCurveDoc` его
+  // отвергал, а `engine.mjs` на любом отказе останавливает полосу — сторож превращался в СТЕНУ
+  // (класс R12 · R13 · R17, [[EXP-0193]]). Одно понятие — одно место; оба цикла и сверка инверсий
+  // читают его отсюда.
+  //
+  // ЧЕГО ЭТО НЕ ОТМЕНЯЕТ: строка САМА пишется как писалась (канон владельца «тюним то, что карта
+  // выдаёт»), её теги и свидетель на месте, и поднять её ХРАПОВИК по-прежнему может — подъём это
+  // безопасное направление. Отменяется ровно право быть ИСТОЧНИКОМ требования.
+  return !tags.includes(CURVE_TAGS.ORIGIN_OVERSHOT);
 }
 
 /** Does this row claim a burn proved it? A claim without a witness is a statement, not evidence. */
@@ -1148,7 +1172,15 @@ export function closePoint(doc, {
     // ПОЛЕ, А НЕ ПРОЗА (`bugs/63`): сводке и сторожам нужно СЧИТАТЬ удержанные подъёмы, а по прозе
     // считать нельзя — тот же довод, по которому классом стал отказ записи и `kept` выше.
     ratchetWithheld: withheld.length ? { mhz, reason: CURVE_TAGS.ORIGIN_OVERSHOT, rows: withheld } : null,
-    why: `${mhz} МГц закрыта: ${voltageMv} мВ, статус «${status}»`
+    // ⚠️ СВОДКА НАЗЫВАЕТ ЗАПИСАННОЕ, А НЕ ЗАКАЗАННОЕ (`bugs/72`, побочная находка; семья `bugs/46`).
+    // До этой правки строка печатала `voltageMv` — то, с чем закрытие ПРИШЛО, — а храповик мог
+    // поднять саму закрываемую строку до `effectiveMv`, и оператор читал «закрыта: 850 мВ» о
+    // документе, в котором стояло 895. Подъём ЧУЖИХ строк назывался всегда, подъём САМОЙ
+    // закрываемой — не назывался нигде, кроме улики внутри строки.
+    why: `${mhz} МГц закрыта: ${effectiveMv} мВ, статус «${status}»`
+      + (effectiveMv !== voltageMv
+        ? ` (замерено ${voltageMv} мВ · ⚠️ САМА СТРОКА ПОДНЯТА ХРАПОВИКОМ до ${effectiveMv} мВ: столько требует более низкая ${ratchetedBy} МГц)`
+        : '')
       + (inherited.length ? ` · ступень унаследовали ${inherited.length} частот(ы) до ${inheritDownToMhz} МГц` : '')
       + (raised.length ? ` · ⚠️ ХРАПОВИК ПОДНЯЛ ${raised.length} частот(у) выше: ${raised.map((x) => `${x.mhz} МГц ${x.fromMv}→${x.toMv} мВ`).join(', ')}` : '')
       + (withheld.length ? ` · 🔒 ХРАПОВИК УДЕРЖАН (замер с промахом, ${CURVE_TAGS.ORIGIN_OVERSHOT}, решение владельца interviews/018 = A): `
@@ -1854,6 +1886,91 @@ function cmdSelftest() {
     ok('ЧИСТЫЙ ЗАМЕР ВОРОТ НЕ ЗАМЕЧАЕТ: поля удержания нет, подъём прошёл',
       edgeUp.ratchetWithheld === null && edgeUp.raised.length === 1,
       JSON.stringify({ withheld: edgeUp.ratchetWithheld, raised: edgeUp.raised }));
+  }
+
+  // ─── ПРОМАХ НЕ ТРЕБУЕТ НИЧЕГО: ОБА НАПРАВЛЕНИЯ ХРАПОВИКА И СВЕРКА ИНВЕРСИЙ (`bugs/72`) ──────────
+  //
+  // 🔴 ЧЕГО НЕ ВИДЕЛА ГРУППА ВЫШЕ, И ЭТО СВОЙСТВО ЕЁ ФИКСТУРЫ, А НЕ НЕБРЕЖНОСТЬ. Там удерживаемая
+  // строка несёт `stop:lever-limited`, а такая строка в сверку инверсий не входит ПО ПОСТРОЕНИЮ
+  // (`demandsVoltage` → false) — значит инверсия там невозможна при любом коде, и ни один из пяти
+  // блоков не утверждает, что документ после удержания остаётся ДОКУМЕНТОМ. Замерено пробами
+  // 2026-08-30: с `stop:edge-found` у удерживаемой строки `validateCurveDoc` давал 1 отказ
+  // (монотонность), а `engine.mjs` на любом отказе ставит `stoppedBy: 'document'` и ОСТАНАВЛИВАЕТ
+  // ПОЛОСУ. Доказанный судья при недоказанном следствии — [[EXP-0193]] сутки спустя.
+  //
+  // И ВТОРОЕ НАПРАВЛЕНИЕ. У храповика внутри `closePoint` их два: цикл «закрываемая поднимает ЧУЖИЕ»
+  // и цикл «НИЖНЯЯ соседка поднимает ЗАКРЫВАЕМУЮ». Ворота 30 августа встали на первом; второй
+  // пропускал ту же кражу 45 мВ на СВЕЖЕМ честном замере (EXP-0147: направления перечисляются
+  // механически, а не по рассказу об инциденте).
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   EH. вернуть `origin:overshot` в `demandsVoltage` → П72-AC1 и П72-AC2
+  //   EJ. `demandsVoltage` возвращает false всегда     → П72-AC3 (предикат стал стеной)
+  //   EK. сводка снова печатает заказанное             → блок сводки
+  console.log('\n— ПРОМАХ НЕ ТРЕБУЕТ НИЧЕГО: ОБА НАПРАВЛЕНИЯ ХРАПОВИКА (bugs/72) —');
+  {
+    // П72-AC1. Удерживаемая строка — ТРЕБУЮЩАЯ (`stop:edge-found`), а не «предел рычага»: только на
+    // такой паре удержание вообще способно оставить противоречие.
+    const demandingAbove = () => {
+      const d = healthyDoc();
+      d.frequencies[3].tags = [CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.ORIGIN_MEASURED];
+      d.frequencies[3].provenBy = 'прожиг: отказ ниже 800 мВ на 2800 МГц — честный измеренный край';
+      d.frequencies[3].voltageMv = 800;
+      return d;
+    };
+    const held = closePoint(demandingAbove(), {
+      mhz: 2400, voltageMv: 850, status: CURVE_STATUS.EDGE_FOUND,
+      extraTags: [CURVE_TAGS.ORIGIN_OVERSHOT],
+      provenBy: 'прожиг: карта подставила своё напряжение вместо заказанного',
+      at: '2026-08-30T13:00:00+03:00',
+    });
+    ok('П72-AC1: удержание НА ТРЕБУЮЩЕЙ строке оставляет документ ВАЛИДНЫМ — полоса не встаёт',
+      held.ok === true && held.raised.length === 0
+        && held.ratchetWithheld !== null
+        && firstInversion(held.doc.frequencies) === null
+        && validateCurveDoc(held.doc, { card, frequencyGrid: FAKE_LADDER }).length === 0,
+      JSON.stringify({
+        raised: held.raised,
+        inv: firstInversion(held.doc.frequencies),
+        refusals: validateCurveDoc(held.doc, { card, frequencyGrid: FAKE_LADDER }).map((r) => r.field),
+      }));
+
+    // П72-AC2. ВТОРОЕ НАПРАВЛЕНИЕ: нижняя соседка с промахом не поднимает ЗАКРЫВАЕМУЮ строку.
+    // Пара выбрана так, что сломанный и правильный код дают РАЗНЫЙ ответ (EXP-0176): 850 против 900.
+    const overshotBelow = (extra) => () => {
+      const d = healthyDoc();
+      d.frequencies[5].tags = [CURVE_TAGS.STOP_EDGE_FOUND, CURVE_TAGS.ORIGIN_MEASURED, ...extra];
+      d.frequencies[5].provenBy = 'прожиг на 2000 МГц: 900 мВ выдержало';
+      d.frequencies[5].voltageMv = 900;
+      return d;
+    };
+    const closeOver = (make) => closePoint(make(), {
+      mhz: 2400, voltageMv: 850, status: CURVE_STATUS.EDGE_FOUND,
+      provenBy: 'прожиг: отказ ниже 850 — честный замер этой частоты',
+      at: '2026-08-30T13:00:00+03:00',
+    });
+    const belowMissed = closeOver(overshotBelow([CURVE_TAGS.ORIGIN_OVERSHOT]));
+    ok('П72-AC2: промахнувшаяся НИЖНЯЯ соседка не поднимает закрываемую строку — 850 мВ остаются 850',
+      belowMissed.ok === true && belowMissed.doc.frequencies[4].voltageMv === 850
+        && (belowMissed.doc.frequencies[4].tags ?? []).includes(CURVE_TAGS.ORIGIN_RATCHETED) === false,
+      JSON.stringify({ mv4: belowMissed.doc.frequencies[4].voltageMv, tags4: belowMissed.doc.frequencies[4].tags }));
+
+    // П72-AC3. ОБРАТНАЯ СТОРОНА, БЕЗ КОТОРОЙ ПРЕДИКАТ СТАЛ БЫ СТЕНОЙ: чистая нижняя соседка
+    // поднимает как поднимала. Мутация EJ («не требует никто») краснит ровно этот блок.
+    const belowClean = closeOver(overshotBelow([]));
+    ok('П72-AC3: ЧИСТАЯ нижняя соседка поднимает как поднимала — безопасное направление цело',
+      belowClean.ok === true && belowClean.doc.frequencies[4].voltageMv === 900
+        && (belowClean.doc.frequencies[4].tags ?? []).includes(CURVE_TAGS.ORIGIN_RATCHETED),
+      JSON.stringify({ mv4: belowClean.doc.frequencies[4].voltageMv, tags4: belowClean.doc.frequencies[4].tags }));
+
+    // СВОДКА НАЗЫВАЕТ ЗАПИСАННОЕ, А НЕ ЗАКАЗАННОЕ (побочная находка `bugs/72`, семья `bugs/46`).
+    // До правки строка печатала «закрыта: 850 мВ» о документе, в котором стояло 900.
+    ok('...и сводка называет ЗАПИСАННОЕ напряжение и подъём САМОЙ закрываемой строки',
+      /закрыта: 900 мВ/.test(belowClean.why ?? '')
+        && /САМА СТРОКА ПОДНЯТА ХРАПОВИКОМ до 900 мВ/.test(belowClean.why ?? '')
+        && /замерено 850 мВ/.test(belowClean.why ?? '')
+        && /закрыта: 850 мВ/.test(belowMissed.why ?? ''),
+      JSON.stringify({ clean: belowClean.why, missed: belowMissed.why }));
   }
 
   console.log('\n— ОБЛАКО ТЕГОВ: словарь, классы, накопление (эпик 04 фаза 1) —');
