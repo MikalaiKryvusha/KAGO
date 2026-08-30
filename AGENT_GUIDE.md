@@ -83,6 +83,16 @@ relies entirely on this document to get to work.
 7. Execute by the fable loop      # /fable-method: gates + forced artifacts (INTENT/AUTH/TWINS/PENDING); /fable-loop to orchestrate; /fable-judge before claiming done
 8. Read the relevant plan         # plans/<feature>.md, if the task touches a specific feature. Code by citing the plan: before implementing a step, QUOTE the anchor line you are doing right now — if you can't name the line, that's scope drift caught BEFORE the diff. A HEAVY task with no plan yet → build the ladder first (Planning discipline below; /plan-task for ordinary work, /plan-epic for epics). Filing a plan/bug/idea → goal vector + acceptance criteria FIRST, per REQUIREMENTS_FRAMEWORK.md
 9. Recon before code (external truth)  # the task rests on an external truth (an old/reference system, a foreign API, prod behavior, a vendor doc)? The FIRST artifact is a recon doc in researches/ — code is forbidden until it exists; then code by the document, not from recall. Recon docs are reused by every future session
+9a. 🔴 РАЗВЕДКА ПЕРЕД РЕШЕНИЕМ НА РАЗВИЛКЕ (механизм М4, `/recon-before-decision`)
+    # Развилка = ДВА И БОЛЕЕ варианта И НЕНУЛЕВАЯ цена ошибки. Оба условия, не одно. Имя
+    # переменной — не развилка; решение, способное повесить машину владельца, — развилка.
+    # Тогда: выписать варианты СПИСКОМ (это ломает ложную развилку — третий вариант становится
+    # виден на бумаге, а не в озарении) → разведка «как решили те, кто решал до нас» → разведдок
+    # в researches/ → рефлексия в ДВЕ половины → решение с блоком @fork у места решения.
+    # Слово владельца: «НЕЛЬЗЯ ДОВЕРЯТЬ принятие решений на развилках ИИ модели и ИИ агенту».
+    # Оплачено машиной владельца 30.08: развилка «писать плёнку каждый такт или в конце» решена
+    # из головы, третий вариант стоил копейки (bugs/76, EXP-0200). Ворота сборки проверяют
+    # блок @fork правилами R9/R10; принуждение живёт там, а не в напоминании (researches/28).
 10. Check the map & blast radius   # before editing code: PROJECT_ARCHITECTURE_INTERNAL_MAP.md — who is affected; update the map if relations change
 11. Run the build (if touching code)   # npm run check
 12. Use the test harness          # npm run gpu:info — drive/observe the software without a human
