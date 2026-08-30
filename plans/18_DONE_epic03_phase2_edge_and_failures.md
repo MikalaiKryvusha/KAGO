@@ -103,3 +103,18 @@ Trap cards and the contract suite (phase 3) · any change to `engine.mjs` · any
 - **The mid-range edge is placed deeper than the lever can reach.** That makes `lever-limited` an
   ordinary outcome of the ordinary card rather than a curiosity of a trap, which is what the sweep
   engine needs to be exercised against.
+
+---
+
+## ✅ STATUS: DONE (тег поставлен 2026-08-30 18:0x, ревизия беклога сессии 68)
+
+**Что закрыто.** Фаза 2 эпика 03 — придуманный край, вероятностный отказ и три исхода. Исполнена
+2026-08-15, тег `DONE` не поставили; предмет `bugs/25`.
+
+**Чем доказано.** Тем же способом, что и фаза 1, и это единственный честный здесь способ: вход
+фазы 3 по `plans/16` §4 — «фаза 2 закрыта · `/fable-judge` по фазе 2», а `plans/19_DONE` (фаза 3,
+тег стоит) пишет в шапке «entry gate passed 19:5x» и «✅ ИСПОЛНЕНА 2026-08-15 21:4x». Свидетель
+закрытия фазы — строка её родителя и ворота следующей фазы, а не маркер внутри неё самой (урок
+ревизии `bugs/25`). Второй свидетель — `STATUS.md`, «эпик 03 закрыт целиком, все три фазы».
+
+**Чего этот тег НЕ утверждает.** Закрытия эпика `plans/16` — см. `bugs/25`.

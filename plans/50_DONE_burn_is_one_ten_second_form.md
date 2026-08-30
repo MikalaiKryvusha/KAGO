@@ -190,3 +190,14 @@ of a test to new output.
   is a larger blast radius than this plan's scope.
 - **`DIVERSE_SET` left untouched** on the `--band` / `--search` / `vfstep` paths — the owner's order
   was about the SWEEP's burn, and widening it unasked would be scope drift.
+
+## ✅ STATUS: DONE (тег поставлен 2026-08-30 18:1x, ревизия беклога сессии 68)
+
+План закрыт 2026-08-26 11:0x (требования 1–3 сданы офлайн, требование 4 передано в `plans/51`);
+тег не поставили (`bugs/25`). **Свидетель сверх собственной шапки — ЗАМЕР на прогоне:** `STATUS.md`
+дважды называет следствие этого плана измеренным — «ступень … стала **15,0 с** с ОДНОЙ формой
+`furnace/sustained@0` (21 из 21 после `plans/50`)» и «прожиг стал одной формой на 10 с
+(`plans/50`)». Изменение наблюдается в прогонах, а не только заявлено.
+
+**Метка `[NOT-TESTED]` на живом железе остаётся в силе** и снимается не этим тегом, а первым живым
+прогоном, который владелец разрешит.

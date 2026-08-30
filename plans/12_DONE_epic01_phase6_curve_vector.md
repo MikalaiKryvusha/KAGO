@@ -200,3 +200,13 @@ rollback is a LIST, not a chain.*
 - **`CLK_VF_POINT_COUNT` moved from `nvapi.mjs` to `config.mjs`** so the validator does not import the
   FFI layer to learn a number (R3). `nvapi.mjs` re-exports it — one definition, twelve call sites
   untouched, no new row in the pair registry.
+
+## ✅ STATUS: DONE (тег поставлен 2026-08-30 18:1x, ревизия беклога сессии 68)
+
+Срез 2 фазы 6 эпика 01 закрыт 2026-08-15 01:3x (все пять шагов, ноль записей в GPU); тег не
+поставили (`bugs/25`). **Свидетель сверх собственной шапки:** коммит `92771c7` «feat(профили):
+подъём кривой становится ВЕКТОРОМ — своё смещение на каждую точку; plans/12».
+
+⚠️ **Что этот тег НЕ означает.** Фаза 6 эпика 01 как целое **переопределена** 2026-08-15 и
+переехала в фазу 5 эпика 02 (`STATUS.md`, `plans/13`). Закрыт ИМЕННО этот документ и его пять
+шагов; судьба фазы-родителя решена отдельно и в другую сторону.

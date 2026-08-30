@@ -6,7 +6,18 @@
 > **Parent:** `plans/13_EPIC_edge_finder_full_range.md` — phase 2. Evidence base: `researches/09`
 > (search space, the step arithmetic, the industry's crash-resume shape) · `ideas/03` steps 6–14 ·
 > `GOAL.md` (five owner decisions of 2026-08-15) · `plans/14` (the document this engine writes into)
-> **Status:** 🔲 open · **entry gate is phase 1's closure and is NOT waived for execution** (§0) ·
+> **Status:** 🟡 **ВСЕ ДЕВЯТЬ ШАГОВ 4.1–4.9 ИСПОЛНЕНЫ 2026-08-16 01:1x** (последний коммит фазы —
+> `d0b3408` «фаза исполнена целиком»; §4.9 несёт свою отметку DONE). **Тег `DONE` НЕ поставлен, и
+> причина названа: расписки судьи по ЭТОЙ фазе нет ни в одном документе.** У фазы 1 она есть и
+> лежит в `plans/14_DONE` §9; у фазы 2 `STATUS.md` утверждает «судья: СВЕРЕНО С ОГОВОРКАМИ»
+> (00:5x — РАНЬШЕ, чем исполнен последний шаг в 01:1x), а строка ворот в `plans/13` §4 говорит
+> «ЖДЁТ СУДЬИ». Два документа расходятся, расписки нет — значит утверждение о судье
+> невоспроизводимо, и закрывать по нему нельзя (`TESTING_FRAMEWORK.md`: заявление, которое судья
+> не может воспроизвести, ОПРОВЕРГНУТО). Найдено ревизией 2026-08-30 18:0x, занесено в `bugs/25`.
+> **Что осталось до тега:** один проход `/fable-judge` по фазе с распиской в этом файле.
+> **Прежняя строка статуса — «🔲 open» — не врала, но и не говорила, что работа сделана: свежая
+> сессия читала её как «фазу надо исполнить».**
+> · **entry gate is phase 1's closure and is NOT waived for execution** (§0) ·
 > **ZERO GPU WRITES for the whole phase** — every line here is proved on injected backends
 > **Outbound:** the generalized first-step governor → `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` and
 > `GPU_TUNING_RAILS.md` §0 (rail S2 gains its evidence clause) · the journal → the phase-3 operational
