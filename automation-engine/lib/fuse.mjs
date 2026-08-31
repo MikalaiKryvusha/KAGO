@@ -391,6 +391,75 @@ export function readBurnPidfile(pidfilePath, { readFileSyncFn = null } = {}) {
 }
 
 /**
+ * РАСПИСКИ РУКИ 2 — «сток подтверждён ЧТЕНИЕМ» (`plans/81` Ш2, `ideas/17` часть 1).
+ *
+ * ЗАЧЕМ. Судья обязан перевзводиться ТОЛЬКО после подтверждённого стока — это смягчение риска (а)
+ * идеи 17, одобренной владельцем (`interviews/022` Q2 = A). Но рука 2 запускается DETACHED и судья
+ * её НЕ ЖДЁТ: `makeStockHand` возвращается за ~5 мс, и это стоимость СПАУНА, а не спасения.
+ * Канал, однако, уже существует — рука пишет в тот же журнал СВОЮ `fsync`-нутую строку с
+ * результатом ПЕРЕЧИТЫВАНИЯ (`fuse-rescue-hand.mjs`):
+ *
+ *   {"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,
+ *    "ms":58444.85,"detail":"сток подтверждён чтением: остаточных смещений 0"}
+ *
+ * 🔴 ПОЧЕМУ РАСПИСКИ РАЗЛИЧАЮТСЯ СЧЁТОМ, А НЕ ВРЕМЕНЕМ. Соблазнительно отбирать расписки «позже
+ * момента трипа». Штампы, однако, ставят РАЗНЫЕ ПРОЦЕССЫ по своим часам, и сравнение таких концов
+ * — ровно та ловушка, за которую проект заплатил ([[EXP-0207]]: «число проверяется не арифметикой,
+ * а вопросом, интервалом МЕЖДУ ЧЕМ И ЧЕМ оно является»; там один конец интервала оказался
+ * человеком, а не машиной). Порядковый номер расписки в СВОЁМ журнале от часов не зависит вовсе:
+ * судья помнит, сколько их было ДО его трипа, и ждёт следующую.
+ *
+ * ЗАМЕР, ОПРАВДЫВАЮЩИЙ ОЖИДАНИЕ (2026-08-31, живая карта в покое, `plans/81` §4): вся рука на
+ * ЗДОРОВОЙ карте — **≈ 1,9 с** (мост, инициализация, перечисление и чтение вместе 30 мс; запись
+ * 127 нулей с перечитыванием 1870,7 мс). На живом трипе 31.08 та же рука отчиталась через
+ * **58,4 с** — в 31 раз медленнее. Значит долгое ожидание случается ровно тогда, когда карте
+ * плохо, то есть когда ждать и НАДО; порога не заводится, потому что задачи для него нет.
+ *
+ * Чистая функция над СТРОКАМИ: никакого ввода-вывода, чтобы решение проверялось фикстурами.
+ *
+ * @param {Array<object|string>} lines строки журнала предохранителя (объекты или сырой JSONL)
+ * @returns {Array<{ok:boolean, ms:number|null, at:string|null}>} расписки в порядке появления
+ *
+ * [TESTED: 2026-08-31 · блоки в `--selftest`, включая фикстуру из НАСТОЯЩЕГО журнала трипа 31.08]
+ */
+export function stockReceipts(lines) {
+  const out = [];
+  for (const raw of Array.isArray(lines) ? lines : []) {
+    let d = raw;
+    if (typeof raw === 'string') {
+      const t = raw.trim();
+      if (!t) continue;
+      try { d = JSON.parse(t); } catch { continue; }
+    }
+    if (!d || d.phase !== 'outcome' || d.hand !== 2) continue;
+    // ИМЯ ДЕЙСТВИЯ РАЗЛИЧАЕТ СПАУН И ПОДТВЕРЖДЕНИЕ, и это не придирка: `stock-voltage` пишет САМ
+    // судья в момент спауна (ok: true означает «процесс запущен»), а `stock-voltage-verified`
+    // пишет РУКА после перечитывания. Принять первую за вторую значило бы считать подтверждённым
+    // сток, которого никто не читал, — то есть построить смягчение риска на факте спауна.
+    if (d.action !== 'stock-voltage-verified' && d.action !== 'stock-voltage-verified-twin') continue;
+    out.push({ ok: d.ok === true, ms: Number.isFinite(d.ms) ? d.ms : null, at: d.at ?? null });
+  }
+  return out;
+}
+
+/**
+ * ГОТОВ ЛИ СУДЬЯ ПЕРЕВЗВЕСТИСЬ — одно решение в одном месте (`plans/81` Ш2).
+ *
+ * Три исхода, и два из них означают ПРЕЖНЕЕ поведение (выход, полоса встаёт):
+ *   `waiting`   — расписки ещё нет; судья продолжает ждать;
+ *   `refused`   — расписка пришла с `ok: false`: сток НЕ подтверждён чтением, продолжать нельзя;
+ *   `confirmed` — сток подтверждён; перевзведение разрешено.
+ *
+ * @param {Array} lines строки журнала · @param {number} seenBefore сколько расписок было ДО трипа
+ */
+export function rearmDecision(lines, seenBefore = 0) {
+  const all = stockReceipts(lines);
+  if (all.length <= seenBefore) return { state: 'waiting', receipt: null };
+  const receipt = all[seenBefore];
+  return { state: receipt.ok ? 'confirmed' : 'refused', receipt };
+}
+
+/**
  * The trip procedure, pure in its ORDER (the part fixtures must pin): intent first — fsync'd
  * BEFORE any action, so a rescue that dies mid-way still left evidence; then hand 1; then hand 2;
  * then outcomes and the ring dump. Returns what happened for the caller's log line.
@@ -993,6 +1062,51 @@ async function cmdSelftest() {
     });
     return JSON.stringify(calls) === '["img:furnace.exe"]';
   })());
+
+  // ─── РАСПИСКА РУКИ 2 И РЕШЕНИЕ О ПЕРЕВЗВЕДЕНИИ (`plans/81` Ш2, `ideas/17` часть 1) ────────────
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //   R1. принять `stock-voltage` (спаун) за подтверждение → «спаун — НЕ подтверждение»
+  //   R2. вернуть `confirmed` при `ok: false`              → «отказ руки НЕ разрешает продолжать»
+  //   R3. не учитывать `seenBefore`                        → «второй трип ждёт ВТОРУЮ расписку»
+  {
+    // 🔴 ФИКСТУРА ИЗ НАСТОЯЩЕГО ЖУРНАЛА — четыре строки живого трипа 2026-08-31 05:12, как есть.
+    // Выдуманная фикстура проверяла бы мой разбор собственного формата; эта проверяет разбор ТОГО,
+    // что рука пишет на самом деле.
+    const realTrip = [
+      '{"at":"2026-08-31T05:12:05.154Z","phase":"intent","cause":"beat-silence","beatSilenceMs":500.61,"progressSilenceMs":null,"hand":null,"action":null,"ok":null,"ms":null,"detail":null}',
+      '{"at":"2026-08-31T05:12:05.664Z","phase":"outcome","cause":"beat-silence","hand":1,"action":"kill-burn","ok":true,"ms":507.29,"detail":"furnace.exe:не найден"}',
+      '{"at":"2026-08-31T05:12:05.671Z","phase":"outcome","cause":"beat-silence","hand":2,"action":"stock-voltage","ok":true,"ms":5.15,"detail":"pid 18728"}',
+      '{"at":"2026-08-31T05:13:04.146Z","phase":"outcome","cause":null,"hand":2,"action":"stock-voltage-verified","ok":true,"ms":58444.85,"detail":"сток подтверждён чтением: остаточных смещений 0"}',
+    ];
+    ok('расписка: на НАСТОЯЩЕМ журнале трипа 31.08 находится РОВНО ОДНА, и это подтверждение чтением',
+      stockReceipts(realTrip).length === 1 && stockReceipts(realTrip)[0].ok === true
+        && stockReceipts(realTrip)[0].ms === 58444.85);
+    ok('расписка: СПАУН руки 2 (`stock-voltage`, ok:true) подтверждением НЕ считается — иначе смягчение стояло бы на факте запуска процесса',
+      stockReceipts(realTrip.filter((l) => !l.includes('verified'))).length === 0);
+    ok('решение: подтверждённый сток РАЗРЕШАЕТ перевзведение', rearmDecision(realTrip, 0).state === 'confirmed');
+    ok('решение: пока расписки нет — ЖДЁМ, а не продолжаем',
+      rearmDecision(realTrip.filter((l) => !l.includes('verified')), 0).state === 'waiting');
+
+    // ОТКАЗ РУКИ — вторая сторона, и она важнее первой: продолжить полосу на карте, про которую
+    // рука сказала «сток НЕ подтверждён», значит отменить само смягчение.
+    const refused = [...realTrip.slice(0, 3),
+      '{"at":"2026-08-31T05:13:04.146Z","phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":false,"ms":1870.7,"detail":"zeroCurve не подтвердился: остаточных 12, отказов 0"}'];
+    ok('🔴 решение: отказ руки НЕ разрешает продолжать — это прежнее поведение, выход и остановка',
+      rearmDecision(refused, 0).state === 'refused');
+
+    // ВТОРОЙ ТРИП ждёт ВТОРУЮ расписку. Различение счётом, а не временем: штампы ставят разные
+    // процессы своими часами, и сравнение таких концов — ловушка EXP-0207.
+    const twoTrips = [...realTrip,
+      '{"at":"2026-08-31T05:20:00.000Z","phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":false,"ms":2000,"detail":"остаточных 3"}'];
+    ok('решение: ВТОРОЙ трип ждёт ВТОРУЮ расписку, а не видит первую (различение счётом, не временем)',
+      rearmDecision(twoTrips, 1).state === 'refused' && rearmDecision(twoTrips, 0).state === 'confirmed');
+    ok('решение: после ПОСЛЕДНЕЙ расписки следующий трип снова ЖДЁТ', rearmDecision(twoTrips, 2).state === 'waiting');
+    ok('расписка двойника (`-verified-twin`) считается так же — репетиция обязана ходить тем же путём',
+      stockReceipts(['{"phase":"outcome","hand":2,"action":"stock-voltage-verified-twin","ok":true,"ms":12}']).length === 1);
+    ok('мусор и пустые строки расписками не притворяются',
+      stockReceipts(['', 'не json', '{"phase":"outcome","hand":1,"action":"stock-voltage-verified","ok":true}']).length === 0);
+  }
 
   ok('рука 2: ИЗОЛИРОВАННЫЙ процесс, судья НЕ ждёт, и он DETACHED — на этой машине недетачнутый ребёнок умирает с родителем (живой прогон 28.08, EXP-0166)', (() => {
     let spawned = null; let opts = null;
