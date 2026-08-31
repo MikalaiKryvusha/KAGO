@@ -1311,9 +1311,17 @@ export async function runStep({
             // the frequency the card ACTUALLY ran, so a path that measures the clock and then drops
             // it leaves the sweep with nothing to key the row by. The capped branch below already
             // sets these two fields; the locked branch simply never did.
+            //
+            // 🔴 И ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ДЫРЫ, ЗАКРЫТАЯ 2026-08-31 (`bugs/87`). Дыру закрывали
+            // спешно, и в поле МАКСИМУМА положили медиану — то есть заполнили его НЕВЕРНЫМ числом
+            // вместо того, чтобы оставить пустым. Цена: за всю жизнь проекта ни одна ступень с этим
+            // держателем не смогла показать разброс, включая ту, где сторож строкой выше напечатал
+            // «ГУЛЯЛА 2677…2835 МГц (размах 158)». Поле, заполненное неверно, дороже пустого:
+            // пустое заставляет посмотреть, заполненное — поверить (EXP-0208).
             if (Number.isFinite(proof.delivered)) {
-              out.deliveredMhz = proof.delivered;
-              out.deliveredMaxMhz = proof.delivered;
+              out.deliveredMhz = proof.delivered;                                     // медиана — ключ строки
+              out.deliveredMaxMhz = Number.isFinite(proof.max) ? proof.max : null;    // максимум — свой
+              out.deliveredMinMhz = Number.isFinite(proof.min) ? proof.min : null;    // минимум — свой
             }
             if (!proof.ok && out.verdict === config.VERDICT.PASS) { out.verdict = null; out.pinRefused = true; out.reason = proof.why; }
             if (!proof.ok) throw new Error(proof.why);
@@ -1336,6 +1344,12 @@ export async function runStep({
           const max = Math.max(...clocks);
           out.deliveredMhz = median;
           out.deliveredMaxMhz = max;
+          // МИНИМУМ — ТРЕТЬИМ ЧИСЛОМ (`bugs/87`). Разброс, по которому судит сторож закрепления, это
+          // `max − min`; журнал же считал его как `max − медиана` и звал тем же словом. Две разные
+          // величины под одним именем: у сорвавшейся ступени 31.08 первая равна 158 МГц, вторая 11,5.
+          // Здесь ветка потолка, и она размахом не судит, — но число обязано ехать с ОБЕИХ ветвей,
+          // иначе журнал снова несёт величину, зависящую от того, кто держал частоту.
+          out.deliveredMinMhz = Math.min(...clocks);
           // ONE LADDER STEP of tolerance and not a millihertz more: the card's own grid is 7–8 MHz,
           // and `clocks.gr` is reported on that grid, so a reading one step above the cap is rounding
           // rather than a breach. Anything beyond it means the ceiling did not hold.
@@ -2732,7 +2746,12 @@ export async function selfTest() {
     mkd(sandbox, { recursive: true });
     const samplerPath = j(sandbox, 'sampler.jsonl');
 
-    const makeFake = ({ writeFails = false } = {}) => {
+    // `clocks` — ПРОБЫ, КОТОРЫЕ ОТДАСТ ФЕЙКОВЫЙ СЭМПЛЕР. Параметр заведён 2026-08-31 (`bugs/87`):
+    // прежде фейк писал двенадцать ОДИНАКОВЫХ проб, поэтому у него минимум = медиана = максимум, и
+    // дефект «в поле максимума лежит медиана» был на нём НЕВИДИМ ПО ПОСТРОЕНИЮ. Мутация,
+    // возвращавшая дефект, проходила по всей батарее зелёной — фикстура, чья форма делает отказ
+    // невозможным ([[EXP-0194]], та же семья, что `bugs/26`).
+    const makeFake = ({ writeFails = false, clocks = null } = {}) => {
       const calls = [];
       let lastOffsets = null;
       return {
@@ -2751,8 +2770,15 @@ export async function selfTest() {
           writeCurve: (_nv, _h, offsets) => {
             calls.push('writeCurve');
             if (writeFails) return { ok: false, failed: N_PTS, settled: false, heldKhz: null, failureClass: 'C2', why: 'C2 — фейк по заказу мутационного свидетеля' };
-            lastOffsets = offsets;
-            return { ok: true, failed: 0, settled: true, heldKhz: offsets.map((o) => Math.round((o ?? 0) * 1000)) };
+            // ФОРМА `uniform` ПЕРЕДАЁТ СКАЛЯР, А НЕ МАССИВ (:953 — `dev.writeCurve(nv, handle,
+            // offsetMhz)`), и настоящий писатель принимает оба. Фейк принимал только массив, то есть
+            // НЕ РЕАЛИЗОВЫВАЛ контракт, который сам же изображает: любой офлайн-прогон закреплённой
+            // ступени падал на `offsets.map is not a function`. Это третья причина, по которой ветку
+            // закрепления не проверял никто (`bugs/87`); первые две — плоская форма строки сэмплера
+            // и двенадцать одинаковых проб.
+            const vec = Array.isArray(offsets) ? offsets : Array.from({ length: N_PTS }, () => offsets);
+            lastOffsets = vec;
+            return { ok: true, failed: 0, settled: true, heldKhz: vec.map((o) => Math.round((o ?? 0) * 1000)) };
           },
           writeVfOffset: () => { calls.push('writeVfOffset'); return { ok: true }; },
           zeroCurve: () => { calls.push('zeroCurve'); return { ok: true, failed: 0, remainingNonZero: 0 }; },
@@ -2764,7 +2790,16 @@ export async function selfTest() {
           startSampler: () => {
             calls.push('sampler');
             // Дюжина проб «под нагрузкой» чуть НИЖЕ потолка: недобор — замер, не отказ (bugs/29).
-            wf(samplerPath, Array.from({ length: 12 }, () => JSON.stringify({ 'utilization.gpu': 99, 'clocks.gr': CAP - 7 })).join('\n'));
+            // ФОРМА СТРОКИ — РОВНО ТА, ЧТО ПИШЕТ НАСТОЯЩИЙ СЭМПЛЕР: `{i, sample}` с шапкой `i: -1`.
+            // Прежняя редакция писала ПЛОСКИЙ объект, и это была не мелочь: ветка потолка плоский
+            // терпит (`r.sample ?? r`), а ветка ЗАКРЕПЛЕНИЯ идёт через `summarizeSamples`, который
+            // требует `r.i >= 0 && r.sample` и на плоском видит НОЛЬ проб. Поэтому закреплённый
+            // путь офлайн не проверялся вовсе — фикстура не могла его дойти (`bugs/87`).
+            const series = clocks ?? Array.from({ length: 12 }, () => CAP - 7);
+            wf(samplerPath, [
+              JSON.stringify({ i: -1, meta: { sampler: 'фейк порта', period_ms: 500 } }),
+              ...series.map((c, i) => JSON.stringify({ i, sample: { 'utilization.gpu': 99, 'clocks.gr': c } })),
+            ].join('\n'));
             return { file: samplerPath, kill: () => calls.push('sampler.kill') };
           },
           burn: {
@@ -2791,6 +2826,49 @@ export async function selfTest() {
         && happy.calls.indexOf('zeroCurve') > happy.calls.indexOf('stressTest'), true);
     ok('ПОРТ: андервольт ИЗМЕРЕН на фикстуре — точка подешевела, экономия положительная',
       (r1.undervolt?.savedMv ?? -1) > 0, true);
+
+    // ─── ТРИ ЧИСЛА ВЫДАЧИ РАЗЛИЧАЮТСЯ, И КАЖДОЕ ЕДЕТ СВОЁ (`bugs/87`) ────────────────────────────
+    //
+    // ЗАЧЕМ ЭТИ БЛОКИ СУЩЕСТВУЮТ, дословно из замера. Дефект — `out.deliveredMaxMhz = медиана` на
+    // ветке ЗАКРЕПЛЕНИЯ — прожил в живом коде и не был пойман ничем: мутация, возвращавшая его,
+    // проходила по 44 наборам ЗЕЛЁНОЙ. Причина не в отсутствии сторожей, а в фикстуре: фейковый
+    // сэмплер писал двенадцать ОДИНАКОВЫХ проб, где минимум = медиана = максимум. Судья был
+    // исправен; данные, на которых вопрос вообще стоит, до него не доходили ([[EXP-0205]]).
+    // Поэтому проверяется ПРОВОДКА на пробах с настоящим разбросом, а не арифметика сводки.
+    //
+    // АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //   HG. `out.deliveredMaxMhz = median` на ветке потолка      → «ПОТОЛОК: три числа РАЗНЫЕ»
+    //   HH. `out.deliveredMaxMhz = proof.delivered` на закреплении → «ЗАКРЕПЛЕНИЕ: три числа РАЗНЫЕ»
+    //   HJ. убрать `out.deliveredMinMhz` на любой ветке          → соответствующий блок
+    {
+      // Пробы с разбросом: медиана НЕ равна ни минимуму, ни максимуму — иначе дефект неотличим.
+      // Отсортированы по возрастанию, чтобы медиана читалась глазом: 13 проб, середина — седьмая.
+      const SPREAD = [CAP - 30, CAP - 22, CAP - 15, CAP - 15, CAP - 15, CAP - 11, CAP - 7,
+        CAP - 7, CAP - 7, CAP - 7, CAP - 7, CAP - 4, CAP];
+      const wide = makeFake({ clocks: SPREAD });
+      const rw = await runStep({
+        point: POINT, offsetMhz: 30, writeShape: 'raise-and-cap', capMhz: CAP,
+        workload: 'sdc_fma', seconds: 1, sustain: 1, device: wide.dev,
+      });
+      ok('ПОТОЛОК: три числа выдачи РАЗНЫЕ — минимум, медиана и максимум едут каждое своё',
+        [rw.deliveredMinMhz, rw.deliveredMhz, rw.deliveredMaxMhz], [CAP - 30, CAP - 7, CAP]);
+
+      // ТА ЖЕ ПРОВЕРКА НА ВЕТКЕ ЗАКРЕПЛЕНИЯ — там и жил дефект. Форма `uniform` потолка не несёт,
+      // частоту держит `-lgc`, и судит СОВСЕМ ДРУГОЙ прибор (`verifyLockUnderLoad`). Разброс здесь
+      // шире допуска, поэтому закрепление ЗАКОННО не подтверждается — но три числа обязаны доехать
+      // и в этом исходе: ровно на нём 31.08 журнал записал разброс 0 при настоящих 158 МГц.
+      const pinned = makeFake({ clocks: SPREAD });
+      const rp = await runStep({
+        point: POINT, offsetMhz: 30, writeShape: 'uniform', pinMhz: CAP - 7,
+        workload: 'sdc_fma', seconds: 1, sustain: 1, device: pinned.dev,
+      });
+      ok('ЗАКРЕПЛЕНИЕ: три числа выдачи РАЗНЫЕ — медиана в поле максимума больше не лежит',
+        [rp.deliveredMinMhz, rp.deliveredMhz, rp.deliveredMaxMhz], [CAP - 30, CAP - 7, CAP]);
+      ok('ЗАКРЕПЛЕНИЕ: и разброс, который из них складывается, — тот самый, по которому судит сторож',
+        rp.deliveredMaxMhz - rp.deliveredMinMhz, 30);
+      ok('ЗАКРЕПЛЕНИЕ: гуляние шире допуска вердикта не даёт — ступень НЕ судится, а не проходит',
+        [rp.verdict, rp.pinRefused === true], [null, true]);
+    }
 
     const sour = makeFake({ writeFails: true });
     const r2 = await runStep({

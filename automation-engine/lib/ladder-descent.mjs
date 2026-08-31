@@ -210,12 +210,21 @@ export function ceilingLockProfile(capMhz, card) {
  */
 export function verifyLockUnderLoad(record, requestedMhz, tolerance = config.LOCK_DELIVERY_TOLERANCE_MHZ) {
   const c = record?.medians?.loaded?.['clocks.gr'];
-  if (!c || c.median === null) return { ok: false, why: 'под нагрузкой не снято ни одной пробы частоты', delivered: null };
+  if (!c || c.median === null) {
+    return { ok: false, why: 'под нагрузкой не снято ни одной пробы частоты', delivered: null, min: null, max: null };
+  }
+  // 🔴 МИНИМУМ И МАКСИМУМ ЕДУТ НАРУЖУ ВО ВСЕХ ИСХОДАХ (`bugs/87`). Раньше отсюда выходила ОДНА
+  // величина — медиана, — и вызывающий на ветке закрепления писал её же в поле МАКСИМУМА журнала:
+  // все семь ступеней проекта с этим держателем получили разброс 0, включая ту, где эта самая
+  // функция в ту же секунду напечатала размах 158 МГц. Числа считались здесь и выбрасывались
+  // строкой ниже — новых вычислений не заведено, отдаётся уже посчитанное (DRY).
+  const edges = { min: c.min, max: c.max };
   const spread = c.max - c.min;
   if (spread > tolerance) {
     return {
       ok: false,
       delivered: c.median,
+      ...edges,
       why: `частота под нагрузкой ГУЛЯЛА ${c.min}…${c.max} МГц (размах ${spread} > ${tolerance}) — это не фиксация`,
     };
   }
@@ -224,10 +233,11 @@ export function verifyLockUnderLoad(record, requestedMhz, tolerance = config.LOC
     return {
       ok: false,
       delivered: c.median,
+      ...edges,
       why: `просили ${requestedMhz} МГц, карта выдала ${c.median} (разница ${off} > ${tolerance} МГц — шире её собственного шага лестницы)`,
     };
   }
-  return { ok: true, delivered: c.median, off, why: off === 0 ? 'выдано ровно столько, сколько просили' : `выдано ${c.median} вместо ${requestedMhz} — на ${Math.abs(off)} МГц ниже, в пределах одного шага лестницы` };
+  return { ok: true, delivered: c.median, ...edges, off, why: off === 0 ? 'выдано ровно столько, сколько просили' : `выдано ${c.median} вместо ${requestedMhz} — на ${Math.abs(off)} МГц ниже, в пределах одного шага лестницы` };
 }
 
 // =================================================================================================
@@ -540,6 +550,25 @@ export async function selfTest() {
       && /1260/.test(verifyLockUnderLoad(rec(1260, 1260, 1260), 2400).why), true);
   ok('нет проб частоты -> отказ, а не молчаливое согласие',
     verifyLockUnderLoad({ medians: { loaded: {} } }, 1200).ok, false);
+
+  // ─── КРАЯ ВЫДАЧИ ЕДУТ НАРУЖУ, А НЕ ОСТАЮТСЯ ВНУТРИ (`bugs/87`) ──────────────────────────────
+  //
+  // Блоки родились из дефекта: функция считала `min` и `max`, печатала их в тексте отказа и
+  // НАРУЖУ отдавала только медиану. Вызывающий на ветке закрепления писал медиану в поле
+  // МАКСИМУМА журнала, и семь ступеней проекта из семи получили разброс 0 — включая ту, о которой
+  // эта функция сказала «ГУЛЯЛА 2677…2835 (размах 158)». Проверяется ПРОВОДКА (доехали ли числа),
+  // а не суждение: судью три блока выше уже проверяют.
+  const slipped = verifyLockUnderLoad(rec(2827, 2677, 2835), 2145);
+  ok('сорванное закрепление отдаёт НАРУЖУ и минимум, и максимум, и медиану — три РАЗНЫХ числа',
+    [slipped.min, slipped.delivered, slipped.max], [2677, 2827, 2835]);
+  ok('и они те самые, из которых сложен напечатанный размах',
+    slipped.max - slipped.min, 158);
+  ok('края едут и на УДАЧНОМ исходе, а не только на отказе',
+    [verifyLockUnderLoad(rec(1200, 1192, 1200), 1200).min, verifyLockUnderLoad(rec(1200, 1192, 1200), 1200).max], [1192, 1200]);
+  ok('края едут и на отказе ПО РАСХОЖДЕНИЮ с заказом',
+    [verifyLockUnderLoad(rec(1260, 1260, 1260), 2400).min, verifyLockUnderLoad(rec(1260, 1260, 1260), 2400).max], [1260, 1260]);
+  ok('когда проб нет — края NULL, а не выдуманный ноль',
+    [verifyLockUnderLoad({ medians: { loaded: {} } }, 1200).min, verifyLockUnderLoad({ medians: { loaded: {} } }, 1200).max], [null, null]);
 
   // --- the knee: Max Optimal's objective, and the definition that took five restatements
   const curve = [

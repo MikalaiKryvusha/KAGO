@@ -1190,6 +1190,9 @@ export async function runRung({
   record.decidedBy = atom?.worstShape ?? null;
   record.deliveredMhz = atom?.deliveredMhz ?? null;
   record.deliveredMaxMhz = atom?.deliveredMaxMhz ?? null;
+  // МИНИМУМ ВЫДАЧИ — третьим числом (`bugs/87`): без него разброс журнала не та величина, по
+  // которой судит сторож закрепления. Проводка доказывается мутацией этой строки, а не судьёй.
+  record.deliveredMinMhz = atom?.deliveredMinMhz ?? null;
   record.servingMvAfter = atom?.undervolt?.after?.mv ?? null;
 
   // FROM HERE ON, EVERY EXIT CLOSES THE JOURNAL LINE — an intent left open by a rung that finished is
@@ -1231,6 +1234,7 @@ export async function runRung({
         // медиана `clocks.gr` считается по пробам ЭТОГО прожига и после него не существует нигде.
         deliveredMhz: record.deliveredMhz ?? null,
         deliveredMaxMhz: record.deliveredMaxMhz ?? null,
+        deliveredMinMhz: record.deliveredMinMhz ?? null,
         why: result.why,
       });
     }
@@ -5988,8 +5992,12 @@ export function selfTest() {
     const cleanUndo = [{ name: 'ОТКАТ: вся кривая обнулена', ok: true, undo: true, detail: '' }];
     // A PASS as the atom reports one: the verdict, the deciding shape, and — the load-bearing part —
     // the voltage the CARD says served the clock after the write.
+    // ТРИ ЧИСЛА ВЫДАЧИ, И ОНИ НАМЕРЕННО РАЗНЫЕ (`bugs/87`). Прежняя фикстура несла два, и оба
+    // близких; форма, в которой минимум неотличим от медианы, делает НЕВИДИМОЙ потерю минимума в
+    // проводке — ровно то, чем `bugs/84` прожил всю жизнь незамеченным. Числа взяты с сорвавшейся
+    // ступени по масштабу: медиана и максимум рядом, минимум заметно ниже.
     const atomPass = (servingMv) => ({
-      verdict: P, worstShape: 'sdc_fma/transient', deliveredMhz: 2842, deliveredMaxMhz: 2845,
+      verdict: P, worstShape: 'sdc_fma/transient', deliveredMhz: 2842, deliveredMaxMhz: 2845, deliveredMinMhz: 2835,
       undervolt: { capMhz: 2842, after: { pointIndex: 90, mv: servingMv } },
       blocks: cleanUndo,
     });
@@ -6356,6 +6364,22 @@ export function selfTest() {
         [45, 25, true, 'кривая + замок', 'raise-and-cap', 90]);
       ok('вердикт ЗАКРЫВАЕТ намерение — иначе следующий запуск обвинил бы законченную ступень в зависании',
         [wired.outcome, orphanIntents(readJournal(jrn).records).length], ['passed', 0]);
+
+      // ─── `bugs/87` — ВСЕ ТРИ ЧИСЛА ВЫДАЧИ ДОЕЗЖАЮТ ОТ АТОМА ДО ЖУРНАЛА ──────────────────────
+      //
+      // Блок держит ПРОВОДКУ, а не арифметику: атом считает три числа (сторож и сводка проверяются
+      // своими наборами), движок обязан довезти все три до строки вердикта. Раньше довозились два,
+      // и минимума не существовало вовсе — поэтому разброс журнала был `max − медиана`, а сторож
+      // судил по `max − min`: две величины под одним словом, у сорвавшейся 31.08 ступени 11,5 и 158.
+      //
+      // АДРЕСАТ МУТАЦИИ, НАЗВАННЫЙ ДО ПРОГОНА:
+      //   HL. `record.deliveredMinMhz = null` в проводке движка → этот блок
+      ok('bugs/87: ВСЕ ТРИ ЧИСЛА ВЫДАЧИ ДОЕЗЖАЮТ ДО ЖУРНАЛА — минимум не теряется по дороге',
+        (() => {
+          const v = readJournal(jrn).records.find((r) => r.state === 'verdict');
+          if (!v) return 'строки вердикта нет вовсе';
+          return [v.deliveredMinMhz ?? 'ПОТЕРЯН', v.deliveredMhz ?? 'ПОТЕРЯНА', v.deliveredMaxMhz ?? 'ПОТЕРЯН'];
+        })(), [2835, 2842, 2845]);
 
       // ─── `bugs/61` — ПУЛЬС СЭМПЛЕРА КАК ВХОД СТУПЕНИ В ВЕРДИКТ ──────────────────────────────
       //

@@ -332,6 +332,10 @@ export function writeVerdict(journal, closing, io = {}) {
     // задним числом нельзя: медиана `clocks.gr` считается по пробам ЭТОГО прожига.
     deliveredMhz: null,
     deliveredMaxMhz: null,
+    // МИНИМУМ ВЫДАЧИ (`bugs/87`, заведён 2026-08-31). Без него разброс считался как
+    // `max − медиана`, а сторож закрепления судит по `max − min`: две разные величины под одним
+    // словом. У ступени, сорвавшейся 31.08, первая равна 11,5 МГц, вторая — 158.
+    deliveredMinMhz: null,
     why: '',
     ...closing,
     // `state` — последним: он принадлежит журналу, а не вызывающему.
@@ -800,10 +804,18 @@ export function harvestPairs(rungs) {
       });
       continue;
     }
-    // РАЗБРОС ВЫДАЧИ ВНУТРИ ПРОЖИГА. `deliveredMhz` — медиана проб ПОД НАГРУЗКОЙ, `deliveredMaxMhz` —
-    // максимум. Их разность печатается, но пару НЕ отбрасывает: порога никто не мерил, а назначенное
-    // число хуже отсутствующего (`PHILOSOPHY.md` → три двери). Порог назовёт замер, когда он будет.
-    const spread = Number.isFinite(r?.deliveredMaxMhz) ? Math.max(0, r.deliveredMaxMhz - mhz) : null;
+    // РАЗБРОС ВЫДАЧИ ВНУТРИ ПРОЖИГА — `max − min`, ТА ЖЕ ВЕЛИЧИНА, ПО КОТОРОЙ СУДИТ СТОРОЖ
+    // (`ladder-descent.verifyLockUnderLoad`). Печатается, но пару НЕ отбрасывает: порога никто не
+    // мерил, а назначенное число хуже отсутствующего (`PHILOSOPHY.md` → три двери).
+    //
+    // 🔴 ЗДЕСЬ БЫЛО `max − медиана`, И ЭТО БЫЛА ДРУГАЯ ВЕЛИЧИНА ПОД ТЕМ ЖЕ ИМЕНЕМ (`bugs/87`):
+    // у ступени, сорвавшейся 31.08, она давала 11,5 МГц там, где сторож видел 158. Записи СТАРШЕ
+    // 2026-08-31 минимума не несут, и для них ответ — `null`, а не пересчёт по медиане: вернуть
+    // правдоподобное число вместо отсутствующего значило бы повторить ровно тот дефект, который
+    // этот блок чинит. Отсутствие видно, подмена — нет.
+    const spread = Number.isFinite(r?.deliveredMaxMhz) && Number.isFinite(r?.deliveredMinMhz)
+      ? Math.max(0, r.deliveredMaxMhz - r.deliveredMinMhz)
+      : null;
     if (spread !== null) worstSpreadMhz = worstSpreadMhz === null ? spread : Math.max(worstSpreadMhz, spread);
 
     // ─── ПАРА «ЗАКАЗ ↔ ВЫДАЧА» ПОМЕЧАЕТСЯ ВИДЕННОЙ НА КАЖДОМ ПРОЖИГЕ, А НЕ ТОЛЬКО НА ТРАТЕ ───────
@@ -928,6 +940,7 @@ export function harvestFromJournal(records) {
       outcome: v.outcome,
       deliveredMhz: v.deliveredMhz ?? null,
       deliveredMaxMhz: v.deliveredMaxMhz ?? null,
+      deliveredMinMhz: v.deliveredMinMhz ?? null,
       servingMvAfter: v.servingMvAfter ?? null,
       orderedMhz: intents.get(v.seq)?.frequencyMhz ?? null,
       orderedMv: intents.get(v.seq)?.voltageMv ?? null,
@@ -1420,7 +1433,12 @@ export function selfTest() {
       writeIntent(j18, { seq: 1, frequencyMhz: 2355, voltageMv: 850 });
       writeVerdict(j18, {
         seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS,
-        servingMvAfter: 850, deliveredMhz: 2205, deliveredMaxMhz: 2212, why: 'прошло',
+        // `deliveredMinMhz` ДОПИСАН В ФИКСТУРУ 2026-08-31 (`bugs/87`), и это приведение записи к
+        // новой форме, а НЕ ослабление блока: ожидаемый разброс остался тем же числом 7, но теперь
+        // он считается как `max − min` (2212 − 2205), то есть той же величиной, что судит сторож
+        // закрепления. Без минимума эта запись стала бы записью СТАРОГО образца, и блок бы
+        // проверял честное молчание вместо арифметики — на что есть отдельные блоки ниже.
+        servingMvAfter: 850, deliveredMhz: 2205, deliveredMinMhz: 2205, deliveredMaxMhz: 2212, why: 'прошло',
       });
       const backHarvest = readJournal(j18).records.find((r) => r.state === LINE.VERDICT);
       // — ЭТО И ЕСТЬ БЛОК ПРОТИВ `bugs/54`. Он читает ДИСК, а не то, что функция вернула: потеря
@@ -1494,6 +1512,28 @@ export function selfTest() {
       ok('УРОЖАЙ СНИМАЕТСЯ ТОЛЬКО С ПРОШЕДШИХ: отказ и зависание пары не заводят',
         (() => { const h = harvestFromJournal(readJournal(j21).records); return [h.burnsHeld, h.pairs.size, h.halfPairs.length]; })(),
         [0, 0, 0]);
+
+      // ─── РАЗБРОС — ЭТО `max − min`, ТА ЖЕ ВЕЛИЧИНА, ЧТО У СТОРОЖА (`bugs/87`) ───────────────────
+      //
+      // Здесь считалось `max − медиана` и звалось разбросом. У ступени, сорвавшейся 31.08, это
+      // давало 11,5 МГц там, где сторож закрепления видел 158, — две разные величины под одним
+      // именем. Блоки держат обе половины починки: новую формулу и ЧЕСТНОЕ МОЛЧАНИЕ на старых
+      // записях, у которых минимума нет. Возвращать им `max − медиана` значило бы подставить
+      // правдоподобное число вместо отсутствующего — ровно дефект, который эти блоки чинят.
+      ok('РАЗБРОС считается как max − min, а не как max − медиана',
+        harvestPairs([{ outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2827, deliveredMinMhz: 2677, deliveredMaxMhz: 2835,
+          servingMvAfter: 790, orderedMhz: 2145, seq: 1 }]).worstSpreadMhz, 158);
+      ok('запись СТАРОГО образца (минимума нет) даёт NULL, а не пересчёт по медиане',
+        harvestPairs([{ outcome: RUNG_OUTCOME.PASSED, deliveredMhz: 2827, deliveredMaxMhz: 2835,
+          servingMvAfter: 790, orderedMhz: 2145, seq: 1 }]).worstSpreadMhz, null);
+      ok('минимум ДОЕЗЖАЕТ от строки журнала до урожая, а не теряется в чтении',
+        (() => {
+          const j22 = openJournal({ dir: join(sandbox, 'spread-wiring') });
+          writeIntent(j22, { seq: 1, frequencyMhz: 2145, voltageMv: 790 });
+          writeVerdict(j22, { seq: 1, at: null, outcome: RUNG_OUTCOME.PASSED, verdict: config.VERDICT.PASS,
+            servingMvAfter: 790, deliveredMhz: 2827, deliveredMinMhz: 2677, deliveredMaxMhz: 2835 });
+          return harvestFromJournal(readJournal(j22).records).worstSpreadMhz;
+        })(), 158);
 
       // — ОДИН АВТОР СЧЁТА. Прогон считает урожай по своим записям ступеней, чтение журнала — по
       //   диску, и оба зовут ОДНУ функцию. Блок держит именно это: пару лучше УБРАТЬ, чем следить.
