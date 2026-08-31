@@ -56,9 +56,9 @@ right to continue.
 
 ```
 npm install                    # koffi dependency
-npm run check                  # expect: 56 .mjs files, 0 failed (re-measured 2026-08-25 11:4x)
-npm run selftest:all           # expect: 28 sets, 0 red, 1394 green blocks (re-measured 2026-08-25 22:36)
-npm run traps                  # expect: 65 assertions, 0 failures, 0 WAITING
+npm run check                  # expect: 74 .mjs files, 0 failed (re-measured 2026-08-31 13:4x)
+npm run selftest:all           # expect: 45 sets, 0 red, 2293 green blocks (re-measured 2026-08-31 13:45)
+npm run traps                  # expect: 65 assertions, 0 failures, 0 WAITING (re-measured 2026-08-31 14:0x)
 npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
 npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
 npm run questions              # expect: «ЧИСТО»
@@ -68,6 +68,16 @@ npm run questions              # expect: «ЧИСТО»
 > rule `STATUS.md` states for its own battery line. This block carried «33 .mjs files» for eleven
 > days after the tree had grown to 56, which is how a session learns to skip a number it is supposed
 > to compare against.
+>
+> 🔴 **AND IT HAPPENED A SECOND TIME — recorded rather than quietly corrected (2026-08-31).** The
+> block stood at «56 .mjs · 28 sets · 1394 blocks» for six days while the tree ran 74 · 45 · 2293:
+> the battery had grown by SEVENTEEN sets and the expectation never moved. A session obeying this
+> file literally would have read «28 sets» against a run printing 45 and had to decide, alone, which
+> number was the defect. **The lesson is about the CARRIER, not about diligence:** a number that a
+> command prints and a document repeats is a truth↔mirror pair, and this one has now drifted twice
+> for the same reason — nothing runs the comparison. Until a gate prints the diff, the honest form is
+> the one used here: every count carries the DATE it was measured, so a reader can see at a glance
+> how old the expectation is instead of trusting it.
 
 **STOP lines:** driver ≠ 610.88 → every golden, checksum and NVAPI id is invalid until re-proved
 (R6); report, do not proceed. Fresh clone → `runs/` is empty, every stress verdict is UNKNOWN
