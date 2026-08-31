@@ -122,11 +122,31 @@ stopping owner apps is allowed by his word, restore them after (`STATUS.md` → 
 | the SHIPPED shape by hand (whole curve + ceiling) | `npm run vfstep -- --shipped-shape --mhz M --cap C` | **S1 — owner present.** Refuses without `--cap`: no ceiling, no shipped shape |
 | edge search at one clock | `npm run engine -- --search --cap C` | **S1 — owner present.** Writes the SHIPPED shape and walks the VOLTAGE ladder. **REFUSES outright when `C` is below the curve's floor** (`top − 1000 MHz`, = 2157 on this card): with no pin, nothing would hold the ceiling |
 | edge search on one frequency band | `npm run engine -- --band N --seconds 10` | **S1 — owner present.** Per rung it prints WHICH shape it writes and WHO holds the ceiling — above the floor «кривая + замок» (curve + BOUND), below it the clock PIN. `bugs/02` step 1 landed 2026-08-14; the search no longer halts by design |
-| **sweep a band top-down** | `npm run engine -- --sweep --from N --to N --max-depth D [--dashboard]` | **S1 — owner present.** ALWAYS run `--dry-run` first and read it (S2): it prints, per frequency, the first-step depth AND the holder. Resumes an interrupted sweep from the write-ahead journal by itself |
+| **sweep a band top-down** | `npm run engine -- --sweep --from N --to N --max-depth D --log <meaning> [--dashboard]` | **S1 — owner present.** ALWAYS run `--dry-run` first and read it (S2): it prints, per frequency, the first-step depth AND the holder. Resumes an interrupted sweep from the write-ahead journal by itself |
 | **rehearse the same sweep offline** | `npm run bench -- --from N --to N [--max-depth D]` | free — virtual card, no GPU write at all. Carries the SAME limits as the live run, so it rehearses the same work |
 | apply / reset a profile | `npm run profile -- --apply <id>` · `-- --reset` | drafts REFUSE until phase 6 (machine gate); reset is always legal |
 | fan level (upward only) | `npm run nvapi -- --fan-write 80 [--cool-to 42]` | state change → owner aware; AUTO restored in `finally` |
 | acoustic / thermal ladders | `npm run fanladder -- --period 15` · `npm run thermal -- --points ...` | owner present (fanladder needs his EAR) |
+
+> 🔴 **NEVER PIPE A RUN INTO `tee` — USE `--log` (`bugs/93`, paid for on 2026-08-31).** The shell hands
+> the caller the exit code of the LAST command in a pipe, so `npm run engine … | tee x.log` reports
+> `tee`'s success. Both live runs that evening returned **0** while the second had been halted by a
+> rescue — erasing the very discriminator `bugs/67` spent three weeks building. `--log` writes the run's
+> own journal, so the file exists without a pipe and the exit code reaches the caller. The log's LAST
+> LINE is `КОД ВОЗВРАТА: N`, so the file alone answers «did the evening succeed?» — an autonomous loop
+> reads the code, a human reads the line.
+>
+> **The machine names the file, you name the MEANING — the owner's rule, 2026-08-31:** *«не надо
+> называть vecher · есть дата и время на машине — так логи и называть, в одну директорию складывать,
+> внутри можно делать поддиректории с названием смысла прогонов»*. So `--log <meaning>` lands at
+> **`runs/logs/<meaning>/<machine date-time>.log`** — one directory for every run log, a subdirectory
+> per meaning, the filename always the clock. Names invented by mood («vecher», «test2»,
+> «final-final») stop answering «which run was this?» within a week; a stamp answers forever and sorts
+> itself. Omit the meaning and it is taken from the MODE (`sweep` · `band` · `search` · `dry-run`) —
+> never invented. Runs accumulate; nothing is ever overwritten (`bugs/94`).
+>
+> Applies to every mode of `npm run engine`, not just `--sweep`. If you catch yourself typing a pipe
+> because you want the output on disk — that want is exactly what `--log` exists for.
 
 ## 3. Verdict dictionary — verdict V → do W
 
