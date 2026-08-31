@@ -310,9 +310,16 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
               + 'npm run profile -- --reset',
           };
         }
-        basePoints = curve.points.map((pt, j) => (pt && Number.isFinite(pt.mhz)
-          ? { ...pt, mhz: pt.mhz - Math.round((cur.offsets[j] ?? 0) / 1000) }
-          : pt));
+        // Арифметика — ОДНА на всех читателей опоры (`card-grids.factoryBaseFrom`). Здесь стояла своя
+        // копия той же строки, и её отсутствие покрытия вскрыла мутация «складывать вместо вычитания»:
+        // она покраснила блоки в `curve --selftest` и НЕ покраснила ни один из 65 блоков применения,
+        // хотя именно этот путь пишет в карту владельца. Копия, которую сторожа не видят, — это класс
+        // `bugs/27` этажом ниже.
+        //
+        // Импорт ЛЕНИВЫЙ, как и остальные в этом бэкенде: модуль обязан оставаться импортируемым для
+        // чистых потребителей, не тащя за собой ни карту, ни `koffi` (дух правила R3).
+        const { factoryBaseFrom } = await import('./card-grids.mjs');
+        basePoints = factoryBaseFrom(curve.points, cur.offsets);
       }
       // `capMhz: null` reaches `buildRaiseAndCapVector` as `null`, which is its own documented way of
       // saying «cap at the curve's top», i.e. a UNIFORM raise with nothing pushed down.
@@ -547,11 +554,63 @@ function defaultCurveLoader(name) {
  *
  * @returns {Promise<object|null>} the resolved `{deltaMhz|deltaByPointMhz, capMhz}` shape, or null.
  */
+/**
+ * ONE LINE SAYING WHAT THE RAISE WAS COMPUTED AGAINST — `B97-AC3`, printed on every apply.
+ *
+ * ⚠️ AND HERE IS THE ONE PLACE WHERE `bugs/98`'s «ОДНА БАЗА НА ВСЁ ПРИМЕНЕНИЕ» IS DELIBERATELY NOT
+ * WHAT HAPPENS, so it is written down rather than discovered: after `bugs/97` the two readers answer
+ * DIFFERENT QUESTIONS, and giving them one base would break one of the two.
+ *
+ *   · `resolveProfileCurve` → `offsetsFor` asks **«how much must this point move to reach the
+ *     frequency our burns proved for its voltage?»** — and «from where» is the REGIME WE TUNE FOR,
+ *     i.e. the stored reference. That is the whole content of `bugs/97`.
+ *   · `writeRaiseAndCap` → `buildRaiseAndCapVector` + the R13 ceiling asks **«what will this card
+ *     offer the moment this write lands?»** — which is `internal table right now + offset`, so its
+ *     base MUST be the live reading. Feeding it the reference would make the ceiling guard reason
+ *     about a card state that is not the one being written to.
+ *
+ * `bugs/98`'s rule was about two readers computing the SAME quantity from two bases — a truth↔mirror
+ * pair, correctly collapsed. This is two readers computing DIFFERENT quantities, and the rule does not
+ * reach it. Do not «unify» them back: the offset would stop being the offset we proved, or the ceiling
+ * guard would stop guarding the write it is attached to.
+ *
+ * [NOT-TESTED] at birth — blocks in `profile --selftest`.
+ */
+export function curveBaseSaid(wantCurve) {
+  const b = wantCurve?.__base;
+  if (!b) return 'опора: живая таблица (ссылки на документ нет)';
+  if (b.kind === 'reference') {
+    const s = b.stamp ?? {};
+    const took = `снята ${s.takenAt ?? '—'} при ${s.tempC ?? '?'} °C · ${s.powerW ?? '?'} Вт · загрузка ${s.utilPct ?? '?'} %`;
+    const drift = wantCurve.__baseDrift?.line ?? 'расхождение с картой не сверено';
+    return `ОПОРА: артефакт худшего случая (${took}) · ${drift}`;
+  }
+  // «Канала сдвигов не было» договаривается отдельным хвостом: без него строка утверждала бы
+  // вычитание, которого не произошло, — то есть врала бы в сторону благополучия.
+  const tail = b.noOffsetChannel
+    ? ' · 🔴 ТЕКУЩИЕ СДВИГИ КАРТЫ НЕ ПРОЧИТАЛИСЬ — опорой служит ЖИВАЯ таблица, то есть то, что мы сами'
+      + ' изменили (bugs/98). Запись это остановит по имени B98-base'
+    : '';
+  // Отказ артефакта переезжает в `after`, когда работа продолжается по вычитанию, — поэтому причина
+  // ищется В ОБОИХ местах. Первая редакция смотрела только верхний уровень, и строка молчала об
+  // отклонении ровно в том случае, ради которого она написана (поймано своим же блоком).
+  const rej = b.kind?.startsWith('reference-') ? b : (b.after?.kind?.startsWith('reference-') ? b.after : null);
+  if (rej?.kind === 'reference-rejected') return `ОПОРА: вычитание живого чтения — артефакт ОТКЛОНЁН (${rej.why})${tail}`;
+  if (rej?.kind === 'reference-unreadable') return `ОПОРА: вычитание живого чтения — артефакт не прочитался (${rej.why})${tail}`;
+  return `ОПОРА: вычитание живого чтения (артефакта худшего случая нет — снять: npm run curve -- --take-reference)${tail}`;
+}
+
 export async function resolveProfileCurve(profile, {
   loadCurve = null, readLive = null, toOffsets = null,
   // Внедряемые чтения текущих сдвигов карты (`bugs/98`). Отсутствуют — импортируются; заданы —
   // набор проверяет вычитание без карты.
   readVfOffsetsFn = null, openNvapiFn = null,
+  // Опорная таблица (`bugs/97`). Внедряется по той же причине: набор обязан пройти и с опорой, и без
+  // неё, не имея ни карты, ни каталога `curves/`.
+  loadReferenceFn = null, cardStamp = null,
+  // Куда сказать, ЧТО послужило опорой. Молчащий выбор опоры — это ровно тот дефект, который
+  // `bugs/97` и лечит, поэтому канал наружу обязателен по построению, а не по желанию.
+  onBase = null,
 } = {}) {
   const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
   const ref = profile?.settings?.curveRef ?? null;
@@ -588,14 +647,67 @@ export async function resolveProfileCurve(profile, {
   // Обнуление тоже дало бы идемпотентность, но ценой ЛИШНЕЙ ЗАПИСИ В КАРТУ на каждом применении —
   // а правило машины владельца требует наименьшей формы (шаг 3). Вычитание не пишет ничего.
   //
-  // ⚠️ ЭТО НЕ ЗАКРЫВАЕТ `bugs/97`. Полученная база — заводская таблица В ТЕКУЩЕМ СОСТОЯНИИ КАРТЫ, а
-  // она сама едет: замер 31.08 дал 60 разошедшихся точек из 128 между 51 и 53 °C. Здесь чинится
-  // ПОВТОРЯЕМОСТЬ (одна и та же карта, два нажатия подряд — одна кривая), а не выбор опоры.
-  //
   // Читатель сдвигов ВНЕДРЯЕМ: набор обязан резолвить ссылку без карты и без nvapi, и импорт
   // происходит только там, где инъекции нет.
   const liveTable = await live();
-  let base = liveTable;
+
+  // 🔴 ОПОРА ИЗ АРТЕФАКТА СТАРШЕ ЛЮБОГО ЖИВОГО ЧТЕНИЯ — ПОЧИНКА `bugs/97`.
+  //
+  // Слово владельца, назначившее опору: *«мы тюним карту для худшего случая — тяжёлая нагрузка, карта
+  // горячая, около 65…70 градусов»*. Замер 31.08 показал, ПОЧЕМУ это не вопрос аккуратности:
+  //
+  //   · карта отдаёт ДВЕ таблицы — покоя и нагрузки; переход обратим, дельты кратны 15 МГц;
+  //   · под нагрузкой таблица НЕ ЗАВИСИТ от температуры (59…69 °C → 0 точек из 128), поэтому опора,
+  //     снятая один раз, воспроизводима — на этом артефакт и стоит;
+  //   · сдвиг пишется АБСОЛЮТНО, значит итог = внутренняя таблица + (цель − опора). Клик по ярлыку
+  //     происходит на карте В ПОКОЕ, и если опорой служит таблица покоя, то под нагрузкой точка
+  //     810 мВ садится на **цель + 30 МГц** — ВЫШЕ доказанного прожигом, ровно в полосе глубокого
+  //     андервольта. С опорой под нагрузкой она садится ровно на цель.
+  //
+  // Порядок предпочтения, и он единственный: артефакт (если есть и годен по штампу R6) → вычитание
+  // живого чтения (починка `bugs/98`, повторяемость без выбора опоры). Что послужило опорой,
+  // сообщается наружу через `onBase` — молчащий выбор опоры и есть лечимый дефект.
+  let base = null;
+  let baseSource = null;
+  try {
+    // 🔴 ИНЪЕКЦИИ ХОДЯТ ВМЕСТЕ, И ЭТО НЕ УДОБСТВО, А ГРАНИЦА ПЕСОЧНИЦЫ.
+    //
+    // `loadCurve` внедряется затем, чтобы набор резолвил ссылку БЕЗ каталога `curves/`. Опорная
+    // таблица лежит в том же каталоге, значит она за той же границей: если документ подан инъекцией,
+    // а опору мы всё равно читаем с диска, песочница протекает.
+    //
+    // Найдено СВОИМ ЖЕ НАБОРОМ, сразу после того как на диске появилась настоящая опора: блок
+    // `bugs/18` («без карты и без curves/») получил смещение 0 вместо 200, потому что мой код взял
+    // реальный артефакт вместо поданной фикстуры. Это не придирка теста — это ровно тот класс, когда
+    // код тайком опирается на состояние машины, и на чужой машине он повёл бы себя иначе.
+    const loadRef = loadReferenceFn ?? (loadCurve ? () => null : (await import('./curve-store.mjs')).loadReferenceTable);
+    const refDoc = loadRef();
+    if (refDoc) {
+      const { referenceUsableFor } = await import('./curve-store.mjs');
+      const usable = referenceUsableFor(refDoc, { card: cardStamp });
+      if (usable.ok) {
+        base = refDoc.points;
+        baseSource = { kind: 'reference', stamp: refDoc.stamp };
+      } else {
+        // R4b: опора ЕСТЬ, но негодна — это не то же самое, что её нет. Причина называется вслух и
+        // работа продолжается по вычитанию, потому что вычитание — доказанный путь, а не догадка.
+        baseSource = { kind: 'reference-rejected', why: usable.problems.map((p) => `${p.field}: ${p.why}`).join(' · ') };
+      }
+    }
+  } catch (e) {
+    baseSource = { kind: 'reference-unreadable', why: e?.message ?? String(e) };
+  }
+
+  // ── ЗАВОДСКАЯ БАЗА ИЗ ЖИВОГО ЧТЕНИЯ — ПОЧИНКА `bugs/98`, И ОНА НУЖНА ВСЕГДА ───────────────────────
+  //
+  // Нужна ДВАЖДЫ, и роли разные: без опоры она СЛУЖИТ опорой (повторяемость `bugs/98`), а с опорой она
+  // единственное, чем можно измерить, НАСКОЛЬКО карта сейчас не в опорном режиме (`B97-AC3`).
+  //
+  // 🔴 Сверять опору с ЖИВОЙ таблицей нельзя, и первая редакция этой строки ровно так и делала:
+  // печатала «выше опоры 74 точек, до +915 МГц» — то есть наш же собственный подъём, а не расстояние
+  // до режима. Число верное и бесполезное; оператор из него не узнаёт ничего, чего не знал. Сверять
+  // надо базу с базой.
+  let cardBase = null;
   try {
     const nvapi = await import('./nvapi.mjs');
     const readOffsets = readVfOffsetsFn ?? nvapi.readVfOffsetsStable;
@@ -612,10 +724,47 @@ export async function resolveProfileCurve(profile, {
     const nv = open();
     const cur = nv ? readOffsets(nv.nv, nv.handle) : null;
     if (cur?.ok && Array.isArray(cur.offsets) && cur.offsets.length >= liveTable.length) {
-      base = liveTable.map((pt, j) => ({ ...pt, mhz: pt.mhz - Math.round((cur.offsets[j] ?? 0) / 1000) }));
+      const { factoryBaseFrom } = await import('./card-grids.mjs');
+      cardBase = factoryBaseFrom(liveTable, cur.offsets);
     }
-  } catch { /* сдвиги не прочитались — работаем как раньше, но об этом скажет строка применения */ }
-  return effectiveCurveSetting(profile, { loadCurve: load, liveTable: base, toOffsets: offs });
+  } catch { /* сдвиги не прочитались — ниже это СКАЖЕТСЯ, а не подменится догадкой (R4b) */ }
+
+  if (!base) {
+    // Опоры-артефакта нет (или она негодна) — работаем по вычитанию, как `bugs/98`. Если и вычитание
+    // не удалось, остаётся живая таблица, то есть прежнее поведение двойника: у него своего моста нет.
+    base = cardBase ?? liveTable;
+    baseSource = baseSource ?? { kind: 'live-subtracted' };
+    if (baseSource.kind !== 'live-subtracted') baseSource = { kind: 'live-subtracted', after: baseSource };
+    if (!cardBase) baseSource.noOffsetChannel = true;
+  }
+
+  // ЧТО ПОСЛУЖИЛО ОПОРОЙ И НАСКОЛЬКО КАРТА ОТ НЕЁ ОТСТОИТ — ЕДЕТ ВМЕСТЕ С РАЗРЕШЁННОЙ КРИВОЙ.
+  //
+  // `B97-AC3` требует эту строку ВСЕГДА, включая ноль, и требование не косметическое: строка,
+  // появляющаяся только когда что-то не так, — это строка, чьё молчание нельзя прочитать (R4b, урок
+  // `bugs/83`). Прицеплено к возвращаемому объекту, а не отдано в колбэк, потому что печатает её
+  // `apply`, и лишний провод, который вызывающий обязан не забыть подключить, — это провод, который
+  // забудут.
+  const resolved = effectiveCurveSetting(profile, { loadCurve: load, liveTable: base, toOffsets: offs });
+  if (resolved && baseSource) {
+    resolved.__base = baseSource;
+    if (baseSource.kind === 'reference') {
+      if (cardBase) {
+        try {
+          const { compareToReference } = await import('./curve-store.mjs');
+          resolved.__baseDrift = compareToReference({ points: base }, cardBase);
+        } catch (e) {
+          resolved.__baseDrift = { line: `расстояние до опорного режима не сверено: ${e?.message ?? e}` };
+        }
+      } else {
+        // «Не смотрел» ≠ «посмотрел и не нашёл» — говорится вслух, потому что молчание здесь читалось
+        // бы как «карта в опорном режиме», а это утверждение, которого никто не проверял.
+        resolved.__baseDrift = { line: 'расстояние до опорного режима НЕ ИЗМЕРЕНО: текущие сдвиги карты не прочитались' };
+      }
+    }
+  }
+  if (typeof onBase === 'function') onBase({ source: baseSource, base, liveTable, cardBase, drift: resolved?.__baseDrift ?? null });
+  return resolved;
 }
 
 export async function apply(backend, profile, {
@@ -737,7 +886,14 @@ export async function apply(backend, profile, {
       ? `ВЕКТОР на ${raise.length} точек (подъём ${Math.min(...raise)}…${Math.max(...raise)} МГц)`
       : `подъём +${raise} МГц на всю кривую`;
     steps.push({
-      what: `кривая V/F: ${raiseSaid}, ${wantCurve.capMhz === null ? 'без потолка' : `потолок ${wantCurve.capMhz} МГц`}`,
+      what: `кривая V/F: ${raiseSaid}, ${wantCurve.capMhz === null ? 'без потолка' : `потолок ${wantCurve.capMhz} МГц`}`
+        // ── ЧЕМ БЫЛА ОПОРА — В ТОЙ ЖЕ СТРОКЕ, ВСЕГДА (`B97-AC3`) ─────────────────────────────────
+        // Оператор читает эту строку в секунды перед записью в карту владельца, и «против чего
+        // посчитан подъём» — часть того, ЧТО пишется, а не служебная подробность. Печатается и когда
+        // всё хорошо: строка, которой нет при благополучии, своим отсутствием ничего не сообщает
+        // (R4b). Отдельным шагом не сделано намеренно — шаг без записи в карту засорял бы журнал
+        // применения, по которому считаются настоящие шаги.
+        + ` · ${curveBaseSaid(wantCurve)}`,
       run: async () => {
         // R13: the specimen's own maximum travels WITH the write. `before` was read from the card at
         // the top of `apply`, so this is a measured bound rather than a constant anyone can forget to
@@ -2360,6 +2516,122 @@ async function cmdSelftest() {
     if (eff.deltaByPointMhz[0] !== 0 || eff.deltaByPointMhz[1] !== 0) {
       return `стоковые строки сдвинуты: ${eff.deltaByPointMhz[0]}/${eff.deltaByPointMhz[1]}`;
     }
+    return null;
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ОПОРА ХУДШЕГО СЛУЧАЯ В РАЗРЕШЕНИИ КРИВОЙ (`bugs/97`)
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // Фикстура повторяет ЗАМЕР, а не удобство: опора под нагрузкой в низковольтной полосе стоит ВЫШЕ
+  // таблицы покоя (замер 31.08: 800…849 мВ +30 МГц), поэтому подъём против неё обязан выйти МЕНЬШЕ —
+  // и это ровно снятый перебег, из-за которого карта бежала выше доказанного.
+  const b97Fixture = () => {
+    const doc = {
+      card: { maxGraphicsMhz: 3090 },
+      frequencies: [
+        { mhz: 3000, voltageMv: 1000, status: 'lever-limited' },
+        { mhz: 2000, voltageMv: 900, status: 'lever-limited' },
+        { mhz: 1000, voltageMv: 800, status: 'stock' },
+        { mhz: 500, voltageMv: 700, status: 'stock' },
+      ],
+    };
+    const restTable = [
+      { i: 0, mhz: 500, mv: 700, freqKhz: 500_000 }, { i: 1, mhz: 1000, mv: 800, freqKhz: 1_000_000 },
+      { i: 2, mhz: 1800, mv: 900, freqKhz: 1_800_000 }, { i: 3, mhz: 2800, mv: 1000, freqKhz: 2_800_000 },
+    ];
+    // Опора: та же таблица, но в нагруженном режиме — на 30 МГц выше в двух рабочих точках.
+    const loadedRef = {
+      kind: 'reference-table',
+      stamp: {
+        driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-31T23:13:42+03:00',
+        tempC: 68, powerW: 197.17, utilPct: 69, pstate: 'P0', underLoad: true,
+      },
+      points: restTable.map((p) => ({ i: p.i, mv: p.mv, freqKhz: p.freqKhz, mhz: p.i >= 2 ? p.mhz + 30 : p.mhz })),
+    };
+    return { doc, restTable, loadedRef };
+  };
+  const b97Resolve = async (over = {}) => {
+    const { doc, restTable, loadedRef } = b97Fixture();
+    const { offsetsFor } = await import('./curve-store.mjs');
+    return resolveProfileCurve(refProfile(), {
+      loadCurve: (name) => (name === 'measured' ? doc : null),
+      readLive: async () => restTable,
+      toOffsets: (d, t) => offsetsFor(d, t, { count: 4 }),
+      loadReferenceFn: () => loadedRef,
+      cardStamp: { driver: '610.88', vbios: '98.03.58.40.8b' },
+      ...over,
+    });
+  };
+
+  block('bugs/97: ОПОРА-АРТЕФАКТ выбирается вместо живого чтения, и подъём считается против неё', async () => {
+    const eff = await b97Resolve();
+    if (!eff) return 'ссылка разрешилась в «кривой нет»';
+    if (eff.__base?.kind !== 'reference') return `опорой стало «${eff.__base?.kind}», а не артефакт`;
+    // 900 мВ обслуживает 1830 МГц по ОПОРЕ (1800 + 30) и должно обслуживать 2000 → +170, а не +200.
+    if (eff.deltaByPointMhz[2] !== 170) return `1800 МГц: смещение ${eff.deltaByPointMhz[2]}, ожидалось 170 (против опоры)`;
+    if (eff.deltaByPointMhz[3] !== 170) return `2800 МГц: смещение ${eff.deltaByPointMhz[3]}, ожидалось 170 (против опоры)`;
+    return null;
+  });
+
+  block('bugs/97: подъём против ОПОРЫ МЕНЬШЕ, чем против покоя — это и есть снятый перебег', async () => {
+    const withRef = await b97Resolve();
+    const withoutRef = await b97Resolve({ loadReferenceFn: () => null });
+    const a = withRef.deltaByPointMhz[2]; const b = withoutRef.deltaByPointMhz[2];
+    if (b !== 200) return `без опоры ожидалось 200, получено ${b}`;
+    if (a !== 170) return `с опорой ожидалось 170, получено ${a}`;
+    if (!(a < b)) return `подъём против опоры (${a}) не меньше подъёма против покоя (${b})`;
+    return null;
+  });
+
+  block('bugs/97: два разрешения подряд дают ОДИН вектор — идемпотентность по построению', async () => {
+    const one = (await b97Resolve()).deltaByPointMhz;
+    const two = (await b97Resolve()).deltaByPointMhz;
+    const differ = one.reduce((n, x, i) => n + (x === two[i] ? 0 : 1), 0);
+    return differ === 0 ? null : `расходится элементов ${differ} из ${one.length}`;
+  });
+
+  block('bugs/97: ЧУЖОЙ ДРАЙВЕР отклоняет опору по R6, работа продолжается по вычитанию, и причина НАЗВАНА', async () => {
+    const eff = await b97Resolve({ cardStamp: { driver: '999.99', vbios: '98.03.58.40.8b' } });
+    if (eff.__base?.kind !== 'live-subtracted') return `опорой стало «${eff.__base?.kind}», ожидалось вычитание`;
+    if (!eff.__base.after?.why || !eff.__base.after.why.includes('R6')) {
+      return `причина отклонения не названа или не про R6: ${JSON.stringify(eff.__base.after)}`;
+    }
+    if (eff.deltaByPointMhz[2] !== 200) return `после отклонения подъём ${eff.deltaByPointMhz[2]}, ожидалось 200 (по покою)`;
+    const said = curveBaseSaid(eff);
+    return said.includes('ОТКЛОНЁН') ? null : `строка не говорит об отклонении: ${said}`;
+  });
+
+  block('bugs/97: ОПОРА В ПОКОЕ отклоняется даже со верным штампом — режим проверяется, а не только карта', async () => {
+    const { loadedRef } = b97Fixture();
+    const restRef = { ...loadedRef, stamp: { ...loadedRef.stamp, tempC: 46, powerW: 21, utilPct: 0, pstate: 'P5' } };
+    const eff = await b97Resolve({ loadReferenceFn: () => restRef });
+    if (eff.__base?.kind !== 'live-subtracted') return `опора покоя ПРИНЯТА — это дефект bugs/97, переехавший в артефакт`;
+    return null;
+  });
+
+  block('bugs/97: строка опоры печатается ВСЕГДА, и без артефакта тоже (B97-AC3, R4b)', async () => {
+    const withRef = curveBaseSaid(await b97Resolve());
+    const withoutRef = curveBaseSaid(await b97Resolve({ loadReferenceFn: () => null }));
+    if (!withRef.includes('ОПОРА')) return `с артефактом строки нет: «${withRef}»`;
+    if (!withRef.includes('68 °C')) return `строка не называет режим снятия: «${withRef}»`;
+    if (!withoutRef.includes('ОПОРА')) return `без артефакта строки нет: «${withoutRef}»`;
+    if (!withoutRef.includes('--take-reference')) return `без артефакта не сказано, как её снять: «${withoutRef}»`;
+    return null;
+  });
+
+  block('bugs/97: ПЕСОЧНИЦА — поданный документ означает поданную опору, реальный curves/ не читается', async () => {
+    // Блок, который поймал настоящий дефект проводки: код лез в реальный каталог, и `bugs/18` получил
+    // смещение 0 вместо 200, как только на диске появилась настоящая опора.
+    const { doc, restTable } = b97Fixture();
+    const { offsetsFor } = await import('./curve-store.mjs');
+    const eff = await resolveProfileCurve(refProfile(), {
+      loadCurve: (name) => (name === 'measured' ? doc : null),
+      readLive: async () => restTable,
+      toOffsets: (d, t) => offsetsFor(d, t, { count: 4 }),
+    });
+    if (eff.__base?.kind === 'reference') return 'песочница протекла: прочитана опора с диска';
+    if (eff.deltaByPointMhz[2] !== 200) return `подъём ${eff.deltaByPointMhz[2]}, ожидалось 200 по поданной таблице`;
     return null;
   });
 

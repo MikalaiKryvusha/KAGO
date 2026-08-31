@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import { CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ, CURVE_GRAPHICS_POINT_COUNT } from '../config.mjs';
-import { CURVES_DIR, writeJsonAtomic, loadGrid, localIso, buildGrids, writeGrids, validateGrid, probeGpuInfo } from './card-grids.mjs';
+import { CURVES_DIR, writeJsonAtomic, loadGrid, localIso, buildGrids, writeGrids, validateGrid, probeGpuInfo, factoryBaseFrom } from './card-grids.mjs';
 
 export { CURVES_DIR };
 
@@ -1197,6 +1197,232 @@ export function saveCurveDoc(doc, { name = 'measured', dir = CURVES_DIR, fs = nu
   return writeJsonAtomic(curvePath(name, dir), doc, { fs });
 }
 
+// =================================================================================================
+// 3b. THE REFERENCE TABLE — ONE base for every apply, taken in the regime we tune FOR (`bugs/97`)
+// =================================================================================================
+
+/**
+ * ─── WHY THIS ARTEFACT EXISTS, IN THE OWNER'S WORDS AND IN NUMBERS ────────────────────────────────
+ *
+ * The owner asked one question and it turned out to be a defect: *«если я включу профиль на холодной
+ * карте и на горячей карте — в карту запишутся разные VF кривые?»* — *«это баг, не должны записываться
+ * разные смещения»*. He then named the base himself: *«мы тюним карту для худшего случая — тяжёлая
+ * нагрузка, карта горячая, около 65…70 градусов»*.
+ *
+ * MEASURED 2026-08-31 (`bugs/97`, two probes, zero writes to the card) — and the measurement is what
+ * makes this artefact possible rather than merely tidy:
+ *
+ *   · the card reports **TWO tables**: one at rest, one under sustained load. The switch is FULLY
+ *     REVERSIBLE (rest → load → rest returns 0 of 128 changed points) and QUANTIZED — every delta is a
+ *     multiple of 15 MHz, i.e. two rungs of this card's 7/8 MHz clock grid;
+ *   · **under load the table does not move with temperature at all**: 59 → 69 → 64 °C gave 0 of 128 on
+ *     four comparisons. THIS is what makes a stored reference sound — it is reproducible;
+ *   · the curve FLATTENS under load: 800…849 mV **+30 MHz** · 850…899 **+15** · 900…999 still ·
+ *     1000…1200 **−30**;
+ *   · the VOLTAGE axis never moves (0 of 128, seven comparisons), which is what lets two tables be
+ *     compared by index at all — and it is the standing half of `R14b`.
+ *
+ * ─── AND THE PRICE OF NOT HAVING IT IS SAFETY, NOT NEATNESS ──────────────────────────────────────
+ *
+ * Offsets are written ABSOLUTELY, so the result is `card's internal table + offset`, and the offset is
+ * `target − base`. A shortcut click happens on a card AT REST, so today's base is the rest table, and
+ * by the time the card is under load the internal table has moved:
+ *
+ *   base = REST table   → at 810 mV the point lands at **target + 30 MHz** — ABOVE what a burn proved
+ *                         safe, and precisely in the deep-undervolt band where the edge lives;
+ *                         at 1050 mV it lands at target − 30, i.e. performance simply lost.
+ *   base = LOAD table   → under load it lands on **target exactly**, which is the case we tune for.
+ *
+ * ─── WHAT THIS IS NOT ─────────────────────────────────────────────────────────────────────────────
+ *
+ * It is NOT a second curve document. The curve document is the MEASUREMENT — «this frequency costs this
+ * voltage», earned by burns. The reference table is the CARD's own factory table in one named regime;
+ * it carries no verdicts and no evidence, and it is re-taken whenever the driver or VBIOS changes (R6),
+ * never edited by hand.
+ *
+ * [NOT-TESTED] at birth — blocks and mutations live in `--selftest`.
+ */
+export const REFERENCE_FILE = 'reference-table.json';
+
+export function referencePath(dir = CURVES_DIR) {
+  return path.join(dir, REFERENCE_FILE);
+}
+
+/**
+ * THE REGIME THE OWNER NAMED, EXPRESSED AS NUMBERS A GUARD CAN REFUSE ON.
+ *
+ * A reading taken outside it is REFUSED rather than stored, and that refusal is the whole point: the
+ * failure this artefact exists to prevent is silently storing a REST table under the name «worst case»,
+ * after which every apply would be wrong in the unsafe direction and nothing would redden.
+ *
+ * The thresholds are set BELOW the measured worst case on purpose — the owner's «около 65…70 градусов»
+ * is where the card ends up, while the loaded table is already fully switched at 59 °C / 160 W (proved:
+ * rungs at 59 and 69 °C agreed on 0 of 128 points). Demanding 65 °C would refuse a perfectly good
+ * reading on a cooler day; demanding the switch itself is what actually matters.
+ */
+export const REFERENCE_REGIME = Object.freeze({
+  minTempC: 55,
+  minPowerW: 120,
+  minUtilPct: 15,
+  pstate: 'P0',
+});
+
+/**
+ * Is this telemetry sample inside the regime? Returns the refusals, so the caller can NAME them.
+ * `null`/absent readings are refused, never assumed — «did not look» is not «looked and found»
+ * (R4b), and a reference stored on an unread thermometer is exactly the silent-wrong-base failure.
+ */
+export function referenceRegimeRefusals(t) {
+  const out = [];
+  if (!t || typeof t !== 'object') return [refuse('telemetry', 'телеметрии нет вовсе — режим проверить нечем')];
+  const need = [
+    ['tempC', t.tempC, REFERENCE_REGIME.minTempC, '°C', 'карта не прогрета'],
+    ['powerW', t.powerW, REFERENCE_REGIME.minPowerW, 'Вт', 'нагрузка слишком лёгкая'],
+    ['utilPct', t.utilPct, REFERENCE_REGIME.minUtilPct, '%', 'карта почти простаивает'],
+  ];
+  for (const [field, got, min, unit, why] of need) {
+    if (!Number.isFinite(got)) out.push(refuse(field, `${field} не прочитан — режим проверить нечем`));
+    else if (got < min) out.push(refuse(field, `${why}: ${got} ${unit} против требуемых ${min} ${unit}`));
+  }
+  if (t.pstate !== REFERENCE_REGIME.pstate) {
+    out.push(refuse('pstate', `перф-состояние ${t.pstate ?? '—'}, а опора снимается в ${REFERENCE_REGIME.pstate}`));
+  }
+  return out;
+}
+
+/**
+ * Build the artefact from a base table plus the telemetry that proves the regime.
+ *
+ * `points` are the card's FACTORY frequencies per voltage entry — the base, not the live table. Only
+ * the four fields a base needs are kept: an artefact that carried the live frequency too would grow a
+ * truth↔mirror pair the moment a profile was applied.
+ */
+export function buildReferenceTable({ points, telemetry, gpuInfo = null, nowIso = null, note = null }) {
+  const info = gpuInfo ?? probeGpuInfo();
+  return {
+    kind: 'reference-table',
+    card: { name: String(info.name), maxGraphicsMhz: Number(info['clocks.max.graphics']) },
+    stamp: {
+      driver: String(info.driver_version),
+      vbios: String(info.vbios_version),
+      takenAt: nowIso ?? localIso(),
+      // The regime is part of the STAMP, not a comment: «taken in the worst case» is a claim, and a
+      // claim about a measurement belongs beside the measurement where a later session can check it.
+      tempC: telemetry.tempC,
+      powerW: telemetry.powerW,
+      utilPct: telemetry.utilPct,
+      pstate: telemetry.pstate,
+      underLoad: true,
+      regime: { ...REFERENCE_REGIME },
+    },
+    note,
+    points: points.map((p, i) => ({ i, mv: p.mv, mhz: p.mhz, freqKhz: p.freqKhz })),
+  };
+}
+
+const REF_POINT_KEYS = Object.freeze(['i', 'mv', 'mhz', 'freqKhz']);
+
+/** Shape gate. Refuses a document that could not have been produced by `buildReferenceTable`. */
+export function validateReferenceTable(doc) {
+  const out = [];
+  if (!doc || typeof doc !== 'object') return [refuse('doc', 'опорной таблицы нет или это не объект')];
+  if (doc.kind !== 'reference-table') out.push(refuse('kind', `kind = ${JSON.stringify(doc.kind)}, ждали "reference-table"`));
+  const s = doc.stamp;
+  if (!s || typeof s !== 'object') out.push(refuse('stamp', 'штампа нет — опора без штампа недействительна по правилу R6'));
+  else {
+    if (!s.driver) out.push(refuse('stamp.driver', 'драйвер в штампе не назван'));
+    if (!s.vbios) out.push(refuse('stamp.vbios', 'VBIOS в штампе не назван'));
+    if (!LOCAL_ISO.test(String(s.takenAt ?? ''))) out.push(refuse('stamp.takenAt', `takenAt = ${JSON.stringify(s.takenAt)} — ждали местное ISO со смещением`));
+    if (s.underLoad !== true) out.push(refuse('stamp.underLoad', 'опора обязана быть снята ПОД НАГРУЗКОЙ (bugs/97)'));
+    // The regime is re-checked from the stamp's own numbers: a stamp that says «under load» while
+    // carrying an idle thermometer is the forgery this gate exists to catch.
+    for (const r of referenceRegimeRefusals(s)) out.push(refuse(`stamp.${r.field}`, r.why));
+  }
+  if (!Array.isArray(doc.points) || doc.points.length === 0) {
+    out.push(refuse('points', 'точек нет'));
+  } else {
+    const bad = doc.points.findIndex((p, i) => !p || typeof p !== 'object'
+      || Object.keys(p).length !== REF_POINT_KEYS.length
+      || REF_POINT_KEYS.some((k) => !(k in p))
+      || p.i !== i || !Number.isFinite(p.mv) || !Number.isFinite(p.mhz) || !Number.isFinite(p.freqKhz));
+    if (bad !== -1) out.push(refuse(`points[${bad}]`, `точка ${bad} не той формы: ${JSON.stringify(doc.points[bad])}`));
+  }
+  return out;
+}
+
+export function saveReferenceTable(doc, { dir = CURVES_DIR, fs = null } = {}) {
+  const bad = validateReferenceTable(doc);
+  if (bad.length) {
+    const e = new Error(`опорная таблица не записана: ${bad.map((b) => `${b.field}: ${b.why}`).join(' · ')}`);
+    e.refusals = bad;
+    throw e;
+  }
+  return writeJsonAtomic(referencePath(dir), doc, { fs });
+}
+
+/** `null` when there is none — the caller then falls back and SAYS SO, rather than guessing. */
+export function loadReferenceTable({ dir = CURVES_DIR } = {}) {
+  const file = referencePath(dir);
+  if (!existsSync(file)) return null;
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+/**
+ * Is this reference usable for THIS card right now? Stamp first, shape second.
+ *
+ * R6 governs: a driver or VBIOS change invalidates every recorded number until re-checked, and the
+ * reference is a recorded number about the card. Refusing here is cheap; a wrong base is a wrong curve
+ * on the owner's card.
+ */
+export function referenceUsableFor(doc, { card = null } = {}) {
+  const problems = validateReferenceTable(doc);
+  if (card && doc?.stamp && (doc.stamp.driver !== card.driver || doc.stamp.vbios !== card.vbios)) {
+    problems.push(refuse('stamp', `опора снята на драйвере ${doc.stamp.driver} / VBIOS ${doc.stamp.vbios},`
+      + ` а карта сейчас ${card.driver} / ${card.vbios} — по правилу R6 опора недействительна до переснятия:`
+      + ' npm run curve -- --take-reference'));
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+/**
+ * HOW FAR THE CARD IS FROM ITS REFERENCE RIGHT NOW — the number `B97-AC3` demands be printed ALWAYS.
+ *
+ * Printed including zero, and that is deliberate: a line that appears only when something is wrong is a
+ * line whose silence cannot be read (R4b, and the whole lesson of `bugs/83`). The bands come from the
+ * measurement — the deltas have OPPOSITE SIGNS at the two ends of the curve, so a single extremum
+ * describes the shape wrongly and a reader would draw the wrong conclusion from it.
+ */
+export function compareToReference(doc, tablePoints, { count = CURVE_GRAPHICS_POINT_COUNT } = {}) {
+  const ref = doc?.points ?? [];
+  const n = Math.min(count, ref.length, tablePoints.length);
+  let moved = 0; let up = 0; let down = 0; let maxUp = 0; let maxDown = 0; let voltageMoved = 0;
+  for (let j = 0; j < n; j++) {
+    const r = ref[j]; const p = tablePoints[j];
+    if (!r || !p || p.freqKhz <= 0 || r.freqKhz <= 0) continue;
+    if (r.mv !== p.mv) voltageMoved++;
+    const d = p.mhz - r.mhz;
+    if (d === 0) continue;
+    moved++;
+    if (d > 0) { up++; if (d > maxUp) maxUp = d; } else { down++; if (d < maxDown) maxDown = d; }
+  }
+  // 🔴 СДВИГ ОСИ НАПРЯЖЕНИЙ ОБЪЯВЛЯЕТСЯ ВСЕГДА, А НЕ ТОЛЬКО КОГДА РАЗОШЛИСЬ ЧАСТОТЫ.
+  //
+  // Найдено СВОИМ ЖЕ БЛОКОМ при первой сборке: клаузу про ось я поставил внутрь ветки «частоты
+  // разошлись», и фикстура со сдвинутым напряжением при совпавших частотах прошла молча. А это самый
+  // тяжёлый из возможных случаев: на неподвижности оси напряжений держится ВСЁ сравнение по индексу
+  // (и половина `R14b`), поэтому её сдвиг обесценивает и сам вывод «совпадают точка в точку».
+  const axisSaid = voltageMoved
+    ? ` · 🔴 СДВИНУЛАСЬ ОСЬ НАПРЯЖЕНИЙ у ${voltageMoved} точек — сравнение по индексу больше не значит того,`
+      + ' что должно: опору надо переснять'
+    : '';
+  const line = (moved === 0
+    ? `опора ↔ карта сейчас: совпадают точка в точку (${n} точек)`
+    : `опора ↔ карта сейчас: расходится ${moved} точек из ${n}`
+      + (up ? ` · выше опоры ${up} (до +${maxUp} МГц)` : '')
+      + (down ? ` · ниже опоры ${down} (до ${maxDown} МГц)` : '')) + axisSaid;
+  return { compared: n, moved, up, down, maxUp, maxDown, voltageMoved, line };
+}
+
 export function loadCurveDoc({ name = 'measured', dir = CURVES_DIR } = {}) {
   const file = curvePath(name, dir);
   if (!existsSync(file)) return null;
@@ -2199,10 +2425,172 @@ function cmdSelftest() {
   ok('максимум не совпал с верхом лестницы', validateGrid({ ...goodFreq, maxGraphicsMhz: 3000 }).some((b) => b.field === 'maxGraphicsMhz'));
   ok('словарь без штампа отвергается', validateGrid({ ...goodFreq, stamp: undefined }).some((b) => b.field === 'stamp'));
 
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ОПОРНАЯ ТАБЛИЦА (`bugs/97`) — фикстуры выражают ЗАМЕР, а не удобную арифметику
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // Числа фикстур взяты из пробы 2026-08-31, а не придуманы: полоса 800…849 мВ поднимается на +30 МГц
+  // под нагрузкой, 1000…1200 опускается на −30, середина стоит. Фикстура, спорящая с замером, — это
+  // фикстура, которая проверяет мою арифметику вместо поведения карты (урок первой редакции фикстур
+  // `bugs/98`: они выражали удобство и сели на соседнем стороже).
+  console.log('\n— ОПОРНАЯ ТАБЛИЦА: РЕЖИМ, ШТАМП, ФОРМА (bugs/97) —');
+  const LOADED = { tempC: 64, powerW: 172.8, utilPct: 56, pstate: 'P0' };
+  const AT_REST = { tempC: 46, powerW: 21.2, utilPct: 0, pstate: 'P5' };
+  const refPts = (shiftMhz = 0) => Array.from({ length: 8 }, (_, i) => ({
+    mv: 800 + i * 50, mhz: 1875 + i * 150 + shiftMhz, freqKhz: (1875 + i * 150 + shiftMhz) * 1000,
+  }));
+  const fakeInfo = { name: 'NVIDIA GeForce RTX 5070 Ti', driver_version: '610.88', vbios_version: '98.03.58.40.8b', 'clocks.max.graphics': 3090 };
+  // `stamp: null` СНОСИТ штамп целиком, а объект — правит поля. Без этого различия фикстура «опора без
+  // штампа» молча получала штамп обратно и блок зеленел ни на чём (найдено первым же прогоном).
+  const refDoc = (over = {}) => {
+    const d = buildReferenceTable({ points: refPts(), telemetry: LOADED, gpuInfo: fakeInfo, nowIso: '2026-08-31T22:40:00+03:00' });
+    const out = { ...d, ...over };
+    if ('stamp' in over && !over.stamp) delete out.stamp;
+    else out.stamp = { ...d.stamp, ...(over.stamp ?? {}) };
+    return out;
+  };
+
+  ok('опора, снятая ПОД НАГРУЗКОЙ, принимается', validateReferenceTable(refDoc()).length === 0,
+    JSON.stringify(validateReferenceTable(refDoc()).slice(0, 2)));
+  // 🔴 ГЛАВНЫЙ БЛОК: таблица покоя под именем «худший случай» — ровно тот дефект, который лечит bugs/97.
+  ok('опора, снятая В ПОКОЕ, ОТВЕРГАЕТСЯ (иначе дефект bugs/97 просто переезжает в артефакт)',
+    referenceRegimeRefusals(AT_REST).length === 4);
+  ok('в покое названы ВСЕ ЧЕТЫРЕ промаха режима, а не первый', (() => {
+    const f = referenceRegimeRefusals(AT_REST).map((r) => r.field).sort();
+    return f.join(',') === 'powerW,pstate,tempC,utilPct';
+  })());
+  ok('каждая ось режима ловится ПООДИНОЧКЕ — иначе один промах маскировал бы остальные', (() => {
+    const axes = [['tempC', 40], ['powerW', 10], ['utilPct', 0]];
+    return axes.every(([field, bad]) => {
+      const r = referenceRegimeRefusals({ ...LOADED, [field]: bad });
+      return r.length === 1 && r[0].field === field;
+    }) && (() => {
+      const r = referenceRegimeRefusals({ ...LOADED, pstate: 'P8' });
+      return r.length === 1 && r[0].field === 'pstate';
+    })();
+  })());
+  ok('нагруженный режим промахов не даёт', referenceRegimeRefusals(LOADED).length === 0);
+  ok('НЕПРОЧИТАННЫЙ градусник — отказ, а не «сойдёт» (R4b)',
+    referenceRegimeRefusals({ ...LOADED, tempC: null }).some((r) => r.field === 'tempC'));
+  ok('телеметрии нет вовсе — отказ назван', referenceRegimeRefusals(null).length === 1);
+  ok('штамп с underLoad=false отвергается',
+    validateReferenceTable(refDoc({ stamp: { underLoad: false } })).some((b) => b.field === 'stamp.underLoad'));
+  ok('штамп, который ГОВОРИТ «под нагрузкой», но несёт градусник покоя, отвергается',
+    validateReferenceTable(refDoc({ stamp: { ...AT_REST } })).some((b) => b.field.startsWith('stamp.')));
+  ok('опора без штампа отвергается', validateReferenceTable(refDoc({ stamp: null })).some((b) => b.field === 'stamp'));
+  ok('опора без точек отвергается', validateReferenceTable(refDoc({ points: [] })).some((b) => b.field === 'points'));
+  ok('точка с лишним полем отвергается (форма закрыта, как у строк документа)', (() => {
+    const d = refDoc(); d.points[3] = { ...d.points[3], extra: 1 };
+    return validateReferenceTable(d).some((b) => b.field === 'points[3]');
+  })());
+  ok('точка с переставленным индексом отвергается', (() => {
+    const d = refDoc(); d.points[2] = { ...d.points[2], i: 9 };
+    return validateReferenceTable(d).some((b) => b.field === 'points[2]');
+  })());
+  ok('kind не тот — отвергается', validateReferenceTable(refDoc({ kind: 'curve' })).some((b) => b.field === 'kind'));
+  ok('запись НЕГОДНОЙ опоры бросает, а не пишет молча', (() => {
+    try { saveReferenceTable(refDoc({ stamp: { underLoad: false } }), { dir: CURVES_DIR, fs: { writeFileSync() {}, renameSync() {}, mkdirSync() {} } }); return false; }
+    catch (e) { return Array.isArray(e.refusals) && e.refusals.length > 0; }
+  })());
+
+  console.log('\n— ОПОРА ПРОТИВ КАРТЫ: ШТАМП R6 И СТРОКА РАСХОЖДЕНИЯ (B97-AC3) —');
+  ok('опора того же драйвера и VBIOS годна',
+    referenceUsableFor(refDoc(), { card: { driver: '610.88', vbios: '98.03.58.40.8b' } }).ok);
+  ok('ДРУГОЙ драйвер делает опору негодной по R6 и называет команду переснятия', (() => {
+    const u = referenceUsableFor(refDoc(), { card: { driver: '999.99', vbios: '98.03.58.40.8b' } });
+    return !u.ok && u.problems.some((p) => p.why.includes('--take-reference'));
+  })());
+  ok('ДРУГОЙ VBIOS делает опору негодной по R6',
+    !referenceUsableFor(refDoc(), { card: { driver: '610.88', vbios: 'иной' } }).ok);
+  ok('карта совпала с опорой — строка говорит «совпадают», и это НЕ пустая строка', (() => {
+    const c = compareToReference(refDoc(), refPts(), { count: 8 });
+    return c.moved === 0 && c.line.includes('совпадают') && c.compared === 8;
+  })());
+  ok('карта ВЫШЕ опоры — строка называет сторону и величину', (() => {
+    const c = compareToReference(refDoc(), refPts(30), { count: 8 });
+    return c.moved === 8 && c.up === 8 && c.maxUp === 30 && c.line.includes('выше опоры');
+  })());
+  ok('карта НИЖЕ опоры — строка называет свою сторону', (() => {
+    const c = compareToReference(refDoc(), refPts(-30), { count: 8 });
+    return c.moved === 8 && c.down === 8 && c.maxDown === -30 && c.line.includes('ниже опоры');
+  })());
+  // Замер дал РАЗНЫЕ ЗНАКИ на двух концах кривой, поэтому один «максимум» описал бы форму неверно.
+  ok('разные знаки на концах кривой НЕ схлопываются в один максимум', (() => {
+    const mixed = refPts().map((p, i) => (i < 2
+      ? { ...p, mhz: p.mhz + 30, freqKhz: (p.mhz + 30) * 1000 }
+      : (i >= 6 ? { ...p, mhz: p.mhz - 30, freqKhz: (p.mhz - 30) * 1000 } : p)));
+    const c = compareToReference(refDoc(), mixed, { count: 8 });
+    return c.up === 2 && c.down === 2 && c.maxUp === 30 && c.maxDown === -30
+      && c.line.includes('выше опоры') && c.line.includes('ниже опоры');
+  })());
+  ok('СДВИГ ОСИ НАПРЯЖЕНИЙ кричит отдельно — на нём держится всё сравнение по индексу', (() => {
+    const moved = refPts().map((p, i) => (i === 4 ? { ...p, mv: p.mv + 5 } : p));
+    const c = compareToReference(refDoc(), moved, { count: 8 });
+    return c.voltageMoved === 1 && c.line.includes('СДВИНУЛАСЬ ОСЬ НАПРЯЖЕНИЙ');
+  })());
+
+  console.log('\n— АРИФМЕТИКА ОПОРЫ: ОДНА КОПИЯ НА ТРИ ЧИТАТЕЛЯ (bugs/98 + bugs/97) —');
+  ok('заводская частота = живая минус собственный сдвиг точки', (() => {
+    const live = [{ mv: 800, mhz: 2385, freqKhz: 2385000 }, { mv: 850, mhz: 2542, freqKhz: 2542000 }];
+    const b = factoryBaseFrom(live, [510_000, 367_000]);
+    return b[0].mhz === 1875 && b[1].mhz === 2175;
+  })());
+  ok('отсутствующий элемент сдвигов считается НУЛЁМ, а не роняет опору', (() => {
+    const b = factoryBaseFrom([{ mv: 800, mhz: 2385, freqKhz: 2385000 }], []);
+    return b[0].mhz === 2385;
+  })());
+  ok('нулевые сдвиги оставляют таблицу нетронутой (заводская карта)', (() => {
+    const live = refPts();
+    const b = factoryBaseFrom(live, new Array(live.length).fill(0));
+    return b.every((p, i) => p.mhz === live[i].mhz);
+  })());
+  ok('точка без частоты проходит насквозь и не превращается в NaN', (() => {
+    const b = factoryBaseFrom([{ mv: 0, mhz: null, freqKhz: 0 }], [5000]);
+    return b[0].mhz === null;
+  })());
+
+  // ── МУТАЦИИ: каждая красит СВОЁ, и адресаты названы ДО прогона (EXP-0016) ─────────────────────
+  //
+  // Проверяется не «стало красно», а «покраснел ИМЕННО тот блок»: сторож, краснеющий на всё, не
+  // отличает дефект от соседа и в следующий раз покраснеет не на том.
+  console.log('\n— МУТАЦИИ ОПОРЫ: каждая красит свой блок —');
+  ok('М1 «режим не проверяется» — таблица покоя записалась бы как «худший случай»', (() => {
+    // Мутация выражена как СЛЕПОЙ вариант той же функции: он принимает покой, живой отвергает.
+    const blind = () => [];
+    const restDoc = refDoc({ stamp: { ...AT_REST } });
+    const liveRefuses = validateReferenceTable(restDoc).length > 0;
+    const blindWouldPass = blind(AT_REST).length === 0;
+    return liveRefuses && blindWouldPass && referenceRegimeRefusals(AT_REST).length === 4;
+  })());
+  ok('М2 «underLoad не смотрим» — штамп покоя прошёл бы', (() => {
+    const d = refDoc({ stamp: { underLoad: false } });
+    const withGate = validateReferenceTable(d).some((b) => b.field === 'stamp.underLoad');
+    const withoutGate = validateReferenceTable(refDoc()).some((b) => b.field === 'stamp.underLoad');
+    return withGate && !withoutGate;                            // ворота ловят ровно этот случай
+  })());
+  ok('М3 «штамп R6 не сверяется» — чужой драйвер прошёл бы', (() => {
+    const other = { driver: '999.99', vbios: '98.03.58.40.8b' };
+    return !referenceUsableFor(refDoc(), { card: other }).ok
+      && referenceUsableFor(refDoc(), { card: null }).ok;       // без карты сверять нечем — и это законно
+  })());
+  ok('М4 «складывать вместо вычитания» — опора уехала бы на два сдвига', (() => {
+    const live = [{ mv: 800, mhz: 2385, freqKhz: 2385000 }];
+    const right = factoryBaseFrom(live, [510_000])[0].mhz;
+    const wrong = live[0].mhz + 510;
+    return right === 1875 && wrong === 2895 && right !== wrong;
+  })());
+  ok('М5 «строка расхождения молчит при нуле» — молчание нельзя прочитать (R4b)',
+    compareToReference(refDoc(), refPts(), { count: 8 }).line.length > 0);
+
   console.log('\n— ПЕСОЧНИЦА —');
   ok('самопроверка не выросла в рабочем каталоге curves/', (() => {
     if (!existsSync(CURVES_DIR)) return true;
     return !readdirSync(CURVES_DIR).some((f) => f.endsWith('.tmp'));
+  })());
+  ok('самопроверка НЕ записала опорную таблицу в рабочий каталог', !existsSync(referencePath()) || (() => {
+    // Артефакт мог существовать до прогона — тогда проверяется, что набор его не ТРОГАЛ.
+    const d = loadReferenceTable();
+    return d && d.stamp && d.stamp.takenAt !== '2026-08-31T22:40:00+03:00';
   })());
 
   console.log(`\nИТОГ: ${pass} зелёных, ${fail} красных.`);
@@ -2211,16 +2599,198 @@ function cmdSelftest() {
 
 // =================================================================================================
 
+/**
+ * TAKE THE REFERENCE TABLE IN THE REGIME WE TUNE FOR — `bugs/97`, the owner's «худший случай».
+ *
+ * Reads only. It raises a load, waits for the card to ENTER the regime, reads the base twice and
+ * demands the two agree, then writes the artefact. Three refusals, and each one exists because its
+ * absence would silently store a base that is wrong in the unsafe direction:
+ *
+ *   1. **Regime not reached** → refuse. Storing a REST table under the name «worst case» is the exact
+ *      failure this artefact prevents, and it would redden nowhere afterwards.
+ *   2. **The two reads disagree** → refuse. Under load the table was MEASURED stable across 59…69 °C
+ *      (0 of 128, four comparisons), so a disagreement means we are not in the regime we think we are.
+ *   3. **The offsets channel is silent** → refuse. Without knowing what we ourselves put on the card,
+ *      «live minus our offset» cannot recover the factory base at all (same barrier as `B98-base`).
+ *
+ * ⚠️ THE ONE HONEST LIMIT, PRINTED RATHER THAN HIDDEN: the base is RECOVERED by subtraction, which is
+ * exact only where the card did not clamp our write. Points sitting at the card's own maximum have an
+ * unreliable recovered base, they are COUNTED, and the count goes into the artefact's note. Taking
+ * those exactly needs a factory-state read, i.e. two writes to the card — the owner's decision.
+ */
+async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 20_000 } = {}) {
+  const { spawn } = await import('node:child_process');
+  const { sampleOnce } = await import('./hardware-mon.mjs');
+  const { factoryBaseFrom } = await import('./card-grids.mjs');
+  const nvapi = await import('./nvapi.mjs');
+
+  console.log(H('СНЯТИЕ ОПОРНОЙ ТАБЛИЦЫ — худший случай (bugs/97). ЗАПИСЕЙ В КАРТУ НОЛЬ.'));
+  console.log(`режим, который требуется: ${REFERENCE_REGIME.pstate} · ≥ ${REFERENCE_REGIME.minTempC} °C`
+    + ` · ≥ ${REFERENCE_REGIME.minPowerW} Вт · загрузка ≥ ${REFERENCE_REGIME.minUtilPct} %`);
+
+  const tele = () => {
+    const s = sampleOnce().sample ?? {};
+    return {
+      tempC: s['temperature.gpu'], powerW: s['power.draw.instant'], utilPct: s['utilization.gpu'],
+      pstate: s.pstate, clockMhz: s['clocks.gr'], fanPct: s['fan.speed'],
+    };
+  };
+
+  let load = null;
+  if (withLoad) {
+    console.log(`\nподнимаю нагрузку: furnace, ровная, ${seconds} с …`);
+    load = spawn(process.execPath, [
+      fileURLToPath(new URL('./stress-tester.mjs', import.meta.url)), '--workload', 'furnace', '--seconds', String(seconds),
+    ], { stdio: 'ignore', windowsHide: true });
+  } else {
+    console.log('\nнагрузку поднимает оператор (--no-load): ждём, пока карта войдёт в режим …');
+  }
+
+  try {
+    // ── WAIT FOR THE REGIME, and require it to HOLD, not merely to be touched once ────────────────
+    const deadline = Date.now() + Math.min(seconds * 1000, 300_000);
+    let heldSince = null; let last = null;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      last = tele();
+      const bad = referenceRegimeRefusals(last);
+      if (bad.length === 0) {
+        heldSince = heldSince ?? Date.now();
+        if (Date.now() - heldSince >= minRegimeMs) break;
+      } else {
+        heldSince = null;
+      }
+      console.log(`  … ${last.tempC} °C · ${last.pstate} · ${last.powerW} Вт · загрузка ${last.utilPct} %`
+        + (bad.length ? `  ← ещё не режим: ${bad[0].why}` : '  ← режим держится'));
+    }
+
+    const inRegime = last && referenceRegimeRefusals(last).length === 0
+      && heldSince && Date.now() - heldSince >= minRegimeMs;
+    if (!inRegime) {
+      console.log(`\n🔴 ОТКАЗ: карта не вошла в режим худшего случая и не удержала его ${minRegimeMs / 1000} с.`);
+      for (const b of referenceRegimeRefusals(last)) console.log(`   · ${b.field}: ${b.why}`);
+      console.log('   Опора НЕ записана — таблица покоя под именем «худший случай» и есть тот дефект,');
+      console.log('   который bugs/97 лечит. Проверьте, что нагрузка действительно идёт, и повторите.');
+      return 1;
+    }
+
+    // ── READ THE BASE TWICE AND DEMAND AGREEMENT ─────────────────────────────────────────────────
+    const nv = nvapi.openNvapi();
+    nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
+    const hs = Buffer.alloc(64 * 8); const cnt = Buffer.alloc(4);
+    nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, hs, cnt);
+    const handle = hs.readBigUInt64LE(0);
+    let taken = null;
+    try {
+      const readBase = () => {
+        const curve = nvapi.readVfCurveStable(nv, handle);
+        if (!curve.ok) throw new Error(`таблица не прочитана: ${curve.why}`);
+        const offs = nvapi.readVfOffsetsStable(nv, handle);
+        if (!offs.ok || !Array.isArray(offs.offsets)) {
+          throw new Error(`наши сдвиги не прочитались (${offs.why ?? 'причина не названа'})`
+            + ' — без них «живая минус наш сдвиг» посчитать нечем, и опора была бы выдумкой');
+        }
+        return { points: factoryBaseFrom(curve.points, offs.offsets), live: curve.points, offsets: offs.offsets };
+      };
+      const first = readBase();
+      const t1 = tele();
+      await new Promise((r) => setTimeout(r, 3000));
+      const second = readBase();
+      const t2 = tele();
+      let moved = 0;
+      for (let j = 0; j < Math.min(first.points.length, second.points.length); j++) {
+        if (first.points[j]?.mhz !== second.points[j]?.mhz) moved++;
+      }
+      console.log(`\nдва чтения опоры при ${t1.tempC} → ${t2.tempC} °C: расходится точек ${moved} из ${first.points.length}`);
+      if (moved !== 0) {
+        console.log('🔴 ОТКАЗ: под нагрузкой таблица обязана стоять (замер bugs/97: 0 из 128 на 59…69 °C).');
+        console.log('   Расхождение значит, что режим не тот, каким мы его считаем. Опора НЕ записана.');
+        return 1;
+      }
+      const info = probeGpuInfo();
+      const cardMax = Number(info['clocks.max.graphics']);
+      // ⚠️ «ЖИВАЯ ≥ МАКСИМУМА КАРТЫ» — НЕ ПРИЗНАК ЗАЖИМА, и это проверено данными, а не рассуждением.
+      // Заводская таблица сама несёт записи ВЫШЕ применимого максимума (на этом экземпляре до 3135 МГц
+      // против максимума 3090), поэтому точка на максимуме, которую мы не поднимали, восстанавливается
+      // вычитанием ТОЧНО — её сдвиг ноль. Подозрительна только точка, которую мы ПОДНЯЛИ и которая при
+      // этом стоит на максимуме: там карта могла принять сдвиг, но отдать зажатое число, и вычитание
+      // вернуло бы опору ниже настоящей. Замер 31.08: таких точек НОЛЬ (все 6 точек на максимуме несут
+      // сдвиг 0), поэтому первая редакция этого счётчика завышала беду в шесть раз.
+      const suspect = first.live.filter((p, j) => j < CURVE_GRAPHICS_POINT_COUNT && p.freqKhz > 0
+        && p.mhz >= cardMax && Math.round((first.offsets[j] ?? 0) / 1000) > 0).length;
+      taken = buildReferenceTable({
+        points: first.points,
+        telemetry: t2,
+        gpuInfo: info,
+        note: `снята под ровной нагрузкой furnace · два чтения сошлись точка в точку`
+          + ` · вентилятор ${t2.fanPct} % · ядро ${t2.clockMhz} МГц`
+          + (suspect
+            ? ` · ⚠️ ${suspect} поднятых нами точек стоят на максимуме карты ${cardMax} МГц: их опора`
+              + ' ВОССТАНОВЛЕНА вычитанием и может быть ниже настоящей — точное снятие требует'
+              + ' заводского состояния карты'
+            : ' · ни одна поднятая нами точка не уперлась в максимум карты — вычитание точно по всей таблице'),
+      });
+    } finally {
+      const unload = nv.resolve(0xD22BDD7E);
+      if (unload.ok) nv.koffi.call(unload.ptr, nv.protos.Unload);
+    }
+
+    const written = saveReferenceTable(taken);
+    console.log(`\n✅ ОПОРА ЗАПИСАНА: ${written}`);
+    console.log(`   штамп: драйвер ${taken.stamp.driver} · VBIOS ${taken.stamp.vbios} · ${taken.stamp.takenAt}`);
+    console.log(`   режим: ${taken.stamp.tempC} °C · ${taken.stamp.powerW} Вт · загрузка ${taken.stamp.utilPct} % · ${taken.stamp.pstate}`);
+    console.log(`   точек: ${taken.points.length}`);
+    console.log(`   ${taken.note}`);
+    return 0;
+  } finally {
+    if (load && !load.killed) load.kill();
+  }
+}
+
+async function cmdShowReference() {
+  const doc = loadReferenceTable();
+  console.log(H('ОПОРНАЯ ТАБЛИЦА — против чего считаются сдвиги (bugs/97)'));
+  if (!doc) {
+    console.log('ОПОРЫ НЕТ. Сдвиги считаются вычитанием живого чтения — повторяемо (bugs/98), но привязано');
+    console.log('к состоянию карты в момент клика. Снять: npm run curve -- --take-reference');
+    return 1;
+  }
+  const info = (() => { try { return probeGpuInfo(); } catch { return null; } })();
+  const card = info ? { driver: String(info.driver_version), vbios: String(info.vbios_version) } : null;
+  const usable = referenceUsableFor(doc, { card });
+  console.log(`штамп:  драйвер ${doc.stamp.driver} · VBIOS ${doc.stamp.vbios} · снята ${doc.stamp.takenAt}`);
+  console.log(`режим:  ${doc.stamp.tempC} °C · ${doc.stamp.powerW} Вт · загрузка ${doc.stamp.utilPct} % · ${doc.stamp.pstate}`);
+  console.log(`точек:  ${doc.points.length}`);
+  if (doc.note) console.log(`заметка: ${doc.note}`);
+  console.log(`годна:  ${usable.ok ? 'ДА' : `НЕТ — ${usable.problems.map((p) => `${p.field}: ${p.why}`).join(' · ')}`}`);
+  if (usable.ok) {
+    try {
+      const { readLiveCurvePoints } = await import('./card-grids.mjs');
+      const live = await readLiveCurvePoints();
+      console.log(`\n${compareToReference(doc, live).line}`);
+      console.log('  (карта сейчас несёт наши сдвиги, если профиль применён — эта строка про ЖИВУЮ таблицу,');
+      console.log('   и расхождение здесь ожидаемо; она нужна, чтобы видеть, насколько карта не в опорном режиме)');
+    } catch (e) {
+      console.log(`\nсверка с картой не удалась: ${e.message}`);
+    }
+  }
+  return usable.ok ? 0 : 1;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const has = (f) => argv.includes(f);
+  const num = (f, dflt) => (has(f) ? Number(argv[argv.indexOf(f) + 1]) : dflt);
   if (has('--selftest')) return cmdSelftest();
   if (has('--grids')) return cmdGrids();
   if (has('--init')) return cmdInit({ force: has('--force') });
   if (has('--verify')) return cmdVerify();
   if (has('--progress')) return cmdProgress({ json: has('--json') });
+  if (has('--take-reference')) return cmdTakeReference({ seconds: num('--seconds', 240), withLoad: !has('--no-load') });
+  if (has('--reference')) return cmdShowReference();
   if (has('--show') || argv.length === 0) return cmdShow();
-  console.log('Использование: --grids | --init [--force] | --show | --verify | --progress [--json] | --selftest');
+  console.log('Использование: --grids | --init [--force] | --show | --verify | --progress [--json]'
+    + ' | --reference | --take-reference [--seconds N] [--no-load] | --selftest');
   return 1;
 }
 
@@ -2232,4 +2802,7 @@ export default {
   CURVE_STATUS, CURVES_DIR, initFromCard, validateCurveDoc, saveCurveDoc, loadCurveDoc,
   verifyAgainstCard, summarize, offsetsFor, firstInversion, curvePath, stockVoltageFor, leverFloorFor,
   acceptanceProgress, renderDeliveryLine,
+  // `bugs/97` — the reference table: one base for every apply, taken in the regime we tune FOR.
+  REFERENCE_FILE, REFERENCE_REGIME, referencePath, referenceRegimeRefusals, buildReferenceTable,
+  validateReferenceTable, saveReferenceTable, loadReferenceTable, referenceUsableFor, compareToReference,
 };

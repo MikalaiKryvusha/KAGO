@@ -175,6 +175,32 @@ export function voltageGridFrom(curvePoints) {
 }
 
 /**
+ * THE FACTORY BASE OF A LIVE TABLE — ONE copy of the arithmetic (`bugs/98` fix, `bugs/97` needs it too).
+ *
+ * `readVfCurve` reports the table ALREADY CARRYING OUR OFFSETS, while offsets are written ABSOLUTELY.
+ * So the factory frequency of a point is «live minus that point's own offset», and every reader that
+ * needs a base must do that subtraction. It was written out twice by hand (`resolveProfileCurve` and
+ * `writeRaiseAndCap`) and the reference taker of `bugs/97` would have made three — so the ARITHMETIC
+ * lives here once, and the POLICY (is the channel absent, or present-but-silent?) stays with each
+ * caller, where the two legitimately differ: the twin has no bridge at all and works off the live
+ * table, whereas a bridge that answered nothing must stop the write (`B98-base`).
+ *
+ * PURE ON PURPOSE — takes the two readings, touches no card. That is what lets the selftest prove the
+ * subtraction with no GPU, and what lets a mutation redden it.
+ *
+ * `offsetsKhz` is what the card reports: kHz, one element per point. A point whose offset is missing is
+ * treated as ZERO rather than refused — a shorter array is the caller's business to check, and the
+ * caller does (`length >= points.length`).
+ *
+ * [NOT-TESTED] at birth — blocks and mutations in `curve --selftest`.
+ */
+export function factoryBaseFrom(livePoints, offsetsKhz) {
+  return livePoints.map((pt, j) => (pt && Number.isFinite(pt.mhz)
+    ? { ...pt, mhz: pt.mhz - Math.round((offsetsKhz?.[j] ?? 0) / 1000) }
+    : pt));
+}
+
+/**
  * Read the live card and build both grids.
  *
  * The NvAPI import is DYNAMIC so that this module stays importable by pure consumers: the validator
