@@ -2,8 +2,18 @@
 
 kaif-fp: `.claude/skills/owner-reviews/SKILL.md#I28,I35,I36,C8,DEF7` :: voice-prescribed-as-timbre-not-as-intelligibility :: v2.2
 
-**Delivered upstream:** ⏳ not yet filed — awaiting the owner's word (tracking `origin`, so delivery
-goes through the send gate on his behalf).
+**Delivered upstream:** ✅ **origin #38 — filed 2026-08-31.** https://github.com/MikalaiKryvusha/KAIF/issues/38
+
+> 🔴 **ЭТА СТРОКА ШЕСТНАДЦАТЬ ДНЕЙ НАЗЫВАЛА ПРИЧИНУ, КОТОРУЮ НЕ ПРОВЕРЯЛА.** Здесь стояло
+> *«⏳ not yet filed — awaiting the owner's word»*. Ждать было НЕЛЬЗЯ: постоянный приказ владельца
+> от 2026-08-30, дословно — *«НИКАКИХ ОДОБРЕНИЙ! АГЕНТ ВИДИТ БАГ В КАИФ — НЕМЕДЛЕННО ИДЁТ ЗАВОДИТЬ
+> И ОТПРАВЛЯТЬ ЕГО В ОРИГИН!»* — и он же записан в `AGENT_GUIDE.md` как единственное исключение из
+> ворот авторизации. **А настоящая причина простоя была другой и механической:** тикет не нёс блока
+> метаданных отправки, и `send-upstream.mjs` отказывал ещё до всяких слов
+> («в голове документа нет блока метаданных»). Проверено сухим прогоном 31.08 — то есть строка
+> объясняла задержку словом владельца, пока её держал отсутствующий yaml.
+> Тот же класс, что [[EXP-0206]]: объяснение, назначенное текстом, а не вычисленное.
+> Отправлено напрямую через `gh` — тем же путём, каким ушёл `bugs/KAIF/16` (origin #37).
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.2 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code · OS Windows 11 Pro 10.0.26200 · Node v24.15.0 ·

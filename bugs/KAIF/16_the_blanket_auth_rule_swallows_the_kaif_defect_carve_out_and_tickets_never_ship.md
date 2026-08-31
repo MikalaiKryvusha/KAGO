@@ -53,6 +53,7 @@ Deployment KAGO, 2026-08-30. Two 🔴 TOP-priority KAIF tickets were filed the s
 origin **#35** and **#36**), both concerning a defect class that had just cost the owner his working
 machine. Both carried, for hours, the line the agent wrote by following line B:
 
+<!-- owner-review:allow because=ЦИТАТА дефектной строки канона внутри тикета, который этот дефект и репортит. Сам тикет доставлен (origin #37). -->
 > `**Delivered upstream:** NOT YET — awaiting the owner's word (outward action).`
 
 The project's own baton (`STATUS.md`) propagated it into the next session's instructions:
