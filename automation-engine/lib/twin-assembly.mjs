@@ -999,9 +999,12 @@ export async function selfTest() {
         runStepFn: (args) => vf.runStep({ ...args, device: dev }),
         fuseTripsFn: () => trips,
       });
+      // Имя выносящего вердикт берётся ИЗ КОНСТАНТЫ движка, а не повторяется литералом: литерал был
+      // бы пятой копией одной строки, и переименование молча оставило бы накопитель слепым
+      // (`bugs/84` — тот же класс: читатель ждал значения, которого никто не пишет).
       ok('ЛЕЧЕНИЕ НА ДВОЙНИКЕ (bugs/88): с проведённым входом та же ступень закрывается ОТКАЗОМ, а не ложным PASS',
         [rec.outcome, rec.verdict, rec.decidedBy, rec.rescuedByFuse],
-        ['hung', V.HUNG, 'предохранитель', true]);
+        ['hung', V.HUNG, engineMod.DECIDED_BY_FUSE, true]);
     }
   }
 

@@ -60,7 +60,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { isMainThread } from 'node:worker_threads';
 
 export const FUSE_DIR = fileURLToPath(new URL('../../runs/death-watch/', import.meta.url));
@@ -374,7 +374,16 @@ export function makeStockHand({ spawnFn, journalPath, extraArgs = [] }) {
       windowsHide: true, stdio: 'ignore', detached: true,
     });
     child.unref?.();
-    return { ok: child.pid !== undefined, ms: performance.now() - t0, detail: child.pid === undefined ? 'spawn failed' : `pid ${child.pid}` };
+    // `pid` ОТДАЁТСЯ ОТДЕЛЬНЫМ ПОЛЕМ, а не только внутри текста `detail` (`plans/81` Ш5).
+    // Судья ждёт расписку руки и обязан отличить «рука ещё работает» от «рука умерла молча»;
+    // границей служит ЖИЗНЬ ПРОЦЕССА, а не выдуманный таймаут. Разбирать своё же предложение
+    // регулярным выражением было бы парой «правда ↔ зеркало» внутри одной функции.
+    return {
+      ok: child.pid !== undefined,
+      ms: performance.now() - t0,
+      pid: child.pid ?? null,
+      detail: child.pid === undefined ? 'spawn failed' : `pid ${child.pid}`,
+    };
   };
 }
 
@@ -422,23 +431,39 @@ export function readBurnPidfile(pidfilePath, { readFileSyncFn = null } = {}) {
  *
  * [TESTED: 2026-08-31 · блоки в `--selftest`, включая фикстуру из НАСТОЯЩЕГО журнала трипа 31.08]
  */
-export function stockReceipts(lines) {
-  const out = [];
+/**
+ * РАЗБОР СТРОК ЖУРНАЛА — ОДИН на все три читателя (`stockReceipts` · `tripCount` · `rearmCount`).
+ *
+ * До Ш5 этот цикл стоял в файле ТРИЖДЫ слово в слово, и это была пара «правда ↔ зеркало», которую
+ * дешевле УБРАТЬ, чем за ней следить (`PHILOSOPHY.md` → DRY): расхождение проявилось бы не отказом,
+ * а тем, что один читатель терпит битую строку, а другой на ней падает. Принимает и объекты, и
+ * сырой JSONL — журнал читают и из памяти (фикстуры), и с диска (движок, судья).
+ */
+function eachRecord(lines, fn) {
   for (const raw of Array.isArray(lines) ? lines : []) {
     let d = raw;
     if (typeof raw === 'string') {
       const t = raw.trim();
       if (!t) continue;
+      // Битая строка ПРОПУСКАЕТСЯ, а не роняет разбор: журнал читают у живой машины, и последняя
+      // строка может быть оборвана смертью процесса ровно посередине.
       try { d = JSON.parse(t); } catch { continue; }
     }
-    if (!d || d.phase !== 'outcome' || d.hand !== 2) continue;
+    if (d) fn(d);
+  }
+}
+
+export function stockReceipts(lines) {
+  const out = [];
+  eachRecord(lines, (d) => {
+    if (d.phase !== 'outcome' || d.hand !== 2) return;
     // ИМЯ ДЕЙСТВИЯ РАЗЛИЧАЕТ СПАУН И ПОДТВЕРЖДЕНИЕ, и это не придирка: `stock-voltage` пишет САМ
     // судья в момент спауна (ok: true означает «процесс запущен»), а `stock-voltage-verified`
     // пишет РУКА после перечитывания. Принять первую за вторую значило бы считать подтверждённым
     // сток, которого никто не читал, — то есть построить смягчение риска на факте спауна.
-    if (d.action !== 'stock-voltage-verified' && d.action !== 'stock-voltage-verified-twin') continue;
+    if (d.action !== 'stock-voltage-verified' && d.action !== 'stock-voltage-verified-twin') return;
     out.push({ ok: d.ok === true, ms: Number.isFinite(d.ms) ? d.ms : null, at: d.at ?? null });
-  }
+  });
   return out;
 }
 
@@ -465,20 +490,48 @@ export function stockReceipts(lines) {
  */
 export function tripCount(lines) {
   let n = 0;
-  for (const raw of Array.isArray(lines) ? lines : []) {
-    let d = raw;
-    if (typeof raw === 'string') {
-      const t = raw.trim();
-      if (!t) continue;
-      try { d = JSON.parse(t); } catch { continue; }
-    }
-    // `phase: 'intent'` пишется ПЕРВЫМ делом трипа и `fsync`-ится ДО рук (см. `runTrip`): значит
-    // строка существует даже у спасения, которое само не дожило до конца. Строки `outcome` не
-    // считаются — их у одного трипа две, и счёт по ним поехал бы вдвое.
-    if (d && d.phase === 'intent') n += 1;
-  }
+  // `phase: 'intent'` пишется ПЕРВЫМ делом трипа и `fsync`-ится ДО рук (см. `runTrip`): значит
+  // строка существует даже у спасения, которое само не дожило до конца. Строки `outcome` не
+  // считаются — их у одного трипа две, и счёт по ним поехал бы вдвое.
+  eachRecord(lines, (d) => { if (d.phase === 'intent') n += 1; });
   return n;
 }
+
+/**
+ * СКОЛЬКО ТРИПОВ СУДЬЯ ПЕРЕЖИЛ — счёт УСПЕШНЫХ перевзведений (`plans/81` Ш5).
+ *
+ * ЗАЧЕМ ОТДЕЛЬНАЯ СТРОКА, А НЕ ПОВТОРНОЕ РЕШЕНИЕ У ПОЛОСЫ. Полосе нужно знать одно: «взведён ли
+ * предохранитель прямо сейчас». Она могла бы спросить `rearmDecision` сама — и тогда решение
+ * «можно ли перевзводиться» жило бы в ДВУХ местах (у судьи и у полосы), то есть было бы парой
+ * «правда ↔ зеркало»: разойдясь, они не покраснели бы, а тихо разрешили бы прожиг без судьи.
+ * Поэтому решает ОДИН судья и пишет РАСПИСКУ О СВОЁМ РЕШЕНИИ; полоса её ЧИТАЕТ, а не повторяет.
+ * Эта же строка — прибор критерия P81-AC4 («ступеней после спасения без взведённого судьи»):
+ * `tripCount(lines) > rearmCount(lines)` и есть «трип, который ещё никто не закрыл».
+ *
+ * Считаются только `ok: true`: строка отказа (`ok: false`) существует ради разбора, и признать её
+ * перевзведением значило бы пустить полосу дальше ровно там, где судья сказал «нельзя».
+ *
+ * @param {Array<object|string>} lines строки журнала предохранителя
+ * @returns {number} сколько раз судья ПЕРЕВЗВЁЛСЯ
+ */
+export function rearmCount(lines) {
+  let n = 0;
+  eachRecord(lines, (d) => { if (d.phase === 'rearm' && d.ok === true) n += 1; });
+  return n;
+}
+
+/**
+ * ТАКТ ОПРОСА РАСПИСКИ — ЭТО КАДЕНЦИЯ, А НЕ ПОРОГ, и различие существенное.
+ *
+ * Порогом здесь ничего не решается: решение принимает расписка руки 2 (`ok`) и жизнь самой руки.
+ * Это число говорит лишь, КАК ЧАСТО спрашивать, — то есть его можно поменять вдвое в любую
+ * сторону, и ни один исход не изменится. Поэтому оно не требует вывода из замера (`plans/81` §3
+ * закрыл развилку «сколько ждать» замером: ждать до расписки, порога не заводить).
+ *
+ * 250 мс против измеренной руки в 1,9 с — восьмая часть самого быстрого ожидания: полоса не
+ * простаивает заметно, а диск опрашивается 4 раза в секунду вместо 500 (такт судьи 2 мс).
+ */
+export const REARM_POLL_MS = 250;
 
 /**
  * ГОТОВ ЛИ СУДЬЯ ПЕРЕВЗВЕСТИСЬ — одно решение в одном месте (`plans/81` Ш2).
@@ -563,6 +616,13 @@ export async function runJudge({
   // спрашивает о его СУЩЕСТВОВАНИИ, и только когда вход 2 уже собрался трипнуть.
   progressFile = null, existsFn = existsSync,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
+  // ⚡ Ш5 (`plans/81`): чем судья ЧИТАЕТ собственный журнал, когда ждёт расписку руки 2. Своя дверь
+  // нужна затем же, зачем `existsFn`: фикстура обязана уметь подать расписку без настоящей руки.
+  readLinesFn = null,
+  // ЖИВ ЛИ ПРОЦЕСС — ОТДЕЛЬНАЯ ДВЕРЬ ОТ `killFn`, НАМЕРЕННО. Сигнал 0 не убивает, а спрашивает о
+  // существовании; пустить этот вопрос через канал убийства значило бы, что фикстура, считающая
+  // убитых, посчитает и опрошенных — две разные правды через одну дверь.
+  isAliveFn = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
   spawnSyncFn, spawnFn, killFn = process.kill.bind(process), onReady = null, log = () => {},
 }) {
   const dgram = await import('node:dgram');
@@ -720,12 +780,116 @@ export async function runJudge({
   const endMs = seconds === null ? Infinity : startMs + seconds * 1000;
   let tripOutcomes = null;
   let lastTickMs = startMs;
+  // ⚡ Ш5: трипов случилось / перевзведений сделано. Считаются ОБА, потому что отвечают на разные
+  // вопросы: сколько раз машину спасали (показатель владельца, AC6) и сколько раз спасение
+  // ПЕРЕЖИЛИ. Раньше хватало одного булева `tripOutcomes !== null`, потому что трип был последним
+  // событием в жизни судьи.
+  let tripsFired = 0;
+  let rearmsDone = 0;
+  // Судья вышел, НЕ пережив свой трип, — это и есть прежнее поведение и прежний код выхода 2.
+  // Отдельное поле, а не `tripsFired > 0`: пережитый трип полосу останавливать НЕ должен, иначе
+  // весь шаг бессмыслен.
+  let exitedUnRearmed = false;
   // Идёт ли прожиг ПРЯМО СЕЙЧАС. Признак — существование файла сердцебиения: его создаёт прожиг и
   // снимает при штатном выходе (и `.cu`, и носитель двойника). Источника не проведено — ворота
   // открыты, и это верно: тогда вход 2 не взведён и трипать нечему.
   const burnInFlight = () => (progressFile === null ? true : existsFn(progressFile));
 
   await new Promise((resolve) => {
+    /**
+     * ⚡ Ш5 — ПЕРЕВЗВЕДЕНИЕ: ЯВНЫЙ СПИСОК ПОЛЕЙ, А НЕ «ПРОДОЛЖАЕМ КАК БЫЛО».
+     *
+     * Риск (д) плана 81, класс `bugs/19`: судья, унёсший состояние прошлой ступени, судит СЛЕДУЮЩУЮ
+     * по чужим таймерам. «Продолжаем как было» здесь означало бы мгновенный повторный трип на
+     * трупе: `lastBeatMs` указывает в момент ДО спасения, и первый же такт увидит тишину длиной во
+     * всё спасение. Поэтому список ПОЛНЫЙ и каждое поле названо — включая те, что оставлены
+     * НАМЕРЕННО: молчание про поле неотличимо от забытого поля.
+     */
+    const resetForRearm = (now) => {
+      // ── СБРАСЫВАЕТСЯ ────────────────────────────────────────────────────────────────────────
+      lastBeatMs = now;          // иначе тишина всего спасения читается как отказ следующей ступени
+      lastProgressMs = null;     // прожиг убит рукой 1; прогрессу взяться неоткуда
+      progressWired = false;     // канал проводил МЁРТВЫЙ прожиг: «источника нет» ≠ «застыл» (R4c)
+      lastTickMs = now;          // иначе вся пауза спасения ляжет в кольцо одним ложным зазором
+      tripOutcomes = null;       // ЭТО И ЕСТЬ ВЗВЕДЕНИЕ: ворота такта — `verdict.tripped && !tripOutcomes`
+      ringDumped = false;        // иначе штатное закрытие НЕ сбросит кольцо второй половины вечера
+      aliveTicks = 0;            // накопители строки жизни — за новое окно, а не за пережитое
+      aliveWorstGap = 0;
+      aliveWorstBeat = null;
+      aliveWorstProgress = null;
+      // Окно строки жизни переносится ЗА `now`, а не двигается шагами: спасение могло длиться
+      // 58 секунд, и догонять его пятьюдесятью восемью пустыми окнами значило бы писать «судья
+      // молчал» про судью, который в это время ЖДАЛ расписку — а это разные факты.
+      aliveWindowEndMs = now + ALIVE_WINDOW_MS;
+      // ── ОСТАЁТСЯ НАМЕРЕННО ──────────────────────────────────────────────────────────────────
+      // `beats`   — счёт за ВСЮ жизнь судьи, он в сводке; обнулять значило бы потерять показатель.
+      // `endMs`   — дедлайн вечера. Продлить его на время спасения значило бы тихо удлинить прогон.
+      // `ring`    — уже опустошён `dumpRing` внутри трипа; повторная чистка была бы второй правдой.
+      // `fd` · `aliveFd` · `sock` — те же каналы: судья не перезапускается, он ПРОДОЛЖАЕТСЯ.
+    };
+
+    /**
+     * ⚡ Ш5 — ОЖИДАНИЕ РАСПИСКИ РУКИ 2. Решение владельца П1 (`plans/81` §3): ЖДАТЬ, порога не
+     * заводить. Замер, на котором это стоит: вся рука на здоровой карте ≈ 1,9 с, на живом трипе
+     * 31.08 — 58,4 с. Долгим ожидание становится ровно тогда, когда карте плохо, то есть когда
+     * ждать и НАДО.
+     *
+     * 🔴 ГРАНИЦА ОЖИДАНИЯ — НАБЛЮДЕНИЕ, А НЕ ВЫДУМАННЫЙ ТАЙМАУТ: ждём, пока ЖИВА САМА РУКА.
+     * Рука, умершая молча (она говорит с умирающим драйвером — это её штатный риск), расписки уже
+     * не напишет, и ждать её вечно значило бы повесить полосу на глазах у владельца. Пид руки
+     * приходит из её же спауна, живость спрашивается сигналом 0 — стандартная проверка
+     * существования процесса, без единого назначенного числа.
+     */
+    const awaitRearm = (tripAtMs) => {
+      const hand2 = tripOutcomes?.find((o) => o.hand === 2) ?? null;
+      const handPid = Number.isInteger(hand2?.pid) ? hand2.pid : null;
+      // Порядковый номер расписки, которую ждёт ИМЕННО ЭТОТ трип. Счёт, а не время: штампы ставят
+      // разные процессы своими часами ([[EXP-0207]]). Каждое перевзведение съедает ровно одну.
+      const seenBefore = rearmsDone;
+      const readLines = readLinesFn ?? (() => {
+        try { return readFileSync(journalPath, 'utf8').split(/\r?\n/u); } catch { return []; }
+      });
+      const finish = (ok, detail, now) => {
+        writeLine(formatFuseLine({
+          atIso: new Date().toISOString(), phase: 'rearm', cause: 'fuse-rescue',
+          hand: 2, action: ok ? 'rearm' : 'rearm-refused', ok, ms: now - tripAtMs, detail,
+        }));
+        if (ok) {
+          rearmsDone += 1;
+          resetForRearm(now);
+          log(`⚡ СУДЬЯ ПЕРЕВЗВЁЛСЯ: ${detail} — полоса идёт дальше (спасений за прогон: ${tripsFired})`);
+          setTimeout(tick, JUDGE_TICK_MS);
+        } else {
+          exitedUnRearmed = true;
+          log(`⚡ СУДЬЯ НЕ ПЕРЕВЗВОДИТСЯ: ${detail} — полоса встаёт`);
+          resolve();
+        }
+      };
+      const poll = () => {
+        const now = performance.now();
+        // Дедлайн вечера старше ожидания: судья, доживший здесь до конца своего окна, выходит — и
+        // выходит НЕПЕРЕВЗВЕДЁННЫМ, потому что трип под ним так и не был закрыт.
+        if (now >= endMs) { finish(false, 'окно судьи кончилось прежде расписки руки 2', now); return; }
+        const d = rearmDecision(readLines(), seenBefore);
+        if (d.state === 'confirmed') {
+          finish(true, `сток подтверждён чтением (рука 2 отчиталась за ${round2(d.receipt.ms ?? 0)} мс)`, now);
+          return;
+        }
+        if (d.state === 'refused') {
+          finish(false, 'рука 2 отчиталась ok:false — сток НЕ подтверждён чтением', now);
+          return;
+        }
+        // `waiting`: расписки ещё нет. Единственный вопрос — жива ли рука.
+        if (handPid === null) { finish(false, 'рука 2 не запустилась — расписки не будет', now); return; }
+        if (!isAliveFn(handPid)) {
+          finish(false, `рука 2 (pid ${handPid}) вышла, не оставив расписки`, now);
+          return;
+        }
+        setTimeout(poll, REARM_POLL_MS);
+      };
+      poll();
+    };
+
     const tick = () => {
       const now = performance.now();
       const verdict = judgeLiveness({ nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired });
@@ -786,8 +950,21 @@ export async function runJudge({
           return;
         }
         tripOutcomes = runTrip({ verdict, burnPid: pidNow, burnImages, killHand, imageKillHand, stockHand, writeLine, dumpRing });
+        tripsFired += 1;
         log(`⚡ ТРИП: ${verdict.cause} — тишина ${round2(verdict.beatSilenceMs ?? -1)} мс. Руки отработали: ${tripOutcomes.map((o) => `${o.action}=${o.ok}`).join(' · ')}`);
-        resolve(); // one trip ends this judge: the step is over either way, a second trip would fire on a corpse
+        // ⚡ Ш5 (`plans/81`): ЗДЕСЬ СТОЯЛ `resolve()` — «один трип кончает судью». Он и кончал вечер:
+        // 31.08 первое живое срабатывание отработало безупречно и закрыло 0 из 20 частот. Заказ
+        // владельца прямо обратный: *«чтобы предохранители не останавливали прогон, а спасали комп…
+        // и чтобы прогон продолжался»*. Прежний довод («второй трип ударит по трупу») снят не
+        // смелостью, а ПОРЯДКОМ: второго трипа не будет, пока рука 2 не подтвердит сток ЧТЕНИЕМ, —
+        // то есть судья возвращается к работе на карте, про которую перечитано, что она заводская.
+        // Отказ подтвердить — прежнее поведение целиком: выход, код 2, полоса встаёт.
+        //
+        // Последнее окно строки жизни закрывается ДО ожидания: дальше судья намеренно не тикает, и
+        // дыру во времени объясняет ПАРА строк `intent` → `rearm` (у второй есть `ms` ожидания).
+        // Смерть машины во время спасения читается по той же паре: `intent` есть, `rearm` нет.
+        if (aliveTicks > 0) flushAlive(now, startMs);
+        awaitRearm(now);
         return;
       }
       if (now >= endMs) { resolve(); return; }
@@ -803,7 +980,23 @@ export async function runJudge({
   if (aliveFd !== null) closeSync(aliveFd);
   closeSync(fd);
   sock.close();
-  return { port: boundPort, beats, tripped: tripOutcomes !== null, tripOutcomes, ringPath };
+  // ⚡ Ш5 (`plans/81`): `tripped` СМЕНИЛ СМЫСЛ, и это названо, а не сделано тихо.
+  //
+  // Было: «срабатывание случилось» — и оно же было последним событием жизни предохранителя, поэтому
+  // одного поля хватало. Стало: срабатывание можно ПЕРЕЖИТЬ, и тогда полосу останавливать НЕЛЬЗЯ —
+  // иначе весь шаг бессмыслен. Поэтому `tripped` теперь отвечает на вопрос вызывающего («обязана ли
+  // полоса встать»), а сколько раз спасали и сколько раз пережили — отдельные счётчики.
+  //
+  // Различие видно в коде выхода: 2 отдаётся ТОЛЬКО за непережитое срабатывание.
+  return {
+    port: boundPort,
+    beats,
+    tripped: exitedUnRearmed,
+    trips: tripsFired,
+    rearms: rearmsDone,
+    tripOutcomes,
+    ringPath,
+  };
 }
 
 // =================================================================================================
@@ -1253,6 +1446,11 @@ async function cmdSelftest() {
       spawnSyncFn: (cmd, args) => ({ status: 0, cmdSeen: [cmd, ...args] }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       spawnFn: () => ({ pid: 1, unref() {} }),
+      // ⚡ Ш5: рука возврата напряжения в этой фикстуре УМИРАЕТ, не оставив расписки — проверяется
+      // ветка «ждать больше нечего». Она даёт ПРЕЖНЕЕ поведение целиком: выход, полоса встаёт.
+      // Настоящий `process.kill` был бы здесь недетерминирован (жив ли на этой машине процесс с
+      // номером 1 — вопрос к машине, а не к предохранителю).
+      isAliveFn: () => false,
       onReady: ({ port }) => { readyPort = port; },
     });
     // Feed real beats for ~200 ms, then go silent — the strangling fixture, END-TO-END through the socket.
@@ -1266,8 +1464,16 @@ async function cmdSelftest() {
     const journal = readFileSync(journalPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     ok('живой судья на эфемерном порту услышал настоящие удары и трипнул, когда они смолкли',
       result.beats > 10 && result.tripped && result.tripOutcomes[0].action === 'kill-burn');
-    ok('журнал судьи: намерение → исход руки 1 → исход руки 2, fsync-строками',
-      journal.length === 3 && journal[0].phase === 'intent' && journal[1].hand === 1 && journal[2].hand === 2);
+    ok('журнал предохранителя: намерение → снятие нагрузки → возврат напряжения → решение о перевзведении',
+      journal.length === 4 && journal[0].phase === 'intent' && journal[1].hand === 1 && journal[2].hand === 2
+      && journal[3].phase === 'rearm');
+    // ⚡ Ш5: РАСПИСКИ НЕТ И РУКА МЕРТВА → ПЕРЕВЗВЕДЕНИЯ НЕТ. Ветка отказа обязана давать ПРЕЖНЕЕ
+    // поведение (код выхода 2, полоса встаёт), иначе шаг не «пережил спасение», а «снял защиту».
+    ok('Ш5 отказ: рука умерла без расписки — судья НЕ перевзвёлся, счёт перевзведений 0',
+      journal[3].ok === false && rearmCount(journal) === 0 && result.rearms === 0
+      && /не оставив расписки/u.test(journal[3].detail ?? ''));
+    ok('Ш5 отказ: непережитое срабатывание оставляет прежний код выхода (полоса встаёт)',
+      result.tripped === true && result.trips === 1);
     ok('кольцо сброшено при трипе и держит СУБ-пороговые такты (то, чего не было у пустых файлов 28.08)', (() => {
       // ≥ 10, not a tight count: the selftest holds NO timeBeginPeriod, so its setTimeout(2) ticks
       // at Windows' default ~15 ms granularity. The REAL judge CLI raises the resolution; the
@@ -1281,6 +1487,77 @@ async function cmdSelftest() {
     // beats slow 0,13 → 4,49 s) reaches the same verdict through the same silence check: the
     // deadman does not need to distinguish the two to rescue — only the post-mortem does.
     ok('обрыв ударов без замедления (профиль мгновенной смерти) — тот же трип', result.tripped);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ⚡ Ш5 `plans/81` — АПВ: ЗАЩИТА ПЕРЕЖИВАЕТ СРАБАТЫВАНИЕ И СНОВА СТОИТ НА ПОСТУ
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // 🔴 ЭТО ГЛАВНЫЙ БЛОК ШАГА, и он проверяет НЕ «защита не вышла», а два факта, которых без него
+  // не было бы вовсе:
+  //   (1) после возврата на пост защита СНОВА СЛЕДИТ — сигналы живости считаются дальше;
+  //   (2) возврат на пост НЕ ПОРОЖДАЕТ ЛОЖНОГО срабатывания — то есть состояние сброшено, а не
+  //       унесено с прошлой ступени (риск (д) плана 81, класс `bugs/19`).
+  //
+  // Второй факт и есть цена явного списка полей: не сбрось `lastBeatMs`, и первый же такт после
+  // возврата увидит «тишину» длиной во всё спасение и ударит по здоровой карте. Фикстура ловит
+  // это прямо: сигналы живости ВОЗОБНОВЛЯЮТСЯ сразу после возврата, и повторное срабатывание при
+  // живых сигналах означало бы ровно унесённое состояние.
+  {
+    const dgram = await import('node:dgram');
+    const os = await import('node:os');
+    const tmp = path.join(os.tmpdir(), `fuse-rearm-${process.pid}`);
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    let readyPort = null;
+    let handSpawns = 0;
+    let feeding = true;
+    const sender = dgram.createSocket('udp4');
+    // Расписка ВЗН подкладывается ЧИСЛОМ, равным числу запусков руки: у каждого срабатывания своя,
+    // и порядковый номер — ровно то, чем их различает `rearmDecision` (счёт, а не время).
+    const receipt = '{"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,"ms":1870}';
+    const judgeDone = runJudge({
+      // Окно защиты кончается, ПОКА СИГНАЛЫ ЖИВОСТИ ЕЩЁ ИДУТ. Это не мелочь фикстуры: гаси их
+      // раньше конца окна — и защита честно сработает ещё десяток раз уже ПОСЛЕ опыта, а блок
+      // прочитает это как «состояние не сброшено». Опыт обязан кончаться на здоровом входе.
+      beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 1.5,
+      spawnSyncFn: () => ({ status: 0 }),
+      killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
+      spawnFn: () => {
+        handSpawns += 1;
+        // Возврат заводского напряжения отработал — карта снова здорова, значит сигналы живости
+        // ВОЗОБНОВЛЯЮТСЯ. Это и есть здоровый вход, на котором ложное срабатывание видно.
+        feeding = true;
+        return { pid: 4242, unref() {} };
+      },
+      isAliveFn: () => true,
+      readLinesFn: () => Array.from({ length: handSpawns }, () => receipt),
+      onReady: ({ port }) => { readyPort = port; },
+    });
+    await new Promise((res) => { setTimeout(res, 50); });
+    const feeder = setInterval(() => {
+      if (readyPort && feeding) sender.send(Buffer.from([0x01]), readyPort, '127.0.0.1');
+    }, 5);
+    // Здоровый ход, затем молчание — одно срабатывание; дальше фикстура сама возобновляет сигналы.
+    await new Promise((res) => { setTimeout(res, 250); });
+    feeding = false;
+    // Ждём КОНЦА ОКНА защиты, не гася сигналы: она обязана досидеть его на здоровом входе.
+    const r = await judgeDone;
+    clearInterval(feeder);
+    sender.close();
+    const lines = readFileSync(journalPath, 'utf8').trim().split('\n');
+
+    ok('Ш5 АПВ: защита ПЕРЕЖИЛА срабатывание — вернулась на пост, а не вышла',
+      [r.trips, r.rearms, r.tripped], [1, 1, false]);
+    ok('Ш5 АПВ: возврат на пост записан в протокол успешной распиской',
+      rearmCount(lines) === 1 && tripCount(lines) === 1);
+    // ⚠️ БЕЗ СБРОСА `lastBeatMs` ЭТА СТРОКА КРАСНЕЕТ: унесённая тишина спасения ударила бы по
+    // здоровой карте немедленно, и срабатываний стало бы два и больше при живых сигналах.
+    ok('Ш5 АПВ: после возврата на пост НЕТ ложного срабатывания при живых сигналах (риск (д), bugs/19)',
+      r.trips, 1);
+    // И защита действительно СЛЕДИТ дальше, а не досиживает окно молча: сигналы после возврата
+    // приняты. Без этого «пережила» означало бы только «процесс не умер».
+    ok('Ш5 АПВ: защита снова СЧИТАЕТ сигналы живости после возврата на пост',
+      r.beats > 60, `принято сигналов: ${r.beats}`);
   }
 
   // ---- pidfile end-to-end: the file appears AFTER the judge starts, and the trip still kills ITS pid
