@@ -77,6 +77,24 @@
 
 ## Entries
 
+### EXP-0222 · 2026-08-31 · ✅ · #a-shared-helper-nobody-guards-is-worse-than-two-copies #the-mutation-is-what-tells-you-which-path-is-covered
+**Context:** `bugs/97` — extracting the base arithmetic (`live − our offset`) that stood written out twice, into one shared `factoryBaseFrom`, on the path that WRITES to the owner's GPU.
+**Tried / did:** extracted it, wired it into ONE of the two call sites (the simpler one), ran both suites — all green — then ran the mutation «add instead of subtract» to prove the guards.
+**Result:** ✅ the mutation reddened 2 blocks in the new module and **ZERO of the 65 blocks guarding the write path** — revealing that the guarded call site still held its own copy, and the shared function's only guarded use was my own fresh blocks. After wiring it into BOTH sites the same mutation reddens both modules.
+**Lesson:** **an extraction is not done when the code compiles and the suites are green — it is done when a mutation of the shared function reddens the guards of EVERY path that uses it.** Green-after-extraction only proves nothing broke; it says nothing about who is now protected. The mutation is the only instrument that answers *«which paths does this guard actually cover?»*, and the answer is routinely narrower than the call graph suggests. Practical form: after extracting, mutate the extracted function and CHECK THE LIST of reddened suites against the list of callers — a caller whose suite stays green is either unguarded or still holding a private copy, and on a write path either is a defect (this is `bugs/27`'s class — «the suite never called the fixture» — one floor down).
+**Repro:** flip `-` to `+` in `card-grids.factoryBaseFrom`; `curve --selftest` AND `profile --selftest` must both redden. If only one does, a copy survives.
+**Trigger:** extracting any duplicated arithmetic/decision into a shared helper, especially on a path that touches hardware or the owner's data.
+**Not for:** pure additive code with no prior copies — there is no "which paths" question to answer.   → link: `bugs/97` · `bugs/98` · `bugs/27` · EXP-0016
+
+### EXP-0221 · 2026-08-31 · ✅ · #the-refuting-probe-must-be-strong-enough-to-reach-the-effect #a-light-load-refuted-nothing
+**Context:** `bugs/97` claimed the card's V/F table shifts with card state (60 of 128 points, +15 MHz). I set out to test it, correctly suspecting the ticket's own «temperature» reading, and correctly starting from the simplest hypothesis.
+**Tried / did:** probe 1 used `sdc_fma` sustained — the same workload the ticket's own measurement used. Rest 44 °C → load 50 °C: **0 of 128 moved.** I wrote «the ticket's premise does not reproduce» into the chat and began doubting a measurement the owner had confirmed.
+**Result:** ✅ probe 2 with `furnace` reached 69 °C / 250 W and reproduced the effect at full size (49 of 128, ±37 MHz). The first probe had **4 % GPU utilization and 52 W** — it moved the perf state but never took the card into the loaded regime at all. My «refutation» measured nothing.
+**Lesson:** **a probe that fails to reproduce an effect has refuted the effect only if the probe was strong enough to CAUSE it — otherwise it has refuted only itself.** Before reporting «does not reproduce», state the probe's own reach in the units of the phenomenon (here: watts and utilization, not seconds of runtime) and compare that reach against where the effect is claimed to live. The environment dossier ALREADY said `sdc_fma` spends 99 % of wall time on process startup and reaches ~8 % utilization — I read the ticket's workload name and inherited its choice instead of asking what the workload actually delivers. Second half of the lesson, about reporting: a negative result deserves the same «what was my instrument's range?» line that a positive one deserves; I published the doubt before I published the range.
+**Repro:** `stress --workload sdc_fma --seconds 150` → ~50 W, 4 % util, +6 °C. `--workload furnace` → ~250 W, 100 % util, +23 °C.
+**Trigger:** any probe whose conclusion is «the reported effect does not reproduce» — check the probe's reach in the phenomenon's own units first.
+**Not for:** probes that DO reproduce — a positive result needs no reach argument.   → link: `bugs/97` · AGENT_GUIDE.md → Environment dossier («Workload burst cost»)
+
 ### EXP-0220 · 2026-08-31 · ❌❌❌❌ · #the-owner-found-four-of-five #i-retold-a-comment-instead-of-measuring #i-turned-a-defect-into-a-usage-rule #the-instrument-i-read-was-lying
 **Context:** вечер, когда продукт впервые дошёл до владельца: профиль применён на его карте, он поиграл, потом мы мерили выгоду на Q2RTX. Я при этом чинил дефекты по эстафете и считал вечер успешным.
 **Tried / did:** докладывал состояние по своим приборам; объяснял устройство по комментариям в коде; на найденный дефект выдал инструкцию, как его обходить.
