@@ -31,8 +31,9 @@
 // automated self-test asserts these functions yet. verify-review-contour.mjs flips this marker.
 
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
-import { resolve, relative, dirname, basename, sep } from 'node:path';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, mkdtempSync } from 'node:fs';
+import { tmpdir as osTmpdir } from 'node:os';
+import { resolve, relative, dirname, basename, sep, join as joinPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalize, listInterviews, humanTime, isoLocal, unreachableVariantLetters } from './lib/review-core.mjs';
@@ -72,6 +73,33 @@ const EXCLUDED_DIRS = new Set([
 // exactly `PROJECT_HISTORY.md:1682` and `:2292`. Re-prove by deleting this set's use in
 // `collectMarkdown` — the two must come back.
 const EXCLUDED_FILES = new Set(['project_history.md']);
+
+/**
+ * ЗАКРЫТ ЛИ ДОКУМЕНТ ТЕГОМ `DONE` В ИМЕНИ — сужение области оси G1 (`bugs/74`).
+ *
+ * ПОЧЕМУ ЭТО ОБЛАСТЬ, А НЕ ПОДАВЛЕНИЕ. Довод дословно тот же, которым выше исключена хроника:
+ * находка, по которой НИКТО НЕ ВПРАВЕ ДЕЙСТВОВАТЬ, ложна по построению. Единственное действие,
+ * которое эта ось может спровоцировать, — перенести вопрос в `interviews/`; а закрытый оригинал
+ * не правят (`AGENT_GUIDE.md`), и цитата владельца внутри него тем более неприкосновенна. Ровно
+ * такой была находка, породившая `bugs/74`: `bugs/14_DONE…:28` — дословная цитата владельца,
+ * приведённая как улика в разборе закрытого дефекта.
+ *
+ * ЦЕНА ДРУГИХ ВАРИАНТОВ, названная в тикете: заморозить в долг — завести строку, которую надо
+ * поддерживать ради находки, которая никогда не станет работой; оставить как есть — держать
+ * `npm run questions` вечно красным и приучить его не читать. Второе уже случилось: 2026-08-31
+ * агент прочитал шесть находок как чужой долг и прошёл мимо ЕДИНСТВЕННОЙ настоящей ([[EXP-0211]]).
+ *
+ * ⚠️ ГРАНИЦА: тег `DONE` — это НЕ «документ мне не нравится». Он ставится по конвенции проекта
+ * (`AGENT_GUIDE.md` → «Backlog & the DONE tag») и только после подтверждённой починки, то есть
+ * закрытость здесь — свойство, которым уже управляет другой ритуал, а не признак, изобретённый
+ * сторожем под себя.
+ *
+ * [TESTED: 2026-08-31 · `--selftest`, блоки «ЗАКРЫТЫЙ тегом DONE вне области» и КОНТРОЛЬ
+ *  «ОТКРЫТЫЙ с тем же текстом — ЛОВИТСЯ»; сужение доказано КРАСНЫМ, а не только зелёным]
+ */
+export function isClosedByDoneTag(fileName) {
+  return /(?:^|[_-])DONE(?:[_-]|\.md$)/u.test(String(fileName));
+}
 
 // =================================================================================================
 // 1. Sign (a) — a queue HEADING
@@ -317,6 +345,7 @@ export function collectMarkdown(root = ROOT) {
         walk(full);
       } else if (e.isFile() && /\.md$/iu.test(e.name)) {
         if (EXCLUDED_FILES.has(e.name.toLowerCase())) continue;   // the chronicle — see the set
+        if (isClosedByDoneTag(e.name)) continue;                  // закрытое тегом DONE — `bugs/74`
         files.push(full);
       }
     }
@@ -800,21 +829,88 @@ export function formatReport(r) {
 // =================================================================================================
 
 const HELP = [
-  'Использование: node tools/questions-guard.mjs [--freeze] [--json] [--no-serve]',
+  'Использование: node tools/questions-guard.mjs [--freeze] [--json] [--no-serve] [--selftest]',
   '',
   '  --freeze     записать текущее состояние в файл долга interviews/decisions/guard-baseline.json',
   '  --json       машинный вывод (только JSON, без человеческого отчёта)',
   '  --no-serve   принимается и игнорируется: сторож никогда не держит сервер (C9)',
+  '  --selftest   собственный набор сторожа на фикстурах в песочнице, дерево проекта не читается',
   '  --help       эта справка',
   '',
   'Код выхода: 0 — чисто или только унаследованный долг; 1 — появилось НОВОЕ нарушение.',
 ].join('\n');
+
+// =================================================================================================
+// 11а. СОБСТВЕННЫЙ НАБОР СТОРОЖА
+// =================================================================================================
+//
+// ЗАЧЕМ ОН ПОЯВИЛСЯ 2026-08-31, и это не церемония. У сторожа, который стережёт КАНОН, не было ни
+// одной собственной проверки, и батарея его не звала — то есть его правки никто не мог доказать.
+// `bugs/74` требует буквально: «Доказать красным ПОСЛЕ сужения: подложить ОТКРЫТЫЙ документ с
+// обращением "Владелец, …" — ось обязана его поймать. Сужение, после которого ось не краснеет ни
+// на чём, — это выключение».
+//
+// ФИКСТУРЫ ЖИВУТ В ПЕСОЧНИЦЕ `$TEMP`, дерево проекта набор не читает и не пишет: сторож, чей набор
+// зависит от состояния репозитория, отвечает на вопрос «что сегодня в дереве», а не «верно ли он
+// судит» (доказательство инертности — рядом с записью в батарее).
+function selfTest() {
+  // ESM: модули берутся импортом, а не `require` — файл `.mjs`. `writeFileSync`/`mkdirSync` уже
+  // импортированы в шапке; недостающие два берутся синхронными импортами узла ниже, у вызова.
+  let red = 0;
+  let blocks = 0;
+  const ok = (name, got, want) => {
+    blocks += 1;
+    const pass = JSON.stringify(got) === JSON.stringify(want);
+    if (!pass) red += 1;
+    console.log(`  ${pass ? '✅' : '❌'} ${name}${pass ? '' : `  — получено ${JSON.stringify(got)}, ожидалось ${JSON.stringify(want)}`}`);
+  };
+  console.log('САМОПРОВЕРКА СТОРОЖА МЕСТА ВОПРОСОВ');
+
+  // ─── признак закрытости: чистая функция, обе стороны ─────────────────────────────────────────
+  ok('тег DONE в середине имени опознаётся', isClosedByDoneTag('14_DONE_operator_stop.md'), true);
+  ok('тег DONE в конце имени опознаётся', isClosedByDoneTag('12_epic01_DONE.md'), true);
+  ok('ОТКРЫТЫЙ документ закрытым НЕ считается', isClosedByDoneTag('74_the_questions_guard_reddens.md'), false);
+  ok('слово DONE ВНУТРИ слова не считается тегом', isClosedByDoneTag('86_abandoned_lock.md'), false);
+  ok('слово «done» строчными не считается тегом (конвенция — заглавные)',
+    isClosedByDoneTag('12_done_something.md'), false);
+
+  // ─── КОНТРОЛЬ, РАДИ КОТОРОГО НАБОР И ЗАВЕДЁН: сужение доказывается КРАСНЫМ ────────────────────
+  //
+  // Один и тот же текст в двух файлах, отличающихся ТОЛЬКО тегом в имени. Если пропадут оба —
+  // ось выключена, а не сужена, и это ровно тот отказ, который `bugs/74` просит не допустить.
+  const box = mkdtempSync(joinPath(osTmpdir(), 'qguard-'));
+  mkdirSync(joinPath(box, 'interviews', 'decisions'), { recursive: true });
+  mkdirSync(joinPath(box, 'bugs'), { recursive: true });
+  const LINE = 'Владелец: подтвердите, пожалуйста, порог — без Вашего слова не иду дальше.\n';
+  writeFileSync(joinPath(box, 'bugs', '90_open_ticket.md'), `# Открытый тикет\n\n${LINE}`, 'utf8');
+  writeFileSync(joinPath(box, 'bugs', '91_DONE_closed_ticket.md'), `# Закрытый тикет\n\n${LINE}`, 'utf8');
+
+  const seen = collectMarkdown(box).map((d) => d.rel.replace(/\\/gu, '/'));
+  ok('ЗАКРЫТЫЙ тегом DONE — ВНЕ области сторожа', seen.includes('bugs/91_DONE_closed_ticket.md'), false);
+  ok('🔴 КОНТРОЛЬ: ОТКРЫТЫЙ с ТЕМ ЖЕ текстом — В области', seen.includes('bugs/90_open_ticket.md'), true);
+
+  const found = scanQuestionsOutsideInterviews(collectMarkdown(box));
+  const files = found.map((f) => String(f.file).replace(/\\/gu, '/'));
+  ok('🔴 КОНТРОЛЬ КРАСНЫМ: обращение к владельцу в ОТКРЫТОМ документе ЛОВИТСЯ',
+    files.some((f) => f.endsWith('90_open_ticket.md')), true);
+  ok('и в закрытом — НЕ ловится, хотя текст байт в байт тот же',
+    files.some((f) => f.endsWith('91_DONE_closed_ticket.md')), false);
+
+  // ─── маркер исключения: пустая причина сама есть нарушение ────────────────────────────────────
+  ok('маркер с причиной действителен', readAllowMarker('<!-- owner-review:allow because=цитата -->')?.valid, true);
+  ok('маркер БЕЗ причины недействителен — заглушить сторож молча нельзя',
+    readAllowMarker('<!-- owner-review:allow -->')?.valid, false);
+
+  console.log(`САМОПРОВЕРКА ЗАВЕРШЕНА: блоков ${blocks}, красных ${red}`);
+  return red ? 1 : 0;
+}
 
 export function main(argv = process.argv.slice(2)) {
   if (argv.includes('--help') || argv.includes('-h')) {
     process.stdout.write(HELP + '\n');
     return 0;
   }
+  if (argv.includes('--selftest')) return selfTest();
   const asJson = argv.includes('--json');
   const freeze = argv.includes('--freeze');
 
