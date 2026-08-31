@@ -1,0 +1,31 @@
+{
+  "kind": "interview",
+  "document": "interview_022_three_forks_that_were_waiting_in_the_chat_instead_of_the_contour.md",
+  "by": "Mikalai Kryvusha",
+  "at": "2026-08-31T10:40:18+03:00",
+  "at_human": "31.08.2026 10:40",
+  "comment": "",
+  "answers": {
+    "Q1": {
+      "choice": "B",
+      "text": "И перемерить частоты",
+      "comment": "и перемерить частоты"
+    },
+    "Q2": {
+      "choice": "A",
+      "text": "",
+      "comment": ""
+    },
+    "Q3": {
+      "choice": "A",
+      "text": "",
+      "comment": ""
+    }
+  },
+  "written": [
+    "Q3",
+    "Q2",
+    "Q1"
+  ],
+  "not_written": []
+}
