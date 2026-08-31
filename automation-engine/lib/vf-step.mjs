@@ -74,6 +74,52 @@ import config from '../config.mjs';
 const require = createRequire(import.meta.url);
 
 /**
+ * ИМЯ ФАЙЛА ПРОБ СТУПЕНИ — И АРХИВИРОВАНИЕ ПРЕДЫДУЩЕГО ВМЕСТО ПЕРЕЗАПИСИ (`bugs/94`, B94-AC1).
+ *
+ * 🔴 ЧТО ЭТО СТОИЛО, ПРЕЖДЕ ЧЕМ БЫЛО ПОЧИНЕНО. Имя несло тройку «держатель · частота · подъём» и
+ * НИЧЕГО о прогоне. 2026-08-31 полоса заказала ту же частоту с тем же подъёмом второй раз — и
+ * сырые пробы инцидента `bugs/86` (заказ 2145 МГц, выдача 2677…2835, превышение 690) исчезли под
+ * новой записью. Тикет остался, улика — нет; выжила только строка, напечатанная сторожем движка.
+ *
+ * ЭТО ТОТ ЖЕ КЛАСС, КОТОРЫЙ ПРОЕКТ УЖЕ ЛЕЧИЛ — и лечил в соседнем архиве. `plans/27` §27.1:
+ * файл пульса удалялся при старте каждого прогона, поэтому у проекта была РОВНО ОДНА запись
+ * потери такта перед смертью машины. Лечение тогда — не удалять, а архивировать. Здесь тот же
+ * довод не был применён: урок записали, механизм построили, на соседа не перенесли
+ * ([[EXP-0212]]: «класс закрыт» — утверждение о СПИСКЕ НОСИТЕЛЕЙ, а не о починенном месте).
+ *
+ * ПОЧЕМУ АРХИВ ИМЕННО ЗДЕСЬ, а не «в начале следующего прогона», как у пульса. У пульса файл ОДИН
+ * на прогон, и момент столкновения — старт. Здесь файлов много, и столкновение случается ровно в
+ * ту секунду, когда ступень собирается писать. Архивируем ПЕРЕД открытием нового: умри машина
+ * посреди прожига — старая улика уже в архиве, а новая частична, и это правильная пара.
+ *
+ * ⚠️ `renameSync` внутри ОДНОГО тома (архив — подпапка того же каталога): переименование между
+ * томами это копирование, а копирование не атомарно (тот же довод, что у `writeJsonAtomic`, R14a).
+ *
+ * ⚠️ Штамп берётся из ВРЕМЕНИ ФАЙЛА, а не из «сейчас»: имя архивной записи обязано говорить,
+ * когда СЛУЧИЛСЯ тот прожиг, а не когда его подвинули.
+ *
+ * @param {string} dir каталог проб (боевой `runs/vmin`, в наборе — песочница)
+ * @param {{pinMhz?:number|null, capMhz?:number|null, offsetMhz:number}} rung координаты ступени
+ * @returns {{file:string, archived:string|null}} путь для записи и куда убрана прежняя запись
+ *
+ * [TESTED: 2026-08-31 · блоки `vfstep --selftest` в песочнице, мутации V1 и V2]
+ */
+export function claimSamplerFile(dir, { pinMhz = null, capMhz = null, offsetMhz }) {
+  const { existsSync, mkdirSync, renameSync, statSync } = require('node:fs');
+  const { join } = require('node:path');
+  mkdirSync(dir, { recursive: true });
+  const name = `${pinMhz ? `pin-${pinMhz}` : `cap-${capMhz}`}-${offsetMhz}.jsonl`;
+  const file = join(dir, name);
+  if (!existsSync(file)) return { file, archived: null };
+  const archiveDir = join(dir, 'archive');
+  mkdirSync(archiveDir, { recursive: true });
+  const stamp = new Date(statSync(file).mtimeMs).toISOString().replace(/[:.]/gu, '-');
+  const archived = join(archiveDir, name.replace(/\.jsonl$/u, `-${stamp}.jsonl`));
+  renameSync(file, archived);
+  return { file, archived };
+}
+
+/**
  * The operating point, measured rather than assumed — see the header. Overridable, because the engine
  * that will loop over this atom must be able to name any point.
  */
@@ -751,7 +797,10 @@ export async function runStep({
       const here = dirname(fileURLToPath(import.meta.url));
       const runsDir = join(here, '..', '..', 'runs', 'vmin');
       mkdirSync(runsDir, { recursive: true });
-      const file = join(runsDir, `${p ? `pin-${p}` : `cap-${c}`}-${o}.jsonl`);
+      // Прежняя запись той же тройки уходит в архив, а не под новую (`bugs/94`). Имя строится
+      // ОДНОЙ функцией — здесь и в наборе, иначе набор проверял бы не то имя, что пишет прогон.
+      const { file, archived } = claimSamplerFile(runsDir, { pinMhz: p, capMhz: c, offsetMhz: o });
+      if (archived) console.log(`  ПРОБЫ ПРОШЛОГО ТАКОГО ЖЕ ПРОЖИГА: убраны в ${archived} — не затёрты`);
       const proc = spawn(process.execPath, [join(here, 'hardware-mon.mjs'), '--seconds', String(samplerSeconds), '--out', file],
         { windowsHide: true, stdio: 'ignore' });
       return { file, kill: () => { try { proc.kill(); } catch { /* уже вышел */ } } };
@@ -2745,6 +2794,56 @@ export async function selfTest() {
     const sandbox = j(tmpdir(), `vfstep-port-${process.pid}`);
     mkd(sandbox, { recursive: true });
     const samplerPath = j(sandbox, 'sampler.jsonl');
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // 🔴 `bugs/94` B94-AC1 — ПОВТОРНЫЙ ПРОЖИГ ТОЙ ЖЕ ТРОЙКИ НЕ УНИЧТОЖАЕТ ПРЕЖНИЕ ПРОБЫ
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Оплачено 2026-08-31: вечерний прогон заказал 2145 МГц с подъёмом 555 второй раз, и сырые
+    // пробы инцидента `bugs/86` исчезли под новой записью. Проверяется НАСТОЯЩЕЙ функцией писателя
+    // в песочнице — не копией её логики, иначе набор доказывал бы себя.
+    {
+      const { existsSync: ex, readdirSync: rd, readFileSync: rf } = await import('node:fs');
+      const box = j(sandbox, 'vmin-collide');
+      const rung = { pinMhz: 2145, capMhz: null, offsetMhz: 555 };
+
+      const { utimesSync } = await import('node:fs');
+      const first = claimSamplerFile(box, rung);
+      wf(first.file, 'ПЕРВЫЙ ПРОЖИГ\n', 'utf8');
+      // ВРЕМЯ ПЕРВОГО ПРОЖИГА ПРИБИВАЕТСЯ ЗАВЕДОМО ПРОШЛЫМ — иначе «сейчас» и «время файла»
+      // неразличимы, и блок ниже зеленел бы на обоих (мутация V2 прошла зелёной именно так).
+      const BURN_AT = new Date('2026-08-11T09:30:00Z');
+      utimesSync(first.file, BURN_AT, BURN_AT);
+      ok('B94-AC1: первый прожиг тройки ничего не архивирует — архивировать нечего',
+        [first.archived, ex(j(box, 'archive'))], [null, false]);
+
+      const second = claimSamplerFile(box, rung);
+      wf(second.file, 'ВТОРОЙ ПРОЖИГ\n', 'utf8');
+      const archived = ex(j(box, 'archive')) ? rd(j(box, 'archive')) : [];
+      // ГЛАВНАЯ СТРОКА ТИКЕТА: файлов стало ДВА, а не один.
+      ok('B94-AC1: повторный прожиг той же тройки оставляет ДВА файла, а не затирает прежний',
+        [rd(box).filter((f) => f.endsWith('.jsonl')).length, archived.length], [1, 1]);
+      // И содержимое прежнего ЦЕЛО — файл переименован, а не создан заново пустым.
+      ok('B94-AC1: в архиве лежат ПРОБЫ ПЕРВОГО прожига, а не пустышка с его именем',
+        rf(j(box, 'archive', archived[0]), 'utf8').trim(), 'ПЕРВЫЙ ПРОЖИГ');
+      ok('B94-AC1: под текущим именем лежит ПОСЛЕДНИЙ прожиг — читатели, знающие одно имя, не сломаны',
+        rf(second.file, 'utf8').trim(), 'ВТОРОЙ ПРОЖИГ');
+      // Штамп берётся из ВРЕМЕНИ ФАЙЛА: имя архивной записи говорит, когда случился ТОТ прожиг.
+      // 🔴 ШТАМП — ВРЕМЯ ТОГО ПРОЖИГА, А НЕ ВРЕМЯ ПЕРЕНОСА, и это проверяется ЧИСЛОМ, а не формой.
+      // Первая редакция блока смотрела только на ФОРМУ имени (`\d{4}-..T..`) — и мутация V2,
+      // подставившая `new Date()` вместо времени файла, прошла ЗЕЛЁНОЙ: «сейчас» тоже имеет форму
+      // даты. Форма не отличает правильный источник от неправильного ([[EXP-0201]]: правило,
+      // проверяющее «похоже ли на дату» вместо «то ли это число», делает подделку удобнее правды).
+      ok('B94-AC1: штамп архива — время ТОГО прожига (11.08), а не время переноса (сегодня)',
+        archived[0], `pin-2145-555-${BURN_AT.toISOString().replace(/[:.]/gu, '-')}.jsonl`);
+      // И ГЛАВНОЕ ДЛЯ НАКОПЛЕНИЯ: имя обязано остаться ЧИТАЕМЫМ разбором прибора, иначе архив
+      // сохранён и невидим — то есть накопления не случилось, а мы решили, что случилось.
+      // Разбор берётся у САМОГО прибора, а не переписывается здесь (пара «правда ↔ зеркало»).
+      const { parseBurnName } = await import('../../tools/hold-vs-raise.mjs');
+      ok('B94-AC1: архивное имя разбирается прибором в ТУ ЖЕ тройку — накопленное будет посчитано',
+        (({ holder, orderedMhz, raiseMhz }) => ({ holder, orderedMhz, raiseMhz }))(parseBurnName(archived[0]) ?? {}),
+        { holder: 'pin', orderedMhz: 2145, raiseMhz: 555 });
+    }
 
     // `clocks` — ПРОБЫ, КОТОРЫЕ ОТДАСТ ФЕЙКОВЫЙ СЭМПЛЕР. Параметр заведён 2026-08-31 (`bugs/87`):
     // прежде фейк писал двенадцать ОДИНАКОВЫХ проб, поэтому у него минимум = медиана = максимум, и
