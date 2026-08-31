@@ -1251,9 +1251,20 @@ export function attachDerivedStatus(doc) {
  * one question: **what is the highest frequency our table says V can serve?** — and that becomes the
  * entry's frequency. The offset is that frequency minus what the entry reads RIGHT NOW.
  *
- * Because the current reading is taken live, the same document produces different offsets at 40 °C
- * and at 57 °C — and the RESULT is identical: every frequency gets the voltage we measured for it.
- * Storing the offsets instead would have frozen one temperature into the artifact.
+ * 🔴 ЗДЕСЬ СТОЯЛО УТВЕРЖДЕНИЕ, ОПРОВЕРГНУТОЕ ЗАМЕРОМ 2026-08-31 (`bugs/97`). Дословно: «живое чтение
+ * даёт разные сдвиги при 40 °C и 57 °C — а РЕЗУЛЬТАТ одинаков: каждая частота получает намеренное ей
+ * напряжение». **Вторая половина неверна.** Сдвиг применяется к точке таблицы ОДИН раз и после этого
+ * за состоянием карты не следит; значит два нажатия одного профиля при разном состоянии карты кладут
+ * в неё РАЗНЫЕ кривые. Владелец назвал это дефектом: *«не должны записываться разные смещения»*.
+ *
+ * Замер: контроль — пять чтений при неизменной карте разошлись на 0 точек из 128 (чтение
+ * детерминировано); опыт — 51 °C против 53 °C после прогрева дали **60 разошедшихся точек из 128, до
+ * +15 МГц**. Два градуса.
+ *
+ * Опору назначил владелец: *«мы тюним карту для худшего случая — тяжёлая нагрузка, карта горячая,
+ * около 65…70 градусов»*. Считать надо против ОДНОЙ опорной таблицы, снятой в этом состоянии.
+ * Починка — `bugs/97`; здесь пока СТАРОЕ поведение, и этот блок стоит, чтобы следующий читатель не
+ * принял его за обоснованное.
  */
 export function offsetsFor(doc, tablePoints, { count = CURVE_GRAPHICS_POINT_COUNT } = {}) {
   const rows = doc.frequencies;

@@ -13,7 +13,7 @@
 //
 // И ЧЕТВЁРТЫЙ СЛОЙ, КОТОРОГО ОН НЕ ПРОСИЛ, НО КОТОРЫЙ ОТВЕЧАЕТ НА ЕГО ВОПРОС «А МОЖНО ЛИ ГЛУБЖЕ»:
 //   ЧТО РЕАЛЬНО ДЕРЖАЛО ПРОЖИГ — самое глубокое ПРОШЕДШЕЕ напряжение каждой частоты, синим.
-//   Там, где синяя точка НИЖЕ красной, стена стоит выше доказанного — и это видно глазом, а не
+//   Там, где синяя точка НИЖЕ красной, пол зависания стоит выше доказанного — видно глазом, а не
 //   вычитается из двух таблиц (`bugs/85`, `ideas/16`).
 //
 // ПОЧЕМУ ГЕНЕРАТОР, А НЕ НАРИСОВАННЫЙ ФАЙЛ: вторая копия правды — пара «правда ↔ зеркало», за
@@ -47,7 +47,14 @@ must(rows.length > 0, 'документ кривой пуст');
 /** Пары «намерение → вердикт» журнала: что заказывали и чем кончилось. Журнала может не быть. */
 function journalFacts() {
   const proven = new Map();   // МГц → самое глубокое ПРОШЕДШЕЕ (выданное) напряжение
-  const hung = new Map();     // МГц → самое ВЫСОКОЕ зависание (это и есть стена, R18)
+  // МГц → самое ВЫСОКОЕ зарегистрированное зависание. Это и есть ПОЛ ЗАВИСАНИЯ (R18): напряжение,
+  // ниже которого спуск на этой частоте не возвращается.
+  //
+  // 🔤 ИМЯ ИСПРАВЛЕНО 2026-08-31 ПО СЛОВУ ВЛАДЕЛЬЦА: *«"Стены" — не понимаю этого термина, он не
+  // академический»*. Здесь стояла «стена» — моя метафора, и хуже того ВТОРОЕ имя для вещи, у которой
+  // уже есть своё: движок печатает «ПОЛ ЗАВИСАНИЯ» в каждой сводке прогона. Одно понятие — одно
+  // слово (DRY применительно к языку); пара имён у одной вещи разъезжается так же, как пара чисел.
+  const hung = new Map();
   if (!existsSync(JOURNAL)) return { proven, hung, lines: 0 };
   const lines = readFileSync(JOURNAL, 'utf8').trim().split(/\r?\n/).filter(Boolean);
   const intents = new Map();
@@ -93,12 +100,19 @@ const mvAll = [
   ...proven.values(), ...hung.values(),
 ].filter(Number.isFinite);
 
-const xMin = Math.min(...mhzAll), xMax = Math.max(...mhzAll);
-const yMin = Math.floor((Math.min(...mvAll) - 20) / 50) * 50;
-const yMax = Math.ceil((Math.max(...mvAll) + 20) / 50) * 50;
+// ⚡ НАПРЯЖЕНИЕ ПО X, ЧАСТОТА ПО Y — ЗАКАЗ ВЛАДЕЛЬЦА 2026-08-31: *«перерисуй, напряжение по оси X»*.
+//
+// Это не вкус, а читаемость по существу: в такой раскладке андервольт виден как СДВИГ КРИВОЙ ВЛЕВО
+// — «та же частота за меньшее напряжение», — и расстояние между серой и цветной линией по
+// горизонтали ЕСТЬ выигрыш в милливольтах, который можно померить глазом. В прежней раскладке тот
+// же выигрыш читался как провал линии вниз, и его приходилось пересчитывать в уме.
+// Так же принято рисовать V/F-кривые в отрасли: напряжение — независимая величина.
+const xMin = Math.floor((Math.min(...mvAll) - 20) / 50) * 50;
+const xMax = Math.ceil((Math.max(...mvAll) + 20) / 50) * 50;
+const yMin = Math.min(...mhzAll), yMax = Math.max(...mhzAll);
 
-const X = (mhz) => PAD.l + ((mhz - xMin) / (xMax - xMin)) * plotW;
-const Y = (mv) => PAD.t + (1 - (mv - yMin) / (yMax - yMin)) * plotH;
+const X = (mv) => PAD.l + ((mv - xMin) / (xMax - xMin)) * plotW;
+const Y = (mhz) => PAD.t + (1 - (mhz - yMin) / (yMax - yMin)) * plotH;
 const n2 = (v) => Math.round(v * 10) / 10;
 
 const polyline = (pts) => pts.map(([a, b]) => `${n2(a)},${n2(b)}`).join(' ');
@@ -107,17 +121,17 @@ const polyline = (pts) => pts.map(([a, b]) => `${n2(a)},${n2(b)}`).join(' ');
 // 3. Слои
 // =================================================================================================
 
-const stockPts = rows.filter((r) => Number.isFinite(r.stockVoltageMv)).map((r) => [X(r.mhz), Y(r.stockVoltageMv)]);
-const tunedPts = touched.filter((r) => Number.isFinite(r.voltageMv)).map((r) => [X(r.mhz), Y(r.voltageMv)]);
+const stockPts = rows.filter((r) => Number.isFinite(r.stockVoltageMv)).map((r) => [X(r.stockVoltageMv), Y(r.mhz)]);
+const tunedPts = touched.filter((r) => Number.isFinite(r.voltageMv)).map((r) => [X(r.voltageMv), Y(r.mhz)]);
 
-const provenDots = [...proven.entries()].filter(([m]) => m >= xMin && m <= xMax)
-  .map(([m, v]) => `<circle cx="${n2(X(m))}" cy="${n2(Y(v))}" r="3" class="proven"><title>${m} МГц: самое глубокое ПРОШЕДШЕЕ ${v} мВ</title></circle>`).join('');
+const provenDots = [...proven.entries()].filter(([m]) => m >= yMin && m <= yMax)
+  .map(([m, v]) => `<circle cx="${n2(X(v))}" cy="${n2(Y(m))}" r="3" class="proven"><title>${m} МГц: самое глубокое ПРОШЕДШЕЕ ${v} мВ</title></circle>`).join('');
 
-const hungDots = [...hung.entries()].filter(([m]) => m >= xMin && m <= xMax)
+const hungDots = [...hung.entries()].filter(([m]) => m >= yMin && m <= yMax)
   .map(([m, v]) => {
     const p = proven.get(m);
     const contradicts = Number.isFinite(p) && p < v;
-    return `<circle cx="${n2(X(m))}" cy="${n2(Y(v))}" r="${contradicts ? 5 : 3.5}" class="${contradicts ? 'hung wrong' : 'hung'}">`
+    return `<circle cx="${n2(X(v))}" cy="${n2(Y(m))}" r="${contradicts ? 5 : 3.5}" class="${contradicts ? 'hung wrong' : 'hung'}">`
       + `<title>${m} МГц: ЗАВИСАНИЕ на ${v} мВ${contradicts ? ` — но прожиг проходил на ${p} мВ, на ${v - p} мВ ГЛУБЖЕ` : ''}</title></circle>`;
   }).join('');
 
@@ -130,15 +144,17 @@ const gaps = [];
     else cur = null;
   }
 }
+// Полоса «не тронуто» задаётся диапазоном ЧАСТОТ, а частота теперь на Y — значит полоса легла
+// горизонтально. Ось Y перевёрнута (высокая частота вверху), поэтому верх полосы даёт `g.to`.
 const gapRects = gaps.filter((g) => g.to > g.from).map((g) =>
-  `<rect x="${n2(X(g.from))}" y="${PAD.t}" width="${n2(X(g.to) - X(g.from))}" height="${plotH}" class="gap">`
+  `<rect x="${PAD.l}" y="${n2(Y(g.to))}" width="${plotW}" height="${n2(Y(g.from) - Y(g.to))}" class="gap">`
   + `<title>не тронуто: ${g.from}…${g.to} МГц</title></rect>`).join('');
 
 // Сетки осей
 const xTicks = [];
-for (let m = Math.ceil(xMin / 250) * 250; m <= xMax; m += 250) xTicks.push(m);
+for (let v = xMin; v <= xMax; v += 50) xTicks.push(v);
 const yTicks = [];
-for (let v = yMin; v <= yMax; v += 50) yTicks.push(v);
+for (let m = Math.ceil(yMin / 250) * 250; m <= yMax; m += 250) yTicks.push(m);
 
 const grid = [
   ...xTicks.map((m) => `<line x1="${n2(X(m))}" y1="${PAD.t}" x2="${n2(X(m))}" y2="${PAD.t + plotH}" class="grid"/>`
@@ -170,7 +186,7 @@ const bucketRows = [...buckets.values()].sort((a, b) => b.from - a.from).map((b)
     + `<td>${b.edge || '—'}</td><td>${b.walled || '—'}</td></tr>`;
 }).join('');
 
-// Противоречия «стена выше доказанного» — списком, потому что это прямой ответ на вопрос владельца.
+// Противоречия «пол зависания выше доказанного» — списком: это прямой ответ на вопрос владельца.
 const contradictions = [...hung.entries()]
   .map(([m, v]) => ({ m, v, p: proven.get(m) }))
   .filter((x) => Number.isFinite(x.p) && x.p < x.v)
@@ -235,31 +251,31 @@ const html = `<!DOCTYPE html>
   <polyline class="tuned" points="${polyline(tunedPts)}"/>
   ${provenDots}
   ${hungDots}
-  <text x="${PAD.l}" y="${H - 12}" class="ax">частота, МГц →</text>
-  <text x="14" y="${PAD.t + 10}" class="ax">мВ</text>
+  <text x="${PAD.l}" y="${H - 12}" class="ax">напряжение, мВ →</text>
+  <text x="14" y="${PAD.t + 10}" class="ax">МГц</text>
 </svg>
 <div class="legend">
   <span><i style="background:#9aa1ae"></i>сток — заводское напряжение</span>
-  <span><i style="background:#1e9e5a"></i>рабочее — что стоит в документе</span>
+  <span><i style="background:#1e9e5a"></i>наша — что стоит в документе; <b>чем ЛЕВЕЕ серой, тем глубже андервольт</b></span>
   <span><b class="dot" style="background:#2b6cb0"></b>самое глубокое, что ПРОХОДИЛО прожиг</span>
   <span><b class="dot" style="background:#d23b3b"></b>записанное зависание — ниже него спуск не ходит</span>
   <span><b class="dot" style="background:#eef1f6;border:1px solid #ccd"></b>бледная зона — не тронуто</span>
 </div>
-<p class="note">Красная точка с тёмной обводкой — <b>стена выше доказанного</b>: прожиг на этой частоте
-проходил ГЛУБЖЕ, чем стоит стена. Наведите — покажет оба числа.</p>
+<p class="note">Красная точка с тёмной обводкой — <b>пол зависания выше доказанного</b>: прожиг на этой
+частоте проходил ГЛУБЖЕ, чем стоит пол. Наведите — покажет оба числа.</p>
 </div>
 
 ${contradictions.length ? `<div class="card">
-<h2>🔴 Стены, стоящие ВЫШЕ того, что эта же частота уже выдержала прожигом</h2>
-<table><thead><tr><th>МГц</th><th>сток, мВ</th><th>стена, мВ</th><th>проходило, мВ</th><th>разница</th><th>андервольт стены</th></tr></thead>
+<h2>🔴 Полы зависания, стоящие ВЫШЕ того, что эта же частота уже выдержала прожигом</h2>
+<table><thead><tr><th>МГц</th><th>сток, мВ</th><th>пол зависания, мВ</th><th>проходило, мВ</th><th>разница</th><th>андервольт пола</th></tr></thead>
 <tbody>${contraRows}</tbody></table>
-<p class="note">Разбор — <code>bugs/85</code>, предложение — <code>ideas/16</code>. Пока стена стоит,
+<p class="note">Разбор — <code>bugs/85</code>, предложение — <code>ideas/16</code>. Пока пол стоит,
 частота не спускается ни в одном прогоне (правило R18, <code>bugs/23</code>).</p>
 </div>` : ''}
 
 <div class="card">
 <h2>Где ещё есть работа — по участкам в 100 МГц</h2>
-<table><thead><tr><th>участок, МГц</th><th>частот</th><th>состояние</th><th>край найден</th><th>со стеной</th></tr></thead>
+<table><thead><tr><th>участок, МГц</th><th>частот</th><th>состояние</th><th>край найден</th><th>с полом зависания</th></tr></thead>
 <tbody>${bucketRows}</tbody></table>
 </div>
 
@@ -270,8 +286,8 @@ mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, html, 'utf8');
 console.log(`КАРТА КРИВОЙ: ${OUT}`);
 console.log(`  частот ${rows.length} · тронуто ${touched.length} · не тронуто ${rows.length - touched.length}`);
-console.log(`  стен (записанных зависаний) ${hung.size} · из них ВЫШЕ доказанного ${contradictions.length}`);
+console.log(`  полов зависания (зарегистрированных) ${hung.size} · из них ВЫШЕ доказанного ${contradictions.length}`);
 if (contradictions.length) {
-  for (const x of contradictions) console.log(`    🔴 ${x.m} МГц: стена ${x.v} мВ, а прожиг проходил на ${x.p} мВ — на ${x.v - x.p} мВ глубже`);
+  for (const x of contradictions) console.log(`    🔴 ${x.m} МГц: пол зависания ${x.v} мВ, а прожиг проходил на ${x.p} мВ — на ${x.v - x.p} мВ глубже`);
 }
 console.log('  В КАРТУ НЕ ЗАПИСАНО НИЧЕГО: инструмент читает два файла и пишет один HTML.');
