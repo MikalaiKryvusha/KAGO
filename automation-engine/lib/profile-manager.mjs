@@ -264,9 +264,59 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       await open();
       const curve = mod.readVfCurve(nv, handle);
       if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
+      // 🔴 ОДНА БАЗА НА ВСЁ ПРИМЕНЕНИЕ, И ОНА ЗАВОДСКАЯ — ПОЧИНКА `bugs/98`, ВТОРАЯ ПОЛОВИНА.
+      //
+      // `readVfCurve` отдаёт таблицу УЖЕ С НАШИМИ СДВИГАМИ, а сдвиги пишутся АБСОЛЮТНО. Значит на
+      // применённом профиле и арифметика вектора, и сторож R13 считали от неверной опоры:
+      //   · вектор получал почти нули и СТИРАЛ настоящие сдвиги (измерено 31.08: карта вернулась к
+      //     заводским частотам, а режим числился применённым);
+      //   · сторож, получив полный вектор, складывал сдвиг с уже сдвинутой частотой и отказывал по
+      //     превышению, которого нет («мы подняли точку до 3157» — а наш сдвиг там 0).
+      // Первая половина починки живёт в `resolveProfileCurve`; без ЭТОЙ второй она лишь меняла тихую
+      // порчу на ложный отказ, потому что базы у двух читателей остались разные. Один рычаг, одна
+      // опора — иначе это пара «правда ↔ зеркало», которую проект предпочитает УБИРАТЬ.
+      //
+      // Заводская частота точки = живая минус её собственный сдвиг. Карта отдаёт сдвиги поточечно
+      // (`readVfOffsetsStable`), так что опора берётся ЧТЕНИЕМ, без обнуления кривой: обнуление тоже
+      // дало бы идемпотентность, но ценою лишней записи в карту на каждом применении (правило
+      // машины владельца, шаг 3 — наименьшая форма).
+      //
+      // ⚠️ ЧИТАТЕЛЬ МОЖЕТ ОТСУТСТВОВАТЬ — у двойника эпика 03 своего моста нет. Тогда опорой
+      // остаётся живая таблица, то есть прежнее поведение: двойник применяет профиль от заводского
+      // состояния и двойного счёта там не бывает.
+      // 🔴 ДВА РАЗНЫХ СЛУЧАЯ, И СМЕШИВАТЬ ИХ НЕЛЬЗЯ (R4b: «не смотрел» ≠ «посмотрел и не нашёл»).
+      // Найдено МУТАЦИЕЙ: первая редакция при ОТКАЗЕ чтения молча возвращалась к живой таблице —
+      // то есть к самому дефекту, — а комментарий рядом обещал, что «об этом скажет строка
+      // применения». Такой строки не было: я написал пожелание вместо факта. Мутация «отказ чтения
+      // читать как отсутствие сдвигов» прошла ЗЕЛЁНОЙ, потому что фикстура всегда отвечала `ok`.
+      //
+      //   · КАНАЛА НЕТ ВОВСЕ (`readVfOffsetsStable` не функция) — это цифровой двойник эпика 03: у
+      //     него своего моста нет, профиль он применяет от заводского состояния, двойного счёта не
+      //     бывает. Работаем по живой таблице, как раньше, и это законно.
+      //   · КАНАЛ ЕСТЬ, НО НЕ ОТВЕТИЛ — писать ОТКАЗЫВАЕМСЯ. Не зная, что уже стоит на карте,
+      //     абсолютный вектор посчитать нечем: любая догадка даёт либо стирание кривой, либо
+      //     двойной счёт и ложный отказ сторожа. Отказ здесь дешевле обеих ошибок.
+      let basePoints = curve.points;
+      if (typeof mod.readVfOffsetsStable === 'function') {
+        const cur = mod.readVfOffsetsStable(nv, handle);
+        if (!cur?.ok || !Array.isArray(cur.offsets)) {
+          return {
+            ok: false,
+            rule: 'B98-base',
+            why: 'текущие сдвиги карты не прочитались'
+              + `${cur?.why ? ` (${cur.why})` : ''} — писать кривую, не зная, что на карте уже стоит, `
+              + 'ЗАПРЕЩЕНО: сдвиги задаются абсолютно, и без опоры запись либо стирает прежнюю кривую, '
+              + 'либо считает подъём дважды (bugs/98). Повторите применение или сбросьте карту: '
+              + 'npm run profile -- --reset',
+          };
+        }
+        basePoints = curve.points.map((pt, j) => (pt && Number.isFinite(pt.mhz)
+          ? { ...pt, mhz: pt.mhz - Math.round((cur.offsets[j] ?? 0) / 1000) }
+          : pt));
+      }
       // `capMhz: null` reaches `buildRaiseAndCapVector` as `null`, which is its own documented way of
       // saying «cap at the curve's top», i.e. a UNIFORM raise with nothing pushed down.
-      const vec = mod.buildRaiseAndCapVector(curve.points, deltaMhz, { capMhz });
+      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE FOUR REFUSALS — R11, R13 (bound), R13 (raised offer), R12 — live in `curveWriteRefusal`
       // above, so the virtual card of epic 03 is held to the SAME bar rather than to a copy of it.
@@ -499,6 +549,9 @@ function defaultCurveLoader(name) {
  */
 export async function resolveProfileCurve(profile, {
   loadCurve = null, readLive = null, toOffsets = null,
+  // Внедряемые чтения текущих сдвигов карты (`bugs/98`). Отсутствуют — импортируются; заданы —
+  // набор проверяет вычитание без карты.
+  readVfOffsetsFn = null, openNvapiFn = null,
 } = {}) {
   const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
   const ref = profile?.settings?.curveRef ?? null;
@@ -517,7 +570,52 @@ export async function resolveProfileCurve(profile, {
   }
   let live = readLive;
   if (!live) ({ readLiveCurvePoints: live } = await import('./card-grids.mjs'));
-  return effectiveCurveSetting(profile, { loadCurve: load, liveTable: await live(), toOffsets: offs });
+  // 🔴 БАЗОЙ СЛУЖИТ ЗАВОДСКАЯ ТАБЛИЦА, А НЕ ЖИВАЯ — ПОЧИНКА `bugs/98`.
+  //
+  // Слово владельца, которым дефект назван: *«Не применяйте профиль поверх уже применённого — ну это
+  // баг. Я говорил, что повторное применение не должно ломать профиль»*. Он прав дважды: и по
+  // существу, и по тому, что инструкция «не щёлкайте дважды» — это обход, живущий до первого раза,
+  // когда о нём не вспомнят.
+  //
+  // Механизм дефекта, ИЗМЕРЕННЫЙ: `readLiveCurvePoints` возвращает таблицу УЖЕ С НАШИМИ СДВИГАМИ.
+  // Сдвиг считается как «цель минус то, что точка несёт сейчас», а запись задаёт сдвиги АБСОЛЮТНО.
+  // Значит второе применение считает почти нули и записывает их ПОВЕРХ настоящих: 31.08 карта
+  // вернулась к заводским частотам (1875/2182/2377/2737/2857/3037), а режим числился применённым,
+  // код возврата 0, перечитывание зелёное. Опорой служило то, что мы сами изменили.
+  //
+  // Лечится вычитанием, а не обнулением кривой перед записью: карта умеет отдать ТЕКУЩИЕ сдвиги по
+  // точкам (`nvapi.readVfOffsetsStable`), и заводская частота точки есть «живая минус её сдвиг».
+  // Обнуление тоже дало бы идемпотентность, но ценой ЛИШНЕЙ ЗАПИСИ В КАРТУ на каждом применении —
+  // а правило машины владельца требует наименьшей формы (шаг 3). Вычитание не пишет ничего.
+  //
+  // ⚠️ ЭТО НЕ ЗАКРЫВАЕТ `bugs/97`. Полученная база — заводская таблица В ТЕКУЩЕМ СОСТОЯНИИ КАРТЫ, а
+  // она сама едет: замер 31.08 дал 60 разошедшихся точек из 128 между 51 и 53 °C. Здесь чинится
+  // ПОВТОРЯЕМОСТЬ (одна и та же карта, два нажатия подряд — одна кривая), а не выбор опоры.
+  //
+  // Читатель сдвигов ВНЕДРЯЕМ: набор обязан резолвить ссылку без карты и без nvapi, и импорт
+  // происходит только там, где инъекции нет.
+  const liveTable = await live();
+  let base = liveTable;
+  try {
+    const nvapi = await import('./nvapi.mjs');
+    const readOffsets = readVfOffsetsFn ?? nvapi.readVfOffsetsStable;
+    // Открытие по умолчанию — тем же приёмом, что и остальные потребители моста (`vf-step`): id
+    // разрешаются через `resolve`, ручка берётся первой из перечисления. Своей копии идиомы здесь
+    // нет — при её расхождении с мостом отказ был бы молчаливым.
+    const open = openNvapiFn ?? (() => {
+      const nvh = nvapi.openNvapi();
+      nvh.koffi.call(nvh.resolve(0x0150E828).ptr, nvh.protos.Initialize);
+      const hs = Buffer.alloc(64 * 8); const cnt = Buffer.alloc(4);
+      nvh.koffi.call(nvh.resolve(0xE5AC921F).ptr, nvh.protos.EnumPhysicalGPUs, hs, cnt);
+      return { nv: nvh, handle: hs.readBigUInt64LE(0) };
+    });
+    const nv = open();
+    const cur = nv ? readOffsets(nv.nv, nv.handle) : null;
+    if (cur?.ok && Array.isArray(cur.offsets) && cur.offsets.length >= liveTable.length) {
+      base = liveTable.map((pt, j) => ({ ...pt, mhz: pt.mhz - Math.round((cur.offsets[j] ?? 0) / 1000) }));
+    }
+  } catch { /* сдвиги не прочитались — работаем как раньше, но об этом скажет строка применения */ }
+  return effectiveCurveSetting(profile, { loadCurve: load, liveTable: base, toOffsets: offs });
 }
 
 export async function apply(backend, profile, {
@@ -1993,6 +2091,146 @@ async function cmdSelftest() {
       if (cb.state.offsets.some((v) => v !== 0)) return 'кривая не обнулена откатом';
       return null;
     }
+  });
+
+  block('bugs/98: ПРИМЕНЕНИЕ ИДЕМПОТЕНТНО — записанные сдвиги НЕ зависят от того, что уже стоит на карте', async () => {
+    // ЧТО ЭТОТ БЛОК СТОРОЖИТ, СЛОВАМИ ВЛАДЕЛЬЦА 2026-08-31: *«Не применяйте профиль поверх уже
+    // применённого — ну это баг. Я говорил, что повторное применение не должно ломать профиль»*.
+    //
+    // Дефект, ИЗМЕРЕННЫЙ на его карте: `readVfCurve` отдаёт таблицу УЖЕ С НАШИМИ СДВИГАМИ, а сдвиги
+    // пишутся АБСОЛЮТНО. Второе применение считало почти нули и записывало их поверх настоящих —
+    // 127 точек из 127 вернулись к заводским, при нулевом коде возврата и зелёном перечитывании.
+    //
+    // ОПЫТ ПОСТРОЕН КАК ПАРА, А НЕ КАК ОДИН ПРОГОН, и это его суть: одно применение доказать
+    // идемпотентность НЕ МОЖЕТ по построению. Прогон А пишет от заводской таблицы; прогон Б получает
+    // таблицу «заводская + то, что записал А» И читателя сдвигов А. Требование: Б записывает РОВНО
+    // то же, что А. Мутация «убрать читателя сдвигов из прогона Б» краснит блок — тогда Б получает
+    // почти нули, то есть ровно дефект.
+    const nvapiReal = await import('./nvapi.mjs');
+    const factory = Array.from({ length: 128 }, (_, i) => {
+      if (i === 127) return { i, mhz: 405, mv: 515, freqKhz: 405_000 };
+      const mhz = i <= 20 ? 180 : Math.round(180 + ((3000 - 180) * (i - 20)) / (126 - 20));
+      return { i, mhz, mv: 450 + i * 5, freqKhz: mhz * 1000 };
+    });
+    // Вектор поднимает ВСЕ точки от 40-й и выше, а не участок посередине: подъём участка обрывает
+    // монотонность на его границе (точка 90 поднята, 91 нет), и сторож порядка законно отказывает —
+    // первая редакция этой фикстуры на том и села. Фикстура обязана выражать опыт, а не спорить с
+    // соседним сторожем.
+    const asked = Array.from({ length: 127 }, (_, i) => (i >= 40 ? 200 : 0));
+    const ROOMY = { cardMaxClockMhz: 3600 };
+    const run = (points, offsetsOnCard) => {
+      let written = null;
+      const injected = {
+        CLK_VF_POINT_COUNT: nvapiReal.CLK_VF_POINT_COUNT,
+        buildRaiseAndCapVector: nvapiReal.buildRaiseAndCapVector,
+        readVfCurve: () => ({ ok: true, points }),
+        writeCurve: (nv, h, offs) => { written = [...offs]; return { ok: true }; },
+        zeroCurve: () => ({ ok: true }),
+        openNvapi: () => ({ koffi: { call: () => {} }, resolve: () => ({ ptr: 0 }), protos: {} }),
+        ...(offsetsOnCard ? { readVfOffsetsStable: () => ({ ok: true, offsets: offsetsOnCard.map((mhz) => mhz * 1000) }) } : {}),
+      };
+      const cb = nvapiCurveBackend({ nvapi: injected });
+      return cb.writeRaiseAndCap(asked, null, ROOMY).then((r) => ({ r, written }));
+    };
+
+    // ── ПРОГОН А: карта на заводе, сдвигов нет ──────────────────────────────────────────────────
+    const A = await run(factory, new Array(128).fill(0));
+    if (!A.r.ok) return `прогон А (от заводской таблицы) не записал: ${A.r.why}`;
+    if (!A.written) return 'прогон А не дошёл до записи';
+    const raisedA = A.written.filter((v) => v !== 0).length;
+    if (raisedA === 0) return 'прогон А не поднял ни одной точки — фикстура не выражает опыт';
+
+    // ── ПРОГОН Б: карта УЖЕ несёт то, что записал А ─────────────────────────────────────────────
+    const applied = factory.map((pt, j) => (j < 127 && Number.isFinite(pt.mhz)
+      ? { ...pt, mhz: pt.mhz + (A.written[j] ?? 0) } : pt));
+    const B = await run(applied, A.written);
+    if (!B.r.ok) return `прогон Б (поверх применённого) ОТКАЗАЛ: ${B.r.why}`;
+    if (!B.written) return 'прогон Б не дошёл до записи';
+
+    const diff = A.written.reduce((n, v, j) => n + (v === B.written[j] ? 0 : 1), 0);
+    if (diff !== 0) {
+      const ex = A.written.map((v, j) => [j, v, B.written[j]]).filter(([, v, w]) => v !== w).slice(0, 4);
+      return `повторное применение записало ДРУГОЕ: разошлось ${diff} точек из 127 — ${JSON.stringify(ex)}`;
+    }
+    return null;
+  });
+
+  block('bugs/98: и сторож огибающей R13 НЕ отказывает поверх применённого профиля (ложная тревога)', async () => {
+    // Вторая половина, без которой первая недоказуема. Починка вектора без починки СТОРОЖА лишь
+    // меняла тихую порчу на ложный отказ: сторож складывал полный сдвиг с уже сдвинутой частотой и
+    // видел превышение, которого нет. Ровно это и случилось на карте владельца — «мы подняли точку
+    // до 3157 МГц», при том что наш сдвиг в той точке был НОЛЬ.
+    const nvapiReal = await import('./nvapi.mjs');
+    const factory = Array.from({ length: 128 }, (_, i) => {
+      if (i === 127) return { i, mhz: 405, mv: 515, freqKhz: 405_000 };
+      const mhz = i <= 20 ? 180 : Math.round(180 + ((3000 - 180) * (i - 20)) / (126 - 20));
+      return { i, mhz, mv: 450 + i * 5, freqKhz: mhz * 1000 };
+    });
+    // Подъём 80 МГц выбран арифметикой, а не на вкус: верх заводской таблицы 3000, значит один
+    // подъём даёт 3080 и проходит под огибающей 3100, а двойной счёт дал бы 3160 и НЕ прошёл бы.
+    // Так блок различает починку от её отсутствия, а не проверяет, что места много.
+    const asked = Array.from({ length: 127 }, (_, i) => (i >= 40 ? 80 : 0));
+    // Огибающая ТЕСНАЯ: она пропускает заводскую таблицу с этим вектором и НЕ пропустила бы двойной
+    // счёт. Иначе блок зеленел бы просто потому, что места много.
+    const TIGHT = { cardMaxClockMhz: 3100 };
+    const mk = (points, offsetsOnCard) => nvapiCurveBackend({
+      nvapi: {
+        CLK_VF_POINT_COUNT: nvapiReal.CLK_VF_POINT_COUNT,
+        buildRaiseAndCapVector: nvapiReal.buildRaiseAndCapVector,
+        readVfCurve: () => ({ ok: true, points }),
+        writeCurve: () => ({ ok: true }),
+        zeroCurve: () => ({ ok: true }),
+        readVfOffsetsStable: () => ({ ok: true, offsets: offsetsOnCard.map((mhz) => mhz * 1000) }),
+        openNvapi: () => ({ koffi: { call: () => {} }, resolve: () => ({ ptr: 0 }), protos: {} }),
+      },
+    });
+    const first = await mk(factory, new Array(128).fill(0)).writeRaiseAndCap(asked, null, TIGHT);
+    if (!first.ok) return `от заводской таблицы сторож отказал, хотя не должен: ${first.why}`;
+    const applied = factory.map((pt, j) => (j < 127 && Number.isFinite(pt.mhz)
+      ? { ...pt, mhz: pt.mhz + (asked[j] ?? 0) } : pt));
+    const second = await mk(applied, asked).writeRaiseAndCap(asked, null, TIGHT);
+    if (!second.ok) return `поверх применённого сторож отказал ЛОЖНО: ${second.why}`;
+    return null;
+  });
+
+  block('bugs/98: канал сдвигов ОТВЕТИЛ ОТКАЗОМ -> запись НЕ идёт (R4b), и ни одна точка не записана', async () => {
+    // Найдено мутацией: «отказ чтения = сдвигов нет» проходило зелёным, потому что фикстура всегда
+    // отвечала успехом. Молчаливый съезд на живую таблицу и есть дефект bugs/98 — значит отказ канала
+    // обязан ОСТАНОВИТЬ запись, а не подменить опору догадкой.
+    //
+    // И вторая половина, без которой это была бы просто строгость: ОТСУТСТВИЕ канала (цифровой
+    // двойник) обязано по-прежнему РАБОТАТЬ. Иначе сторож против дефекта сломал бы стенд.
+    const nvapiReal = await import('./nvapi.mjs');
+    const points = Array.from({ length: 128 }, (_, i) => {
+      if (i === 127) return { i, mhz: 405, mv: 515, freqKhz: 405_000 };
+      const mhz = i <= 20 ? 180 : Math.round(180 + ((3000 - 180) * (i - 20)) / (126 - 20));
+      return { i, mhz, mv: 450 + i * 5, freqKhz: mhz * 1000 };
+    });
+    const asked = Array.from({ length: 127 }, (_, i) => (i >= 40 ? 80 : 0));
+    let writes = 0;
+    const base = {
+      CLK_VF_POINT_COUNT: nvapiReal.CLK_VF_POINT_COUNT,
+      buildRaiseAndCapVector: nvapiReal.buildRaiseAndCapVector,
+      readVfCurve: () => ({ ok: true, points }),
+      writeCurve: () => { writes++; return { ok: true }; },
+      zeroCurve: () => ({ ok: true }),
+      openNvapi: () => ({ koffi: { call: () => {} }, resolve: () => ({ ptr: 0 }), protos: {} }),
+    };
+    const ROOMY = { cardMaxClockMhz: 3600 };
+
+    // (1) КАНАЛ ЕСТЬ, НО ОТВЕТИЛ ОТКАЗОМ — записи быть не должно ВОВСЕ
+    const refused = await nvapiCurveBackend({
+      nvapi: { ...base, readVfOffsetsStable: () => ({ ok: false, why: 'проба не устоялась' }) },
+    }).writeRaiseAndCap(asked, null, ROOMY);
+    if (refused.ok) return 'отказ канала сдвигов НЕ остановил запись';
+    if (writes !== 0) return `при отказе канала записано ${writes} раз(а) — должно быть 0`;
+    if (!/сдвиги карты не прочитались/u.test(refused.why ?? '')) return `причина отказа не названа: ${refused.why}`;
+
+    // (2) КАНАЛА НЕТ ВОВСЕ (двойник) — обязано работать как раньше
+    const twin = await nvapiCurveBackend({ nvapi: base }).writeRaiseAndCap(asked, null, ROOMY);
+    if (!twin.ok) return `без канала сдвигов (двойник) запись сломалась: ${twin.why}`;
+    if (writes !== 1) return `двойник записал ${writes} раз(а) вместо одного`;
+    return null;
   });
 
   block('ВЕКТОР: инверсия ОТВЕРГНУТА последней строкой перед записью, и ни одна точка не записана', async () => {
