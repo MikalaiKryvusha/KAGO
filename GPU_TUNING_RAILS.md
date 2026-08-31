@@ -184,6 +184,21 @@ the 2026-08-14 conflict verbatim — three rungs whose every load shape PASSED w
    strike) — a red block stops the run until understood.
 7. **Windows CLIs with `/`-flags and PowerShell payloads run through PowerShell, never Git Bash**
    (EXP-0043) · **prose is edited with file tools, never through shell arguments** (EXP-0035).
+8. 🆕 **A HOLE, A BUG OR ANY UNFORESEEN BEHAVIOUR FOUND MID-RUN → STOP THE RUN AND FIX IT.**
+   The owner's word, 2026-08-31: *«пока мы делаем KAGO и находим дыры, баги, непредвиденное
+   поведение - это для тебя повод остановить прогон и чинить. Мы стемимся к тому, что
+   непредвиденного для нас не осталось, и багов и дыр в движке нет»*
+   (`GOAL.md` → «🤖 KAGO ТЮНИТ САМ И ОТДАЁТ ПРОФИЛИ»).
+   **There is nothing left to weigh.** The old trade — stop and lose the evening, or note it in the
+   baton and keep the tempo — is settled: the finding IS the reason to stop. **«Unforeseen
+   behaviour» ranks with «bug»**: it is enough that the system did something you did not expect;
+   proving it is a defect is NOT a precondition for stopping.
+   Why this is correct rather than merely cautious: a hole walked past for tempo stays in the
+   product, and the next meeting with it is at the USER's machine — without us and without a log.
+   That tempo is paid for with their crash.
+   This generalises STOP line 6 from guards to ANY unforeseen observation, and it is a
+   DEVELOPMENT-MODE rule (the owner's own boundary in the same message): the finished product has
+   nothing to stop for, because by then the holes are gone — that is what «finished» means.
 
 ## 5. Maintenance
 
