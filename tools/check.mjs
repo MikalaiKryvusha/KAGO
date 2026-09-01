@@ -11,8 +11,24 @@
 //  before verify-final removed the installer's KAIF-LOADER.mjs from the root — the file count tracks
 //  the tree, so re-read it rather than expecting this number.]
 
+// ─── ПОЧЕМУ У ЭТИХ ВОРОТ ЕСТЬ СТОРОЖ ВХОДА (`bugs/95`) ────────────────────────────────────────────
+//
+// Модуль ES исполняется ПРИ ИМПОРТЕ целиком. До 2026-09-01 весь код ниже стоял на верхнем уровне,
+// поэтому `import('tools/check.mjs')` откуда угодно означал: прогнать ворота сборки, спаунить три
+// подпроцесса, прочитать полторы тысячи файлов — и вызвать `process.exit`, убив импортирующего.
+// Хуже: `process.argv` принадлежит ВЫЗЫВАЮЩЕМУ, так что чужой `--selftest-encoding` уводил ворота
+// в ветку самопроверки.
+//
+// Дефект наказывал ровно за то поведение, которого требует канон: сессия, попробовавшая
+// ПЕРЕИСПОЛЬЗОВАТЬ разбор вместо копии (DRY), получала непонятный обвал и делала естественный, но
+// неверный вывод «импортировать нельзя» — то есть писала копию. Класс закрывается формой: работа
+// живёт в `main()`, а `main()` зовётся только когда файл запущен КАК ПРОГРАММА.
+//
+// Образец взят из проекта, а не изобретён: `fuse.mjs` → `isMainThread && resolve(argv[1]) === здесь`.
+// Здесь хватает половины — воркеров у ворот нет.
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = process.cwd();
@@ -31,17 +47,19 @@ function collect(dir, found = []) {
   return found;
 }
 
-const files = collect(ROOT);
-let failed = 0;
-
-for (const file of files) {
-  // `node --check` parses the file and reports syntax errors without running a line of it.
-  const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
-  if (r.status !== 0) {
-    failed++;
-    console.error('FAIL ' + relative(ROOT, file));
-    if (r.stderr) console.error(r.stderr.trim());
+/** Parse every collected .mjs without executing it. Returns how many failed. */
+function parseGate(files) {
+  let failed = 0;
+  for (const file of files) {
+    // `node --check` parses the file and reports syntax errors without running a line of it.
+    const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+    if (r.status !== 0) {
+      failed++;
+      console.error('FAIL ' + relative(ROOT, file));
+      if (r.stderr) console.error(r.stderr.trim());
+    }
   }
+  return failed;
 }
 
 // ─── THE ENCODING-CORRUPTION GATE — a lesson that repeated, so it stopped being a lesson ─────────
@@ -104,35 +122,53 @@ function mojibakeIn(text) {
   return MOJIBAKE.filter((m) => text.includes(m));
 }
 
-if (process.argv.includes('--selftest-encoding')) {
-  // Prove the guard RED before its green is trusted (EXP-0008). The sample is built here rather than
-  // stored as a fixture, because a mojibake fixture on disk is a file every future tool must be told
-  // to ignore.
+/** The guard proved RED before its green is trusted (EXP-0008). Returns the exit code. */
+function selftestEncoding() {
+  // The sample is built here rather than stored as a fixture, because a mojibake fixture on disk is a
+  // file every future tool must be told to ignore.
   const broken = 'РљРћРќРўР РђРљРў: Р¶РёРІР°СЏ РєРѕР»РѕРЅРєР°';
   const clean = 'КОНТРАКТ: живая колонка — обычный русский текст с тире и «кавычками»';
   const redOk = mojibakeIn(broken).length > 0;
   const greenOk = mojibakeIn(clean).length === 0;
   console.log(`${redOk ? 'OK  ' : 'FAIL'} сторож КРАСНЕЕТ на испорченном тексте (${mojibakeIn(broken).join(' ')})`);
   console.log(`${greenOk ? 'OK  ' : 'FAIL'} сторож МОЛЧИТ на правильном русском`);
-  process.exit(redOk && greenOk ? 0 : 1);
+  return redOk && greenOk ? 0 : 1;
 }
 
-const textFiles = collectText(ROOT);
-let mojibake = 0;
-let guardExempt = 0;
-for (const file of textFiles) {
-  const text = readFileSync(file, 'utf8');
-  if (text.includes(GUARD_MARK)) { guardExempt++; continue; }
-  const found = mojibakeIn(text);
-  if (found.length) {
-    mojibake++;
-    console.error(`ПОРЧА КОДИРОВКИ: ${relative(ROOT, file)}`);
-    console.error(`       Русский текст в этом файле нечитаем — найдено: ${found.join(' ')}`);
-    console.error('       Так выглядит UTF-8, прочитанный как windows-1251: одна буква стала двумя.');
-    console.error('       Причина всегда одна — файл прогнали через оболочку, а не через файловые');
-    console.error('       инструменты (EXP-0067). Восстанови из git и переделай правку Edit/Write.');
+/** The encoding gate over every text file. Returns `{ scanned, corrupted }`. */
+function encodingGate() {
+  const textFiles = collectText(ROOT);
+  let mojibake = 0;
+  let guardExempt = 0;
+  for (const file of textFiles) {
+    const text = readFileSync(file, 'utf8');
+    if (text.includes(GUARD_MARK)) { guardExempt++; continue; }
+    const found = mojibakeIn(text);
+    if (found.length) {
+      mojibake++;
+      console.error(`ПОРЧА КОДИРОВКИ: ${relative(ROOT, file)}`);
+      console.error(`       Русский текст в этом файле нечитаем — найдено: ${found.join(' ')}`);
+      console.error('       Так выглядит UTF-8, прочитанный как windows-1251: одна буква стала двумя.');
+      console.error('       Причина всегда одна — файл прогнали через оболочку, а не через файловые');
+      console.error('       инструменты (EXP-0067). Восстанови из git и переделай правку Edit/Write.');
+    }
   }
+  return { scanned: textFiles.length - guardExempt, corrupted: mojibake };
 }
+
+/**
+ * ВСЯ РАБОТА ВОРОТ — здесь, и зовётся она только при ПРЯМОМ ЗАПУСКЕ (`bugs/95`, разбор вверху файла).
+ *
+ * `process.argv` читается ТОЛЬКО отсюда: до починки его читал верхний уровень модуля, то есть чужие
+ * флаги импортирующего процесса становились флагами ворот.
+ */
+function main(argv) {
+  // Ветка самопроверки уходит первой и ничего не сканирует: она доказывает сторожа, а не дерево.
+  if (argv.includes('--selftest-encoding')) return selftestEncoding();
+
+  const files = collect(ROOT);
+  const failed = parseGate(files);
+  const enc = encodingGate();
 
 // -------------------------------------------------------------------------------------------------
 // ТРЕТЬИ ВОРОТА: СТРАНИЦА ОКНА НАБЛЮДЕНИЯ СОБРАНА ИЗ ТЕКУЩИХ ИСТОЧНИКОВ
@@ -145,10 +181,10 @@ for (const file of textFiles) {
 // следила машина. Теперь следит. Проверка сама доказана красным: правка источника без пересборки
 // роняет её в код 1.
 // -------------------------------------------------------------------------------------------------
-const pageCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'build-dashboard-page.mjs'), '--check'],
-  { cwd: ROOT, encoding: 'utf8' });
-const pageStale = pageCheck.status !== 0;
-if (pageStale) process.stderr.write(pageCheck.stderr || pageCheck.stdout || '');
+  const pageCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'build-dashboard-page.mjs'), '--check'],
+    { cwd: ROOT, encoding: 'utf8' });
+  const pageStale = pageCheck.status !== 0;
+  if (pageStale) process.stderr.write(pageCheck.stderr || pageCheck.stdout || '');
 
 // -------------------------------------------------------------------------------------------------
 // ЧЕТВЁРТЫЕ ВОРОТА: МОЛИТВА ВВЕРХУ КАНОНА НЕ РАЗОШЛАСЬ С ИСТОЧНИКОМ
@@ -159,9 +195,9 @@ if (pageStale) process.stderr.write(pageCheck.stderr || pageCheck.stdout || '');
 // текст живёт ОДИН РАЗ, в `PHILOSOPHY.md`, раскладывается командой, а эти ворота не дают копии
 // разъехаться молча. Лечение печатается вместе с отказом.
 // -------------------------------------------------------------------------------------------------
-const prayerCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'prayer.mjs')], { cwd: ROOT, encoding: 'utf8' });
-const prayerDrifted = prayerCheck.status !== 0;
-if (prayerDrifted) process.stderr.write(prayerCheck.stderr || prayerCheck.stdout || '');
+  const prayerCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'prayer.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const prayerDrifted = prayerCheck.status !== 0;
+  if (prayerDrifted) process.stderr.write(prayerCheck.stderr || prayerCheck.stdout || '');
 
 // -------------------------------------------------------------------------------------------------
 // ПЯТЫЕ ВОРОТА: СТОРОЖ ОБЯЗАН ОБЪЯВИТЬ, ПРОТИВ ЧЕГО ОН ДОКАЗАН (механизм М1, `plans/76`)
@@ -186,14 +222,20 @@ if (prayerDrifted) process.stderr.write(prayerCheck.stderr || prayerCheck.stdout
 // Сам линтер доказан 108 фикстурами (58 негативных · 50 позитивных · 24 оси) и мутациями по каждому
 // правилу; одна из мутаций в первый же прогон нашла в нём недостижимое правило, и оно снято.
 // -------------------------------------------------------------------------------------------------
-const guardCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'guard-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
-const guardsUndeclared = guardCheck.status !== 0;
-if (guardsUndeclared) process.stderr.write(guardCheck.stdout || guardCheck.stderr || '');
+  const guardCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'guard-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const guardsUndeclared = guardCheck.status !== 0;
+  if (guardsUndeclared) process.stderr.write(guardCheck.stdout || guardCheck.stderr || '');
 
-console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
-console.log(`проверено на порчу кодировки ${textFiles.length - guardExempt} текстовых файлов, `
-  + `испорченных ${mojibake} (сам сторож освобождён меткой)`);
-console.log(`страница окна наблюдения: ${pageStale ? 'УСТАРЕЛА — пересобрать' : 'собрана из текущих источников'}`);
-console.log(`молитва вверху канона: ${prayerDrifted ? 'РАЗОШЛАСЬ — node tools/prayer.mjs --apply' : (prayerCheck.stdout || '').trim() || 'совпадает с источником'}`);
-console.log(`декларация угроз сторожей: ${guardsUndeclared ? 'КРАСНО — node tools/guard-lint.mjs' : (guardCheck.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'чисто'}`);
-process.exit(failed === 0 && mojibake === 0 && !pageStale && !prayerDrifted && !guardsUndeclared ? 0 : 1);
+  console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
+  console.log(`проверено на порчу кодировки ${enc.scanned} текстовых файлов, `
+    + `испорченных ${enc.corrupted} (сам сторож освобождён меткой)`);
+  console.log(`страница окна наблюдения: ${pageStale ? 'УСТАРЕЛА — пересобрать' : 'собрана из текущих источников'}`);
+  console.log(`молитва вверху канона: ${prayerDrifted ? 'РАЗОШЛАСЬ — node tools/prayer.mjs --apply' : (prayerCheck.stdout || '').trim() || 'совпадает с источником'}`);
+  console.log(`декларация угроз сторожей: ${guardsUndeclared ? 'КРАСНО — node tools/guard-lint.mjs' : (guardCheck.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'чисто'}`);
+  return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared ? 0 : 1;
+}
+
+// СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  process.exit(main(process.argv.slice(2)));
+}
