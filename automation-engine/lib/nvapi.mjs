@@ -528,7 +528,49 @@ export function readFanCoolers(nv, handle, { versions = [1, 2, 3, 4] } = {}) {
  *
  * [NOT-TESTED] at birth — offline blocks in `--selftest-shape` are what flip this.
  */
-export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_COUNT - 1, capMhz = null } = {}) {
+export function buildRaiseAndCapVector(points, deltaMhz, {
+  count = CLK_VF_POINT_COUNT - 1, capMhz = null,
+  // ─── КОНВЕРТ КАРТЫ КАК ГРАНИЦА ПОДЪЁМА (`bugs/99`) ──────────────────────────────────────────────
+  //
+  // `null` — прежнее поведение, буква в букву: ни одного подрезанного сдвига, ни одной новой ветки на
+  // пути прогонов развёртки. Число — максимум, который назвал САМ ЭКЗЕМПЛЯР (`clocks.max.graphics`),
+  // и тогда ни один НАШ подъём не предложит карте выше него.
+  //
+  // ЗАЧЕМ ЭТО ВООБЩЕ НУЖНО, И ЭТО ЗАМЕР, А НЕ ОСТОРОЖНОСТЬ. Сдвиг задаётся АБСОЛЮТНО, значит карта
+  // отдаёт «заводская таблица МОМЕНТА + сдвиг». Таблица у этой карты не одна: под нагрузкой она в
+  // полосе 800…849 мВ стоит выше, а наверху кривой НИЖЕ, чем в покое (`bugs/97`, замер 31.08).
+  // Вектор, сшитый по опоре худшего случая (карта горячая), целится наверху ровно в 3090 МГц — сам
+  // максимум карты, — и в покое те же сдвиги дают 3105…3112, то есть ВЫШЕ максимума. Замерено
+  // 2026-09-01: точки 116…120 (1175…1200 мВ), превышение до 22 МГц. R13 на это отказывает — верно
+  // отказывает, — и профиль владельца становится неприменимым.
+  //
+  // ПОДРЕЗАЮТСЯ ТОЛЬКО ПОЛОЖИТЕЛЬНЫЕ СДВИГИ. Отрицательный сдвиг — это придавливание точек НАД
+  // потолком, работа `capMhz`, и трогать её конверт не вправе: точки, которые мы не поднимали, —
+  // дело карты, а не наше (та же граница, по которой R13 судит `highestRaisedOfferMhz`, а не
+  // `highestOfferedMhz`). Поэтому у этой карты точка 120 с заводскими 3105 МГц остаётся как есть:
+  // мы просто не поднимаем её, а не опускаем к 3090.
+  envelopeMhz = null,
+  // ─── 🔴 И ГЛАВНОЕ УСЛОВИЕ, БЕЗ КОТОРОГО ПОДРЕЗКА ОБЕЗОРУЖИВАЕТ R13 ──────────────────────────────
+  //
+  // НАЙДЕНО СВОИМ ЖЕ БЛОКОМ 2026-09-01, и находка важнее самой подрезки. Первая редакция подрезала
+  // ЛЮБОЙ превышающий подъём — и блок «R13: кривая ВЫШЕ МАКСИМУМА КАРТЫ отвергнута до записи»
+  // покраснел со словами «форма, уронившая машину 2026-08-15, ПРОШЛА в карту». Он прав: подрезка
+  // превратила громкий отказ в молчаливое «гоним карту на её пределе». Для `bugs/11` (подъём +592
+  // без потолка, доказанный только под потолком 2842) это худший исход из возможных.
+  //
+  // РАЗЛИЧАЮТСЯ ДВА СЛУЧАЯ, И РАЗЛИЧАЮТСЯ НЕ ПО РАЗМЕРУ, А ПО НАМЕРЕНИЮ (порог, выбранный агентом,
+  // владелец в этом проекте уже отклонял — `bugs/73`):
+  //
+  //   · вектор ЦЕЛИЛСЯ ВНУТРЬ конверта, а наружу его выносит только разница таблиц покоя и нагрузки
+  //     (`optimised`: цель против опоры ровно 3090 при максимуме 3090) — подрезка соразмерна;
+  //   · вектор целился ВЫШЕ конверта сам по себе (`bugs/11`) — обязан быть ОТКАЗ.
+  //
+  // `intentTopMhz` — верхнее ПОДНЯТОЕ предложение против той опоры, для которой вектор считался.
+  // `null` значит «о намерении ничего не заявлено», и тогда подрезки НЕТ ВОВСЕ: новое поведение
+  // требует положительного утверждения, а не отсутствия возражений. Та же логика, по которой R13
+  // требует передать максимум карты, а не подставляет умолчание.
+  intentTopMhz = null,
+} = {}) {
   const usable = points.slice(0, count).filter((p) => p.freqKhz > 0);
   if (!usable.length) return { ok: false, why: 'ни одной точки с частотой' };
   const topMhz = Math.max(...usable.map((p) => p.mhz));
@@ -559,6 +601,29 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
   }
   const deltaAt = (i) => (deltaIsVector ? deltaMhz[i] : deltaMhz);
 
+  // Учёт подрезки по конверту: ЦЕНА НАЗЫВАЕТСЯ ЧИСЛОМ, включая ноль (`bugs/99` → B99-AC3). Строка,
+  // появляющаяся только когда что-то подрезано, своим молчанием ничего не сообщает (R4b).
+  const envelopeGiven = Number.isFinite(Number(envelopeMhz)) && Number(envelopeMhz) > 0 ? Number(envelopeMhz) : null;
+  // ⚠️ `typeof`, А НЕ `Number(...)`, И ЭТО ОПЛАЧЕНО СВОИМ ЖЕ БЛОКОМ. Первая редакция писала
+  // `Number.isFinite(Number(intentTopMhz))`, а `Number(null)` даёт 0 — то есть «о намерении ничего не
+  // заявлено» превращалось в «намерение 0 МГц», 0 всегда внутри конверта, и подрезка включалась ВСЕГДА.
+  // Блок «R13: бомба bugs/11» покраснел ровно на этом: форма, уронившая машину, прошла бы в карту.
+  const intent = typeof intentTopMhz === 'number' && Number.isFinite(intentTopMhz) ? intentTopMhz : null;
+  // ПОДРЕЗКА ВКЛЮЧАЕТСЯ ТОЛЬКО ПРИ ЗАЯВЛЕННОМ И ЗАКОННОМ НАМЕРЕНИИ (разбор в шапке функции).
+  const envelope = envelopeGiven !== null && intent !== null && intent <= envelopeGiven ? envelopeGiven : null;
+  const envelopeClamp = {
+    envelopeMhz: envelopeGiven,
+    intentTopMhz: intent,
+    // ПОЧЕМУ подрезки не было — отдельным словом, а не пустотой: «намерение не заявлено» и
+    // «намерение выше конверта» ведут к РАЗНЫМ действиям вызывающего (`bugs/99`).
+    allowed: envelope !== null,
+    why: envelopeGiven === null ? 'конверт не передан'
+      : intent === null ? 'намерение вектора не заявлено — подрезка запрещена, судит R13'
+        : intent > envelopeGiven ? `намерение ${intent} МГц выше конверта ${envelopeGiven} МГц — подрезка запрещена, судит R13`
+          : null,
+    points: 0, totalMhz: 0, maxMhz: 0, rows: [],
+  };
+
   const offsets = [];
   for (let i = 0; i < count; i++) {
     const p = points[i];
@@ -570,9 +635,33 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     // the card never reached it under load (it sat at 2887 of a 3172 top), so the cap bound nothing and
     // the raise was taken as SPEED — 2887 → 2932 MHz at 137.3 → 137.1 W, i.e. no saving at all.
     const wanted = Math.min(deltaAt(i), cap - p.mhz);
+    // КОНВЕРТ — ГРАНИЦА ТОЛЬКО ДЛЯ ПОДЪЁМА (разбор в шапке функции). Ноль — законный итог: точка,
+    // чья заводская частота уже на максимуме карты или выше, просто не поднимается.
+    let bounded = wanted;
+    if (envelope !== null) {
+      // ⚠️ ОСТАТОК ПРИЖАТ К НУЛЮ, И ИМЕННО ЭТО ДЕЛАЕТ КОНВЕРТ ГРАНИЦЕЙ ТОЛЬКО ДЛЯ ПОДЪЁМА.
+      // Отрицательный `wanted` (придавливание точек над потолком, работа `capMhz`) никогда не
+      // окажется БОЛЬШЕ неотрицательного остатка, поэтому ветка ниже до него не доходит — и здесь
+      // стояла ещё и явная проверка `wanted > 0`. Мутация «убрать её» прошла ЗЕЛЁНОЙ: она была
+      // недостижима, то есть лишней сущностью с видом сторожа (`PHILOSOPHY.md` → Оккам; тот же
+      // разбор, по которому из предохранителя убрали разность «конец − начало»). Работу делает
+      // прижатие к нулю, и его краснит своя мутация (сделать остаток отрицательным).
+      const allowed = Math.max(0, envelope - p.mhz);
+      if (wanted > allowed) {
+        envelopeClamp.points += 1;
+        envelopeClamp.totalMhz += wanted - allowed;
+        envelopeClamp.maxMhz = Math.max(envelopeClamp.maxMhz, wanted - allowed);
+        // Первые несколько точек — поимённо: цена, названная одним итогом, не даёт увидеть, ГДЕ она
+        // заплачена, а «наверху кривой» и «в полосе прожигов» — разные новости для владельца.
+        if (envelopeClamp.rows.length < 8) {
+          envelopeClamp.rows.push({ point: i, voltageMv: p.mv ?? null, was: wanted, now: allowed, cutMhz: wanted - allowed });
+        }
+        bounded = allowed;
+      }
+    }
     // The wall is named by the HARDWARE, not by our caution: NVML published −1000…+1000 MHz for the
     // graphics domain (`researches/05` §8), and config carries it with `..._IS_MEASURED = true`.
-    offsets.push(Math.max(config.CLOCK_OFFSET_MIN_MHZ, Math.min(config.CLOCK_OFFSET_MAX_MHZ, wanted)));
+    offsets.push(Math.max(config.CLOCK_OFFSET_MIN_MHZ, Math.min(config.CLOCK_OFFSET_MAX_MHZ, bounded)));
   }
   // WHAT THE CURVE ACTUALLY OFFERS AFTER THE WRITE — computed, never assumed. The cap is a WISH until
   // this number confirms it, and on this card the wish does not always come true: see below.
@@ -651,6 +740,9 @@ export function buildRaiseAndCapVector(points, deltaMhz, { count = CLK_VF_POINT_
     highestOfferedMhz,
     highestRaisedOfferMhz,
     lowestEnforceableCapMhz,
+    // ЦЕНА ПОДРЕЗКИ ПО КОНВЕРТУ — всегда, включая ноль подрезанных точек, и `envelopeMhz: null`
+    // отличимо от «конверт был, подрезать не пришлось» (`bugs/99`).
+    envelopeClamp,
     capEnforced: highestOfferedMhz <= cap,
     capLeakMhz: Math.max(0, highestOfferedMhz - cap),
     stockMonotone: stockOrder.monotone,
@@ -1669,6 +1761,68 @@ export function selftestShape() {
   let hugeMonotone = true;
   for (let i = 1; i < hugeCurve.length; i++) if (hugeCurve[i] < hugeCurve[i - 1]) hugeMonotone = false;
   check('и даже обрезанный чудовищный шаг оставляет кривую монотонной', hugeMonotone);
+
+  // ─── ПОДРЕЗКА ПО КОНВЕРТУ КАРТЫ — `bugs/99`, И ГЛАВНОЕ ЗДЕСЬ ВТОРАЯ ПОЛОВИНА ───────────────────
+  //
+  // Первая половина («подрезать, чтобы профиль применялся») дёшева. Вторая («не обезоружить R13»)
+  // оплачена: подрезав ЛЮБОЙ превышающий подъём, я пропустил бомбу `bugs/11` в карту, и покраснел
+  // блок применения, а не этот. Поэтому блоки ниже проверяют РАЗЛИЧЕНИЕ, а не саму арифметику.
+  {
+    const ENV = 3000;                 // «максимум карты» фикстуры — НИЖЕ верха таблицы (3157), как у этой карты
+    // Намерение внутри конверта: вектор целился ровно в ENV, а таблица момента вынесла его на 20 МГц выше.
+    const idx = points.slice(0, 127).findIndex((p) => p.mhz > ENV - 60 && p.mhz < ENV);
+    const base = points[idx].mhz;
+    const asked = ENV + 20 - base;    // подъём, дающий предложение ENV+20 против ЭТОЙ таблицы
+    const legit = buildRaiseAndCapVector(points, Array.from({ length: 127 }, (_, i) => (i === idx ? asked : 0)),
+      { envelopeMhz: ENV, intentTopMhz: ENV });
+    check('B99: намерение ВНУТРИ конверта — подъём подрезан ровно до конверта, ни мегагерцем ниже',
+      legit.ok && base + legit.offsets[idx] === ENV, `предложение ${base + legit.offsets[idx]} при конверте ${ENV}`);
+    check('B99: цена подрезки НАЗВАНА числом — точки, сумма и максимум на точке',
+      legit.envelopeClamp.points === 1 && legit.envelopeClamp.totalMhz === 20 && legit.envelopeClamp.maxMhz === 20,
+      JSON.stringify(legit.envelopeClamp));
+    check('B99: подрезанная точка названа ПОИМЁННО — «наверху кривой» и «в полосе прожигов» разные новости',
+      legit.envelopeClamp.rows.length === 1 && legit.envelopeClamp.rows[0].point === idx,
+      JSON.stringify(legit.envelopeClamp.rows));
+
+    // 🔴 РАЗЛИЧЕНИЕ 1: НАМЕРЕНИЕ НЕ ЗАЯВЛЕНО — подрезки НЕТ ВОВСЕ, судит R13.
+    const silent = buildRaiseAndCapVector(points, Array.from({ length: 127 }, (_, i) => (i === idx ? asked : 0)),
+      { envelopeMhz: ENV });
+    check('B99: намерение НЕ ЗАЯВЛЕНО — ни одной подрезанной точки, вектор идёт к сторожу как был',
+      silent.envelopeClamp.points === 0 && silent.envelopeClamp.allowed === false
+        && silent.offsets[idx] === asked && base + silent.offsets[idx] === ENV + 20,
+      JSON.stringify({ clamp: silent.envelopeClamp, offer: base + silent.offsets[idx] }));
+    // ⚠️ Блок, оплаченный ошибкой: `Number(null)` даёт 0, и «намерения нет» читалось как «намерение 0».
+    check('B99: и причина отказа от подрезки НАЗВАНА, а не пуста — «не заявлено» ≠ «не понадобилась»',
+      /намерение вектора не заявлено/u.test(silent.envelopeClamp.why ?? ''), silent.envelopeClamp.why ?? '(пусто)');
+
+    // 🔴 РАЗЛИЧЕНИЕ 2: НАМЕРЕНИЕ ВЫШЕ КОНВЕРТА — это форма `bugs/11`, подрезка запрещена.
+    const bomb = buildRaiseAndCapVector(points, 592, { envelopeMhz: ENV, intentTopMhz: 3400 });
+    check('B99: намерение ВЫШЕ конверта — подрезки нет, превышение доезжает до R13 (bugs/11 цел)',
+      bomb.envelopeClamp.points === 0 && bomb.envelopeClamp.allowed === false && bomb.highestRaisedOfferMhz > ENV,
+      JSON.stringify({ clamp: bomb.envelopeClamp.allowed, offer: bomb.highestRaisedOfferMhz }));
+    check('B99: и эта причина названа СВОИМИ словами, отличимыми от «не заявлено»',
+      /выше конверта/u.test(bomb.envelopeClamp.why ?? ''), bomb.envelopeClamp.why ?? '(пусто)');
+
+    // Конверт не трогает придавливание вниз: это работа потолка, и точки, которые мы не поднимали, —
+    // дело карты (та же граница, по которой R13 судит поднятое, а не всё предложенное).
+    const withCap = buildRaiseAndCapVector(points, DELTA, { capMhz: 2887, envelopeMhz: ENV, intentTopMhz: 2887 });
+    check('B99: отрицательные сдвиги конверт НЕ трогает — придавливание к потолку осталось как было',
+      withCap.pushedDown > 0 && withCap.envelopeClamp.points === 0,
+      JSON.stringify({ pushedDown: withCap.pushedDown, clamped: withCap.envelopeClamp.points }));
+
+    // Точка, чья ЗАВОДСКАЯ частота уже выше конверта: сдвиг 0, а не отрицательный. Ноль — законный итог.
+    const aboveEnv = points.slice(0, 127).findIndex((p) => p.mhz > ENV);
+    const atWall = buildRaiseAndCapVector(points, Array.from({ length: 127 }, (_, i) => (i === aboveEnv ? 30 : 0)),
+      { envelopeMhz: ENV, intentTopMhz: ENV });
+    check('B99: точка уже НАД конвертом получает сдвиг 0, а не минус — мы её не поднимаем, но и не опускаем',
+      atWall.offsets[aboveEnv] === 0, `сдвиг ${atWall.offsets[aboveEnv]}`);
+
+    // И ноль подрезанных точек при законном намерении — тоже отчёт, а не молчание (R4b).
+    const roomy = buildRaiseAndCapVector(points, 5, { envelopeMhz: 9999, intentTopMhz: 3000 });
+    check('B99: подрезка НЕ ПОНАДОБИЛАСЬ — это сказано числом 0 и признаком «разрешена», а не пустотой',
+      roomy.envelopeClamp.points === 0 && roomy.envelopeClamp.allowed === true && roomy.envelopeClamp.why === null,
+      JSON.stringify(roomy.envelopeClamp));
+  }
 
   // --- THE CASE THAT ACTUALLY BUYS WATTS: a cap BELOW the curve's top
   //

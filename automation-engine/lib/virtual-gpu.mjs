@@ -1727,8 +1727,12 @@ export function virtualCard(cardProfile, {
       return { ok: true };
     },
 
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null } = {}) {
-      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz });
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null } = {}) {
+      // КОНВЕРТ ПЕРЕДАЁТСЯ ТЕМ ЖЕ ЧИСЛОМ, ЧТО У ЖИВОГО БЭКЕНДА (`bugs/99`), и это не удобство, а
+      // ПАРИТЕТ: подрежь живая карта подъём, а двойник нет — двойник начал бы ОТКАЗЫВАТЬ там, где
+      // карта пишет. Двойник, отказывающий больше карты, врёт мягче, чем отказывающий меньше, но
+      // врёт: стенд перестаёт быть репетицией того же прогона.
+      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz, envelopeMhz: cardMaxClockMhz, intentTopMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE SAME FOUR REFUSALS THE LIVE BACKEND APPLIES — one function, called by both. A mutation
       // that removes this line must redden the parity block, and that is the block's whole job.

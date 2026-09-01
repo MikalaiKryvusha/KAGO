@@ -260,7 +260,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
   const COUNT = () => (mod.CLK_VF_POINT_COUNT ?? 128) - 1;
 
   return {
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null } = {}) {
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null } = {}) {
       await open();
       const curve = mod.readVfCurve(nv, handle);
       if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
@@ -323,7 +323,14 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       }
       // `capMhz: null` reaches `buildRaiseAndCapVector` as `null`, which is its own documented way of
       // saying «cap at the curve's top», i.e. a UNIFORM raise with nothing pushed down.
-      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz });
+      //
+      // 🔴 КОНВЕРТ КАРТЫ ЕДЕТ ВМЕСТЕ С ЗАПИСЬЮ (`bugs/99`). Тот же максимум, которым судит R13, —
+      // здесь он не только судит, но и ОГРАНИЧИВАЕТ подъём: сторож, отказывающий там, где подъём
+      // можно законно подрезать на 15 МГц в пяти точках самого верха кривой, делает отгружаемый
+      // профиль неприменимым (замерено 2026-09-01: 5 точек из 68, максимум −15 МГц). Судить и
+      // ограничивать одним числом — не дублирование, а один рычаг с одной опорой: разойдись они, и
+      // мы получили бы пару «правда↔зеркало» ровно на пути записи в карту владельца.
+      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz, envelopeMhz: cardMaxClockMhz, intentTopMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE FOUR REFUSALS — R11, R13 (bound), R13 (raised offer), R12 — live in `curveWriteRefusal`
       // above, so the virtual card of epic 03 is held to the SAME bar rather than to a copy of it.
@@ -342,7 +349,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
           why: w.why ?? `запись кривой: ${w.failed} точек из ${COUNT()} не записались`,
         };
       }
-      return { ok: true, vector: vec.offsets.slice(0, COUNT()) };
+      return { ok: true, vector: vec.offsets.slice(0, COUNT()), envelopeClamp: vec.envelopeClamp ?? null };
     },
 
     async readCurveOffsets() {
@@ -763,6 +770,29 @@ export async function resolveProfileCurve(profile, {
       }
     }
   }
+  // ─── НАМЕРЕНИЕ ВЕКТОРА — ОДНО ЧИСЛО, ЕДУЩЕЕ ВМЕСТЕ С НИМ (`bugs/99`) ──────────────────────────
+  //
+  // «Куда вектор ЦЕЛИЛСЯ» — это верхнее поднятое предложение против ТОЙ опоры, для которой он
+  // считался. Знать это может только здесь: опора живёт в этой функции, а бэкенд записи видит уже
+  // готовый вектор и заводскую таблицу МОМЕНТА, которая от опоры отличается (в этом весь `bugs/97`).
+  //
+  // Число нужно записи для одного решения: законна ли подрезка по конверту карты. Вектор, целившийся
+  // ВНУТРЬ конверта, выносит наружу только разница таблиц покоя и нагрузки — это подрезается. Вектор,
+  // целившийся ВЫШЕ конверта, — это форма `bugs/11`, и она обязана получить отказ, а не подрезку.
+  // Поэтому здесь считается НАМЕРЕНИЕ, а не «сколько получится на карте»: подменить одно другим
+  // значило бы обезоружить R13 (мой собственный блок покраснел на этом 2026-09-01).
+  if (resolved && Array.isArray(resolved.deltaByPointMhz) && Array.isArray(base)) {
+    let top = null;
+    for (let i = 0; i < resolved.deltaByPointMhz.length; i += 1) {
+      const d = Number(resolved.deltaByPointMhz[i]) || 0;
+      if (d <= 0) continue;
+      const p = base[i];
+      if (!p || !(p.freqKhz > 0)) continue;
+      const offer = p.mhz + d;
+      if (top === null || offer > top) top = offer;
+    }
+    resolved.__intentTopMhz = top;
+  }
   if (typeof onBase === 'function') onBase({ source: baseSource, base, liveTable, cardBase, drift: resolved?.__baseDrift ?? null });
   return resolved;
 }
@@ -898,7 +928,11 @@ export async function apply(backend, profile, {
         // R13: the specimen's own maximum travels WITH the write. `before` was read from the card at
         // the top of `apply`, so this is a measured bound rather than a constant anyone can forget to
         // update after a driver change.
-        const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz, { cardMaxClockMhz: before.clockMaxMhz });
+        // `intentTopMhz` — куда вектор ЦЕЛИЛСЯ против своей опоры (`bugs/99`). Едет отдельным полем,
+        // потому что бэкенд записи опоры не видит, а без намерения подрезка по конверту запрещена.
+        const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz, {
+          cardMaxClockMhz: before.clockMaxMhz, intentTopMhz: wantCurve.__intentTopMhz ?? null,
+        });
         if (!w.ok) throw new Error(`запись кривой не удалась: ${w.why ?? 'причина не названа'}`);
         // P6-AC3 — PROVED BY READ-BACK, never by a status code. `nvidia-smi` already taught this
         // project that a tool's own success text is not evidence (`researches/01` §5), and the curve
@@ -921,7 +955,19 @@ export async function apply(backend, profile, {
           }
           throw new Error(`перечитанная кривая не совпала с записанной: точка ${mismatch} — записывали ${want[mismatch]}, прочитали ${back.offsets[mismatch]}.${cleanup}`);
         }
-        return { value: sampleWritable(backend), samples: [], proof: 'curve-read-back' };
+        // ─── ЦЕНА ПОДРЕЗКИ ПО КОНВЕРТУ — В ТУ ЖЕ СТРОКУ, ВСЕГДА (`bugs/99` → B99-AC3) ────────────
+        // Владелец обязан узнать, что часть подъёма не доехала до карты, ОТ МЕНЯ и числом, а не из
+        // замера потом. Ноль печатается тоже: строка, появляющаяся только при подрезке, своим
+        // молчанием ничего не сообщает (R4b, тот же барьер, что у строки опоры выше).
+        const ec = w.envelopeClamp ?? null;
+        const note = ec === null || ec.envelopeMhz === null
+          ? ' · ПОДРЕЗКА ПО КОНВЕРТУ: не проверялась — максимум карты бэкенду не передан'
+          : (ec.points === 0
+            ? ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): не потребовалась, 0 точек`
+            : ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): ${ec.points} точ., суммарно −${ec.totalMhz} МГц, `
+              + `максимум на точке −${ec.maxMhz} МГц (${ec.rows.map((r) => `${r.voltageMv ?? '?'} мВ ${r.was}→${r.now}`).join(', ')}`
+              + `${ec.points > ec.rows.length ? ' …' : ''})`);
+        return { value: sampleWritable(backend), samples: [], proof: 'curve-read-back', note };
       },
       undo: async () => {
         const z = await curveBackend.zeroCurve();
@@ -1040,7 +1086,9 @@ export async function apply(backend, profile, {
         : proof.proof === 'deferred-to-load'
           ? ' (КОМАНДА ОТДАНА, доставка не доказана: на простое фиксация высокой частоты не наблюдается — проверка под нагрузкой)'
           : '';
-      log.push(`${step.what} — перечитано: ${proof.value.powerLimitW} Вт / ${proof.value.clockMhz} МГц${caveat}`);
+      // `proof.note` — то, что знает только САМ шаг и только ПОСЛЕ записи (цена подрезки по конверту,
+      // `bugs/99`). В `what` такое попасть не может: строка `what` составляется до записи.
+      log.push(`${step.what} — перечитано: ${proof.value.powerLimitW} Вт / ${proof.value.clockMhz} МГц${caveat}${proof.note ?? ''}`);
     } catch (e) {
       // P2-AC4: any failing step returns the card to the state it held before the apply began.
       const undone = [];
@@ -2701,6 +2749,51 @@ async function cmdSelftest() {
     const over = await cb.writeRaiseAndCap(592, CARD_MAX + 1, { cardMaxClockMhz: CARD_MAX });
     if (over.ok !== false) return 'потолок на 1 МГц выше максимума карты прошёл';
     if (writes !== writesBeforeOver) return `отказ на границе произошёл ПОСЛЕ записи: новых записей ${writes - writesBeforeOver}`;
+    return null;
+  });
+
+  // ─── `bugs/99`: ПОДРЕЗКА ПО КОНВЕРТУ — ПРОВОДКА, А НЕ АРИФМЕТИКА ──────────────────────────────
+  //
+  // Сама арифметика доказана у себя дома (`nvapi --selftest-shape`, десять блоков с обеими
+  // сторонами различения). Здесь вопрос другой и он дороже: доезжает ли НАМЕРЕНИЕ от опоры до
+  // бэкенда записи, и доезжает ли ЦЕНА до строки, которую читает владелец ([[EXP-0205]]: мутируй
+  // проводку, а не судью).
+  //
+  // АДРЕСАТЫ МУТАЦИЙ: MA — не передавать `intentTopMhz` в `writeRaiseAndCap` → оба блока ниже ·
+  // MB — не считать `__intentTopMhz` в `resolveProfileCurve` → первый · MC — убрать `note` из шага
+  // записи → второй.
+
+  block('bugs/99: НАМЕРЕНИЕ вектора считается против ОПОРЫ и доезжает до записи', async () => {
+    const { doc, restTable } = b97Fixture();
+    const { offsetsFor } = await import('./curve-store.mjs');
+    const eff = await resolveProfileCurve(refProfile(), {
+      loadCurve: () => doc, toOffsets: offsetsFor, readLive: async () => restTable,
+      loadReferenceFn: () => null, readVfOffsetsFn: () => ({ ok: true, offsets: new Array(128).fill(0) }),
+      openNvapiFn: () => ({ nv: {}, handle: 0n }),
+    });
+    if (!Array.isArray(eff?.deltaByPointMhz)) return 'вектор не разрешился — блок мерит не то';
+    if (typeof eff.__intentTopMhz !== 'number') return `намерение не посчитано: ${JSON.stringify(eff.__intentTopMhz)}`;
+    // Намерение — это ПОДНЯТОЕ предложение против опоры, а не верх опоры и не максимум вектора.
+    let expected = null;
+    for (let i = 0; i < eff.deltaByPointMhz.length; i += 1) {
+      const d = Number(eff.deltaByPointMhz[i]) || 0;
+      if (d <= 0) continue;
+      const p = restTable[i];
+      if (!p || !(p.freqKhz > 0)) continue;
+      expected = Math.max(expected ?? -Infinity, p.mhz + d);
+    }
+    if (eff.__intentTopMhz !== expected) return `намерение ${eff.__intentTopMhz} против ожидаемого ${expected}`;
+    return null;
+  });
+
+  block('bugs/99: ЦЕНА подрезки доезжает до строки применения — всегда, включая ноль точек', async () => {
+    const b = fakeBackend(); const cb = fakeCurve();
+    // Профиль с инлайновой кривой: намерения он не несёт, поэтому подрезка ЗАПРЕЩЕНА, и строка
+    // обязана сказать это, а не промолчать. Молчание здесь читалось бы как «подрезки не было».
+    const r = await apply(b, curveProfile(), { card: SELFTEST_CARD, timing: FAST, curveBackend: cb });
+    const said = r.steps.find((s) => s.includes('кривая V/F')) ?? '';
+    if (!said) return 'шага кривой в журнале применения нет';
+    if (!/ПОДРЕЗКА ПО КОНВЕРТУ/u.test(said)) return `строка применения молчит о подрезке: ${said}`;
     return null;
   });
 
