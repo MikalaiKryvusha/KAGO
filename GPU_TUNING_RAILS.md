@@ -56,8 +56,8 @@ right to continue.
 
 ```
 npm install                    # koffi dependency
-npm run check                  # expect: 74 .mjs files, 0 failed (re-measured 2026-08-31 13:4x)
-npm run selftest:all           # expect: 45 sets, 0 red, 2293 green blocks (re-measured 2026-08-31 13:45)
+npm run check                  # expect: 74 .mjs files, 0 failed (re-measured 2026-09-01 08:5x)
+npm run selftest:all           # expect: 45 sets, 0 red, 2403 green blocks (re-measured 2026-09-01 09:06)
 npm run traps                  # expect: 65 assertions, 0 failures, 0 WAITING (re-measured 2026-08-31 14:0x)
 npm run gpu:info               # expect: driver 610.88, VBIOS 98.03.58.40.8b, 250–300 W, 3090 MHz
 npm run watchdog -- --status   # expect: «СТОРОЖ НЕ ВЗВЕДЁН»
