@@ -16,8 +16,11 @@
   .brand .name { font-size: 56px; letter-spacing: .16em; color: #ffffff; font-weight: 800; line-height: 1 }
   .brand .name span { color: #8b949e; font-weight: 700; letter-spacing: .1em }
   /* Синяя пилюля со ссылкой на репозиторий — слово владельца 2026-09-01. */
-  .pill { display: inline-block; margin-top: 22px; background: #1f6feb; color: #ffffff;
-          font-size: 27px; font-weight: 600; padding: 14px 30px; border-radius: 999px;
+  /* Пилюля по ШИРИНЕ ССЫЛКИ, а не во всю строку: в колонке flex дочерний элемент растягивается по
+     умолчанию, поэтому здесь нужен align-self, а не inline-block (первая редакция дала полосу
+     во всю ширину кадра). */
+  .pill { align-self: flex-start; margin-top: 20px; background: #1f6feb; color: #ffffff;
+          font-size: 24px; font-weight: 600; padding: 11px 24px; border-radius: 999px;
           letter-spacing: .01em; white-space: nowrap }
   /* Строка-описание проекта — слово владельца 2026-09-01. Кегль подобран так, чтобы она встала в
      ДВЕ строки и не рвалась посередине слова: капитель на 1080 точек шириной иначе не читается. */
@@ -98,7 +101,7 @@
       </tr>
       <tr>
         <td class="what">Частота ядра</td>
-        <td class="num stock">2730<span class="u"> МГц</span></td><td class="num opt">2797<span class="u"> МГц</span><span class="d good">+2,5 %</span></td><td class="num mp">2940<span class="u"> МГц</span><span class="d good">+7,7 %</span></td>
+        <td class="num plain">2730<span class="u"> МГц</span></td><td class="num plain">2797<span class="u"> МГц</span><span class="d good">+2,5 %</span></td><td class="num plain">2940<span class="u"> МГц</span><span class="d good">+7,7 %</span></td>
       </tr>
   </table>
 

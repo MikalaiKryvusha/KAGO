@@ -104,7 +104,10 @@ const ROWS = [
   { what: 'Мощность', unit: 'Вт', pick: (r) => r.medians?.loaded?.['power.draw.instant']?.median, digits: 0, better: 'down', floorPct: 0.65 },
   { what: 'Температура', unit: '°C', pick: (r) => r.medians?.loaded?.['temperature.gpu']?.median, digits: 0, better: 'down' },
   { what: 'Вентилятор', unit: '%', pick: (r) => r.medians?.loaded?.['fan.speed']?.median, digits: 0, better: 'down' },
-  { what: 'Частота ядра', unit: 'МГц', pick: (r) => r.medians?.loaded?.['clocks.gr']?.median, digits: 0, better: 'up' },
+  // ЧАСТОТА НЕ КРАСИТСЯ — слово владельца 2026-09-01. И это не только вкус: частота сама по себе не
+  // выигрыш для читателя (факт 25 этого проекта: 6 % частоты покупают 1 % кадров), поэтому цветом её
+  // подавать значило бы выдавать внутреннюю величину за пользу.
+  { what: 'Частота ядра', unit: 'МГц', pick: (r) => r.medians?.loaded?.['clocks.gr']?.median, digits: 0, better: 'up', plain: true },
 ];
 
 /** Запись прибора по метке. Нет записи — ПАДАЕМ: карточка без замера не рисуется. */
@@ -234,7 +237,7 @@ const deltaHtml = (d) => {
 const rowsHtml = data.map((r) => `
       <tr>
         <td class="what">${typo(r.what)}</td>
-        ${COLUMNS.map((c) => `<td class="num ${c.key}">${fmt(r.cells[c.key].value, r.digits)}<span class="u">${NB}${r.unit}</span>`
+        ${COLUMNS.map((c) => `<td class="num ${r.plain ? 'plain' : c.key}">${fmt(r.cells[c.key].value, r.digits)}<span class="u">${NB}${r.unit}</span>`
     + `${c.key === 'stock' ? '' : deltaHtml(r.deltas[c.key])}</td>`).join('')}
       </tr>`).join('');
 
@@ -256,8 +259,11 @@ const html = `<!doctype html>
   .brand .name { font-size: 56px; letter-spacing: .16em; color: #ffffff; font-weight: 800; line-height: 1 }
   .brand .name span { color: #8b949e; font-weight: 700; letter-spacing: .1em }
   /* Синяя пилюля со ссылкой на репозиторий — слово владельца 2026-09-01. */
-  .pill { display: inline-block; margin-top: 22px; background: #1f6feb; color: #ffffff;
-          font-size: 27px; font-weight: 600; padding: 14px 30px; border-radius: 999px;
+  /* Пилюля по ШИРИНЕ ССЫЛКИ, а не во всю строку: в колонке flex дочерний элемент растягивается по
+     умолчанию, поэтому здесь нужен align-self, а не inline-block (первая редакция дала полосу
+     во всю ширину кадра). */
+  .pill { align-self: flex-start; margin-top: 20px; background: #1f6feb; color: #ffffff;
+          font-size: 24px; font-weight: 600; padding: 11px 24px; border-radius: 999px;
           letter-spacing: .01em; white-space: nowrap }
   /* Строка-описание проекта — слово владельца 2026-09-01. Кегль подобран так, чтобы она встала в
      ДВЕ строки и не рвалась посередине слова: капитель на 1080 точек шириной иначе не читается. */
