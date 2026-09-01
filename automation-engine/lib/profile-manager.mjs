@@ -1022,7 +1022,13 @@ export async function apply(backend, profile, {
   if (target.lock) {
     const { min, max } = target.lock;
     steps.push({
-      what: `фиксация частоты ${min}…${max} МГц`,
+      // ЗАМОК-ГРАНИЦА И ЗАКРЕПЛЕНИЕ НАЗЫВАЮТСЯ РАЗНЫМИ СЛОВАМИ (`GPU_TUNING_RAILS.md` §3, разбор в
+      // `profile-store.describeProfile`). Строку читает владелец в секунды перед записью в его карту,
+      // и «фиксация 180…3090» сказала бы ему, что карта обязана держать одну частоту, — то есть ровно
+      // обратное тому, что делает граница.
+      what: min === max
+        ? `ЗАКРЕПЛЕНИЕ частоты ${min} МГц (пин)`
+        : `замок-граница частоты ${min}…${max} МГц (карта свободна вниз, выше ${max} не уходит)`,
       run: async () => {
         const r = backend.lockGraphicsClocksMhz(min, max);
         if (!r.ok) throw new Error(`фиксация частоты не удалась (код ${r.status}): ${r.stderr || r.stdout}`);

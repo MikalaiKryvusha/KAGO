@@ -1,0 +1,25 @@
+{
+  "kind": "interview",
+  "document": "interview_025_what_holds_never_above_when_the_factory_table_drifts.md",
+  "by": "Mikalai Kryvusha",
+  "at": "2026-09-01T10:07:37+03:00",
+  "at_human": "01.09.2026 10:07",
+  "comment": "",
+  "answers": {
+    "Q1": {
+      "choice": "A",
+      "text": "",
+      "comment": "Ну очевидно же, что карта физически не может дать больше 3090 МГц - это зашито в её драйвере. Значит все пересчёты частоты должны быть с условием \"X но не более 3090. Если получается более, то X = 3090\""
+    },
+    "Q2": {
+      "choice": "A",
+      "text": "",
+      "comment": ""
+    }
+  },
+  "written": [
+    "Q2",
+    "Q1"
+  ],
+  "not_written": []
+}

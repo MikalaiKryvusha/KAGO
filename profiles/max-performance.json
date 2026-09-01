@@ -5,7 +5,7 @@
   "qualified": false,
   "settings": {
     "powerLimitWatts": 300,
-    "graphicsClockLockMhz": null,
+    "graphicsClockLockMhz": { "min": 180, "max": 3090 },
     "curveRaiseAndCapMhz": null,
     "curveRef": "measured",
     "curveCapMhz": null
