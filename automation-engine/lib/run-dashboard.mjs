@@ -1119,8 +1119,8 @@ export async function raiseDashboard({
   }
 
   log(`ДАШБОРД: ${started.url ?? `http://127.0.0.1:${port}/`}`);
-  log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — ни карты, ни журнала, ни документа кривой');
-  log(`         оно не касается. Источник — ${pulsePath} (прибор, не запись).`);
+  log('ЧТО ЭТО: окно наблюдения за прогоном. Оно только ЧИТАЕТ — карты не касается вовсе; журнал и документ');
+  log(`         кривой читает ради картинки виджета «КРИВАЯ» и никогда не пишет. Источник — ${pulsePath} (прибор, не запись).`);
 
   // THE OLD WINDOW GOES ONLY NOW — the owner's instruction while watching the first rehearsal
   // («старый браузер умей закрывать»). A second window on the same gauge is not a second view, it
