@@ -226,13 +226,27 @@ function main(argv) {
   const guardsUndeclared = guardCheck.status !== 0;
   if (guardsUndeclared) process.stderr.write(guardCheck.stdout || guardCheck.stderr || '');
 
+// -------------------------------------------------------------------------------------------------
+// ШЕСТЫЕ ВОРОТА: КАЖДЫЙ ПРИБОР `tools/*.mjs` НЕСЁТ СТОРОЖ ВХОДА (`bugs/95`, решение владельца 04.09)
+//
+// Импорт модуля в этом языке — запуск. Прибор без сторожа входа исполняет свою работу с argv
+// ВЫЗЫВАЮЩЕГО: так `tidy.mjs` снимал окна владельца, `grant-agent-*` писали его файл прав, а цикл
+// импорта ради описи пересобрал бинарники прожига (EXP-0218). Сами эти ворота были первым починенным
+// прибором класса (сессия 77). Долг заморожен в `decisions/entry-guard-baseline.json` и может только
+// убывать: починенный прибор, оставшийся в базе, тоже красный — база не имеет права врать.
+// -------------------------------------------------------------------------------------------------
+  const entryCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'entry-guard-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const entryUnguarded = entryCheck.status !== 0;
+  if (entryUnguarded) process.stderr.write(entryCheck.stdout || entryCheck.stderr || '');
+
   console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
   console.log(`проверено на порчу кодировки ${enc.scanned} текстовых файлов, `
     + `испорченных ${enc.corrupted} (сам сторож освобождён меткой)`);
   console.log(`страница окна наблюдения: ${pageStale ? 'УСТАРЕЛА — пересобрать' : 'собрана из текущих источников'}`);
   console.log(`молитва вверху канона: ${prayerDrifted ? 'РАЗОШЛАСЬ — node tools/prayer.mjs --apply' : (prayerCheck.stdout || '').trim() || 'совпадает с источником'}`);
   console.log(`декларация угроз сторожей: ${guardsUndeclared ? 'КРАСНО — node tools/guard-lint.mjs' : (guardCheck.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'чисто'}`);
-  return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared ? 0 : 1;
+  console.log(`сторож входа приборов: ${entryUnguarded ? 'КРАСНО — node tools/entry-guard-lint.mjs' : (entryCheck.stdout || '').split('\n')[0] || 'чисто'}`);
+  return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared && !entryUnguarded ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).

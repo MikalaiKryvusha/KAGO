@@ -29,6 +29,8 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { findToolchain, buildCuda, describeToolchain, ToolchainMissingError } from '../automation-engine/lib/toolchain.mjs';
 import config from '../automation-engine/config.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
 const ROOT = resolve(process.cwd());
 const WORKLOADS = join(ROOT, 'workloads');
@@ -263,4 +265,5 @@ function main(argv) {
   return 0;
 }
 
-process.exit(main(process.argv.slice(2)));
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(main(process.argv.slice(2)));

@@ -12,8 +12,19 @@
 
 import { readFileSync } from 'node:fs';
 import { claimsBurnProof, validateCurveDoc } from '../automation-engine/lib/curve-store.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
-const [beforePath, afterPath = 'curves/measured.json'] = process.argv.slice(2);
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
+
+const [beforePath, afterPath = 'curves/measured.json'] = argv;
 if (!beforePath) {
   console.error('нужен путь к снимку ДО: node tools/harvest-acceptance.mjs runs/measured.before-X.json');
   process.exit(2);
@@ -60,3 +71,8 @@ console.log('');
 console.log(validateCurveDoc(after).length === 0
   ? '  ВАЛИДАТОР ПОСЛЕ ПРОГОНА: ЧИСТО'
   : `  🔴 ВАЛИДАТОР ПОСЛЕ ПРОГОНА: ${validateCurveDoc(after).length} отказ(ов)`);
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

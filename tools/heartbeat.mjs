@@ -34,6 +34,8 @@
 import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
 const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const HEARTBEAT = path.join(REPO_ROOT, '.kaif', 'heartbeat.log');
@@ -81,4 +83,5 @@ function main(argv) {
   return 0;
 }
 
-process.exit(main(process.argv.slice(2)));
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(main(process.argv.slice(2)));

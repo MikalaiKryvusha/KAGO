@@ -14,8 +14,19 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   curvePath, tagsForStatus, statusFromTags, CURVE_STATUS,
 } from '../automation-engine/lib/curve-store.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
-const check = process.argv.includes('--check');
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
+
+const check = argv.includes('--check');
 const file = curvePath('measured');
 const doc = JSON.parse(readFileSync(file, 'utf8'));
 
@@ -61,3 +72,8 @@ if (check) {
   writeFileSync(file, `${JSON.stringify({ ...doc, frequencies: rows }, null, 2)}\n`, 'utf8');
   console.log(`\nЗАПИСАНО: ${file}`);
 }
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

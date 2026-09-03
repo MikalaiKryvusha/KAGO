@@ -36,6 +36,8 @@ import { scanDocumentForOwnerQuestions, checkUnreachableChoices } from './questi
 // bugs/66: the ask block and the spoken phrase must come from ONE function; the blocks
 // below compare the two OUTPUTS against each other, never against a written constant.
 import { askFor, callPhrase, loadDoc } from './review.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LF = String.fromCharCode(10);
@@ -1057,4 +1059,5 @@ async function main(argv) {
   return failed === 0 ? 0 : 1;
 }
 
-main(process.argv.slice(2)).then((code) => process.exit(code));
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) main(process.argv.slice(2)).then((code) => process.exit(code));

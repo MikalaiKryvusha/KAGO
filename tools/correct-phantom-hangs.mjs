@@ -17,6 +17,17 @@
 import {
   openJournal, writeCorrection, hangFloors, readJournal, RUNG_OUTCOME, SWEEP_DIR,
 } from '../automation-engine/lib/sweep-journal.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
+
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
 
 // Улика — общая для обеих ступеней, потому что обе принадлежат одной сессии и одному классу.
 const EVIDENCE = 'СЕССИЯ 30 (2026-08-16 16:0x-18:1x): STATUS о ней дословно — «Карта за всю сессию '
@@ -57,3 +68,8 @@ for (const [mhz, v] of [...after].sort((a, b) => b[0] - a[0])) {
   console.log(`   ${mhz} МГц -> ${v.voltageMv} мВ (seq ${v.seq})`);
 }
 console.log(`\nбыло полов ${before.size}, стало ${after.size} — снято ${before.size - after.size}`);
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

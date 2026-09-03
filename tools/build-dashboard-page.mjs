@@ -21,6 +21,17 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
+
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
 
 const SRC = join('homeworks', '03_sweep_animation.html');
 const DST = join('assets', 'dashboard', 'sweep.html');
@@ -349,7 +360,7 @@ s = s.replace('</body>', `<script>\n${js}</script>\n</body>`);
 // рабочая копия получает CRLF, а сборщик пишет LF. Без нормализации сторож краснел бы на КАЖДОМ
 // свежем клоне — по своей причине, а не по дефекту, и его первым делом научились бы объяснять
 // (стоп-линия 6 рельсов: сторож, которому нашли оправдание, — сторож, который не сработал).
-if (process.argv.includes('--check')) {
+if (argv.includes('--check')) {
   const norm = (t) => t.replace(/\r\n/g, '\n');
   if (!existsSync(DST)) {
     console.error(`ОСТАНОВ: страницы ${DST} нет на диске — соберите: node tools/build-dashboard-page.mjs`);
@@ -378,7 +389,7 @@ console.log(`СОБРАНО: ${DST}, ${s.length} байт (из ${SRC} — пр�
 //
 // A render is accepted by LOOKING, never by reading the code that produced it (EXP-0046) — so this is
 // the check, not a convenience. The output is a run artefact and stays out of history.
-if (process.argv.includes('--preview')) {
+if (argv.includes('--preview')) {
   const pulsePath = join('runs', 'dashboard', 'live.json');
   must(existsSync(pulsePath), `нет пульса ${pulsePath} — сперва прогон: npm run bench -- --from 2842 --to 2820`);
   const pulse = readFileSync(pulsePath, 'utf8');
@@ -392,7 +403,7 @@ if (process.argv.includes('--preview')) {
   // тот же на стенде и на живой карте (слово владельца 2026-08-16 04:1x). Числа при этом остаются
   // теми, что были в прогоне: подпись под картинкой говорит, откуда они, а сама картинка не
   // изображает замер живой карты.
-  const noPill = process.argv.includes('--no-pill');
+  const noPill = argv.includes('--no-pill');
   // Пульс НЕ обновляется в статике, поэтому детектор зависания зажёгся бы через три секунды и
   // снимок вышел бы с тревогой. Здесь это ложь о картинке, а не о прогоне: держим метку времени
   // свежей ровно для рендера.
@@ -408,3 +419,8 @@ if (process.argv.includes('--preview')) {
   console.log(`         msedge --headless=new --disable-gpu --window-size=1200,860 --virtual-time-budget=4000 \\`);
   console.log(`           "--screenshot=<абсолютный путь>.png" "file:///${process.cwd().replace(/\\/g, '/')}/${out.replace(/\\/g, '/')}"`);
 }
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

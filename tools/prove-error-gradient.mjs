@@ -15,12 +15,22 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findToolchain, buildCuda } from '../automation-engine/lib/toolchain.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
+
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
 
 const REPO = 'D:\\work\\ai_sandbox\\KAGO';
 const OUT = path.join(process.env.TEMP || process.env.TMP || '.', 'kago-gradient-proof');
 mkdirSync(OUT, { recursive: true });
 
-const argv = process.argv.slice(2);
 const wIdx = argv.indexOf('--workload');
 const NAME = wIdx >= 0 && argv[wIdx + 1] ? argv[wIdx + 1] : 'sdc_fma';
 const src = readFileSync(path.join(REPO, 'workloads', `${NAME}.cu`), 'utf8');
@@ -80,3 +90,8 @@ console.log(bad === 0
   ? 'ГРАДИЕНТ ИЗМЕРЯЕТ: одиночный переворот бита опознан как 1 элемент, расстояние 1, индекс 123.'
   : `ГРАДИЕНТ НЕ ИЗМЕРЯЕТ: расхождений ${bad}.`);
 process.exit(bad === 0 ? 0 : 1);
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

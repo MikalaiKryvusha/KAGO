@@ -11,8 +11,19 @@
 //  power range 250…300 W, exit 0]
 
 import { spawnSync } from 'node:child_process';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
-const asJson = process.argv.includes('--json');
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
+
+const asJson = argv.includes('--json');
 
 /** Run nvidia-smi and return trimmed stdout, or null if the call failed. */
 function smi(args) {
@@ -153,3 +164,8 @@ if (asJson) {
     console.log(`               This is the CLOCK grid. The VOLTAGE grid is still unmeasured (phase 4).`);
   }
 }
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

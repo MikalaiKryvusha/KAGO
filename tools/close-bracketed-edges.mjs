@@ -19,11 +19,22 @@
 import { openJournal, readJournal, provenRungs, hangFloors } from '../automation-engine/lib/sweep-journal.mjs';
 import { loadCurveDoc, saveCurveDoc, closePoint } from '../automation-engine/lib/curve-store.mjs';
 import { marginAboveLastStableMv } from '../automation-engine/config.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
-const APPLY = process.argv.includes('--apply');
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
+
+const APPLY = argv.includes('--apply');
 // ⚠️ ШТАМП — ЛОКАЛЬНЫЙ ISO, а не UTC: формат строки документа требует смещения (`LOCAL_ISO`),
 // и канон велит брать момент у системы, а не из головы (EXP-0019).
-const stamp = process.argv.find((a) => a.startsWith('--at='))?.slice(5) ?? null;
+const stamp = argv.find((a) => a.startsWith('--at='))?.slice(5) ?? null;
 if (!stamp) { console.error('ОСТАНОВ: передай момент локальным ISO: --at=YYYY-MM-DDTHH:MM:SS+03:00'); process.exit(1); }
 
 const { records } = readJournal(openJournal());
@@ -91,3 +102,8 @@ for (const p of plan) {
 const saved = saveCurveDoc(doc);
 if (saved && saved.ok === false) { console.error(`ОСТАНОВ: документ не сохранён — ${saved.why ?? ''}`); process.exit(1); }
 console.log(`\nЗАПИСАНО: строк закрыто ${closed}. Документ сохранён атомарно.`);
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

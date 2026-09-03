@@ -18,6 +18,17 @@
 import {
   openJournal, readJournal, orphanIntents, closeAsOperatorStop, hangFloors, SWEEP_DIR,
 } from '../automation-engine/lib/sweep-journal.mjs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
+
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
 
 const journal = openJournal({ dir: SWEEP_DIR });
 const before = readJournal(journal).records;
@@ -43,3 +54,8 @@ console.log('ПОЛЫ ПОСЛЕ:');
 for (const [mhz, v] of [...hangFloors(after)].sort((a, b) => b[0] - a[0])) {
   console.log(`   ${mhz} МГц -> ${v.voltageMv} мВ (seq ${v.seq})`);
 }
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

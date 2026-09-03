@@ -23,6 +23,8 @@
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
 const PROJECT = 'KAGO';
 const TEAM_ROLES = ['engineer', 'verifier']; // менеджер places не имеет — его место ГЛАВНАЯ копия
@@ -156,4 +158,5 @@ function selftest() {
   process.exit(bad ? 1 : 0);
 }
 
-main();
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) main();

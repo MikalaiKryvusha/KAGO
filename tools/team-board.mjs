@@ -32,6 +32,8 @@ import { readFileSync, writeFileSync, renameSync, existsSync, mkdtempSync, rmSyn
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
 
 const BOARD_NAME = 'TEAM_STATUS.md';
 const PROJECT = 'KAGO';
@@ -307,4 +309,5 @@ async function selftest() {
   process.exit(bad ? 1 : 0);
 }
 
-main().catch((e) => { console.error(`ОШИБКА: ${e.message}`); process.exit(1); });
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) main().catch((e) => { console.error(`ОШИБКА: ${e.message}`); process.exit(1); });

@@ -225,6 +225,10 @@ const SUITES = [
   // Дотянуться до писателя этот путь не может по строению файла, а не по намерению автора.
   { id: 'tidy', npm: 'npm run tidy -- --selftest', argv: ['tools/tidy.mjs', '--selftest'],
     what: 'уборка после прогона: кого можно убивать, кого нельзя', done: /^САМОПРОВЕРКА УБОРКИ:/mu },
+  // Инертность: набор пишет ТОЛЬКО в свой `mkdtemp` и сносит его в `finally`; настоящий `tools/`
+  // не читается вовсе (строка сводки это утверждает сама). Вошёл 2026-09-04 вместе с линтером.
+  { id: 'entryguard', npm: 'npm run entryguard -- --selftest', argv: ['tools/entry-guard-lint.mjs', '--selftest'],
+    what: 'сторож входа приборов tools/ (bugs/95): база долга только убывает', done: /^САМОПРОВЕРКА СТОРОЖА ВХОДА:/mu },
   { id: 'fanladder', npm: 'npm run fanladder -- --selftest', argv: ['tools/fan-ladder.mjs', '--selftest'],
     what: 'акустическая лестница: план уровней и разбор замера', done: /^САМОПРОВЕРКА:/mu },
   { id: 'bench', npm: 'npm run bench -- --selftest', argv: ['automation-engine/lib/bench-run.mjs', '--selftest'],

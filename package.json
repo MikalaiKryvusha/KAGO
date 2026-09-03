@@ -50,6 +50,7 @@
     "dashboard": "node automation-engine/lib/run-dashboard.mjs",
     "bench": "node automation-engine/lib/bench-run.mjs",
     "tidy": "node tools/tidy.mjs",
+    "entryguard": "node tools/entry-guard-lint.mjs",
     "pulse": "node tools/pulse-report.mjs",
     "hold": "node tools/hold-vs-raise.mjs",
     "deathwatch": "node automation-engine/lib/death-watch.mjs",

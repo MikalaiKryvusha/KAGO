@@ -28,6 +28,17 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
+
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
 
 const CURVE = join('curves', 'measured.json');
 const JOURNAL = join('runs', 'sweep', 'journal.jsonl');
@@ -347,3 +358,8 @@ if (contradictions.length) {
   for (const x of contradictions) console.log(`    🔴 ${x.m} МГц: пол зависания ${x.v} мВ, а прожиг проходил на ${x.p} мВ — на ${x.v - x.p} мВ глубже`);
 }
 console.log('  В КАРТУ НЕ ЗАПИСАНО НИЧЕГО: инструмент читает два файла и пишет один HTML.');
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));

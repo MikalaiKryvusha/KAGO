@@ -46,6 +46,17 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'no
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
+import { resolve as entryResolve } from 'node:path';
+import { fileURLToPath as entryPath } from 'node:url';
+
+/**
+ * ВСЯ РАБОТА ПРИБОРА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`, сессия 78).
+ * До починки тело стояло на верхнем уровне модуля и исполнялось при ИМПОРТЕ с argv вызывающего.
+ * Тело намеренно НЕ сдвинуто по отступу: в приборах этого класса есть многострочные шаблоны,
+ * и сдвиг изменил бы порождаемые артефакты; голден байт-в-байт дороже отступа.
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ */
+async function main(argv) {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RUNS = join(ROOT, 'runs', 'graphics');
@@ -378,4 +389,9 @@ for (const r of data) {
   console.log(`  ${r.what.padEnd(14)} ${COLUMNS.map((c) => `${c.title} ${fmt(r.cells[c.key].value, r.digits)}`).join(' · ')}`
     + (r.delta ? ` · разница ${r.delta.pct.toFixed(1)} %` : ''));
 }
-if (process.argv.includes('--open')) spawn('explorer.exe', [PNG], { detached: true, stdio: 'ignore' }).unref();
+if (argv.includes('--open')) spawn('explorer.exe', [PNG], { detached: true, stdio: 'ignore' }).unref();
+return 0;
+}
+
+// СТОРОЖ ВХОДА — прибор исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+if (process.argv[1] && entryResolve(process.argv[1]) === entryResolve(entryPath(import.meta.url))) process.exit(await main(process.argv.slice(2)));
