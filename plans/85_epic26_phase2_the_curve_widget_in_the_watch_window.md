@@ -38,7 +38,7 @@ first for the next live evening).
 | P85-AC4 | The widget switches and the choice survives a reopen | Meter: built page carries the toggle (`#widget-card` / `#widget-curve`), the containers, `localStorage` key `kago.widget.v1`, and honours `?widget=curve`; observed by two headless renders of `--preview` (card state, curve state) looked at with eyes (EXP-0046) · Target: both renders show the intended widget; the taste verdict is the owner's |
 | P85-AC5 | The live rung is on the picture | Meter: dashboard selftest issues a real HTTP request `/curve.svg?mhz=2842&mv=995&stock=1045` against sandbox fixtures · Target: the answer is `image/svg+xml`, carries `class="marker"` at that frequency and a trace from the stock voltage to the current one; the same route WITHOUT the query carries no marker |
 | P85-AC6 | One renderer, two surfaces (DRY — the pair is REMOVED, not watched) | Meter: `grep -c "<polyline" tools/build-curve-map.mjs` and `grep -c "PAD.l + ((mv" -r automation-engine tools` · Target: 0 in the tool, exactly 1 definition of the axis mapping in the repository (`automation-engine/lib/curve-map.mjs`) |
-| P85-AC7 | The static map tells the engine's truth about floors after `interviews/022` = B | Meter: the rebuilt `assets/curve-map.html` counts vs a direct probe of `hangFloors`/`provenRungs` on the production journal (taken 2026-09-04 before any edit: floors **13**, proven **44**, raw hangs 17, refuted-or-corrected-above-floor **6**) · Target: the page names 13 floors and 6 REFUTED hangs, with the verb «снят движком», never «ниже него спуск не ходит» for a refuted one |
+| P85-AC7 | The static map tells the engine's truth about floors after `interviews/022` = B | Meter: the rebuilt `assets/curve-map.html` counts vs a direct probe of `hangFloors` / `provenRungs` / `corrections` on the production journal (taken 2026-09-04 before the rebuild, through the journal's own readers: floors **13**, proven **44**, `hung` verdicts 21 of which **6 carry a correction** — writer-crash or operator-stop, i.e. not card events — and of the 15 uncorrected the engine refutes **2** by rule B: 2872 @ 1035 and 2835 @ 1015). ✏️ The first draft of this row said «6 refuted»: that number came from a probe that ignored corrections — the very drift the old static map had (it drew corrected phantom hangs as walls) · Target: the page names 13 floors and 2 REFUTED hangs with the verb «снято движком», and no corrected hang appears at all |
 | P85-AC8 | Read-only work | Meter: `sha256sum curves/measured.json runs/sweep/journal.jsonl` before and after the whole plan (I1 shape) · Target: both unchanged; `git status` shows no change to `curves/` |
 | P85-AC9 | Data paths are seams, not constants (`bugs/65` shape) | Meter: dashboard selftest block — `raiseDashboard({curvePath, journalPath})` hands both to `startFn`; CLI accepts `--curve` / `--journal`; the twin branch of `engine.mjs` passes ITS sandbox document and journal · Target: the block is green and the engine source carries both flags on the twin spawn line |
 
@@ -118,9 +118,9 @@ Each step quotes the meta-plan line it executes: `plans/26` → «2 | Видже
 - [ ] **Ш1 — the shared renderer.** New `automation-engine/lib/curve-map.mjs`: `curveFacts({doc,
       records})` (rows sorted, touched/untouched, gaps, `proven` = `provenRungs`, `floors` =
       `hangFloors`, `refuted` = highest raw hang per frequency not honoured as a floor and not
-      corrected), `renderCurveSvg(facts, {W, H, PAD, fontPx, marker, caption})` — the ONE axis
-      mapping; the effective («наша») line is built from TOUCHED rows only (E26-AC2: an untouched
-      document draws no tuned line); `--selftest` with the mutation addressees named before the run
+      corrected), `renderCurveSvg(facts, {size, marker, xCaption, summary})` — the ONE axis
+      mapping; the effective («наша») line is the whole document once anything is measured and
+      empty on an untouched document (E26-AC2); `--selftest` with the mutation addressees named before the run
       (empty document → no tuned points · order-independence of the effective line · refuted ≠ floor
       · marker on/off · floors come from `hangFloors`, not from a local re-implementation). Anchors
       E26-AC1, E26-AC2.
@@ -187,7 +187,11 @@ Each step quotes the meta-plan line it executes: `plans/26` → «2 | Видже
 - default view stays the accepted card animation; the curve is one click away and remembered;
 - the toggle sits top-left ON the stage (the pill's mirror), not inside the МЕНЮ dropdown — the
   widget switch is a thing you do while glancing at the picture, the menu is for settings;
-- the effective line is built from touched rows only (E26-AC2 read literally);
+- the effective line is the WHOLE document once anything is measured (what lands on the card: our
+  measurement where it beats stock, stock elsewhere — never to the right of the stock line), and no
+  line at all on a document nobody touched. ✏️ The first edition took touched rows only, reading
+  E26-AC2 literally; the rebuilt static page showed the defect — the green line ran right of the grey
+  wherever a factory row outranks the measured ones — and the rule was corrected the same hour;
 - a hang the engine no longer honours is drawn as a HOLLOW red ring and named «снято движком» — the
   fact stays visible, the verb is truthful;
 - the live marker is a ring at (voltage, frequency) with a horizontal trace back to the frequency's

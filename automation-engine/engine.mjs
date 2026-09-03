@@ -75,6 +75,7 @@ import {
   validateCurveDoc,
   saveCurveDoc,
   loadCurveDoc,
+  curvePath,
 } from './lib/curve-store.mjs';
 import {
   writeIntent, writeVerdict,
@@ -11027,8 +11028,12 @@ async function mainSweep(argv, arg) {
     const { spawn: spawnDash } = await import('node:child_process');
     const { fileURLToPath: toPathDash } = await import('node:url');
     const dashScript = join(dirname(toPathDash(import.meta.url)), 'lib', 'run-dashboard.mjs');
+    // И КРИВАЯ ДВОЙНИКА — ТОЖЕ ЕГО СОБСТВЕННАЯ (`plans/85`, E26-AC3): виджет кривой в окне читает
+    // документ и журнал по переданным путям, и без этих двух флагов он показал бы кривую ВЛАДЕЛЬЦА
+    // под маркером вымышленной ступени — замер и вымысел на одном поле, которых канон не допускает.
     dashProc = spawnDash(process.execPath, [dashScript, '--port', String(dash.DEFAULT_PORT),
-      '--pulse', twinPulsePath, '--telemetry', join(twin.runDir, 'telemetry.jsonl')],
+      '--pulse', twinPulsePath, '--telemetry', join(twin.runDir, 'telemetry.jsonl'),
+      '--curve', curvePath(twin.docName, twin.docDir), '--journal', join(twin.journalDir, 'journal.jsonl')],
     { windowsHide: true, stdio: 'ignore' });
     dashProc.unref?.();
     const seen = await dash.waitForViewer(dash.DEFAULT_PORT);

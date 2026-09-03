@@ -50,6 +50,10 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+// The curve widget's picture (`plans/85`): ONE renderer shared with `tools/build-curve-map.mjs`. The
+// module reads the document and the journal through the journal's PURE readers only — this server
+// stays a reader, and it never touches `resumeState`.
+import { CURVE_PATH, JOURNAL_PATH, WIDGET_SIZE, WIDGET_X_CAPTION, loadFacts, renderCurveSvg } from './curve-map.mjs';
 
 export const PULSE_PATH = join('runs', 'dashboard', 'live.json');
 /** Where the side-car sampler writes the card's readings for the whole run. One file, appended. */
@@ -539,6 +543,10 @@ export function serve({
   // набору дорогу в батарею, которая обещает «карту можно не освобождать». Теперь дорога открыта.
   telemetryPath = TELEMETRY_PATH,
   pagePath = PAGE_PATH,
+  // THE CURVE'S TWO FILES — seams too (`plans/85`, the `bugs/65` shape): the twin's window gets the
+  // twin's document and journal, or the owner's curve would lie under a fictional rung (E26-AC3).
+  curvePath = CURVE_PATH,
+  journalPath = JOURNAL_PATH,
   pollMs = 200,
   heartbeatMs = 10_000,
   onListen = null,
@@ -578,6 +586,27 @@ export function serve({
     if (url === '/pulse') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(pulseNow(pulsePath, Date.now(), telemetryPath)));
+    }
+    // ⚡ КРИВАЯ — ТОЙ ЖЕ КАРТИНКОЙ, ЧТО И `assets/curve-map.html` (`plans/85`, эпик 26 фаза 2).
+    //
+    // Сервер РИСУЕТ, страница ПОКАЗЫВАЕТ: окно остаётся читателем (E26-AC1) — ни одного вычисления над
+    // кривой в браузере. Три числа в запросе — ступень под тестом из пульса, переданная страницей как
+    // есть: по ним рендерер ставит маркер И не рисует полом орфанное намерение журнала на той ступени,
+    // которая сейчас горит (намерение без вердикта в покое — зависание, в полёте — просто работа).
+    // Отсутствующий документ — 404 С ПРИЧИНОЙ по-русски, а не пустая картинка: страница печатает её.
+    if (url === '/curve.svg') {
+      const q = new URLSearchParams((req.url || '').split('?')[1] ?? '');
+      const num = (k) => (q.has(k) && q.get(k) !== '' && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : null);
+      const mhz = num('mhz');
+      const mv = num('mv');
+      const marker = mhz !== null && mv !== null ? { mhz, mv, stock: num('stock') } : null;
+      const loaded = loadFacts({ curvePath, journalPath, inFlight: marker });
+      if (!loaded.ok) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(loaded.why);
+      }
+      res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(renderCurveSvg(loaded.facts, { size: WIDGET_SIZE, marker, summary: true, xCaption: WIDGET_X_CAPTION }));
     }
     // WHO IS ACTUALLY WATCHING — the route a run asks before it is allowed to touch the card.
     //
@@ -1031,6 +1060,8 @@ export async function raiseDashboard({
   // бы боевые файлы — окно двойника показывало бы живой прогон.
   pulsePath = PULSE_PATH,
   telemetryPath = TELEMETRY_PATH,
+  curvePath = CURVE_PATH,
+  journalPath = JOURNAL_PATH,
   withWindow = true,
   log = console.log,
   closeWindowFn = closeWindow,
@@ -1048,7 +1079,7 @@ export async function raiseDashboard({
 } = {}) {
   let viewerSeen = null;
   let windowSeen = null;
-  let started = await startFn({ port, pulsePath, telemetryPath });
+  let started = await startFn({ port, pulsePath, telemetryPath, curvePath, journalPath });
 
   if (!started.ok && started.code === 'EADDRINUSE') {
     const probe = await probeFn(port);
@@ -1069,7 +1100,7 @@ export async function raiseDashboard({
       log(`ПОРТ:    ${port} так и не освободился. Ничего не тронуто.`);
       return { ok: false, why: 'порт не освободился', windowTouched: false };
     }
-    started = await startFn({ port, pulsePath, telemetryPath });
+    started = await startFn({ port, pulsePath, telemetryPath, curvePath, journalPath });
   }
 
   if (!started.ok) {
@@ -1786,6 +1817,12 @@ export async function selfTest() {
       check('и он висит на СИГНАЛАХ тоже, а не только на штатном выходе',
         /for \(const sig of \['SIGINT', 'SIGTERM'\]\) process\.on\(sig, \(\) => \{ shutWindow\(\)/.test(engineSrc),
         'Ctrl+C уносит прогон, а окно оставляет');
+      // ─── ДВОЙНИК ПОЛУЧАЕТ СВОЮ КРИВУЮ (`plans/85`, E26-AC3) ───────────────────────────────────
+      // Тот же приём — адрес в исходнике, потому что прогнать твин-путь с окном здесь нельзя.
+      //   АДРЕСАТ МУТАЦИИ: CK. снять `--curve`/`--journal` со спавна окна на твин-пути → этот блок.
+      check('ДВОЙНИК ПОЛУЧАЕТ СВОЮ КРИВУЮ И СВОЙ ЖУРНАЛ: спавн окна на твин-пути несёт --curve и --journal',
+        /'--curve', curvePath\(twin\.docName, twin\.docDir\), '--journal', join\(twin\.journalDir, 'journal\.jsonl'\)/.test(engineSrc),
+        'твин-путь поднимает окно без путей кривой — под вымышленной ступенью легла бы кривая владельца');
     }
 
     // — ЗАПИСАННАЯ ТЕМА (слово владельца 2026-08-22). Маршрут проверяется НАСТОЯЩИМ запросом:
@@ -1846,6 +1883,122 @@ export async function selfTest() {
         got.status === 200 && got.type === 'audio/mpeg' && got.bytes > 100000,
         JSON.stringify(got));
     }
+
+    // ─── ВИДЖЕТ КРИВОЙ НА СТРАНИЦЕ (`plans/85`, эпик 26 фаза 2) ──────────────────────────────────
+    //
+    // Что здесь доказывается: СТРУКТУРА собранной страницы и ПРОВОДКА по тексту. Чего не доказывается:
+    // что картинка читается глазом — это вердикт владельца (E26-AC6), и никакой блок его не выдаёт.
+    //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+    //     CA. внести state-alive/state-dead внутрь виджета              → «ТРЕВОГА ЖИВЁТ ВНЕ ВИДЖЕТОВ»
+    //     CB. убрать переключатель или контейнер из сборки              → «ДВА ВИДЖЕТА И ПЕРЕКЛЮЧАТЕЛЬ»
+    //     CC. посчитать на странице глубину/сдвиг по числам кривой      → «СТРАНИЦА НЕ СЧИТАЕТ»
+    //     CD. не запоминать выбор или снять разбор ?widget=             → «ВЫБОР ПОМНИТСЯ И ЗАДАЁТСЯ АДРЕСОМ»
+    //     CE. не звать wireCurveWidget() при подъёме страницы           → «ПРОВОДКА ВИДЖЕТА ПОДКЛЮЧЕНА»
+    {
+      const cardFrom = page.indexOf('id="card-widget"');
+      const cardTo = page.indexOf('<!-- /card-widget -->');
+      const curveFrom = page.indexOf('id="curve-widget"');
+      const curveTo = page.indexOf('<!-- /curve-widget -->');
+      check('ДВА ВИДЖЕТА И ПЕРЕКЛЮЧАТЕЛЬ на сцене: карта, кривая, две кнопки, держатель картинки',
+        cardFrom > 0 && cardTo > cardFrom && curveFrom > cardTo && curveTo > curveFrom
+          && page.includes('id="widget-card"') && page.includes('id="widget-curve"') && page.includes('id="curve-svg"'),
+        JSON.stringify({ cardFrom, cardTo, curveFrom, curveTo }));
+      const alive = page.indexOf('id="state-alive"');
+      const dead = page.indexOf('id="state-dead"');
+      const inside = (i, a, b) => i > a && i < b;
+      check('ТРЕВОГА ЖИВЁТ ВНЕ ВИДЖЕТОВ (E26-AC4): state-alive и state-dead — ни внутри карты, ни внутри кривой',
+        alive > 0 && dead > 0 && !inside(alive, cardFrom, cardTo) && !inside(dead, cardFrom, cardTo)
+          && !inside(alive, curveFrom, curveTo) && !inside(dead, curveFrom, curveTo),
+        JSON.stringify({ alive, dead, cardFrom, cardTo, curveFrom, curveTo }));
+      const w0 = page.indexOf("const WIDGET_KEY = 'kago.widget.v1';");
+      const w1 = page.indexOf('/* Стенные часы браузера');
+      const wiring = w0 > 0 && w1 > w0 ? page.slice(w0, w1) : '';
+      check('ПРОВОДКА ВИДЖЕТА ПОДКЛЮЧЕНА — вызов при подъёме страницы, а не упоминание',
+        wiring.length > 0 && /^\s*wireCurveWidget\(\);/m.test(page), `срез проводки ${wiring.length} байт`);
+      check('СТРАНИЦА НЕ СЧИТАЕТ (E26-AC1): в проводке виджета нет арифметики над числами кривой — три числа пульса едут в запрос как есть',
+        wiring.includes('/curve.svg')
+          && !/(voltageMv|stockVoltageMv|frequencyMhz|depthMv)\s*[-+*/]/.test(wiring)
+          && !/[-+*/]\s*(r|run|pulse)\.(voltageMv|stockVoltageMv|frequencyMhz|depthMv)/.test(wiring)
+          && !/Math\./.test(wiring),
+        'в проводке виджета нашлась арифметика над числами кривой');
+      check('ВЫБОР ПОМНИТСЯ И ЗАДАЁТСЯ АДРЕСОМ: ключ памяти и разбор ?widget= в проводке',
+        wiring.includes('localStorage') && wiring.includes("get('widget')") && wiring.includes("'curve'"),
+        'нет ключа памяти или разбора адреса');
+    }
+  }
+
+  // ─── КРИВАЯ ОТДАЁТСЯ СЕРВЕРОМ ГОТОВОЙ КАРТИНКОЙ (`plans/85`) ──────────────────────────────────
+  //
+  // Проверяется НАСТОЯЩИМ запросом к серверу над ПЕСОЧНЫМИ документом и журналом: боевые
+  // `curves/measured.json` и `runs/sweep/journal.jsonl` не читаются и не пишутся.
+  //   АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА:
+  //     CF. убрать маршрут /curve.svg                                    → «КРИВАЯ ОТДАЁТСЯ ПО /curve.svg»
+  //     CG. не передавать маркер рендереру                               → «МАРКЕР СТУПЕНИ ЕДЕТ ИЗ ЗАПРОСА»
+  //     CH. отвечать 200 пустотой на отсутствующий документ              → «НЕТ ДОКУМЕНТА — 404 С ПРИЧИНОЙ»
+  //     CI. снять curvePath/journalPath из вызова startFn                → «ПУТИ КРИВОЙ ДОЕЗЖАЮТ ДО СЕРВЕРА»
+  //     CJ. не передавать маркер как inFlight (ступень в полёте = зависание) → «СТУПЕНЬ В ПОЛЁТЕ НЕ РИСУЕТСЯ ПОЛОМ»
+  {
+    const box = join('runs', 'dashboard-selftest', 'curve');
+    mkdirSync(box, { recursive: true });
+    const docPath = join(box, 'measured.json');
+    const jPath = join(box, 'journal.jsonl');
+    writeFileSync(docPath, JSON.stringify({
+      kind: 'tuning-curve', voltageGridMv: [800, 850, 900, 950, 1000, 1050, 1100],
+      stamp: { takenAt: '2026-09-04T10:00:00+03:00' },
+      frequencies: [
+        { mhz: 2000, voltageMv: 800, stockVoltageMv: 800, tags: ['stop:untouched'] },
+        { mhz: 2842, voltageMv: 995, stockVoltageMv: 1045, tags: ['stop:edge-found', 'origin:measured'] },
+        { mhz: 2887, voltageMv: 1100, stockVoltageMv: 1100, tags: ['stop:untouched'] },
+      ],
+    }), 'utf8');
+    writeFileSync(jPath, `${[
+      JSON.stringify({ state: 'intent', seq: 1, frequencyMhz: 2842, voltageMv: 1000, at: '2026-09-04T10:00:00+03:00' }),
+      JSON.stringify({ state: 'verdict', seq: 1, outcome: 'passed', servingMvAfter: 1000, at: '2026-09-04T10:00:10+03:00' }),
+      // Намерение БЕЗ вердикта: в покое это зависание, под живым прогоном — ступень, которая горит сейчас.
+      JSON.stringify({ state: 'intent', seq: 2, frequencyMhz: 2842, voltageMv: 995, at: '2026-09-04T10:00:11+03:00' }),
+    ].join('\n')}\n`, 'utf8');
+    const get = (srv, path) => new Promise((resolve) => {
+      let raw = '';
+      const req = httpRequest({ host: '127.0.0.1', port: srv.server.address().port, path, agent: false }, (res) => {
+        res.setEncoding('utf8');
+        res.on('data', (c) => { raw += c; });
+        res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], body: raw }));
+      });
+      req.on('error', (e) => resolve({ status: 0, type: null, body: e.message }));
+      req.end();
+    });
+    const s = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json'), curvePath: docPath, journalPath: jPath });
+    await new Promise((r) => { s.server.once('listening', r); });
+    const plain = await get(s, '/curve.svg');
+    check('КРИВАЯ ОТДАЁТСЯ ПО /curve.svg — SVG с обеими линиями и точкой прожига, без маркера без запроса',
+      plain.status === 200 && /image\/svg\+xml/.test(String(plain.type)) && plain.body.includes('class="stock"')
+        && /<polyline class="tuned" points="[\d.,]+ /.test(plain.body) && plain.body.includes('class="proven"')
+        && !plain.body.includes('class="marker"'),
+      JSON.stringify({ status: plain.status, type: plain.type, head: plain.body.slice(0, 80) }));
+    const marked = await get(s, '/curve.svg?mhz=2842&mv=995&stock=1045');
+    check('МАРКЕР СТУПЕНИ ЕДЕТ ИЗ ЗАПРОСА: кольцо и след от стока на картинке, подпись с обоими числами',
+      marked.status === 200 && marked.body.includes('class="marker"') && marked.body.includes('class="trace"')
+        && marked.body.includes('2842 МГц · 995 мВ'),
+      marked.body.slice(0, 120));
+    check('СТУПЕНЬ В ПОЛЁТЕ НЕ РИСУЕТСЯ ПОЛОМ: намерение без вердикта на ступени под тестом — не зависание; в покое — зависание',
+      !marked.body.includes('class="hung"') && plain.body.includes('class="hung"'),
+      JSON.stringify({ liveHasFloor: marked.body.includes('class="hung"'), restHasFloor: plain.body.includes('class="hung"') }));
+    s.close();
+    const noDoc = serve({ port: 0, pulsePath: join('runs', 'dashboard-selftest', 'live.json'), curvePath: join(box, 'нет-документа.json'), journalPath: jPath });
+    await new Promise((r) => { noDoc.server.once('listening', r); });
+    const missing = await get(noDoc, '/curve.svg');
+    check('НЕТ ДОКУМЕНТА — 404 С ПРИЧИНОЙ, а не пустая картинка и не трассировка',
+      missing.status === 404 && /нет документа кривой/.test(missing.body), JSON.stringify(missing));
+    noDoc.close();
+    const seenOpts = [];
+    const plumbed = await raiseDashboard({
+      port: 0, log: () => {}, withWindow: false, curvePath: docPath, journalPath: jPath,
+      startFn: async (o) => { seenOpts.push(o); return { ok: true, s: { close: () => {} }, url: 'http://127.0.0.1:0/' }; },
+    });
+    check('ПУТИ КРИВОЙ ДОЕЗЖАЮТ ДО СЕРВЕРА: raiseDashboard прокладывает curvePath/journalPath (bugs/65, E26-AC3)',
+      plumbed.ok === true && seenOpts[0]?.curvePath === docPath && seenOpts[0]?.journalPath === jPath,
+      JSON.stringify(seenOpts[0] ?? null));
+    try { rmSync(box, { recursive: true, force: true }); } catch { /* ok */ }
   }
 
   const failed = results.filter((r) => !r.ok).length;
@@ -1894,6 +2047,8 @@ async function main(argv) {
     port,
     pulsePath: arg('pulse', PULSE_PATH),
     telemetryPath: arg('telemetry', TELEMETRY_PATH),
+    curvePath: arg('curve', CURVE_PATH),
+    journalPath: arg('journal', JOURNAL_PATH),
     withWindow: !argv.includes('--no-window'),
   });
   if (!raised.ok) return 1;

@@ -233,6 +233,13 @@ const SUITES = [
   // `judgeOffer` на фикстурах; сводная строка это утверждает сама («Карта не читалась»).
   { id: 'probeoffer', npm: 'npm run probeoffer -- --selftest', argv: ['tools/probe-offer.mjs', '--selftest'],
     what: 'проба предложения карты против её максимума (P83-AC6): что считать превышением', done: /^САМОПРОВЕРКА ПРОБЫ ПРЕДЛОЖЕНИЯ:/mu },
+  // ВОШЁЛ 2026-09-04 ВМЕСТЕ С САМИМ МОДУЛЕМ (`plans/85`): один рендерер карты кривой на статическую
+  // страницу и виджет окна наблюдения. ДОКАЗАТЕЛЬСТВО ИНЕРТНОСТИ, рядом с записью: ветка `--selftest`
+  // работает на документах и журналах В ПАМЯТИ, единственный путь, который она открывает, —
+  // заведомо отсутствующий файл под `runs/` (проверка честного отказа); ни карта, ни `curves/`,
+  // ни боевой журнал не читаются и не пишутся.
+  { id: 'curvemap', npm: 'npm run curvemap -- --selftest', argv: ['automation-engine/lib/curve-map.mjs', '--selftest'],
+    what: 'карта кривой: факты журнала от одного автора, эффективная линия, маркер ступени, геометрия (plans/85)', done: /^САМОПРОВЕРКА КАРТЫ КРИВОЙ:/mu },
   { id: 'fanladder', npm: 'npm run fanladder -- --selftest', argv: ['tools/fan-ladder.mjs', '--selftest'],
     what: 'акустическая лестница: план уровней и разбор замера', done: /^САМОПРОВЕРКА:/mu },
   { id: 'bench', npm: 'npm run bench -- --selftest', argv: ['automation-engine/lib/bench-run.mjs', '--selftest'],

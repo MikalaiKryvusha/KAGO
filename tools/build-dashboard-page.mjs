@@ -183,6 +183,73 @@ must(s.includes('<div class="stage">'), 'сцена не найдена');
 s = s.replace('<div class="stage">',
   '<div class="stage"><span class="pill" id="synthetic-note" style="display:none">ВИРТУАЛЬНАЯ</span>');
 
+// ---- 3f. ВИДЖЕТ КРИВОЙ — ПЕРЕКЛЮЧАЕТСЯ ВИДЖЕТ, А НЕ СТРАНИЦА (`plans/85`, эпик 26 фаза 2).
+//
+// Слово владельца 2026-08-23 (`plans/26`): *«Предлагаю переключать ВИДЖЕТ, а не страницу: кривая
+// встаёт на место анимации видеокарты — хорошо»*. Табы отклонены им же: вкладка, уводящая панель
+// прогона с экрана, умеет спрятать тревогу — а тревога здесь и есть прибор. Поэтому:
+//   · рисунок карты оборачивается в `#card-widget`, рядом встаёт `#curve-widget` — оба ВНУТРИ сцены;
+//   · строки состояния (`state-alive` / `state-dead`) остаются в правой колонке, ВНЕ обоих (E26-AC4);
+//   · переключатель — две кнопки в левом верхнем углу сцены, зеркало пилюли «ВИРТУАЛЬНАЯ» справа;
+//   · картинку целиком рисует сервер (`/curve.svg`) тем же рендерером, что `assets/curve-map.html`,
+//     а страница только показывает (E26-AC1). Облик кривой в тёмной теме — те же имена классов, что
+//     у рендерера, и палитра самой страницы; шрифты крупные (слово владельца, `ideas/05`).
+// Принятый макет НЕ правится: он обёрнут, а не перерисован.
+{
+  const svgOpen = '<svg viewBox="0 26 380 262"';
+  must(s.includes(svgOpen), 'рисунок видеокарты не найден в макете');
+  must(s.split('</svg>').length === 2, 'в макете ожидался ровно один </svg>');
+  s = s.replace(svgOpen, `<div class="wswitch" role="group" aria-label="что показывать на сцене">
+        <button type="button" id="widget-card" class="on">КАРТА</button><button type="button" id="widget-curve">КРИВАЯ</button>
+      </div>
+      <div id="card-widget">${svgOpen}`);
+  s = s.replace('</svg>', `</svg></div><!-- /card-widget -->
+      <div id="curve-widget" hidden>
+        <div id="curve-svg"><p class="note">кривая ещё не запрошена</p></div>
+        <div class="legend">
+          <span><i style="background:#6d7885"></i>сток — заводское напряжение</span>
+          <span><i style="background:var(--ok)"></i>наша — что ляжет в карту; левее серой = глубже андервольт</span>
+          <span><b class="dot" style="background:#3d86ff"></b>самое глубокое, что проходило стресс-тест</span>
+          <span><b class="dot" style="background:var(--alarm)"></b>пол зависания — ниже спуск не ходит</span>
+          <span><b class="dot" style="border:2px solid var(--alarm)"></b>зависание, снятое движком</span>
+          <span><b class="dot" style="border:3px solid var(--fire)"></b>частота под тестом сейчас</span>
+        </div>
+        <p class="note" id="curve-note"></p>
+      <!-- /curve-widget --></div>`);
+  const stageStyle = '  .stage{position:relative}';
+  must(s.includes(stageStyle), 'стиль сцены не найден');
+  s = s.replace(stageStyle, `${stageStyle}
+  /* ПЕРЕКЛЮЧАТЕЛЬ ВИДЖЕТА — левый верхний угол сцены, зеркало пилюли справа. Кнопки макета
+     стилизованы глобально (\`button{…}\`), поэтому здесь всё переопределено явно. */
+  .wswitch{position:absolute;top:12px;left:14px;z-index:2;display:inline-flex;border:1px solid var(--line);
+           border-radius:999px;overflow:hidden;background:rgba(15,18,22,.88)}
+  .wswitch button{font:inherit;font-size:11px;font-weight:700;letter-spacing:.12em;padding:4px 12px;
+                  border:0;border-radius:0;background:transparent;color:var(--dim);cursor:pointer}
+  .wswitch button:hover{color:#e6edf3;border-color:transparent}
+  .wswitch button.on{background:#1c242e;color:#e6edf3}
+  /* ВИДЖЕТ КРИВОЙ — тёмная тема тех же классов, что рисует рендерер curve-map.mjs. Размеры букв —
+     в системе координат картинки 760×520: 22 px осей, 24 px подписи маркера. */
+  #curve-widget{padding:38px 10px 8px}
+  #curve-widget svg{display:block;width:100%;height:auto}
+  #curve-widget .grid{stroke:#232a33;stroke-width:1}
+  #curve-widget .ax{fill:#8b98a8;font-size:22px;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .ax.empty{font-size:26px;fill:#c9d3df}
+  #curve-widget .cap{fill:#a9b4c2;font-size:16px;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .gap{fill:#171b21}
+  #curve-widget .stock{fill:none;stroke:#6d7885;stroke-width:3}
+  #curve-widget .tuned{fill:none;stroke:var(--ok);stroke-width:4}
+  #curve-widget .proven{fill:#3d86ff;opacity:.9}
+  #curve-widget .hung{fill:var(--alarm)}
+  #curve-widget .hung.refuted{fill:none;stroke:var(--alarm);stroke-width:2.5}
+  #curve-widget .trace{stroke:var(--fire);stroke-width:3;stroke-dasharray:8 6}
+  #curve-widget .marker{fill:none;stroke:var(--fire);stroke-width:4}
+  #curve-widget .marker-label{fill:#ffb08a;font-size:24px;font-weight:700;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .legend{display:flex;gap:14px;flex-wrap:wrap;margin:8px 4px 0;font-size:13px;color:#c9d3df}
+  #curve-widget .legend i{display:inline-block;width:20px;height:3px;vertical-align:middle;margin-right:6px;border-radius:2px}
+  #curve-widget .legend b.dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:6px;box-sizing:border-box}
+  #curve-widget .note{font-size:13px;color:var(--dim);margin:6px 4px 0;min-height:18px}`);
+}
+
 // ---- 3c. THE LAST ENGINEERED DEATH IS REMOVED — the owner's word, 2026-08-22.
 //
 // The mockup pauses the accepted keyframes whenever the page goes into its `hung` state. That is the
@@ -390,7 +457,10 @@ console.log(`СОБРАНО: ${DST}, ${s.length} байт (из ${SRC} — пр�
 // A render is accepted by LOOKING, never by reading the code that produced it (EXP-0046) — so this is
 // the check, not a convenience. The output is a run artefact and stays out of history.
 if (argv.includes('--preview')) {
-  const pulsePath = join('runs', 'dashboard', 'live.json');
+  // Пульс — параметр (`--pulse <файл>`), как у сервера окна (`bugs/65`): снимок с придуманной ступенью
+  // берётся из песочницы, а боевой прибор `runs/dashboard/live.json` ради картинки не переписывается.
+  const pulseArgAt = argv.indexOf('--pulse');
+  const pulsePath = pulseArgAt >= 0 && argv[pulseArgAt + 1] ? argv[pulseArgAt + 1] : join('runs', 'dashboard', 'live.json');
   must(existsSync(pulsePath), `нет пульса ${pulsePath} — сперва прогон: npm run bench -- --from 2842 --to 2820`);
   const pulse = readFileSync(pulsePath, 'utf8');
   let prev = s
@@ -398,7 +468,12 @@ if (argv.includes('--preview')) {
     .replace('src="/logo.webp"', 'src="../logo/kago-logo.webp"')
     // Превью лежит в `assets/dashboard/`, поэтому запись у него под боком, без ведущей косой.
     .replace("'/theme.mp3'", "'themes/deep-space.mp3'");
-  must(prev.includes('connect();'), 'в проводке нет вызова connect()');
+  // ⚠️ ЯКОРЬ — ДВЕ ПОСЛЕДНИЕ СТРОКИ ПРОВОДКИ, а не первое попавшееся `connect();` (найдено снимком
+  // 2026-09-04, `plans/85` Ш6: превью рисовало «НЕТ СВЯЗИ» и пустые плитки — подмена попадала в
+  // `connect();` звукового движка, встроенного ВЫШЕ проводки, а настоящая лента оставалась и падала
+  // на file://). Заглушка ставится ровно вместо вызова ленты в самом хвосте проводки.
+  const CONNECT_AT_TAIL = 'requestAnimationFrame(frame);\nconnect();';
+  must(prev.includes(CONNECT_AT_TAIL), 'в хвосте проводки нет пары requestAnimationFrame(frame) + connect()');
   // `--no-pill` снимает метку «ВИРТУАЛЬНАЯ» — снимок для README показывает ИНСТРУМЕНТ, а он один и
   // тот же на стенде и на живой карте (слово владельца 2026-08-16 04:1x). Числа при этом остаются
   // теми, что были в прогоне: подпись под картинкой говорит, откуда они, а сама картинка не
@@ -410,9 +485,31 @@ if (argv.includes('--preview')) {
   // Ленты в статике нет вовсе, а страница теперь честно называет её отсутствие («нет связи») —
   // `bugs/27`. Для рендера подставляется ЗАГЛУШКА ленты в состоянии OPEN: back door в боевой код
   // ради снимка не заводится, подменяется только то, чего в файле физически нет.
-  prev = prev.replace('connect();',
-    `es = { readyState: 1 }; pulse = ${pulse}; ${noPill ? 'pulse.card.synthetic = false; ' : ''}pulseAt = performance.now(); paint();\n`
+  prev = prev.replace(CONNECT_AT_TAIL,
+    `requestAnimationFrame(frame);\nes = { readyState: 1 }; pulse = ${pulse}; ${noPill ? 'pulse.card.synthetic = false; ' : ''}pulseAt = performance.now(); paint();\n`
     + '  setInterval(() => { pulseAt = performance.now(); }, 200);');
+  // ВИДЖЕТ КРИВОЙ В СТАТИКЕ (`plans/85`): маршрута `/curve.svg` у файла нет, поэтому картинка
+  // рендерится ЗДЕСЬ тем же рендерером из тех же файлов (или из `--curve`/`--journal`) с маркером из
+  // впрыснутого пульса и подставляется адресом `data:` — подменяется ровно то, чего у файла физически
+  // нет, как и лента выше. `--widget curve` открывает превью сразу на кривой.
+  {
+    const cm = await import('../automation-engine/lib/curve-map.mjs');
+    const pr = JSON.parse(pulse)?.run ?? {};
+    const marker = Number.isFinite(pr.frequencyMhz) && Number.isFinite(pr.voltageMv) && pr.finished !== true
+      ? { mhz: pr.frequencyMhz, mv: pr.voltageMv, stock: Number.isFinite(pr.stockVoltageMv) ? pr.stockVoltageMv : null } : null;
+    const argOf = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+    const loaded = cm.loadFacts({ curvePath: argOf('curve', cm.CURVE_PATH), journalPath: argOf('journal', cm.JOURNAL_PATH), inFlight: marker });
+    must(loaded.ok, `кривая для превью: ${loaded.why}`);
+    const svg = cm.renderCurveSvg(loaded.facts, { size: cm.WIDGET_SIZE, marker, summary: true, xCaption: cm.WIDGET_X_CAPTION });
+    const anchor = "const curveUrl = (q) => '/curve.svg' + q;";
+    must(prev.includes(anchor), 'в проводке нет адреса кривой');
+    prev = prev.replace(anchor, `const curveUrl = () => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(${JSON.stringify(svg)});`);
+    if (argOf('widget', null) === 'curve') {
+      const pick = "new URLSearchParams(location.search).get('widget')";
+      must(prev.includes(pick), 'в проводке нет разбора ?widget=');
+      prev = prev.replace(pick, "'curve'");
+    }
+  }
   const out = join('assets', 'dashboard', '_preview.html');
   writeFileSync(out, prev, 'utf8');
   console.log(`ПРЕВЬЮ:  ${out} — впрыснут пульс seq=${JSON.parse(pulse).seq}. Снять картинку:`);

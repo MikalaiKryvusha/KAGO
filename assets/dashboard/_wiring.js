@@ -128,6 +128,7 @@ function paint() {
   document.title = r.finished
     ? 'KAGO — прогон завершён'
     : 'KAGO — Выполняется автоматический тюнинг-прогон видеокарты';
+  refreshCurve(false);   // кривая перечитывается ТОЛЬКО когда сменилась ступень или закрылась частота
 }
 
 /* ⏱ ЧАСЫ ПРОГОНА. Считаются от ЛОКАЛЬНЫХ часов, привязанных к последнему пульсу, поэтому идут в
@@ -428,6 +429,88 @@ function wireVizMenu() {
   setOpen(false);
 }
 
+/* ==================================================================================================
+   ВИДЖЕТ КРИВОЙ — переключается ВИДЖЕТ, а не страница (слово владельца 2026-08-23, `plans/26`;
+   MVP — `plans/85`)
+   ==================================================================================================
+   Страница здесь ЧИТАТЕЛЬ: картинку целиком рисует сервер (`/curve.svg`) тем же рендерером, что и
+   `assets/curve-map.html`. Единственные числа, которые страница отдаёт наверх, — три поля пульса,
+   переданные в запрос КАК ЕСТЬ: частота под тестом, её напряжение и сток. Ни одного вычисления над
+   кривой здесь нет и быть не должно (E26-AC1): третья версия правды на витрине начинается с одного
+   вычитания в браузере.
+
+   КОГДА КАРТИНКА ПЕРЕЧИТЫВАЕТСЯ — по ключу, а не по каждому кадру: сменилась ступень (частота ·
+   напряжение · сток), закрылась частота (документ переписан), прогон кончился, прогона нет. Возраст
+   записи и секунды стресс-теста ключом НЕ являются — от них картинка не меняется. Между прогонами
+   виджет показывает документ как есть: «что уже протюнили» читается и без прогона.
+
+   ВЫБОР ЧЕЛОВЕКА ПОМНИТСЯ (тот же довод, что у звука): окно поднимается заново на каждый прогон, и
+   заставлять владельца каждый раз щёлкать «КРИВАЯ» значит вернуть его к консоли. `?widget=curve` в
+   адресе сильнее памяти — так снимается превью и так можно открыть окно сразу на кривой.
+   Умолчание — принятый владельцем рисунок карты; кривая в одном щелчке. */
+const WIDGET_KEY = 'kago.widget.v1';
+const curveUrl = (q) => '/curve.svg' + q;
+let curveShown = false;
+let curveKey = null;        // ключ последней запрошенной картинки
+
+function wireCurveWidget() {
+  const card = $('card-widget'), curve = $('curve-widget'), bCard = $('widget-card'), bCurve = $('widget-curve');
+  if (!card || !curve || !bCard || !bCurve || !$('curve-svg')) return;   // страница собрана без виджета — не падаем
+  const load = () => { try { return localStorage.getItem(WIDGET_KEY); } catch (e) { return null; } };
+  const save = (v) => { try { localStorage.setItem(WIDGET_KEY, v); } catch (e) { /* приватный режим */ } };
+  const show = (which, remember) => {
+    curveShown = which === 'curve';
+    card.hidden = curveShown;
+    curve.hidden = !curveShown;
+    bCard.classList.toggle('on', !curveShown);
+    bCurve.classList.toggle('on', curveShown);
+    if (remember) save(which);
+    if (curveShown) refreshCurve(true);
+  };
+  bCard.addEventListener('click', () => show('card', true));
+  bCurve.addEventListener('click', () => show('curve', true));
+  const fromUrl = new URLSearchParams(location.search).get('widget');
+  show(fromUrl === 'curve' || fromUrl === 'card' ? fromUrl : (load() === 'curve' ? 'curve' : 'card'), false);
+}
+
+function curveKeyOf(p) {
+  if (!p) return 'no-pulse';
+  const r = p.run || {};
+  return [p.noRun ? 'none' : 'run', r.frequencyMhz, r.voltageMv, r.stockVoltageMv, (r.coverage || {}).closed, r.finished].join('|');
+}
+
+function refreshCurve(force) {
+  if (!curveShown) return;
+  const key = curveKeyOf(pulse);
+  if (!force && key === curveKey) return;
+  curveKey = key;
+  const r = (pulse && !pulse.noRun && pulse.run) ? pulse.run : {};
+  const q = new URLSearchParams();
+  // Три числа пульса едут в запрос КАК ЕСТЬ — страница их не складывает и не вычитает.
+  if (r.frequencyMhz != null && r.voltageMv != null && r.finished !== true) {
+    q.set('mhz', r.frequencyMhz);
+    q.set('mv', r.voltageMv);
+    if (r.stockVoltageMv != null) q.set('stock', r.stockVoltageMv);
+  }
+  const qs = q.toString() ? '?' + q.toString() : '';
+  const holder = $('curve-svg'), note = $('curve-note');
+  fetch(curveUrl(qs), { cache: 'no-store' })
+    .then(async (res) => { if (!res.ok) throw new Error(await res.text()); return res.text(); })
+    .then((svg) => {
+      holder.innerHTML = svg;
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, '0');
+      note.textContent = (qs ? 'ступень под тестом отмечена · ' : 'прогона нет — документ как есть · ')
+        + 'картинка обновлена ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+    })
+    .catch((e) => {
+      // Обрыв или отказ сервера НАЗЫВАЕТСЯ, а не молчит: прошлая картинка остаётся, подпись говорит,
+      // что она прошлая. Следующая смена ступени попробует снова.
+      curveKey = null;
+      note.textContent = 'кривая недоступна — ' + (e && e.message ? e.message : e) + ' · окно повторит запрос при следующей смене ступени';
+    });
+}
+
 /* Стенные часы браузера — единственное на этой странице, что НЕ приходит с прогона, и это
    намеренно: они обязаны идти, когда всё остальное встало.
 
@@ -447,5 +530,6 @@ wallClock();
 
 wireVizMenu();     // сначала оправа: звук при отрисовке уже красит кнопку меню
 wireSound();
+wireCurveWidget(); // до ленты: запомненная «КРИВАЯ» запрашивает документ ещё до первого пульса
 requestAnimationFrame(frame);
 connect();

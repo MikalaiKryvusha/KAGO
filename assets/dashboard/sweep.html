@@ -41,6 +41,35 @@
   .m.clocks>div{flex:1}
   .m.clocks b{font-size:24px}
   .stage{position:relative}
+  /* ПЕРЕКЛЮЧАТЕЛЬ ВИДЖЕТА — левый верхний угол сцены, зеркало пилюли справа. Кнопки макета
+     стилизованы глобально (`button{…}`), поэтому здесь всё переопределено явно. */
+  .wswitch{position:absolute;top:12px;left:14px;z-index:2;display:inline-flex;border:1px solid var(--line);
+           border-radius:999px;overflow:hidden;background:rgba(15,18,22,.88)}
+  .wswitch button{font:inherit;font-size:11px;font-weight:700;letter-spacing:.12em;padding:4px 12px;
+                  border:0;border-radius:0;background:transparent;color:var(--dim);cursor:pointer}
+  .wswitch button:hover{color:#e6edf3;border-color:transparent}
+  .wswitch button.on{background:#1c242e;color:#e6edf3}
+  /* ВИДЖЕТ КРИВОЙ — тёмная тема тех же классов, что рисует рендерер curve-map.mjs. Размеры букв —
+     в системе координат картинки 760×520: 22 px осей, 24 px подписи маркера. */
+  #curve-widget{padding:38px 10px 8px}
+  #curve-widget svg{display:block;width:100%;height:auto}
+  #curve-widget .grid{stroke:#232a33;stroke-width:1}
+  #curve-widget .ax{fill:#8b98a8;font-size:22px;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .ax.empty{font-size:26px;fill:#c9d3df}
+  #curve-widget .cap{fill:#a9b4c2;font-size:16px;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .gap{fill:#171b21}
+  #curve-widget .stock{fill:none;stroke:#6d7885;stroke-width:3}
+  #curve-widget .tuned{fill:none;stroke:var(--ok);stroke-width:4}
+  #curve-widget .proven{fill:#3d86ff;opacity:.9}
+  #curve-widget .hung{fill:var(--alarm)}
+  #curve-widget .hung.refuted{fill:none;stroke:var(--alarm);stroke-width:2.5}
+  #curve-widget .trace{stroke:var(--fire);stroke-width:3;stroke-dasharray:8 6}
+  #curve-widget .marker{fill:none;stroke:var(--fire);stroke-width:4}
+  #curve-widget .marker-label{fill:#ffb08a;font-size:24px;font-weight:700;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .legend{display:flex;gap:14px;flex-wrap:wrap;margin:8px 4px 0;font-size:13px;color:#c9d3df}
+  #curve-widget .legend i{display:inline-block;width:20px;height:3px;vertical-align:middle;margin-right:6px;border-radius:2px}
+  #curve-widget .legend b.dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:6px;box-sizing:border-box}
+  #curve-widget .note{font-size:13px;color:var(--dim);margin:6px 4px 0;min-height:18px}
   /* Пилюля «ВИРТУАЛЬНАЯ» — вверху справа НА виджете видеокарты, место выбрал владелец. Огненный
      цвет бренда: заметно, но это не тревога — карта не сломана, она ненастоящая. */
   .pill{position:absolute;top:12px;right:14px;z-index:2;padding:4px 12px;border-radius:999px;
@@ -220,7 +249,10 @@
 <div class="wrap">
   <div class="card">
     <div class="stage"><span class="pill" id="synthetic-note" style="display:none">ВИРТУАЛЬНАЯ</span>
-      <svg viewBox="0 26 380 262" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
+      <div class="wswitch" role="group" aria-label="что показывать на сцене">
+        <button type="button" id="widget-card" class="on">КАРТА</button><button type="button" id="widget-curve">КРИВАЯ</button>
+      </div>
+      <div id="card-widget"><svg viewBox="0 26 380 262" role="img" aria-label="Видеокарта с тремя вентиляторами и отвёрткой">
         <defs>
           <linearGradient id="shroud" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stop-color="#4a525d"/><stop offset=".45" stop-color="#343b45"/>
@@ -475,7 +507,19 @@
             <text id="seg-pwr" class="seg on"  x="343" y="235" text-anchor="end">248</text>
           </g>
         </g>
-      </svg>
+      </svg></div><!-- /card-widget -->
+      <div id="curve-widget" hidden>
+        <div id="curve-svg"><p class="note">кривая ещё не запрошена</p></div>
+        <div class="legend">
+          <span><i style="background:#6d7885"></i>сток — заводское напряжение</span>
+          <span><i style="background:var(--ok)"></i>наша — что ляжет в карту; левее серой = глубже андервольт</span>
+          <span><b class="dot" style="background:#3d86ff"></b>самое глубокое, что проходило стресс-тест</span>
+          <span><b class="dot" style="background:var(--alarm)"></b>пол зависания — ниже спуск не ходит</span>
+          <span><b class="dot" style="border:2px solid var(--alarm)"></b>зависание, снятое движком</span>
+          <span><b class="dot" style="border:3px solid var(--fire)"></b>частота под тестом сейчас</span>
+        </div>
+        <p class="note" id="curve-note"></p>
+      <!-- /curve-widget --></div>
     </div>
   </div>
 
@@ -1967,6 +2011,7 @@ function paint() {
   document.title = r.finished
     ? 'KAGO — прогон завершён'
     : 'KAGO — Выполняется автоматический тюнинг-прогон видеокарты';
+  refreshCurve(false);   // кривая перечитывается ТОЛЬКО когда сменилась ступень или закрылась частота
 }
 
 /* ⏱ ЧАСЫ ПРОГОНА. Считаются от ЛОКАЛЬНЫХ часов, привязанных к последнему пульсу, поэтому идут в
@@ -2267,6 +2312,88 @@ function wireVizMenu() {
   setOpen(false);
 }
 
+/* ==================================================================================================
+   ВИДЖЕТ КРИВОЙ — переключается ВИДЖЕТ, а не страница (слово владельца 2026-08-23, `plans/26`;
+   MVP — `plans/85`)
+   ==================================================================================================
+   Страница здесь ЧИТАТЕЛЬ: картинку целиком рисует сервер (`/curve.svg`) тем же рендерером, что и
+   `assets/curve-map.html`. Единственные числа, которые страница отдаёт наверх, — три поля пульса,
+   переданные в запрос КАК ЕСТЬ: частота под тестом, её напряжение и сток. Ни одного вычисления над
+   кривой здесь нет и быть не должно (E26-AC1): третья версия правды на витрине начинается с одного
+   вычитания в браузере.
+
+   КОГДА КАРТИНКА ПЕРЕЧИТЫВАЕТСЯ — по ключу, а не по каждому кадру: сменилась ступень (частота ·
+   напряжение · сток), закрылась частота (документ переписан), прогон кончился, прогона нет. Возраст
+   записи и секунды стресс-теста ключом НЕ являются — от них картинка не меняется. Между прогонами
+   виджет показывает документ как есть: «что уже протюнили» читается и без прогона.
+
+   ВЫБОР ЧЕЛОВЕКА ПОМНИТСЯ (тот же довод, что у звука): окно поднимается заново на каждый прогон, и
+   заставлять владельца каждый раз щёлкать «КРИВАЯ» значит вернуть его к консоли. `?widget=curve` в
+   адресе сильнее памяти — так снимается превью и так можно открыть окно сразу на кривой.
+   Умолчание — принятый владельцем рисунок карты; кривая в одном щелчке. */
+const WIDGET_KEY = 'kago.widget.v1';
+const curveUrl = (q) => '/curve.svg' + q;
+let curveShown = false;
+let curveKey = null;        // ключ последней запрошенной картинки
+
+function wireCurveWidget() {
+  const card = $('card-widget'), curve = $('curve-widget'), bCard = $('widget-card'), bCurve = $('widget-curve');
+  if (!card || !curve || !bCard || !bCurve || !$('curve-svg')) return;   // страница собрана без виджета — не падаем
+  const load = () => { try { return localStorage.getItem(WIDGET_KEY); } catch (e) { return null; } };
+  const save = (v) => { try { localStorage.setItem(WIDGET_KEY, v); } catch (e) { /* приватный режим */ } };
+  const show = (which, remember) => {
+    curveShown = which === 'curve';
+    card.hidden = curveShown;
+    curve.hidden = !curveShown;
+    bCard.classList.toggle('on', !curveShown);
+    bCurve.classList.toggle('on', curveShown);
+    if (remember) save(which);
+    if (curveShown) refreshCurve(true);
+  };
+  bCard.addEventListener('click', () => show('card', true));
+  bCurve.addEventListener('click', () => show('curve', true));
+  const fromUrl = new URLSearchParams(location.search).get('widget');
+  show(fromUrl === 'curve' || fromUrl === 'card' ? fromUrl : (load() === 'curve' ? 'curve' : 'card'), false);
+}
+
+function curveKeyOf(p) {
+  if (!p) return 'no-pulse';
+  const r = p.run || {};
+  return [p.noRun ? 'none' : 'run', r.frequencyMhz, r.voltageMv, r.stockVoltageMv, (r.coverage || {}).closed, r.finished].join('|');
+}
+
+function refreshCurve(force) {
+  if (!curveShown) return;
+  const key = curveKeyOf(pulse);
+  if (!force && key === curveKey) return;
+  curveKey = key;
+  const r = (pulse && !pulse.noRun && pulse.run) ? pulse.run : {};
+  const q = new URLSearchParams();
+  // Три числа пульса едут в запрос КАК ЕСТЬ — страница их не складывает и не вычитает.
+  if (r.frequencyMhz != null && r.voltageMv != null && r.finished !== true) {
+    q.set('mhz', r.frequencyMhz);
+    q.set('mv', r.voltageMv);
+    if (r.stockVoltageMv != null) q.set('stock', r.stockVoltageMv);
+  }
+  const qs = q.toString() ? '?' + q.toString() : '';
+  const holder = $('curve-svg'), note = $('curve-note');
+  fetch(curveUrl(qs), { cache: 'no-store' })
+    .then(async (res) => { if (!res.ok) throw new Error(await res.text()); return res.text(); })
+    .then((svg) => {
+      holder.innerHTML = svg;
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, '0');
+      note.textContent = (qs ? 'ступень под тестом отмечена · ' : 'прогона нет — документ как есть · ')
+        + 'картинка обновлена ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+    })
+    .catch((e) => {
+      // Обрыв или отказ сервера НАЗЫВАЕТСЯ, а не молчит: прошлая картинка остаётся, подпись говорит,
+      // что она прошлая. Следующая смена ступени попробует снова.
+      curveKey = null;
+      note.textContent = 'кривая недоступна — ' + (e && e.message ? e.message : e) + ' · окно повторит запрос при следующей смене ступени';
+    });
+}
+
 /* Стенные часы браузера — единственное на этой странице, что НЕ приходит с прогона, и это
    намеренно: они обязаны идти, когда всё остальное встало.
 
@@ -2286,6 +2413,7 @@ wallClock();
 
 wireVizMenu();     // сначала оправа: звук при отрисовке уже красит кнопку меню
 wireSound();
+wireCurveWidget(); // до ленты: запомненная «КРИВАЯ» запрашивает документ ещё до первого пульса
 requestAnimationFrame(frame);
 connect();
 </script>
