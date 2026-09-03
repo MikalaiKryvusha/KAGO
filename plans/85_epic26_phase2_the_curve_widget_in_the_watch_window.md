@@ -165,6 +165,7 @@ Each step quotes the meta-plan line it executes: `plans/26` → «2 | Видже
 | the built page is fresh and the tools carry their entry guards | `npm run check` | `tools/check.mjs` |
 | the static map did not drift semantically | rebuilt page vs the numbers of P85-AC7 | `assets/curve-map.html` |
 | it looks like a curve widget to a human | two headless renders looked at; then the owner's eye | `runs/dashboard/preview-card.png` · `runs/dashboard/preview-curve.png` (run artifacts, not history) |
+| the REAL command path serves it, not only the library | ✅ 2026-09-04 02:14 — `npm run dashboard -- --no-window --port 7311` raised in the background; `/health` 200, `/` 206 KB with the widget markup, `/curve.svg` 200 · 18 KB · 39 ms, with the query: 1 marker · 1 trace · 2 refuted rings; closed by `--close` (pid named, port freed) | `automation-engine/lib/run-dashboard.mjs` (`main`) |
 
 ## 5. Risks, tiered (Murphy)
 
