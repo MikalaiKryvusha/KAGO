@@ -1727,17 +1727,25 @@ export function virtualCard(cardProfile, {
       return { ok: true };
     },
 
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null } = {}) {
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null, boundHeldBy = null } = {}) {
       // КОНВЕРТ ПЕРЕДАЁТСЯ ТЕМ ЖЕ ЧИСЛОМ, ЧТО У ЖИВОГО БЭКЕНДА (`bugs/99`), и это не удобство, а
       // ПАРИТЕТ: подрежь живая карта подъём, а двойник нет — двойник начал бы ОТКАЗЫВАТЬ там, где
       // карта пишет. Двойник, отказывающий больше карты, врёт мягче, чем отказывающий меньше, но
       // врёт: стенд перестаёт быть репетицией того же прогона.
-      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz, envelopeMhz: cardMaxClockMhz, intentTopMhz });
+      // ЗАМОК ДЕРЖИТ ГРАНИЦУ (`plans/84`): подрезки против таблицы момента НЕТ — вектор уже подрезан
+      // против опоры выше по течению, и резать его второй раз значило бы снова сделать его зависимым
+      // от момента. Тот же выбор, что у живого бэкенда, тем же признаком.
+      const heldByLock = boundHeldBy === 'lock';
+      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz, envelopeMhz: heldByLock ? null : cardMaxClockMhz, intentTopMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE SAME FOUR REFUSALS THE LIVE BACKEND APPLIES — one function, called by both. A mutation
       // that removes this line must redden the parity block, and that is the block's whole job.
-      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
+      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz, boundHeldBy, basisTopMhz: intentTopMhz });
       if (refusal) return refusal;
+      // Превышение МОМЕНТА над максимумом — число наружу, включая ноль: под замком это не отказ, но и
+      // не молчание (R4b). Без заявки о замке здесь всегда 0 по построению — R13 бы отказал раньше.
+      const momentOvershootMhz = heldByLock && vec.highestRaisedOfferMhz !== null && Number.isFinite(Number(cardMaxClockMhz))
+        ? Math.max(0, vec.highestRaisedOfferMhz - Number(cardMaxClockMhz)) : 0;
       // ─── ЧТО КАРТА В ИТОГЕ ДЕРЖИТ — РЕШАЕТ КАРТА, А НЕ ВЫЗЫВАЮЩИЙ (`plans/38`) ─────────────────
       //
       // Здесь стояло `state.curveOffsetsMhz = vec.offsets…`, то есть карта СОХРАНЯЛА ВЕКТОР. Из-за
@@ -1751,7 +1759,7 @@ export function virtualCard(cardProfile, {
       if (!w.ok) return w;
       // ⚠️ `vector` — ЗАКАЗ, а не то, что легло. Вызывающий, сверяющий запись, обязан спрашивать
       // карту (`readCurve`/`readCurveOffsets`), иначе он сверяет свою заявку сам с собой.
-      return { ok: true, vector: requested };
+      return { ok: true, vector: requested, envelopeClamp: vec.envelopeClamp, momentOvershootMhz, highestRaisedOfferMhz: vec.highestRaisedOfferMhz };
     },
 
     async readCurveOffsets() {

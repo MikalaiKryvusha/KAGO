@@ -185,7 +185,7 @@ export function nvidiaSmiBackend() {
  *  `virtual-gpu --selftest` adds the parity block, and a mutation that stops the virtual backend from
  *  calling this function reddens it — i.e. the shared decision is proved SHARED, not merely present.]
  */
-export function curveWriteRefusal(vec, { capMhz = null, cardMaxClockMhz = null } = {}) {
+export function curveWriteRefusal(vec, { capMhz = null, cardMaxClockMhz = null, boundHeldBy = null, basisTopMhz = null } = {}) {
   // ─── R11: A CEILING MUST BE HELD BY SOMETHING ──────────────────────────────────────────────────
   // The format already refuses a cap below the curve's floor, and this is the same rule at the moment
   // of writing, where the CARD's own top is in hand rather than the ladder's. Two checks of one fact
@@ -213,6 +213,27 @@ export function curveWriteRefusal(vec, { capMhz = null, cardMaxClockMhz = null }
     return { ok: false, rule: 'R13-bound', why: 'максимум карты не передан — писать кривую, не зная потолка экземпляра, запрещено '
       + '(правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ», R13, bugs/11)' };
   }
+  // ─── ДЕРЖАТЕЛЬ ГРАНИЦЫ — ЗАМОК: R13 СУДИТ НАМЕРЕНИЕ ПРОТИВ ОПОРЫ, А НЕ ПРЕДЛОЖЕНИЕ МОМЕНТА ──────
+  //
+  // Репетиция `plans/84`. Когда вызывающий заявил, что «никогда выше» держит замок-граница, а вектор
+  // подрезан против ОПОРЫ (`resolveProfileCurve`, `clampAtBasis`), предложение таблицы МОМЕНТА может
+  // законно стоять выше максимума на разницу таблиц покоя и нагрузки (до +22 МГц, `bugs/97`) — карта
+  // до него не доходит, потому что замок стоит ПЕРВЫМ. Судится тогда то, что судить честно:
+  // НАМЕРЕНИЕ. Бомба `bugs/11` (+592 без потолка, намерение 3400) отказ получает по-прежнему; заявка
+  // «держит замок» БЕЗ заявленного намерения — тоже отказ: новое поведение требует положительного
+  // утверждения, а не отсутствия возражений (та же логика, что у привратника подрезки в `bugs/99`).
+  // Без заявки — прежний путь буква в букву.
+  if (boundHeldBy === 'lock') {
+    if (typeof basisTopMhz !== 'number' || !Number.isFinite(basisTopMhz)) {
+      return { ok: false, rule: 'R13-basis', why: 'заявлено, что границу держит замок, а намерение вектора против опоры не заявлено — '
+        + 'судить нечего, запись запрещена (plans/84)' };
+    }
+    if (basisTopMhz > bound) {
+      return { ok: false, rule: 'R13-offer', why: `намерение вектора против ОПОРЫ — ${basisTopMhz} МГц при максимуме карты ${bound} МГц `
+        + `— превышение ${basisTopMhz - bound} МГц. Замок держит выданную частоту, но не право целиться выше максимума: `
+        + 'это правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ» (R13, bugs/11)' };
+    }
+  } else
   // The judged number is what WE lifted, never what the factory table already offered: on this card
   // the stock top entry is 3172 MHz against a card maximum of 3090, so reading the whole curve's top
   // here would refuse a vector of all zeroes.
@@ -260,7 +281,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
   const COUNT = () => (mod.CLK_VF_POINT_COUNT ?? 128) - 1;
 
   return {
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null } = {}) {
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null, boundHeldBy = null } = {}) {
       await open();
       const curve = mod.readVfCurve(nv, handle);
       if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
@@ -330,13 +351,19 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       // профиль неприменимым (замерено 2026-09-01: 5 точек из 68, максимум −15 МГц). Судить и
       // ограничивать одним числом — не дублирование, а один рычаг с одной опорой: разойдись они, и
       // мы получили бы пару «правда↔зеркало» ровно на пути записи в карту владельца.
-      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz, envelopeMhz: cardMaxClockMhz, intentTopMhz });
+      // ЗАМОК ДЕРЖИТ ГРАНИЦУ (`plans/84`, репетиция): вектор уже подрезан против ОПОРЫ выше по течению,
+      // и подрезка против таблицы МОМЕНТА не делается — иначе вектор снова зависел бы от температуры
+      // клика. Отказы ниже судят тогда НАМЕРЕНИЕ, а превышение момента возвращается числом.
+      const heldByLock = boundHeldBy === 'lock';
+      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz, envelopeMhz: heldByLock ? null : cardMaxClockMhz, intentTopMhz });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE FOUR REFUSALS — R11, R13 (bound), R13 (raised offer), R12 — live in `curveWriteRefusal`
       // above, so the virtual card of epic 03 is held to the SAME bar rather than to a copy of it.
       // Everything the long comments there say applied here first and was moved, not softened.
-      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz });
+      const refusal = curveWriteRefusal(vec, { capMhz, cardMaxClockMhz, boundHeldBy, basisTopMhz: intentTopMhz });
       if (refusal) return refusal;
+      const momentOvershootMhz = heldByLock && vec.highestRaisedOfferMhz !== null && Number.isFinite(Number(cardMaxClockMhz))
+        ? Math.max(0, vec.highestRaisedOfferMhz - Number(cardMaxClockMhz)) : 0;
       const w = mod.writeCurve(nv, handle, vec.offsets, { count: COUNT() });
       // ⚠️ `w.ok` NOW MEANS «the calls were accepted AND the card holds what we asked», not «the
       // statuses were zero» (`plans/40`, epic 36 phase 4). So the refusal quotes the NAMED class when
@@ -349,7 +376,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
           why: w.why ?? `запись кривой: ${w.failed} точек из ${COUNT()} не записались`,
         };
       }
-      return { ok: true, vector: vec.offsets.slice(0, COUNT()), envelopeClamp: vec.envelopeClamp ?? null };
+      return { ok: true, vector: vec.offsets.slice(0, COUNT()), envelopeClamp: vec.envelopeClamp ?? null, momentOvershootMhz, highestRaisedOfferMhz: vec.highestRaisedOfferMhz };
     },
 
     async readCurveOffsets() {
@@ -618,6 +645,15 @@ export async function resolveProfileCurve(profile, {
   // Куда сказать, ЧТО послужило опорой. Молчащий выбор опоры — это ровно тот дефект, который
   // `bugs/97` и лечит, поэтому канал наружу обязателен по построению, а не по желанию.
   onBase = null,
+  // ─── ПОДРЕЗКА ПРОТИВ ОПОРЫ, А НЕ ПРОТИВ ТАБЛИЦЫ МОМЕНТА (`plans/84`, репетиция) ─────────────────
+  //
+  // `false` — прежний путь буква в букву (`plans/84` P84-AC7). `true` — подъём подрезается по конверту
+  // ЗДЕСЬ, против той же ОПОРЫ, против которой он считался, и потому вектор один при любой температуре
+  // клика; «никогда выше максимума» при этом держит не арифметика момента, а замок-граница, который
+  // `apply` ставит ПЕРВЫМ. Требует опоры-АРТЕФАКТА: без неё «опора» — это таблица момента, и флаг не
+  // покупал бы ничего, кроме ложного чувства воспроизводимости, — поэтому отказ по имени.
+  clampAtBasis = false,
+  envelopeMhz = null,
 } = {}) {
   const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
   const ref = profile?.settings?.curveRef ?? null;
@@ -770,6 +806,52 @@ export async function resolveProfileCurve(profile, {
       }
     }
   }
+  // ─── ПОДРЕЗКА ПРОТИВ ОПОРЫ (`plans/84` Ш2) — ДО расчёта намерения, чтобы намерение было честным ─
+  if (clampAtBasis && resolved) {
+    const env = Number.isFinite(Number(envelopeMhz)) && Number(envelopeMhz) > 0 ? Number(envelopeMhz) : null;
+    const refusals = [];
+    if (env === null) refusals.push({ field: 'envelopeMhz', why: 'подрезка против опоры требует максимума карты, а он не передан' });
+    if (baseSource?.kind !== 'reference') {
+      refusals.push({ field: 'settings.curveRef', why: `подрезка против опоры требует опоры-АРТЕФАКТА, а опорой стало «${baseSource?.kind ?? '—'}»`
+        + (baseSource?.after?.why ? ` (${baseSource.after.why})` : '') + ' — без артефакта вектор считался бы против таблицы момента, '
+        + 'и флаг не покупал бы воспроизводимости. Снимите опору: npm run curve -- --take-reference, либо примените без флага' });
+    }
+    if (refusals.length) {
+      const err = new Error(`профиль «${profile?.name}»: подрезка против опоры невозможна:\n` + refusals.map((r) => `    ${r.field}: ${r.why}`).join('\n'));
+      err.refusals = refusals;
+      throw err;
+    }
+    // 🔴 «ПОДРЕЗКА ПРОТИВ ОПОРЫ» ВЫРОЖДАЕТСЯ В СУД, И ЭТО НАХОДКА РЕПЕТИЦИИ, А НЕ УПРОЩЕНИЕ.
+    //
+    // Первая редакция РЕЗАЛА подъём до `конверт − опора_i`. Но всё, что пришлось бы резать против
+    // опоры, — это вектор, ЦЕЛИВШИЙСЯ выше максимума карты, а такой вектор R13 обязан ОТВЕРГАТЬ, не
+    // подправлять молча (EXP-0225: правка, превращающая отказ в тихое исправление, обезоруживает
+    // сторожа; ровно так первая редакция подрезки момента пропустила бомбу `bugs/11`). А вектор, не
+    // целившийся выше, резать не за что. Значит против опоры нечего резать НИКОГДА: либо отказ, либо
+    // вектор как есть. Что этот режим действительно покупает — отсутствие подрезки МОМЕНТА в бэкенде
+    // (`boundHeldBy: 'lock'`): вектор перестаёт зависеть от температуры клика, а превышение момента
+    // держит замок, поставленный первым. Цена — числом, всегда, включая «резать нечего».
+    let intentAtBasis = null;
+    if (Array.isArray(resolved.deltaByPointMhz)) {
+      for (let i = 0; i < resolved.deltaByPointMhz.length; i += 1) {
+        const d = Number(resolved.deltaByPointMhz[i]) || 0;
+        const p = base[i];
+        if (d <= 0 || !p || !(p.freqKhz > 0)) continue;
+        const offer = p.mhz + d;
+        if (intentAtBasis === null || offer > intentAtBasis) intentAtBasis = offer;
+      }
+    }
+    if (intentAtBasis !== null && intentAtBasis > env) {
+      const err = new Error(`профиль «${profile?.name}» отвергнут до записи: намерение вектора против ОПОРЫ — ${intentAtBasis} МГц при `
+        + `максимуме карты ${env} МГц (превышение ${intentAtBasis - env} МГц). Замок держит выданную частоту, но не право целиться `
+        + 'выше максимума — это правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ» (R13, bugs/11); против опоры это не режется, а отвергается');
+      err.refusals = [{ field: 'settings.curveRef', why: `намерение ${intentAtBasis} МГц выше конверта ${env} МГц (R13, plans/84)` }];
+      throw err;
+    }
+    resolved.__basisJudge = { envelopeMhz: env, basis: 'reference', intentTopMhz: intentAtBasis, verdict: intentAtBasis === null ? 'ничего не поднято' : 'внутри конверта — резать нечего' };
+    resolved.__boundHeldBy = 'lock';
+  }
+
   // ─── НАМЕРЕНИЕ ВЕКТОРА — ОДНО ЧИСЛО, ЕДУЩЕЕ ВМЕСТЕ С НИМ (`bugs/99`) ──────────────────────────
   //
   // «Куда вектор ЦЕЛИЛСЯ» — это верхнее поднятое предложение против ТОЙ опоры, для которой он
@@ -899,6 +981,25 @@ export async function apply(backend, profile, {
   // reach a `curveRef` profile MUST, because only they can `await import` the store — we use their
   // answer verbatim. `undefined` is the only value that triggers a resolution here.
   const wantCurve = curve === undefined ? effectiveCurveSetting(profile, { loadCurve }) : curve;
+  // ─── ЗАМОК ДЕРЖИТ ГРАНИЦУ → ЗАМОК ОБЯЗАТЕЛЕН И СТАВИТСЯ ПЕРВЫМ (`plans/84` Ш4) ──────────────────
+  //
+  // Вектор, подрезанный против ОПОРЫ, в покое может ПРЕДЛАГАТЬ выше максимума карты на разницу таблиц
+  // (до +22 МГц, `bugs/97`); держит его не арифметика, а замок-граница. Значит без замка в профиле
+  // такой вектор писать нельзя вовсе, а с замком — только ПОСЛЕ того, как замок встал: карта не должна
+  // ни секунды стоять без замка с предложением выше максимума (класс `bugs/11`). Отказ — до первой записи.
+  if (wantCurve?.__boundHeldBy === 'lock') {
+    const env = wantCurve.__basisJudge?.envelopeMhz ?? null;
+    const lock = profile?.settings?.graphicsClockLockMhz ?? null;
+    const why = !lock ? 'в профиле нет замка частоты'
+      : !(lock.min < lock.max) ? `замок ${lock.min}…${lock.max} — закрепление, а не граница`
+        : (env !== null && lock.max > env) ? `верх замка ${lock.max} МГц выше конверта ${env} МГц — «никогда выше» им не держится`
+          : null;
+    if (why) {
+      const err = new Error(`профиль «${profile?.name}» отвергнут до записи: вектор подрезан против опоры и рассчитывает на замок-границу, а ${why}`);
+      err.refusals = [{ field: 'settings.graphicsClockLockMhz', why: `${why} (plans/84: держатель границы — замок, и он обязателен)` }];
+      throw err;
+    }
+  }
   if (wantCurve) {
     if (!curveBackend) {
       const err = new Error(`профиль «${profile.name}» задаёт кривую V/F, а бэкенд кривой не передан — `
@@ -916,6 +1017,7 @@ export async function apply(backend, profile, {
       ? `ВЕКТОР на ${raise.length} точек (подъём ${Math.min(...raise)}…${Math.max(...raise)} МГц)`
       : `подъём +${raise} МГц на всю кривую`;
     steps.push({
+      kind: 'curve',
       what: `кривая V/F: ${raiseSaid}, ${wantCurve.capMhz === null ? 'без потолка' : `потолок ${wantCurve.capMhz} МГц`}`
         // ── ЧЕМ БЫЛА ОПОРА — В ТОЙ ЖЕ СТРОКЕ, ВСЕГДА (`B97-AC3`) ─────────────────────────────────
         // Оператор читает эту строку в секунды перед записью в карту владельца, и «против чего
@@ -932,6 +1034,7 @@ export async function apply(backend, profile, {
         // потому что бэкенд записи опоры не видит, а без намерения подрезка по конверту запрещена.
         const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz, {
           cardMaxClockMhz: before.clockMaxMhz, intentTopMhz: wantCurve.__intentTopMhz ?? null,
+          boundHeldBy: wantCurve.__boundHeldBy ?? null,
         });
         if (!w.ok) throw new Error(`запись кривой не удалась: ${w.why ?? 'причина не названа'}`);
         // P6-AC3 — PROVED BY READ-BACK, never by a status code. `nvidia-smi` already taught this
@@ -960,13 +1063,20 @@ export async function apply(backend, profile, {
         // замера потом. Ноль печатается тоже: строка, появляющаяся только при подрезке, своим
         // молчанием ничего не сообщает (R4b, тот же барьер, что у строки опоры выше).
         const ec = w.envelopeClamp ?? null;
-        const note = ec === null || ec.envelopeMhz === null
-          ? ' · ПОДРЕЗКА ПО КОНВЕРТУ: не проверялась — максимум карты бэкенду не передан'
-          : (ec.points === 0
-            ? ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): не потребовалась, 0 точек`
-            : ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): ${ec.points} точ., суммарно −${ec.totalMhz} МГц, `
-              + `максимум на точке −${ec.maxMhz} МГц (${ec.rows.map((r) => `${r.voltageMv ?? '?'} мВ ${r.was}→${r.now}`).join(', ')}`
-              + `${ec.points > ec.rows.length ? ' …' : ''})`);
+        const bj = wantCurve.__basisJudge ?? null;
+        // ─── ЗАМОК ДЕРЖИТ ГРАНИЦУ (`plans/84` P84-AC6): суд против ОПОРЫ и превышение МОМЕНТА —
+        // оба числом, оба всегда, включая ноль. Второе — то самое, чего прежний путь не допускал;
+        // под замком оно не отказ, но и не молчание.
+        const note = bj !== null
+          ? ` · ПОДРЕЗКА ПРОТИВ ОПОРЫ (${bj.envelopeMhz} МГц): резать нечего — намерение ${bj.intentTopMhz ?? '—'} МГц ${bj.verdict}; подрезки момента НЕТ`
+            + ` · предложение момента выше максимума на +${w.momentOvershootMhz ?? 0} МГц — держит замок ${profile.settings.graphicsClockLockMhz.min}…${profile.settings.graphicsClockLockMhz.max}`
+          : (ec === null || ec.envelopeMhz === null
+            ? ' · ПОДРЕЗКА ПО КОНВЕРТУ: не проверялась — максимум карты бэкенду не передан'
+            : (ec.points === 0
+              ? ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): не потребовалась, 0 точек`
+              : ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): ${ec.points} точ., суммарно −${ec.totalMhz} МГц, `
+                + `максимум на точке −${ec.maxMhz} МГц (${ec.rows.map((r) => `${r.voltageMv ?? '?'} мВ ${r.was}→${r.now}`).join(', ')}`
+                + `${ec.points > ec.rows.length ? ' …' : ''})`));
         return { value: sampleWritable(backend), samples: [], proof: 'curve-read-back', note };
       },
       undo: async () => {
@@ -1022,6 +1132,7 @@ export async function apply(backend, profile, {
   if (target.lock) {
     const { min, max } = target.lock;
     steps.push({
+      kind: 'lock',
       // ЗАМОК-ГРАНИЦА И ЗАКРЕПЛЕНИЕ НАЗЫВАЮТСЯ РАЗНЫМИ СЛОВАМИ (`GPU_TUNING_RAILS.md` §3, разбор в
       // `profile-store.describeProfile`). Строку читает владелец в секунды перед записью в его карту,
       // и «фиксация 180…3090» сказала бы ему, что карта обязана держать одну частоту, — то есть ровно
@@ -1053,11 +1164,18 @@ export async function apply(backend, profile, {
         return readBack(backend, (s) => s.clockMhz >= min && s.clockMhz <= max,
           { what: `частота должна встать в ${min}…${max} МГц`, ...timing });
       },
-      // Undoable — `-rgc` is the vendor's documented reset — and never actually walked, because this
-      // step is last. Registered anyway so a future step added after it inherits a correct rollback.
+      // Undoable — `-rgc` is the vendor's documented reset. Last in the usual order; FIRST when the
+      // bound is the holder (`plans/84`), and then this undo IS walked if the curve fails behind it.
+      // ГРАНИЦА (min < max) на простое не наблюдаема — частота и без замка внутри 180…3090, так что
+      // «покинуть диапазон» никогда не наступит; откат границы докладывается честно (`reported-only`),
+      // ровно как снятие фиксации, которую мы не ставили. ЗАКРЕПЛЕНИЕ (min === max) доказывается по-прежнему.
       undo: async () => {
         const r = backend.resetGraphicsClocks();
         if (!r.ok) throw new Error(`ОТКАТ фиксации частоты не удался (код ${r.status}): ${r.stderr || r.stdout}`);
+        if (min < max) {
+          const s = sampleWritable(backend);
+          return { value: s, samples: [s], proof: 'reported-only' };
+        }
         return readBack(backend, (s) => s.clockMhz < min || s.clockMhz > max,
           { what: 'частота должна покинуть зафиксированную точку', ...timing });
       },
@@ -1081,6 +1199,14 @@ export async function apply(backend, profile, {
       // locked-clocks field (EXP-0014). Harmless because this step is LAST and the rollback only
       // ever walks back over EARLIER steps. The rollback of "go to factory" is applying a profile.
     });
+  }
+
+  // ─── ЗАМОК ПЕРВЫМ, когда он держатель границы (`plans/84` Ш4, P84-AC5) ─────────────────────────
+  // Обычный порядок (кривая → ватты → замок) не трогается: перестановка только под заявленным
+  // держателем, и отказ без замка уже отработал выше — здесь замок точно есть.
+  if (wantCurve?.__boundHeldBy === 'lock') {
+    const at = steps.findIndex((s) => s.kind === 'lock');
+    if (at > 0) steps.unshift(...steps.splice(at, 1));
   }
 
   for (const step of steps) {
@@ -2792,6 +2918,142 @@ async function cmdSelftest() {
     return null;
   });
 
+  // ─── plans/84: ПОДРЕЗКА ПРОТИВ ОПОРЫ — РЕПЕТИЦИЯ НА ЦИФРОВОМ ДВОЙНИКЕ ────────────────────────────
+  //
+  // Двойник карты владельца (`benches/cards/rtx5070ti.json`) собирается ДВАЖДЫ: с таблицей «нагрузка»
+  // (она же ОПОРА — артефакт худшего случая, внедрён) и с таблицей «покой», которая выше опоры на
+  // 22 МГц от 1040 мВ — это ЗАМЕР `plans/83` Ш6, а не удобное число. Один профиль с замком 180…3090
+  // применяется на обоих; читается то, что двойник ДЕРЖИТ (`readOffsetsSync`), а не заявка.
+  // Зелёный здесь доказывает ЛОГИКУ (I3): что делает КРЕМНИЙ с предложением выше максимума под
+  // замком — вопрос живого шага при владельце, и он в этом наборе не ставится.
+  const p84 = async () => {
+    const { virtualCard } = await import('./virtual-gpu.mjs');
+    const { readFileSync } = await import('node:fs');
+    const json = JSON.parse(readFileSync(new URL('../../benches/cards/rtx5070ti.json', import.meta.url), 'utf8'));
+    const BUMP = 22;
+    const twin = (bump) => virtualCard({ ...json, vfTable: json.vfTable.map((e) => (e.voltageMv >= 1040 && e.mhz > 1000 ? { ...e, mhz: e.mhz + bump } : e)) }, { seed: 1 });
+    const stamp = { driver: '610.88', vbios: '98.03.58.40.8b' };
+    const load = twin(0);
+    const refDoc = {
+      kind: 'reference-table',
+      stamp: { ...stamp, takenAt: '2026-08-31T23:13:42+03:00', tempC: 68, powerW: 197.17, utilPct: 69, pstate: 'P0', underLoad: true },
+      // Форма точки опоры — ровно как в артефакте (`curves/reference-table.json`): лишнее поле
+      // валидатор отвергает, и первая редакция фикстуры на этом покраснела.
+      points: load.curveBackend.points().map((p) => ({ i: p.i, mv: p.mv, mhz: p.mhz, freqKhz: p.freqKhz })),
+    };
+    // Подъём +25 МГц, но НЕ выше максимума карты против той таблицы, что подана опорой, — так целится
+    // настоящий документ (верх 3067 → 1025 мВ ниже 3090). Против опоры намерение выходит РОВНО 3090;
+    // на двойнике «покой +22» то же намерение предлагает 3112. Документ кривой не нужен — `toOffsets`
+    // внедрён. Вариант «целиться выше» — отдельный блок с ожиданием ОТКАЗА.
+    const raise = (d, t) => ({ offsets: t.map((p) => (p.freqKhz > 0 ? Math.min(25, Math.max(0, 3090 - p.mhz)) : 0)), clamped: 0 });
+    const raiseAbove = (d, t) => ({ offsets: t.map((p) => (p.freqKhz > 0 ? 25 : 0)), clamped: 0 });
+    const profile = () => { const p = refProfile(); p.settings.graphicsClockLockMhz = { min: 180, max: 3090 }; return p; };
+    const resolve = (vc, over = {}) => resolveProfileCurve(profile(), {
+      loadCurve: () => ({ frequencies: [] }), readLive: async () => vc.curveBackend.points(), toOffsets: raise,
+      loadReferenceFn: () => refDoc, cardStamp: stamp, ...over,
+    });
+    const applyOn = async (vc, resolved, prof = profile()) => {
+      const order = [];
+      const lgc = vc.backend.lockGraphicsClocksMhz.bind(vc.backend);
+      vc.backend.lockGraphicsClocksMhz = (a, b) => { order.push('lgc'); return lgc(a, b); };
+      const wr = vc.curveBackend.writeRaiseAndCap.bind(vc.curveBackend);
+      vc.curveBackend.writeRaiseAndCap = (...a) => { order.push('curve'); return wr(...a); };
+      const r = await apply(vc.backend, prof, { card: vc.describe(), curveBackend: vc.curveBackend, curve: resolved, timing: FAST, verifyLock: 'deferred' });
+      return { r, order, held: vc.curveBackend.readOffsetsSync() };
+    };
+    return { twin, load, refDoc, resolve, applyOn, profile, BUMP, raiseAbove };
+  };
+
+  block('plans/84 P84-AC1: вектор ПРОТИВ ОПОРЫ один и тот же на двойнике «нагрузка» и «покой +22» — 0 точек расхождения', async () => {
+    const T = await p84();
+    const a = await T.applyOn(T.load, await T.resolve(T.load, { clampAtBasis: true, envelopeMhz: 3090 }));
+    const rest = T.twin(T.BUMP);
+    const b = await T.applyOn(rest, await T.resolve(rest, { clampAtBasis: true, envelopeMhz: 3090 }));
+    const differ = a.held.reduce((n, x, i) => n + (x === b.held[i] ? 0 : 1), 0);
+    if (!a.r.applied || !b.r.applied) return 'применение не прошло';
+    if (differ !== 0) return `расходится точек ${differ} из ${a.held.length}`;
+    if (!a.held.some((x) => x > 0)) return 'на двойник не легло ни одного подъёма';
+    return null;
+  });
+
+  block('plans/84 P84-AC1 КОНТРОЛЬ: прежний путь (подрезка момента) на тех же двойниках даёт РАЗНЫЕ векторы', async () => {
+    const T = await p84();
+    const a = await T.applyOn(T.load, await T.resolve(T.load));
+    const rest = T.twin(T.BUMP);
+    const b = await T.applyOn(rest, await T.resolve(rest));
+    const differ = a.held.reduce((n, x, i) => n + (x === b.held[i] ? 0 : 1), 0);
+    return differ > 0 ? null : 'контроль вырожден: прежний путь тоже дал одинаковые векторы — репетиция ничего не различает';
+  });
+
+  block('plans/84 P84-AC2: намерение против опоры ≤ конверта — суд назван числом, вектор не тронут', async () => {
+    const T = await p84();
+    const eff = await T.resolve(T.load, { clampAtBasis: true, envelopeMhz: 3090 });
+    const plain = await T.resolve(T.load);
+    if (eff.__boundHeldBy !== 'lock') return `держатель «${eff.__boundHeldBy}», ждали «lock»`;
+    if (eff.__intentTopMhz !== 3090 || eff.__basisJudge?.intentTopMhz !== 3090) return `намерение ${eff.__intentTopMhz} / суд ${JSON.stringify(eff.__basisJudge)}`;
+    const differ = eff.deltaByPointMhz.reduce((n, x, i) => n + (x === plain.deltaByPointMhz[i] ? 0 : 1), 0);
+    return differ === 0 ? null : `суд ТРОНУЛ вектор: ${differ} точек — против опоры резать нечего, а он резал`;
+  });
+
+  block('plans/84 P84-AC2c: вектор, ЦЕЛЯЩИЙСЯ выше максимума против опоры, — ОТКАЗ до записи, а не тихая подрезка (EXP-0225)', async () => {
+    const T = await p84();
+    try { await T.resolve(T.load, { clampAtBasis: true, envelopeMhz: 3090, toOffsets: T.raiseAbove }); } catch (e) {
+      return /R13/u.test(e.message) && /отвергается/u.test(e.message) ? null : `отказ не тот: ${e.message}`;
+    }
+    return 'разрешилось: намерение выше максимума было подрезано молча';
+  });
+
+  block('plans/84 P84-AC2b: без опоры-артефакта подрезка против опоры ОТКАЗЫВАЕТ по имени', async () => {
+    const T = await p84();
+    try { await T.resolve(T.load, { clampAtBasis: true, envelopeMhz: 3090, loadReferenceFn: () => null }); } catch (e) {
+      return /артефакт/u.test(e.message) && e.refusals?.length ? null : `отказ не про артефакт: ${e.message}`;
+    }
+    return 'разрешилось без опоры — флаг купил ложную воспроизводимость';
+  });
+
+  block('plans/84 P84-AC3: бомба bugs/11 под заявкой «держит замок» — ОТКАЗ R13-offer по НАМЕРЕНИЮ, а без намерения — R13-basis', async () => {
+    const T = await p84();
+    const vc = T.twin(0);
+    const before = vc.writes.curveWrite;
+    const bomb = await vc.curveBackend.writeRaiseAndCap(592, null, { cardMaxClockMhz: 3090, intentTopMhz: 3400, boundHeldBy: 'lock' });
+    if (bomb.ok || bomb.rule !== 'R13-offer') return `бомба: ${JSON.stringify({ ok: bomb.ok, rule: bomb.rule })}`;
+    const mute = await vc.curveBackend.writeRaiseAndCap(25, null, { cardMaxClockMhz: 3090, intentTopMhz: null, boundHeldBy: 'lock' });
+    if (mute.ok || mute.rule !== 'R13-basis') return `без намерения: ${JSON.stringify({ ok: mute.ok, rule: mute.rule })}`;
+    return vc.writes.curveWrite === before ? null : 'в кривую двойника что-то записалось';
+  });
+
+  block('plans/84 P84-AC4: профиль БЕЗ замка под подрезкой против опоры отвергается ДО записи — записей в кривую 0', async () => {
+    const T = await p84();
+    const vc = T.twin(T.BUMP);
+    const eff = await T.resolve(vc, { clampAtBasis: true, envelopeMhz: 3090 });
+    const noLock = T.profile(); noLock.settings.graphicsClockLockMhz = null;
+    try { await T.applyOn(vc, eff, noLock); } catch (e) {
+      if (!/замка/u.test(e.message)) return `отказ не про замок: ${e.message}`;
+      return vc.writes.curveWrite === 0 && vc.writes.lockClocks === 0 ? null : `записи были: ${JSON.stringify(vc.writes)}`;
+    }
+    return 'применилось без замка';
+  });
+
+  block('plans/84 P84-AC5: замок ставится ДО кривой под заявленным держателем, и ПОСЛЕ — без него', async () => {
+    const T = await p84();
+    const withLock = await T.applyOn(T.twin(0), await T.resolve(T.load, { clampAtBasis: true, envelopeMhz: 3090 }));
+    const plain = await T.applyOn(T.twin(0), await T.resolve(T.load));
+    if (!(withLock.order.indexOf('lgc') === 0 && withLock.order.indexOf('curve') === 1)) return `новый путь: порядок ${withLock.order}`;
+    if (!(plain.order.indexOf('curve') === 0 && plain.order.indexOf('lgc') === 1)) return `прежний путь: порядок ${plain.order}`;
+    return null;
+  });
+
+  block('plans/84 P84-AC6: строка применения называет превышение момента — +22 на «покое», +0 на «нагрузке»', async () => {
+    const T = await p84();
+    const a = await T.applyOn(T.load, await T.resolve(T.load, { clampAtBasis: true, envelopeMhz: 3090 }));
+    const b = await T.applyOn(T.twin(T.BUMP), await T.resolve(T.twin(T.BUMP), { clampAtBasis: true, envelopeMhz: 3090 }));
+    const line = (r) => r.steps.find((s) => s.includes('ПОДРЕЗКА ПРОТИВ ОПОРЫ')) ?? '';
+    if (!line(a.r).includes('выше максимума на +0 МГц')) return `нагрузка: «${line(a.r)}»`;
+    if (!line(b.r).includes(`выше максимума на +${T.BUMP} МГц`)) return `покой: «${line(b.r)}»`;
+    if (!line(b.r).includes('держит замок 180…3090')) return `держатель не назван: «${line(b.r)}»`;
+    return null;
+  });
+
   block('bugs/99: ЦЕНА подрезки доезжает до строки применения — всегда, включая ноль точек', async () => {
     const b = fakeBackend(); const cb = fakeCurve();
     // Профиль с инлайновой кривой: намерения он не несёт, поэтому подрезка ЗАПРЕЩЕНА, и строка
@@ -2979,7 +3241,13 @@ async function main(argv) {
     // sets no curve must not load nvapi64.dll for nothing.
     // The referenced document is loaded HERE, in the CLI, because only the CLI may `await import` the
     // store (which transitively pulls the card probes). Everything below sees one resolved shape.
-    const effCurve = await resolveProfileCurve(profile);
+    // `--clamp-at-basis` — репетиционный путь `plans/84`: подрезка против ОПОРЫ, «никогда выше» держит
+    // замок, поставленный первым. Без флага — прежний путь буква в букву. Живой шаг — при владельце.
+    const clampAtBasis = argv.includes('--clamp-at-basis');
+    const effCurve = await resolveProfileCurve(profile, clampAtBasis
+      ? { clampAtBasis: true, envelopeMhz: readState(backend).clockMaxMhz }
+      : {});
+    if (clampAtBasis) console.log('⚠️  ПОДРЕЗКА ПРОТИВ ОПОРЫ (--clamp-at-basis, plans/84): замок-граница ставится ПЕРВЫМ, предложение момента может стоять выше максимума — держит замок.');
     const needsCurve = effCurve !== null;
     const curveBackend = needsCurve ? nvapiCurveBackend() : null;
 

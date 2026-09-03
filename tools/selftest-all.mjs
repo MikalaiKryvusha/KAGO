@@ -229,6 +229,10 @@ const SUITES = [
   // не читается вовсе (строка сводки это утверждает сама). Вошёл 2026-09-04 вместе с линтером.
   { id: 'entryguard', npm: 'npm run entryguard -- --selftest', argv: ['tools/entry-guard-lint.mjs', '--selftest'],
     what: 'сторож входа приборов tools/ (bugs/95): база долга только убывает', done: /^САМОПРОВЕРКА СТОРОЖА ВХОДА:/mu },
+  // Инертность: ветка `--selftest` возвращает ДО `askCard()` и до открытия nvapi — судится чистая
+  // `judgeOffer` на фикстурах; сводная строка это утверждает сама («Карта не читалась»).
+  { id: 'probeoffer', npm: 'npm run probeoffer -- --selftest', argv: ['tools/probe-offer.mjs', '--selftest'],
+    what: 'проба предложения карты против её максимума (P83-AC6): что считать превышением', done: /^САМОПРОВЕРКА ПРОБЫ ПРЕДЛОЖЕНИЯ:/mu },
   { id: 'fanladder', npm: 'npm run fanladder -- --selftest', argv: ['tools/fan-ladder.mjs', '--selftest'],
     what: 'акустическая лестница: план уровней и разбор замера', done: /^САМОПРОВЕРКА:/mu },
   { id: 'bench', npm: 'npm run bench -- --selftest', argv: ['automation-engine/lib/bench-run.mjs', '--selftest'],
