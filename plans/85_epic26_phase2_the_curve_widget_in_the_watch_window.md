@@ -4,7 +4,10 @@
 > в визуализаторе. Это тоже оффлайн. Сделаем MVP.»*)
 > **Parent:** `plans/26_EPIC_curve_visualiser.md` — phase 2 «Виджет кривой в окне наблюдения
 > (переключаемый)», gates `E26-AC1 · E26-AC2 · E26-AC4 · виден живой прогон` · `ideas/05` (the order)
-> **Status:** 🟢 planned 2026-09-04 · steps below tick as they close
+> **Status:** 🟢 planned 2026-09-04 01:37 +03:00 · **MVP EXECUTED 2026-09-04 02:0x +03:00** — Ш1…Ш5 closed,
+> Ш6 observation done (two renders looked at, live probe, hashes equal), papers at the session's
+> closure · **waits for the OWNER'S EYE** (taste: letter size, the toggle's place, whether the curve
+> should be the default view) — not DONE until he has looked
 > **Outbound:** the owner's EYE on the built widget (taste class — the fonts of `E26-AC6`, the place
 > of the toggle, whether the curve should be the default view) → chat, not an interview · phase 1 of
 > the epic is recorded as CLOSED by the owner's verdicts of 2026-08-31 on the static map (see §1)
@@ -115,7 +118,7 @@ stateDiagram-v2
 Each step quotes the meta-plan line it executes: `plans/26` → «2 | Виджет кривой в окне наблюдения
 (переключаемый) | E26-AC1 · E26-AC2 · E26-AC4 · виден живой прогон».
 
-- [ ] **Ш1 — the shared renderer.** New `automation-engine/lib/curve-map.mjs`: `curveFacts({doc,
+- [x] **Ш1 — the shared renderer.** ✅ 2026-09-04 (`curvemap` 25 blocks). New `automation-engine/lib/curve-map.mjs`: `curveFacts({doc,
       records})` (rows sorted, touched/untouched, gaps, `proven` = `provenRungs`, `floors` =
       `hangFloors`, `refuted` = highest raw hang per frequency not honoured as a floor and not
       corrected), `renderCurveSvg(facts, {size, marker, xCaption, summary})` — the ONE axis
@@ -124,29 +127,29 @@ Each step quotes the meta-plan line it executes: `plans/26` → «2 | Видже
       (empty document → no tuned points · order-independence of the effective line · refuted ≠ floor
       · marker on/off · floors come from `hangFloors`, not from a local re-implementation). Anchors
       E26-AC1, E26-AC2.
-- [ ] **Ш2 — the static map moves onto the renderer.** `tools/build-curve-map.mjs` keeps its page,
+- [x] **Ш2 — the static map moves onto the renderer.** ✅ 2026-09-04 — stock and tuned polylines byte-identical to HEAD, grid identical; what changed: 13 floors from `hangFloors` (was 17 raw), 2 refuted rings (was 6 «contradictions», 4 of them corrected phantom hangs). `tools/build-curve-map.mjs` keeps its page,
       legend and tables and stops drawing; the «полы выше доказанного» table becomes «зависания,
       снятые движком» with the truthful verb (`interviews/022` = B, 2026-08-31). Rebuild
       `assets/curve-map.html`; the golden is a CONTROLLED diff explained by P85-AC7's numbers (13 ·
       6 · 44) and by the touched-only line — nothing else may change.
-- [ ] **Ш3 — the route and its seams.** `run-dashboard.mjs`: `serve({curvePath, journalPath})` →
+- [x] **Ш3 — the route and its seams.** ✅ 2026-09-04 — plus the bench path: `bench-run.mjs` now saves the rehearsal's document into `runs/bench/measured.json` and prints the window command with its paths (found while checking E26-AC3 on every path, not only the twin's). `run-dashboard.mjs`: `serve({curvePath, journalPath})` →
       `GET /curve.svg` (200 `image/svg+xml`, `no-store`; 404 with a Russian reason when the document
       is absent — honesty, not a stack trace); `raiseDashboard` plumbs both paths; CLI `--curve` /
       `--journal`; `engine.mjs` twin branch passes its sandbox document and journal. Anchors
       «виден живой прогон», P85-AC9.
-- [ ] **Ш4 — the page.** `tools/build-dashboard-page.mjs`: wrap the card SVG in `#card-widget`, add
+- [x] **Ш4 — the page.** ✅ 2026-09-04 — and a defect of the PREVIEW found by the first render: since 2026-08-22 `--preview` injected the pulse into the sound engine's `disconnect();` (the first `connect();` substring in the page), so every preview since then showed «НЕТ СВЯЗИ» and empty tiles; the anchor is now the wiring's own tail. `tools/build-dashboard-page.mjs`: wrap the card SVG in `#card-widget`, add
       the toggle (top-left of the stage, mirror of the «ВИРТУАЛЬНАЯ» pill) and `#curve-widget`
       (SVG holder + legend + note), the dark skin for the renderer's class names using the page's
       own palette; `_wiring.js`: `wireCurveWidget()` — toggle, memory, `?widget=`, refetch rules,
       failure text. `--preview` additionally inlines a rendered SVG so a `file://` render shows the
       widget (`--preview --widget curve`). The accepted mockup `homeworks/03` is NOT edited (canon).
       Anchors E26-AC4.
-- [ ] **Ш5 — the checks land with the work.** New battery suite `curvemap` (`npm run curvemap --
+- [x] **Ш5 — the checks land with the work.** ✅ 2026-09-04 — `curvemap` 25 · `dashboard` 76 → 87 · battery 48 suites, 0 red, 2478 blocks · `npm run check` green. New battery suite `curvemap` (`npm run curvemap --
       --selftest`), new blocks in `dashboard --selftest` (route with/without marker · 404 reason ·
       page structure · P85-AC3 · P85-AC1 grep · P85-AC9 plumbing); `npm run check` (freshness gate of
       the built page, entry guard); `npm run selftest:all`. Mutations: each new block names its
       addressee and is reddened once.
-- [ ] **Ш6 — verification by observation, then the papers.** Two headless renders of the preview
+- [x] **Ш6 — verification by observation, then the papers.** ✅ observation 2026-09-04 02:0x: `runs/dashboard/preview-card.png` and `preview-curve.png` looked at (three defects found by eye and fixed: stub landed in the sound engine, marker label over the counts line, «МГц» over «3000», axis caption cut); live probe of `/curve.svg` from production files 61 ms / 16 KB with 44 · 13 · 2; hashes of the document and the journal equal before/after. Papers — at the session's soft closure. Two headless renders of the preview
       (card · curve) opened and LOOKED at; one live probe of `/curve.svg` served from the production
       files by a real server on an ephemeral port (read-only; counts of layers printed); sha check
       P85-AC8. Then: `plans/26` status (phase 1 closed by the owner's word, phase 2 MVP done and
