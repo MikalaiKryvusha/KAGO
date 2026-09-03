@@ -144,7 +144,7 @@ Each step quotes the meta-plan line it executes: `plans/26` → «2 | Видже
       failure text. `--preview` additionally inlines a rendered SVG so a `file://` render shows the
       widget (`--preview --widget curve`). The accepted mockup `homeworks/03` is NOT edited (canon).
       Anchors E26-AC4.
-- [x] **Ш5 — the checks land with the work.** ✅ 2026-09-04 — `curvemap` 25 · `dashboard` 76 → 87 · battery 48 suites, 0 red, 2478 blocks · `npm run check` green. New battery suite `curvemap` (`npm run curvemap --
+- [x] **Ш5 — the checks land with the work.** ✅ 2026-09-04 — `curvemap` 25 · `dashboard` 76 → 87 · battery 48 suites, 0 red, 2478 blocks · `npm run check` green · **mutations executed at the judge pass (02:24), each reddening its named blocks and only them: M1b · M2 · M3 · M5 (curve map) · CH · CJ (window); the other named addressees (M4 · M6 · M7 · CA…CG · CI · CK) are named but NOT yet executed — a debt, not a claim.** New battery suite `curvemap` (`npm run curvemap --
       --selftest`), new blocks in `dashboard --selftest` (route with/without marker · 404 reason ·
       page structure · P85-AC3 · P85-AC1 grep · P85-AC9 plumbing); `npm run check` (freshness gate of
       the built page, entry guard); `npm run selftest:all`. Mutations: each new block names its

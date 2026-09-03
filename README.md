@@ -46,8 +46,10 @@
 
 <p align="center">
   <sub><b>The run dashboard.</b> The card carries its own readouts; the column reports the search.
-  The animation is driven by the run's pulse rather than by a timer of its own — when the machine
-  freezes, the picture freezes with it, and the rung on screen is the rung that killed it.</sub>
+  The window is fed by the run's pulse: when the run goes quiet for longer than it promised, the
+  state line turns red and names the rung that was on the card at that moment. One click swaps the
+  card for the tuning curve itself — stock, our line, the rungs that survived the stress test, the
+  hang floors the engine honours, and the rung under test right now.</sub>
 </p>
 
 ---
@@ -351,8 +353,10 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 
 <p align="center">
   <sub><b>Дашборд прогона.</b> Показания карты живут на самой карте, справа — ход поиска края.
-  Анимацию двигает ПУЛЬС прогона, а не собственный таймер: когда машина зависает, картинка замирает
-  вместе с ней, и та ступень, что на экране, и есть точка отказа.</sub>
+  Окно кормится пульсом прогона: если прогон молчит дольше, чем обещал, строка состояния краснеет и
+  называет ступень, которая была на карте в этот момент. Один щелчок меняет карту на саму
+  тюнинг-кривую — сток, нашу линию, ступени, выдержавшие стресс-тест, полы зависания, которые держит
+  движок, и ступень под тестом прямо сейчас.</sub>
 </p>
 
 ---
