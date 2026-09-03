@@ -102,6 +102,7 @@ KAGO/
 | Measured profiles, stamped with driver and VBIOS | `profiles/` | `profile-manager.mjs` at boot and on switch |
 | Sweep logs and telemetry | `logs/`, `runs/` — git-ignored | the agent, when a profile misbehaves |
 | Golden references from the stock run | `runs/baseline/` | `stress-tester.mjs`, for every stability verdict |
+| The curve map — stock · our effective line · proven dots · the engine's hang floors · refuted hangs — drawn by ONE renderer (`automation-engine/lib/curve-map.mjs`, `plans/85`) | static page `assets/curve-map.html` (`node tools/build-curve-map.mjs`, `--png <file>` renders it 3840×2160 with the owner's browser) · live: the «КРИВАЯ» widget of the watch window, served as `GET /curve.svg?mhz&mv&stock` by `run-dashboard.mjs` from `curves/measured.json` + `runs/sweep/journal.jsonl` (or the paths given by `--curve` / `--journal` — the twin and the bench pass their own sandboxes) | the owner, by eye — «что протюнили, где сток, где край», and where the engine is descending right now |
 
 ## 3. Boundaries worth stating
 
