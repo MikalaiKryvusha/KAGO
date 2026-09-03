@@ -39,6 +39,7 @@ import { curveDocForCard, pointsForCard, makeSweepStepFn } from './trap-suite.mj
 import { sweepRange, sweepReportLines } from '../engine.mjs';
 import { openJournal } from './sweep-journal.mjs';
 import { openPulse, clearPulse, PULSE_PATH } from './run-dashboard.mjs';
+import { saveCurveDoc, curvePath } from './curve-store.mjs';
 
 const CARD_PATH = join('benches', 'cards', 'rtx5070ti.json');
 const RUN_DIR = join('runs', 'bench');
@@ -140,10 +141,17 @@ export async function rehearse({
   };
 
   const startedMs = Date.now();
+  // ДОКУМЕНТ РЕПЕТИЦИИ — ФАЙЛОМ В ЕЁ ПЕСОЧНИЦЕ, а не только в памяти (`plans/85`, E26-AC3): виджет
+  // кривой окна наблюдения читает документ файлом, и окно, поднятое над репетицией без него, показало
+  // бы под вымышленной ступенью кривую ВЛАДЕЛЬЦА. Документ владельца `curves/measured.json` при этом
+  // не трогается — прежний инвариант цел, стал только честнее. Первая запись — ДО прогона, чтобы
+  // картинка была с первой ступени, а не с первой закрытой частоты.
+  const curveDoc = curveDocForCard(card);
+  saveCurveDoc(curveDoc, { dir: RUN_DIR });
   const report = await sweepRange({
     // Документ — ВЕСЬ диапазон карты, как на живом пути (`loadCurveDoc({})`); полоса ограничивает
     // ГРУППЫ, а не документ, иначе просевшая частота выпадает из документа и роняет прогон.
-    curveDoc: curveDocForCard(card),
+    curveDoc,
     points: pointsForCard(card),
     fromMhz,
     toMhz,
@@ -155,9 +163,11 @@ export async function rehearse({
     // The bench card's own maximum, so the locked shape caps the curve at the envelope (R13).
     envelopeMhz: card.card.maxGraphicsMhz,
     runStepFn,
-    // The document stays in memory: this run must not touch `curves/measured.json`, which is the
-    // owner's real card's document and the memory of everything phase 3 will prove.
-    saveFn: null,
+    // The document is saved into THIS run's sandbox (`runs/bench/measured.json`) and never into
+    // `curves/measured.json`, which is the owner's real card's document and the memory of everything
+    // phase 3 will prove. The file exists so the watch window's curve widget can read the REHEARSAL's
+    // curve (`plans/85`, E26-AC3) — the same seam the twin path uses.
+    saveFn: async (d) => saveCurveDoc(d, { dir: RUN_DIR }),
     onEvent: (e) => {
       pulse?.event(e);
       if (e.kind !== 'rung-start') onLine(`  ${e.text}`);
@@ -271,7 +281,10 @@ async function main(argv) {
   console.log('             ПО-НАСТОЯЩЕМУ, иначе смотреть было бы не на что; и стенд честен про цену');
   console.log('             ускорения — короткий тест находит МЕНЬШЕ, это в его же модели отказа');
   console.log(`  ЖУРНАЛ:    ${join(RUN_DIR, 'journal.jsonl')} (песочница репетиции)`);
-  console.log(`  ДАШБОРД:   ${PULSE_PATH} · окно — npm run dashboard`);
+  console.log(`  ДОКУМЕНТ:  ${curvePath('measured', RUN_DIR)} (песочница репетиции; документ владельца не тронут)`);
+  // Окно над репетицией поднимается С ЕЁ путями — иначе виджет кривой покажет документ и журнал
+  // ВЛАДЕЛЬЦА под вымышленной ступенью (E26-AC3, `plans/85`).
+  console.log(`  ДАШБОРД:   ${PULSE_PATH} · окно — npm run dashboard -- --curve ${curvePath('measured', RUN_DIR)} --journal ${join(RUN_DIR, 'journal.jsonl')}`);
   console.log('');
 
   const { report, elapsedMs } = await rehearse({ fromMhz, toMhz, sustain, depthCapMv });
