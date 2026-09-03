@@ -34,10 +34,12 @@
 // [TESTED: 2026-09-04 · слои и геометрия — набором `npm run curvemap -- --selftest`; страница —
 //  пересборкой и сверкой чисел с прямой пробой журнала (plans/85, P85-AC7)]
 
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { resolve as entryResolve } from 'node:path';
-import { fileURLToPath as entryPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath as entryPath, pathToFileURL } from 'node:url';
 import { CURVE_PATH, JOURNAL_PATH, loadFacts, renderCurveSvg } from '../automation-engine/lib/curve-map.mjs';
 
 /**
@@ -201,6 +203,38 @@ for (const x of refutedRows) {
     : `    ○ ${x.m} МГц: зависание ${x.v} мВ полом не считается`);
 }
 console.log('  В КАРТУ НЕ ЗАПИСАНО НИЧЕГО: инструмент читает два файла и пишет один HTML.');
+
+// =================================================================================================
+// 5. `--png <файл>` — РЕНДЕР 4K ТОЙ ЖЕ РАЗМЕТКИ (эпик 26, фаза 3, E26-AC5)
+// =================================================================================================
+//
+// Заказ владельца (`ideas/05` §1): *«чтобы можно было рендерить в png … Разрешение рендера 4K»*.
+// Браузер — его собственный, внешний инструмент, как `nvidia-smi`: в зависимости не входит (разведка
+// `ideas/05` §3 сняла этот риск прогоном). Окно 1920×1080 при масштабе 2 даёт ровно 3840×2160 И
+// крупные буквы; растянуть страницу на 3840 логических пикселей значило бы получить мелкий столбик
+// посреди пустого листа (у страницы ширина 1420). Размер проверяется чтением IHDR самого PNG — без
+// ImageMagick, который на этой машине SVG не растрирует и здесь не нужен.
+const pngAt = argv.indexOf('--png');
+if (pngAt >= 0) {
+  const out = argv[pngAt + 1];
+  must(out, '--png требует путь к файлу');
+  const { browserCandidates } = await import('../automation-engine/lib/run-dashboard.mjs');
+  const browser = browserCandidates().find(([, p]) => p && existsSync(p));
+  must(browser, 'браузер не найден (Edge/Chrome): рендер 4K делает браузер владельца как внешний инструмент');
+  mkdirSync(dirname(resolve(out)), { recursive: true });
+  const r = spawnSync(browser[1], [
+    '--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=1920,1080', '--force-device-scale-factor=2',
+    '--virtual-time-budget=3000', '--no-first-run', `--user-data-dir=${resolve(tmpdir(), 'kago-curve-render')}`,
+    `--screenshot=${resolve(out)}`, pathToFileURL(resolve(OUT)).href,
+  ], { stdio: 'ignore', timeout: 90_000, windowsHide: true });
+  must(existsSync(out), `рендер не появился: ${out} (браузер вышел с кодом ${r.status ?? 'нет'})`);
+  const head = readFileSync(out).subarray(0, 24);
+  must(head.length === 24 && head.readUInt32BE(12) === 0x49484452, `файл ${out} — не PNG (нет IHDR)`);
+  const w = head.readUInt32BE(16);
+  const h = head.readUInt32BE(20);
+  console.log(`РЕНДЕР: ${out} — PNG ${w}×${h} (${browser[0]}, окно 1920×1080 при масштабе 2)`);
+  if (w !== 3840 || h !== 2160) { console.error(`ОСТАНОВ: E26-AC5 требует 3840×2160, получено ${w}×${h}`); return 1; }
+}
 return 0;
 }
 

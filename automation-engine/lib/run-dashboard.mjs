@@ -899,14 +899,24 @@ export function windowArgs(url, { size = '--window-size=1200,820', profileDir = 
   ];
 }
 
-export function openWindow(url, { size = '--window-size=1200,820', profileDir = WINDOW_PROFILE_DIR } = {}) {
-  const env = process.env;
-  const candidates = [
+/**
+ * Where a Chromium browser may live on this machine, in the order we try them. ONE list for the two
+ * callers that spawn a browser — the watch window here and the 4K render of the curve map
+ * (`tools/build-curve-map.mjs --png`, epic 26 phase 3): the browser is the owner's own, used as an
+ * external instrument exactly like `nvidia-smi`, and never a dependency (`ideas/05` §3).
+ * @returns {Array<[string, string]>} `[name, path]` pairs; existence is checked by the caller
+ */
+export function browserCandidates(env = process.env) {
+  return [
     ['Edge', join(env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe')],
     ['Edge', join(env.ProgramFiles || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe')],
     ['Chrome', join(env.ProgramFiles || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe')],
     ['Chrome', join(env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')],
   ];
+}
+
+export function openWindow(url, { size = '--window-size=1200,820', profileDir = WINDOW_PROFILE_DIR } = {}) {
+  const candidates = browserCandidates();
   mkdirSync(dirname(WINDOW_PID_PATH), { recursive: true });
   for (const [name, path] of candidates) {
     if (!path || !existsSync(path)) continue;
