@@ -33,8 +33,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-
-const APPLY = process.argv.includes('--apply');
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Обычная консольная программа — наследует консоль, окна не создаёт. Никогда не бросает. */
 function run(exe, args) {
@@ -145,68 +145,89 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
-if (process.argv.includes('--selftest')) process.exit(await selfTest());
+/**
+ * ВСЯ РАБОТА УБОРКИ — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`).
+ *
+ * До починки флаг `--apply` читался на верхнем уровне модуля из `process.argv` — то есть из argv
+ * ВЫЗЫВАЮЩЕГО. Импорт этого файла из любого процесса, в чьих аргументах есть `--apply` (флаг носит
+ * половина приборов проекта), снимал сэмплеры телеметрии и закрывал окна терминала владельца — класс
+ * `bugs/21` (уборка убила живую развёртку) и `bugs/64` (закрыла окно вычитки посреди ответа), только
+ * через дверь импорта. Теперь `process.argv` читается ТОЛЬКО параметром отсюда, и импорт — чтение.
+ *
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ * @returns {Promise<number>} код выхода
+ */
+async function main(argv) {
+  if (argv.includes('--selftest')) return selfTest();
+  const APPLY = argv.includes('--apply');
 
-console.log(APPLY ? 'УБОРКА (--apply): закрываю найденное' : 'ОСМОТР: только показываю. Убрать — добавьте --apply');
-console.log('');
+  console.log(APPLY ? 'УБОРКА (--apply): закрываю найденное' : 'ОСМОТР: только показываю. Убрать — добавьте --apply');
+  console.log('');
 
-// ---- 0. ПЕРВЫМ ДЕЛОМ: НЕ ИДЁТ ЛИ ПРОГОН. Раньше всего остального, потому что всё остальное —
-//         это `taskkill`, и один из его адресатов может держать карту прямо сейчас (`bugs/21`).
-{
-  const wd = await import('../automation-engine/lib/watchdog.mjs');
-  const state = runInFlight(processesNamed('node.exe'), wd.readArmed(), pidAlive);
-  if (state.busy) {
-    console.log(`ПРОГОН В РАБОТЕ — НЕ ТРОГАЮ НИЧЕГО (${state.why}).`);
-    console.log('Окно наблюдения и сэмплер телеметрии принадлежат ему, а не мусору.');
-    console.log('Брошенные окна подождут один ход: убрать их сейчас значит убить прогон.');
-    process.exit(0);
+  // ---- 0. ПЕРВЫМ ДЕЛОМ: НЕ ИДЁТ ЛИ ПРОГОН. Раньше всего остального, потому что всё остальное —
+  //         это `taskkill`, и один из его адресатов может держать карту прямо сейчас (`bugs/21`).
+  {
+    const wd = await import('../automation-engine/lib/watchdog.mjs');
+    const state = runInFlight(processesNamed('node.exe'), wd.readArmed(), pidAlive);
+    if (state.busy) {
+      console.log(`ПРОГОН В РАБОТЕ — НЕ ТРОГАЮ НИЧЕГО (${state.why}).`);
+      console.log('Окно наблюдения и сэмплер телеметрии принадлежат ему, а не мусору.');
+      console.log('Брошенные окна подождут один ход: убрать их сейчас значит убить прогон.');
+      return 0;
+    }
+    if (state.why) console.log(`⚠️  ${state.why}`);
   }
-  if (state.why) console.log(`⚠️  ${state.why}`);
-}
 
-// ---- 1. НАШИ АРТЕФАКТЫ — опознаются положительно, убираются без оговорок.
-const dash = await import('../automation-engine/lib/run-dashboard.mjs');
-const probe = await dash.probeDashboard(dash.DEFAULT_PORT);
-if (probe.alive && probe.ours) {
-  const pid = dash.findListenerPid(dash.DEFAULT_PORT);
-  console.log(`ОКНО НАБЛЮДЕНИЯ: сервер жив на ${dash.DEFAULT_PORT} (pid ${pid ?? 'не опознан'})`);
-  if (APPLY && pid) { kill(pid); console.log('   снят'); }
-} else {
-  console.log('ОКНО НАБЛЮДЕНИЯ: сервера нет');
-}
-if (APPLY) {
-  const gone = dash.closeWindow();
-  console.log(gone.closed.length ? `   окно: закрыто (${gone.closed.join(', ')})` : '   окно: закрывать было нечего');
-}
-
-const samplers = processesNamed('node.exe').filter((p) => /hardware-mon/.test(p.cmd));
-console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
-if (APPLY) for (const s of samplers) { kill(s.pid); console.log(`   снят ${s.pid}`); }
-
-// ---- 2. БРОШЕННЫЕ ОКНА ТЕРМИНАЛА — те, что подняты системой через DCOM и опустели.
-console.log('');
-const terms = [...processesNamed('WindowsTerminal.exe'), ...processesNamed('OpenConsole.exe')];
-if (terms.length === 0) {
-  console.log('ОКНА ТЕРМИНАЛА: ни одного — чисто');
-} else {
-  for (const t of terms) {
-    const kids = childCount(t.pid);
-    // ПРИЗНАК БРОШЕННОСТИ — ПУСТОТА, А НЕ ПРОИСХОЖДЕНИЕ. Первая редакция закрывала только окна с
-    // меткой `-Embedding` (поднятые системой через DCOM), и брошенный `OpenConsole.exe` под неё не
-    // попал: владелец видел его на экране, а инструмент отчитывался «не трогаю». Верный признак
-    // проще и безопаснее: **в терминале не работает НИ ОДНОГО процесса**. Терминал, в котором
-    // владелец что-то делает, всегда держит внутри хотя бы оболочку — он не будет тронут никогда;
-    // терминал без единого процесса внутри не используется никем по определению.
-    const abandoned = kids === 0;
-    const origin = /-Embedding/i.test(t.cmd) ? 'поднят системой' : 'запущен пользователем';
-    console.log(`ОКНО ТЕРМИНАЛА: pid ${t.pid} · ${origin} · процессов внутри ${kids}`
-      + (abandoned ? '  → БРОШЕНО, закрываю' : '  → в нём работают, НЕ ТРОГАЮ'));
-    if (APPLY && abandoned) { kill(t.pid); console.log('   закрыто'); }
+  // ---- 1. НАШИ АРТЕФАКТЫ — опознаются положительно, убираются без оговорок.
+  const dash = await import('../automation-engine/lib/run-dashboard.mjs');
+  const probe = await dash.probeDashboard(dash.DEFAULT_PORT);
+  if (probe.alive && probe.ours) {
+    const pid = dash.findListenerPid(dash.DEFAULT_PORT);
+    console.log(`ОКНО НАБЛЮДЕНИЯ: сервер жив на ${dash.DEFAULT_PORT} (pid ${pid ?? 'не опознан'})`);
+    if (APPLY && pid) { kill(pid); console.log('   снят'); }
+  } else {
+    console.log('ОКНО НАБЛЮДЕНИЯ: сервера нет');
   }
+  if (APPLY) {
+    const gone = dash.closeWindow();
+    console.log(gone.closed.length ? `   окно: закрыто (${gone.closed.join(', ')})` : '   окно: закрывать было нечего');
+  }
+
+  const samplers = processesNamed('node.exe').filter((p) => /hardware-mon/.test(p.cmd));
+  console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
+  if (APPLY) for (const s of samplers) { kill(s.pid); console.log(`   снят ${s.pid}`); }
+
+  // ---- 2. БРОШЕННЫЕ ОКНА ТЕРМИНАЛА — те, что подняты системой через DCOM и опустели.
+  console.log('');
+  const terms = [...processesNamed('WindowsTerminal.exe'), ...processesNamed('OpenConsole.exe')];
+  if (terms.length === 0) {
+    console.log('ОКНА ТЕРМИНАЛА: ни одного — чисто');
+  } else {
+    for (const t of terms) {
+      const kids = childCount(t.pid);
+      // ПРИЗНАК БРОШЕННОСТИ — ПУСТОТА, А НЕ ПРОИСХОЖДЕНИЕ. Первая редакция закрывала только окна с
+      // меткой `-Embedding` (поднятые системой через DCOM), и брошенный `OpenConsole.exe` под неё не
+      // попал: владелец видел его на экране, а инструмент отчитывался «не трогаю». Верный признак
+      // проще и безопаснее: **в терминале не работает НИ ОДНОГО процесса**. Терминал, в котором
+      // владелец что-то делает, всегда держит внутри хотя бы оболочку — он не будет тронут никогда;
+      // терминал без единого процесса внутри не используется никем по определению.
+      const abandoned = kids === 0;
+      const origin = /-Embedding/i.test(t.cmd) ? 'поднят системой' : 'запущен пользователем';
+      console.log(`ОКНО ТЕРМИНАЛА: pid ${t.pid} · ${origin} · процессов внутри ${kids}`
+        + (abandoned ? '  → БРОШЕНО, закрываю' : '  → в нём работают, НЕ ТРОГАЮ'));
+      if (APPLY && abandoned) { kill(t.pid); console.log('   закрыто'); }
+    }
+  }
+
+  console.log('');
+  console.log(APPLY ? 'ГОТОВО.' : 'Ничего не тронуто. Убрать — `node tools/tidy.mjs --apply`');
+  return 0;
 }
 
-console.log('');
-console.log(APPLY ? 'ГОТОВО.' : 'Ничего не тронуто. Убрать — `node tools/tidy.mjs --apply`');
+// СТОРОЖ ВХОДА — уборка исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`). Форма —
+// образец проекта (`card-generator.mjs`, `fuse.mjs`): сравнение РАЗРЕШЁННЫХ путей, а не имени файла.
+const isEntry = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (isEntry) process.exit(await main(process.argv.slice(2)));
 
 /**
  * Самопроверка решения «трогать или не трогать» — на фикстурах, без машины и без единого `taskkill`.

@@ -72,10 +72,6 @@ const WIDE_RULES = [
 const WIDE_MODE = 'dontAsk';
 const MODE_KEY = 'defaultMode';
 
-const mode = process.argv.includes('--show') ? 'show'
-  : process.argv.includes('--revoke') ? 'revoke'
-  : 'grant';
-
 function load() {
   if (!existsSync(SETTINGS)) return { permissions: { allow: [], ask: [], deny: [] } };
   const raw = readFileSync(SETTINGS, 'utf8').replace(/^﻿/, '');
@@ -94,65 +90,81 @@ function save(obj) {
   writeFileSync(SETTINGS, JSON.stringify(obj, null, 2).replace(/\r\n/g, '\n') + '\n', 'utf8');
 }
 
-const settings = load();
-settings.permissions ??= {};
-settings.permissions.allow ??= [];
-settings.permissions.ask ??= [];
-settings.permissions.deny ??= [];
+/**
+ * ВСЯ РАБОТА ГРАНТА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`).
+ *
+ * До починки верхний уровень модуля ЧИТАЛ режим из `process.argv` вызывающего и ПИСАЛ файл прав
+ * владельца: импорт из процесса с `--revoke` в аргументах отзывал выданные им права, импорт без
+ * флагов — выдавал их. Файл прав — его решение, и трогать его вправе только его прямой запуск.
+ * `process.argv` читается ТОЛЬКО параметром отсюда.
+ *
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ * @returns {number} код выхода
+ */
+function main(argv) {
+  const mode = argv.includes('--show') ? 'show'
+    : argv.includes('--revoke') ? 'revoke'
+    : 'grant';
 
-const allow = settings.permissions.allow;
-const deny = settings.permissions.deny;
+  const settings = load();
+  settings.permissions ??= {};
+  settings.permissions.allow ??= [];
+  settings.permissions.ask ??= [];
+  settings.permissions.deny ??= [];
 
-if (mode === 'show') {
-  const have = WIDE_RULES.filter((r) => allow.includes(r));
-  console.log(`файл: ${SETTINGS}`);
-  console.log(`широкие правила: ${have.length} из ${WIDE_RULES.length} на месте${have.length ? ` (${have.join(', ')})` : ''}`);
-  console.log(`режим по умолчанию: ${settings.permissions[MODE_KEY] ?? 'не задан (значит «спрашивать»)'} — нужен «${WIDE_MODE}»`);
-  console.log(`всего разрешений: ${allow.length} · запретов: ${deny.length}`);
-  console.log('\nЗАПРЕТЫ (они СИЛЬНЕЕ любых разрешений, широкий грант их не отменяет):');
+  const allow = settings.permissions.allow;
+  const deny = settings.permissions.deny;
+
+  if (mode === 'show') {
+    const have = WIDE_RULES.filter((r) => allow.includes(r));
+    console.log(`файл: ${SETTINGS}`);
+    console.log(`широкие правила: ${have.length} из ${WIDE_RULES.length} на месте${have.length ? ` (${have.join(', ')})` : ''}`);
+    console.log(`режим по умолчанию: ${settings.permissions[MODE_KEY] ?? 'не задан (значит «спрашивать»)'} — нужен «${WIDE_MODE}»`);
+    console.log(`всего разрешений: ${allow.length} · запретов: ${deny.length}`);
+    console.log('\nЗАПРЕТЫ (они СИЛЬНЕЕ любых разрешений, широкий грант их не отменяет):');
+    for (const d of deny) console.log(`  ✗ ${d}`);
+    return 0;
+  }
+
+  if (mode === 'revoke') {
+    const before = allow.length;
+    settings.permissions.allow = allow.filter((r) => !WIDE_RULES.includes(r));
+    // Режим снимаем ТОЛЬКО если это наш — чужой (выставленный вручную) не трогаем.
+    const hadMode = settings.permissions[MODE_KEY] === WIDE_MODE;
+    if (hadMode) delete settings.permissions[MODE_KEY];
+    save(settings);
+    console.log(`СНЯТО: ${before - settings.permissions.allow.length} широких правил${hadMode ? ` и режим «${WIDE_MODE}»` : ''}. Остальные разрешения не тронуты.`);
+    console.log('Агент снова будет спрашивать на командах, которых нет в узком списке.');
+    return 0;
+  }
+
+  const added = [];
+  for (const rule of WIDE_RULES) {
+    if (!allow.includes(rule)) { allow.push(rule); added.push(rule); }
+  }
+  const modeWas = settings.permissions[MODE_KEY];
+  const modeChanged = modeWas !== WIDE_MODE;
+  if (modeChanged) settings.permissions[MODE_KEY] = WIDE_MODE;
+
+  if (added.length === 0 && !modeChanged) {
+    console.log('Права УЖЕ выданы — ничего не меняю (скрипт идемпотентен).');
+  } else {
+    save(settings);
+    if (added.length) {
+      console.log(`ВЫДАНО (${added.length}):`);
+      for (const r of added) console.log(`  ✓ ${r}`);
+    }
+    if (modeChanged) {
+      console.log(`РЕЖИМ ПО УМОЛЧАНИЮ: ${modeWas ?? 'не был задан'} → ${WIDE_MODE}`);
+      console.log('  (именно он снимает вопрос на том, чего НЕТ в списке разрешений — а спрашивают');
+      console.log('   всегда именно про это. Запреты продолжают действовать и проверяются ПЕРВЫМИ.)');
+    }
+  }
+
+  console.log(`\nфайл: ${SETTINGS}`);
+  console.log(`\nЗАПРЕТЫ ОСТАЛИСЬ И ОНИ СИЛЬНЕЕ РАЗРЕШЕНИЙ — вот они, ${deny.length} шт.:`);
   for (const d of deny) console.log(`  ✗ ${d}`);
-  process.exit(0);
-}
-
-if (mode === 'revoke') {
-  const before = allow.length;
-  settings.permissions.allow = allow.filter((r) => !WIDE_RULES.includes(r));
-  // Режим снимаем ТОЛЬКО если это наш — чужой (выставленный вручную) не трогаем.
-  const hadMode = settings.permissions[MODE_KEY] === WIDE_MODE;
-  if (hadMode) delete settings.permissions[MODE_KEY];
-  save(settings);
-  console.log(`СНЯТО: ${before - settings.permissions.allow.length} широких правил${hadMode ? ` и режим «${WIDE_MODE}»` : ''}. Остальные разрешения не тронуты.`);
-  console.log('Агент снова будет спрашивать на командах, которых нет в узком списке.');
-  process.exit(0);
-}
-
-const added = [];
-for (const rule of WIDE_RULES) {
-  if (!allow.includes(rule)) { allow.push(rule); added.push(rule); }
-}
-const modeWas = settings.permissions[MODE_KEY];
-const modeChanged = modeWas !== WIDE_MODE;
-if (modeChanged) settings.permissions[MODE_KEY] = WIDE_MODE;
-
-if (added.length === 0 && !modeChanged) {
-  console.log('Права УЖЕ выданы — ничего не меняю (скрипт идемпотентен).');
-} else {
-  save(settings);
-  if (added.length) {
-    console.log(`ВЫДАНО (${added.length}):`);
-    for (const r of added) console.log(`  ✓ ${r}`);
-  }
-  if (modeChanged) {
-    console.log(`РЕЖИМ ПО УМОЛЧАНИЮ: ${modeWas ?? 'не был задан'} → ${WIDE_MODE}`);
-    console.log('  (именно он снимает вопрос на том, чего НЕТ в списке разрешений — а спрашивают');
-    console.log('   всегда именно про это. Запреты продолжают действовать и проверяются ПЕРВЫМИ.)');
-  }
-}
-
-console.log(`\nфайл: ${SETTINGS}`);
-console.log(`\nЗАПРЕТЫ ОСТАЛИСЬ И ОНИ СИЛЬНЕЕ РАЗРЕШЕНИЙ — вот они, ${deny.length} шт.:`);
-for (const d of deny) console.log(`  ✗ ${d}`);
-console.log(`
+  console.log(`
 Дальше:
   • ПЕРЕЗАПУСТИ СЕССИЮ АГЕНТА — режим по умолчанию читается на старте, в отличие от списка
     разрешений, который подхватывается на следующем же вызове;
@@ -164,3 +176,9 @@ console.log(`
 Чего этот грант НЕ отменяет: агент по-прежнему спрашивает на ПРОДУКТОВОМ видении
 (развилки, вкус, бренд) — для этого в KAIF есть interviews/ и homeworks/, и это
 правило фреймворка, а не разрешений.`);
+  return 0;
+}
+
+// СТОРОЖ ВХОДА — грант исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isEntry) process.exit(main(process.argv.slice(2)));

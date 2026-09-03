@@ -71,51 +71,68 @@ function load() {
   }
 }
 
-const settings = load();
-settings.permissions ??= {};
-settings.permissions.allow ??= [];
-settings.permissions.deny ??= [];
-const allow = settings.permissions.allow;
-const deny = settings.permissions.deny;
+/**
+ * ВСЯ РАБОТА ГРАНТА — здесь, и зовётся она ТОЛЬКО при прямом запуске (`bugs/95`).
+ *
+ * До починки верхний уровень модуля ПИСАЛ файл прав владельца при любом импорте (без флагов —
+ * выдавал правила, с `--revoke` в argv вызывающего — снимал их). `process.argv` читается ТОЛЬКО
+ * параметром отсюда; импорт файла — чтение.
+ *
+ * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
+ * @returns {number} код выхода
+ */
+function main(argv) {
+  const settings = load();
+  settings.permissions ??= {};
+  settings.permissions.allow ??= [];
+  settings.permissions.deny ??= [];
+  const allow = settings.permissions.allow;
+  const deny = settings.permissions.deny;
 
-if (process.argv.includes('--show')) {
-  const have = FILE_OPS.filter((r) => allow.includes(r));
-  console.log(`файл: ${SETTINGS}`);
-  console.log(`правила файловых операций: ${have.length} из ${FILE_OPS.length} на месте`);
-  for (const r of FILE_OPS) console.log(`  ${allow.includes(r) ? '✓' : '·'} ${r}`);
-  console.log('');
-  console.log(`всего разрешений: ${allow.length} · запретов: ${deny.length} (запреты СИЛЬНЕЕ разрешений)`);
-  console.log('');
-  console.log('ЕСЛИ ВОПРОСЫ ОСТАЛИСЬ — дело не в этом файле, а в классификаторе авто-режима.');
-  console.log('Рычаг: команда /permissions в Claude Code и смена режима.');
-  process.exit(0);
-}
+  if (argv.includes('--show')) {
+    const have = FILE_OPS.filter((r) => allow.includes(r));
+    console.log(`файл: ${SETTINGS}`);
+    console.log(`правила файловых операций: ${have.length} из ${FILE_OPS.length} на месте`);
+    for (const r of FILE_OPS) console.log(`  ${allow.includes(r) ? '✓' : '·'} ${r}`);
+    console.log('');
+    console.log(`всего разрешений: ${allow.length} · запретов: ${deny.length} (запреты СИЛЬНЕЕ разрешений)`);
+    console.log('');
+    console.log('ЕСЛИ ВОПРОСЫ ОСТАЛИСЬ — дело не в этом файле, а в классификаторе авто-режима.');
+    console.log('Рычаг: команда /permissions в Claude Code и смена режима.');
+    return 0;
+  }
 
-if (process.argv.includes('--revoke')) {
-  const before = allow.length;
-  settings.permissions.allow = allow.filter((r) => !FILE_OPS.includes(r));
+  if (argv.includes('--revoke')) {
+    const before = allow.length;
+    settings.permissions.allow = allow.filter((r) => !FILE_OPS.includes(r));
+    writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+    console.log(`СНЯТО: ${before - settings.permissions.allow.length} правил. Остальные разрешения и все запреты не тронуты.`);
+    return 0;
+  }
+
+  const added = [];
+  for (const rule of FILE_OPS) {
+    if (!allow.includes(rule)) { allow.push(rule); added.push(rule); }
+  }
   writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
-  console.log(`СНЯТО: ${before - settings.permissions.allow.length} правил. Остальные разрешения и все запреты не тронуты.`);
-  process.exit(0);
+
+  console.log(`файл: ${SETTINGS}`);
+  if (added.length) {
+    console.log(`ДОБАВЛЕНО ${added.length}:`);
+    for (const r of added) console.log(`  + ${r}`);
+  } else {
+    console.log('Все правила уже были на месте — ничего не изменилось.');
+  }
+  console.log('');
+  console.log(`Итого разрешений: ${allow.length} · запретов: ${deny.length}. Запреты НЕ тронуты и остаются сильнее.`);
+  console.log('');
+  console.log('ЧЕСТНАЯ ОГОВОРКА: это снимает вопросы, которые задаёт файл настроек. Классификатор');
+  console.log('авто-режима — отдельная модель НАД настройками, и он может спросить снова. Если так —');
+  console.log('единственный надёжный рычаг ваш: /permissions в Claude Code, смена режима.');
+  console.log('Откат этого скрипта: node tools/grant-agent-file-ops.mjs --revoke');
+  return 0;
 }
 
-const added = [];
-for (const rule of FILE_OPS) {
-  if (!allow.includes(rule)) { allow.push(rule); added.push(rule); }
-}
-writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
-
-console.log(`файл: ${SETTINGS}`);
-if (added.length) {
-  console.log(`ДОБАВЛЕНО ${added.length}:`);
-  for (const r of added) console.log(`  + ${r}`);
-} else {
-  console.log('Все правила уже были на месте — ничего не изменилось.');
-}
-console.log('');
-console.log(`Итого разрешений: ${allow.length} · запретов: ${deny.length}. Запреты НЕ тронуты и остаются сильнее.`);
-console.log('');
-console.log('ЧЕСТНАЯ ОГОВОРКА: это снимает вопросы, которые задаёт файл настроек. Классификатор');
-console.log('авто-режима — отдельная модель НАД настройками, и он может спросить снова. Если так —');
-console.log('единственный надёжный рычаг ваш: /permissions в Claude Code, смена режима.');
-console.log('Откат этого скрипта: node tools/grant-agent-file-ops.mjs --revoke');
+// СТОРОЖ ВХОДА — грант исполняется ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
+const isEntry = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (isEntry) process.exit(main(process.argv.slice(2)));
