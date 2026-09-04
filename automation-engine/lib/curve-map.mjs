@@ -26,9 +26,12 @@
 //                  journal's corrections; a map computing its own floors disagreed with the run for
 //                  four days after 2026-08-31, and the owner read «ниже него спуск не ходит» over a
 //                  floor the engine had already dropped;
-//   refuted      — a RECORDED hang the engine does not honour as a floor (refuted by a deeper pass,
-//                  or standing above a lower floor). Drawn hollow and named «снято движком»: the fact
-//                  stays visible, the verb is truthful;
+//   remeasure    — a RECORDED hang the engine does not honour as a floor (refuted by a deeper pass,
+//                  or standing above a lower floor) and NOT yet re-attributed by a correction: the frequency's
+//                  evidence contradicts itself. Drawn hollow and named «ПЕРЕМЕРИТЬ» — the one thing it asks for.
+//                  The owner 2026-09-04 (plans/86): a point named «снято движком» carried no value, only the
+//                  inheritance of an error; a false hang is CORRECTED in the journal, and a genuine contradiction
+//                  is remeasured, after which its correction makes the point vanish. Empty layer = no caption;
 //   marker       — the rung under test RIGHT NOW (the pulse's frequency · voltage · stock), a ring
 //                  with a trace back to the stock voltage: the descent, seen. Only the live surface
 //                  passes one.
@@ -60,31 +63,39 @@ export const CURVE_PATH = join('curves', 'measured.json');
 export const JOURNAL_PATH = join('runs', 'sweep', 'journal.jsonl');
 export const UNTOUCHED_TAG = 'stop:untouched';
 
-/** ⚡ THE LEFT EDGE OF THE AXIS — the owner's order 2026-08-31: *«рисуй график начиная с 600 мВ»*.
- *  The card's grid starts at 450 mV, but the lower rungs are the resting state: no tuning happens
- *  there and none will. Stretching the axis to 450 gave a third of the sheet to a region where both
- *  lines lie on each other and squeezed the region where the work is (800…1200 mV). A cut about
- *  RESOLUTION, not about hiding data — which is why the axis caption says so on the canvas. */
-export const X_FLOOR_MV = 600;
+/** ⚡ THE LEFT EDGE OF THE AXIS — the owner's order 2026-09-04, looking at the live widget:
+ *  *«и начинать график можно с 700 мВ»* (it supersedes his 2026-08-31 *«рисуй график начиная с
+ *  600 мВ»*, given on the static map). The card's grid starts at 450 mV, but the lower rungs are the
+ *  resting state: no tuning happens there and none will. Stretching the axis left gave a third of the
+ *  sheet to a region where both lines lie on each other and squeezed the region where the work is
+ *  (800…1200 mV). A cut about RESOLUTION, not about hiding data — which is why the axis caption says
+ *  so on the canvas. On the battle document the cut drops exactly one row: 180 MHz at 450 mV, rest. */
+export const X_FLOOR_MV = 700;
 
 /** The static page's geometry — `assets/curve-map.html` is drawn with exactly these numbers. */
 export const STATIC_SIZE = Object.freeze({
   W: 1360, H: 620, PAD: Object.freeze({ l: 74, r: 26, t: 28, b: 54 }),
-  xTickMv: 50, yTickMhz: 250, r: Object.freeze({ proven: 3, floor: 3.5, refuted: 5, marker: 7 }),
+  xTickMv: 50, yTickMhz: 250, r: Object.freeze({ proven: 3, floor: 3.5, remeasure: 5, marker: 7 }),
 });
 
 /** The watch window's geometry: fewer pixels, larger marks — the owner: *«шрифты крупные»*. The label
  *  sizes themselves are CSS (the skin's business), the radii and tick density are geometry. */
 export const WIDGET_SIZE = Object.freeze({
   W: 760, H: 540, PAD: Object.freeze({ l: 84, r: 24, t: 48, b: 64 }),
-  xTickMv: 100, yTickMhz: 250, r: Object.freeze({ proven: 5, floor: 6, refuted: 8, marker: 11 }),
+  // Proven dots are TINY on purpose — the owner 2026-09-04, looking at the widget: *«то, что прошло тест,
+  // и никак не будет использоваться — синие точки — можно очень маленькими точками рисовать, чтобы мало
+  // место занимали на графике»* (their 50 % opacity is the skin's business, `build-dashboard-page.mjs`).
+  xTickMv: 100, yTickMhz: 250, r: Object.freeze({ proven: 2, floor: 6, remeasure: 8, marker: 11 }),
   // The «МГц» label and the counts line sit ABOVE the plot, in the top padding: inside the plot they
   // collided with the first tick label and with the marker of a rung near the top (seen 2026-09-04).
   labelsAbove: true,
 });
-/** The widget's x-axis caption — ONE string for the live route and the static preview (a pair collapsed).
- *  Short on purpose: at the widget's letter size the static page's long form ran off the sheet. */
-export const WIDGET_X_CAPTION = 'напряжение, мВ → (ось от 600 мВ: ниже тюнинга нет)';
+/** The x-axis caption — ONE string for both surfaces (a pair collapsed). NO justification in it: the
+ *  owner 2026-09-04, on the widget — *«оправдание ОСЬ ОТ 700 МВ, НИЖЕ — это убрать»*. The axis's left
+ *  edge is explained once, at `X_FLOOR_MV`, for the reader of the code; the reader of the picture
+ *  gets the quantity and its unit — no arrow either, and the caption sits at the axis's RIGHT end
+ *  (*«напряжение, мВ — убрать стрелку, переместить в правое крайнее положение»*, same day). */
+export const WIDGET_X_CAPTION = 'напряжение, мВ';
 
 // =================================================================================================
 // 1. Facts — from the document and the journal, without a single number from the head
@@ -95,7 +106,7 @@ export const WIDGET_X_CAPTION = 'напряжение, мВ → (ось от 600
  * (an orphan is either the rung in flight or the death `closeHangs` will record on the next launch)
  * and never from a corrected line (a corrected «hang» was an operator stop or a writer death, not a
  * card event — `writeCorrection`). This is the RECORD; which of these the engine still honours is
- * `hangFloors`' verdict, and the difference between the two maps is the `refuted` layer.
+ * `hangFloors`' verdict, and the difference between the two maps is the `remeasure` layer.
  *
  * @returns {Map<number, {voltageMv:number, seq:number}>}
  */
@@ -145,16 +156,16 @@ export function curveFacts({ doc, records = [], inFlight = null } = {}) {
       if (orphans.has(f.seq) && mhz === inFlight.mhz && f.voltageMv === inFlight.mv) floors.delete(mhz);
     }
   }
-  const refuted = new Map();
+  const remeasure = new Map();
   for (const [mhz, h] of rawHangs(records)) {
     const f = floors.get(mhz);
     if (!f || f.voltageMv < h.voltageMv) {
-      refuted.set(mhz, { voltageMv: h.voltageMv, seq: h.seq, provenMv: proven.get(mhz)?.voltageMv ?? null, floorMv: f?.voltageMv ?? null });
+      remeasure.set(mhz, { voltageMv: h.voltageMv, seq: h.seq, provenMv: proven.get(mhz)?.voltageMv ?? null, floorMv: f?.voltageMv ?? null });
     }
   }
 
   return {
-    rows, grid, touched, untouched: rows.length - touched.length, gaps, proven, floors, refuted, isUntouched,
+    rows, grid, touched, untouched: rows.length - touched.length, gaps, proven, floors, remeasure, isUntouched,
     stamp: doc?.stamp ?? {}, card: doc?.card ?? {},
   };
 }
@@ -214,7 +225,7 @@ export function curveGeometry(facts, size = STATIC_SIZE, xFloorMv = X_FLOOR_MV) 
     ...facts.rows.map((r) => r.stockVoltageMv), ...facts.rows.map((r) => r.voltageMv),
     ...[...facts.proven.values()].map((x) => x.voltageMv),
     ...[...facts.floors.values()].map((x) => x.voltageMv),
-    ...[...facts.refuted.values()].map((x) => x.voltageMv),
+    ...[...facts.remeasure.values()].map((x) => x.voltageMv),
   ].filter(Number.isFinite);
   if (mhzAll.length === 0 || mvAll.length === 0) return null;
   const xMin = Math.max(xFloorMv, Math.floor((Math.min(...mvAll) - 20) / 50) * 50);
@@ -250,11 +261,11 @@ export function renderCurveSvg(facts, {
 } = {}) {
   const g = curveGeometry(facts, size, xFloorMv);
   if (!g) {
-    return `<svg viewBox="0 0 ${size.W} ${size.H}" role="img" aria-label="Кривая напряжений по частотам">`
+    return `<svg viewBox="0 0 ${size.W} ${size.H}" role="img" aria-label="Кривая напряжений по частотам" data-remeasure="0">`
       + `<text x="${size.PAD.l}" y="${size.PAD.t + 24}" class="ax empty">документ кривой не несёт ни одной частоты — рисовать нечего</text></svg>`;
   }
   const { PAD, plotW, plotH, xMin, xMax, yMin, yMax, X, Y } = g;
-  const { rows, proven, floors, refuted, gaps } = facts;
+  const { rows, proven, floors, remeasure, gaps } = facts;
   const r = size.r ?? STATIC_SIZE.r;
 
   const stockPts = rows.filter((row) => Number.isFinite(row.stockVoltageMv) && row.stockVoltageMv >= xMin)
@@ -271,15 +282,15 @@ export function renderCurveSvg(facts, {
     .map(([m, x]) => `<circle cx="${n2(X(x.voltageMv))}" cy="${n2(Y(m))}" r="${r.floor}" class="hung">`
       + `<title>${m} МГц: ПОЛ ЗАВИСАНИЯ ${x.voltageMv} мВ — ниже него спуск не ходит (правило движка)</title></circle>`).join('');
 
-  const refutedDots = [...refuted.entries()].filter(([m, x]) => inAxes(m, x.voltageMv))
+  const refutedDots = [...remeasure.entries()].filter(([m, x]) => inAxes(m, x.voltageMv))
     .map(([m, x]) => {
       const why = Number.isFinite(x.provenMv) && x.provenMv < x.voltageMv
-        ? `СНЯТО движком (interviews/022 = B): стресс-тест проходил на ${x.provenMv} мВ, на ${x.voltageMv - x.provenMv} мВ ГЛУБЖЕ`
+        ? `ПЕРЕМЕРИТЬ — записи противоречат друг другу: стресс-тест проходил на ${x.provenMv} мВ, на ${x.voltageMv - x.provenMv} мВ ГЛУБЖЕ; стеной не стоит (interviews/022 = B), поправки в журнале нет`
         : (Number.isFinite(x.floorMv)
-          ? `полом не считается: действующий пол этой частоты — ${x.floorMv} мВ`
-          : 'полом не считается: опровергнуто или снято поправкой журнала');
-      return `<circle cx="${n2(X(x.voltageMv))}" cy="${n2(Y(m))}" r="${r.refuted}" class="hung refuted">`
-        + `<title>${m} МГц: зависание на ${x.voltageMv} мВ — ${why}</title></circle>`;
+          ? `ПЕРЕМЕРИТЬ — полом не стоит: действующий пол этой частоты — ${x.floorMv} мВ, поправки в журнале нет`
+          : 'ПЕРЕМЕРИТЬ — полом не стоит, поправки в журнале нет');
+      return `<circle cx="${n2(X(x.voltageMv))}" cy="${n2(Y(m))}" r="${r.remeasure}" class="hung remeasure">`
+        + `<title>${m} МГц: записано зависание на ${x.voltageMv} мВ — ${why}</title></circle>`;
     }).join('');
 
   // The «not touched» band is a range of FREQUENCY, and frequency is on Y — so the band lies flat.
@@ -318,19 +329,19 @@ export function renderCurveSvg(facts, {
       + `text-anchor="${rightSide ? 'start' : 'end'}">${esc(label)}</text>`;
   }
 
-  const caption = xCaption ?? `напряжение, мВ → (ось начинается с ${xMin} мВ: ниже сетка карты есть, тюнинга нет)`;
+  const caption = xCaption ?? WIDGET_X_CAPTION;
   // Where the two top labels live: inside the plot for the static page (its golden), in the top padding
   // for sizes that ask for it (`labelsAbove`).
   const topY = size.labelsAbove ? PAD.t - 14 : PAD.t + 20;
   const summarySvg = summary
     ? `<text x="${PAD.l + plotW}" y="${topY}" class="cap" text-anchor="end">тронуто ${facts.touched.length} из ${rows.length} · `
-      + `полов зависания ${floors.size} · снято движком ${refuted.size} · проходило ${proven.size}</text>`
+      + `полов зависания ${floors.size} · перемерить ${remeasure.size} · проходило ${proven.size}</text>`
     : '';
   const mhzLabel = size.labelsAbove
     ? `<text x="${PAD.l - 10}" y="${topY}" class="ax" text-anchor="end">МГц</text>`
     : `<text x="14" y="${PAD.t + 10}" class="ax">МГц</text>`;
 
-  return `<svg viewBox="0 0 ${size.W} ${size.H}" role="img" aria-label="Кривая напряжений по частотам">
+  return `<svg viewBox="0 0 ${size.W} ${size.H}" role="img" aria-label="Кривая напряжений по частотам" data-remeasure="${remeasure.size}">
   ${gapRects}
   ${grid}
   <polyline class="stock" points="${polyline(stockPts)}"/>
@@ -340,7 +351,7 @@ export function renderCurveSvg(facts, {
   ${refutedDots}
   ${markerSvg}
   ${summarySvg}
-  <text x="${PAD.l}" y="${size.H - 12}" class="ax">${esc(caption)}</text>
+  <text x="${PAD.l + plotW}" y="${size.H - 12}" class="ax" text-anchor="end">${esc(caption)}</text>
   ${mhzLabel}
 </svg>`;
 }
@@ -452,16 +463,17 @@ export function selfTest() {
       !facts.floors.has(2400) && facts.floors.get(2600)?.voltageMv === 900,
       JSON.stringify([...facts.floors]));
     check('и опровергнутое зависание видно как СНЯТОЕ, с обоими числами — факт остаётся, глагол правдив',
-      facts.refuted.get(2400)?.voltageMv === 1000 && facts.refuted.get(2400)?.provenMv === 950 && !facts.refuted.has(2600),
-      JSON.stringify([...facts.refuted]));
+      facts.remeasure.get(2400)?.voltageMv === 1000 && facts.remeasure.get(2400)?.provenMv === 950 && !facts.remeasure.has(2600),
+      JSON.stringify([...facts.remeasure]));
     check('ПРОЖИГ ДОКАЗЫВАЕТ ВЫДАННОЕ НАПРЯЖЕНИЕ, а не заказанное: 2600 МГц проходило на 960, не на 950',
       facts.proven.get(2600)?.voltageMv === 960 && facts.proven.get(2400)?.voltageMv === 950,
       JSON.stringify([...facts.proven]));
     check('ПОПРАВЛЕННОЕ ЗАВИСАНИЕ — НЕ УЛИКА: остановка оператора не рисуется ни полом, ни снятым зависанием',
-      !facts.floors.has(2000) && !facts.refuted.has(2000), JSON.stringify({ floors: [...facts.floors], refuted: [...facts.refuted] }));
+      !facts.floors.has(2000) && !facts.remeasure.has(2000), JSON.stringify({ floors: [...facts.floors], remeasure: [...facts.remeasure] }));
     const svg = renderCurveSvg(facts);
-    check('и на картинке снятое зависание — полый круг с названным глаголом',
-      /class="hung refuted"><title>2400 МГц: зависание на 1000 мВ — СНЯТО движком/.test(svg)
+    check('и на картинке противоречие — полый круг, который просит ОДНОГО: перемерить (plans/86); корень SVG несёт счёт для легенды',
+      /class="hung remeasure"><title>2400 МГц: записано зависание на 1000 мВ — ПЕРЕМЕРИТЬ — записи противоречат друг другу: стресс-тест проходил на 950 мВ, на 50 мВ ГЛУБЖЕ/.test(svg)
+      && /^<svg [^>]*data-remeasure="1"/.test(svg)
         && /class="hung"><title>2600 МГц: ПОЛ ЗАВИСАНИЯ 900 мВ/.test(svg),
       svg.slice(0, 400));
   }
@@ -509,18 +521,28 @@ export function selfTest() {
       STATIC_SIZE.W === 1360 && STATIC_SIZE.H === 620 && STATIC_SIZE.PAD.l === 74 && STATIC_SIZE.PAD.r === 26
         && STATIC_SIZE.PAD.t === 28 && STATIC_SIZE.PAD.b === 54 && STATIC_SIZE.xTickMv === 50 && STATIC_SIZE.yTickMhz === 250,
       JSON.stringify(STATIC_SIZE));
-    // Ось ПРИЖИМАЕТСЯ к данным, когда они выше пола (750 → 700), и ОТСЕКАЕТСЯ полом, когда данные
-    // уходят ниже него (450 → 600): второе — слово владельца, первое — разрешение картинки.
-    check('ось прижимается к данным, когда они выше пола: минимум 750 мВ даёт край 700, а не 600',
+    // Ось ПРИЖИМАЕТСЯ к данным, когда они выше пола (850 → 800), и ОТСЕКАЕТСЯ полом, когда данные
+    // уходят ниже него (450 → 700): второе — слово владельца, первое — разрешение картинки.
+    check('на минимуме 750 мВ край оси совпадает с полом 700 — ни отсечения, ни зазора',
       g.xMin === 700, `xMin=${g.xMin}`);
+    const highDoc = { ...mixedDoc, frequencies: mixedDoc.frequencies.filter((r) => r.voltageMv >= 850) };
+    const gHigh = curveGeometry(curveFacts({ doc: highDoc, records: [] }));
+    check('ось прижимается к данным, когда они выше пола: минимум 850 мВ даёт край 800, а не 700',
+      gHigh.xMin === 800, `xMin=${gHigh.xMin}`);
     const lowDoc = { ...mixedDoc, frequencies: [...mixedDoc.frequencies, row(180, 450, 450, [UNTOUCHED_TAG])] };
     const gLow = curveGeometry(curveFacts({ doc: lowDoc, records: [] }));
-    check('ЛЕВЫЙ КРАЙ ОСИ — 600 мВ (слово владельца), когда сетка карты начинается ниже: 450 мВ покоя отсечены',
-      gLow.xMin === 600 && X_FLOOR_MV === 600, `xMin=${gLow.xMin}`);
+    check('ЛЕВЫЙ КРАЙ ОСИ — 700 мВ (слово владельца 2026-09-04), когда сетка карты начинается ниже: 450 мВ покоя отсечены',
+      gLow.xMin === 700 && X_FLOOR_MV === 700, `xMin=${gLow.xMin}`);
+    check('ПОДПИСЬ ОСИ — ВЕЛИЧИНА И ЕДИНИЦА, БЕЗ ОПРАВДАНИЯ И БЕЗ СТРЕЛКИ, У ПРАВОГО КРАЯ ОСИ (слово владельца 2026-09-04)',
+      WIDGET_X_CAPTION === 'напряжение, мВ' && !/тюнинга нет|ось от|начинается с|→/.test(renderCurveSvg(facts))
+        && new RegExp(`<text x="${STATIC_SIZE.PAD.l + g.plotW}" y="${STATIC_SIZE.H - 12}" class="ax" text-anchor="end">напряжение, мВ</text>`).test(renderCurveSvg(facts)),
+      WIDGET_X_CAPTION);
     const widget = renderCurveSvg(facts, { size: WIDGET_SIZE, summary: true });
     check('ВИДЖЕТ РИСУЕТСЯ ТЕМ ЖЕ РЕНДЕРЕРОМ в своей геометрии, со строкой счёта внутри картинки',
-      widget.startsWith(`<svg viewBox="0 0 ${WIDGET_SIZE.W} ${WIDGET_SIZE.H}"`) && /class="cap"[^>]*>тронуто 2 из 5 · полов зависания 0 · снято движком 0 · проходило 0</.test(widget),
+      widget.startsWith(`<svg viewBox="0 0 ${WIDGET_SIZE.W} ${WIDGET_SIZE.H}"`) && /class="cap"[^>]*>тронуто 2 из 5 · полов зависания 0 · перемерить 0 · проходило 0</.test(widget),
       widget.slice(0, 120));
+      check('БЕЗ ПРОТИВОРЕЧИЙ КОРЕНЬ SVG ГОВОРИТ 0 — легенда виджета прячет строку «перемерить» по этому числу, а не по своему счёту',
+        /^<svg [^>]*data-remeasure="0"/.test(widget), widget.slice(0, 160));
   }
 
   // — Loading: honest answers, never a throw.
@@ -557,7 +579,7 @@ async function main(argv) {
   if (!loaded.ok) { console.error(`ОСТАНОВ: ${loaded.why}`); return 1; }
   const f = loaded.facts;
   console.log(`КАРТА КРИВОЙ (факты): частот ${f.rows.length} · тронуто ${f.touched.length} · проходило ${f.proven.size} · `
-    + `полов зависания ${f.floors.size} · снято движком ${f.refuted.size} · журнал ${loaded.journalLines} строк`);
+    + `полов зависания ${f.floors.size} · перемерить ${f.remeasure.size} · журнал ${loaded.journalLines} строк`);
   console.log('В КАРТУ НЕ ЗАПИСАНО НИЧЕГО: модуль читает два файла.');
   return 0;
 }

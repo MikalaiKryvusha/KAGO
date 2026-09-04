@@ -6,8 +6,8 @@
 > (переключаемый)», gates `E26-AC1 · E26-AC2 · E26-AC4 · виден живой прогон` · `ideas/05` (the order)
 > **Status:** 🟢 planned 2026-09-04 01:37 +03:00 · **MVP EXECUTED 2026-09-04 02:0x +03:00** — Ш1…Ш5 closed,
 > Ш6 observation done (two renders looked at, live probe, hashes equal), papers at the session's
-> closure · **waits for the OWNER'S EYE** (taste: letter size, the toggle's place, whether the curve
-> should be the default view) — not DONE until he has looked
+> closure · ✅ **DONE 2026-09-04 (session 80): the owner LOOKED** — three answers plus two verdicts
+> on what he saw, all executed the same session (`homeworks/06`, §6 below)
 > **Outbound:** the owner's EYE on the built widget (taste class — the fonts of `E26-AC6`, the place
 > of the toggle, whether the curve should be the default view) → chat, not an interview · phase 1 of
 > the epic is recorded as CLOSED by the owner's verdicts of 2026-08-31 on the static map (see §1)
@@ -52,7 +52,7 @@ meter.
 ## 1. What is already decided — not re-litigated
 
 1. **Voltage on X, frequency on Y** — the owner's order 2026-08-31 on the static map: *«перерисуй,
-   напряжение по оси X»*; **the axis starts at 600 mV** — *«рисуй график начиная с 600 мВ»*; **our
+   напряжение по оси X»*; **the axis starts at 700 mV** — *«и начинать график можно с 700 мВ»* (2026-09-04, on the live widget; it replaced his 2026-08-31 *«рисуй график начиная с 600 мВ»*); **our
    line is the EFFECTIVE curve** (highest frequency each voltage may serve), born from his defect
    report *«наша VF кривая ужасная, у неё не видно равномерности»* and *«не вижу нашего графика»*
    (commits `eff421b`, `40003cb`; the quotes live in the tool's own comments). This IS phase 1 of the
@@ -187,6 +187,11 @@ Each step quotes the meta-plan line it executes: `plans/26` → «2 | Видже
   wiring; asked in the report, not decided here.
 
 ## 6. Decisions made without the owner (to be settled at closure)
+
+> ✅ **Settled 2026-09-04 (session 80, `homeworks/06`), the owner at the window:** the toggle stays
+> top-left on the stage, the default stays the card animation, the axis digits go 22 → 20 px
+> (*«чуть-чуть мельче цифры»*), the legend is cut to six short captions (*«непонятные, слишком
+> длинные подписи»*), the axis floor becomes 700 mV (*«и начинать график можно с 700 мВ»*).
 
 - default view stays the accepted card animation; the curve is one click away and remembered;
 - the toggle sits top-left ON the stage (the pill's mirror), not inside the МЕНЮ dropdown — the

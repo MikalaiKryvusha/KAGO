@@ -64,7 +64,7 @@ const must = (cond, why) => { if (!cond) { console.error(`ОСТАНОВ: ${why}
 const loaded = loadFacts({ curvePath: CURVE, journalPath: JOURNAL });
 must(loaded.ok, loaded.why);
 const { facts, journalLines } = loaded;
-const { rows, touched, proven, floors, refuted, isUntouched } = facts;
+const { rows, touched, proven, floors, remeasure, isUntouched } = facts;
 
 // =================================================================================================
 // 2. Картинка — тем же рендерером, что и виджет окна наблюдения; здесь только облик страницы
@@ -98,11 +98,11 @@ const bucketRows = [...buckets.values()].sort((a, b) => b.from - a.from).map((b)
 // Зависания, которые движок полом не считает, — списком: это прямой ответ на вопрос владельца
 // «2872 закрыта на 1035 — уверен, что это неверно» (2026-08-31), и это те частоты, которые он
 // велел перемерить (`interviews/022`: «И перемерить частоты»).
-const refutedRows = [...refuted.entries()]
+const remeasureRows = [...remeasure.entries()]
   .map(([m, x]) => ({ m, v: x.voltageMv, p: x.provenMv, f: x.floorMv, stock: rows.find((r) => r.mhz === m)?.stockVoltageMv ?? null }))
   .sort((a, b) => (Number.isFinite(b.p) ? b.v - b.p : 0) - (Number.isFinite(a.p) ? a.v - a.p : 0));
 
-const refutedTable = refutedRows.map((x) =>
+const remeasureTable = remeasureRows.map((x) =>
   `<tr><td>${x.m}</td><td>${x.stock ?? '—'}</td><td class="bad">${x.v}</td><td class="ok">${Number.isFinite(x.p) ? x.p : '—'}</td>`
   + `<td>${Number.isFinite(x.p) ? `${x.v - x.p} мВ` : '—'}</td><td>${Number.isFinite(x.f) ? `${x.f} мВ` : 'снят целиком'}</td></tr>`).join('');
 
@@ -130,7 +130,7 @@ const html = `<!DOCTYPE html>
   .tuned { fill: none; stroke: #1e9e5a; stroke-width: 2.2; }
   .proven { fill: #2b6cb0; opacity: .85; }
   .hung { fill: #d23b3b; }
-  .hung.refuted { fill: none; stroke: #d23b3b; stroke-width: 2; }
+  .hung.remeasure { fill: none; stroke: #d23b3b; stroke-width: 2; }
   .trace { stroke: #e07b39; stroke-width: 2; stroke-dasharray: 6 4; }
   .marker { fill: none; stroke: #e07b39; stroke-width: 2.5; }
   .marker-label { fill: #b45a1c; font-size: 13px; font-weight: 600; }
@@ -157,16 +157,15 @@ const html = `<!DOCTYPE html>
 ${svg}
 <div class="legend">
   <span><i style="background:#9aa1ae"></i>сток — заводское напряжение</span>
-  <span><i style="background:#1e9e5a"></i>наша — что ЛЯЖЕТ В КАРТУ; <b>чем ЛЕВЕЕ серой, тем глубже андервольт</b></span>
+  <span><i style="background:#1e9e5a"></i>тюнинг-кривая — что ЛЯЖЕТ В КАРТУ; <b>чем ЛЕВЕЕ серой, тем глубже андервольт</b></span>
   <span><b class="dot" style="background:#2b6cb0"></b>самое глубокое, что ПРОХОДИЛО прожиг</span>
   <span><b class="dot" style="background:#d23b3b"></b>пол зависания, который держит движок — ниже него спуск не ходит</span>
-  <span><b class="dot" style="border:2px solid #d23b3b"></b>зависание, СНЯТОЕ движком — опровергнуто более глубоким прожигом</span>
-  <span><b class="dot" style="background:#eef1f6;border:1px solid #ccd"></b>бледная зона — не тронуто</span>
+${remeasureRows.length ? '  <span><b class="dot" style="border:2px solid #d23b3b"></b>ПЕРЕМЕРИТЬ — записи частоты противоречат друг другу: зависание записано, а прожиг проходил глубже</span>\n' : ''}  <span><b class="dot" style="background:#eef1f6;border:1px solid #ccd"></b>бледная зона — не тронуто</span>
 </div>
-<p class="note">Полый красный круг — <b>зависание, которое движок полом больше не считает</b>: прожиг на этой
-частоте проходил ГЛУБЖЕ записанного зависания (решение владельца <code>interviews/022</code> = B), и частота
-спускается заново. Наведите — покажет оба числа.</p>
-<p class="note"><b>Зелёная линия — то, что ляжет в карту</b>, а не колонка документа: для каждой ступени
+${remeasureRows.length ? `<p class="note">Полый красный круг — <b>ПЕРЕМЕРИТЬ</b>: у частоты записано зависание, а прожиг проходил ГЛУБЖЕ
+него. Стеной такая запись не стоит (<code>interviews/022</code> = B), но и поправки с уликой в журнале у неё нет — записи
+противоречат друг другу, и снять противоречие может только перемер и поправка (<code>plans/86</code>). Наведите — покажет оба числа.</p>
+` : ''}<p class="note"><b>Зелёная линия — то, что ляжет в карту</b>, а не колонка документа: для каждой ступени
 напряжения берётся самая высокая частота, которую это напряжение вправе обслужить по нашим замерам.
 Она монотонна по построению; там, где заводская строка выше измеренных, линия ложится НА серую —
 карта остаётся на стоке. На документе без единого замера линии нет вовсе.
@@ -175,12 +174,12 @@ ${svg}
 дать напряжения», точка — «что выдержал один прожиг».</p>
 </div>
 
-${refutedRows.length ? `<div class="card">
-<h2>🔴 Зависания, снятые движком: эта же частота выдержала прожиг ГЛУБЖЕ записанного зависания</h2>
-<table><thead><tr><th>МГц</th><th>сток, мВ</th><th>снятое зависание, мВ</th><th>проходило, мВ</th><th>разница</th><th>действующий пол</th></tr></thead>
-<tbody>${refutedTable}</tbody></table>
+${remeasureRows.length ? `<div class="card">
+<h2>🔴 Перемерить: записано зависание, а эта же частота выдержала прожиг ГЛУБЖЕ него</h2>
+<table><thead><tr><th>МГц</th><th>сток, мВ</th><th>записанное зависание, мВ</th><th>проходило, мВ</th><th>разница</th><th>действующий пол</th></tr></thead>
+<tbody>${remeasureTable}</tbody></table>
 <p class="note">Разбор — <code>bugs/85</code>, решение владельца — <code>interviews/022</code> (вариант B,
-«и перемерить частоты»). Снятый пол частоту не держит: спуск идёт заново и ищет край прожигом.</p>
+«и перемерить частоты»). Такая запись частоту не держит: спуск идёт заново и ищет край прожигом; после перемера — поправка в журнал, и строка отсюда уходит (<code>plans/86</code>).</p>
 </div>` : ''}
 
 <div class="card">
@@ -196,8 +195,8 @@ mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, html, 'utf8');
 console.log(`КАРТА КРИВОЙ: ${OUT}`);
 console.log(`  частот ${rows.length} · тронуто ${touched.length} · не тронуто ${rows.length - touched.length} · проходило прожиг ${proven.size}`);
-console.log(`  полов зависания (держит движок) ${floors.size} · зависаний, снятых движком ${refuted.size}`);
-for (const x of refutedRows) {
+console.log(`  полов зависания (держит движок) ${floors.size} · перемерить ${remeasure.size}`);
+for (const x of remeasureRows) {
   console.log(Number.isFinite(x.p)
     ? `    ○ ${x.m} МГц: зависание ${x.v} мВ снято — прожиг проходил на ${x.p} мВ, на ${x.v - x.p} мВ глубже`
     : `    ○ ${x.m} МГц: зависание ${x.v} мВ полом не считается`);

@@ -498,6 +498,10 @@ function refreshCurve(force) {
     .then(async (res) => { if (!res.ok) throw new Error(await res.text()); return res.text(); })
     .then((svg) => {
       holder.innerHTML = svg;
+      // Строка легенды «перемерить» живёт только при непустом слое (plans/86): число берётся с корня
+      // SVG, который посчитал сервер, — страница остаётся читателем и своего счёта не ведёт.
+      const legendRemeasure = $('legend-remeasure'), root = holder.querySelector('svg');
+      if (legendRemeasure) legendRemeasure.hidden = !(root && Number(root.getAttribute('data-remeasure')) > 0);
       const d = new Date();
       const p2 = (n) => String(n).padStart(2, '0');
       // Подпись — УТВЕРЖДЕНИЕ о состоянии, и у каждого состояния своё (EXP-0078: подпись над не тем

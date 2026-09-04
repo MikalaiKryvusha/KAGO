@@ -207,12 +207,12 @@ s = s.replace('<div class="stage">',
       <div id="curve-widget" hidden>
         <div id="curve-svg"><p class="note">кривая ещё не запрошена</p></div>
         <div class="legend">
-          <span><i style="background:#6d7885"></i>сток — заводское напряжение</span>
-          <span><i style="background:var(--ok)"></i>наша — что ляжет в карту; левее серой = глубже андервольт</span>
-          <span><b class="dot" style="background:#3d86ff"></b>самое глубокое, что проходило стресс-тест</span>
-          <span><b class="dot" style="background:var(--alarm)"></b>пол зависания — ниже спуск не ходит</span>
-          <span><b class="dot" style="border:2px solid var(--alarm)"></b>зависание, снятое движком</span>
-          <span><b class="dot" style="border:3px solid var(--fire)"></b>частота под тестом сейчас</span>
+          <span><i style="background:#6d7885"></i>сток</span>
+          <span><i style="background:var(--ok)"></i>тюнинг-кривая</span>
+          <span><b class="dot proven" style="background:#3d86ff"></b>прошло тест</span>
+          <span><b class="dot" style="background:var(--alarm)"></b>зависание</span>
+          <span id="legend-remeasure" hidden><b class="dot" style="border:2px solid var(--alarm)"></b>перемерить</span>
+          <span><b class="dot" style="border:3px solid var(--fire)"></b>идёт тест</span>
         </div>
         <p class="note" id="curve-note"></p>
       <!-- /curve-widget --></div>`);
@@ -232,15 +232,16 @@ s = s.replace('<div class="stage">',
   #curve-widget{padding:38px 10px 8px}
   #curve-widget svg{display:block;width:100%;height:auto}
   #curve-widget .grid{stroke:#232a33;stroke-width:1}
-  #curve-widget .ax{fill:#8b98a8;font-size:22px;font-family:"Segoe UI",system-ui,sans-serif}
+  #curve-widget .ax{fill:#8b98a8;font-size:20px;font-family:"Segoe UI",system-ui,sans-serif}
   #curve-widget .ax.empty{font-size:26px;fill:#c9d3df}
   #curve-widget .cap{fill:#a9b4c2;font-size:16px;font-family:"Segoe UI",system-ui,sans-serif}
   #curve-widget .gap{fill:#171b21}
   #curve-widget .stock{fill:none;stroke:#6d7885;stroke-width:3}
   #curve-widget .tuned{fill:none;stroke:var(--ok);stroke-width:4}
-  #curve-widget .proven{fill:#3d86ff;opacity:.9}
+  #curve-widget .proven{fill:#3d86ff;opacity:.7}
+  #curve-widget .legend b.dot.proven{width:6px;height:6px;margin:0 8px 0 2px}
   #curve-widget .hung{fill:var(--alarm)}
-  #curve-widget .hung.refuted{fill:none;stroke:var(--alarm);stroke-width:2.5}
+  #curve-widget .hung.remeasure{fill:none;stroke:var(--alarm);stroke-width:2.5}
   #curve-widget .trace{stroke:var(--fire);stroke-width:3;stroke-dasharray:8 6}
   #curve-widget .marker{fill:none;stroke:var(--fire);stroke-width:4}
   #curve-widget .marker-label{fill:#ffb08a;font-size:24px;font-weight:700;font-family:"Segoe UI",system-ui,sans-serif}
