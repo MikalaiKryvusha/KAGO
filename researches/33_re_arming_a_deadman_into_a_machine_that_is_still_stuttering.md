@@ -1,6 +1,6 @@
 # Research 33 — re-arming a deadman into a machine that is still stuttering: how the industry gates the return to service
 
-> **Created:** 2026-09-04 12:1x +03:00 (session 81) · **Parent:** `bugs/101` observation 4 (six fuse trips in 21 s on 04.09, each 60 ms after the previous re-arm) · `plans/81` Ш5 (the АПВ wait) · mechanism M4 of the canon («на развилке — не решать самому, а учиться у лучших») · **Status:** 🟢 recon taken: three fields, four sources; the fork is written for the owner with the project's own numbers, no threshold chosen by the agent · **Outbound:** the fork → the owner through the review contour (`interviews/`), quoting §4 inside the question; the chosen form → `plans/81` (a Ш7) and `fuse.mjs`
+> **Created:** 2026-09-04 12:1x +03:00 (session 81) · **Parent:** `bugs/101` observation 4 (six fuse trips in 21 s on 04.09, each 60 ms after the previous re-arm) · `plans/81` Ш5 (the АПВ wait) · mechanism M4 of the canon («на развилке — не решать самому, а учиться у лучших») · **Status:** 🟢 recon taken: three fields, four sources; the fork is written for the owner with the project's own numbers, no threshold chosen by the agent · **Outbound:** the fork is filed as `interviews/026` Q2 with §4 quoted inside it (2026-09-04 12:2x); the chosen form → `plans/81` (a Ш7) and `fuse.mjs`
 
 ---
 
@@ -48,7 +48,7 @@ The industrial watchdog pattern (PLC scan / process monitoring references; the L
 3. **They keep the sweep out of the half-open window.** In every breaker, callers are refused (or metered) while half-open; ours must not open a new `intent` until the judge is CLOSED. That is the fencing token of `researches/31` applied one state earlier — `tripCount > rearmCount` today, `state !== CLOSED` tomorrow.
 4. **They serve the owner's own words twice.** «Сколько угодно спасений разрешаю» (`interviews/024` = E) — a half-open state does not cap rescues, it stops counting a failed probe as a rescue; and «зависание — наш провал» (S4) — six rescues in 21 s into a stuttering machine is the fuse *working* and the design *failing*, which is exactly the number S4 asks to bring down.
 
-## 4. The fork for the owner — with the project's numbers, and no threshold of the agent's
+## 4. The three shapes side by side — quoted into `interviews/026` Q2 (the question lives THERE; this is its evidence)
 
 | | A. HALF-OPEN by the BEAT (recommended) | B. HALF-OPEN by a fixed wait | C. as today |
 |---|---|---|---|
