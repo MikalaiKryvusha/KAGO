@@ -59,6 +59,8 @@ The industrial watchdog pattern (PLC scan / process monitoring references; the L
 | cost | the sweep resumes later by the window; on 04.09 that is the 21 s the storm lasted, instead of five rungs burned blind | resumes after a pause that is wrong on both sides for any other storm | 04.09 repeats |
 | what it does NOT buy | a machine that stops beating entirely (instant death, EXP class «мгновенная смерть») — no probe can pass; that is the reboot path and stays it | same | — |
 
+**Measured 12:19 over every fuse protocol on disk** (`runs/death-watch/*-fuse.jsonl`, 31.08 and 04.09): re-arms into a sick machine — **10 of 10** — were followed by the next trip in **0.06 s**, one deadman period; the one re-arm into a healthy machine (04.09 10:50:41) held for **319 s**. Today's criterion («stock confirmed») separated sick from healthy zero times out of eleven; the beat separates them within 60 ms.
+
 **Recommendation A**, on the recon's argument, not on taste: the probe exists, runs at 2 ms, costs nothing, and its failure is already the fuse's own definition of «sick». The window's length is a MEASUREMENT question (how long did the beat stay sick after each rescue, over every fuse-alive file on disk — a one-line script), and it goes to the owner as measured numbers, not as a proposal of «10 s».
 
 ## 5. What this recon did NOT establish — named
