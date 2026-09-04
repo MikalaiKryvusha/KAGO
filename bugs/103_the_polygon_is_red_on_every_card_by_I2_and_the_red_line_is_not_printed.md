@@ -1,6 +1,6 @@
 # Bug 103 — the polygon reddens EVERY generated card by guard И2 («stop named, exit code 0»), and the polygon's report does not print the line that matched
 
-**Status:** 🔴 OPEN — found, reproduced twice, NOT diagnosed (session ended at the owner's named time) · **Filed:** 2026-09-04 12:2x (session 81, offline) · **Found:** `npm run polygon -- --count 3` run as an end-to-end regression after the per-rung `stopWhen` fix (`bugs/101` finding 2) · **Severity: high for the bench, none for the card** — the polygon is the instrument that certifies the engine on unknown GPUs (`plans/71`, closed 30/30 on 2026-08-29); a polygon that is red on every card certifies nothing.
+**Status:** 🟡 FIXED 2026-09-04 12:3x (session 81), the 30-card witness pending — the cause was READ from the polygon's own log (below): the bare marker `'АВАРИЙНАЯ'` matched the fuse's STARTUP banner on the twin. Marker replaced by the declaration of a trip (`'СРАБОТАЛА АВАРИЙНАЯ ЗАЩИТА'`); two blocks in `polygon-guards --selftest` (22 → **24**): the banner at exit 0 → green, the live trip line at exit 0 → red; mutation «вернуть голое АВАРИЙНАЯ» reddens the banner block alone; trap `b67` untouched and red as before. `npm run polygon -- --count 1` → **пройдена 1 из 1** (was 0 of 3). **Left:** B103-AC3's `--count 30` (30 minutes of machine time; run it before the next `plans/71` claim) · **Filed:** 2026-09-04 12:2x (session 81, offline) · **Found:** `npm run polygon -- --count 3` run as an end-to-end regression after the per-rung `stopWhen` fix (`bugs/101` finding 2) · **Severity: high for the bench, none for the card** — the polygon is the instrument that certifies the engine on unknown GPUs (`plans/71`, closed 30/30 on 2026-08-29); a polygon that is red on every card certifies nothing.
 
 ⚠️ **ZERO GPU WRITES.** The polygon runs the engine on generated cards in a separate process.
 
@@ -17,7 +17,11 @@ Each card's run itself finishes normally: the twin's `live.json` says `ПРОГ�
 
 ## Forensics — and the second defect
 
-- The guard's verdict carries the matched line (`Строка: «…»`, `polygon-guards.mjs:128`, sliced to 160 chars) and `polygon.mjs:314` pushes `f.why` whole — yet the line that reached the output file is **exactly 200 characters** and ends at «…скрипт и ночной про»: something between the guard and the file caps the report line at 200 (measured with `wc -c` on the raw output, not on a `cut`). **The matched line never reaches the operator.** Step 1 is to find that cap (`polygon.mjs` `log`/report writer, or the runner around it) and lift it for guard verdicts. Same family as `bugs/102` (evidence computed and then thrown away one line before the reader).
+- ✏️ **RETRACTED 12:3x — the «line is not printed / capped at 200» claim was MY OWN `cut -c1-200` on the background task's output; the polygon prints the guard's line whole.** Left visible rather than deleted: a ticket that blamed the instrument for the reader's pipe is itself the lesson (EXP-0232's second half — never write a diagnosis on a hypothesis). The real line, from the polygon's full log:
+
+  > `Строка: «⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ, двойник): pid 32164, НЕ ВЗВЕДЕНА (только наблюдение); протокол в песочнице …»`
+
+  **Diagnosis, read not guessed:** `DEFAULT_STOP_MARKERS` carried the bare word `'АВАРИЙНАЯ'`; since the fuse was renamed to САЗ (`researches/32`, session 73) the fuse's STARTUP banner on the twin contains «АВАРИЙНАЯ ЗАЩИТА» — on every card, with exit 0 — so И2 fires on a healthy run. The marker matched a mention of the protection, not a declaration of a stop. Same family as `bugs/102` (evidence computed and then thrown away one line before the reader).
 - A direct re-run of the engine on the card is not one command: `benches/runs/virtual-virtual-gpu_1002.json` is the twin's CURVE DOCUMENT (`kind: tuning-curve`), not the card; the generated card file the polygon fed is not kept under that name (`polygon.mjs:130` writes it, the path is not printed). Reproduction therefore goes through the polygon itself.
 
 ## Hypothesis (a reading of the marker list, not a diagnosis)
