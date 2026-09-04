@@ -1,6 +1,6 @@
 # Bug 103 — the polygon reddens EVERY generated card by guard И2 («stop named, exit code 0»), and the polygon's report does not print the line that matched
 
-**Status:** 🟡 FIXED 2026-09-04 12:3x (session 81), the 30-card witness pending — the cause was READ from the polygon's own log (below): the bare marker `'АВАРИЙНАЯ'` matched the fuse's STARTUP banner on the twin. Marker replaced by the declaration of a trip (`'СРАБОТАЛА АВАРИЙНАЯ ЗАЩИТА'`); two blocks in `polygon-guards --selftest` (22 → **24**): the banner at exit 0 → green, the live trip line at exit 0 → red; mutation «вернуть голое АВАРИЙНАЯ» reddens the banner block alone; trap `b67` untouched and red as before. `npm run polygon -- --count 1` → **пройдена 1 из 1** (was 0 of 3); `--count 5` at 12:36 → **5 of 5, 188 s**; `--count 10 --seed-base 2000` at 12:44 → **10 of 10, 468 s** (16 cards green in total, two seed bases). **Left:** B103-AC3's `--count 30` (30 minutes of machine time; run it before the next `plans/71` claim) · **Filed:** 2026-09-04 12:2x (session 81, offline) · **Found:** `npm run polygon -- --count 3` run as an end-to-end regression after the per-rung `stopWhen` fix (`bugs/101` finding 2) · **Severity: high for the bench, none for the card** — the polygon is the instrument that certifies the engine on unknown GPUs (`plans/71`, closed 30/30 on 2026-08-29); a polygon that is red on every card certifies nothing.
+**Status:** ✅ DONE — FIXED 2026-09-04 12:3x (session 81); **the 30-card witness taken 2026-09-04 15:2x…16:0x (session 82): 30 of 30 (10 + 10 + 5 + 5, 1434 s of polygon time) on seeds 1000…1029, on the engine WITH the session-82 wiring of `bugs/101` finding 3** (section «Witness» below) — the cause was READ from the polygon's own log (below): the bare marker `'АВАРИЙНАЯ'` matched the fuse's STARTUP banner on the twin. Marker replaced by the declaration of a trip (`'СРАБОТАЛА АВАРИЙНАЯ ЗАЩИТА'`); two blocks in `polygon-guards --selftest` (22 → **24**): the banner at exit 0 → green, the live trip line at exit 0 → red; mutation «вернуть голое АВАРИЙНАЯ» reddens the banner block alone; trap `b67` untouched and red as before. `npm run polygon -- --count 1` → **пройдена 1 из 1** (was 0 of 3); `--count 5` at 12:36 → **5 of 5, 188 s**; `--count 10 --seed-base 2000` at 12:44 → **10 of 10, 468 s** (16 cards green in total, two seed bases). **Left:** nothing (B103-AC3 taken by the 30-card witness below) · **Filed:** 2026-09-04 12:2x (session 81, offline) · **Found:** `npm run polygon -- --count 3` run as an end-to-end regression after the per-rung `stopWhen` fix (`bugs/101` finding 2) · **Severity: high for the bench, none for the card** — the polygon is the instrument that certifies the engine on unknown GPUs (`plans/71`, closed 30/30 on 2026-08-29); a polygon that is red on every card certifies nothing.
 
 ⚠️ **ZERO GPU WRITES.** The polygon runs the engine on generated cards in a separate process.
 
@@ -43,6 +43,21 @@ Since 2026-08-29 the sweep's summary gained lines that the marker list was never
 | B103-AC2 | the cause is a READ line, not a reasoning | this ticket quotes the line |
 | B103-AC3 | polygon green again without weakening И2 | `polygon-guards --selftest` trap `b67` still red; `--count 30` → 30/30 or the honest number |
 
+## Witness — 30 cards, taken 2026-09-04 (session 82, offline)
+
+B103-AC3 asks for `--count 30`. The tool that runs this session caps a background command at ten minutes, and the one attempt to run the full batch detached from it ended in a way worth recording: **the polygon was interrupted at 14:59:39 after eleven green cards** (1000…1010) — its log carries a `^C`, no process of ours sends a console Ctrl event (grep over `automation-engine` and `tools`: none), no leftover process was found, and the cause is NOT known. The batch was therefore re-run as chunks on the SAME thirty seeds (seedBase + i, i = 0…29, amplitude 0.7; 10 + 10 + 5 + 5) — each chunk under the ceiling, each printing its own coverage map:
+
+| run | seeds | result | time | engine |
+|---|---|---|---|---|
+| 14:51 detached, interrupted | 1000…1010 (11 of 30) | 11 of 11 green, then `^C` | — | pre-edit (session 81 tree) |
+| 15:22 chunk 1 | 1000…1009 | **10 of 10** | 384.6 s (38.5 s/card) | session-82 tree (finding 3 wired) |
+| chunk 2 | 1010…1019 | **10 of 10** · 522.6 s (52.3 s/card; card 1011 alone took 152 s — a slow card by its own numbers, no hang fiction) | | session-82 tree |
+| chunk 3 | 1020…1029 | **10 of 10** in two halves of five (300.6 s + 226.4 s; card 1024 took 152 s) — halves, because a ten-card chunk had reached 523 s against a 600 s ceiling | | session-82 tree |
+
+**Total: 30 of 30 (10 + 10 + 5 + 5, 1434 s of polygon time).** Guard И2 was not weakened: `polygon-guards --selftest` 24/24 with trap `b67` red as before (session 81), and the marker is still the declaration `'СРАБОТАЛА АВАРИЙНАЯ ЗАЩИТА'`. What chunks do NOT give: one coverage map over thirty cards (P71-AC5's meter) — each chunk prints its own over ten; the archetype cycle is the same on every chunk (typical · cold-lucky · hot-unlucky · angry-governor · drifty, ×2). The battery in the same hour (48 sets): the first run reddened `fuse` alone — the `bugs/102` flicker, this time WITH its evidence file — and the rerun at 15:50 was 48 sets green, 2501 blocks; unrelated to the polygon (`polyguard` 24/24 in both).
+
+**Left:** nothing on this ticket. The `^C` is an observation, not a diagnosis — a second interruption of a detached polygon is a ticket of its own.
+
 ## Decisions made without the owner
 
 None. Nothing changed; the pre-fix engine was restored byte-for-byte (`git checkout -- automation-engine/engine.mjs`, tree clean).
@@ -50,3 +65,7 @@ None. Nothing changed; the pre-fix engine was restored byte-for-byte (`git check
 ## Links
 
 `bugs/67` (И2's origin) · `bugs/102` (evidence thrown away one line before the reader) · `bugs/101` (the change whose regression test found this) · `plans/71` (polygon closed 30/30 on 29.08) · `automation-engine/lib/polygon-guards.mjs` (`guardStopIsNamedAndExitCodeAgrees`, `DEFAULT_STOP_MARKERS`) · `automation-engine/lib/polygon.mjs:160`
+
+## ✅ STATUS: DONE (2026-09-04 15:5x, session 82)
+
+Fixed 2026-09-04 12:3x (session 81): the stop marker became the declaration `'СРАБОТАЛА АВАРИЙНАЯ ЗАЩИТА'`; `polygon-guards --selftest` 22 → 24 with trap `b67` still red. Witness (B103-AC3) taken 2026-09-04 15:22…15:48 (session 82): **30 of 30 cards on seeds 1000…1029**, in four chunks (10 + 10 + 5 + 5; 1434 s of polygon time), on the engine tree that also carries the `bugs/101` finding-3 wiring — so the same run doubles as E67-AC5's witness that the twin path did not move. Left on this ticket: nothing. The `^C` that ended the one detached full-batch attempt after eleven green cards is recorded above as an observation, not a diagnosis.
