@@ -72,3 +72,23 @@ C3 — драйвер правит результат: 127 записей лег
 
 `bugs/50` (первый и до сегодня единственный случай) · `bugs/45` · `plans/82` ·
 `runs/death-watch/2026-08-31T14-03-05-531Z-fuse.jsonl` · `runs/sweep-session73*.log`.
+
+---
+
+## ✏️ 2026-09-04 12:0x (session 81) — CASE 2 IS REFUTED AS A DRIVER EVENT: it was OUR OWN write, racing the rescue hand
+
+Read in `runs/death-watch/2026-08-31T14-03-05-531Z-fuse.jsonl:28-30` against `runs/sweep/journal.jsonl`:
+hand 2 wrote stock at 17:04:38.240 (+03:00) and verified at 17:04:42.057 — **«127 записей … `want 0,
+got 113000`»**. In that same window the sweep wrote **seq 833** (intent 17:04:38, 2115 MHz ← 815 mV,
+**`deltaMhz: 113`**). The number hand 2 «found» is the next rung's raise, not a driver rewrite. The
+identical pattern repeated on 04.09 (hand 2 stock 10:56:22.372 → verify 10:56:26.530 «got 75000» on
+126 points; **seq 857** intent 10:56:23, **`deltaMhz: 75`**). Two cases, two exact matches.
+
+**What this changes in this ticket:** the sentence «во ВТОРОМ случае C3 случился в руке СПАСЕНИЯ»
+stays true as an observation and becomes false as a diagnosis — the hand's verifier cannot tell «the
+driver rewrote my zeros» from «the sweep wrote after me», and labelled a race as C3. The frequency
+count B92-AC1 must EXCLUDE rescue-hand C3s whose numbers match an open intent of the journal.
+**Case 1** (a settled write whose curve offers 15 MHz above the cap — seq 702, and again seq 845 on
+04.09, both PASS) is untouched by this and remains the open question of this ticket.
+
+Race, per-rung stop and the unmounted progress input — `bugs/101`. Lesson — EXP-0233.
