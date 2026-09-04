@@ -92,3 +92,20 @@ count B92-AC1 must EXCLUDE rescue-hand C3s whose numbers match an open intent of
 04.09, both PASS) is untouched by this and remains the open question of this ticket.
 
 Race, per-rung stop and the unmounted progress input — `bugs/101`. Lesson — EXP-0233.
+
+## ✅ B92-AC1 TAKEN 2026-09-04 12:1x — the count, by the journal, not by memory
+
+`writeFailureClass` over all **864** verdict lines of `runs/sweep/journal.jsonl`: `—` 850 · **C3 12** · C5 1 · C1 1.
+
+| day | C3 write-path cases | verdicts | seqs |
+|---|---|---|---|
+| 2026-08-24 | 1 | PASS/void | 702 (the `bugs/50` case) |
+| 2026-08-25 | 2 | PASS | 743 · 764 |
+| 2026-08-26 | **6** | PASS ×6 | 786…791 — one band, six rungs in two minutes |
+| 2026-08-30 | 1 | **ЗАВИС** | 808 (2857 MHz / 885 mV — the unremeasured hang, EXP-0231 «not for») |
+| 2026-08-31 | 1 | PASS | 824 |
+| 2026-09-04 | 1 | PASS | 845 (2737 MHz, «offers 15 MHz above the cap») |
+
+Plus the two rescue-hand refusals (31.08 `…14-03-05-531Z`, 04.09 `…07-50-16-246Z`) — **both the race of `bugs/101`, excluded from this count.**
+
+**What the number says.** «One case for the whole history» was never true: the class had 6 cases on 26.08 alone, before this ticket was filed; and in 11 of 12 write-path cases the rung went on to a PASS — the curve offered above the cap after a settled, point-by-point-green write, and the card held the ceiling anyway (the lock — `plans/83`). The one hung C3 (seq 808) is the only case where a verdict coincided with the class, and that hang has no remeasurement. So the open question narrows to: **why does a settled write sometimes offer 7…15 MHz above the cap, and does the bound (`-lgc`) make that harmless by construction** — a question for the live card with the owner (read the offered top after a write with the bound armed, at rest and under load), not for a driver-defect hypothesis.
