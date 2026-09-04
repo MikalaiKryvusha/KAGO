@@ -55,7 +55,9 @@
 //   npm run selftest:all -- --selftest             this tool's OWN guard, four fixtures, no suites
 // Exit: 0 = every suite green · 1 = at least one red (or an unknown id was asked for)
 //
-// [TESTED: 2026-08-21 00:4x · `--selftest` → 5 blocks, 0 failed: five fixture children driven through
+// [TESTED: 2026-09-04 12:1x · `--selftest` → 6 blocks, 0 failed (block F, the red set's evidence file,
+//  added for `bugs/102`; mutation «снять writeFileSync» reddens F alone) · previously 2026-08-21 00:4x ·
+//  5 blocks: five fixture children driven through
 //  the same `runSuite()` the battery uses — honest red (exit 1), LYING exit code (red lines, exit 0),
 //  a suite that died before its completion line, a green one as the negative control, and one mixing
 //  all three vocabularies at once (2 green / 3 red / 1 waiting). The battery itself: 17 suites, 848
@@ -66,6 +68,8 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -388,7 +392,7 @@ function stampNow(d = new Date()) {
  * @returns {{id:string, ok:boolean, why:string, code:number, ms:number,
  *            green:number, red:number, pending:number, summary:string|null}}
  */
-export function runSuite(suite, { cwd = ROOT } = {}) {
+export function runSuite(suite, { cwd = ROOT, evidenceDir = null } = {}) {
   const started = Date.now();
   // `stdout` and `stderr` are read as ONE stream: a suite that prints its failures to stderr (which
   // `check` does) would otherwise be counted as having none.
@@ -421,9 +425,22 @@ export function runSuite(suite, { cwd = ROOT } = {}) {
   if (code === 0 && red > 0) reasons.push('РАСХОЖДЕНИЕ ДВУХ ЧТЕНИЙ: код выхода 0, а набор печатает провалы — врёт код выхода');
   if (code !== 0 && red === 0 && summaryLine !== null) reasons.push('РАСХОЖДЕНИЕ ДВУХ ЧТЕНИЙ: код выхода не ноль, а красных строк нет');
 
+  // 🔴 УЛИКА КРАСНОГО НАБОРА СОХРАНЯЕТСЯ, А НЕ ВЫБРАСЫВАЕТСЯ (`bugs/102`). До 2026-09-04 текст набора
+  // жил только в этом буфере: батарея считала красные строки, печатала их ЧИСЛО и совет «повторить
+  // одной командой» — а набор, красный ТОЛЬКО в батарее (`fuse` 31.08 и 04.09, `dashboard`,
+  // `watchdog`), при повторе зелёный, и единственная улика уже уничтожена. Пишется только для
+  // красного: зелёная батарея мусора не оставляет; `runs/` под gitignore.
+  let evidence = null;
+  if (reasons.length && evidenceDir) {
+    mkdirSync(evidenceDir, { recursive: true });
+    evidence = path.join(evidenceDir, `${suite.id}.log`);
+    writeFileSync(evidence, text, 'utf8');
+    reasons.push(`улика: ${evidence}`);
+  }
+
   return {
     id: suite.id, ok: reasons.length === 0, why: reasons.join(' · '),
-    code, ms, green, red, pending, summary: summaryLine,
+    code, ms, green, red, pending, summary: summaryLine, evidence,
   };
 }
 
@@ -451,10 +468,14 @@ function runBattery(only) {
     ? (r.summary ? r.summary.trim() : 'сводки нет')
     : `блоков ${r.green}${r.pending ? ` · ждут ${r.pending}` : ''}`);
 
+  // Куда ложится вывод КРАСНОГО набора (`bugs/102`): одна папка на батарею, файл на набор. Папка
+  // появляется только при первом красном — см. `runSuite`.
+  const evidenceDir = path.join(ROOT, 'runs', 'selftest', new Date().toISOString().replace(/[:.]/gu, '-'));
+
   const results = [];
   for (const suite of chosen) {
     process.stdout.write(`  ${suite.id.padEnd(9)} ${suite.what} … `);
-    const r = runSuite(suite);
+    const r = runSuite(suite, { evidenceDir });
     r.counted = counted(suite, r);
     r.countsBlocks = suite.countsBlocks !== false;
     results.push(r);
@@ -552,8 +573,33 @@ function toolSelftest() {
     console.log(`ПЛОХО E. три словаря разом -> получено ${JSON.stringify(counted)}, ждали [2,3,1]`);
   }
 
+  // F. УЛИКА КРАСНОГО НАБОРА (`bugs/102`): красная фикстура оставляет файл с ПОЛНЫМ выводом и называет
+  // путь в `why`; зелёная — файла не оставляет. Песочница — своя, снимается в `finally`.
+  //   АДРЕСАТ МУТАЦИИ: снять `writeFileSync` в `runSuite` → «файл красного набора существует».
+  {
+    const box = mkdtempSync(path.join(os.tmpdir(), 'kago-selftest-all-'));
+    try {
+      const redFx = cases[0].suite;   // A — честный красный
+      const greenFx = cases[3].suite; // D — честный зелёный
+      const rr = runSuite(redFx, { evidenceDir: box });
+      const rg = runSuite(greenFx, { evidenceDir: box });
+      const redFile = path.join(box, 'A.log');
+      const kept = existsSync(redFile) && readFileSync(redFile, 'utf8').includes('ПЛОХО два')
+        && rr.evidence === redFile && rr.why.includes(`улика: ${redFile}`);
+      const clean = !existsSync(path.join(box, 'D.log')) && rg.evidence === null;
+      if (kept && clean) {
+        console.log('OK   F. улика красного набора: файл с полным выводом существует и назван в why; зелёный файла не оставил');
+      } else {
+        failed++;
+        console.log(`ПЛОХО F. улика красного набора -> файл есть=${existsSync(redFile)} назван=${rr.why.includes('улика:')} зелёный чист=${clean}`);
+      }
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  }
+
   console.log('');
-  console.log(`САМОПРОВЕРКА БАТАРЕИ: 5 блоков, провалов ${failed}.`);
+  console.log(`САМОПРОВЕРКА БАТАРЕИ: 6 блоков, провалов ${failed}.`);
   return failed === 0 ? 0 : 1;
 }
 
