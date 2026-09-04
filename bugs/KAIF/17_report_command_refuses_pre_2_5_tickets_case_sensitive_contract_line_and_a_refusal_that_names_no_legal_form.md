@@ -17,8 +17,12 @@ a timeout is 'outcome unknown' rather than a refusal, `--dry-run` calls nothing.
 became a command precisely so that no agent has to reason about it.
 
 Template A (`/report-bug`): *"`**Delivered upstream:** <origin issue URL · or NOT YET — legal only on
-tracking: anonymous>`"*. The field's 16 tickets were written under the 2.2–2.4 templates, whose line read
-*"NOT YET — awaiting the owner's word (outward action)"*, and three of them wrote it lowercase.
+tracking: anonymous>`"*. The field's 16 tickets were written under the 2.2–2.4 templates.
+
+<!-- owner-review:allow because=цитата СТРОКИ ШАБЛОНА KAIF 2.2–2.4, которую отвергает команда report, а не обращение к владельцу: за ним по этому тикету ничего не числится, тикет уже отправлен в исток (origin #40). Класс ложной находки bugs/40 — «цитата читается как обращение К нему». -->
+Their line read *"NOT YET — awaiting the owner's word (outward action)"*, and three of them wrote it
+lowercase.
+
 
 ## Got in the field
 

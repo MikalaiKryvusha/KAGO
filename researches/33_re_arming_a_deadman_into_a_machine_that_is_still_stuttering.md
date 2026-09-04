@@ -63,6 +63,96 @@ The industrial watchdog pattern (PLC scan / process monitoring references; the L
 
 **Recommendation A**, on the recon's argument, not on taste: the probe exists, runs at 2 ms, costs nothing, and its failure is already the fuse's own definition of «sick». The window's length is a MEASUREMENT question (how long did the beat stay sick after each rescue, over every fuse-alive file on disk — a one-line script), and it goes to the owner as measured numbers, not as a proposal of «10 s».
 
+## 4a. THE WINDOW LENGTH — MEASURED 2026-09-04 (the §5 gap, closed) — ⚠️ ITS PROBE IS CORRECTED IN §4b BELOW
+
+§5 left the window length open and named the measurement that yields it. Run over **every**
+`runs/death-watch/*-fuse-alive.jsonl` on disk — 705 seconds carrying a beat-silence figure, across
+six protocols of 31.08 and 04.09:
+
+| | healthy | sick |
+|---|---|---|
+| worst beat silence, ms | 2.84 … **41.21** (691 s) | **60.89** … 500.61 (14 s) |
+| judge ticks per second | 406 … 442 | **4** |
+| separation | -- | **19.68 ms with not one of the 705 samples inside it** |
+
+**The number the window actually needs, and it is not the storm duration.** The sick EPISODES are:
+31.08 05:12:05 (a single second), 31.08 14:04:26 → 14:04:38 (11.3 s), 04.09 07:56:07 → 07:56:22
+(15.4 s, UTC — the 10:56 storm). Inside all three there are **ZERO healthy seconds**: a stuttering
+machine does not emit a healthy beat at all. The one re-arm into a healthy machine (04.09 07:50:40 UTC)
+was followed by **319 consecutive healthy seconds**.
+
+So the window does not have to cover the storm — §4 guessed «X read off the storm’s own duration
+(21 s)» and the measurement REFUTES that guess: any window above zero already separates the two
+states, because the storm contains no healthy second to be fooled by.
+
+**Chosen: 3 consecutive healthy seconds, threshold the existing deadman setpoint 60 ms.** The
+measurement earns «above zero»; the margin from 1 s to 3 s is MY choice and is named as mine, not
+presented as measured — it costs the sweep 3 s per rescue (against five rungs burned blind on 04.09)
+and buys tolerance against a single fluke reading. The threshold is not chosen at all: 60 ms is the
+deadman period already in service, and the measurement CONFIRMS it sits inside the empty 41 → 61 ms
+gap rather than cutting through a distribution.
+
+> ⚠️ **This is a number for the MECHANISM, not a policy for the owner** (EXP-0214). The policy — «the
+> sweep must not burn while the watch is off post» — is the owner’s, given 2026-09-04 19:37 in
+> `interviews/026` Q1: *«Перемерить то, что было намерено по старому оракулу»*. What §5 forbade under
+> `bugs/73` was an agent inventing the owner’s THRESHOLD and calling it his; deriving a window from a
+> measurement to serve a policy he already gave is the agent’s own work.
+
+[NOT-TESTED] — the window is measured, not yet wired into `fuse.mjs`; the wiring and its guard belong
+to ОТДЕЛЬНЫЙ ПЛАН полуоткрытого окна (ещё не написан; `plans/81` Ш7 ЗАКРЫТ 31.08 — ссылка на него была ошибкой).
+
+## 4b. ✏️ THE PROBE OF §4a WAS THE WRONG SIGNAL — CORRECTED THE SAME DAY, BY READING THE CODE
+
+§4a chose «beat silence» as the half-open probe and measured it. **Then the code was read, and the
+probe turned out not to exist in the state it is meant to guard.**
+
+`fuse.mjs:825` — `if (buf[0] === 0x01) { lastBeatMs = now; beats += 1; }`. The beat is the BURN
+RIDER's heartbeat, arriving over the rider's channel. Half-open begins after hand 1 has killed the
+burn and hand 2 has restored stock: **there is no burn, therefore no beats, therefore no probe.** A
+window waiting for «healthy beats» with the load off would wait forever — the run would never resume,
+which is a wall, not a guard (`bugs/72` · EXP-0193, the shape this project keeps paying for).
+
+**The signal that survives the load being off is the judge's OWN tick rate** — its loop keeps ticking
+through half-open. Re-measured over the same 716 seconds of `runs/death-watch/*-fuse-alive.jsonl`:
+
+| | healthy | sick |
+|---|---|---|
+| judge ticks per second | **356 … 442** (676 s) | 4 … **261** (40 s) |
+| the empty gap between the classes | \-- | **95 ticks/s, and not one of the 716 samples inside it** |
+
+A threshold of **300 ticks/s** sits in that gap. It is not a chosen number in the `bugs/73` sense —
+every value from 262 to 355 gives the identical partition of the measured data; 300 is the round one
+inside the empty band. **A threshold of 100 was tried first and REJECTED by the measurement**: it left
+three «healthy» seconds (100, 102, 107) sitting inside a sick episode, i.e. it cut through the
+distribution instead of the gap.
+
+**The window length — re-derived on the correct signal, and the §4a conclusion SURVIVES.** Sick
+seconds grouped into CONTIGUOUS episodes (a run of 3 healthy seconds breaks an episode):
+
+| episode | duration | sick seconds | healthy seconds INSIDE |
+|---|---|---|---|
+| 31.08 05:12:05 | 0.0 s | 1 | **0** |
+| 31.08 14:04:26 → 14:04:38 | 11.3 s | 6 | **0** |
+| 04.09 06:37:50 → 06:38:14 | 24.0 s | 25 | **0** |
+| 04.09 07:50:40 | 0.0 s | 1 | **0** |
+| 04.09 07:50:51 | 0.0 s | 1 | **0** |
+| 04.09 07:56:07 → 07:56:22 (the storm) | 14.8 s | 6 | **0** |
+
+**Six episodes, not one healthy second inside any of them.** So the window need only exceed zero, and
+**3 seconds is a 3× margin** — my choice, named as mine, costing the sweep 3 s per rescue against the
+five rungs it burned blind on 04.09.
+
+⚠️ **§4a's own numbers stay on the page rather than being deleted, and this is deliberate**: they are
+the correct measurement of a DIFFERENT thing — the health of the burn's heartbeat WHILE a burn runs,
+which is what input 1 already trips on. What was wrong was not the arithmetic but the choice of
+signal, and arecon document that quietly swaps a number teaches nobody why the first one was wrong.
+
+**How this was caught:** not by review and not by a test — by reading `fuse.mjs` before writing the
+plan that would use the probe. The measurement was made first and the code read second, which is the
+wrong order; had the plan been written on §4a alone, the window would have hung the run forever on the
+first rescue. [[EXP]] candidate: *«замер сигнала не доказывает, что сигнал существует в том состоянии,
+ради которого меришь»*.
+
 ## 5. What this recon did NOT establish — named
 
 - Whether the display corruption of 04.09 (cursor, wallpaper) came from the six curve zero/raise cycles in 21 s or from the driver storm that started three minutes earlier — the recon is about the fuse's return to service, not about the display.

@@ -75,7 +75,7 @@ import { progressRiderArgs } from './lib/fuse.mjs';
 // The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
 // measured; `curve-store` decides what the artifact may hold, and there is no second writer.
 import {
-  CURVE_STATUS, CURVE_TAGS, tagsForStatus, claimsBurnProof, statusFromTags, closePoint, leverFloorFor,
+  CURVE_STATUS, CURVE_TAGS, tagsForStatus, claimsBurnProof, servesAsProvenGround, statusFromTags, closePoint, leverFloorFor,
   validateCurveDoc,
   saveCurveDoc,
   loadCurveDoc,
@@ -1829,7 +1829,7 @@ export function seedFor({ frequencyMhz, curveDoc } = {}) {
   for (const r of rows) {
     if (!r || !Number.isFinite(r.mhz) || !Number.isFinite(r.voltageMv)) continue;
     if (r.mhz <= frequencyMhz) continue;              // only from ABOVE
-    if (!claimsBurnProof(r)) continue;                // only PASSED evidence
+    if (!servesAsProvenGround(r)) continue;           // only PASSED evidence, and only WATCHED (P87-AC4)
     // The NEAREST higher frequency: the closest neighbour is the least extrapolation.
     if (best === null || r.mhz < best.mhz) best = r;
   }
@@ -2154,7 +2154,7 @@ export function planFrequency({
   // соседка СВЕРХУ — и намеренно пропускает саму частоту (`r.mhz <= frequencyMhz` → continue).
   const ownRow = Array.isArray(curveDoc?.frequencies)
     ? curveDoc.frequencies.find((r) => r?.mhz === frequencyMhz) : null;
-  const ownRowMv = ownRow && claimsBurnProof(ownRow) && Number.isFinite(ownRow.voltageMv)
+  const ownRowMv = ownRow && servesAsProvenGround(ownRow) && Number.isFinite(ownRow.voltageMv)
     ? ownRow.voltageMv : null;
   // ГЛУБОЧАЙШАЯ ИЗ ДВУХ СОБСТВЕННЫХ — та же логика, что строкой ниже для собственной против соседской.
   const ownMv = provenPassMv === null ? ownRowMv
@@ -2461,7 +2461,7 @@ export async function sweepFrequency({
   // и запас — честная консервативность.
   const provenInDoc = (mhz) => {
     const row = docRowOf(mhz);
-    return row && claimsBurnProof(row) && Number.isFinite(row.voltageMv) ? row.voltageMv : null;
+    return row && servesAsProvenGround(row) && Number.isFinite(row.voltageMv) ? row.voltageMv : null;
   };
   // САМОЕ ГЛУБОКОЕ ДОКАЗАННОЕ НА ЭТОЙ ВЫДАННОЙ ЧАСТОТЕ — из двух источников, оба про ОДНУ пару:
   // прожиги ЭТОГО спуска (сырые) и строка документа (рабочая точка, уже с запасом владельца).
@@ -6209,6 +6209,32 @@ export function selfTest() {
     seedFor({ frequencyMhz: 3090, curveDoc: seedDoc }), null);
   ok('пустой документ кривой → затравки нет, а не выдуманное напряжение',
     seedFor({ frequencyMhz: 2500, curveDoc: { frequencies: [] } }), null);
+
+  // ── P87-AC4 — СТРОКА, ПРОЖЖЁННАЯ БЕЗ СТОРОЖА НА ПОСТУ, ЗАТРАВКОЙ НЕ СЛУЖИТ ────────────────────
+  // Метка, отключающая строку только от СЧЁТА, — украшение: назавтра эта же строка станет затравкой
+  // соседнего спуска, и непроверенное число разойдётся по кривой само. Слово владельца —
+  // `interviews/026` Q1 = B, Q4 = A.
+  const unwatchedDoc = {
+    frequencies: [
+      { mhz: 3090, voltageMv: 1100, tags: ['burn:short', 'origin:measured', 'origin:unwatched'] },
+      { mhz: 2842, voltageMv: 1000, tags: ['burn:short', 'origin:measured', 'origin:unwatched'] },
+      { mhz: 2000, voltageMv: 850, tags: ['burn:long'] },
+    ],
+  };
+  ok('P87-AC4: соседка под меткой «без сторожа» затравкой не служит — спуск от стока',
+    seedFor({ frequencyMhz: 2500, curveDoc: unwatchedDoc }), null);
+  ok('P87-AC4: помеченная соседка ПРОПУСКАЕТСЯ, а не роняет поиск — берётся следующая чистая выше',
+    seedFor({
+      frequencyMhz: 2500,
+      curveDoc: {
+        frequencies: [
+          { mhz: 3090, voltageMv: 1100, tags: ['burn:short', 'origin:measured'] },
+          { mhz: 2842, voltageMv: 1000, tags: ['burn:short', 'origin:measured', 'origin:unwatched'] },
+        ],
+      },
+    })?.neighbourMhz, 3090);
+  ok('P87-AC4: чистая соседка метку не получает и затравку даёт как прежде',
+    seedFor({ frequencyMhz: 1500, curveDoc: unwatchedDoc })?.neighbourMhz, 2000);
 
   // — the governor's generalization, and the IDENTITY that proves it did not weaken anything
   const deepLadder = [{ savedMv: 150 }, { savedMv: 160 }, { savedMv: 170 }, { savedMv: 180 }];

@@ -260,6 +260,40 @@ export const CURVE_TAGS = Object.freeze({
    *
    *  [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this. */
   ORIGIN_OVERSHOT: 'origin:overshot',
+  /** НАПРЯЖЕНИЕ ПРОЖЖЕНО, КОГДА СТОРОЖ, ВИДЯЩИЙ ПРЕДВЕСТНИК КРАЯ, НЕ БЫЛ НА ПОСТУ. On screen the
+   *  owner reads it as «снято без сторожа на посту»; in the document it is one fact with two routes.
+   *
+   *  **Route 1 — the watch did not yet exist.** The instrument learned to read a telemetry stall as a
+   *  verdict on **2026-08-29**, commit `8409546` (`bugs/61` DONE: «пульс сэмплера доехал до вердикта
+   *  ступени — ступор системы = ЗАВИС, край записывается»). Everything burned before that date was
+   *  judged by an oracle that watched only arithmetic correctness and could not see the edge coming.
+   *
+   *  **Route 2 — the watch existed and had LEFT the post.** On 2026-09-04 the fuse exited (code 2) and
+   *  the band burned five more rungs unguarded (`bugs/101`); two of them reached this document.
+   *
+   *  **Set by the owner's word, not by the agent's judgement** (`interviews/026`, 2026-09-04):
+   *  Q1 = B — *«оракул, который корректность расчетов смотрел — не видел предсказание края. Сейчас он
+   *  стал лучше, когда он смотрит на лаги телеметрии. Перемерить то, что было намерено по старому
+   *  оракулу»*; Q4 = A — *«все перемерить. Но в понедельник. не сегодня»*.
+   *
+   *  ⚠️ **CUMULATIVE, like `origin:overshot`.** A row keeps `origin:measured` (it WAS burned here) and
+   *  carries this one besides (nobody was watching while it burned). The two facts are independent.
+   *
+   *  ⚠️ **NOT the `remeasure` layer of the curve map** (`curve-map.mjs`, `plans/86`). That one is a
+   *  DERIVED contradiction between records — a recorded hang the engine refuses to honour as a floor —
+   *  computed on the fly and never stored. Same verb in Russian, different fact; merging them would
+   *  create exactly the «two truths under one name» pair this project has already paid for three times
+   *  (`bugs/40`, `interviews/008`, `interviews/013`).
+   *
+   *  ⚠️ **NOT set on a row without its own burn.** A neighbour that inherited its number or was raised
+   *  by the ratchet has no burn of its own to be unwatched during; marking it would put the tag on rows
+   *  whose provenance is a different question entirely (`plans/87` risk 1, named and left open).
+   *
+   *  **Cleared only by a re-burn under a live watch** (P87-AC7) — never by hand, because a mark that a
+   *  human can wipe is a mark that gets wiped the day the number it guards becomes inconvenient.
+   *
+   *  [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this. */
+  ORIGIN_UNWATCHED: 'origin:unwatched',
 });
 
 const TAG_VALUES = Object.freeze(Object.values(CURVE_TAGS));
@@ -427,6 +461,30 @@ export function demandsVoltage(row) {
 export function claimsBurnProof(row) {
   const tags = row?.tags;
   return Array.isArray(tags) && tags.some((t) => PROVEN_TAGS.includes(t));
+}
+
+/**
+ * MAY THIS STORED ROW BE TRUSTED AS GROUND A DESCENT STANDS ON? — the second gate of `plans/87`
+ * (P87-AC4), and the reason it is a SEPARATE predicate rather than a condition inside
+ * `claimsBurnProof`.
+ *
+ * The two questions are genuinely different, and conflating them would WEAKEN a guard instead of
+ * adding one. `claimsBurnProof` answers «does this row CLAIM a burn?» — and `validateCurveDoc` leans
+ * on exactly that to demand a witness (`provenBy`) from every such row. Teach that predicate to say
+ * «no» about an unwatched row and the witness requirement silently stops firing on precisely the rows
+ * whose provenance is in question. That is the false-`[TESTED]` shape, arrived at by «improving» a
+ * predicate — so the claim stays as it was, and the TRUST is asked separately.
+ *
+ * Its three callers in `engine.mjs` — the neighbour seed (§4.2), the frequency's own proven ground,
+ * and `provenInDoc` — all ask this one question, and they share this one definition deliberately: two
+ * spellings of «the row is proven» inside one module is the truth↔mirror pair the registry says to
+ * collapse rather than watch.
+ *
+ * @param {object} row  a curve-document row
+ * @returns {boolean}   false for a row burned while the watch was off post (`origin:unwatched`)
+ */
+export function servesAsProvenGround(row) {
+  return claimsBurnProof(row) && !(row?.tags ?? []).includes(CURVE_TAGS.ORIGIN_UNWATCHED);
 }
 
 /**
@@ -602,7 +660,16 @@ export const ACCEPTANCE_MODES = Object.freeze(['max-performance', 'optimised', '
 export function acceptanceProgress(doc, { profiles = [] } = {}) {
   const rows = doc?.frequencies ?? [];
   const has = (r, t) => Array.isArray(r.tags) && r.tags.includes(t);
-  const edges = rows.filter((r) => has(r, CURVE_TAGS.STOP_EDGE_FOUND));
+
+  // P87-AC3 — «ДОКАЗАННЫЙ» БОЛЬШЕ НЕ ЗНАЧИТ «ЗАПИСАННЫЙ». A row burned while the watch that sees the
+  // edge coming was off post does not count toward the owner's acceptance, by his own word
+  // (`interviews/026` Q1 = B · Q4 = A, 2026-09-04). The filter stands HERE, before every other count,
+  // so no downstream tally can quietly put such a row back: the number the owner reads is the number
+  // this line produces. Marked edges are not swallowed — they are counted apart and printed apart.
+  const unwatched = rows.filter((r) => has(r, CURVE_TAGS.ORIGIN_UNWATCHED));
+  const edgesAll = rows.filter((r) => has(r, CURVE_TAGS.STOP_EDGE_FOUND));
+  const edgesUnwatched = edgesAll.filter((r) => has(r, CURVE_TAGS.ORIGIN_UNWATCHED));
+  const edges = edgesAll.filter((r) => !has(r, CURVE_TAGS.ORIGIN_UNWATCHED));
   const burned = edges.filter((r) => has(r, CURVE_TAGS.ORIGIN_MEASURED));
   const inherited = edges.filter((r) => !has(r, CURVE_TAGS.ORIGIN_MEASURED) && has(r, CURVE_TAGS.ORIGIN_INHERITED));
   const derived = edges.filter((r) => !has(r, CURVE_TAGS.ORIGIN_MEASURED) && !has(r, CURVE_TAGS.ORIGIN_INHERITED)
@@ -612,6 +679,14 @@ export function acceptanceProgress(doc, { profiles = [] } = {}) {
 
   const byMode = new Map(profiles.filter((p) => p && typeof p === 'object').map((p) => [p.mode, p]));
   const shipped = ACCEPTANCE_MODES.filter((m) => byMode.get(m)?.qualified === true);
+  // P87-AC5 — ЗАВИСИМОСТЬ НАЗЫВАЕТСЯ, СЧЁТ НЕ ТРОГАЕТСЯ. A shipped mode whose curve reference points
+  // at THIS document inherits its marked rows. Revoking the mode here would be a wall on the owner's
+  // own desktop (`optimised` is qualified and refs `measured`) — the bugs/72 · EXP-0193 shape, where a
+  // guard stopped the work it was meant to protect. Un-shipping an accepted mode is the owner's word,
+  // not the counter's; the counter's whole job is to say what it sees.
+  const restingOnUnwatched = unwatched.length === 0 ? [] : shipped.filter(
+    (m) => (byMode.get(m)?.settings?.curveRef ?? null) === (doc?.name ?? null),
+  );
 
   return {
     total: rows.length,
@@ -620,11 +695,14 @@ export function acceptanceProgress(doc, { profiles = [] } = {}) {
       burned: burned.length,
       inherited: inherited.length,
       derived: derived.length,
+      unwatched: edgesUnwatched.length,
+      unwatchedMhz: edgesUnwatched.map((r) => r.mhz).sort((a, b) => b - a),
       unclassified: unclassified.map((r) => ({ mhz: r.mhz, tags: [...(r.tags ?? [])] })),
     },
+    unwatchedRows: unwatched.length,
     untouched,
     touched: rows.length - untouched,
-    modes: { shipped: shipped.length, total: ACCEPTANCE_MODES.length, names: shipped },
+    modes: { shipped: shipped.length, total: ACCEPTANCE_MODES.length, names: shipped, restingOnUnwatched },
   };
 }
 
@@ -634,6 +712,18 @@ export function renderDeliveryLine(p) {
   const e = p.edges;
   let line = `ПРИЁМКА: краёв ${e.total}/${p.total} (прожигом ${e.burned} · соседкой ${e.inherited} · выведено ${e.derived})`
     + ` · не тронуто ${p.untouched} · режимов отгружено ${p.modes.shipped}/${p.modes.total}`;
+  // P87-AC3 — непроверенное НАЗЫВАЕТСЯ, а не вычитается молча: счёт, упавший без объяснения, читается
+  // как регресс. Пустой слой молчит — строка появляется только когда метка на документе есть.
+  if (e.unwatched > 0) {
+    line += `\nбез сторожа на посту: ${e.unwatched} кра(я/ёв) — ${e.unwatchedMhz.join(' · ')} МГц`
+      + `${p.unwatchedRows > e.unwatched ? ` (всего строк под меткой ${p.unwatchedRows})` : ''}`
+      + ' · перепрожиг при владельце у машины';
+  }
+  if (p.modes.restingOnUnwatched?.length > 0) {
+    line += `
+отгружённые режимы опираются на помеченную кривую: ${p.modes.restingOnUnwatched.join(' · ')}`
+      + ' — счёт отгрузки не тронут, отзыв это слово владельца';
+  }
   if (e.unclassified.length > 0) {
     line += `\nне классифицировано: ${e.unclassified.length} — ${e.unclassified.map((r) => `${r.mhz} МГц [${r.tags.join(', ')}]`).join(' · ')}`;
   }
@@ -894,6 +984,15 @@ export function closePoint(doc, {
   extraTags = [],
   inheritDownToMhz = null,
   at = null,
+  // P87-AC7 — БЫЛ ЛИ СТОРОЖ, ВИДЯЩИЙ ПРЕДВЕСТНИК КРАЯ, НА ПОСТУ, ПОКА ЭТО ЖГЛОСЬ. Три состояния, и
+  // умолчание `null` — «никто не сказал» — САМОЕ ОСТОРОЖНОЕ из трёх: оно СОХРАНЯЕТ метку строки и не
+  // ставит новой. Умолчание `true` было бы дырой: состояния «сторож на посту» в движке пока нет (оно
+  // родится с полуоткрытым окном, `plans/81` Ш7), и тогда любой перепрожиг молча стирал бы метку — в
+  // том числе сделанный без защиты, то есть ровно тот случай, ради которого метка и заведена.
+  //   true  — сторож стоял: метка СНИМАЕТСЯ, число снова доказано;
+  //   false — сторож был вне поста: метка СТАВИТСЯ, даже если строка была чистой;
+  //   null  — не сказано: метка строки переносится как есть.
+  watchOnPost = null,
 } = {}) {
   const no = (why) => ({ ok: false, doc, closed: 0, inherited: [], raised: [], why });
   if (!doc || !Array.isArray(doc.frequencies) || doc.frequencies.length === 0) {
@@ -1027,6 +1126,12 @@ export function closePoint(doc, {
   // промахнувшаяся ступень пометила бы весь диапазон наследования, и тег снова перестал бы отличать.
   // Проверено выше на объединённом наборе, поэтому здесь только добавление.
   for (const t of addTags) if (!measuredTags.includes(t)) measuredTags.push(t);
+  // P87-AC7 — метка «без сторожа на посту» переживает перезапись тегов, пока её не сняли ЯВНО.
+  const wasUnwatched = (rows[idx]?.tags ?? []).includes(CURVE_TAGS.ORIGIN_UNWATCHED);
+  const keepsMark = watchOnPost === false || (watchOnPost === null && wasUnwatched);
+  if (keepsMark && !measuredTags.includes(CURVE_TAGS.ORIGIN_UNWATCHED)) {
+    measuredTags.push(CURVE_TAGS.ORIGIN_UNWATCHED);
+  }
   rows[idx] = {
     ...rows[idx],
     voltageMv: effectiveMv,
@@ -1673,6 +1778,29 @@ function cmdProgress({ json = false } = {}) {
   return 0;
 }
 
+/**
+ * ОЧЕРЕДЬ ПЕРЕПРОЖИГА — `plans/87` Ш6 (P87-AC6). Одна команда печатает всё, что ждёт понедельника:
+ * строки под меткой «без сторожа на посту», с причиной у каждой. Без неё очередь пришлось бы
+ * собирать глазами по документу в 389 строк, а список, собранный глазами, — это список, в котором
+ * забыли строку.
+ */
+function cmdUnwatched({ json = false } = {}) {
+  const doc = loadCurveDoc();
+  if (!doc) { console.log(`Документа кривой нет: ${curvePath()}.`); return 1; }
+  const rows = (doc.frequencies ?? []).filter((r) => (r.tags ?? []).includes(CURVE_TAGS.ORIGIN_UNWATCHED));
+  if (json) { console.log(JSON.stringify(rows, null, 2)); return 0; }
+  if (rows.length === 0) { console.log('Строк под меткой «без сторожа на посту» нет — перепрожигать нечего.'); return 0; }
+  console.log(H('ОЧЕРЕДЬ ПЕРЕПРОЖИГА — строки, прожжённые без сторожа на посту'));
+  console.log(`\nВсего ${rows.length}; из них краёв ${rows.filter((r) => (r.tags ?? []).includes(CURVE_TAGS.STOP_EDGE_FOUND)).length}.`);
+  console.log('Слово владельца (interviews/026 Q4): «все перемерить. Но в понедельник. не сегодня.»\n');
+  for (const r of [...rows].sort((a, b) => b.mhz - a.mhz)) {
+    const edge = (r.tags ?? []).includes(CURVE_TAGS.STOP_EDGE_FOUND) ? ' 🔴КРАЙ' : '';
+    console.log(`  ${String(r.mhz).padStart(4)} МГц ← ${String(r.voltageMv).padStart(4)} мВ${edge}  · снято ${String(r.editedAt ?? '').slice(0, 10)}`);
+  }
+  console.log('\nМетка снимается ТОЛЬКО перепрожигом под живым сторожем (P87-AC7), руками — никогда.');
+  return 0;
+}
+
 async function cmdVerify() {
   const doc = loadCurveDoc();
   if (!doc) { console.log(`Документа кривой нет: ${curvePath()}.`); return 1; }
@@ -1786,6 +1914,99 @@ function cmdSelftest() {
     const line = renderDeliveryLine(acceptanceProgress(progDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]])));
     return line.startsWith('ПРИЁМКА: краёв 1/10 (прожигом 1 · соседкой 0 · выведено 0)')
       && line.includes('не тронуто 9') && line.includes('режимов отгружено 0/4');
+  })());
+
+  // ── P87-AC3 — КРАЙ БЕЗ СТОРОЖА НА ПОСТУ В СЧЁТ ПРИЁМКИ НЕ ИДЁТ ────────────────────────────────
+  // Слово владельца `interviews/026` Q1 = B и Q4 = A. Сторож написан ДО кода и обязан был покраснеть.
+  ok('P87-AC3: край под меткой «без сторожа» выходит из счёта краёв и считается отдельно', (() => {
+    const p = acceptanceProgress(progDoc([
+      [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED],
+      [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED],
+      [T.STOP_EDGE_FOUND, T.ORIGIN_INHERITED, T.ORIGIN_UNWATCHED],
+    ]));
+    return p.edges.total === 1 && p.edges.burned === 1 && p.edges.unwatched === 2;
+  })());
+  ok('P87-AC3: строка доставки НАЗЫВАЕТ непроверенные, а не прячет их', (() => {
+    const line = renderDeliveryLine(acceptanceProgress(progDoc([
+      [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED],
+      [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED],
+    ])));
+    return line.startsWith('ПРИЁМКА: краёв 1/10') && line.includes('без сторожа на посту: 1');
+  })());
+  ok('P87-AC3: метка на НЕ-крае счёт краёв не трогает вовсе', (() => {
+    const p = acceptanceProgress(progDoc([
+      [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED],
+      [T.BURN_SHORT, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED],
+    ]));
+    return p.edges.total === 1 && p.edges.unwatched === 0 && p.unwatchedRows === 1;
+  })());
+  ok('P87-AC3: без единой метки строка доставки о ней МОЛЧИТ (пустой слой не шумит)', (() => {
+    const line = renderDeliveryLine(acceptanceProgress(progDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]])));
+    return !line.includes('без сторожа');
+  })());
+
+  // ── P87-AC5 — ОТГРУЖЕННЫЙ РЕЖИМ, ОПЁРТЫЙ НА ПОМЕЧЕННУЮ КРИВУЮ, НАЗЫВАЕТСЯ, НО НЕ ОТЗЫВАЕТСЯ ────
+  // Плана было «вектор на метке не проходит», и это было бы СТЕНОЙ на рабочем столе владельца:
+  // `optimised` несёт qualified: true и ссылается ровно на этот документ (класс bugs/72 · EXP-0193 —
+  // сторож, ставший стеной). Поэтому метрика ГОВОРИТ, а применение не ломается; отзывать режим —
+  // слово владельца, а не моё.
+  const namedDoc = (tagSets, name = 'measured') => ({ ...progDoc(tagSets), name });
+  const modeRef = (mode, ref) => ({ mode, qualified: true, settings: { curveRef: ref } });
+  ok('P87-AC5: отгруженный режим на помеченной кривой НАЗВАН и счёт отгрузки НЕ тронут', (() => {
+    const p = acceptanceProgress(namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED]]), {
+      profiles: [modeRef('optimised', 'measured')],
+    });
+    return p.modes.shipped === 1 && p.modes.restingOnUnwatched.join() === 'optimised'
+      && renderDeliveryLine(p).includes('опираются на помеченную кривую: optimised');
+  })());
+  ok('P87-AC5: режим на ДРУГОЙ кривой не называется — зависимости нет', (() => {
+    const p = acceptanceProgress(namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED]]), {
+      profiles: [modeRef('optimised', 'measured-2400')],
+    });
+    return p.modes.shipped === 1 && p.modes.restingOnUnwatched.length === 0;
+  })());
+  ok('P87-AC5: чистая кривая — строки про зависимость нет вовсе', (() => {
+    const p = acceptanceProgress(namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]]), {
+      profiles: [modeRef('optimised', 'measured')],
+    });
+    return p.modes.restingOnUnwatched.length === 0 && !renderDeliveryLine(p).includes('опираются на помеченную');
+  })());
+
+  // ── P87-AC7 — МЕТКУ СНИМАЕТ ТОЛЬКО ПЕРЕПРОЖИГ ПОД ЖИВЫМ СТОРОЖЕМ ──────────────────────────────
+  // Три состояния, и умолчание — САМОЕ ОСТОРОЖНОЕ: кто не сказал, тот не снимает. Состояния «сторож
+  // на посту» в движке ещё нет (оно родится с полуоткрытым окном, `plans/81` Ш7), и умолчание
+  // `true` дало бы дыру: любой перепрожиг молча стирал бы метку, в том числе сделанный без защиты.
+  const markedDoc = () => {
+    const d = healthyDoc();
+    d.frequencies[4].tags = [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED];
+    d.frequencies[4].provenBy = 'прожиг 04.09, сторож вне поста';
+    return d;
+  };
+  const closeAt = (watchOnPost) => closePoint(markedDoc(), {
+    mhz: markedDoc().frequencies[4].mhz,
+    voltageMv: markedDoc().frequencies[4].voltageMv - 50,
+    status: CURVE_STATUS.EDGE_FOUND,
+    provenBy: 'перепрожиг',
+    ...(watchOnPost === undefined ? {} : { watchOnPost }),
+  });
+  ok('P87-AC7: перепрожиг ПОД ЖИВЫМ сторожем метку СНИМАЕТ', (() => {
+    const r = closeAt(true);
+    const row = r.doc.frequencies[4];
+    return r.ok && r.closed === 1 && !row.tags.includes(T.ORIGIN_UNWATCHED);
+  })());
+  ok('P87-AC7: перепрожиг при стороже ВНЕ поста метку СТАВИТ (и на чистой строке тоже)', (() => {
+    const r = closePoint(healthyDoc(), {
+      mhz: healthyDoc().frequencies[4].mhz,
+      voltageMv: healthyDoc().frequencies[4].voltageMv - 50,
+      status: CURVE_STATUS.EDGE_FOUND,
+      provenBy: 'перепрожиг без защиты',
+      watchOnPost: false,
+    });
+    return r.ok && r.doc.frequencies[4].tags.includes(T.ORIGIN_UNWATCHED);
+  })());
+  ok('P87-AC7: МУТАЦИЯ — вызыватель, который НЕ СКАЗАЛ, метку не снимает (умолчание осторожное)', (() => {
+    const r = closeAt(undefined);
+    return r.ok && r.doc.frequencies[4].tags.includes(T.ORIGIN_UNWATCHED);
   })());
 
   console.log('\n— ФОРМА И ОБЯЗАТЕЛЬНЫЕ ПОЛЯ —');
@@ -2786,6 +3007,7 @@ async function main() {
   if (has('--init')) return cmdInit({ force: has('--force') });
   if (has('--verify')) return cmdVerify();
   if (has('--progress')) return cmdProgress({ json: has('--json') });
+  if (has('--unwatched')) return cmdUnwatched({ json: has('--json') });
   if (has('--take-reference')) return cmdTakeReference({ seconds: num('--seconds', 240), withLoad: !has('--no-load') });
   if (has('--reference')) return cmdShowReference();
   if (has('--show') || argv.length === 0) return cmdShow();

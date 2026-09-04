@@ -323,7 +323,9 @@ const PAGE_CSS = [
   'font:16px/1.55 "Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;',
   '-webkit-text-size-adjust:100%}',
   '.wrap{max-width:920px;margin:0 auto;padding:20px 18px 96px}',
-  '.hdr{position:sticky;top:0;z-index:5;background:var(--bg);',
+  // Шапка НЕ липкая — слово владельца 2026-09-04: «верхняя шапка должна скролиться с контентом,
+  // не быть стики». Это класс вкуса (TESTING_FRAMEWORK → «the taste class»): судит его глаз.
+  '.hdr{background:var(--bg);',
   'border-bottom:1px solid var(--line);padding:14px 0 12px;margin-bottom:20px}',
   '.proj{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);font-weight:700}',
   '.hdr h1{font-size:23px;line-height:1.25;margin:6px 0 8px;font-weight:650}',

@@ -1,6 +1,6 @@
 # Bug 104 — the twin's death rehearsal still asserts ONE trip and a STOPPED band, so it has been red since 31.08 — and a filtered grep let a session report it as 7/7
 
-**Status:** 🔴 OPEN — found by the closing judge pass of session 82 · **Filed:** 2026-09-04 16:0x (session 82, offline) · **Found:** `node automation-engine/lib/twin-assembly.mjs --rehearse-death progress-stall --no-window` run twice (15:18 and 16:01) — exit code **1** both times, two `🔴` checks each · **Severity: medium** — the rehearsal is the instrument that certifies the fuse's rescue chain end-to-end on the double (P63-AC5, P66-AC5); an instrument red for five days that nobody ran certifies nothing, and a reader who filters its output can report it green.
+**Status:** ✅ FIXED 2026-09-04 (session 84) — see «Fixed» below — found by the closing judge pass of session 82 · **Filed:** 2026-09-04 16:0x (session 82, offline) · **Found:** `node automation-engine/lib/twin-assembly.mjs --rehearse-death progress-stall --no-window` run twice (15:18 and 16:01) — exit code **1** both times, two `🔴` checks each · **Severity: medium** — the rehearsal is the instrument that certifies the fuse's rescue chain end-to-end on the double (P63-AC5, P66-AC5); an instrument red for five days that nobody ran certifies nothing, and a reader who filters its output can report it green.
 
 ⚠️ **ZERO GPU WRITES.** Everything here runs on the double; I1 (live artefacts untouched) was ✅ in both runs.
 
@@ -48,6 +48,44 @@ So the rescue chain of input 2 WORKS on the double — three times per run — a
 ## Decisions made without the owner
 
 None. Nothing in the engine or the rehearsal was changed; the false «7/7» was corrected in the three documents that carried it.
+
+## Fixed — 2026-09-04, session 84 (twin only, ZERO GPU writes; the card was not touched)
+
+**The open question of «What is NOT concluded» is answered, and the guess in it was WRONG.** It read:
+«`intents.length === 1` may still hold for `strangle` and `instant` because their probes stop beating
+for good». Run before touching anything — **all three profiles were red on BOTH checks**:
+
+| profile | before | after | intents the run actually produced |
+|---|---|---|---|
+| `progress-stall` | exit 1 · 2 🔴 | **exit 0 · 0 🔴** | **3**, every one `progress-stall` |
+| `strangle` | exit 1 · 2 🔴 | **exit 0 · 0 🔴** | **9**, every one `beat-silence` |
+| `instant` | exit 1 · 2 🔴 | **exit 0 · 0 🔴** | **5**, every one `beat-silence` |
+
+**Check 1 — the strict half kept, and STRENGTHENED.** Was `intents.length === 1 && intents[0].cause === …`
+— the cause of the FIRST intent only. Now: at least one intent, and **every** intent carries the
+profile’s cause. Only «exactly one» was relaxed — the part the engine refuted on 31.08.
+
+**Check 2 — INVERTED, not relaxed (B104-AC2).** It asserted that the band HAD STOPPED, i.e. it demanded
+exactly the behaviour the owner abolished: *«Сколько угодно спасений разрешаю… Запустил и забыл — оно
+само все сделало»* (`interviews/024` = E). It now asserts «ПОЛОСА ПРОДОЛЖАЕТСЯ» ≥ 1 and prints the count.
+
+**Both predicates were LIFTED OUT of the rehearsal** (`causeForProfile`, `everyIntentHasCause`,
+`countBandWentOn`) and covered by `twin --selftest`, which the battery runs. An inline condition inside
+a 12-second rehearsal cannot be mutated, so nothing could prove it was able to redden at all. **Three
+mutations, each reddening its own** — a foreign cause among the right ones · no intents at all · the
+band stopped (no continuation line). `twin --selftest`: 25 → **29 blocks**, all agree.
+
+⚠️ **WHAT THIS DOES NOT CURE, NAMED:** the battery proves a predicate CAN redden; it cannot see that a
+predicate went stale in MEANING — which is exactly what happened on 31.08. Only running the rehearsal
+catches that, so item 3 of the fix plan is met by the ceremony, not the battery: **the rehearsal joins
+the closing pair registry as «rehearsal exit 0 on all three profiles»** (36 s of wall time — too slow
+for a 48-second battery, cheap once per session).
+
+**Acceptance:** B104-AC1 ✅ (exit 0, cause asserted for every intent, mutation reddens) · B104-AC2 ✅
+(continuation asserted, mutation reddens) · B104-AC3 ✅ (all three codes recorded in the table above).
+
+**The reader’s half (item 4)** is already canon: EXP-0237 — a rehearsal is judged by its exit code and
+its count of 🔴, never by a filtered grep. This session read both, for all three profiles, before and after.
 
 ## Links
 
