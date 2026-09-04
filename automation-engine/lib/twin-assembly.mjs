@@ -353,6 +353,12 @@ export async function makeTwinAssembly({
   // здоровый прогон вход 2 не взводит по правилу выше. Правило про репетиции, замер — не репетиция.
   const mDecision = (armM || deathRehearsal === 'progress-stall') ? fuse.armMDecision('furnace') : null;
   if (mDecision && !mDecision.armed) throw new Error(mDecision.why);
+  // ⚡ Форма, которой вход 2 едет на всадниках, — ОДНА на двойник и живой путь (`fuse.progressRiderArgs`,
+  // `bugs/101` находка 3): двойник знал её здесь, живой путь — нет, и никакой блок этой пары не видел.
+  // Аргументы двойника от этого не меняются ни на байт (E67-AC5) — блоки ниже это держат.
+  const progressRiders = mDecision?.armed
+    ? fuse.progressRiderArgs({ progressFile, armMMs: mDecision.armMMs })
+    : { judge: [], probe: [] };
   return {
     vc, card, device, probedCard, recover, loadDoc,
     // ─── ВХОД ПУЛЬСА СЭМПЛЕРА (`bugs/61`, `plans/72` шаг 4) ───────────────────────────────────────
@@ -371,13 +377,13 @@ export async function makeTwinAssembly({
         ...(armed ? ['--arm-n', String(armN), '--burn-pidfile', burnPidfile, '--twin-stock', cardFile] : []),
         // Судье путь файла нужен НЕ для чтения прогресса (его несёт проба ударом 0x02), а для
         // ворот «идёт ли прожиг»: существование файла и есть признак.
-        ...(mDecision?.armed ? ['--arm-m', String(mDecision.armMMs), '--progress-file', progressFile] : []),
+        ...progressRiders.judge,
         '--seconds', '600', '--out', join(runDir, 'fuse.jsonl')],
       probeArgs: ['--beat-sender', '--seconds', '600', '--tick', '2',
         // Ретранслятор прогресса едет только там, где вход 2 взведён: непроведённый источник и
         // застывший — РАЗНЫЕ вещи, и сторож `progressWired` различает их только если мы не
         // проводим канал зря.
-        ...(mDecision?.armed ? ['--progress-file', progressFile] : []),
+        ...progressRiders.probe,
         ...(playsProfile ? ['--play-profile', deathRehearsal, '--after-pidfile', burnPidfile] : [])],
       probeMode: 'beat-sender',
     },

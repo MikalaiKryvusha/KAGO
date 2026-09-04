@@ -763,6 +763,12 @@ export async function runStep({
   // snapToLadder, verdict/ceiling logic) is deliberately NOT in the port: a stand-in must not be
   // able to bring its own arithmetic (invariant I2 — a double softer than the original lies green).
   device = null,
+  // ⚡ ВХОД 2 ПРЕДОХРАНИТЕЛЯ (`bugs/101` находка 3): файл сердцебиения прожига. Атом его не читает —
+  // он лишь ДОНОСИТ путь до прожига (`dev.burn.stressTest` → `runBurst` → `--progress-file`), чтобы
+  // судья видел прогресс НАСТОЯЩЕГО прожига, а не только носителя двойника. 04.09 путь терялся
+  // именно здесь: атом его не нёс, и ядро ступени висело 165 с невидимым. null — строка запуска
+  // прежняя до байта. [TESTED: 2026-09-04 · --selftest: доезжает по обоим путям — набор и одна форма]
+  progressFile = null,
 } = {}) {
   const nvapi = await import('./nvapi.mjs');
   const wd = await import('./watchdog.mjs');
@@ -1260,6 +1266,7 @@ export async function runStep({
         runShapeFn: (s) => dev.burn.stressTest({
           ...dev.burn.runOptionsForShape(s, { seconds, sustain }),
           onBurst: () => { watchdog.beat(); },
+          progressFile,
         }),
         onShape: () => { watchdog.beat(); },
       });
@@ -1296,6 +1303,7 @@ export async function runStep({
       seconds,
       sustain,
       onBurst: () => { watchdog.beat(); },     // the lease is renewed by the load itself
+      progressFile,
     });
     out.verdict = result.verdict;
     // THE GRADED NUMBERS ARE CARRIED, not dropped. The oracle counts how many elements went bad and
@@ -2853,8 +2861,10 @@ export async function selfTest() {
     const makeFake = ({ writeFails = false, clocks = null } = {}) => {
       const calls = [];
       let lastOffsets = null;
+      const burnOpts = [];
       return {
         calls,
+        burnOpts,
         dev: {
           recover: () => { calls.push('recover'); return { found: false }; },
           arm: () => { calls.push('arm'); return { guardPid: 777, beat: () => {}, disarm: () => calls.push('disarm') }; },
@@ -2903,7 +2913,7 @@ export async function selfTest() {
           },
           burn: {
             judgeCandidate: async () => { throw new Error('набора в этом прогоне нет'); },
-            stressTest: async () => { calls.push('stressTest'); return { verdict: config.VERDICT.PASS, reason: 'фейковый оракул: сумма сошлась', meters: { badElems: 0 }, bursts: [{}] }; },
+            stressTest: async (o) => { calls.push('stressTest'); burnOpts.push(o); return { verdict: config.VERDICT.PASS, reason: 'фейковый оракул: сумма сошлась', meters: { badElems: 0 }, bursts: [{}] }; },
             runOptionsForShape: () => ({}),
           },
         },
@@ -2925,6 +2935,38 @@ export async function selfTest() {
         && happy.calls.indexOf('zeroCurve') > happy.calls.indexOf('stressTest'), true);
     ok('ПОРТ: андервольт ИЗМЕРЕН на фикстуре — точка подешевела, экономия положительная',
       (r1.undervolt?.savedMv ?? -1) > 0, true);
+
+    // ─── ⚡ ВХОД 2: путь файла сердцебиения ДОЕЗЖАЕТ до прожига через порт (`bugs/101` находка 3) ───
+    //
+    // 04.09 судья на живом пути не видел прогресса потому, что путь терялся ДО прожига: атом его не
+    // нёс. Блоки держат ПРОВОДКУ, а не арифметику, и на ОБОИХ путях прожига — набор форм (так жжёт
+    // развёртка) и одна форма. АДРЕСАТЫ МУТАЦИЙ: снять `progressFile` из вызова `stressTest` на
+    // ветке набора → «НАБОРОМ»; на ветке одной формы → «одной формой».
+    {
+      const one = makeFake();
+      await runStep({
+        point: POINT, offsetMhz: 30, writeShape: 'raise-and-cap', capMhz: CAP,
+        workload: 'sdc_fma', seconds: 1, sustain: 1, device: one.dev, progressFile: 'X:/hb.txt',
+      });
+      ok('ВХОД 2: progressFile атома доезжает до dev.burn.stressTest одной формой',
+        one.burnOpts.map((o) => o.progressFile), ['X:/hb.txt']);
+      ok('ВХОД 2: без progressFile прожиг зовётся с null — строка запуска прежняя',
+        happy.burnOpts.map((o) => o.progressFile), [null]);
+      const set = makeFake();
+      set.dev.burn.judgeCandidate = async ({ shapes: sh, runShapeFn }) => {
+        const ran = [];
+        for (const s of sh) { const r = await runShapeFn(s); ran.push({ id: s.id, workload: s.workload, shape: s.shape, bearsVerdict: true, verdict: r.verdict, reason: r.reason, meters: r.meters }); }
+        return { verdict: config.VERDICT.PASS, worstShape: ran[0].id, reason: 'фейк набора', ran, skipped: [], stoppedEarly: false, preflight: null };
+      };
+      set.dev.burn.runOptionsForShape = (s) => ({ name: s.workload, seconds: 1, sustain: 1 });
+      await runStep({
+        point: POINT, offsetMhz: 30, writeShape: 'raise-and-cap', capMhz: CAP,
+        shapes: [{ id: 'furnace/sustained@0', workload: 'furnace', shape: 'sustained', bearsVerdict: true, args: [] }],
+        seconds: 1, sustain: 1, device: set.dev, progressFile: 'X:/hb.txt',
+      });
+      ok('ВХОД 2: progressFile атома доезжает до dev.burn.stressTest НАБОРОМ форм (так жжёт развёртка)',
+        set.burnOpts.map((o) => o.progressFile), ['X:/hb.txt']);
+    }
 
     // ─── ТРИ ЧИСЛА ВЫДАЧИ РАЗЛИЧАЮТСЯ, И КАЖДОЕ ЕДЕТ СВОЁ (`bugs/87`) ────────────────────────────
     //

@@ -162,16 +162,53 @@ export const PROGRESS_TICK_MAX_MS = Object.freeze({
 export const ARM_M_K = 3;
 
 /**
+ * РАБОЧАЯ ТОЧКА, НА КОТОРОЙ СНЯТ МАКСИМУМ ТАКТА, — частота графики под нагрузкой того самого
+ * архивного прогона, что дал максимум (`runs/power/<файл>.json` → `medians.loaded['clocks.gr'].median`).
+ *
+ * ⚠️ ТАКТ ЗАПУСКА ОБРАТЕН ЧАСТОТЕ, И ЭТО ИЗМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО — на `branchy` по 29 архивным
+ * прогонам: 25,9 мс при 2797 МГц → 81,9 мс при 900 МГц (×3,16 при отношении частот 3,11; максимум
+ * `branchy` выше и ЕСТЬ значение при 900 МГц). Максимум `furnace` снят при 2820 МГц, и все семь
+ * его архивных прогонов лежат в 2812…2820 МГц — на 900 МГц такт `furnace` не снят ни разу.
+ * Уставка 993 мс, выведенная из такта при 2820 МГц, на полосе до 900 МГц красила бы ЗДОРОВЫЙ запуск
+ * (ожидаемый такт 955…1045 мс), а трип закрывает частоту как край (`interviews/023`) — ложный порог,
+ * записанный уликой (класс EXP-0038). Найдено 04.09 одним проходом по архиву ДО проводки
+ * (`bugs/101`, поправка плана; правило EXP-0036: старые настоящие данные проверяют ПОРОГИ).
+ *
+ * Для `furnace` масштаб 1/f — ГИПОТЕЗА, перенесённая с `branchy`: ядро с половиной, упирающейся в
+ * память, замедляется МЕНЬШЕ, чем 1/f, при падении только частоты ядра, так что 1/f — осторожная
+ * сторона (M больше нужного, никогда не меньше). Меряет её первый живой прогон: протокол живости
+ * пишет `worstProgressSilenceMs` каждую секунду на каждой частоте полосы.
+ */
+export const PROGRESS_TICK_REF_MHZ = Object.freeze({
+  furnace: 2820,   // grid59-furnace-ramp-3s.json · n=6 · 2026-08-26 (разгон с 1590, медиана 2820)
+  branchy: 900,    // cold_900.json · n=62 · 2026-08-10
+  sdc_fma: 2835,   // uv_0.json · n=60 · 2026-08-10
+});
+
+/**
+ * ВО СКОЛЬКО РАЗ ТАКТ ДЛИННЕЕ на нижней частоте полосы, чем на опорной. Никогда не ниже 1: полоса
+ * ВЫШЕ опорной частоты оставляет измеренный максимум как есть — уменьшать порог ниже худшего
+ * наблюдавшегося случая значило бы опускать его под пол наблюдателя (`branchy` при 2692 МГц дал бы
+ * 82 мс < 150 мс и ложный отказ взведения). Без частоты — 1: двойник и прежние вызовы не меняются.
+ */
+export function progressTickScale(workload, lowestMhz = null) {
+  const ref = PROGRESS_TICK_REF_MHZ[workload];
+  if (!Number.isFinite(lowestMhz) || lowestMhz <= 0 || !Number.isFinite(ref)) return 1;
+  return Math.max(1, ref / lowestMhz);
+}
+
+/**
  * Порог входа 2 для НАЗВАННОЙ нагрузки. Незнакомая нагрузка — ОТКАЗ, а не догадка: порог, выведенный
  * из неизмеренного такта, это выдуманное число в предохранителе, который убивает работу владельца.
+ * `lowestMhz` — нижняя частота полосы, до которой спустится прожиг (масштаб выше); без неё — как прежде.
  */
-export function deriveArmMMs(workload) {
+export function deriveArmMMs(workload, { lowestMhz = null } = {}) {
   const tick = PROGRESS_TICK_MAX_MS[workload];
   if (tick === undefined) {
     throw new Error(`такт прогресса для нагрузки «${workload}» не измерен — порога вывести не из чего `
       + `(знаем: ${Object.keys(PROGRESS_TICK_MAX_MS).join(', ')})`);
   }
-  return Math.ceil(tick * ARM_M_K);
+  return Math.ceil(tick * ARM_M_K * progressTickScale(workload, lowestMhz));
 }
 
 /**
@@ -192,8 +229,8 @@ export const PROGRESS_POLL_MS = 50;
  * ⚠️ Это РЕШЕНИЕ, а не заявление о невозможности (EXP-0169): такт `sdc_fma` — 0,8 мс, он быстрее
  * любого файлового наблюдения, и другой источник для такой формы потребовал бы другой дороги.
  */
-export function armMDecision(workload) {
-  const armMMs = deriveArmMMs(workload);
+export function armMDecision(workload, { lowestMhz = null } = {}) {
+  const armMMs = deriveArmMMs(workload, { lowestMhz });
   const floor = ARM_M_K * PROGRESS_POLL_MS;
   if (armMMs < floor) {
     return {
@@ -204,8 +241,29 @@ export function armMDecision(workload) {
         + `чем файловая дорога способна разглядеть`,
     };
   }
+  const scale = progressTickScale(workload, lowestMhz);
   return { armed: true, armMMs, why: `вход 2 взведён для «${workload}»: M = ${armMMs} мс `
-    + `(${ARM_M_K} × ${PROGRESS_TICK_MAX_MS[workload]} мс измеренного такта)` };
+    + `(${ARM_M_K} × ${PROGRESS_TICK_MAX_MS[workload]} мс измеренного такта`
+    + (scale > 1 ? ` × ${scale.toFixed(2)}: такт снят при ${PROGRESS_TICK_REF_MHZ[workload]} МГц, полоса спускается до ${lowestMhz} МГц` : '')
+    + ')' };
+}
+
+/**
+ * КАК ВХОД 2 ЕДЕТ НА ВСАДНИКАХ — ОДНО МЕСТО ЗНАНИЯ для двойника и живого пути (`bugs/101` находка 3:
+ * двойник знал форму в сборке, живой путь поднимал судью и пробу двумя литералами без неё, и никакой
+ * блок этой пары «правда ↔ зеркало» не видел). Судье путь нужен для ворот «идёт ли прожиг»
+ * (`burnInFlight`), пробе — для ретранслятора удара `0x02`.
+ *   · `armMMs` число — ВЗВЕДЁН: тишина прогресса ≥ M при существующем файле — трип `progress-stall`;
+ *   · `armMMs` null — НАБЛЮДЕНИЕ: файл проведён, тишина пишется в протокол живости
+ *     (`worstProgressSilenceMs`), трипа по входу 2 нет — дверь калибровки такта на настоящей полосе;
+ *   · без файла — пусто на обоих: непроведённый источник и застывший — разные вещи (`progressWired`).
+ */
+export function progressRiderArgs({ progressFile = null, armMMs = null } = {}) {
+  if (!progressFile) return { judge: [], probe: [] };
+  return {
+    judge: [...(armMMs !== null ? ['--arm-m', String(armMMs)] : []), '--progress-file', progressFile],
+    probe: ['--progress-file', progressFile],
+  };
 }
 
 // =================================================================================================
@@ -1464,14 +1522,20 @@ async function cmdSelftest() {
     const journal = readFileSync(journalPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     ok('живой судья на эфемерном порту услышал настоящие удары и трипнул, когда они смолкли',
       result.beats > 10 && result.tripped && result.tripOutcomes[0].action === 'kill-burn');
+    // ⚡ ЧТО ВИДЕЛ БЛОК — В СТРОКЕ, А НЕ ТОЛЬКО ИМЯ (`bugs/102` шаг 2). Первая сохранённая улика красной
+    // батареи 04.09 15:48 принесла ровно эти два имени и НИ ОДНОГО числа: последовательность фаз, счёт
+    // ударов, трипов и перевзведений остались невидимыми. Пороги не тронуты (B102-AC3) — печатается
+    // только то, что блок и так сравнивает; следующее мигание станет читаемым.
+    const seen = journal.map((l) => l.phase + (l.hand ? '/рука' + l.hand : '') + (l.ok === false ? '(не-ok)' : '')).join(' → ')
+      + ' · ударов ' + result.beats + ' · трипов ' + result.trips + ' · перевзведений ' + result.rearms;
     ok('журнал предохранителя: намерение → снятие нагрузки → возврат напряжения → решение о перевзведении',
       journal.length === 4 && journal[0].phase === 'intent' && journal[1].hand === 1 && journal[2].hand === 2
-      && journal[3].phase === 'rearm');
+      && journal[3]?.phase === 'rearm', seen);
     // ⚡ Ш5: РАСПИСКИ НЕТ И РУКА МЕРТВА → ПЕРЕВЗВЕДЕНИЯ НЕТ. Ветка отказа обязана давать ПРЕЖНЕЕ
     // поведение (код выхода 2, полоса встаёт), иначе шаг не «пережил спасение», а «снял защиту».
     ok('Ш5 отказ: рука умерла без расписки — судья НЕ перевзвёлся, счёт перевзведений 0',
-      journal[3].ok === false && rearmCount(journal) === 0 && result.rearms === 0
-      && /не оставив расписки/u.test(journal[3].detail ?? ''));
+      journal[3]?.ok === false && rearmCount(journal) === 0 && result.rearms === 0
+      && /не оставив расписки/u.test(journal[3]?.detail ?? ''), seen);
     ok('Ш5 отказ: непережитое срабатывание оставляет прежний код выхода (полоса встаёт)',
       result.tripped === true && result.trips === 1);
     ok('кольцо сброшено при трипе и держит СУБ-пороговые такты (то, чего не было у пустых файлов 28.08)', (() => {
@@ -1675,6 +1739,30 @@ async function cmdSelftest() {
   ok('формы медленнее наблюдателя взводятся, порог назван в причине (furnace · branchy)', (() => {
     const f = armMDecision('furnace'); const b = armMDecision('branchy');
     return f.armed && b.armed && f.armMMs === 993 && b.armMMs === 246 && /M = 993 мс/u.test(f.why);
+  })());
+  // ---- ⚡ порог следует за НИЖНЕЙ частотой полосы (`bugs/101` находка 3, поправка плана 04.09)
+  //   АДРЕСАТЫ МУТАЦИЙ: снять масштаб в deriveArmMMs → «3109»; снять Math.max(1, …) → «branchy 246».
+  ok('такт обратен частоте: M(furnace, полоса до 900 МГц) = 3109 мс — 993 × 2820/900, а не 993', (() => {
+    const d = armMDecision('furnace', { lowestMhz: 900 });
+    return d.armed && d.armMMs === 3109 && /2820 МГц/u.test(d.why) && /900 МГц/u.test(d.why);
+  })());
+  ok('полоса не ниже опорной частоты такта — M прежний до байта (2842 → 993; без частоты → 993)', (() => {
+    const d = armMDecision('furnace', { lowestMhz: 2842 });
+    return d.armMMs === 993 && armMDecision('furnace').armMMs === 993 && !/спускается/u.test(d.why);
+  })());
+  ok('масштаб НИКОГДА не ниже 1: максимум branchy снят на 900 МГц, полоса до 2692 не опускает M ниже 246', (() => {
+    return armMDecision('branchy', { lowestMhz: 2692 }).armMMs === 246 && progressTickScale('branchy', 2692) === 1;
+  })());
+  ok('опорная частота такта есть у КАЖДОЙ измеренной нагрузки — масштаб без неё был бы догадкой', (() => {
+    return Object.keys(PROGRESS_TICK_MAX_MS).every((w) => Number.isFinite(PROGRESS_TICK_REF_MHZ[w]) && PROGRESS_TICK_REF_MHZ[w] > 0);
+  })());
+  ok('всадники входа 2 — одна форма на двойник и живой путь: взведён → --arm-m + файл судье, файл пробе; наблюдение → без --arm-m; без файла → пусто', (() => {
+    const armed = progressRiderArgs({ progressFile: 'F', armMMs: 1040 });
+    const observe = progressRiderArgs({ progressFile: 'F' });
+    const none = progressRiderArgs({});
+    return JSON.stringify(armed) === JSON.stringify({ judge: ['--arm-m', '1040', '--progress-file', 'F'], probe: ['--progress-file', 'F'] })
+      && JSON.stringify(observe) === JSON.stringify({ judge: ['--progress-file', 'F'], probe: ['--progress-file', 'F'] })
+      && JSON.stringify(none) === JSON.stringify({ judge: [], probe: [] });
   })());
 
   // ---- настройка на двойнике (P65-AC3/AC5): словарь исходов и различитель «на чём трипнуло»

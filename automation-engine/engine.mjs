@@ -68,6 +68,10 @@ import { localIso } from './lib/card-grids.mjs';
 // движок на границе ступени и наблюдатель реального времени, кормящий предохранитель. Два
 // потребителя, считающие порог каждый у себя, — это два порога, которые разойдутся молча.
 import { driverVoiceVerdict, driverEventsInWindow, DRIVER_VOICE } from './lib/driver-voice.mjs';
+// ⚡ Вход 2 предохранителя на живом пути (`bugs/101` находка 3): слой входа 2 на всадниках — ОДНА
+// функция для двойника и живого пути. Импорт статический и безопасный офлайн: `fuse.mjs` на импорте
+// ничего не запускает (сторож входа `bugs/95`), winmm берёт лениво внутри судьи.
+import { progressRiderArgs } from './lib/fuse.mjs';
 // The tuning-curve document, and ONLY through its own author (R14a). The sweep decides WHAT was
 // measured; `curve-store` decides what the artifact may hold, and there is no second writer.
 import {
@@ -3558,6 +3562,29 @@ export function resolveDeliveredRow(doc, deliveredMhz) {
  * а на двойнике журнал судьи лежит в песочнице прогона, и боевая папка не пополняется вовсе
  * (инвариант I1, EXP-0025). Пару «правда↔зеркало» лучше СХЛОПНУТЬ, чем сторожить (R14a).
  */
+/**
+ * АРГУМЕНТЫ ВСАДНИКОВ ЖИВОГО ПУТИ — чистая функция, чтобы форма спауна была ДОКАЗУЕМА блоком
+ * (`bugs/101` находка 3). До 04.09 строки судьи и пробы жили двумя литералами у `spawn` внутри
+ * `mainSweep`, и того, что живой путь поднимает их БЕЗ входа 2, не видел ни один блок: двойник свою
+ * форму держал в сборке (`twin.riders`), живой путь — нигде. Теперь у живого пути своя сборка, а
+ * слой входа 2 у обеих — `fuse.progressRiderArgs`.
+ *
+ * Порт пробы сюда НЕ входит: судья называет его в stdout уже после старта, и спаун добавляет
+ * `--port` последним — ровно как у двойника. Без файла строка судьи — прежняя до байта.
+ *
+ * [TESTED: 2026-09-04 · engine --selftest: взведённая форма · наблюдение · без файла]
+ * [NOT-TESTED: живой прогон с этими аргументами — первый при владельце, с 08.09]
+ */
+export function liveFuseRiders({ armNMs, fuseJournalPath, progressFile = null, armMMs = null,
+  burnImages = 'furnace.exe,branchy.exe,sdc_fma.exe', seconds = 36000 }) {
+  const p2 = progressRiderArgs({ progressFile, armMMs });
+  return {
+    judgeArgs: ['--judge', '--arm-n', String(armNMs), '--burn-images', burnImages,
+      ...p2.judge, '--seconds', String(seconds), '--out', fuseJournalPath],
+    probeArgs: ['--probe', '--seconds', String(seconds), '--tick', '2', ...p2.probe],
+  };
+}
+
 export function fuseJournalHintFor(twin) {
   return twin ? `песочнице ${twin.runDir}` : 'runs/death-watch/*-fuse.jsonl';
 }
@@ -8629,6 +8656,36 @@ export function selfTest() {
           [midStop.stoppedBy, midStop.closed > 0, /посреди частоты/.test(midStop.why ?? '')], ['fuse-rescue', true, true]);
       }
 
+      // ═══════════════════════════════════════════════════════════════════════════════════════
+      // ⚡ ВХОД 2 НА ЖИВОМ ПУТИ — ФОРМА ВСАДНИКОВ ДОКАЗУЕМА (`bugs/101`, находка 3)
+      // ═══════════════════════════════════════════════════════════════════════════════════════
+      //
+      // 04.09 ядро ступени висело 165 с, а вход 2 молчал: живой путь поднимал судью и пробу без
+      // `--progress-file`, и ни один блок этого не видел — строки жили у `spawn`. Теперь форма —
+      // чистая функция, и блоки держат три её состояния. Уставка следует за нижней частотой полосы.
+      //   АДРЕСАТЫ МУТАЦИЙ: снять `...p2.probe` в `liveFuseRiders` → «проба несёт»; снять `...p2.judge`
+      //   → «судья взведён»; снять `lowestMhz` в `armMDecision` → «900 МГц → 3109».
+      {
+        const fuseMod = await import('./lib/fuse.mjs');
+        const armed = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J', progressFile: 'F', armMMs: 1040 });
+        const observe = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J', progressFile: 'F', armMMs: null });
+        const bare = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J' });
+        ok('bugs/101 находка 3: живой судья взведён по входу 2 — --arm-m с уставкой и --progress-file в строке',
+          [armed.judgeArgs.includes('--arm-m'), armed.judgeArgs[armed.judgeArgs.indexOf('--arm-m') + 1], armed.judgeArgs.includes('--progress-file')],
+          [true, '1040', true]);
+        ok('bugs/101 находка 3: живая проба несёт --progress-file (ретранслятор удара 0x02)',
+          armed.probeArgs.includes('--progress-file'), true);
+        ok('вход 2 наблюдением (--progress-observe): файл проведён обоим, --arm-m нет',
+          [observe.judgeArgs.includes('--progress-file'), observe.judgeArgs.includes('--arm-m'), observe.probeArgs.includes('--progress-file')],
+          [true, false, true]);
+        ok('без файла строка судьи прежняя до байта: ни --arm-m, ни --progress-file; --arm-n и --out на месте',
+          [bare.judgeArgs, bare.probeArgs.includes('--progress-file')],
+          [['--judge', '--arm-n', '60', '--burn-images', 'furnace.exe,branchy.exe,sdc_fma.exe', '--seconds', '36000', '--out', 'J'], false]);
+        ok('уставка входа 2 следует за НИЖНЕЙ частотой полосы: 900 МГц → 3109 мс, 2842 → 993 (как прежде)',
+          [fuseMod.armMDecision('furnace', { lowestMhz: 900 }).armMMs, fuseMod.armMDecision('furnace', { lowestMhz: 2842 }).armMMs],
+          [3109, 993]);
+      }
+
       // ═══════════════════════════════════════════════════════════════════════════════════════════
       // ⚡ ЧЕРЕДА СРАБАТЫВАНИЙ НЕ ОСТАНАВЛИВАЕТ ПОЛОСУ — РЕШЕНИЕ ВЛАДЕЛЬЦА (`interviews/024` = E)
       // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -10642,6 +10699,17 @@ async function mainSweep(argv, arg) {
   // предохранителя, `plans/63`). Здесь умирает САМА КАРТА на названной ступени — то есть проверяется
   // журнал упреждающей записи, а не судья всадников. Два разных отказа, два разных флага.
   const twinHangKills = process.argv.includes('--twin-hang-kills');
+  // ⚡ ВХОД 2 НА ЖИВОМ ПУТИ (`bugs/101` находка 3): по умолчанию ВЗВЕДЁН — уставка выводится из
+  // нижней частоты полосы (`fuse.armMDecision('furnace', { lowestMhz })`). `--progress-observe` —
+  // НАБЛЮДЕНИЕ: файл проведён, тишина прогресса пишется в протокол живости, трипа по входу 2 нет.
+  // Дверь для калибровки такта на настоящей полосе (первый живой прогон при владельце) и для вето
+  // владельца (`interviews/026` Q3). Не умолчание — защита, живущая только когда её напечатали, не
+  // установлена (EXP-0078, ворота 6a — ровно класс этой находки).
+  const progressObserve = process.argv.includes('--progress-observe');
+  if (progressObserve && cardArg === 'virtual') {
+    console.error('ОШИБКА: --progress-observe — живой путь. На двойнике вход 2 взводится флагом --twin-arm-m или репетицией --twin-death progress-stall.');
+    return 2;
+  }
   if ((twinDeath !== null || twinArmNRaw !== null || process.argv.includes('--twin-arm')
     || process.argv.includes('--twin-arm-m') || process.argv.includes('--twin-window') || twinHangKills)
     && cardArg !== 'virtual') {
@@ -11262,16 +11330,31 @@ async function mainSweep(argv, arg) {
   // знала — а он ей теперь НУЖЕН: ступень обязана спросить «сработал ли подо мной предохранитель»
   // (решение владельца `interviews/023`). Двойник `--out` передавал всегда, живой путь просто
   // догоняет его. Папка та же (`FUSE_DIR`), так что форензика ищет там же, где искала.
+  const fuseStamp = new Date().toISOString().replace(/[:.]/gu, '-');
   const fuseJournalPath = twin
     ? join(twin.runDir, 'fuse.jsonl')
-    : join(fuseMod.FUSE_DIR, `${new Date().toISOString().replace(/[:.]/gu, '-')}-fuse.jsonl`);
+    : join(fuseMod.FUSE_DIR, `${fuseStamp}-fuse.jsonl`);
+  // ⚡ ВХОД 2 НА ЖИВОМ ПУТИ (`bugs/101` находка 3; двойник проводит его в сборке — `twin.riders`).
+  //
+  // 04.09 ядро ступени 2737 МГц / 820 мВ висело 165 с под двадцатью криками драйвера, и кончил его
+  // только таймаут прожига 60 000 мс: файл сердцебиения не был проведён ни к прожигу, ни к пробе,
+  // ни к судье — вход доказан на двойнике и не поставлен на ракету (ворота 6a). Файл лежит рядом с
+  // протоколом защиты, тем же штампом. УСТАВКА ВЫВОДИТСЯ ИЗ НИЖНЕЙ ЧАСТОТЫ ПОЛОСЫ: такт запуска
+  // обратен частоте (архив: `branchy` 25,9 → 81,9 мс от 2797 к 900 МГц), а максимум `furnace` снят
+  // при 2820 МГц — уставка 993 мс на полосе до 900 МГц красила бы здоровый запуск (`fuse.PROGRESS_TICK_REF_MHZ`).
+  // `--progress-observe` — наблюдение без срабатывания (калибровка такта; вето владельца — `interviews/026` Q3).
+  //
+  // [NOT-TESTED: живой путь — первый прогон при владельце с 08.09; до него — пересборка прожига с
+  //  флагом (`workloads:build`, distinct=1). Форма аргументов доказана блоками `liveFuseRiders`.]
+  const progressFile = twin ? null : join(fuseMod.FUSE_DIR, `${fuseStamp}-burn-progress.txt`);
+  const progressDecision = twin ? null : fuseMod.armMDecision('furnace', { lowestMhz: toMhz });
+  const liveRiders = twin ? null : liveFuseRiders({
+    armNMs: fuseMod.DERIVED_ARM_N_MS, fuseJournalPath, progressFile,
+    armMMs: (!progressObserve && progressDecision.armed) ? progressDecision.armMMs : null,
+  });
   const fuseJudge = spawn(process.execPath, twin
     ? [fuseScript, ...twin.riders.judgeArgs]
-    : [
-      fuseScript, '--judge', '--arm-n', String(fuseMod.DERIVED_ARM_N_MS),
-      '--burn-images', 'furnace.exe,branchy.exe,sdc_fma.exe',
-      '--seconds', '36000', '--out', fuseJournalPath,
-    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    : [fuseScript, ...liveRiders.judgeArgs], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   // ⚡ ОДИН ЧИТАТЕЛЬ ПРОТОКОЛА ЗАЩИТЫ НА ВСЕХ (Ш5). Читателей стало трое — счёт срабатываний для
   // ступени, счёт повторных включений для полосы и ожидание АПВ, — и три копии `readFileSync` были
   // бы парой «правда ↔ зеркало» втройне: разойдясь в разборе битой последней строки, они молча
@@ -11296,7 +11379,7 @@ async function mainSweep(argv, arg) {
       // умолчанию, измеренный профиль смерти в репетиции фазы 4 (`plans/63`).
       fuseProbe = spawn(process.execPath, twin
         ? [watchScript, ...twin.riders.probeArgs, '--port', m[1]]
-        : [watchScript, '--probe', '--port', m[1], '--seconds', '36000', '--tick', '2'],
+        : [watchScript, ...liveRiders.probeArgs, '--port', m[1]],
       { windowsHide: true, stdio: 'ignore' });
       fuseProbe.unref?.();
       console.log(`ДАТЧИК ЖИВОСТИ: pid ${fuseProbe.pid} → порт ${m[1]}, сигнал живости каждые 2 мс${twin ? ` (виртуальный: ${twin.riders.probeArgs.includes('--play-profile') ? 'ПРОФИЛЬ СМЕРТИ ' + twin.riders.probeArgs[twin.riders.probeArgs.indexOf('--play-profile') + 1] : 'источник сигналов живости'})` : ''}`);
@@ -11349,7 +11432,10 @@ async function mainSweep(argv, arg) {
     // Оба входа печатаются ИЗ АРГУМЕНТОВ, которые судья реально получил. Вход 2 назван отдельно:
     // молчащая строка про взведённый M читалась бы как «его нет» — ровно ложное «нельзя» (EXP-0169).
     ? `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ, двойник): pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЕНА, уставка ${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-n') + 1]} мс${twin.riders.judgeArgs.includes('--arm-m') ? ` · ВТОРОЙ ВХОД ВЗВЕДЁН, уставка ${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-m') + 1]} мс (прогресс прожига)` : ' · второй вход не проведён'}, АВН: пид-файл носителя · ВЗН: заводское напряжение ДВОЙНИКА` : 'НЕ ВЗВЕДЕНА (только наблюдение)'}; протокол в ${fuseJournalHint}`
-    : `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ): pid ${fuseJudge.pid}, уставка ${fuseMod.DERIVED_ARM_N_MS} мс тишины · АВН: образы прожига · ВЗН: заводское напряжение; протокол в ${fuseJournalHint}`);
+    : `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ): pid ${fuseJudge.pid}, уставка ${fuseMod.DERIVED_ARM_N_MS} мс тишины · АВН: образы прожига · ВЗН: заводское напряжение; протокол в ${fuseJournalHint}`
+      + (liveRiders.judgeArgs.includes('--arm-m')
+        ? ` · ВТОРОЙ ВХОД (прогресс прожига) ВЗВЕДЁН: ${progressDecision.why}; файл сердцебиения ${progressFile}`
+        : ` · ВТОРОЙ ВХОД (прогресс прожига): НАБЛЮДЕНИЕ (--progress-observe) — тишина прогресса пишется в протокол живости, защита по нему не бьёт; файл сердцебиения ${progressFile}`));
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
@@ -11477,7 +11563,9 @@ async function mainSweep(argv, arg) {
     fuseTripsFn: () => fuseMod.tripCount(fuseLines()),
     // Порт устройства (эпик 59 фаза 2): на двойнике атом получает устройство сборки, живой путь —
     // свой адаптер по умолчанию, бит-в-бит.
-    runStepFn: (a) => vf.runStep(twin ? { ...a, device: twin.device } : a),
+    // ⚡ Живой путь несёт атому файл сердцебиения прожига (вход 2, `bugs/101` находка 3); двойник
+    // держит свой в сборке и в устройстве, движок ему ничего не подставляет (I4).
+    runStepFn: (a) => vf.runStep(twin ? { ...a, device: twin.device } : { ...a, progressFile }),
     saveFn: async (d) => (twin ? twin.saveDoc(d) : saveCurveDoc(d)),
     onEvent: (e) => {
       pulse?.event(e);

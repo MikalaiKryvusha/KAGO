@@ -109,16 +109,26 @@ export function assertOneShape({ transient = false, lowload = false } = {}) {
  * What licenses that exemption is not this comment but an executable check: `npm run workloads:build`
  * re-proves on every build that the sustained mode yields the SAME checksum with `distinct=1`.
  */
-export function runBurst({ name, exe = null, args = [], sustainSeconds = 0, run = null } = {}) {
+export function runBurst({ name, exe = null, args = [], sustainSeconds = 0, run = null, progressFile = null } = {}) {
   const binary = exe || join(WORKLOADS_DIR, `${name}.exe`);
   const timeout = burstTimeoutMs(sustainSeconds);
   const launcher = run || ((cmd, a) => spawnSync(cmd, a, {
     encoding: 'utf8', timeout, windowsHide: true,
   }));
 
-  const argv = Number(sustainSeconds) > 0
-    ? [...args.map(String), '--sustain', String(sustainSeconds)]
-    : args.map(String);
+  const argv = [
+    ...args.map(String),
+    ...(Number(sustainSeconds) > 0 ? ['--sustain', String(sustainSeconds)] : []),
+    // ⚡ ВХОД 2 ПРЕДОХРАНИТЕЛЯ (`plans/66`, `bugs/101` находка 3): файл сердцебиения прогресса едет
+    // ВНЕ `args` — по той же лицензии, что `--sustain` (штамп эталона сравнивает `args`, и
+    // диагностика не смеет превратить каждый прожиг в НЕИЗВЕСТНО). Без флага `.cu` не делает ни
+    // одного системного вызова (P66-AC2); с флагом — трогает файл после сверки КАЖДОГО запуска и
+    // снимает его при штатном выходе. До 04.09 живая развёртка флага не передавала вовсе, и ядро
+    // ступени висело 165 с, пока его не кончил таймаут прожига.
+    // [TESTED: 2026-09-04 · --selftest: флаг после --sustain / без файла строка прежняя до байта]
+    // [NOT-TESTED: живой прожиг с флагом — пересборка `workloads:build` с distinct=1, при владельце]
+    ...(progressFile ? ['--progress-file', String(progressFile)] : []),
+  ];
 
   const r = launcher(binary, argv);
 
@@ -346,6 +356,8 @@ export async function stressTest({
   run = null,
   queryLog = true,
   onBurst = null,
+  // ⚡ Вход 2 (`bugs/101` находка 3): файл сердцебиения прожига — доносится до `runBurst`, вне `args`.
+  progressFile = null,
 } = {}) {
   assertOneShape({ transient, lowload });
 
@@ -394,7 +406,7 @@ export async function stressTest({
     const remainingS = (seconds * 1000 - (Date.now() - started)) / 1000;
     const thisBurst = burstSeconds > 0 ? Math.max(1, Math.min(burstSeconds, Math.floor(remainingS))) : 0;
     if (burstSeconds > 0 && remainingS < 1) break;
-    const b = runBurst({ name, args, sustainSeconds: thisBurst, run });
+    const b = runBurst({ name, args, sustainSeconds: thisBurst, run, progressFile });
     bursts.push(b);
     if (onBurst) onBurst(b);
     if (b.died) break;                                   // a dead process ends the run; it IS the result
@@ -1261,6 +1273,17 @@ export async function selfTest() {
   check('exit≠0 -> died', died.died, true);
   const noLine = runBurst({ name: 'probe', run: () => ({ status: 0, stdout: 'ничего полезного\n', stderr: '' }) });
   check('exit 0 без строки KAGO-WORKLOAD -> died', noLine.died, true);
+
+  // 8. ⚡ вход 2: файл сердцебиения едет ВНЕ args и только когда назван (`bugs/101` находка 3).
+  //    АДРЕСАТ МУТАЦИИ: снять спред `--progress-file` в argv → первый блок.
+  {
+    const seen = [];
+    const capture = (cmd, a) => { seen.push(a); return { status: 0, stdout: 'KAGO-WORKLOAD name=probe checksum=1 distinct=1 launches=1', stderr: '' }; };
+    runBurst({ name: 'probe', args: ['2400'], sustainSeconds: 10, run: capture, progressFile: 'X:/hb.txt' });
+    runBurst({ name: 'probe', args: ['2400'], sustainSeconds: 10, run: capture });
+    check('вход 2: --progress-file идёт ПОСЛЕ --sustain, вне args', JSON.stringify(seen[0]), JSON.stringify(['2400', '--sustain', '10', '--progress-file', 'X:/hb.txt']));
+    check('вход 2: без progressFile строка запуска прежняя до байта', JSON.stringify(seen[1]), JSON.stringify(['2400', '--sustain', '10']));
+  }
 
   return { ok: results.every((r) => r.ok), results };
 }
