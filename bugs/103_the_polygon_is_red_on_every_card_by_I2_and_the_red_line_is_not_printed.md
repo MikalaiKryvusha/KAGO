@@ -17,7 +17,7 @@ Each card's run itself finishes normally: the twin's `live.json` says `ПРОГ�
 
 ## Forensics — and the second defect
 
-- The guard's verdict carries the matched line (`Строка: «…»`, sliced to 160 chars) — but the polygon's red print (`🔴 ЛОМАЮЩАЯ КАРТА … класс: И2 …`) prints only the first sentence of the verdict; **the matched line never reaches the operator.** Same family as `bugs/102` (evidence computed and then thrown away one line before the reader).
+- The guard's verdict carries the matched line (`Строка: «…»`, `polygon-guards.mjs:128`, sliced to 160 chars) and `polygon.mjs:314` pushes `f.why` whole — yet the line that reached the output file is **exactly 200 characters** and ends at «…скрипт и ночной про»: something between the guard and the file caps the report line at 200 (measured with `wc -c` on the raw output, not on a `cut`). **The matched line never reaches the operator.** Step 1 is to find that cap (`polygon.mjs` `log`/report writer, or the runner around it) and lift it for guard verdicts. Same family as `bugs/102` (evidence computed and then thrown away one line before the reader).
 - A direct re-run of the engine on the card is not one command: `benches/runs/virtual-virtual-gpu_1002.json` is the twin's CURVE DOCUMENT (`kind: tuning-curve`), not the card; the generated card file the polygon fed is not kept under that name (`polygon.mjs:130` writes it, the path is not printed). Reproduction therefore goes through the polygon itself.
 
 ## Hypothesis (a reading of the marker list, not a diagnosis)
