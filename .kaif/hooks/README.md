@@ -32,8 +32,10 @@ config. To enable:
    `.claude/settings.local.json` (personal), with the owner's consent recorded where your
    project records decisions.
 3. Reload the session (hook configs are read at session start). Smoke: run
-   `node .kaif/hooks/prompt-refresh-timer.mjs` with no `.kaif/refresh-marker.json` present —
-   it must print a JSON order; stamp a fresh marker — it must print nothing.
+   `node .kaif/hooks/prompt-refresh-timer.mjs < /dev/null` with no `.kaif/refresh-marker.json`
+   present — it must print a JSON order; stamp a fresh marker — it must print nothing. The
+   redirect matters: the hook reads its event JSON from stdin, so a hand-run without it waits on
+   the terminal forever (field: a two-minute timeout on the first try).
 
 To disable: remove the entries from your settings file. The markdown ritual keeps working
 either way.

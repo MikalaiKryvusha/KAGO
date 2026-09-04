@@ -78,7 +78,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ### Step 5. The farewell report
 
 Report to the human: what was recorded, what was built, the commit hash(es), what was pushed, and
-the baton in one paragraph — the main thing the NEXT chat should do first. That's the goodbye.
+the baton in one paragraph — the main thing the NEXT chat should do first. The report OPENS with
+the forced delivery line — `DELIVERY: <the owner's metric> X → Y; moved by: <one line> | blocker:
+<named>` — the ONE acceptance metric named in `MASTER_PLAN.md`; a zero delta is legal only with a
+named blocker (`/fable-judge` hunts a farewell without the line — the delivery-line hunt). That's
+the goodbye.
 
 ## Notes
 

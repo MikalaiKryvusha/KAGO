@@ -39,11 +39,12 @@ and the lessons, never the files: a copy is a second truth with two places to fi
 
 ## The invariants (normative — a contour without them falls apart)
 
-One number space, I1–I38. I1–I7 are the original core; I8–I36 were each paid for by a field
+One number space, I1–I39. I1–I7 are the original core; I8–I36 were each paid for by a field
 incident in one of three projects running this contour (the tool ate an hour of the owner's work ·
 a show replaced by a file path · an answered question re-asked two days later). I37–I38 name the
 notice class and arrived differently — not after an incident, but on the owner's request that the
-contour be able to TELL, not only to ask.
+contour be able to TELL, not only to ask. I39 (2.5) was paid for at the origin: a stale homework
+raised in a batch next to a live question.
 
 - **I1. md is the source, HTML is derived. Always.** The page is built from the document and never
   hand-edited — otherwise a second truth appears and the next empty-context session misses
@@ -196,11 +197,22 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   genuinely absent right now, it announces itself in every call ("system voice — engine not
   installed") and stands as a recorded debt until the engine lands. The engineering half stays:
   the approval contour has no right to BREAK over timbre — make route choice a pure function so
-  both branches sit under guards regardless of the machine running the checks.
+  both branches sit under guards regardless of the machine running the checks. **And the voice is
+  chosen by LANGUAGE first, timbre second** (origin issue #38: a Russian phrase read by an English
+  phoneme set is not worse timbre, it is noise — and every guard stayed green): the route selects a
+  voice whose culture matches `.kaif/kaif.json` → `language`; the system default is taken only when
+  its culture already matches; when no matching voice exists, the contour says so aloud in the call
+  line and drops to beeps + banner rather than speaking an unintelligible sentence. The route
+  function returns the CHOSEN voice and its culture, and the guard asserts culture-matches-language
+  — a guard that can go red.
 - **I36. Text normalization for speech lives in the ENGINE, not in the project.** The call phrase
   almost always carries a number ("interview #16"); without normalization digits get swallowed or
   spelled out. Heavy shared resources (the TTS model, its venv) belong to the MACHINE, not the
-  project: the project calls a ready command and falls back honestly when it is absent.
+  project: the project calls a ready command and falls back honestly when it is absent. The boundary
+  holds for the rich engine only: the stock FALLBACK has no cross-script normalization, so a project
+  on the fallback owns the minimal normalization of its own phrase — transliterating foreign-script
+  tokens — as a rule over the whole phrase in the phrase builder (the source of such tokens is the
+  document title the agent wrote), never a per-word dictionary.
 
 **The notice class (I37–I38) — the contour also has something to SAY:**
 
@@ -221,6 +233,14 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   comment must leave that document byte-for-byte untouched. Unread notices accumulate under the
   questions, never above them: questions block work, notices do not, and the page order is where
   the human sees that difference.
+- **I39. A stale queue position is the AGENT's debt, never a question to the human.** A batch
+  shows only what is still worth the human's attention; a position older than the stale threshold
+  (default 14 days) is printed to the agent by name and kept OFF the page until the agent closes
+  the document by status (the owner's word, or "withdrawn") or shows it deliberately with an
+  explicit flag. Paid for at the origin: a proofreading homework for a release that had shipped two
+  weeks earlier was raised in a batch next to a live question — the owner's word: "the release is
+  long out, the review is overdue, why did you open this for me". Age comes from the queue's own
+  timestamp, then from the document header's first ISO date; a document with neither cannot go stale.
 
 ## The named class: "handling the human's work"
 

@@ -16,9 +16,13 @@ the open backlog: `bugs/`, `ideas/`, `plans/`, `homeworks/` without the `DONE` t
 `interviews/`.
 
 ### Step 2. Rank by value
-Order candidate steps by **value toward the vision** per `PHILOSOPHY.md`: Pareto (the vital few that
-move the result), the Eisenhower matrix (important × urgent), second-order effects (what unblocks the
-most future work). Note the rough effort of each.
+Rank FIRST by the denominator: does the step move the owner's acceptance metric (the `DELIVERY:`
+metric named in `MASTER_PLAN.md`) or unblock the next run of a scarce resource (the owner's live
+evening, a machine, a device)? Only then order the rest by **value toward the vision** per
+`PHILOSOPHY.md`: Pareto (the vital few that move the result), the Eisenhower matrix (important ×
+urgent), second-order effects (what unblocks the most future work). The newest pain is NOT a
+priority claim by itself — a fresh incident earns its rank by the metric, not by its date (field:
+54 honest, green sessions moved the product 11 of 389). Note the rough effort of each.
 
 ### Step 3. Answer in chat
 1. **The ONE next step** — highest value, and *why it is next* (tie it to GOAL/MASTER_PLAN).

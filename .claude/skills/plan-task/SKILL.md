@@ -38,7 +38,11 @@ Structure (keep it to one screen where possible):
 ```
 ## Plan: <one-line goal>
 **Goal vector:** <what pain we solve and where we want to be — name Achieve / Maintain / Avoid where it clarifies>
-**Acceptance criteria (done when):** <observable criteria — what will be SEEN working, not "code written"; a numeric criterion carries its fit criterion: Scale · Meter · Target>
+**Acceptance criteria (done when):** <observable criteria — what will be SEEN working, not "code written"; a numeric criterion carries its fit criterion: Scale · Meter · Target — or one four-line scenario per criterion (REQUIREMENTS_FRAMEWORK.md → The scenario form):>
+- Situation. <the state of the world with concrete values — not an action>
+- Action. <exactly one action of the user, the system or the agent>
+- Result. <what is SEEN from outside: a number, an output line, a file — never "works correctly">
+- Check. <a repository command or query + its expected output; Scale · Meter · Target live here>
 **Steps:**
 - [ ] <step — small enough to verify on its own>
 - [ ] ...

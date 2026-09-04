@@ -59,7 +59,10 @@ Until one fires — don't stop, don't wait for confirmations, work.
    `git add -A && git commit -m "<msg>" && git push`. **The one-step rule:** one meaningful change = one full gate run = one commit —
    no batch commits (a big diff can't be honestly reviewed; a judged failure rolls back one file, not a
    night). `/fable-judge` pass before every push.
-7. **Short chat report** (1–3 lines): so in the morning the human sees the progress.
+7. **Short chat report** (1–3 lines): so in the morning the human sees the progress; opened by
+   `DELIVERY: краёв X/389 → Y/389 · режимов A/4 → B/4; moved by: … | blocker: …`
+   (`npm run curve -- --progress`; the metric named in `MASTER_PLAN.md` → «Метрика доставки»; zero
+   delta only with a named blocker — the judge's delivery-line hunt).
 8. **Self-restart**: if there's work left in the turn — just continue the next iteration in the same
    turn; don't assess how much context is left and don't end the turn yourself (the harness does that).
    `ScheduleWakeup` (same `/nightloop` input, short listen) is a *mechanical fallback* for when the

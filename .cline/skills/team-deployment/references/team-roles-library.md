@@ -7,6 +7,8 @@
 > concrete session assigned to it; a role may be instantiated more than once (engineer ×2) —
 > keep those three apart. Contracts are distilled from a live six-role field team plus published
 > multi-agent research; adapt parameters, keep the form.
+> **An existing LIVE team: take the skill's adopt path** — its contracts are compared with these,
+> not replaced by them; a local contract stricter than the library is a signal to the origin.
 
 Contract form (every role below follows it):
 
@@ -122,9 +124,12 @@ Contract form (every role below follows it):
 ## Team archetypes
 
 An archetype is a starting composition plus ACTIVATION CONDITIONS for optional seats — evidence
-before scale, never the reverse. Both archetypes assume the centralized topology (everyone
+before scale, never the reverse. All archetypes assume the centralized topology (everyone
 reports to the manager; peer collaboration where the constitution explicitly allows it) and one
-isolated workspace per implementation seat.
+isolated workspace per implementation seat. **A physical singleton under test is an axis of
+size in its own right:** when one device serializes the core work and may need a human at the
+machine, the deciding questions are who may touch it, how its access maps to a board lock and
+whether the verifier may re-run device claims — pick `hardware-lab-small` before counting seats.
 
 ### Archetype: web-product-small
 
@@ -154,3 +159,20 @@ Starting composition — 4–6 seats:
 Anti-pattern watch: manager bottleneck (all dispatch and merges on one seat — cut work into
 one-session portions, alternate heavy tasks); agent explosion (a seat without independent work);
 shared workspace mutation (two engineers in one zone — re-cut by feature boundary, not by layer).
+
+### Archetype: hardware-lab-small *(a measurement / device project: one physical singleton under test)*
+
+Starting composition — 2–3 seats:
+
+| Seat | Count | Condition |
+|---|---|---|
+| manager | 1 | always (folds in architect duties); **the ONLY seat with device-write authority**, and only under the device's board lock; a human-present rule for live runs is inherited from the project's own canon where one exists |
+| engineer | 0–1 | activate when the device-FREE backlog (offline machinery, analysis, tooling) exceeds the manager's pace; its zone is defined negatively — a task that seems to need the device goes back to the manager |
+| qa-verifier | 1 | always; verdicts from RECORDED observations (run journals, fixtures, exported data) — never by re-touching the device: independence is bought with journals, not with a second hand on the singleton |
+
+Constitution additions this archetype requires: a **§ 0 device rule** above the nine invariant
+sections (who writes to the device · under which lock · when a human must be present), and a
+lock row for the device in the board (§ 7) that refuses every seat but the manager. Anti-pattern
+watch: verifier at the device (a re-run that changes the state under test); engineer waiting on
+the device (a zone cut so that every task needs the singleton — re-cut to device-free streams);
+a device claim with no journal behind it (the verifier has nothing to verify).

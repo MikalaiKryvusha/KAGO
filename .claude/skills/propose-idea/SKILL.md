@@ -41,7 +41,8 @@ status "awaiting approval" and is **NOT implemented until the human approves it*
 
    ## Goal vector — the pain it solves + how we check
    <what pain/opportunity, for whom, and where we want to be; acceptance criteria — how we will
-   OBSERVE that the idea worked (REQUIREMENTS_FRAMEWORK.md); both may change as the work teaches>
+   OBSERVE that the idea worked (REQUIREMENTS_FRAMEWORK.md) — as fit-criterion lines or as
+   four-line scenarios: Situation · Action · Result · Check; both may change as the work teaches>
 
    ## Essence
    <what is proposed, briefly>

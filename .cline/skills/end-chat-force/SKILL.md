@@ -37,7 +37,9 @@ retry once, and if it still fails, tell the human: the commit exists locally, no
 ## Step 3. The one-line farewell
 
 One line to the human: the commit hash, the single most important thing for the next chat, and
-the reminder that the ceremonies debt is recorded in `STATUS.md`. Goodbye.
+the reminder that the ceremonies debt is recorded in `STATUS.md` — prefixed by the delivery line
+`DELIVERY: <the owner's metric> X → Y; moved by: … | blocker: …` (the metric from
+`MASTER_PLAN.md`; force mode skips ceremonies, never the accounting). Goodbye.
 
 ## What this skill refuses to skip
 

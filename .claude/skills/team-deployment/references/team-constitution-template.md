@@ -6,6 +6,9 @@
 > The nine numbered sections are INVARIANTS distilled from a live field team — adapt their
 > parameters, keep their rules. Companion document: the status board (`TEAM_STATUS.md`).
 > Read by EVERY role at the start of its session — in full, before the first action.
+> **An existing LIVE team: take the skill's adopt path — do not copy this template over its
+> constitution.** The owner's recorded words in a live constitution stay legitimate; the adopt
+> path reconciles them with these invariants and puts every delta to the owner first.
 
 ## What this is and when it binds
 
@@ -32,6 +35,12 @@ The project prefix keeps this team's windows and addresses distinguishable from 
 sessions living on the same machine; the `team` infix marks a directory as a team seat at a
 glance (the owner's named pattern: `project-team-role`). A session learns its OWN role from its
 working directory — a role is where you are, not what you claim.
+**Exception — the manager:** his seat IS the main copy (directory `<project>`, branch `main`);
+only his session ADDRESS carries the `<project>-team-manager` form. Tools deriving roles from
+directories treat the main copy as the manager — the rule and its single exception are both
+stated here, so a tool written to this section needs no invented case (field: a board tool had
+to add `dirName === PROJECT → manager` on its own authority; a stricter reading would have locked
+the manager out of his own board).
 
 | Role | Session address | Directory | Branch | Focus |
 |---|---|---|---|---|
@@ -55,6 +64,8 @@ Culture: structured, orderly, formalized, respectful.
    (branch, commits, files) · how verified (commands, numbers) · what remains / risks*.
 4. **Do not interrupt the busy.** Check the board before writing; if the addressee is busy, send
    only what cannot wait. Waiting for someone's work — subscribe for their idle, don't poll.
+   **Re-send throttle:** a message is not repeated until the addressee has been FREE on the
+   board at least once since it was sent — a second copy to a busy seat is noise, not urgency.
 5. **Never stay silent about a blocker.** Blocked — one short message to the holder plus a
    "waiting for…" note on your board row. Idle — report to the Manager and wait for a task.
 6. **Help respectfully.** See a neighbor struggling — offer help BY MESSAGE; never edit another
@@ -84,6 +95,9 @@ role rewrites ONLY its own row via the board tool. Form, rules, and the tool con
 board document itself. Update your row at every state change: took a task · waiting · freed.
 Statuses are SHORT; the document never grows. The board shows the moment; the project's
 `STATUS.md` still carries the baton between sessions — the board never replaces it.
+The board lives OUTSIDE git (ignore-first; board document → "Where the board lives"); a tracked
+board is a named opt-out recorded HERE with its price: `<n/a | opt-out: <why> — price: a dirty
+main copy by construction>`.
 
 ## 5. Git discipline
 
@@ -95,11 +109,20 @@ Statuses are SHORT; the document never grows. The board shows the moment; the pr
   and tells the role.
 - **Fresh `main` is everyone's concern:** starting a new task, verify your branch was reset from
   the current `main` — checking is cheaper than untangling a conflict.
+- **Push delegation has an explicit boundary:** a role whose push WORKS pushes its OWN branch
+  itself — that is not the Manager's work and never queues on him; only `main` is the Manager's
+  push, always (a field team wrote this boundary after the canon left it implicit).
 - **Where a role's push is locked** by the environment: the role reports branch and head to the
   Manager; the Manager reviews the full diff as Tech Lead (secrets by own grep, never on trust)
   and either pushes or returns with named causes. Push review and verifier's verdict are TWO
   different doors — both stay. Into `main` pushes only the Manager — always. A role does not ask
   a neighbor to push for it and does not route around its own safety.
+- **Server CI is part of this pipeline** (`team-ci.yml`, materialized by the deploying skill's
+  operation 3 from the project's own commands): a RED CI on a role branch blocks the merge the
+  same way a missing verifier's verdict does — the Manager merges nothing red. CI runs the cheap
+  gates only (units, lint, typecheck; no secrets, no emulators, no live stand — those stay local
+  behind the stand lock, § 7). A team on a non-GitHub remote runs the same job as the documented
+  local pre-push script named in this section: `<pre-push command or "n/a — GitHub Actions">`.
 - The project's full git hygiene canon applies in every workspace without exemptions.
 
 ## 6. Document numbering in team mode
@@ -118,7 +141,10 @@ One machine for everyone. Freely parallel: unit tests, builds, type checks, read
 each workspace has its own. 🔴 **Under a board lock** (one role at a time): <list the project's
 singletons — test stand, emulators, port-bound previews, e2e suites>. Take the lock → run →
 release; holding "just in case" is forbidden. Lock busy — negotiate by message or do another part
-of your task. 🔴 **Manager only (and only by canon):** the deploy door, production resources,
+of your task. **Capacity is N lock rows, not one:** a resource that admits N parallel users
+(N ports, N emulator instances) is listed as N slot rows on the board, and a SEAT is not a SLOT —
+one role may hold two slots, two roles may share the resource; the row names the slot, the
+holder names the seat. 🔴 **Manager only (and only by canon):** the deploy door, production resources,
 owner review pages, push into `main`. Kill only YOUR OWN processes, addressed by id — other
 agents' processes live on this machine.
 
@@ -157,9 +183,13 @@ the canon, by name — never "look it up yourself"; (3) a role that sees it is b
 does not treat its numbers as the project's picture until reset.
 
 **Stop:** the Manager broadcasts the stop signal; every role brings work to a logical point
-(commit to its branch, report, mark itself free on the board); the Manager fixes the tails in the
-project's `STATUS.md`. A role that vanished without a report is not a catastrophe: its branch
-holds the commits, the Manager clears its board row, the work returns to the backlog.
+(commit to its branch, report, mark itself free on the board — **and RELEASES every lock it
+holds and clears its own "Waiting for" cell**: a lock and a "waiting for QA" line once outlived a
+shift by five days, blocking a resource and a neighbor that nobody was actually using or
+waiting on); the Manager fixes the tails in the project's `STATUS.md` and, before closing,
+audits the board for locks and waits left behind. A role that vanished without a report is not
+a catastrophe: its branch holds the commits, the Manager clears its board row and its locks, the
+work returns to the backlog.
 
 ## Role contracts
 

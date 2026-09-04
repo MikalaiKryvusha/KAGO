@@ -21,6 +21,11 @@ Two parameters, spoken back in ONE line before starting:
 
 Example: *"Guarded loop: until 22:00, wake-ups every 10 min (default). Starting."*
 
+The contract is WRITTEN, not only spoken (origin issue #30: a session wrote "until 23:50" into its
+own heartbeat and still closed 25 minutes early): the first heartbeat line of the run reads
+`armed until <ISO>`, and `.kaif/guarded-loop.json` carries `{ "until": "<ISO>" }` — a written line
+is not a keeper; the CHECK against it is (Step 5).
+
 The duration bounds the WORKING, not the closing (`AGENT_GUIDE.md` → Working until a named time):
 work at your normal pace right up to the boundary — no early finish out of deadline fear — and
 reaching the boundary STARTS the soft closure (Step 5), it never means "everything must be
@@ -85,12 +90,19 @@ Woken by the watchdog and the pulse is stale:
 
 ## Step 5 — end of the run
 
-At the duration boundary (or when the pool is empty): finish the current item cleanly to a
-natural cut — unhurried, the boundary started the closing, it does not rush it — write the final
-heartbeat line (`run complete`), **disarm the external watchdog**, and close per the session's
+Before ANY closing ceremony, print the forced artifact —
+`BOUNDARY: now <ISO> · armed until <ISO> · pool <empty | N items>` — and closure starts ONLY when
+`now ≥ until`, or with a genuinely empty pool listed aloud. Ceremony time is spent AFTER the
+boundary, never reserved before it: budgeting the ceremonies backwards from the boundary is the
+exact inversion that silently lost 25 of 60 ordered minutes in the field (origin issue #30), and
+`/fable-judge` hunts a final pulse earlier than `until` with a non-empty pool (the early-finish
+hunt). Then, at the duration boundary (or when the pool is empty): finish the current item cleanly
+to a natural cut — unhurried, the boundary started the closing, it does not rush it — write the
+final heartbeat line (`run complete`), **disarm the external watchdog**, and close per the session's
 situation: the full unhurried `/end-chat-soft` ceremonies if the session ends, or a parking note
 (the `/pause` way) if the chat continues. Report: items done, restarts survived, anything
-escalated.
+escalated — opened by `DELIVERY: <the owner's metric> X → Y; moved by: … | blocker: …` (the metric
+from `MASTER_PLAN.md`; zero delta only with a named blocker — the judge's delivery-line hunt).
 
 ## What this skill refuses to do
 
@@ -99,3 +111,5 @@ escalated.
 - "Always restart" — without a cooldown and the escalation cap a bad state becomes a crash-storm.
 - Leave the watchdog armed after the run, or run two watchdogs without a single-instance guard.
 - Invent thresholds — the debounce and timeouts come from the project's measured durations.
+- Close before the armed boundary with a non-empty pool — the `BOUNDARY:` line is printed first,
+  and the clock decides, not the agent's estimate of how long the ceremonies will take.

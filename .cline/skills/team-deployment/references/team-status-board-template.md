@@ -8,6 +8,8 @@
 > The board is the state IN THE MOMENT — transparent to the whole team so agents do not
 > interrupt each other, respect each other's busyness, and can see where help is needed.
 > The project's `STATUS.md` still carries the baton between sessions; the board never replaces it.
+> **An existing LIVE team: take the skill's adopt path — do not copy this template over its
+> board or its board tool;** a tool that already holds the contract below is a match, not a defect.
 
 ## Board
 
@@ -16,8 +18,18 @@
 | manager | 🟢 free | — | — | <stamp> |
 | <role> | 🟢 free | — | — | <stamp> |
 
-*(States: 🟢 free · 🔴 busy. "Doing" — one short line: what and on whose assignment. "Waiting
-for" — who/what blocks, or "—". "Updated" — the project's canonical moment stamp.)*
+*("Doing" — one short line: what and on whose assignment. "Waiting for" — the ADDRESS of who
+blocks, or "—". "Updated" — the project's canonical moment stamp.)*
+
+**Four states, and each is a ROLE with an obligation** (two states were not enough: three seats
+of six once stood "busy" while standing still, and the "Waiting for" column obliged nobody):
+
+| State | Meaning | Obligation of the seat | Obligation of the Manager |
+|---|---|---|---|
+| 🟢 free | no assignment in hand | report readiness; take the next assignment | give one, or say "wait" |
+| 🔴 busy | working on a named assignment | "Doing" names it; row refreshed at every cut | do not interrupt (§ 2 rule 4) |
+| 🟡 blocked | cannot proceed | "Waiting for" names the ADDRESS and the matter; one message to the holder | react to `audit-waiting` (contract item 7) — a blocked seat is the Manager's queue |
+| ⚫ offline | window closed / session gone | row cleared on stop (§ 9); locks released | clear a vanished seat's row and locks (Manager-only override) |
 
 ## Resource locks
 
@@ -35,6 +47,20 @@ previews… Take → run → release; holding "just in case" is forbidden.)*
 - Successes and difficulties are legal status content — that is how neighbors see where to help.
 - Reading the board before messaging someone is part of the communication regimen (constitution
   § 2 rule 4).
+
+## Where the board lives — session state OUTSIDE git
+
+The board is the state of the moment, not history: it is rewritten at every state change, so a
+TRACKED board makes the `main` tree dirty by construction (field: 105 board commits in ten days,
+14 of them only to clean the tree before a gate). Therefore:
+
+- **`TEAM_STATUS.md` is ignore-first** — one line in `.gitignore` when operation 3 materializes
+  it (the same class as `.kaif/refresh-marker.json` and the heartbeat); it is never committed.
+- **A snapshot travels to the retrospective:** operation 5 copies the board as it stood at the
+  end of the shift into the retrospective document — that is where its history belongs.
+- **Named opt-out:** a team that wants the board tracked (audit trail, no shared disk) writes the
+  opt-out into the constitution § 4 with its price stated — a dirty tree at every state change —
+  and exempts the board from the tree-cleanliness gates by name.
 
 ## Board tool — the contract (the project's agent builds it)
 
@@ -58,12 +84,19 @@ Node.js. The tool MUST hold:
    itself — never remembered by the session.
 6. **Proven on a broken case before trusted** (project testing canon): a foreign-row edit is
    refused; an abandoned lock is recovered; two concurrent writers do not corrupt the table.
+7. **`audit-waiting` — the wait column obliges someone.** The tool lists every 🟡 blocked row and
+   judges it: the "Waiting for" cell must name a seat by its ADDRESS (matched on word boundaries
+   that understand the project's script, not ASCII `\b`); a named seat that is not 🔴 busy means
+   "nobody is working on what you wait for"; an unnamed addressee means "nothing to check". Any
+   such row is an ALARM: non-zero exit code, and the Manager reacts before anything else (reassign,
+   unblock, or clear). Proven red on a fixture with a dead addressee and a nameless wait.
 
 Suggested command surface (adapt names to the project):
 
 ```
-<board-tool> set [--busy|--free] [--doing "…"] [--waiting "…"]   # my row only
-<board-tool> lock <resource> | unlock <resource>                  # singleton locks
+<board-tool> set [--busy|--free|--blocked] [--doing "…"] [--waiting "<address>: …"]   # my row only
+<board-tool> lock <resource> | unlock <resource>                  # singleton locks (N slot rows for capacity N)
 <board-tool> show                                                 # print the board
-<board-tool> set --role <r> …                                     # Manager-only: clear a stale row
+<board-tool> audit-waiting                                        # blocked rows judged; exit ≠ 0 on an alarm
+<board-tool> set --role <r> …                                     # Manager-only: clear a stale/offline row
 ```

@@ -23,7 +23,7 @@
 //   "aiMarks": ["[ИИ]", "[ИИ-ред]"]   — the [AI]- and [AI-ed]-analog open tags; closers are
 //   derived ([ИИ] → [/ИИ]); the English pair is always recognized too (bug 34, project B Г8).
 // Exit codes: 0 = gate ran green · 1 = violations · 3 = SKIPPED (no canonArtifacts KEY —
-//   nothing was proven; check and report agree on this, bug 34 / field report KCam Г7).
+//   nothing was proven; check and report agree on this, bug 34 / field report project D Г7).
 //
 // Commands:
 //   node .kaif/tools/kaif-provenance.mjs report            # where AI text awaits acceptance
@@ -54,7 +54,7 @@ const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 const slashes = (p) => p.replaceAll('\\', '/'); // registry keys and decl entries use forward slashes
 // SKIPPED ≠ passed (bug 34): without a canonArtifacts KEY the gate has nothing to guard —
 // exit 3 says "nothing was proven", and check/report AGREE on it (they used to diverge:
-// report said "nothing to report" exit 0 while check scanned and failed — field report KCam Г7).
+// report said "nothing to report" exit 0 while check scanned and failed — field report project D Г7).
 const EXIT_SKIPPED = 3;
 
 // The deployment's marker carries the whole convention: the canon declaration AND the

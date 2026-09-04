@@ -200,6 +200,23 @@ is worse than a missing one**. And what the AI *does* legitimately write into th
 visibly marked (`[AI]…[/AI]` provenance marks — `AGENT_GUIDE.md`) until the owner accepts it: AI text
 must never dissolve into the owner's text unnoticed.
 
+**The fourth door — a fork is closed by recon of the domain's authorities, not by reasoning
+(KAIF 2.5).** The three doors are about a missing FACT. Between them and the owner's forks of vision (`/interview`)
+lies a class the canon used to hand to the agent silently: the ENGINEERING FORK — how to flush a
+buffer, which threshold to take, where to draw a refusal boundary. Formally no fact is missing (the
+agent "knows" the options) and formally it is not vision (the owner does not want to decide it) —
+and it is exactly where a plausible argument is the worst available source: subjectively convincing,
+carrying no trace of anyone else's burns. Field-paid (origin issue #36): a black box was set to dump
+"on trip and on close only — never per tick", reasoned from the model's head; the machine froze, the
+box wrote zero bytes — and flight recorders, write-ahead logs and crash dumps had all settled the
+question decades ago: flush continuously. So: **a fork is not the agent's property.** It is decided
+EITHER by the owner OR by the domain's authorities found by recon (industry practice, specifications,
+incident reviews — not the first search hit); the agent's own judgment stops being FIRST and can
+never be the ONLY source. The mark of a fork is ≥ 2 options plus a non-zero price of error or
+irreversibility; where both are small, recon costs more than it buys and the choice is made on the
+spot (a variable name, the order of two lines). The forced artifact at the decision point is the
+`FORK:` line (`AGENT_GUIDE.md` → the fable loop), and `/fable-judge` hunts a fork decided without it.
+
 ### Descartes' Square — a decision tool for hard forks
 When the right choice isn't intuitively obvious, analyze it through four questions: **What happens if I DO
 this? What happens if I DON'T? What will NOT happen if I do? What will NOT happen if I don't?** Answering

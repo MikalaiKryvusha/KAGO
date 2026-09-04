@@ -141,6 +141,57 @@ reach). "Search is fast" → Scale: ms per query at 500 RPS · Meter: load-test 
 A criterion nobody can measure is a wish; a criterion with Scale/Meter/Target is a check the agent can
 execute and cite (verification then follows `TESTING_FRAMEWORK.md` — by observation, never inferred).
 
+### The scenario form — the same criterion written as an example (optional, a project's choice)
+
+An owner who does not write EARS or Planguage still has to state what "done" looks like, and an
+agent explaining a mechanic to that owner should not answer with a formula. The scenario form is
+the one shape the canon offers for that: four lines, the owner's language, and the fourth line is
+the test.
+
+```
+- Situation. <the state of the world, with concrete values — not an action>
+- Action. <exactly one action of the user, the system or the agent>
+- Result. <what is SEEN from outside: a number, an output line, a file — never "works correctly">
+- Check. <a runnable command or query of the repository + its expected output; a numeric criterion
+  puts Scale · Meter · Target here>
+```
+
+The first three lines are Given / When / Then of classic BDD one to one; the fourth is what the
+agent era adds to BDD: without a machine signal, "done" stays the agent's word. EARS maps onto it
+— WHILE / WHEN → Situation / Action, "the system shall …" → Result — so EARS remains the form of a
+requirement SENTENCE and the scenario the form of an acceptance CRITERION; Scale · Meter · Target
+live in the Check line, and the ten criteria apply to the scenario as a whole (singular = one
+action, verifiable = the Check line, traceable = the rule heading above the scenario).
+
+**Seven rules of form** (rules 1–6 and the line order are guarded mechanically — the linter
+below; rule 7 is the judge's):
+
+1. **The Result is observable from outside.**
+   ❌ Result. The chain is computed correctly.
+   ✅ Result. Chain length L = 2; the game log shows three rolls: 17, 31, 62.
+2. **One action.** No "and then / afterwards" in the Action line — that is a second scenario.
+   ❌ Action. The player rolls the chain and then equips the found sword.
+   ✅ Action. The player rolls the chain link by link.
+3. **Concrete values.** Wisdom 70, not "high Wisdom"; the dice 17, 31, 62, not "a roll".
+4. **Third person, present tense.** The user, the player, the agent — never "I", "me".
+5. **No implementation in the first three lines.** Functions, variables, selectors, SQL, JSON are
+   not the scenario's language; the Check line speaks them.
+6. **The Check is a runnable command or query with its expected output.**
+   ❌ Check. Verify by hand.
+   ✅ Check. `node tools/chain.mjs --rolls 17,31,62 --wisdom 70` prints `2`.
+7. **Editing the Check line during execution is a red flag.** It changes only with a justification
+   in the commit, like any check of the project (`AGENT_GUIDE.md` → Commits); a quietly adjusted
+   Check is the weakened-test fraud `/fable-judge` hunts.
+
+Two boundaries paid for in the field: an OWNER-written Check may be empty — the agent fills it and
+shows it; an agent-written empty Check is a defect. And the form binds acceptance criteria and the
+explanation of a mechanic to the owner (`/interview`), never the owner's own canon text. Keywords
+are mirrored per language like the stop-word dictionary (the four English keywords above; the
+shipped mirrors are `en` and `ru`, a project adds its own row); the optional tool module `kaif-scenario-lint`
+(`.kaif/tools/`, `check` / `selftest`) guards rules 1–6 plus the line order where a scenario is
+STARTED (rule 7 is hunted by `/fable-judge`) and never demands one — the form stays a project's
+choice (Boundaries below).
+
 ## The writing checklist — the executable carrier of this canon
 
 The sections above explain WHY; this checklist is what the writing session actually walks
@@ -150,7 +201,9 @@ target document — a plan, an epic, a bug's "done when", an idea:
 - [ ] **Open with the goal vector:** the pain being solved + where we want to be; name the goal
       type — Achieve · Maintain · Avoid.
 - [ ] **Follow with the acceptance criteria** — one line per criterion, each carrying a fit
-      criterion (numeric ones as Scale · Meter · Target).
+      criterion (numeric ones as Scale · Meter · Target) — or one four-line scenario per criterion
+      (Situation · Action · Result · Check); where the shipped form linter is wired, run it:
+      `node .kaif/tools/kaif-scenario-lint.mjs`
 - [ ] **Write each requirement as ONE EARS sentence:** active voice, actor named, one modal used
       honestly (shall / should / will).
 - [ ] **Sweep the draft against the stop-word dictionary** — every hit is rewritten measurably or
@@ -171,7 +224,8 @@ consults the writer the same way the linter does — it never blocks a draft (se
 - **Not BDUF.** No full specification up front — requirements are written for the work at hand
   (a plan's goal vector, a bug's "done when"), and grow with the work.
 - **Not Gherkin-everywhere.** EARS shapes the *requirement sentence*; scenario syntax is a per-project
-  choice, not a canon obligation.
+  choice, not a canon obligation — the canon offers ONE optional scenario form for that choice
+  (above) and never requires it.
 - **Not a second testing canon.** TESTING verifies what was made; REQUIREMENTS shapes what is
   required — one line, one boundary, no overlap.
 
@@ -182,6 +236,9 @@ consults the writer the same way the linter does — it never blocks a draft (se
 - **The stop-word dictionary as a guard** — the optional tool module `kaif-requirements-lint`
   (`.kaif/tools/`) runs the dictionary as a grep step over target documents; advisory, with an
   explicit-justification escape.
+- **The scenario form as a guard** — the optional tool module `kaif-scenario-lint` (`.kaif/tools/`)
+  judges the SHAPE of a started scenario (the seven rules, both shipped languages); it duplicates
+  nothing from the dictionary and never demands a scenario.
 - **`/fable-judge`** — treats acceptance criteria as claims to re-run; an unverifiable criterion is
   judged like an unverifiable "done".
 - **`TESTING_FRAMEWORK.md`** — receives every fit criterion at verification time; principle 3 (early

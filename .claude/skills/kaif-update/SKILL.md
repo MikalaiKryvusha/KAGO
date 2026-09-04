@@ -36,12 +36,18 @@ diverged places. Your cognitive work is that task, not the migration.
    - `node .kaif/kaif-core.mjs diff --source <url|dir>` — a per-module preview of what the new
      version would change *here*. Works even on a v1 manifest: the machinery builds a synthetic
      baseline of your CURRENT version (`--baseline <dir|url>` points it at saved artifacts when
-     the origin release is unreachable).
+     the origin release is unreachable). It also prints the wholesale verdict of every localized
+     candidate WITH its numbers (`baseFound N of M, ceiling K → frozen | merged`) and records them
+     in `.kaif/update-rehearsal.json`: the next `update` over this tree freezes any file whose live
+     verdict differs from what you read here (task item `verdict-mismatch`, both number sets).
    - The **sandbox copy** — not a model of the pass but the pass itself: export the tree
      (`git archive HEAD | tar -x -C <tmpdir>`), `git init` there, run the REAL update/bootstrap in
      the copy and read its diff. A minute and a few MB buy a byte-accurate preview — in the field
      the live pass matched the sandbox byte for byte. Prefer this on the first-ever update and on
-     any deployment with heavy localization.
+     any deployment with heavy localization. The copy's receipt (`<copy>/.kaif/last-update.json`)
+     carries the verdicts it printed: hand it to the live run as
+     `update --rehearsal <copy>/.kaif/last-update.json`, and a file the copy froze can never be
+     merged live — a mismatch freezes it and names both number sets in the task.
 
 3. **Route by what the project has:**
    - **`.kaif/kaif-core.mjs` exists (KAIF ≥ 1.5):** run `node .kaif/kaif-core.mjs update`

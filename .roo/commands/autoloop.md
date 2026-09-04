@@ -75,7 +75,10 @@ without those resources.
    (build + tests + checks) = one commit — never batch half a day of work into one commit: a big diff
    can't be honestly reviewed even by its author, and when the judge finds trouble, the rollback is one
    file instead of a session. `git diff --stat` before committing — anything you didn't intend, stop.
-11. **Short chat report** (1–3 lines): what you did, what you verified, what's next. → next task.
+11. **Short chat report** (1–3 lines): what you did, what you verified, what's next — opened by the
+    delivery line `DELIVERY: краёв X/389 → Y/389 · режимов A/4 → B/4; moved by: … | blocker: …`
+    (`npm run curve -- --progress`; the metric named in `MASTER_PLAN.md` → «Метрика доставки»; zero
+    delta only with a named blocker — the judge's delivery-line hunt). → next task.
 
 ## Self-pacing (so the loop runs LONG)
 

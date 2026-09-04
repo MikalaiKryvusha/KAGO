@@ -22,6 +22,9 @@ can be returned to (or handed to `/bug-research`).
   file it with the source noted ("tossed by the owner, <date>"), confirm in one line, return to the
   current task.
 - NOT for a "stuck-from-misunderstanding" stall (that's `PHILOSOPHY.md`) and not instead of fixing a trivial typo.
+- **Size the response before the first line** — the severity ladder (`BUG_FIXING_FRAMEWORK.md`):
+  S1 / S2 get a bug document with a `Severity:` line in its header; **S3 (a burr, cosmetics, a
+  one-off typo) gets one line in `EXPERIENCE.md` (`/experience`) and NO bug document.**
 
 ## Branch first — a defect of the FRAMEWORK itself, not the project
 
@@ -41,24 +44,20 @@ contour in `AGENT_GUIDE.md` governs the local fix; this branch governs the REPOR
    append a "+1 observation" comment there (conditions, environment, version, steps, expected/got;
    new version of the same class → "reproduced on vX.Y") — do NOT open a new ticket.
 3. **File locally:** `bugs/KAIF/NN_*.md` by template A/B below (create the directory on first use).
-4. **Deliver by tracking mode:** `origin` — file/append the origin issue **under the KAIF
-   owner's STANDING AUTHORIZATION, signed by the agent**; `anonymous` — the signal stays LOCAL,
-   never reach for the origin. The authorization is not implied — it is the KAIF owner's
-   standing rule, given verbatim in origin issue #15: every KAIF defect an agent finds is
-   reported by the agent to the KAIF GitHub, and the ticket is signed by the project's agent so
-   it reads as the agent's field report, not the owner's statement — "this is CANON". Delivering
-   here EXERCISES that pre-given human decision and cites it; nothing in this step bypasses a
-   human — the human decision was made once, upstream, by the repository's own owner. TRANSPORT
-   and AUTHORSHIP are two independent axes: the transport is whatever account `gh` has — usually
-   the owner's, and that is normal; the AUTHOR is named in the ticket body: state that the text
-   is written by, and answered for by, the project's agent. If your agent system's permission
-   layer asks a human to confirm the outbound call — let it ask and wait: the confirmation
-   prompt and the standing authorization compose, they never conflict (a project A 2.3 field report:
-   the older imperative wording of this step read to safety classifiers as "post to the
-   internet without asking" and was refused — the rule's substance was never the problem).
-   The `/owner-reviews` send gate exists for a DIFFERENT risk — publishing in a FOREIGN
-   repository or as the owner's own statement — and stays mandatory there; a KAIF-defect signal
-   to the framework's own origin carries neither risk and does not queue on the human.
+4. **Deliver by tracking mode:** `origin` — run the machinery, in the same motion as filing and
+   ahead of the work that found the defect:
+   `node .kaif/kaif-core.mjs report bugs/KAIF/NN_*.md`
+   It files the origin issue signed by the agent under the KAIF owner's STANDING AUTHORIZATION
+   (origin issue #15 — the owner's word: "this is CANON"; the `AGENT_GUIDE.md` authorization
+   gate names this carve-out inline, origin issue #37), appends the authorship trailer (the
+   transport is the machine's `gh` account, the AUTHOR is the project's agent) and writes the
+   issue URL into the ticket's `Delivered upstream:` line. Its refusals are named — `tracking:
+   anonymous` (the signal stays LOCAL; `NOT YET` is legal there), no `gh`, not a ticket, `gh`
+   refused — and a timeout is reported as OUTCOME UNKNOWN, never as a refusal (check before
+   repeating). If your agent system's permission layer asks a human to confirm the call — let it
+   ask and wait: the prompt and the standing authorization compose. `--dry-run` shows what would
+   go. The `/owner-reviews` send gate stays for FOREIGN repositories and statements in the
+   owner's name. On `origin`, `NOT YET` is a debt with an owner, never a resting state.
 5. **Sender quality gate:** a signal goes upstream only with a deterministic repro OR verbatim
    quote-evidence; blameless wording (a weak model's failure is described as a missing guardrail,
    never as "the model is dumb").
@@ -73,6 +72,7 @@ Both templates open with the machine-grepable fingerprint
 # KAIF bug: <one-line defect statement>
 
 kaif-fp: <surface> :: <symptom-class> :: v<major.minor>
+**Delivered upstream:** <origin issue URL · or `NOT YET` — legal only on `tracking: anonymous`>
 **Autocapture** (from `.kaif/kaif.json` + update receipt): KAIF <version> · project <name | anonymized> ·
 sphere <…> · language <…> · i18n <…> · tracking <origin | none> · agent system <…> · OS <…> · Node <…>
 **Dedup attestation:** searched `bugs/KAIF/` (<command → result>) and open origin issues
@@ -104,6 +104,7 @@ owner-work-safety / honest-green / owner-decisions / cold-start / memory / auton
 # KAIF improvement request: <one-line proposal>
 
 kaif-fp: <surface> :: <symptom-class> :: v<major.minor>
+**Delivered upstream:** <origin issue URL · or `NOT YET` — legal only on `tracking: anonymous`>
 **Autocapture:** <same line as template A>
 **Dedup attestation:** <same as template A>
 
@@ -140,8 +141,11 @@ proven in production — projects, hours, sources. The owner of KAIF decides the
 
    **Status:** 🔴 OPEN   (or 🟡 partial / 🔬 research-only / 🔧 fix pending verification)
    **Version/build:** <build>   ·   **When/context:** <date, during which task it was found>
+   **Severity:** S1 | S2 | S3   <consulted at FILING time — the severity ladder, BUG_FIXING_FRAMEWORK.md;
+   S3 gets ONE line in EXPERIENCE.md instead of this document>
    **Fix accepted when (observable):** <what will be SEEN working after the fix — written by
-   REQUIREMENTS_FRAMEWORK.md; refine as the investigation teaches>
+   REQUIREMENTS_FRAMEWORK.md; refine as the investigation teaches — or as a four-line scenario:
+   Situation · Action · Result · Check ("The scenario form")>
 
    ## Symptom
    <what is observed>

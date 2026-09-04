@@ -1,25 +1,48 @@
 {
-  "from": "2.3",
-  "to": "2.4",
-  "route": "core-update",
-  "source": "https://github.com/MikalaiKryvusha/KAIF/releases/latest/download",
+  "from": "2.4",
+  "to": "2.5",
+  "route": "bootstrap",
   "counters": {
-    "replaced": 7,
-    "mergedModules": 8,
-    "added": 6,
-    "kept": 68
+    "replaced": 18,
+    "mergedModules": 12,
+    "added": 4,
+    "kept": 63,
+    "adopted": 9
   },
-  "diverged": [],
-  "divergedModules": {
-    "AGENT_GUIDE.md": [
-      "# KAGO — AI Agent Guide"
-    ]
+  "classified": true,
+  "verdicts": {
+    "AGENT_GUIDE.md": {
+      "baseFound": 28,
+      "baseN": 29,
+      "ceiling": 4,
+      "outcome": "merged"
+    },
+    "PHILOSOPHY.md": {
+      "baseFound": 22,
+      "baseN": 22,
+      "ceiling": 3,
+      "outcome": "merged"
+    },
+    "BUG_FIXING_FRAMEWORK.md": {
+      "baseFound": 6,
+      "baseN": 6,
+      "ceiling": 1,
+      "outcome": "merged"
+    },
+    "TESTING_FRAMEWORK.md": {
+      "baseFound": 7,
+      "baseN": 7,
+      "ceiling": 1,
+      "outcome": "merged"
+    },
+    "REQUIREMENTS_FRAMEWORK.md": {
+      "baseFound": 7,
+      "baseN": 7,
+      "ceiling": 1,
+      "outcome": "merged"
+    }
   },
-  "ownerConvention": [
-    "STATUS.md",
-    "PROJECT_HISTORY.md"
-  ],
-  "date": "2026-08-28T13:58:43+03:00",
-  "judgeVerdict": "FABLE-JUDGE VERDICT on the KAIF 2.3 → 2.4 update (KAGO, 2026-08-28): VERIFIED WITH CAVEATS.\n\nClaims re-run, not trusted:\n1. \"Versions stamped\" — `node -e` read of `.kaif/kaif.json`: version=2.4, released=2026-08-28,\n   history carries both intervals (2.2→2.3, 2.3→2.4 route core-update). CONFIRMED.\n2. \"Nothing owner-authored lost\" — `git status --porcelain` filtered for STATUS.md, GOAL.md,\n   MASTER_PLAN.md, plans/, bugs/, ideas/, interviews/, researches/, curves/, runs/: zero modified\n   owner files (the only bugs/ change is the NEW ticket 10, an addition). `node tools/prayer.mjs\n   --apply` reports all 12 canon copies byte-identical to PHILOSOPHY.md. CONFIRMED.\n3. \"The merges are real\" — AGENT_GUIDE.md now carries exactly one KAIF:CREED pair (lines 7/10) and\n   one KAIF:PRAYER pair (lines 12/46); the English template prayer and the duplicated PRIME\n   PRINCIPLE / AUTONOMOUS MODE blocks inserted by the mechanical pass were folded out (each block\n   counted once by Select-String, 3 patterns → 3 hits); the new WORKING-UNTIL-A-NAMED-TIME rule is\n   present once. The kept-for-us module (Russian prayer with the owner's интервью-017 cadence)\n   survived verbatim. CONFIRMED.\n4. \"The project still works\" — `npm run check`: 57 .mjs parse, 436 text files encoding-clean.\n   `npm run selftest:all`: 29 sets, 0 red, 1421 green blocks, 17.0 s — identical to the numbers\n   STATUS.md recorded before the update. `node .kaif/kaif-core.mjs check`: manifest satisfied,\n   85 files + 152 agent artifacts. CONFIRMED.\n5. \"Deprecation done\" — old /end-chat removed in all five agent dirs (git rm), pair\n   /end-chat-force + /end-chat-soft present, 169 mirror copies re-synced by the checkpoints,\n   the only live reference re-pointed (PROJECT_HISTORY.md header); chronicle entries kept verbatim\n   per append-only rule. CONFIRMED.\n\nCaveats:\n- The named-time rule and the intro stay in ENGLISH in AGENT_GUIDE.md — legal (agent-read doc,\n  language routed by audience), but the ru language pack will keep arriving English-first; the\n  localized prayer cadence (full text once per session, three principles per task) intentionally\n  diverges from the upstream template's every-task-in-full cadence on the owner's word\n  (интервью 017 Q2 = B) — a permanent, documented local module.\n- Two 2.4 POLICY changes (the /end-chat split; the named-time contract) were adopted on the\n  strength of the owner's explicit order to update to 2.4 and surfaced verbatim in the chat; the\n  owner has not yet separately ratified them — veto remains one line away.\n- STATUS.md bonsai warning (1426 lines vs ~200) is pre-existing debt, named in STATUS itself,\n  unrelated to this update.\n- One framework defect found and ticketed, not silently fixed: bugs/KAIF/10 (the placeholders task\n  item lists verbatim quotes as fill locations; the gate correctly skips them).",
-  "verifiedAt": "2026-08-28T14:07:32+03:00"
+  "date": "2026-09-04T17:11:13+03:00",
+  "judgeVerdict": "FABLE-JUDGE VERDICT on the KAIF 2.4 → 2.5 update (KAGO, 2026-09-04): VERIFIED WITH CAVEATS.\n\nClaims re-run, not trusted:\n1. \"Versions stamped\" — `node -e` read of `.kaif/kaif.json`: version=2.5, released=2026-09-04, history\n   carries 2.2→2.3, 2.3→2.4 (core-update) and 2.4→2.5 (route `bootstrap`, 2026-09-04T17:11:13+03:00);\n   `node .kaif/kaif-core.mjs version` → `KAIF 2.5 (released 2026-09-04) · tracking: origin · lang: ru`. CONFIRMED.\n2. \"Nothing owner-authored lost\" — `git status --short` over STATUS.md, GOAL.md, PROJECT_HISTORY.md,\n   EXPERIENCE.md, plans/, bugs/, ideas/, interviews/, researches/, curves/, homeworks/, profiles/, workloads/,\n   tools/, automation-engine/: two lines only, both deliberate additions of this pass — MASTER_PLAN.md\n   (+7/−0, the delivery-metric block the 2.5 template convention asks for) and plans/54 (+1 comment line,\n   a KAIF-VERSION-OK marker). `npm run check` → «молитва: 12 канон-документов, все копии совпадают с\n   PHILOSOPHY.md». CONFIRMED.\n3. \"The merges are real\" — anchored pairs KAIF:PRAYER 1/1 in all 8 carriers (AGENT_GUIDE, PHILOSOPHY,\n   BUG_FIXING, TESTING, REQUIREMENTS, STATUS, GOAL, MASTER_PLAN); the mechanically merged modules each\n   found exactly once by grep (fourth door in PHILOSOPHY = 1, severity ladder in BUG_FIXING = 1 at line 109\n   AFTER the prayer END at line 37, scenario form in REQUIREMENTS = 1, size budgets + FORK paragraph in\n   AGENT_GUIDE = 1); the hand folds each once (INTENT/AUTH/TWINS/PENDING/FORK in step 7 = 1, the @guard\n   template block in TESTING = 1, DELIVERY: in AGENT_GUIDE = 3 lines — the fable-loop paragraph and rule 1);\n   `cmp` of the four edited skills against .agents/.grok/.cline = 12/12 identical; `check` → 0 drifted\n   mirrors. CONFIRMED.\n4. \"The project still works\" — `npm run check`: 79 .mjs parse, 1699 text files encoding-clean, threat\n   guard 0 new violations / 1 pre-existing debt, entry guard 34/0/0. `npm run selftest:all`: ИТОГ наборов 48,\n   красных 0, зелёных блоков 2501, 48.3 с — identical to the numbers STATUS.md recorded before the update\n   (48/0/2501). `node .kaif/kaif-core.mjs check`: manifest satisfied, 89 files + 152 agent artifacts. CONFIRMED.\n5. \"Replaced content carries no owner edits\" — the tree was clean at 3a00d75 before the pass; `cmp` of\n   `.kaif/backup-2.4-2.5/<f>` against `git show HEAD:<f>` for every replaced/merged path present in the\n   backup: compared 29, mismatches 0. CONFIRMED.\n6. \"The rehearsal bound the live pass\" — the sandbox-b copy (git archive → git init → thin KAIF.md +\n   loader) produced a KAIF_UPDATE_TASK.md byte-IDENTICAL to the live one (`diff` empty), the same counters\n   (18 replaced · 12 modules · 4 added · 63 kept) and the same wholesale verdicts with numbers\n   (AGENT_GUIDE baseFound 28 of 29 ceiling 4 → merged; the other four N of N → merged). CONFIRMED.\n7. Fork-without-recon hunt — the route choice (core-update with the deployed 2.4 core vs bootstrap with the\n   fresh 2.5 core) carried its FORK: line in the chat before the live run: options A | B · price of error\n   low (backup tree + git) · consulted: the /kaif-update route note + two sandbox rehearsals (route A observed\n   planting the severity ladder INSIDE the localized prayer pair; route B observed placing it after the END).\n   PASSES.\n8. Delivery-line hunt — `DELIVERY: краёв 11/389 → 11/389 · режимов 1/4 → 1/4; moved by: nothing (a\n   framework update, offline by the owner's order) | blocker: edge runs happen only with the owner at the\n   machine (интервью 017, Q4)`; `npm run curve -- --progress` → «краёв 11/389 (прожигом 9 · соседкой 1 ·\n   выведено 0) · режимов отгружено 1/4». Zero delta with a named blocker. PASSES.\nWeakened tests: none — no test or guard was touched; the TESTING 6a text was collapsed to the owner's quote\nplus a pointer (the 2.5 \"mechanized lesson collapses\" rule), its full text stays in git history.\n\nCaveats:\n- Eight policy changes of 2.5 are adopted on the owner's update order and surfaced in the chat with the veto\n  open: the AUTH carve-out (already local law since 2026-08-30), FORK:, gate 5 second half, the guarded-loop\n  boundary, the S1/S2/S3 ladder + DELIVERY: line, `kaif-core report`, the team defaults, the four update\n  behaviours. The prayer cadence stays the owner's own setting (интервью 017 Q2 = B) — legal under 2.5.\n- The two new team-deployment references arrive in English and stay English (agent-read).\n- `kaif-core report` refuses three pre-2.5 local tickets (bugs/KAIF/10, 11, 12: lowercase «not yet») and\n  one delivered-by-hand ticket (16: prose, no URL on the contract line) with the same «neither NOT YET nor a\n  URL» message — ticketed this pass (bugs/KAIF/17); 10–12 are fixed in 2.5 (10 observed here, 11–12 by the\n  release notes) and their DONE closure is a named follow-up, not part of this update.\n- Line budgets warn on five re-read documents (STATUS 1809/200, GOAL 1958/300, AGENT_GUIDE 1655/1200,\n  MASTER_PLAN 466/300, REQUIREMENTS 251/250) — pre-existing bonsai debt, advisory by design.\n- The permission-layer allowlist for `node .kaif/kaif-core.mjs report` was NOT added — the owner's config.",
+  "verifiedAt": "2026-09-04T17:29:58+03:00"
 }

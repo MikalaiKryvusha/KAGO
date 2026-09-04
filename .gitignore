@@ -91,3 +91,5 @@ assets/dashboard/_preview.html
 benches/cards/generated/*
 !benches/cards/generated/virtual-gpu_42.json
 .kaif/loop-guard.out
+.kaif/guarded-loop.json
+.kaif/update-rehearsal.json

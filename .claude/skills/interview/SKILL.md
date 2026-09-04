@@ -96,6 +96,16 @@ If it shapes brand/architecture/UX for the long term — interview.
   needed to clarify is worse than a few extra questions.
 - Don't ask what's already decided in `plans/`/`MASTER_PLAN.md` or past interviews.
 
+### Step 3a. Explaining a mechanic to the owner — a scenario first, the formula after
+
+When a question (or its context) has to explain how something works — a rule, a mechanic, a
+behaviour — open with a four-line scenario with concrete values (`REQUIREMENTS_FRAMEWORK.md` →
+"The scenario form": Situation · Action · Result · Check), and only then the formula: the
+formula explains WHY it came out so; a scenario without the formula is still an explanation, a
+formula without the scenario is not. The values in the scenario come from the canon or from a run,
+never invented (the three doors, `PHILOSOPHY.md`); the owner answers in the same language — his
+scenario may leave the Check line empty, and filling it is the agent's work.
+
 ### Step 4. Ask the owner — via the document
 The default, autonomy-friendly method: the owner answers **right in the md document** (fills the
 "**Answer:**" fields). This keeps the work async — the agent isn't blocked on a synchronous chat.

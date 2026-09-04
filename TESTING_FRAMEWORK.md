@@ -177,25 +177,47 @@ ships, walk the gates that apply:
 5. **A check that has never failed proves nothing.** Every new guard/check is verified on a broken
    version first (see `BUG_FIXING_FRAMEWORK.md` → Guards); goldens for refactors are byte-exact —
    an empty diff is proof, "the numbers look the same" is not.
+   **And the broken version is NAMED — together with its distance from the THREAT.** Reddening a
+   guard against *a* broken version is necessary and not sufficient: four field guards in one
+   evening were each green and mutation-proven — and each proven against the failure that was
+   convenient to simulate (a process death on a digital twin instead of a machine freeze; a
+   readback after a CLEAN close instead of a death without one; one warning instead of an
+   accumulation; the first step instead of any step). The machine hung, and the fuse built for it
+   recorded nothing (origin issue #35). A green mutation over a wrong-threat fixture does not
+   withhold confidence — it ISSUES it, falsely. So every guard declares, next to itself, four
+   greppable lines, and a guard is DONE only when the last one is no longer `NOT YET`:
+   ```
+   @guard <name>
+   THREAT:         the real event it exists for
+   PROVED-AGAINST: what the red run actually did
+   GAP:            what the proof does NOT cover — or the word `none`, written after thinking
+   ON-REAL-PATH:   where it was seen working on the path the owner actually runs — or `NOT YET`
+   ```
+   A recorder whose tape must outlive the event it explains declares the same way — `@forensic
+   <name>` · `EXPLAINS:` the event · `DURABLE-AT:` when the evidence becomes durable — and `close`,
+   `exit`, `trip-only` are rejected values: evidence durable only at a clean ending is not evidence.
+   The optional tool module `kaif-guard-lint` (`.kaif/tools/`, `check` / `selftest`) reds on a block
+   with a missing field or a rejected `DURABLE-AT`; it fires only on explicit `@guard` / `@forensic`
+   markers and never guesses what a guard is.
 6. **After a deploy, the gate is production itself, entered as a user.** Sign in by whatever door
    the product offers, walk the real screens, read the console — only then is "deployed" a fact.
    A smoke that only walks public surfaces proves the landing page is alive, not the product: if
    the product has authenticated state, an unauthenticated smoke is NOT evidence about the
    product. (Field-paid: three deploys in one night served an application that did not start at
    all, with every local instrument green — origin issue #18.)
-6a. **A GUARD is not done until it has been seen on the REAL path — «is the engine mounted?»**
-   Gate 6 says a deploy is only real when you enter the deployed product as a user. The same is
-   true one level down, and it was paid for on 2026-08-30: a fuse built over two days, with a
-   green suite and mutations reddening exactly their own blocks, recorded ZERO trips when the
-   owner's machine actually hung — because everything it was ever proved against was a SIMULATED
-   process death on a test double, and the double cannot freeze its host. The owner named the
-   class better than any definition: *«the engine passed its burn test, all tests green — you
-   just forgot to mount it on the rocket, and the countdown has started»*.
-   **The obligation:** a guard's own suite is evidence about the SUITE. Before «done», observe the
-   guard on the path the owner actually runs, and record WHEN — an observation without a date
-   cannot be re-checked, and an uncheckable claim about checking is the very class this rule
-   exists for. Honest debt («not yet») is legal and visible; a bare «yes / works / verified» is
-   not. Where the agent system supports it, this is a lint, not prose (KAIF ticket 14/15).
+6a. **«Is the engine mounted?» — the owner's name (2026-08-30) for gate 5's second half above.**
+   A fuse built over two days, green suite, mutations reddening exactly their own blocks, recorded
+   ZERO trips when the owner's machine actually hung — everything it was proved against was a
+   SIMULATED process death on a test double, and the double cannot freeze its host. The owner:
+   *«the engine passed its burn test, all tests green — you just forgot to mount it on the rocket,
+   and the countdown has started»*. The obligation is the `@guard` block of gate 5 (with the DATE of
+   the real-path observation — an observation without a date cannot be re-checked; an honest
+   `NOT YET` is legal, a bare «works» is not). In this project it is a lint, not prose:
+   `tools/guard-lint.mjs` (М1/М4, `plans/76`, the same fields, run by `npm run check` as «СТОРОЖ
+   УГРОЗ»); the framework's `.kaif/tools/kaif-guard-lint.mjs` reads the same markers (KAIF 2.5,
+   origin issue #35 — filed from this project as `bugs/KAIF/14`). Two texts of one rule are a pair;
+   this one collapsed to the owner's word and the pointer (KAIF 2.5 → «a mechanized lesson
+   collapses»).
 
 7. **Artifact integrity before shipping.** "It built" and "it is one build" are different claims:
    the shipped bundle carries exactly ONE build identity, asserted mechanically before upload. An
@@ -229,6 +251,9 @@ a verification and never flips a marker; the owner's recorded verdict is.
   says WHAT must carry a status and how trust propagates. The triviality gate still applies: a trivial
   change verified by its one obvious check needs no ceremony beyond its normal comment.
 - **`/fable-judge`** — treats test-status markers as claims: a `[TESTED]` it cannot reproduce is REFUTED.
+- **The guard-declaration block as a guard** — the optional tool module `kaif-guard-lint`
+  (`.kaif/tools/`) runs gate 5's second half mechanically over explicit `@guard` / `@forensic` /
+  `@fork` markers; advisory, `SKIPPED=3` when a tree declares nothing.
 - **`BUG_FIXING_FRAMEWORK.md`** — where testing's findings go (one doc per defect; 3 attempts → research).
 - **Spheres** (`.kaif/spheres/`) — define the sphere's evidence, verification-by-observation meaning, and
   fraud table; principle 6 lives there.

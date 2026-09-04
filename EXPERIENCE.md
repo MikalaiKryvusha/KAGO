@@ -77,6 +77,15 @@
 
 ## Entries
 
+### EXP-0238 · 2026-09-04 · ❌→✅ · #measure-line-endings-by-bytes-not-by-grep-in-git-bash #a-false-crlf-reading-nearly-became-a-report-claim #kaif-update #s3-one-line
+**Context:** the KAIF 2.5 update pass; deciding whether the merge had flipped CRLF files to LF (the 2.3 rake, bugs/KAIF/06). Severity S3 (a minute lost, nothing shipped) — one entry, no bug document, per the 2.5 ladder.
+**Tried / did:** `grep -c $'\r$' <file>` in Git Bash reported 1652 of 1652 lines CRLF for AGENT_GUIDE.md, then `tr -cd '\r' < <file> | wc -c` reported 0 and `git ls-files --eol` reported `i/lf w/lf`.
+**Result:** ❌→✅ — the grep count was an artifact (MSYS text-mode grep matches `\r$` on LF lines); the bytes and git agree: this tree is LF in the working copy with autocrlf=true, and git's «LF will be replaced by CRLF» warnings are the norm, not damage. The false reading was caught before it reached the field report.
+**Lesson:** **measure line endings by BYTES (`tr -cd '\r' | wc -c`, `od -c`) or by `git ls-files --eol` — never by a grep pattern in Git Bash.** Two readings of one fact that disagree mean one instrument lies; find which before writing the number down.   → link: reports/KAIF_UPDATES/KAGO_KAIF_2.5_UPDATE_REPORT.md
+**Repro:** `printf 'a\nb\n' > /tmp/lf.txt; grep -c $'\r$' /tmp/lf.txt` → prints 2 on this machine; `tr -cd '\r' < /tmp/lf.txt | wc -c` → 0.
+**Trigger:** any claim about CRLF/LF in a report or a bug → the byte count and the git eol view must be in the same sentence.
+**Not for:** content diffs — `git diff` already ignores nothing and shows EOL flips as whole-file changes.
+
 ### EXP-0237 · 2026-09-04 · ❌→✅ · #a-filtered-pipe-hid-a-failed-check #judge-a-rehearsal-by-exit-code-and-red-count-never-by-grep #second-strike-of-exp-0234 #a-stale-check-survives-five-days-outside-the-battery
 **Context:** session 82 ran `twin --rehearse-death progress-stall` as the end-to-end witness of the input-2 wiring and piped it through `grep "progress-stall|ТРИП|трип|СПАСЕН|✅|❌|…"`. Seven lines came back, one of them `🔴`; I read the 🔴 as the rehearsal's colour for «the death happened» and wrote «7/7» into the ticket, STATUS and EXP-0235. The closing judge re-ran it with a wider filter: eight lines, TWO 🔴, exit code 1 — both times.
 **Tried / did:** read the rehearsal's own code: `okc ? '✅' : '🔴'`, `bad += 1`, `return bad === 0 ? 0 : 1` — 🔴 IS a failed check. The hidden line («полоса ВСТАЛА … спасение», lower-case) matched nothing in my pattern. Then read the sandboxes: three intents, all `progress-stall`, hands and rearms fine — the two red checks are STALE (written 29.08, before Ш5 made the band continue on 31.08) and the rehearsal is not in the battery, so it had been red for five days with nobody looking. Filed `bugs/104`; corrected the three documents.

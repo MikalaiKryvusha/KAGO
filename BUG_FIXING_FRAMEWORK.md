@@ -106,6 +106,32 @@ To fix a bug, the agent must:
 
 ---
 
+## The severity ladder — the response is sized by the incident, never fixed at maximum
+
+Consulted at FILING time, before the first line of a bug document, and written into that
+document's header (`Severity: S1 | S2 | S3`):
+
+- **S1 — hardware, the machine, measured data or the owner's trust harmed** → the full package
+  above: bug document · guard proven red against a NAMED broken version (`TESTING_FRAMEWORK.md`
+  gate 5) · twin sweep · class closure · lesson in `EXPERIENCE.md`.
+- **S2 — a run or an hour lost** → bug document + guard. No epic, no new canon section, no new
+  tool: the class is closed by the guard, not by more machinery.
+- **S3 — everything else** (a papercut, a cosmetic slip, a one-off typo in a generated line) → one
+  line in `EXPERIENCE.md` (`/experience`, with its mechanization field) — no bug document.
+
+Two caps that keep the protection layer from becoming the project's main source of defects:
+
+- **An incident never opens an epic by itself.** An epic must additionally pass the delivery
+  test — does it move the owner's acceptance metric (the `DELIVERY:` line, `MASTER_PLAN.md`)? —
+  otherwise the fix stays a fix. (Field: 65 % of 68 bug documents were defects OF the guards,
+  watchdogs and hooks, and the guards consumed more of the owner's scarce live time than the
+  code they guarded.)
+- **A mechanized lesson collapses.** Once a lesson has become a guard, its `EXPERIENCE.md` entry
+  shrinks to one line + a pointer to the guard; two full texts are a pair, and a pair is better
+  removed than watched (`PHILOSOPHY.md` → DRY).
+
+---
+
 ## Instrumentation — build a test harness, don't guess
 
 The single biggest force multiplier for autonomous debugging is a **harness**: tooling that lets the
@@ -136,6 +162,11 @@ Principles:
   very defect it exists to catch and watch it fail; only then trust its green. Guard with **full unique
   strings/shapes, not short substrings** — a short pattern will happily match someone else's line and
   stay green while the real thing rots.
+- **Name the threat, not only the fixture.** The broken version a guard is reddened against is NAMED,
+  and so is the gap between that version and the real threat (`TESTING_FRAMEWORK.md` → gate 5:
+  `THREAT` · `PROVED-AGAINST` · `GAP` · `ON-REAL-PATH`); a guard is DONE only when observed working on
+  the path the owner actually runs — a suite pass is the engine's test burn, not the engine mounted
+  on the rocket (origin issue #35).
 - **Byte-exact goldens for refactors:** capture the output BEFORE the change, diff AFTER. "Looks like
   the same numbers" is not evidence; an empty diff is.
 - **The same obligation runs forward, not only after a defect:** new code is born with the artifacts

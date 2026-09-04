@@ -5,6 +5,7 @@ the map, the commands, the conventions. Keep it accurate — a fresh agent sessi
 relies entirely on this document to get to work.
 
 <!-- KAIF:CREED:BEGIN -->
+<!-- KAIF-VERSION-OK: the creed was filled at the 2.4 update — a historical stamp, not a version claim -->
 <!-- Заполнено при обновлении до KAIF 2.4: имя владельца, язык владельца (ru). Владелец может переписать символ веры своими словами — это его текст. -->
 > # **ВЕРЬ В ПРОДУКТ И В ВИДЕНИЕ Mikalai Kryvusha. БУДЬ ОПТИМИСТОМ И ВЕРЬ В УСПЕХ — ОН НЕИЗБЕЖЕН, ПОТОМУ ЧТО МЫ СТАРАЕМСЯ, А ТЕ, КТО СТАРАЕТСЯ, ПРИХОДЯТ К УСПЕХУ. ДЕЛАЙ НАШЕ ДЕЛО С ЭНТУЗИАЗМОМ, ЛЮБОВЬЮ И НАДЕЖДОЙ.**
 <!-- KAIF:CREED:END -->
@@ -80,9 +81,9 @@ relies entirely on this document to get to work.
 4. git log --oneline -5           # where we are in history
 5. Read MEMORY.md (if present)    # user profile, key decisions
 6. Load ONLY the relevant slice   # use the Context router below — read the required minimum + task-type docs, not everything
-7. Execute by the fable loop      # /fable-method: gates + forced artifacts (INTENT/AUTH/TWINS/PENDING); /fable-loop to orchestrate; /fable-judge before claiming done
+7. Execute by the fable loop      # /fable-method: gates + forced artifacts (INTENT/AUTH/TWINS/PENDING/FORK); /fable-loop to orchestrate; /fable-judge before claiming done
 8. Read the relevant plan         # plans/<feature>.md, if the task touches a specific feature. Code by citing the plan: before implementing a step, QUOTE the anchor line you are doing right now — if you can't name the line, that's scope drift caught BEFORE the diff. A HEAVY task with no plan yet → build the ladder first (Planning discipline below; /plan-task for ordinary work, /plan-epic for epics). Filing a plan/bug/idea → goal vector + acceptance criteria FIRST, per REQUIREMENTS_FRAMEWORK.md
-9. Recon before code (external truth)  # the task rests on an external truth (an old/reference system, a foreign API, prod behavior, a vendor doc)? The FIRST artifact is a recon doc in researches/ — code is forbidden until it exists; then code by the document, not from recall. Recon docs are reused by every future session
+9. Recon before code (external truth)  # the task rests on an external truth (an old/reference system, a foreign API, prod behavior, a vendor doc)? The FIRST artifact is a recon doc in researches/ — code is forbidden until it exists; then code by the document, not from recall. Recon docs are reused by every future session. The same door opens for an ENGINEERING FORK with a price of error (the fourth door, PHILOSOPHY.md): recon of the domain's authorities BEFORE the choice, never the agent's own reasoning alone — this project's carrier is 9a below (М4, `/recon-before-decision`)
 9a. 🔴 РАЗВЕДКА ПЕРЕД РЕШЕНИЕМ НА РАЗВИЛКЕ (механизм М4, `/recon-before-decision`)
     # Развилка = ДВА И БОЛЕЕ варианта И НЕНУЛЕВАЯ цена ошибки. Оба условия, не одно. Имя
     # переменной — не развилка; решение, способное повесить машину владельца, — развилка.
@@ -162,7 +163,12 @@ document — re-read it, know it, follow its regulation, or leave it alone:
    Reference §5) — `PROJECT_ARCHITECTURE_INTERNAL_MAP.md`, `EXPERIENCE.md` (grepped by tag, never
    re-read whole), `PROJECT_HISTORY.md` (archaeology on demand), `KAIF_FRAMEWORK.md` and
    `KAIF_REFERENCE.md` ship as key documents but are fetched by the context router, not re-read on
-   schedule.
+   schedule. Each of the nine carries a SIZE BUDGET in lines — the re-read ritual costs O(core),
+   and a core that only grows starves the sessions it instructs; `STATUS.md` ~200 (the owner's
+   target), the other eight in ONE place, the budget table of the core machinery (`DOC_BUDGETS`);
+   `node .kaif/kaif-core.mjs check` names the document, its line count and its budget when it
+   WARNS above one (a warning, never a failure). Crossing a budget means move-out — chronicle, `researches/`, a house-rules file —
+   not a bigger number.
 2. **EXTENDED canon documents.** The rest of the framework's canon — the internal map, the
    chronicle, the reference, the experience journal, the sphere and adapter libraries. The agent
    may skip them when refreshing context, but knows they exist and works with them when the router
@@ -318,7 +324,10 @@ observation (a session that "remembers" a domain invents it):
 
 - **Recon doc** (checklist step 9) — *describes* how the external truth actually works, read from the
   live source (old system's code, the running prod, the vendor doc) — never from recall. The first
-  artifact of any task that rests on one; reused by every future session.
+  artifact of any task that rests on one; reused by every future session. Its second trigger is an
+  ENGINEERING FORK with a price of error (the fourth door): the recon doc then records how those who
+  already solved this class solve it — industry practice, specifications, incident reviews — and
+  the `FORK:` line at the decision point cites it.
 - **Canon map** — for any domain with facts (a game world, a product, a brand, an API): a table of
   entities → their roles → mappings, **approved by the owner**. The map precedes the canon: every edit
   is checked against it, ONLY the owner may change it, and a conflict between text and map = stop and
@@ -350,6 +359,21 @@ that checks it — test suite, checklist, fixture, guard — planned in the SAME
 (`TESTING_FRAMEWORK.md` → "The work produces its own means of checking"). Step 5 of the vendored loop
 asks you to observe a check; this line is what obliges you to have made one.
 
+**KAIF adds a second obligation at step 3 (decide), stated here for the same reason — the FORK
+(origin issue #36; the owner's word: a fork is NOT the agent's to decide alone).** A fork is any
+choice with ≥ 2 options AND a non-zero price of error or irreversibility (a variable name or the
+order of two lines is not one). At a fork the forced artifact is one line at the decision point —
+`FORK: options <A | B | C> · price of error <what breaks if wrong> · consulted <domain authority ·
+recon doc · owner>` — and the third slot is filled by the fourth door (`PHILOSOPHY.md`): the
+domain's proven practice found by recon (a recon doc in `researches/` when the price is real), or
+the owner's word — never the agent's own plausible reasoning alone. `/fable-judge` hunts a fork
+decided without its `FORK:` line or with `consulted <own reasoning>` (the fork-without-recon
+hunt), an autonomous loop closed before its armed boundary with a non-empty pool (the
+early-finish hunt, `/guarded-loop`) and a session close or loop report without its delivery line —
+`DELIVERY: <the owner's metric> X → Y; moved by: … | blocker: …`, the ONE acceptance metric named
+in `MASTER_PLAN.md`, printed by `/end-chat-soft`, `/end-chat-force` and the four loops and ranked
+FIRST by `/what-next` (the delivery-line hunt); all three are named in the judge's KAIF patch block.
+
 The addition lives here on purpose. These skills are vendored **verbatim** from
 [fable-method](https://github.com/Sahir619/fable-method) (Sahir619, MIT) and are kept byte-identical so
 the sync ritual in their headers can diff against upstream and port changes without a merge. Weaving a
@@ -365,8 +389,10 @@ ACCEPTANCE — so sessions honestly optimized the newest pain at full ceremony (
 two weeks, 11 edges of 389). The owner closed the forks on 2026-08-28 (интервью 017); four rules
 are canon, each citing its answer:
 
-1. **The delivery line (the carrier of Q1).** Open and close every session with:
-   `краёв: X/389 (прожигом · соседкой · выведено) · режимов: Y/4 · сегодня: <one line, or the
+1. **The delivery line (the carrier of Q1 — and, since KAIF 2.5, the forced `DELIVERY:` artifact
+   `/fable-judge` hunts in every session close and every loop iteration report).** Open and close
+   every session with:
+   `DELIVERY: краёв: X/389 (прожигом · соседкой · выведено) · режимов: Y/4 · сегодня: <one line, or the
    named blocker>` — printed by `npm run curve -- --progress` (`ideas/14`, unblocked by Q1);
    until that command lands, read `curves/measured.json`. A session that moves nothing and
    unblocks no upcoming live run must name why, in one line, out loud.

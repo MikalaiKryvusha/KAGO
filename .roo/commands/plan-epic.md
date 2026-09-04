@@ -39,8 +39,9 @@ mechanical quote check (a finding is not a finding until verified).
   the backlog by filename alone, before anyone opens it (`plans/README.md` → Naming).
 - The meta-plan OPENS with the epic's goal vector — *what pain we solve and where we want to
   be* — and the epic's acceptance criteria (observable, countable where possible), written by
-  `REQUIREMENTS_FRAMEWORK.md`; vector and criteria may be modified as phases teach — changing
-  them is an edit, not a failure.
+  `REQUIREMENTS_FRAMEWORK.md` — as fit-criterion lines or as four-line scenarios (Situation ·
+  Action · Result · Check, "The scenario form"); vector and criteria may be modified as phases
+  teach — changing them is an edit, not a failure.
 - Phases with a stated ORDER and the reasoning behind it; dependencies between phases.
 - Gates: what must be true to enter/close each phase (builds green, guards proven able to fail,
   judge passes — per `TESTING_FRAMEWORK.md`).
