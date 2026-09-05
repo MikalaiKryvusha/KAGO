@@ -62,7 +62,8 @@
     "workplace": "node tools/team-workplace.mjs",
     "fuse": "node automation-engine/lib/fuse.mjs",
     "twin": "node automation-engine/lib/twin-assembly.mjs",
-    "polygon": "node automation-engine/lib/polygon.mjs"
+    "polygon": "node automation-engine/lib/polygon.mjs",
+    "okdialect": "node tools/assert-dialect-lint.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"

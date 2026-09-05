@@ -239,6 +239,28 @@ function main(argv) {
   const entryUnguarded = entryCheck.status !== 0;
   if (entryUnguarded) process.stderr.write(entryCheck.stdout || entryCheck.stderr || '');
 
+// -------------------------------------------------------------------------------------------------
+// СЕДЬМЫЕ ВОРОТА: НИ ОДИН БЛОК НЕ НАПИСАН ЧУЖИМ ДИАЛЕКТОМ `ok` (`bugs/106`, 2026-09-05)
+//
+// В проекте два законных диалекта помощника: `ok(имя, cond, подробность)` и `ok(имя, got, want)`.
+// Строка, написанная вторым диалектом внутри батареи первого, горит зелёным СТРУКТУРНО — непустой
+// массив истинен, число истинно, — чем бы ни кончился прогон. Так две строки шага Ш5 в `fuse.mjs`,
+// включая ту, что сама называла себя ГЛАВНОЙ строкой шага, простояли украшением пять дней, и
+// приписанная им мутация покрасить их не могла.
+//
+// Нашлись они не батареей: батарея на них и смотрела зелёным глазом. Нашёл тот, кто собрался НА НИХ
+// ОПЕРЕТЬСЯ при приёмке `plans/88` Ш3. Ворота ставятся ровно затем, чтобы третьего раза не было —
+// это второй ложный зелёный за одни сутки (`bugs/109` — первый).
+//
+// Линтер доказан КРАСНЫМ на настоящем дереве, а не на выдумке: на снимке `fuse.mjs` до починки он
+// находит ровно те две строки (1702 и 1709) и ни одной законной; тринадцать фикстур, пять красных.
+// Правило «второй аргумент обязан быть условием» опробовано первым и отвергнуто замером — 528
+// срабатываний на 1373 вызова, почти все ложные.
+// -------------------------------------------------------------------------------------------------
+  const dialectCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'assert-dialect-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const dialectMixed = dialectCheck.status !== 0;
+  if (dialectMixed) process.stderr.write(dialectCheck.stderr || dialectCheck.stdout || '');
+
   console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
   console.log(`проверено на порчу кодировки ${enc.scanned} текстовых файлов, `
     + `испорченных ${enc.corrupted} (сам сторож освобождён меткой)`);
@@ -246,7 +268,9 @@ function main(argv) {
   console.log(`молитва вверху канона: ${prayerDrifted ? 'РАЗОШЛАСЬ — node tools/prayer.mjs --apply' : (prayerCheck.stdout || '').trim() || 'совпадает с источником'}`);
   console.log(`декларация угроз сторожей: ${guardsUndeclared ? 'КРАСНО — node tools/guard-lint.mjs' : (guardCheck.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'чисто'}`);
   console.log(`сторож входа приборов: ${entryUnguarded ? 'КРАСНО — node tools/entry-guard-lint.mjs' : (entryCheck.stdout || '').split('\n')[0] || 'чисто'}`);
-  return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared && !entryUnguarded ? 0 : 1;
+  console.log(`диалект ok в батареях: ${dialectMixed ? 'КРАСНО — node tools/assert-dialect-lint.mjs' : (dialectCheck.stdout || '').split('\n')[0] || 'чисто'}`);
+  return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared
+    && !entryUnguarded && !dialectMixed ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
