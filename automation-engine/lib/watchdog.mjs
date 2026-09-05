@@ -475,7 +475,15 @@ export async function selftest() {
   const blocks = [];
   const check = (name, ok, detail = '') => blocks.push({ name, ok, detail });
   // A directory of its OWN, so the fixtures' fire reports cannot be mistaken for real ones later.
-  const sandbox = path.join(WATCHDOG_DIR, `__selftest-${process.pid}`);
+  //
+  // ⚡ `bugs/102`: имя больше НЕ строится из `process.pid`. В наборе `fuse` такое имя оказалось
+  // причиной трёхкратного мигания «красный в батарее, зелёный отдельно»: Windows переиспользует
+  // номера процессов, а батарея запускает сорок с лишним процессов подряд, и остаток чужого прогона
+  // попадал в фикстуру. **Здесь это ПРЕДОСТОРОЖНОСТЬ ПО АНАЛОГИИ, а не доказанная причина:** эта
+  // песочница убирается в `finally`, так что остаток возможен только после аварийного обрыва.
+  // `watchdog` — второй из трёх мигавших наборов, и снять с него подозрение дешевле, чем сторожить.
+  fs.mkdirSync(WATCHDOG_DIR, { recursive: true });
+  const sandbox = fs.mkdtempSync(path.join(WATCHDOG_DIR, '__selftest-'));
   const tmp = path.join(sandbox, 'armed.json');
   const alwaysAlive = () => true;
   const neverAlive = () => false;

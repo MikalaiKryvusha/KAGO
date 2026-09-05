@@ -60,7 +60,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { isMainThread } from 'node:worker_threads';
 
 export const FUSE_DIR = fileURLToPath(new URL('../../runs/death-watch/', import.meta.url));
@@ -1564,6 +1564,29 @@ async function cmdSelftest() {
     })());
   }
 
+  // 🔴 `bugs/102` — ПЕСОЧНИЦА ФИКСТУРЫ ОБЯЗАНА БЫТЬ СВЕЖЕЙ, И ЭТО СТОРОЖИТСЯ, А НЕ ПОМНИТСЯ.
+  //
+  // ДИАГНОЗ, ПОЛУЧЕННЫЙ ОПЫТОМ 2026-09-05, а не рассуждением. Набор `fuse` трижды за четыре сессии
+  // краснел ВНУТРИ батареи и был зелен, запущенный отдельно (сессии 75, 81, 82). Улика сессии 82
+  // назвала две красные строки; обе читают ФАЙЛ журнала, а соседний блок, читающий ВОЗВРАЩЁННОЕ
+  // значение, оставался зелёным. Проба воспроизвела это точно: положи в журнал одну строку от
+  // «прошлого прогона» — и получишь ровно ту картину, строка в строку.
+  //
+  // ПОЧЕМУ ОСТАТОК ВООБЩЕ БЫЛ ВОЗМОЖЕН: девять фикстур звали песочницу по `process.pid`, судья
+  // открывает журнал на ДОПИСЫВАНИЕ, а Windows номера процессов переиспользует. Батарея запускает
+  // сорок с лишним процессов подряд — там совпадение много вероятнее, чем у набора, запущенного в
+  // одиночку минутой позже. Отсюда и «красный в батарее, зелёный отдельно», и невоспроизводимость.
+  //
+  // Гипотеза тикета (подстой хоста дольше 60 мс) ОПРОВЕРГНУТА: она не объясняла, почему зелен
+  // именно тот блок, что не читает файл.
+  ok('bugs/102: песочницы фикстур свежие — ни одна не названа по pid (тот же pid = чужой журнал)', (() => {
+    const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    // Ищем ИМЕНОВАНИЕ временного пути номером процесса. Исключений нет намеренно: правило без
+    // исключений сторожится одной строкой, а правило с оговоркой требует помнить оговорку.
+    const bad = [...src.matchAll(/tmpdir\(\)[^\n]*process\.pid/gu)].map((m) => m[0].trim());
+    return bad.length === 0;
+  })(), 'песочницы, названные по pid, всё ещё есть — остаток чужого прогона снова покрасит батарею');
+
   // ---- the ring (P55-AC5)
   ok('кольцо: до заполнения отдаёт всё по порядку', (() => {
     const r = makeRing(4); pushRing(r, 1); pushRing(r, 2); pushRing(r, 3);
@@ -1821,9 +1844,11 @@ async function cmdSelftest() {
   // ---- burn pidfile (epic 59 phase 4): the carrier's pid, resolved at the trip and never earlier
   {
     const os = await import('node:os');
-    const { writeFileSync: wf, rmSync: rf } = await import('node:fs');
-    const pf = path.join(os.tmpdir(), `fuse-pidfile-${process.pid}.pid`);
-    try { rf(pf, { force: true }); } catch { /* clean slate */ }
+    const { writeFileSync: wf } = await import('node:fs');
+    // `bugs/102`: свежий каталог вместо имени по pid — «файла нет» здесь ИСТИНА по построению, а не
+    // по удачно сработавшему `rmSync`. Прежняя форма чистила файл руками и потому работала; соседние
+    // фикстуры той же чистки не имели, и остаток чужого прогона краснил их внутри батареи.
+    const pf = path.join(mkdtempSync(path.join(os.tmpdir(), 'fuse-pidfile-')), 'burn-carrier.pid');
     ok('пид-файл: нет файла — честный null (рука 1 скажет «нечего убивать», рука 2 всё равно идёт)',
       readBurnPidfile(pf) === null && readBurnPidfile(null) === null);
     wf(pf, '4242\n', 'utf8');
@@ -1850,7 +1875,7 @@ async function cmdSelftest() {
   {
     const dgram = await import('node:dgram');
     const os = await import('node:os');
-    const tmp = path.join(os.tmpdir(), `fuse-selftest-${process.pid}`);
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-selftest-'));
     // Selftest artefacts land in a SANDBOX, never in runs/death-watch/ — a fixture among real
     // post-mortems is fabricated evidence (EXP-0025).
     const journalPath = path.join(tmp, 'judge.jsonl');
@@ -1927,7 +1952,7 @@ async function cmdSelftest() {
   {
     const dgram = await import('node:dgram');
     const os = await import('node:os');
-    const tmp = path.join(os.tmpdir(), `fuse-rearm-${process.pid}`);
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-rearm-'));
     const journalPath = path.join(tmp, 'judge.jsonl');
     let readyPort = null;
     let handSpawns = 0;
@@ -2053,7 +2078,7 @@ async function cmdSelftest() {
   {
     const dgram = await import('node:dgram');
     const os = await import('node:os');
-    const tmp = path.join(os.tmpdir(), `fuse-halfopen-wall-${process.pid}`);
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-halfopen-wall-'));
     const journalPath = path.join(tmp, 'judge.jsonl');
     let readyPort = null;
     let handSpawns = 0;
@@ -2111,7 +2136,7 @@ async function cmdSelftest() {
   {
     const dgram = await import('node:dgram');
     const os = await import('node:os');
-    const tmp = path.join(os.tmpdir(), `fuse-halfopen-observe-${process.pid}`);
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-halfopen-observe-'));
     const journalPath = path.join(tmp, 'judge.jsonl');
     let readyPort = null;
     let handSpawns = 0;
@@ -2158,7 +2183,7 @@ async function cmdSelftest() {
   {
     const dgram = await import('node:dgram');
     const os = await import('node:os');
-    const tmp = path.join(os.tmpdir(), `fuse-halfopen-slept-${process.pid}`);
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-halfopen-slept-'));
     const journalPath = path.join(tmp, 'judge.jsonl');
     let readyPort = null;
     let handSpawns = 0;
@@ -2202,7 +2227,7 @@ async function cmdSelftest() {
     const dgram = await import('node:dgram');
     const os = await import('node:os');
     const { writeFileSync: wf } = await import('node:fs');
-    const tmp = path.join(os.tmpdir(), `fuse-pidfile-e2e-${process.pid}`);
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-pidfile-e2e-'));
     const pf = path.join(tmp, 'burn-carrier.pid');
     const journalPath = path.join(tmp, 'judge.jsonl');
     const killed = [];
@@ -2257,7 +2282,7 @@ async function cmdSelftest() {
   // ---- ворота входа 2 сквозным прогоном судьи (оплачено ложным трипом 2026-08-29)
   {
     const os = await import('node:os');
-    const outDir = path.join(os.tmpdir(), `fuse-gate-${process.pid}`);
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'fuse-gate-'));
     // Прогресс молчит ВСЁ время прогона, вход 2 взведён на 100 мс — трипнуть обязано, если бы не
     // ворота. Файла сердцебиения нет: «прожига нет» ⇒ тишина законна.
     const noBurn = await runJudge({
@@ -2362,7 +2387,7 @@ async function cmdSelftest() {
     const { spawn } = await import('node:child_process');
     const { readdirSync, existsSync } = await import('node:fs');
     const os = await import('node:os');
-    const outDir = path.join(os.tmpdir(), `fuse-out-${process.pid}`);
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'fuse-out-'));
     const outJournal = path.join(outDir, 'rehearsal.jsonl');
     const combatBefore = new Set(existsSync(FUSE_DIR) ? readdirSync(FUSE_DIR) : []);
     const code = await new Promise((res) => {
@@ -2425,8 +2450,10 @@ async function cmdSelftest() {
     const fs = await import('node:fs');
     // Артефакты блока — в ПЕСОЧНИЦЕ, никогда в runs/death-watch/: фикстура среди настоящих
     // посмертных разборов это сфабрикованная улика (EXP-0025).
-    const sandbox = path.join(os.tmpdir(), `fuse-alive-${process.pid}-${Date.now()}`);
-    fs.mkdirSync(sandbox, { recursive: true });
+    // `bugs/102`: эта фикстура и раньше была уникальной (`pid` + `Date.now()`) и за собой убирала —
+    // единственная из девяти. Переведена на общую форму, чтобы правило «песочница свежая» стало БЕЗ
+    // ИСКЛЮЧЕНИЙ и его можно было сторожить одной строкой, а не помнить про особый случай.
+    const sandbox = mkdtempSync(path.join(os.tmpdir(), 'fuse-alive-'));
     const out = path.join(sandbox, 'fuse.jsonl');
     const alivePath = out.replace(/\.jsonl$/u, '-alive.jsonl');
     // НЕ взведён (`--arm-n` не передан) — трипа быть не должно: нам нужна смерть БЕЗ трипа.
