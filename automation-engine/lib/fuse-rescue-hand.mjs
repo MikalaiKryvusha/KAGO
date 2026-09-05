@@ -24,14 +24,65 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+
+/**
+ * СЧЁТЧИК НАМЕРЕНИЙ ПОЛОСЫ — ОДНО ЧИСЛО, ПО КОТОРОМУ РУКА УЗНАЁТ О ЧУЖОЙ ЗАПИСИ (`bugs/101` №1).
+ *
+ * Чистая функция и отдельное имя, потому что различать `state: 'intent'` полосы и `phase: 'intent'`
+ * судьи придётся ещё не раз: это ДВА РАЗНЫХ намерения в двух разных журналах, и спутать их значило
+ * бы считать собственные срабатывания за записи полосы.
+ */
+export function sweepIntentCount(lines) {
+  let n = 0;
+  for (const l of lines) {
+    if (!l) continue;
+    try { const d = JSON.parse(l); if (d && d.state === 'intent') n += 1; } catch { /* хвост записи — не строка */ }
+  }
+  return n;
+}
 
 /**
  * The rescue core, injectable for fixtures. Initialize → EnumPhysicalGPUs → zeroCurve — the exact
  * open sequence `profile-manager` uses (one pattern, not a second dialect of the same bridge).
+ *
+ * ═══ СЕЙЛОК ВОКРУГ СОБСТВЕННОЙ ЗАПИСИ (`bugs/101` находка 1, форма из `researches/31` §2.2) ═══
+ *
+ * ЧТО БЫЛО. Рука пишет сток, перечитывает кривую и требует нулей. 31.08 и 04.09 она нашла НЕ нули —
+ * 113000 на 127 точках и 75000 на 126 — и назвала это C3, «драйвер правит результат». Оба числа
+ * оказались НАШИМИ: `deltaMhz` ступеней seq 833 и seq 857, которые полоса писала В ТО ЖЕ ОКНО.
+ * Проверяющий не умел отличить «после меня записал кто-то ещё» от «драйвер переписал меня», и его
+ * отказ обрывал возврат судьи на пост: 04.09 полоса сожгла после этого пять ступеней без защиты.
+ *
+ * ЧТО ТЕПЕРЬ. Линуксовый `seqlock`: читатель берёт счётчик ДО и ПОСЛЕ своей критической секции, и
+ * ИЗМЕНИВШИЙСЯ счётчик обесценивает чтение — оно отбрасывается, а не чинится и не толкуется. Здесь
+ * счётчик — число намерений в журнале ПОЛОСЫ: полоса `fsync`-ит намерение ДО того, как коснётся
+ * карты, значит выросшее число и означает «наша же запись легла в моё окно».
+ *
+ * ПОЧЕМУ ОТБРАСЫВАЕТСЯ И ЧИСТОЕ ЧТЕНИЕ. Прочитать нули посреди чужой записи можно просто раньше
+ * неё — тогда «сток подтверждён» было бы утверждением о карте, которой уже нет. Отрасль здесь
+ * единодушна и проект тоже: недействительное измерение ОТБРАСЫВАЕТСЯ, а не принимается наполовину.
+ *
+ * ПОВТОР РОВНО ОДИН, И ЭТО МОЙ ВЫБОР, НАЗВАННЫЙ ВЫБОРОМ. Гонщик — запись ОДНОЙ ступени, и к моменту
+ * обнаружения она уже закончена; второй гонки в том же спасении не будет, пока полоса ждёт возврата
+ * (`stopWhen`: `tripCount > rearmCount`). Цена — один лишний `zeroCurve` (замер: 1,9 с на здоровой
+ * карте). Неограниченный повтор, как в ядре, здесь запрещён: рука говорит с умирающим драйвером.
+ *
+ * ИСТОЧНИКА НЕ ПРОВЕДЕНО — СТОРОЖ МОЛЧИТ, А НЕ ГОЛОСУЕТ. Без `sweepJournalPath` счётчик равен
+ * `null`, гонка не объявляется никогда, и поведение остаётся ДОСЛОВНО прежним. «Не смотрели» и
+ * «посмотрели и чисто» — разные вещи (структурное правило невзведённого входа, R4b).
  */
-export async function doStockRescue({ nvapiModule = null } = {}) {
+export async function doStockRescue({
+  nvapiModule = null, sweepJournalPath = null, readSweepLinesFn = null,
+} = {}) {
   const t0 = performance.now();
+  const readIntents = () => {
+    if (sweepJournalPath === null && readSweepLinesFn === null) return null;
+    const read = readSweepLinesFn ?? (() => {
+      try { return readFileSync(sweepJournalPath, 'utf8').split(/\r?\n/u); } catch { return []; }
+    });
+    return sweepIntentCount(read());
+  };
   try {
     const mod = nvapiModule ?? await import('./nvapi.mjs');
     const nv = mod.openNvapi();
@@ -40,12 +91,33 @@ export async function doStockRescue({ nvapiModule = null } = {}) {
     const count = Buffer.alloc(4);
     nv.koffi.call(nv.resolve(0xE5AC921F).ptr, nv.protos.EnumPhysicalGPUs, handles, count);
     const handle = handles.readBigUInt64LE(0);
-    const z = mod.zeroCurve(nv, handle);
+    let z = null;
+    let raced = false;
+    let racedTwice = false;
+    let seenBefore = null;
+    let seenAfter = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      seenBefore = readIntents();
+      z = mod.zeroCurve(nv, handle);
+      seenAfter = readIntents();
+      raced = seenBefore !== null && seenAfter !== null && seenAfter !== seenBefore;
+      if (!raced) break;
+      if (attempt === 2) { racedTwice = true; break; }
+    }
+    if (racedTwice) {
+      return {
+        ok: false,
+        ms: performance.now() - t0,
+        // ⚠️ ИМЯ ОТКАЗА — ПОЛОВИНА ЕГО ЦЕНЫ. Два разбора подряд (31.08 и 04.09) пошли по ложному
+        // следу «драйвер правит наши записи» именно потому, что отказ был назван C3.
+        detail: `ГОНКА С ПОЛОСОЙ, а не C3: намерений полосы стало ${seenAfter} против ${seenBefore} — наша же запись легла в окно проверки; чтение отброшено, повтор тоже гонка`,
+      };
+    }
     return {
       ok: z.ok === true,
       ms: performance.now() - t0,
       detail: z.ok === true
-        ? `сток подтверждён чтением: остаточных смещений ${z.remainingNonZero}`
+        ? `сток подтверждён чтением: остаточных смещений ${z.remainingNonZero}${seenAfter === null ? '' : ` (намерений полосы ${seenAfter}, не двигались)`}`
         : (z.why ?? `zeroCurve не подтвердился: остаточных ${z.remainingNonZero}, отказов ${z.failed}`),
     };
   } catch (e) {
@@ -101,8 +173,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const journalPath = i !== -1 ? argv[i + 1] : null;
   const t = argv.indexOf('--twin');
   const twinCard = t !== -1 ? argv[t + 1] : null;
+  // ⚡ `bugs/101` находка 1: журнал ПОЛОСЫ — тот самый счётчик сейлока. Флага нет — сторож молчит.
+  const sj = argv.indexOf('--sweep-journal');
+  const sweepJournalPath = sj !== -1 ? argv[sj + 1] : null;
   const run = async () => {
-    const r = await doStockRescue({ nvapiModule: twinCard ? await buildTwinNvapiModule({ cardFile: twinCard }) : null });
+    const r = await doStockRescue({
+      nvapiModule: twinCard ? await buildTwinNvapiModule({ cardFile: twinCard }) : null,
+      sweepJournalPath,
+    });
     if (journalPath) {
       mkdirSync(path.dirname(journalPath), { recursive: true });
       const fd = openSync(journalPath, 'a');

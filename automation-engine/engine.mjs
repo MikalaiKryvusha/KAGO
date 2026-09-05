@@ -3576,10 +3576,14 @@ export function resolveDeliveredRow(doc, deliveredMhz) {
  * [NOT-TESTED: живой прогон с этими аргументами — первый при владельце, с 08.09]
  */
 export function liveFuseRiders({ armNMs, fuseJournalPath, progressFile = null, armMMs = null,
+  // ⚡ `bugs/101` находка 1: журнал ПОЛОСЫ едет к руке 2 как счётчик сейлока. Судья его не читает —
+  // он передаёт его дальше. `null` оставляет поведение прежним до байта: сторож молчит.
+  sweepJournalPath = null,
   burnImages = 'furnace.exe,branchy.exe,sdc_fma.exe', seconds = 36000 }) {
   const p2 = progressRiderArgs({ progressFile, armMMs });
   return {
     judgeArgs: ['--judge', '--arm-n', String(armNMs), '--burn-images', burnImages,
+      ...(sweepJournalPath ? ['--sweep-journal', sweepJournalPath] : []),
       ...p2.judge, '--seconds', String(seconds), '--out', fuseJournalPath],
     probeArgs: ['--probe', '--seconds', String(seconds), '--tick', '2', ...p2.probe],
   };
@@ -11377,9 +11381,19 @@ async function mainSweep(argv, arg) {
   const liveRiders = twin ? null : liveFuseRiders({
     armNMs: fuseMod.DERIVED_ARM_N_MS, fuseJournalPath, progressFile,
     armMMs: (!progressObserve && progressDecision.armed) ? progressDecision.armMMs : null,
+    sweepJournalPath: journal.path,
   });
+  // ⚡ `bugs/101` находка 1 — СЧЁТЧИК СЕЙЛОКА ДЛЯ РУКИ 2, И ОН ОДИН НА ОБА ПУТИ.
+  //
+  // Рука 2 сверяет число намерений ПОЛОСЫ вокруг собственной записи: выросло — значит наша же
+  // запись легла в её окно проверки, и «остаточные смещения» это НАШ `deltaMhz`, а не правка
+  // драйвера. Журнал здесь ровно тот, в который полоса пишет (`journal.path`), — и у двойника он
+  // свой, в песочнице стенда, так что сверка одинакова на обоих путях, а улики не смешиваются.
+  // Двойник гонку воспроизвести не может (рука держит СВОЙ экземпляр карты) — он доказывает
+  // ПРОВОДКУ; сама развилка «гонка ↔ C3» держится блоками и мутациями.
+  const twinJudgeArgs = twin ? [...twin.riders.judgeArgs, '--sweep-journal', journal.path] : null;
   const fuseJudge = spawn(process.execPath, twin
-    ? [fuseScript, ...twin.riders.judgeArgs]
+    ? [fuseScript, ...twinJudgeArgs]
     : [fuseScript, ...liveRiders.judgeArgs], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   // ⚡ ОДИН ЧИТАТЕЛЬ ПРОТОКОЛА ЗАЩИТЫ НА ВСЕХ (Ш5). Читателей стало трое — счёт срабатываний для
   // ступени, счёт повторных включений для полосы и ожидание АПВ, — и три копии `readFileSync` были

@@ -633,11 +633,23 @@ export const REARM_HEALTHY_SECONDS = 3;
  * @param {object}  a
  * @param {number}  a.ticksPerSec    такт судьи за последнюю секунду
  * @param {number}  a.healthyNeeded  сколько здоровых секунд подряд нужно
+ * @param {number}  a.healthyTicksPerSec  уставка здоровья; умолчание — измеренная (см. ниже)
  * @param {object|null} a.state      предыдущее состояние (null — начало полуоткрытого окна)
  * @returns {{healthySeconds:number, onPost:boolean, ticksPerSec:number}}
+ *
+ * 🔴 ПОЧЕМУ УСТАВКА — ПАРАМЕТР, А НЕ ТОЛЬКО КОНСТАНТА (найдено замером 2026-09-05, ДО проводки Ш3).
+ * 300 тактов/с — свойство не «здоровой машины», а «здоровой машины, на которой судья не голодает».
+ * Безголовый судья в одиночку даёт 401…404/с (замер: `--judge --seconds 5`), но В РЕПЕТИЦИИ СМЕРТИ,
+ * где ту же машину грузит вся полоса, строка жизни показывает 4…70/с. С уставкой 300 окно не
+ * закрылось бы В РЕПЕТИЦИИ НИКОГДА — то есть механизм стал бы СТЕНОЙ ровно там, где его принимают
+ * (`bugs/72` · [[EXP-0193]], та же стена, что и в §3, и в §4a плана 88). Поэтому уставку называет
+ * СРЕДА: живой путь берёт измеренную 300, стенд — свою, и обе видны в журнале (P88-AC5).
  */
-export function halfOpenGate({ ticksPerSec, healthyNeeded = REARM_HEALTHY_SECONDS, state = null } = {}) {
-  const healthy = Number.isFinite(ticksPerSec) && ticksPerSec >= JUDGE_HEALTHY_TICKS_PER_SEC;
+export function halfOpenGate({
+  ticksPerSec, healthyNeeded = REARM_HEALTHY_SECONDS,
+  healthyTicksPerSec = JUDGE_HEALTHY_TICKS_PER_SEC, state = null,
+} = {}) {
+  const healthy = Number.isFinite(ticksPerSec) && ticksPerSec >= healthyTicksPerSec;
   const healthySeconds = healthy ? (state?.healthySeconds ?? 0) + 1 : 0;
   return { healthySeconds, onPost: healthySeconds >= healthyNeeded, ticksPerSec: ticksPerSec ?? null };
 }
@@ -721,10 +733,20 @@ export function runTrip({ verdict, burnPid, burnImages = null, killHand, imageKi
 export async function runJudge({
   beatPort = 0, armNMs = null, armMMs = null, burnPid = null, burnImages = null,
   burnPidFile = null, twinStockCard = null,
+  // ⚡ `bugs/101` находка 1: ПУТЬ ЖУРНАЛА ПОЛОСЫ, и судья им НЕ ПОЛЬЗУЕТСЯ — он лишь передаёт его
+  // руке 2, которой счётчик намерений нужен как сейлок вокруг собственной записи. Судья читать его
+  // не должен: решение о гонке принимает тот, кто в ней участвовал, а не наблюдатель со стороны.
+  sweepJournalPath = null,
   // ⚡ Вход 2 (`plans/66`): путь файла сердцебиения прожига. Судья его НЕ ЧИТАЕТ в такте — он лишь
   // спрашивает о его СУЩЕСТВОВАНИИ, и только когда вход 2 уже собрался трипнуть.
   progressFile = null, existsFn = existsSync,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
+  // ⚡ Ш3 (`plans/88` §4b(4) и §4c): ПОЛУОТКРЫТОЕ ОКНО ПРИХОДИТ ПАРАМЕТРАМИ, А НЕ ТОЛЬКО КОНСТАНТОЙ.
+  // Умолчания — измеренные числа живого пути. Своими значениями окно называют те, кто физически не
+  // может дать 300 тактов/с: фикстура без `timeBeginPeriod` (~62/с) и репетиция смерти, где ту же
+  // машину грузит вся полоса (4…70/с). Без этой двери окно стало бы СТЕНОЙ на стенде — тот самый
+  // класс, за который проект уже платил (`bugs/72` · [[EXP-0193]]).
+  healthySeconds = REARM_HEALTHY_SECONDS, healthyTicksPerSec = JUDGE_HEALTHY_TICKS_PER_SEC,
   // ⚡ Ш5 (`plans/81`): чем судья ЧИТАЕТ собственный журнал, когда ждёт расписку руки 2. Своя дверь
   // нужна затем же, зачем `existsFn`: фикстура обязана уметь подать расписку без настоящей руки.
   readLinesFn = null,
@@ -862,7 +884,14 @@ export async function runJudge({
 
   const killHand = makeKillHand({ spawnSyncFn, killFn });
   const imageKillHand = makeImageKillHand({ spawnSyncFn });
-  const stockHand = makeStockHand({ spawnFn, journalPath, extraArgs: twinStockCard ? ['--twin', twinStockCard] : [] });
+  const stockHand = makeStockHand({
+    spawnFn,
+    journalPath,
+    extraArgs: [
+      ...(twinStockCard ? ['--twin', twinStockCard] : []),
+      ...(sweepJournalPath ? ['--sweep-journal', sweepJournalPath] : []),
+    ],
+  });
 
   const sock = dgram.createSocket('udp4');
   let lastBeatMs = null;
@@ -899,12 +928,36 @@ export async function runJudge({
   // Отдельное поле, а не `tripsFired > 0`: пережитый трип полосу останавливать НЕ должен, иначе
   // весь шаг бессмыслен.
   let exitedUnRearmed = false;
+  // ⚡ Ш3 (`plans/88`): ВРЕМЯ ОТКРЫТОГО СПАСЕНИЯ и СОСТОЯНИЕ ПОЛУОТКРЫТОГО ОКНА.
+  //
+  // `tripAtMs !== null` означает «срабатывание случилось и ещё не закрыто» — им живут ОБЕ половины
+  // возврата: ожидание расписки руки 2 и накопление здоровых секунд после неё. Раньше это время
+  // было аргументом `awaitRearm`, потому что закрыть спасение мог только он; теперь закрыть его
+  // может и такт (дедлайн вечера настигает судью В ОКНЕ), значит время обязано жить снаружи обоих.
+  //
+  // `halfOpen === null` — окна нет: либо спасения нет вовсе, либо расписка ещё не пришла.
+  let tripAtMs = null;
+  let halfOpen = null;
   // Идёт ли прожиг ПРЯМО СЕЙЧАС. Признак — существование файла сердцебиения: его создаёт прожиг и
   // снимает при штатном выходе (и `.cu`, и носитель двойника). Источника не проведено — ворота
   // открыты, и это верно: тогда вход 2 не взведён и трипать нечему.
   const burnInFlight = () => (progressFile === null ? true : existsFn(progressFile));
 
   await new Promise((resolve) => {
+    // ⚡ Ш3: ТАКТ ТЕПЕРЬ ПЕРЕЖИВАЕТ СПАСЕНИЕ, ЗНАЧИТ ЕГО НАДО УМЕТЬ ОСТАНОВИТЬ ЯВНО.
+    //
+    // До Ш3 останавливать было нечего: судья, ушедший ждать расписку, такта не планировал вовсе, и
+    // `resolve()` заставал систему без единого висящего таймера. Теперь такт идёт весь рескью — и
+    // `resolve()` без остановки оставил бы его тикать ПОСЛЕ `closeSync(fd)`: первая же запись
+    // строки жизни ударила бы в закрытый дескриптор. Это не гипотеза о стиле, а прямое следствие
+    // снятия того самого `return`, ради которого шаг и делается.
+    let tickTimer = null;
+    let stopped = false;
+    const stopJudge = () => {
+      stopped = true;
+      if (tickTimer !== null) { clearTimeout(tickTimer); tickTimer = null; }
+      resolve();
+    };
     /**
      * ⚡ Ш5 — ПЕРЕВЗВЕДЕНИЕ: ЯВНЫЙ СПИСОК ПОЛЕЙ, А НЕ «ПРОДОЛЖАЕМ КАК БЫЛО».
      *
@@ -949,7 +1002,7 @@ export async function runJudge({
      * приходит из её же спауна, живость спрашивается сигналом 0 — стандартная проверка
      * существования процесса, без единого назначенного числа.
      */
-    const awaitRearm = (tripAtMs) => {
+    const awaitRearm = (startedAtMs) => {
       const hand2 = tripOutcomes?.find((o) => o.hand === 2) ?? null;
       const handPid = Number.isInteger(hand2?.pid) ? hand2.pid : null;
       // Порядковый номер расписки, которую ждёт ИМЕННО ЭТОТ трип. Счёт, а не время: штампы ставят
@@ -958,48 +1011,118 @@ export async function runJudge({
       const readLines = readLinesFn ?? (() => {
         try { return readFileSync(journalPath, 'utf8').split(/\r?\n/u); } catch { return []; }
       });
-      const finish = (ok, detail, now) => {
-        writeLine(formatFuseLine({
-          atIso: new Date().toISOString(), phase: 'rearm', cause: 'fuse-rescue',
-          hand: 2, action: ok ? 'rearm' : 'rearm-refused', ok, ms: now - tripAtMs, detail,
-        }));
-        if (ok) {
-          rearmsDone += 1;
-          resetForRearm(now);
-          log(`⚡ СУДЬЯ ПЕРЕВЗВЁЛСЯ: ${detail} — полоса идёт дальше (спасений за прогон: ${tripsFired})`);
-          setTimeout(tick, JUDGE_TICK_MS);
-        } else {
-          exitedUnRearmed = true;
-          log(`⚡ СУДЬЯ НЕ ПЕРЕВЗВОДИТСЯ: ${detail} — полоса встаёт`);
-          resolve();
-        }
-      };
       const poll = () => {
+        // Судья мог закончить, пока опрос спал: такт теперь живёт параллельно и умеет закрыть
+        // спасение раньше (дедлайн вечера). Опрос, проснувшийся после закрытия дескрипторов,
+        // написал бы в закрытый файл — поэтому первый вопрос всегда «а судья ещё жив».
+        if (stopped || tripAtMs === null) return;
         const now = performance.now();
-        // Дедлайн вечера старше ожидания: судья, доживший здесь до конца своего окна, выходит — и
-        // выходит НЕПЕРЕВЗВЕДЁННЫМ, потому что трип под ним так и не был закрыт.
-        if (now >= endMs) { finish(false, 'окно судьи кончилось прежде расписки руки 2', now); return; }
         const d = rearmDecision(readLines(), seenBefore);
         if (d.state === 'confirmed') {
-          finish(true, `сток подтверждён чтением (рука 2 отчиталась за ${round2(d.receipt.ms ?? 0)} мс)`, now);
+          // ⚡ Ш3: РАСПИСКА БОЛЬШЕ НЕ ЗАКРЫВАЕТ СПАСЕНИЕ — ОНА ОТКРЫВАЕТ ПОЛУОТКРЫТОЕ ОКНО.
+          // Замер, ради которого шаг и делается: перевзведений в БОЛЬНУЮ машину было 10 из 10, и
+          // каждое кончалось новым срабатыванием через 0,06 с. Расписка говорит про КАРТУ («сток
+          // возвращён и перечитан»), а не про МАШИНУ — здоровье машины доказывает такт судьи.
+          openHalfOpen(now, d.receipt);
           return;
         }
         if (d.state === 'refused') {
-          finish(false, 'рука 2 отчиталась ok:false — сток НЕ подтверждён чтением', now);
+          closeRescue(false, 'рука 2 отчиталась ok:false — сток НЕ подтверждён чтением', now);
           return;
         }
         // `waiting`: расписки ещё нет. Единственный вопрос — жива ли рука.
-        if (handPid === null) { finish(false, 'рука 2 не запустилась — расписки не будет', now); return; }
+        if (handPid === null) { closeRescue(false, 'рука 2 не запустилась — расписки не будет', now); return; }
         if (!isAliveFn(handPid)) {
-          finish(false, `рука 2 (pid ${handPid}) вышла, не оставив расписки`, now);
+          closeRescue(false, `рука 2 (pid ${handPid}) вышла, не оставив расписки`, now);
           return;
         }
+        // Дедлайн вечера здесь БОЛЬШЕ НЕ ПРОВЕРЯЕТСЯ, и это не забытая строка. Такт идёт весь
+        // рескью и опрашивает тот же `endMs` каждые 2 мс против 250 мс у опроса — две копии
+        // одного решения были бы парой «правда ↔ зеркало», разошедшейся на четверть секунды.
         setTimeout(poll, REARM_POLL_MS);
       };
+      void startedAtMs;
       poll();
     };
 
+    /**
+     * ⚡ Ш3 (`plans/88`) — ВХОД В ПОЛУОТКРЫТОЕ СОСТОЯНИЕ.
+     *
+     * Отсюда и до взведения судья НАБЛЮДАЕТ: такт идёт, строка жизни пишется, срабатывание
+     * невозможно — ворота такта `verdict.tripped && !tripOutcomes` закрыты, пока спасение открыто,
+     * а закрывает его только `resetForRearm` при взведении. Это ровно то, что отрасль называет
+     * half-open: контур смотрит на пробу, не пропуская нагрузку (`researches/33`).
+     *
+     * 🔴 ОКНО СТРОКИ ЖИЗНИ ВЫРАВНИВАЕТСЯ ЗДЕСЬ, И БЕЗ ЭТОГО ОКНО ЛГАЛО БЫ. Границы окон стоят от
+     * старта судьи; спасение кончается посреди окна, и первой «здоровой секундой» оказался бы
+     * огрызок в сто миллисекунд с сотней тактов — то есть здоровая машина была бы прочитана как
+     * больная, а счёт сброшен на пустом месте. Перенос границы ЗА `now` — тот же приём и та же
+     * причина, что у `resetForRearm`.
+     */
+    const openHalfOpen = (now, receipt) => {
+      halfOpen = { state: null, sinceMs: now, receiptMs: receipt?.ms ?? null };
+      if (aliveTicks > 0) flushAlive(now, startMs);
+      aliveWindowEndMs = now + ALIVE_WINDOW_MS;
+      writeLine(formatFuseLine({
+        atIso: new Date().toISOString(), phase: 'rearm', cause: 'fuse-rescue',
+        // `ok: null` — НЕ решение, а состояние: ни «вернулся», ни «отказался». Полоса читает
+        // `rearmCount` (`phase: 'rearm' && ok === true`), и строка с `null` для неё невидима —
+        // проверено предикатом, а не надеждой: половина возврата, посчитанная за возврат, пустила
+        // бы прожиг без взведённой защиты.
+        hand: 2, action: 'half-open', ok: null, ms: now - tripAtMs,
+        detail: `сток подтверждён чтением (рука 2 отчиталась за ${round2(receipt?.ms ?? 0)} мс); ПОЛУОТКРЫТО — нужно ${healthySeconds} здоровых секунд подряд при такте ≥ ${healthyTicksPerSec}/с`,
+      }));
+      log(`⚡ ПОЛУОТКРЫТО: сток подтверждён, но на пост судья вернётся, ДОКАЗАВ здоровье машины — ${healthySeconds} здоровых секунд подряд (такт ≥ ${healthyTicksPerSec}/с)`);
+    };
+
+    /**
+     * ⚡ Ш3 — ЗАКРЫТИЕ СПАСЕНИЯ, ОДНО НА ВСЕ ТРИ ПУТИ (расписка отказала · рука умерла · вечер
+     * кончился в окне). Вынесено из `awaitRearm` наружу именно потому, что третий путь принадлежит
+     * теперь ТАКТУ: держать закрытие внутри опроса значило бы иметь два разных способа закрыть одно
+     * состояние — DRY здесь не украшение, а условие того, что `rearm`-строка в журнале ровно одна.
+     */
+    const closeRescue = (ok, detail, now, gate = null) => {
+      // Закрыть можно только ОТКРЫТОЕ спасение, и ровно один раз. Пути к закрытию теперь три
+      // (опрос · такт · дедлайн), и два из них способны сработать в один и тот же миг: без этой
+      // строки в журнал легла бы вторая `rearm`-строка на то же срабатывание, а счёт `rearmCount`
+      // у полосы поехал бы — то есть прожиг без взведённой защиты.
+      if (stopped || tripAtMs === null) return;
+      writeLine(formatFuseLine({
+        atIso: new Date().toISOString(), phase: 'rearm', cause: 'fuse-rescue',
+        hand: 2, action: ok ? 'rearm' : 'rearm-refused', ok, ms: now - tripAtMs,
+        // P88-AC5: уставка и длина окна ПЕЧАТАЮТСЯ, а не живут только в коде. Так выборка растёт
+        // сама (риск 3 плана 88: шесть эпизодов — малая выборка, и лечится она не угадыванием
+        // пошире, а числом в каждом перевзведении).
+        detail: gate === null ? detail
+          : `${detail} · ticksPerSec=${gate.ticksPerSec} · healthySeconds=${gate.healthySeconds}/${healthySeconds} · уставка ${healthyTicksPerSec}/с`,
+      }));
+      if (ok) {
+        rearmsDone += 1;
+        // §4b(2): `resetForRearm` зовётся ЗДЕСЬ, при взведении, и ни секундой раньше. Он ставит
+        // `lastBeatMs = now`; позови его на входе в окно — и к моменту взведения он протух бы на
+        // всю длину окна, а первый же взведённый такт увидел бы тишину в три секунды и ударил
+        // мгновенно. Спасение, порождающее спасение, — шторм 04.09, сделанный своими руками.
+        resetForRearm(now);
+        halfOpen = null;
+        tripAtMs = null;
+        log(`⚡ СУДЬЯ ПЕРЕВЗВЁЛСЯ: ${detail} — полоса идёт дальше (спасений за прогон: ${tripsFired})`);
+        // §4b(3): такта здесь НЕ ПЛАНИРУЕТСЯ. Цикл идёт непрерывно с самого старта, и второй
+        // `setTimeout(tick)` завёл бы ВТОРОГО судью на том же журнале: удвоенный `aliveTicks`
+        // прочитался бы как «машина стала здоровее» — ложь в безопасную сторону, худший сорт.
+      } else {
+        exitedUnRearmed = true;
+        halfOpen = null;
+        tripAtMs = null;
+        log(`⚡ СУДЬЯ НЕ ПЕРЕВЗВОДИТСЯ: ${detail} — полоса встаёт`);
+        stopJudge();
+      }
+    };
+
     const tick = () => {
+      // ⚡ Ш3: судья уже закончил — такт молчит. Строка стоит ПЕРВОЙ и до любого обращения к
+      // дескрипторам: закрытие происходит в другом колбэке, и один запланированный такт всегда
+      // успевает проснуться после него.
+      if (stopped) return;
       const now = performance.now();
       const verdict = judgeLiveness({ nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired });
       // Every tick lands in the ring — the judge's own wake-up gap included: a judge that stalls
@@ -1024,6 +1147,9 @@ export async function runJudge({
         aliveWorstProgress = verdict.progressSilenceMs;
       }
       if (now >= aliveWindowEndMs) {
+        // ⚡ Ш3: ЧИСЛО ТАКТОВ ЗА ЗАКРЫВАЕМОЕ ОКНО СНИМАЕТСЯ ДО СБРОСА — `flushAlive` обнуляет
+        // накопитель, и полуоткрытому окну мерить было бы уже нечего.
+        const ticksThisWindow = aliveTicks;
         flushAlive(now, startMs);
         // Окно двигается ОТ ПРЕДЫДУЩЕЙ ГРАНИЦЫ, а не от `now`: иначе задержка такта накапливалась
         // бы в дрейф, и «строка в секунду» незаметно стала бы строкой в полторы.
@@ -1031,7 +1157,29 @@ export async function runJudge({
         // Если судья проспал целые окна (система встала), не пишем строку за каждое пропущенное —
         // пустые строки не улика. Догоняем до ближайшей будущей границы, а сам факт проспанного
         // времени виден в `worstGapMs` следующей строки.
-        while (now >= aliveWindowEndMs) aliveWindowEndMs += ALIVE_WINDOW_MS;
+        let sleptWindows = 0;
+        while (now >= aliveWindowEndMs) { aliveWindowEndMs += ALIVE_WINDOW_MS; sleptWindows += 1; }
+        // ── ПОЛУОТКРЫТОЕ ОКНО: ОДНА ЗАКРЫТАЯ СЕКУНДА — ОДНО РЕШЕНИЕ НАКОПИТЕЛЯ ──────────────────
+        // Считается только ЗАКРЫТОЕ окно строки жизни: огрызок между спасением и границей не
+        // секунда, и мерить по нему такт значило бы делить на время, которого не было.
+        if (halfOpen !== null) {
+          // 🔴 ПРОСПАННЫЕ ГРАНИЦЫ ОБЕСЦЕНИВАЮТ ВСЮ ЗАКРЫТУЮ СТРОКУ, А НЕ ДОБАВЛЯЮТСЯ К НЕЙ.
+          // `aliveTicks` считает такты ОТ ПРЕДЫДУЩЕГО СБРОСА, а не за секунду: замри машина на две
+          // секунды — и такты, накопленные ДО заморозки, лягут в одну строку и прочитаются как
+          // «здоровая секунда». Замершая машина оказалась бы ЗДОРОВЕЕ заикающейся, то есть окно
+          // пропустило бы ровно тот случай, ради которого заведено.
+          //
+          // Порядок здесь и был первой ошибкой проводки: сброс стоял ПОСЛЕ решения `onPost`, и
+          // блок «проспанное окно» покраснел на первом же прогоне — судья взвёлся, увидев 63 такта
+          // за 2,3 секунды. Найдено блоком, а не рассуждением, и потому записано числом.
+          halfOpen.state = halfOpenGate({
+            ticksPerSec: sleptWindows > 0 ? 0 : ticksThisWindow,
+            healthyNeeded: healthySeconds, healthyTicksPerSec, state: halfOpen.state,
+          });
+          if (halfOpen.state.onPost) {
+            closeRescue(true, `машина доказала здоровье: ${halfOpen.state.healthySeconds} здоровых секунд подряд`, now, halfOpen.state);
+          }
+        }
       }
       lastTickMs = now;
       if (verdict.tripped && !tripOutcomes) {
@@ -1055,7 +1203,7 @@ export async function runJudge({
         // выключили бы вход 2 там, где он и нужен. Файл же снимают ОБА — и `.cu`, и носитель.
         if (verdict.cause === 'progress-stall' && !burnInFlight()) {
           lastProgressMs = now;
-          setTimeout(tick, JUDGE_TICK_MS);
+          tickTimer = setTimeout(tick, JUDGE_TICK_MS);
           return;
         }
         tripOutcomes = runTrip({ verdict, burnPid: pidNow, burnImages, killHand, imageKillHand, stockHand, writeLine, dumpRing });
@@ -1069,17 +1217,39 @@ export async function runJudge({
         // то есть судья возвращается к работе на карте, про которую перечитано, что она заводская.
         // Отказ подтвердить — прежнее поведение целиком: выход, код 2, полоса встаёт.
         //
-        // Последнее окно строки жизни закрывается ДО ожидания: дальше судья намеренно не тикает, и
-        // дыру во времени объясняет ПАРА строк `intent` → `rearm` (у второй есть `ms` ожидания).
-        // Смерть машины во время спасения читается по той же паре: `intent` есть, `rearm` нет.
-        if (aliveTicks > 0) flushAlive(now, startMs);
+        // ✏️ ПЕРЕПИСАНО Ш3 (`plans/88` §4b(1)). ЗДЕСЬ СТОЯЛО: «дальше судья намеренно не тикает, и
+        // дыру во времени объясняет ПАРА строк `intent` → `rearm`». Решение было ОСОЗНАННЫМ, и
+        // отменяется оно тоже осознанно, а не обходится молча: на остановленном такте полуоткрытое
+        // окно ждало бы такта, которого никто не производит, — стена, а не сторож (§4a). Такт идёт
+        // ВЕСЬ рескью, и улика от этого только лучше: строка жизни покрывает и само спасение, а
+        // пара `intent` → `rearm` никуда не девается (смерть машины во время спасения по-прежнему
+        // читается по ней: `intent` есть, `rearm` нет). Огрызок окна строки жизни здесь больше НЕ
+        // сбрасывается — его закрывает `openHalfOpen`, когда выравнивает границу.
+        tripAtMs = now;
         awaitRearm(now);
+        // `return` СНЯТ намеренно — он и был остановкой такта. Дальше по функции только дедлайн и
+        // планирование следующего такта, и оба теперь обязаны работать посреди спасения.
+        // Первый опрос расписки идёт СИНХРОННО и умеет закрыть спасение отказом здесь же (рука не
+        // запустилась) — тогда судья уже кончился, и планировать ему такт нечего.
+        if (stopped) return;
+      }
+      if (now >= endMs) {
+        // Дедлайн вечера, застигший ОТКРЫТОЕ спасение, — это прежнее поведение (полоса встаёт), и
+        // оно обязано быть записано как отказ: трип под судьёй так и не был закрыт. Раньше эту
+        // ветку держал опрос расписки; теперь спасение может застать вечер и В ПОЛУОТКРЫТОМ окне —
+        // машина, не выздоровевшая до конца окна судьи, оставляет его НЕПЕРЕВЗВЕДЁННЫМ (P88-AC4).
+        if (tripAtMs !== null) {
+          closeRescue(false, halfOpen === null
+            ? 'окно судьи кончилось прежде расписки руки 2'
+            : 'окно судьи кончилось прежде окна здоровья: машина не выздоровела', now, halfOpen?.state ?? null);
+          return;
+        }
+        stopJudge();
         return;
       }
-      if (now >= endMs) { resolve(); return; }
-      setTimeout(tick, JUDGE_TICK_MS);
+      tickTimer = setTimeout(tick, JUDGE_TICK_MS);
     };
-    setTimeout(tick, JUDGE_TICK_MS);
+    tickTimer = setTimeout(tick, JUDGE_TICK_MS);
   });
 
   if (!ringDumped) dumpRing(); // graceful close = step close: the black box lands either way
@@ -1527,6 +1697,62 @@ async function cmdSelftest() {
     const unverified = await doStockRescue({ nvapiModule: { ...fake, zeroCurve: () => ({ ok: false, remainingNonZero: 3, failed: 1, why: null }) } });
     ok('рука 2 (ядро): статус 0 без подтверждения чтением — НЕ ok («status 0 is not verification»)',
       unverified.ok === false && /остаточных 3/.test(unverified.detail));
+
+    // ══ `bugs/101` НАХОДКА 1 — СЕЙЛОК: «после меня записал кто-то ещё» ≠ «драйвер переписал меня» ══
+    //
+    // 🔴 ЦЕНА РАЗЛИЧИЯ НАЗВАНА ЧИСЛАМИ, А НЕ СЛОВАМИ. 31.08 рука нашла 113000 на 127 точках, 04.09 —
+    // 75000 на 126, и оба раза назвала это C3, «драйвер правит результат». Оба числа — `deltaMhz`
+    // ступеней seq 833 и seq 857, то есть НАША ЖЕ запись в её окне. Ложный C3 обрывал возврат судьи
+    // на пост: 04.09 после него полоса сожгла ПЯТЬ ступеней без взведённой защиты.
+    const { sweepIntentCount } = await import('./fuse-rescue-hand.mjs');
+    ok('сейлок: счётчик считает намерения ПОЛОСЫ и НЕ считает намерения судьи — это два разных журнала',
+      sweepIntentCount([
+        '{"state":"intent","seq":1}', '{"state":"verdict","seq":1}',
+        '{"phase":"intent","cause":"beat-silence"}',   // строка СУДЬИ: не намерение полосы
+        'битый хвост', '', '{"state":"intent","seq":2}',
+      ]) === 2, `насчитано ${sweepIntentCount(['{"state":"intent","seq":1}', '{"phase":"intent"}'])} на смеси`);
+    // Гонка ОДИН раз: повтор чистый → сток подтверждён, судья идёт в окно. Это и есть «отбросить и
+    // перечитать» из `researches/31` §2.2, и именно эта ветка спасает возврат на пост.
+    {
+      let seen = 0; let zeroed = 0;
+      const raceOnce = {
+        ...fake,
+        zeroCurve: () => { zeroed += 1; return { ok: true, remainingNonZero: 0, failed: 0 }; },
+      };
+      const r1 = await doStockRescue({
+        nvapiModule: raceOnce,
+        // Полоса пишет намерение ВНУТРИ первой проверки и больше не пишет: счётчик 0,1 · 1,1.
+        readSweepLinesFn: () => { seen += 1; return seen === 2 ? ['{"state":"intent","seq":1}'] : (seen > 2 ? ['{"state":"intent","seq":1}'] : []); },
+      });
+      ok('сейлок: гонка на первой проверке — чтение ОТБРОШЕНО, повтор чистый, сток подтверждён (возврат жив)',
+        r1.ok === true && zeroed === 2, `zeroCurve вызван ${zeroed} раз(а) · ${r1.detail}`);
+    }
+    // Гонка ОБА раза → отказ, но назван СВОИМ именем. Полоса всё равно встанет — но разбор пойдёт
+    // по верному следу, а не в третий раз в «драйвер правит наши записи».
+    {
+      let n = 0;
+      const raceAlways = { ...fake, zeroCurve: () => ({ ok: false, remainingNonZero: 126, failed: 0, why: 'C3 — драйвер правит результат: want 0, got 75000' }) };
+      const r2 = await doStockRescue({
+        nvapiModule: raceAlways,
+        readSweepLinesFn: () => { n += 1; return Array.from({ length: n }, (_, i) => `{"state":"intent","seq":${i + 1}}`); },
+      });
+      ok('сейлок: гонка на обеих проверках — отказ назван ГОНКОЙ, а не C3 (два разбора ушли по ложному следу)',
+        r2.ok === false && /ГОНКА С ПОЛОСОЙ/u.test(r2.detail) && !/^C3/u.test(r2.detail), r2.detail);
+    }
+    // 🔴 И ОБРАТНАЯ СТОРОНА, БЕЗ КОТОРОЙ ПОЧИНКА БЫЛА БЫ ХУЖЕ БОЛЕЗНИ: настоящий C3 при НЕПОДВИЖНОМ
+    // счётчике обязан остаться C3. Списать правку драйвера на гонку значило бы снять защиту.
+    {
+      const realC3 = { ...fake, zeroCurve: () => ({ ok: false, remainingNonZero: 126, failed: 0, why: 'C3 — драйвер правит результат: want 0, got 75000' }) };
+      const r3 = await doStockRescue({ nvapiModule: realC3, readSweepLinesFn: () => ['{"state":"intent","seq":1}'] });
+      ok('сейлок: счётчик НЕ двигался — настоящий C3 остаётся C3, гонкой его не прикрывают',
+        r3.ok === false && /C3/u.test(r3.detail) && !/ГОНКА/u.test(r3.detail), r3.detail);
+    }
+    // Источника не проведено — сторож МОЛЧИТ: поведение прежнее до байта («не смотрели» ≠ «чисто»).
+    {
+      const r4 = await doStockRescue({ nvapiModule: fake });
+      ok('сейлок: журнала полосы не передали — гонка не объявляется никогда, поведение прежнее до байта',
+        r4.ok === true && !/ГОНКА/u.test(r4.detail) && !/намерений полосы/u.test(r4.detail), r4.detail);
+    }
   }
 
   // ---- hand 2 on the TWIN (epic 59 phase 4): the same core, the bridge is the model, zeroing OBSERVED
@@ -1666,7 +1892,18 @@ async function cmdSelftest() {
       // Окно защиты кончается, ПОКА СИГНАЛЫ ЖИВОСТИ ЕЩЁ ИДУТ. Это не мелочь фикстуры: гаси их
       // раньше конца окна — и защита честно сработает ещё десяток раз уже ПОСЛЕ опыта, а блок
       // прочитает это как «состояние не сброшено». Опыт обязан кончаться на здоровом входе.
-      beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 2,
+      // ⚡ Ш3 (`plans/88` §4b(4)): ОКНО ЗДОРОВЬЯ ФИКСТУРЫ — СВОИМИ ЧИСЛАМИ, И ОБА ИЗМЕРЕНЫ.
+      // `healthySeconds: 1` — иначе на трёх секундах окна прогон в 2 с не перевзвёлся бы НИКОГДА
+      // (то самое ограничение, найденное чтением до кода). `healthyTicksPerSec: 40` — внутри
+      // процесса самопроверки `timeBeginPeriod(1)` никто не поднимал, и такт стоит на 64…65/с при
+      // зазоре 16 мс (замер 2026-09-05, четыре секунды подряд: 65 · 65 · 64 · 65). Уставка живого
+      // пути 300 здесь недостижима СТРУКТУРНО — прими её фикстура, и она доказывала бы не механизм,
+      // а разрешение таймера Windows. 40 стоит с запасом вдвое ниже измеренного и заведомо выше
+      // нуля; что окно вообще УМЕЕТ не пустить — доказывает соседний блок «стена» с уставкой 5000.
+      // Окно ВЫРОСЛО с 2 с до 5: половина возврата теперь ждёт закрытой секунды строки жизни, и
+      // прежние 2 с не вмещали ДВЕ такие секунды — фикстура мерила бы дедлайн, а не механизм.
+      beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 5,
+      healthySeconds: 1, healthyTicksPerSec: 40,
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       spawnFn: () => {
@@ -1690,24 +1927,37 @@ async function cmdSelftest() {
     // мутацией М4 ([[EXP-0205]]: зелёная мутация — находка, а не облегчение): снятие сброса
     // `tripOutcomes` не краснило НИЧЕГО, потому что второго срабатывания никто не просил.
     await new Promise((res) => { setTimeout(res, 250); });
-    feeding = false;                                    // тишина №1 → срабатывание, затем возврат
-    await new Promise((res) => { setTimeout(res, 700); });
-    feeding = false;                                    // тишина №2 → защита обязана сработать СНОВА
+    feeding = false;                                    // t≈300: тишина №1 → срабатывание, затем возврат
+    // ⚡ Ш3: ПАУЗА ВЫРОСЛА 700 → 1700 мс, И ЭТО НЕ ЗАПАС «НА ВСЯКИЙ СЛУЧАЙ». Возврат на пост теперь
+    // ждёт ЗАКРЫТОЙ секунды строки жизни: полуоткрытое окно распахивается на срабатывании (t≈360) и
+    // выравнивает границу на t≈1360. Гаси сигналы раньше — и тишина №2 упала бы ВНУТРЬ окна, где
+    // судья наблюдает и трипать не может; фикстура прочитала бы это как «защита больше не
+    // срабатывает» и обвинила бы механизм в том, чего он не делал.
+    await new Promise((res) => { setTimeout(res, 1700); });
+    feeding = false;                                    // t≈2000: тишина №2 → защита обязана сработать СНОВА
     // Ждём КОНЦА ОКНА защиты, не гася сигналы: она обязана досидеть его на здоровом входе.
     const r = await judgeDone;
     clearInterval(feeder);
     sender.close();
     const lines = readFileSync(journalPath, 'utf8').trim().split('\n');
 
+    // 🔴 ДВЕ СТРОКИ НИЖЕ ПОЧИНЕНЫ 2026-09-05 (`bugs/106`), И ЭТО НАШЛОСЬ ПОД ПРИЁМКОЙ Ш3.
+    // Они были написаны ЧУЖИМ ДИАЛЕКТОМ `ok`: в батарее `driver-voice` подпись `(имя, факт,
+    // ожидание)`, а здесь — `(имя, УСЛОВИЕ, подробность)`. Непустой массив и число 2 — истина, то
+    // есть обе строки горели зелёным СТРУКТУРНО, чего бы ни намерил прогон, и мутация М4, которой
+    // они приписаны, покраснить их не могла. Зелёный, неотличимый от «не смотрели», — оплаченный
+    // класс ([[EXP-0112]]). Теперь это условия, а измеренное печатается подробностью.
+    const seenRearm = `трипов ${r.trips} · перевзведений ${r.rearms} · вышел неперевзведённым: ${r.tripped}`;
     ok('Ш5 АПВ: защита ПЕРЕЖИЛА срабатывание — вернулась на пост, а не вышла',
-      [r.trips >= 1, r.rearms >= 1, r.tripped], [true, true, false]);
+      r.trips >= 1 && r.rearms >= 1 && r.tripped === false, seenRearm);
     ok('Ш5 АПВ: возврат на пост записан в протокол успешной распиской, счёт сходится',
-      rearmCount(lines) === r.rearms && tripCount(lines) === r.trips && r.rearms === r.trips);
+      rearmCount(lines) === r.rearms && tripCount(lines) === r.trips && r.rearms === r.trips,
+      `${seenRearm} · строк rearm ${rearmCount(lines)} · строк intent ${tripCount(lines)}`);
     // 🔴 ГЛАВНАЯ СТРОКА ШАГА. Мутация М4 (не сбрасывать `tripOutcomes`) краснит ровно её: защита
     // пережила бы срабатывание, но осталась бы слепой навсегда — а слепая защита хуже вышедшей,
     // потому что выглядит работающей.
     ok('Ш5 АПВ: после возврата на пост защита СНОВА СРАБАТЫВАЕТ — взведение настоящее, а не выживание',
-      r.trips, 2);
+      r.trips === 2, seenRearm);
     // ⚠️ И РОВНО ДВА, не больше: без сброса `lastBeatMs` унесённая тишина спасения ударила бы по
     // здоровой карте немедленно, и срабатываний стало бы много (риск (д), класс `bugs/19`).
     ok('Ш5 АПВ: ложных срабатываний при живых сигналах НЕТ — состояние сброшено, а не унесено',
@@ -1716,6 +1966,187 @@ async function cmdSelftest() {
     // приняты. Без этого «пережила» означало бы только «процесс не умер».
     ok('Ш5 АПВ: защита снова СЧИТАЕТ сигналы живости после возврата на пост',
       r.beats > 60, `принято сигналов: ${r.beats}`);
+
+    // ══ Ш3 (`plans/88`) — ПОЛУОТКРЫТОЕ ОКНО НА СКВОЗНОМ ПРОГОНЕ, а не только в чистой функции ══
+    const recs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const halfOpenLines = recs.filter((d) => d.action === 'half-open');
+    const rearmLines = recs.filter((d) => d.phase === 'rearm' && d.ok === true);
+    ok('Ш3: у КАЖДОГО возврата на пост есть своё полуоткрытое состояние — расписка и взведение разведены',
+      halfOpenLines.length === r.rearms && r.rearms === 2,
+      `строк half-open ${halfOpenLines.length} · перевзведений ${r.rearms}`);
+    // 🔴 ГЛАВНАЯ СТРОКА Ш3. Полоса читает `rearmCount` (`phase: 'rearm' && ok === true`). Посчитай
+    // она половину возврата за возврат — и прожиг пошёл бы при судье, который ещё НАБЛЮДАЕТ, то
+    // есть ровно то, что шаг пришёл предотвратить. Мутация: поставить `ok: true` в `openHalfOpen`.
+    ok('Ш3: половина возврата НЕ считается возвратом — счёт полосы половинки не видит',
+      rearmCount(lines) === 2 && halfOpenLines.every((d) => d.ok === null),
+      `rearmCount=${rearmCount(lines)} · ok у half-open: ${halfOpenLines.map((d) => String(d.ok)).join(',')}`);
+    // Окно РЕАЛЬНО ЗАДЕРЖАЛО возврат, а не проехало формально: между срабатыванием и взведением
+    // легла закрытая секунда строки жизни, тогда как расписка руки пришла в первые же миллисекунды.
+    // Без этой строки «окно есть» доказывалось бы наличием строки в журнале, а не задержкой.
+    ok('Ш3: возврат на пост ОТСТАЁТ от расписки на длину окна здоровья (окно работает, а не значится)',
+      rearmLines.every((d) => d.ms >= 1000) && halfOpenLines.every((d) => d.ms < 1000),
+      `ms у rearm: ${rearmLines.map((d) => d.ms).join(',')} · ms у half-open: ${halfOpenLines.map((d) => d.ms).join(',')}`);
+    // P88-AC5: уставка и длина окна ПЕЧАТАЮТСЯ в журнал каждого перевзведения — так малая выборка
+    // (шесть эпизодов, риск 3 плана 88) растёт сама, вместо того чтобы угадываться пошире.
+    ok('P88-AC5: строка возврата несёт ticksPerSec и healthySeconds — выборка растёт сама',
+      rearmLines.every((d) => /ticksPerSec=\d+/u.test(d.detail ?? '') && /healthySeconds=\d+\/1/u.test(d.detail ?? '')),
+      rearmLines.map((d) => d.detail).join(' || '));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ⚡ Ш3 `plans/88` — ОКНО, КОТОРОЕ НЕ ПУСКАЕТ: судья с недостижимой уставкой НЕ ВСТАЁТ НА ПОСТ
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // 🔴 БЕЗ ЭТОГО БЛОКА ПРЕДЫДУЩИЕ ДОКАЗЫВАЮТ ТОЛЬКО «ОКНО ПРОПУСКАЕТ». Пара к ним обязана быть
+  // симметричной: тот же сквозной прогон, та же расписка, единственная разница — уставка здоровья
+  // выше всего, что машина способна дать (5000 тактов/с против измеренных 64…65). Судья обязан
+  // остаться НЕПЕРЕВЗВЕДЁННЫМ, а полоса — встать: это прежнее поведение, и оно не потеряно.
+  // И это же страховка от обратной беды: сделай окно бутафорией — блок покраснеет.
+  {
+    const dgram = await import('node:dgram');
+    const os = await import('node:os');
+    const tmp = path.join(os.tmpdir(), `fuse-halfopen-wall-${process.pid}`);
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    let readyPort = null;
+    let handSpawns = 0;
+    let feeding = true;
+    const sender = dgram.createSocket('udp4');
+    const receipt = '{"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,"ms":1870}';
+    const judgeDone = runJudge({
+      beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 3,
+      healthySeconds: 1, healthyTicksPerSec: 5000,   // НЕДОСТИЖИМО: измерено 64…65 тактов/с
+      spawnSyncFn: () => ({ status: 0 }),
+      killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
+      spawnFn: () => { handSpawns += 1; feeding = true; return { pid: 4242, unref() {} }; },
+      isAliveFn: () => true,
+      readLinesFn: () => Array.from({ length: handSpawns }, () => receipt),
+      onReady: ({ port }) => { readyPort = port; },
+    });
+    await new Promise((res) => { setTimeout(res, 50); });
+    const feeder = setInterval(() => {
+      if (readyPort && feeding) sender.send(Buffer.from([0x01]), readyPort, '127.0.0.1');
+    }, 5);
+    await new Promise((res) => { setTimeout(res, 250); });
+    feeding = false;                                   // тишина → срабатывание → расписка → ПОЛУОТКРЫТО
+    const r = await judgeDone;
+    clearInterval(feeder);
+    sender.close();
+    const lines = readFileSync(journalPath, 'utf8').trim().split('\n');
+    const recs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const refusal = recs.find((d) => d.action === 'rearm-refused') ?? null;
+    const seen = `трипов ${r.trips} · перевзведений ${r.rearms} · вышел неперевзведённым: ${r.tripped}`;
+    ok('P88-AC1 сквозной: машина, не давшая здорового такта, НЕ пускает судью на пост — расписки мало',
+      r.rearms === 0 && rearmCount(lines) === 0, seen);
+    ok('P88-AC4 сквозной: невыздоровевшая машина оставляет судью НЕПЕРЕВЗВЕДЁННЫМ — полоса встаёт, как и прежде',
+      r.tripped === true && r.trips === 1, seen);
+    ok('P88-AC4: отказ назван СВОИМ именем — «прежде окна здоровья», а не «прежде расписки»',
+      /прежде окна здоровья/u.test(refusal?.detail ?? ''), refusal?.detail ?? 'строки отказа нет');
+    // Полуоткрытое состояние ОТКРЫЛОСЬ (расписка была принята) — иначе блок доказывал бы стену на
+    // ступень раньше, у руки 2, и про само окно не сказал бы ничего.
+    ok('Ш3: полуоткрытое состояние ОТКРЫЛОСЬ и не закрылось — стена именно в окне, а не в расписке',
+      recs.filter((d) => d.action === 'half-open').length === 1,
+      `строк half-open ${recs.filter((d) => d.action === 'half-open').length}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ⚡ Ш3 — ВНУТРИ ОКНА СУДЬЯ НАБЛЮДАЕТ: СРАБАТЫВАНИЕ НЕВОЗМОЖНО, ХОТЯ УДАРОВ НЕТ ВОВСЕ
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // 🔴 БЛОК РОДИЛСЯ ИЗ ЗЕЛЁНОЙ МУТАЦИИ, А НЕ ИЗ ПЛАНА ([[EXP-0205]]). Мутация M3 — перенести
+  // `resetForRearm` со ВЗВЕДЕНИЯ на вход в окно, то есть нарушить §4b(2) плана 88, — не покрасила
+  // НИ ОДНОГО из 99 блоков: в остальных фикстурах удары возобновляются вместе с рукой 2, и
+  // протухший `lastBeatMs` там нечем поймать. Здесь удары НЕ возобновляются — ровно как на живом
+  // пути, где рука 1 убила прожиг и бить стало некому (§3 плана 88). `resetForRearm` снимает
+  // `tripOutcomes`, а это и есть взведение: сделай его на входе — и судья ударит ВНУТРИ окна, по
+  // машине, которую сам же лечит, и штормом 04.09 (шесть срабатываний за 21 с) уже собственного
+  // изготовления.
+  {
+    const dgram = await import('node:dgram');
+    const os = await import('node:os');
+    const tmp = path.join(os.tmpdir(), `fuse-halfopen-observe-${process.pid}`);
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    let readyPort = null;
+    let handSpawns = 0;
+    let feeding = true;
+    const sender = dgram.createSocket('udp4');
+    const receipt = '{"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,"ms":1870}';
+    const judgeDone = runJudge({
+      // Окно судьи (1,2 с) КОРОЧЕ окна здоровья, считая от срабатывания: взведения тут не будет ни
+      // при какой погоде, и блок говорит ровно об одном — сколько раз ударила защита.
+      beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 1.2,
+      healthySeconds: 1, healthyTicksPerSec: 40,
+      spawnSyncFn: () => ({ status: 0 }),
+      killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
+      // Рука 2 запускается, но УДАРЫ НЕ ВОЗВРАЩАЕТ: нагрузка снята, бить некому.
+      spawnFn: () => { handSpawns += 1; return { pid: 4242, unref() {} }; },
+      isAliveFn: () => true,
+      readLinesFn: () => Array.from({ length: handSpawns }, () => receipt),
+      onReady: ({ port }) => { readyPort = port; },
+    });
+    await new Promise((res) => { setTimeout(res, 50); });
+    const feeder = setInterval(() => {
+      if (readyPort && feeding) sender.send(Buffer.from([0x01]), readyPort, '127.0.0.1');
+    }, 5);
+    await new Promise((res) => { setTimeout(res, 250); });
+    feeding = false;                                   // тишина → одно срабатывание → ПОЛУОТКРЫТО
+    const r = await judgeDone;
+    clearInterval(feeder);
+    sender.close();
+    ok('Ш3 §4a: в полуоткрытом окне судья НАБЛЮДАЕТ — при полной тишине ударов срабатывание ровно ОДНО',
+      r.trips === 1 && r.rearms === 0,
+      `трипов ${r.trips} (ждали 1) · перевзведений ${r.rearms} · вышел неперевзведённым: ${r.tripped}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ⚡ Ш3 — ПРОСПАННОЕ ОКНО НЕ ЗДОРОВАЯ СЕКУНДА: замри судья на две секунды, счёт СБРАСЫВАЕТСЯ
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // 🔴 ВТОРАЯ ЗЕЛЁНАЯ МУТАЦИЯ (M6), И ОНА ОПАСНЕЕ ПЕРВОЙ. `aliveTicks` считает такты ОТ ПРЕДЫДУЩЕГО
+  // сброса, а не за секунду; замри машина на две секунды — и накопленные ДО заморозки такты лягут
+  // в одну закрытую строку, где прочитаются как «здоровая секунда». То есть замершая машина
+  // выглядела бы ЗДОРОВЕЕ заикающейся, и окно пропустило бы ровно тот случай, ради которого
+  // заведено. Здесь событийный цикл замораживается по-настоящему (`Atomics.wait` — судья живёт в
+  // ЭТОМ процессе), и счёт обязан обнулиться на проспанном окне.
+  {
+    const dgram = await import('node:dgram');
+    const os = await import('node:os');
+    const tmp = path.join(os.tmpdir(), `fuse-halfopen-slept-${process.pid}`);
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    let readyPort = null;
+    let handSpawns = 0;
+    let feeding = true;
+    const sender = dgram.createSocket('udp4');
+    const receipt = '{"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,"ms":1870}';
+    const judgeDone = runJudge({
+      beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 3,
+      // Уставка 30 при измеренных 64…65: заморозка обязана сорвать окно ПРОСПАННЫМ ОКНОМ, а не
+      // тем, что тактов случайно не хватило, — иначе блок доказывал бы не то, что назван доказывать.
+      healthySeconds: 1, healthyTicksPerSec: 30,
+      spawnSyncFn: () => ({ status: 0 }),
+      killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
+      spawnFn: () => { handSpawns += 1; return { pid: 4242, unref() {} }; },
+      isAliveFn: () => true,
+      readLinesFn: () => Array.from({ length: handSpawns }, () => receipt),
+      onReady: ({ port }) => { readyPort = port; },
+    });
+    await new Promise((res) => { setTimeout(res, 50); });
+    const feeder = setInterval(() => {
+      if (readyPort && feeding) sender.send(Buffer.from([0x01]), readyPort, '127.0.0.1');
+    }, 5);
+    await new Promise((res) => { setTimeout(res, 250); });
+    feeding = false;                                   // t≈300: срабатывание ≈360, окно до ≈1360
+    await new Promise((res) => { setTimeout(res, 1000); });
+    // t≈1300: МАШИНА ЗАМИРАЕТ НА 1,4 с — событийный цикл встал, судья вместе с ним. Проснувшись,
+    // он закроет окно, накопленное ДО заморозки, и обязан увидеть проспанные границы.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1400);
+    const r = await judgeDone;
+    clearInterval(feeder);
+    sender.close();
+    const alive = readFileSync(journalPath.replace(/\.jsonl$/u, '-alive.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l));
+    ok('Ш3: проспанное окно СБРАСЫВАЕТ накопление — замершая машина не выглядит здоровее заикающейся',
+      r.rearms === 0 && r.tripped === true,
+      `перевзведений ${r.rearms} (ждали 0) · строка жизни: ${alive.map((a) => `${a.t}:${a.ticks}т/зазор ${a.worstGapMs}`).join(' · ')}`);
   }
 
   // ---- pidfile end-to-end: the file appears AFTER the judge starts, and the trip still kills ITS pid
@@ -2026,11 +2457,18 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           burnImages: str('--burn-images', null)?.split(',').map((x) => x.trim()).filter(Boolean) ?? null,
           burnPidFile: str('--burn-pidfile', null),
           twinStockCard: str('--twin-stock', null),
+          // ⚡ `bugs/101` находка 1 — журнал полосы едет насквозь до руки 2 и нигде не читается судьёй.
+          sweepJournalPath: str('--sweep-journal', null),
           progressFile: str('--progress-file', null),
           // --out: the sandbox door (P56-AC4, the phase-2 verdict's caveat). A rehearsal that can
           // only write into runs/death-watch/ plants fixtures among real post-mortems (EXP-0025).
           journalPath: str('--out', null) ?? path.join(FUSE_DIR, `${stamp}-fuse.jsonl`),
           seconds: has('--seconds') ? num('--seconds', null) : null,
+          // ⚡ Ш3 (`plans/88`): ПОЛУОТКРЫТОЕ ОКНО СВОИМИ ЧИСЛАМИ — только для тех, кто физически не
+          // может дать измеренный такт живого пути (стенд, фикстура). Умолчание — измеренное, и
+          // живой путь флагов не передаёт: возможность назвать уставку не то же, что необходимость.
+          healthySeconds: has('--rearm-healthy-seconds') ? num('--rearm-healthy-seconds', REARM_HEALTHY_SECONDS) : REARM_HEALTHY_SECONDS,
+          healthyTicksPerSec: has('--rearm-healthy-ticks') ? num('--rearm-healthy-ticks', JUDGE_HEALTHY_TICKS_PER_SEC) : JUDGE_HEALTHY_TICKS_PER_SEC,
           spawnSyncFn: spawnSync, spawnFn: spawn, log: console.log,
         });
         console.log(`СУДЬЯ ЗАКОНЧИЛ: ударов ${r.beats} · трип: ${r.tripped} · кольцо: ${r.ringPath}`);
@@ -2040,7 +2478,8 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
     if (has('--loaded-floor')) {
       return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] | --loaded-floor [--seconds 90]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-ticks T] | --loaded-floor [--seconds 90]');
+    console.log(`--rearm-healthy-* — ПОЛУОТКРЫТОЕ ОКНО возврата на пост (plans/88): по умолчанию ${REARM_HEALTHY_SECONDS} здоровых секунд подряд при такте ≥ ${JUDGE_HEALTHY_TICKS_PER_SEC}/с (замер researches/33 §4b). Свои числа называет тот, кто не может дать измеренный такт живого пути: стенд и фикстура.`);
     return 1;
   };
   run().then((code) => process.exit(code)).catch((e) => { console.error(e); process.exit(1); });
