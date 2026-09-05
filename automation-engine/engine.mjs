@@ -3593,6 +3593,31 @@ export function fuseJournalHintFor(twin) {
   return twin ? `песочнице ${twin.runDir}` : 'runs/death-watch/*-fuse.jsonl';
 }
 
+/**
+ * ⚡ Ш5 `plans/88` — БЫЛ ЛИ СТОРОЖ НА ПОСТУ. Предикат живого пути, вынесенный НАРУЖУ и оттого
+ * накрываемый.
+ *
+ * 🔴 ЭТА ФУНКЦИЯ РОДИЛАСЬ ИЗ ЗЕЛЁНОЙ МУТАЦИИ, и это стоит записать ([[EXP-0205]], [[EXP-0240]]).
+ * Сначала предикат стоял инлайн-замыканием в `mainSweep`: `() => fuseArmed && fuseJudge.exitCode
+ * === null`. Мутация «перестать спрашивать про взведённость» — то есть считать ОХРАНЯЕМЫМ прогон,
+ * у которого защита вообще не взведена, — прошла ЗЕЛЁНОЙ на всех 483 блоках: батарея до замыкания
+ * внутри `mainSweep` не достаёт. Тот же приём, которым `liveFuseRiders` вынес наружу аргументы
+ * всадников, и по той же причине.
+ *
+ * ДВЕ ПОЛОВИНЫ, И ОБЕ ОБЯЗАТЕЛЬНЫ:
+ *   `armed`          — защита взведена (`--arm-n` у судьи). Прогон наблюдения охраняемым не считается:
+ *                      судья, который смотрит и не бьёт, машину не спасает;
+ *   `judgeExitCode`  — `null` означает «судья ЖИВ». Вышедший судья (любой код, включая 0 по концу
+ *                      своего окна) — это прожиг без защиты, ровно случай 04.09 (`bugs/101` находка 2).
+ *
+ * МОНОТОННОСТЬ — свойство, ради которого предикат читается ОДИН РАЗ, в момент закрытия частоты:
+ * обе половины умеют падать из истины в ложь и никогда обратно, значит истина в конце интервала
+ * доказывает истину на всём интервале. Отсюда иммунитет к гонке опроса из `bugs/108`.
+ */
+export function watchOnPostNow({ armed = false, judgeExitCode = null } = {}) {
+  return armed === true && judgeExitCode === null;
+}
+
 export async function sweepRange({
   curveDoc = null,
   points = [],
@@ -3606,6 +3631,28 @@ export async function sweepRange({
   driverEventsFn = null,
   // Спасение предохранителя как вход ступени (`bugs/88`, `interviews/023`) — туда же и так же.
   fuseTripsFn = null,
+  /**
+   * ⚡ Ш5 `plans/88` — БЫЛ ЛИ СТОРОЖ НА ПОСТУ, ПОКА ЭТУ ЧАСТОТУ ЖГЛИ (P88-AC6, гасит единственный
+   * долг `plans/87`).
+   *
+   * Возвращает `true | false | null` и уходит прямо в `closePoint`, чей контракт три состояния уже
+   * различает: `true` СНИМАЕТ метку «без сторожа», `false` СТАВИТ, `null` переносит как есть.
+   * Хук не проведён — `null`, и поведение остаётся прежним ДО БАЙТА: до этого шага движок работал
+   * на осторожном умолчании, и это была безопасная сторона, а не забытая строка.
+   *
+   * 🔴 ПОЧЕМУ ОДНОГО ЧТЕНИЯ В МОМЕНТ ЗАКРЫТИЯ ДОСТАТОЧНО — И ЭТО НЕ ЭКОНОМИЯ, А СВОЙСТВО ВЕЛИЧИНЫ.
+   * «Взведённый судья ЖИВ» МОНОТОННА: вышедший процесс не воскресает, а взведение задаётся на весь
+   * прогон. Величина умеет падать из истины в ложь и никогда обратно, поэтому истина в КОНЦЕ
+   * интервала доказывает истину на ВСЁМ интервале. Отсюда же её иммунитет к гонке опроса, на
+   * которой стоит `bugs/108`: там полоса ловит МЕРЦАЮЩЕЕ состояние «сейчас на посту» и промахивается
+   * мимо шестидесяти миллисекунд; здесь читается состояние, которое мерцать не может.
+   *
+   * ⚠️ ЧЕГО ЭТОТ ВХОД НЕ УТВЕРЖДАЕТ, названо прямо: он говорит «защита была взведена и жива», а НЕ
+   * «спасений не случалось». Спасение — доказательство того, что сторож РАБОТАЛ, и метить им строку
+   * значило бы наказывать защиту за срабатывание. Строки 2692 и 2685 МГц получили метку 04.09 не за
+   * спасение, а за то, что судья ВЫШЕЛ и пять ступеней сгорели после него (`bugs/101` находка 2).
+   */
+  watchOnPostFn = null,
   journal = null,
   recover = null,
   saveFn = null,
@@ -3827,7 +3874,12 @@ export async function sweepRange({
   let ownEvidenceBefore = null;
   let ownEvidenceAfter = null;
   const flushHarvest = async (afterMhz) => {
-    const w = writeHarvestRows(doc, harvestPairs(harvestedRungs), { at: now ? now() : null });
+    const w = writeHarvestRows(doc, harvestPairs(harvestedRungs), {
+      at: now ? now() : null,
+      // Тот же вход и тем же способом, что у спуска: величина монотонна, поэтому одно чтение здесь
+      // судит весь интервал, за который урожай накопился.
+      watchOnPost: watchOnPostFn ? watchOnPostFn() : null,
+    });
     // Считается ОДИН РАЗ за прогон — до первой записи урожая; дальше это уже не «до».
     if (ownEvidenceBefore === null) ownEvidenceBefore = w.ownEvidenceBefore;
     ownEvidenceAfter = w.ownEvidenceAfter;
@@ -4296,6 +4348,10 @@ export async function sweepRange({
         + overshootWitness(miss),
       inheritDownToMhz: inheritFloorMhz,
       at: now ? now() : null,
+      // ⚡ Ш5 `plans/88` (P88-AC6): метка «снято без сторожа на посту» СНИМАЕТСЯ здесь и только
+      // здесь — перепрожигом под живой взведённой защитой, а не руками. Хука нет — `null`, и
+      // строка переносит свою метку как есть, ровно как работал движок до этого шага.
+      ...(watchOnPostFn ? { watchOnPost: watchOnPostFn() } : {}),
     });
     if (!closed.ok) {
       report.ok = false;
@@ -4534,7 +4590,15 @@ export function driverVoiceForRun({ driverEventsFn = null, fromMs = null, toMs =
  *
  * [NOT-TESTED] при рождении — блоки в `--selftest` это переворачивают.
  */
-export function writeHarvestRows(doc, harvest, { at = null } = {}) {
+/**
+ * ⚡ Ш5 `plans/88`: УРОЖАЙ ТОЖЕ ЗАКРЫВАЕТ ТОЧКИ, ЗНАЧИТ ТОЖЕ НЕСЁТ `watchOnPost`.
+ *
+ * Провести вход только в спуск и забыть про урожай значило бы провести метку НАПОЛОВИНУ: строка
+ * урожая — это прожиг, выдержанный на выданной частоте, то есть ровно то, чему метка и адресована.
+ * Без входа она входила бы в документ чистой независимо от того, стоял ли сторож, — дыра в ту же
+ * сторону, ради которой заведён `plans/87`.
+ */
+export function writeHarvestRows(doc, harvest, { at = null, watchOnPost = null } = {}) {
   const written = [];
   const refused = [];
   // ─── ЧТО ХРАПОВИК ПОДНЯЛ ПО ДОРОГЕ — И РАНЬШЕ ЭТО МОЛЧА ТЕРЯЛОСЬ (эпик 47 фаза 2) ──────────────
@@ -4621,6 +4685,7 @@ export function writeHarvestRows(doc, harvest, { at = null } = {}) {
       // ПРАВИЛО 2: наследования нет.
       inheritDownToMhz: null,
       at,
+      watchOnPost,
     });
     if (!closed.ok) { refused.push({ mhz: p.deliveredMhz, why: closed.why }); continue; }
     // ПРАВИЛО 3 продолжение: документ проверяется ПОСЛЕ каждой строки, а не в конце. Строка,
@@ -8538,6 +8603,89 @@ export function selfTest() {
       [...new Set(burned)].sort((a, b) => b - a), [2842, 2820]);
 
     // =============================================================================================
+    // ⚡ Ш5 `plans/88` (P88-AC6) — МЕТКА «СНЯТО БЕЗ СТОРОЖА НА ПОСТУ» ДОЕЗЖАЕТ ДО ДОКУМЕНТА
+    //
+    // Гасит ЕДИНСТВЕННЫЙ названный долг `plans/87`: движок не передавал `watchOnPost` в `closePoint`
+    // и работал на осторожном умолчании `null`, потому что состояния «сторож на посту» ещё не
+    // существовало — оно родилось с полуоткрытым окном (Ш3 этой же сессии).
+    //
+    // ТРИ СОСТОЯНИЯ ПРОВЕРЯЮТСЯ ВСЕ ТРИ, И ЭТО НЕ ИЗБЫТОК. `true` без `false` доказывал бы только
+    // «умеем снимать», а метка, которая снимается всегда, хуже отсутствующей: она молча объявляет
+    // доказанным то, что жглось без защиты. `null` без первых двух не отличить от «вход не
+    // проведён вовсе» — то есть от долга, который здесь и гасится.
+    {
+      const marked = (rows) => rows.map((r) => ({ ...r, tags: [...r.tags, CURVE_TAGS.ORIGIN_UNWATCHED] }));
+      const tagsAt = (doc, mhz) => (doc.frequencies.find((r) => r.mhz === mhz)?.tags ?? []);
+      const runWith = async (rows, watchOnPostFn) => {
+        let saved = null;
+        await sweepRange({
+          envelopeMhz: 3090,
+          curveDoc: sweepDoc(rows), points: sweepPoints,
+          runStepFn: async (args) => sweepAtom(980)(args),
+          buildVector: vectorPinned,
+          saveFn: async (d) => { saved = d; return { ok: true }; },
+          ...(watchOnPostFn === undefined ? {} : { watchOnPostFn }),
+          now: () => '2026-08-16T02:00:00+03:00',
+          clockMs: (() => { let t = 0; return () => (t += 1000); })(),
+        });
+        return saved;
+      };
+
+      const lifted = await runWith(marked(bandRows), () => true);
+      ok('P88-AC6: сторож БЫЛ на посту — перепрожиг СНИМАЕТ метку, число снова доказано',
+        [tagsAt(lifted, 2842).includes(CURVE_TAGS.ORIGIN_UNWATCHED),
+          tagsAt(lifted, 2820).includes(CURVE_TAGS.ORIGIN_UNWATCHED)],
+        [false, false]);
+
+      const stamped = await runWith(bandRows, () => false);
+      ok('P88-AC6: сторож был ВНЕ поста — метка СТАВИТСЯ даже на чистую строку',
+        [tagsAt(stamped, 2842).includes(CURVE_TAGS.ORIGIN_UNWATCHED),
+          tagsAt(stamped, 2820).includes(CURVE_TAGS.ORIGIN_UNWATCHED)],
+        [true, true]);
+
+      // 🔴 СТРОКА, ЗАЩИЩАЮЩАЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДО БАЙТА. Без хука движок обязан вести себя ровно
+      // так, как вёл до этого шага: метку переносить, новой не ставить. Любой другой исход означал
+      // бы, что проводка тихо изменила смысл документа на всех путях, где хука нет (стенд, ручные
+      // прогоны, чужие вызовы `sweepRange`).
+      const carried = await runWith(marked(bandRows), undefined);
+      const cleanCarried = await runWith(bandRows, undefined);
+      ok('P88-AC6: хук не проведён — метка ПЕРЕНОСИТСЯ как есть, и новой не появляется (прежнее поведение до байта)',
+        [tagsAt(carried, 2842).includes(CURVE_TAGS.ORIGIN_UNWATCHED),
+          tagsAt(cleanCarried, 2842).includes(CURVE_TAGS.ORIGIN_UNWATCHED)],
+        [true, false]);
+
+      // И ОТДЕЛЬНО — УРОЖАЙ. Он закрывает точки ДРУГИМ путём (`writeHarvestRows`), и провести метку
+      // только в спуск значило бы провести её наполовину: строка урожая это тоже выдержанный прожиг.
+      const oneHarvest = harvestPairs([{
+        outcome: 'passed', deliveredMhz: 2835, deliveredMaxMhz: 2835,
+        servingMvAfter: 1000, orderedMhz: 2842, seq: 1,
+      }]);
+      const hLift = writeHarvestRows(sweepDoc(marked(bandRows)), oneHarvest,
+        { at: '2026-08-16T02:00:00+03:00', watchOnPost: true });
+      const hStamp = writeHarvestRows(sweepDoc(bandRows), oneHarvest,
+        { at: '2026-08-16T02:00:00+03:00', watchOnPost: false });
+      const hCarry = writeHarvestRows(sweepDoc(marked(bandRows)), oneHarvest,
+        { at: '2026-08-16T02:00:00+03:00' });
+      ok('P88-AC6: УРОЖАЙ несёт тот же вход — снимает метку, ставит метку, без входа переносит',
+        [tagsAt(hLift.doc, 2835).includes(CURVE_TAGS.ORIGIN_UNWATCHED),
+          tagsAt(hStamp.doc, 2835).includes(CURVE_TAGS.ORIGIN_UNWATCHED),
+          tagsAt(hCarry.doc, 2835).includes(CURVE_TAGS.ORIGIN_UNWATCHED)],
+        [false, true, true]);
+
+      // 🔴 ПРЕДИКАТ ЖИВОГО ПУТИ — ОТДЕЛЬНО, И ЭТОТ БЛОК РОДИЛСЯ ИЗ ЗЕЛЁНОЙ МУТАЦИИ. Пока он был
+      // замыканием внутри `mainSweep`, мутация «не спрашивать про взведённость» проходила зелёной
+      // на всех 483 блоках: батарея туда не достаёт. Главная строка здесь — ВТОРАЯ: прогон, у
+      // которого защита не взведена вовсе, охраняемым не считается.
+      ok('P88-AC6: предикат «сторож на посту» — взведён И жив; наблюдение и вышедший судья дают ЛОЖЬ',
+        [watchOnPostNow({ armed: true, judgeExitCode: null }),
+          watchOnPostNow({ armed: false, judgeExitCode: null }),
+          watchOnPostNow({ armed: true, judgeExitCode: 2 }),
+          watchOnPostNow({ armed: true, judgeExitCode: 0 }),
+          watchOnPostNow({})],
+        [true, false, false, false, false]);
+    }
+
+    // =============================================================================================
     // 🗣 `bugs/79` — ГОЛОС ДРАЙВЕРА ДОЕЗЖАЕТ ДО НАКОПИТЕЛЯ, И ИМЕННО СВОИМ РОДОМ
     //
     // ЭТОТ БЛОК РОДИЛСЯ ИЗ ЗЕЛЁНОЙ МУТАЦИИ, и это стоит записать: мутация «класть в накопитель без
@@ -11392,6 +11540,10 @@ async function mainSweep(argv, arg) {
   // Двойник гонку воспроизвести не может (рука держит СВОЙ экземпляр карты) — он доказывает
   // ПРОВОДКУ; сама развилка «гонка ↔ C3» держится блоками и мутациями.
   const twinJudgeArgs = twin ? [...twin.riders.judgeArgs, '--sweep-journal', journal.path] : null;
+  // ⚡ Ш5 `plans/88`: ВЗВЕДЕНА ЛИ ЗАЩИТА — ОДНО МЕСТО, ЧИТАЕМОЕ ТРЕМЯ. Признак читался строкой
+  // подъёма и понадобился ещё метке «без сторожа» и её будущим читателям; три отдельных
+  // `includes('--arm-n')` были бы парой «правда ↔ зеркало» втройне (тот же довод, что у `fuseLines`).
+  const fuseArmed = (twin ? twinJudgeArgs : liveRiders.judgeArgs).includes('--arm-n');
   const fuseJudge = spawn(process.execPath, twin
     ? [fuseScript, ...twinJudgeArgs]
     : [fuseScript, ...liveRiders.judgeArgs], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
@@ -11471,7 +11623,7 @@ async function mainSweep(argv, arg) {
     // схлопнуть, чем сторожить (R14a).
     // Оба входа печатаются ИЗ АРГУМЕНТОВ, которые судья реально получил. Вход 2 назван отдельно:
     // молчащая строка про взведённый M читалась бы как «его нет» — ровно ложное «нельзя» (EXP-0169).
-    ? `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ, двойник): pid ${fuseJudge.pid}, ${twin.riders.judgeArgs.includes('--arm-n') ? `ВЗВЕДЕНА, уставка ${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-n') + 1]} мс${twin.riders.judgeArgs.includes('--arm-m') ? ` · ВТОРОЙ ВХОД ВЗВЕДЁН, уставка ${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-m') + 1]} мс (прогресс прожига)` : ' · второй вход не проведён'}, АВН: пид-файл носителя · ВЗН: заводское напряжение ДВОЙНИКА` : 'НЕ ВЗВЕДЕНА (только наблюдение)'}; протокол в ${fuseJournalHint}`
+    ? `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ, двойник): pid ${fuseJudge.pid}, ${fuseArmed ? `ВЗВЕДЕНА, уставка ${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-n') + 1]} мс${twin.riders.judgeArgs.includes('--arm-m') ? ` · ВТОРОЙ ВХОД ВЗВЕДЁН, уставка ${twin.riders.judgeArgs[twin.riders.judgeArgs.indexOf('--arm-m') + 1]} мс (прогресс прожига)` : ' · второй вход не проведён'}, АВН: пид-файл носителя · ВЗН: заводское напряжение ДВОЙНИКА` : 'НЕ ВЗВЕДЕНА (только наблюдение)'}; протокол в ${fuseJournalHint}`
     : `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ): pid ${fuseJudge.pid}, уставка ${fuseMod.DERIVED_ARM_N_MS} мс тишины · АВН: образы прожига · ВЗН: заводское напряжение; протокол в ${fuseJournalHint}`
       + (liveRiders.judgeArgs.includes('--arm-m')
         ? ` · ВТОРОЙ ВХОД (прогресс прожига) ВЗВЕДЁН: ${progressDecision.why}; файл сердцебиения ${progressFile}`
@@ -11601,6 +11753,25 @@ async function mainSweep(argv, arg) {
     //  что живой судья доносит до неё этот счёт. Закрывается первым живым прогоном при владельце
     //  (ворота 6a): в сводке обязана появиться строка «СПАСЕНО ПРЕДОХРАНИТЕЛЕМ» с закрытой частотой]
     fuseTripsFn: () => fuseMod.tripCount(fuseLines()),
+    // ⚡ Ш5 `plans/88` (P88-AC6) — ИСТОЧНИК ФАКТА «СТОРОЖ БЫЛ НА ПОСТУ», И ЕГО ДВЕ ПОЛОВИНЫ.
+    //
+    // Взведён ли ВООБЩЕ (`--arm-n` в аргументах судьи) — константа прогона; жив ли судья
+    // (`exitCode === null`) — величина, умеющая падать из истины в ложь и никогда обратно. Обе
+    // вместе монотонны, поэтому чтение в момент закрытия частоты судит весь интервал, за который
+    // её жгли (разбор — у `watchOnPostFn` в подписи `sweepRange`).
+    //
+    // Прогон БЕЗ взведённой защиты честно даёт `false`: строка получает метку «снято без сторожа»,
+    // и это ровно тот случай, ради которого `plans/87` заведён, — 18 частот до 29.08 попали под
+    // метку именно потому, что тогда сторожа не существовало.
+    //
+    // [TESTED: 2026-09-05 СКВОЗНЫМ ПРОГОНОМ НА ДВОЙНИКЕ, обе стороны и на настоящем пути движка.
+    //  `twin --smoke` БЕЗ взведения закрыл 2842 и 2835 МГц — обе строки получили `origin:unwatched`;
+    //  `twin --smoke --armed` на том же документе — обе метку ПОТЕРЯЛИ, помеченных строк 0. Плюс
+    //  пять блоков `engine --selftest` и четыре мутации, каждая красит свою.]
+    // [NOT-TESTED: ЖИВАЯ КАРТА — первый прогон при владельце с 08.09. Форма аргументов и путь
+    //  состояния бит-в-бит те же, что доказаны выше на двойнике; не доказано только, что настоящий
+    //  судья на настоящей карте доносит сюда своё состояние.]
+    watchOnPostFn: () => watchOnPostNow({ armed: fuseArmed, judgeExitCode: fuseJudge.exitCode }),
     // Порт устройства (эпик 59 фаза 2): на двойнике атом получает устройство сборки, живой путь —
     // свой адаптер по умолчанию, бит-в-бит.
     // ⚡ Живой путь несёт атому файл сердцебиения прожига (вход 2, `bugs/101` находка 3); двойник
