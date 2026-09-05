@@ -206,10 +206,28 @@ export function parseInterview(text, { file = '<memory>' } = {}) {
 /** Parse one question block. Exported so the guard's counting cross-check (G11) can call it. */
 export function parseQuestionBlock(blockLines, index) {
   const heading = blockLines[0].replace(/^#{2,4}\s*/u, '').trim();
+  // 🔴 ЯРЛЫК БЕРЁТСЯ ИЗ ЗАГОЛОВКА, А НЕ ИЗ ПОРЯДКА (`bugs/105`, находка 1, починено 2026-09-05).
+  //
+  // Стояло `id: \`Q${index}\`` — порядковый номер блока. Пока нумерация в документе сплошная,
+  // порядок и заголовок совпадают, и дефект невидим. Он проявляется ровно тогда, когда нумерация
+  // РАЗРЫВАЕТСЯ, — а разрывается она ЗАКОННО: снятый агентом вопрос остаётся на месте разбором,
+  // это предписанное поведение. `interviews/026` несёт Q1, Q3, Q4 — и запись решения получила
+  // ключи Q1, Q2, Q3, то есть ответ владельца на Q3 лёг под ключом Q2.
+  //
+  // Цена названа владельцем в тот же день: один из тех двух ответов — приказ, роняющий метрику
+  // приёмки с 11 краёв до 4. Сессия с пустым контекстом исполнила бы его НЕ НА ТОМ вопросе и
+  // уверенно, потому что источник машинный.
+  //
+  // Номер уже захвачен регулярным выражением (`RE_QUESTION_HEADING`, группа 2) и до сих пор просто
+  // отбрасывался. Столкновений быть не может: `questionBlockRanges` пропускает второй заголовок с
+  // тем же номером (`bugs/70`), значит номер в пределах документа уникален по построению.
+  const headNum = RE_QUESTION_HEADING.exec(blockLines[0])?.[2] ?? null;
   const q = {
     index,
     heading,
-    id: `Q${index}`,
+    // `index` ОСТАЁТСЯ и остаётся порядковым: по нему блоки сопоставляются со своими границами.
+    // Разошлись именно две роли одного числа — ПОРЯДОК и ИМЯ, — и лечение в том, чтобы их развести.
+    id: `Q${headNum ?? index}`,
     body: [],
     options: [],
     answer: null,
@@ -509,17 +527,26 @@ export function applyAnswersToDocument(docPath, answers, { by, at, atHuman }) {
   const lines = normalize(original).split('\n');
 
   // Map question ids to their absolute answer-field line numbers.
+  //
+  // 🔴 ГРАНИЦЫ БЕРУТСЯ У `questionBlockRanges`, А НЕ ИЩУТСЯ ЗАНОВО (`bugs/105`, находка 2,
+  // починено 2026-09-05). Здесь стоял СВОЙ обход: счётчик `qi++` на каждой строке, совпавшей с
+  // `RE_QUESTION_HEADING`, и выборка `doc.questions[qi - 1]`. Это второй разбор одного факта —
+  // ровно то, против чего написана шапка этого модуля, — и он не нёс защиты `bugs/70`.
+  //
+  // ЧЕМ ЭТО ГРОЗИЛО, НАБЛЮДЕНО НА ФИКСТУРЕ, А НЕ ВЫВЕДЕНО: агент, пишущий разбор своими секциями
+  // вида «### Q1 = A, и вот что это меняет», ставит заголовок, совпадающий с выражением ДОСЛОВНО.
+  // `questionBlockRanges` такую строку пропускает (номер уже открыл вопрос), а этот обход считал её
+  // вопросом и сдвигал ВСЁ последующее сопоставление на единицу. В пробе ответ владельца на Q2 лёг
+  // строкой ПОД ЦИТАТУ агента, настоящий Q2 остался без ответа, а функция вернула `written: ["Q2"]`
+  // — то есть отчиталась успехом о порче документа владельца.
+  //
+  // Границы и `doc.questions` строятся из ОДНОГО источника и потому выровнены по индексу
+  // построением: `parseInterview` наполняет вопросы тем же `questionBlockRanges` в том же порядке.
   const absolute = [];
-  {
-    let qi = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (RE_QUESTION_HEADING.test(lines[i])) {
-        qi++;
-        const q = doc.questions[qi - 1];
-        if (!q) continue;
-        if (q.answerLine !== null) absolute.push({ q, line: i + q.answerLine });
-      }
-    }
+  for (const [k, range] of questionBlockRanges(original).entries()) {
+    const q = doc.questions[k];
+    if (!q || q.answerLine === null) continue;
+    absolute.push({ q, line: range.start + q.answerLine });
   }
 
   // BOTTOM-UP — the whole reason this function is not a simple forEach.

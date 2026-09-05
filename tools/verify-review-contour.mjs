@@ -364,6 +364,123 @@ block('B4', 'the writer reports what LANDED in the document, not what was posted
     `the skip is not reported by name and reason: ${JSON.stringify(report.skipped)}`);
 });
 
+// -------------------------------------------------------------------------------------------------
+// `bugs/105` — ЯРЛЫК ВОПРОСА И МЕСТО ОТВЕТА: ДВЕ РОЛИ ОДНОГО ЧИСЛА, РАЗОШЕДШИЕСЯ МОЛЧА
+//
+// Обе находки наблюдены КРАСНЫМИ на этих самых фикстурах до правки 2026-09-05, и обе про одно:
+// порядковый номер блока подменял ИМЯ вопроса.
+// -------------------------------------------------------------------------------------------------
+
+/** Документ с РАЗОРВАННОЙ нумерацией — Q2 снят агентом, как в `interviews/026`. */
+function docWithBrokenNumbering() {
+  return [
+    '# Интервью 905 — нумерация разорвана снятым вопросом',
+    '',
+    '**Status:** 🔴 ждёт владельца',
+    '',
+    '## Q1. Первый вопрос',
+    '',
+    'Тело.',
+    '',
+    '**Ответ:**',
+    '',
+    '---',
+    '',
+    '## ~~Q2~~ — СНЯТ С ВАС, разобран агентом',
+    '',
+    'Разбор без вопроса — заголовок НЕ несёт номера и вопросом не является.',
+    '',
+    '---',
+    '',
+    '## Q3. Третий вопрос',
+    '',
+    'Тело.',
+    '',
+    '**Ответ:**',
+    '',
+    '---',
+    '',
+    '## Q4. Четвёртый вопрос',
+    '',
+    'Тело.',
+    '',
+    '**Ответ:**',
+    '',
+  ].join('\n');
+}
+
+/** Документ, где агент озаглавил СВОЙ разбор цитатой вопроса (`bugs/70`). */
+function docWithCitationHeading() {
+  return [
+    '# Интервью 906 — разбор агента озаглавлен цитатой',
+    '',
+    '**Status:** 🔴 ждёт владельца',
+    '',
+    '## Q1. Первый вопрос',
+    '',
+    'Тело.',
+    '',
+    '**Ответ:**',
+    '',
+    '---',
+    '',
+    '### Q1 = A, и вот что это меняет',
+    '',
+    'Разбор агента. Заголовок совпадает с выражением вопроса ДОСЛОВНО, но это цитата.',
+    '',
+    '---',
+    '',
+    '## Q2. Второй вопрос',
+    '',
+    'Тело.',
+    '',
+    '**Ответ:**',
+    '',
+  ].join('\n');
+}
+
+block('B7', 'a question keeps the number from its OWN heading when the numbering is broken', async () => {
+  // Находка 1 `bugs/105`. До правки ярлыки были Q1|Q2|Q3 при заголовках Q1|Q3|Q4, и запись решения
+  // владельца по `interviews/026` легла ключом Q2 на вопрос, который в документе называется Q3.
+  // Цена названа владельцем в тот же день: один из тех ответов — приказ, роняющий метрику приёмки
+  // с 11 краёв до 4. Сессия с пустым контекстом исполнила бы его не на том вопросе и уверенно.
+  const doc = core.parseInterview(docWithBrokenNumbering(), { file: '<память>' });
+  const ids = doc.questions.map((q) => q.id);
+  must(JSON.stringify(ids) === JSON.stringify(['Q1', 'Q3', 'Q4']),
+    `ярлыки взяты из порядка, а не из заголовков: ${JSON.stringify(ids)} при заголовках `
+    + `${JSON.stringify(doc.questions.map((q) => q.heading.slice(0, 3)))}`);
+  // И снятый вопрос вопросом НЕ стал: его заголовок номера не несёт.
+  must(doc.questions.length === 3,
+    `распознано вопросов ${doc.questions.length}, а их три — снятый заголовок посчитан вопросом`);
+});
+
+block('B8', 'an answer lands under its OWN question even when the agent titled a section with a citation', async () => {
+  // Находка 2 `bugs/105` — НЕ описанная в тикете и найденная при его починке. Запись ответов вела
+  // СВОЙ обход заголовков, без защиты `bugs/70`, и цитатная секция агента сдвигала сопоставление на
+  // единицу. Наблюдено на этой фикстуре: ответ на Q2 лёг строкой под цитату, настоящий Q2 остался
+  // без ответа, а функция вернула `written: ["Q2"]` — то есть отчиталась УСПЕХОМ о порче документа.
+  const dir = freshDir('b8');
+  const docPath = join(dir, 'interview_906_citation.md');
+  writeFileSync(docPath, docWithCitationHeading(), 'utf8');
+
+  const report = core.applyAnswersToDocument(docPath, { Q2: { choice: 'B', text: '', comment: '' } },
+    { by: 'Mikalai Kryvusha', at: core.isoLocal(new Date()) });
+  const lines = readFileSync(docPath, 'utf8').split('\n');
+  const answered = lines.findIndex((l) => l.startsWith('**Ответ:** B'));
+  const citation = lines.findIndex((l) => l.startsWith('### Q1 = A'));
+  const secondQ = lines.findIndex((l) => l.startsWith('## Q2.'));
+
+  must(report.written.length === 1 && report.written[0] === 'Q2',
+    `запись отчиталась не тем: ${JSON.stringify(report.written)}`);
+  must(answered > secondQ,
+    `ответ лёг ВЫШЕ своего вопроса: строка ответа ${answered}, строка «## Q2.» ${secondQ}, цитата ${citation}`);
+  must(answered > citation + 1 && secondQ > citation,
+    `ответ лёг под ЦИТАТУ агента (строка ${citation}), а не под свой вопрос (строка ${secondQ})`);
+  // И первый вопрос остался нетронутым — сдвиг задел бы и его.
+  must(lines.filter((l) => l.startsWith('**Ответ:**')).length === 2,
+    'полей «Ответ:» стало не два — запись задела чужую строку');
+});
+
 block('B5', 'a document whose questions are all answered stops being "waiting" by itself', async () => {
   const dir = freshDir('b5');
   const docPath = join(dir, 'interview_903_single.md');
