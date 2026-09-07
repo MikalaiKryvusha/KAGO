@@ -246,6 +246,50 @@ const polyline = (pts) => pts.map(([a, b]) => `${n2(a)},${n2(b)}`).join(' ');
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
+ * WHERE THE RUNG-UNDER-TEST READOUT SITS — the BOTTOM margin, on the left. Never on the plot field.
+ *
+ * The owner's word on the live widget, 2026-09-08: *«текст точно нужно убрать с графика»*. The ring
+ * and the trace ARE the picture; the numbers are a READOUT, and a readout printed over the curve hides
+ * the very rows it describes.
+ *
+ * ⚠️ WHY THE BOTTOM AND NOT THE TOP MARGIN, WHICH LOOKED LIKE THE OBVIOUS HOME. The top row already
+ * carries the counts line (`class="cap"`, right-anchored). On the widget the readout is 24 px bold and
+ * the counts 16 px: «2842 МГц · 910 мВ» from x=84 runs to roughly 290, while the counts string of the
+ * battle document reaches back to roughly 236 from its right anchor. The two would have overlapped —
+ * the same defect one margin over, and it would have been the owner's eye that found it again. The
+ * bottom row holds only the axis caption at the RIGHT end, so the left half of it is free on both
+ * surfaces. Hence ONE rule, no branch on `labelsAbove`: `markerLabelRowIsFree` keeps it honest.
+ */
+function markerLabelY(size) {
+  return size.H - 12;
+}
+
+/**
+ * THE INVARIANT BEHIND THE OWNER'S WORD, MADE CHECKABLE: the readout does not overlap the plot field.
+ *
+ * Written as a predicate rather than left to the eye because this is the second render defect the eye
+ * had to catch (EXP-0046 — a render is accepted by the eye; the eye is not a regression test).
+ */
+export function markerLabelIsOffField(size = STATIC_SIZE) {
+  const PAD = size.PAD;
+  const y = markerLabelY(size);
+  const plotH = size.H - PAD.t - PAD.b;
+  return y < PAD.t || y > PAD.t + plotH;
+}
+
+/**
+ * ...AND THE SECOND HALF OF THE SAME PROMISE: the readout does not share its row with the counts line.
+ *
+ * Off-field alone is not enough — the top margin is off-field too, and that is exactly where the two
+ * texts would have collided. Text width is a font question this module cannot answer, so the invariant
+ * is stated where it IS answerable: different rows.
+ */
+export function markerLabelRowIsFree(size = STATIC_SIZE) {
+  const topY = size.labelsAbove ? size.PAD.t - 14 : size.PAD.t + 20;
+  return markerLabelY(size) !== topY;
+}
+
+/**
  * @param {object} facts   from `curveFacts`
  * @param {object} [o]
  * @param {object} [o.size]       `STATIC_SIZE` or `WIDGET_SIZE`
@@ -310,29 +354,33 @@ export function renderCurveSvg(facts, {
       + `<text x="${PAD.l - 10}" y="${n2(Y(m)) + 4}" class="ax" text-anchor="end">${m}</text>`),
   ].join('');
 
-  // THE RUNG UNDER TEST — a ring at (voltage, frequency) and a trace back to the stock voltage of
-  // that frequency: the descent as a distance you can see. Drawn only inside the axes: a marker
-  // outside the sheet would be a coordinate, not a mark.
-  let markerSvg = '';
-  if (marker && Number.isFinite(marker.mhz) && Number.isFinite(marker.mv) && inAxes(marker.mhz, marker.mv)) {
-    const cx = X(marker.mv);
-    const cy = Y(marker.mhz);
-    const fromMv = Number.isFinite(marker.stock) ? Math.min(Math.max(marker.stock, xMin), xMax) : marker.mv;
-    const rightSide = cx < PAD.l + plotW * 0.62;
-    // A rung near the TOP of the sheet gets its label BELOW the ring — above it there is no room, and
-    // the label collided with the counts line on the first render (2026-09-04).
-    const below = cy - r.marker - 30 < PAD.t;
-    const label = `${marker.mhz} МГц · ${marker.mv} мВ`;
-    markerSvg = `<line x1="${n2(X(fromMv))}" y1="${n2(cy)}" x2="${n2(cx)}" y2="${n2(cy)}" class="trace"/>`
-      + `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${r.marker}" class="marker"><title>частота под тестом: ${esc(label)}</title></circle>`
-      + `<text x="${n2(rightSide ? cx + r.marker + 8 : cx - r.marker - 8)}" y="${n2(below ? cy + r.marker + 26 : cy - r.marker - 6)}" class="marker-label" `
-      + `text-anchor="${rightSide ? 'start' : 'end'}">${esc(label)}</text>`;
-  }
-
   const caption = xCaption ?? WIDGET_X_CAPTION;
   // Where the two top labels live: inside the plot for the static page (its golden), in the top padding
   // for sizes that ask for it (`labelsAbove`).
   const topY = size.labelsAbove ? PAD.t - 14 : PAD.t + 20;
+
+  // THE RUNG UNDER TEST — a ring at (voltage, frequency) and a trace back to the stock voltage of
+  // that frequency: the descent as a distance you can see. Drawn only inside the axes: a marker
+  // outside the sheet would be a coordinate, not a mark.
+  //
+  // 🔴 ITS TEXT NEVER LANDS ON THE PLOT FIELD. The owner, looking at the live widget 2026-09-08:
+  // *«текст точно нужно убрать с графика»*. The ring and the trace ARE the picture; the numbers are a
+  // READOUT, and a readout that sits on top of the curve hides the very rows it is describing. So the
+  // label goes to the margin the surface offers — the top labels row beside the counts where there is
+  // one (`labelsAbove`), the bottom caption row otherwise — and `markerLabelIsOffField` below turns
+  // that sentence into an invariant a block can check instead of an eye.
+  let markerSvg = '';
+  let markerLabelSvg = '';
+  if (marker && Number.isFinite(marker.mhz) && Number.isFinite(marker.mv) && inAxes(marker.mhz, marker.mv)) {
+    const cx = X(marker.mv);
+    const cy = Y(marker.mhz);
+    const fromMv = Number.isFinite(marker.stock) ? Math.min(Math.max(marker.stock, xMin), xMax) : marker.mv;
+    const label = `${marker.mhz} МГц · ${marker.mv} мВ`;
+    markerSvg = `<line x1="${n2(X(fromMv))}" y1="${n2(cy)}" x2="${n2(cx)}" y2="${n2(cy)}" class="trace"/>`
+      + `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${r.marker}" class="marker"><title>частота под тестом: ${esc(label)}</title></circle>`;
+    markerLabelSvg = `<text x="${PAD.l}" y="${markerLabelY(size)}" class="marker-label" `
+      + `text-anchor="start">${esc(label)}</text>`;
+  }
   const summarySvg = summary
     ? `<text x="${PAD.l + plotW}" y="${topY}" class="cap" text-anchor="end">тронуто ${facts.touched.length} из ${rows.length} · `
       + `полов зависания ${floors.size} · перемерить ${remeasure.size} · проходило ${proven.size}</text>`
@@ -351,6 +399,7 @@ export function renderCurveSvg(facts, {
   ${refutedDots}
   ${markerSvg}
   ${summarySvg}
+  ${markerLabelSvg}
   <text x="${PAD.l + plotW}" y="${size.H - 12}" class="ax" text-anchor="end">${esc(caption)}</text>
   ${mhzLabel}
 </svg>`;
@@ -385,6 +434,7 @@ export function loadFacts({ curvePath = CURVE_PATH, journalPath = JOURNAL_PATH, 
 //   M3. drop the `inFlight` rule                                        → «СТУПЕНЬ В ПОЛЁТЕ — НЕ ЗАВИСАНИЕ»
 //   M4. count a corrected hang as recorded                              → «ПОПРАВЛЕННОЕ ЗАВИСАНИЕ — НЕ УЛИКА»
 //   M5. drop the marker branch                                          → «МАРКЕР РИСУЕТСЯ ПО ЗАПРОСУ»
+//   M5b. put the marker label back beside the ring (on the field)        → «ПОДПИСЬ ЧАСТОТЫ ПОД ТЕСТОМ НЕ ЛЕЖИТ НА ПОЛЕ ГРАФИКА»
 //   M6. change a number of `STATIC_SIZE`                                → «ГЕОМЕТРИЯ СТАТИЧЕСКОЙ СТРАНИЦЫ»
 //   M7. `effectiveCurve` back to «first row that fits»                  → «ПОРЯДОК СТРОК БЕЗРАЗЛИЧЕН»
 export function selfTest() {
@@ -504,9 +554,30 @@ export function selfTest() {
         && marked.includes(`<line x1="${n2(g.X(1000))}" y1="${n2(g.Y(2400))}" x2="${n2(g.X(900))}" y2="${n2(g.Y(2400))}" class="trace"/>`)
         && marked.includes('2400 МГц · 900 мВ'),
       marked.slice(marked.indexOf('class="trace"') - 120, marked.indexOf('class="trace"') + 200));
+    // — Слово владельца 2026-09-08: *«текст точно нужно убрать с графика»*. Проверяется НЕ глазом:
+    //   отметка подписи берётся из самой картинки и сверяется с полем листа, на обеих поверхностях.
+    const yOf = (svg) => {
+      const m = /<text x="[^"]*" y="([\d.-]+)" class="marker-label" /.exec(svg);
+      return m ? Number(m[1]) : null;
+    };
+    const markedWidget = renderCurveSvg(facts, { size: WIDGET_SIZE, summary: true, marker: { mhz: 2400, mv: 900, stock: 1000 } });
+    const offField = (svg, size) => {
+      const y = yOf(svg);
+      const plotH = size.H - size.PAD.t - size.PAD.b;
+      return y !== null && (y < size.PAD.t || y > size.PAD.t + plotH);
+    };
+    check('ПОДПИСЬ ЧАСТОТЫ ПОД ТЕСТОМ НЕ ЛЕЖИТ НА ПОЛЕ ГРАФИКА (слово владельца 2026-09-08) — на обеих поверхностях',
+      offField(marked, STATIC_SIZE) && offField(markedWidget, WIDGET_SIZE)
+        && markerLabelIsOffField(STATIC_SIZE) && markerLabelIsOffField(WIDGET_SIZE)
+        && markerLabelRowIsFree(STATIC_SIZE) && markerLabelRowIsFree(WIDGET_SIZE),
+      `статическая y=${yOf(marked)} поле ${STATIC_SIZE.PAD.t}…${STATIC_SIZE.H - STATIC_SIZE.PAD.b} · `
+        + `виджет y=${yOf(markedWidget)} поле ${WIDGET_SIZE.PAD.t}…${WIDGET_SIZE.H - WIDGET_SIZE.PAD.b}`);
+    check('и на поле не осталось НИ ОДНОЙ подписи маркера — класс встречается ровно один раз, снаружи',
+      (markedWidget.match(/class="marker-label"/g) ?? []).length === 1,
+      String((markedWidget.match(/class="marker-label"/g) ?? []).length));
     const outside = renderCurveSvg(facts, { marker: { mhz: 100, mv: 900, stock: 1000 } });
     check('маркер за пределами осей не рисуется — координата вне листа это не метка',
-      !outside.includes('class="marker"'), 'маркер нарисован за пределами осей');
+      !outside.includes('class="marker"') && !outside.includes('class="marker-label"'), 'маркер нарисован за пределами осей');
   }
 
   // — Geometry: the ends of the axes land on the padding, and the static page's numbers are what they were.
