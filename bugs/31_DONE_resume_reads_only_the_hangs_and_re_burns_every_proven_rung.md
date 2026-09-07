@@ -1,6 +1,10 @@
 # Bug 31 — the resume reads only the HANGS from the journal, so every reboot re-burns the whole descent
 
-**Status:** 🔴 OPEN
+**Статус:** ✅ **ЗАКРЫТ — свидетель: коммит `f29b1f3` «chore(ревизия беклога): bugs/14, 20, 31 закрыты
+DONE — их починки давно в коде».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем
+`bugs/25` п.4 (`backlog-truth-lint`), нашедшим расхождение машинно. Прежняя — ниже, дословно.
+
+> **Прежняя строка статуса (устарела):** 🔴 OPEN
 **Version/build:** 0.9.0 · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-22 22:2x +03:00 — resuming the band `2820…2700` after the machine hung at
 2820 MHz / 850 mV. Found by the owner watching the window: *«а почему всё опять началось с 2820? ведь

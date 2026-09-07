@@ -1,6 +1,10 @@
 # Bug 28 — the burn runs one or two grid steps BELOW the frequency the evidence is filed under
 
-**Status:** 🔴 OPEN — found 2026-08-22 17:2x by correlating the sweep journal against the telemetry
+**Статус:** ✅ **ЗАКРЫТ — свидетель: коммит `2818e8b` «chore(ревизия беклога, вторая тройка): bugs/28,
+48, 50 закрыты DONE».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем `bugs/25` п.4
+(`backlog-truth-lint`), нашедшим расхождение машинно. Прежняя — ниже, дословно.
+
+> **Прежняя строка статуса (устарела):** 🔴 OPEN — found 2026-08-22 17:2x by correlating the sweep journal against the telemetry
 sampler, on the owner's question: *«верная ли частота под прожигом, прожигается ли карта на той
 частоте, которую мы и настраиваем»*
 **Version/build:** `main` @ `062ac0a` · driver 610.88 / VBIOS 98.03.58.40.8b

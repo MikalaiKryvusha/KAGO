@@ -1,6 +1,10 @@
 # Bug 20 — a writer that dies of its OWN software fault is recorded as the card hanging
 
-**Status:** 🔴 OPEN
+**Статус:** ✅ **ЗАКРЫТ — свидетель: коммит `f29b1f3` «chore(ревизия беклога): bugs/14, 20, 31 закрыты
+DONE — их починки давно в коде».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем
+`bugs/25` п.4 (`backlog-truth-lint`), нашедшим расхождение машинно. Прежняя — ниже, дословно.
+
+> **Прежняя строка статуса (устарела):** 🔴 OPEN
 **Version/build:** `main` @ `dce8007` · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-16 ≈17:0x +03:00, observed on the very next launch after `bugs/19` killed
 the live sweep. Found by reading the resumed run's first line.

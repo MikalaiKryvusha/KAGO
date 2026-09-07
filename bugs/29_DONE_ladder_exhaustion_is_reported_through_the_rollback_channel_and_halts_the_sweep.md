@@ -1,6 +1,10 @@
 # Bug 29 — ladder exhaustion is reported through the ROLLBACK channel, so a measurement outcome halts the sweep
 
-**Status:** 🔴 OPEN
+**Статус:** ✅ **ЗАКРЫТ — свидетель: коммит `6525ab9` «chore(ревизия беклога): bugs/29 закрыт DONE —
+лестница интенсивности…».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем `bugs/25`
+п.4 (`backlog-truth-lint`), нашедшим расхождение машинно. Прежняя — ниже, дословно.
+
+> **Прежняя строка статуса (устарела):** 🔴 OPEN
 **Version/build:** 0.9.0 · driver 610.88 / VBIOS 98.03.58.40.8b
 **When/context:** 2026-08-22 21:3x +03:00 — the owner's live tuning run `--sweep --from 2872 --to 2700`,
 launched with him at the machine (S1 satisfied). The run halted after 308 s with **0 of 24 frequencies

@@ -1,6 +1,10 @@
 # Bug 40 — the questions guard is written off as «all findings false», and the write-off is itself wrong: 1 of its 9 is REAL
 
-**Status:** 🟡 OPEN — **the real finding is CLOSED and class B is FIXED: 9 → 8 → 6 findings, each
+**Статус:** ✅ **ЗАКРЫТ — свидетель: коммит `3405921` «chore(ревизия беклога): bugs/40 закрыт DONE —
+находка закрыта интервью».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем `bugs/25`
+п.4 (`backlog-truth-lint`), нашедшим расхождение машинно. Прежняя — ниже, дословно.
+
+> **Прежняя строка статуса (устарела):** 🟡 OPEN — **the real finding is CLOSED and class B is FIXED: 9 → 8 → 6 findings, each
 step witnessed by the guard itself; a further 6 → 4 came from the bonsai trim and is NOT a fix.** Classes A, C and D are named with their mechanical
 discriminators and remain. The instrument is no longer «broken» or «working»: every line of its
 output is now accounted for.
