@@ -63,7 +63,8 @@
     "fuse": "node automation-engine/lib/fuse.mjs",
     "twin": "node automation-engine/lib/twin-assembly.mjs",
     "polygon": "node automation-engine/lib/polygon.mjs",
-    "okdialect": "node tools/assert-dialect-lint.mjs"
+    "okdialect": "node tools/assert-dialect-lint.mjs",
+    "backlogtruth": "node tools/backlog-truth-lint.mjs"
   },
   "dependencies": {
     "koffi": "^3.1.4"

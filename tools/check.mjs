@@ -258,6 +258,16 @@ function main(argv) {
 // срабатываний на 1373 вызова, почти все ложные.
 // -------------------------------------------------------------------------------------------------
   const dialectCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'assert-dialect-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+
+// -------------------------------------------------------------------------------------------------
+// ВОСЬМЫЕ ВОРОТА: СОГЛАСИЕ ИМЕНИ ФАЙЛА И СТРОКИ СТАТУСА (bugs/25 пункт 4 плана починки).
+// Пункт назван 2026-08-21 и не исполнялся; за это время класс возвращался ТРИЖДЫ и каждый раз
+// находился глазами — последний раз 2026-09-07, четыре закрытых тикета в списке открытых STATUS.
+// Сторож НЕ решает, закрыт предмет: он сверяет два сигнала, по которым считается беклог.
+// -------------------------------------------------------------------------------------------------
+  const backlogCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'backlog-truth-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const backlogSplit = backlogCheck.status !== 0;
+  if (backlogSplit) process.stderr.write(backlogCheck.stderr || backlogCheck.stdout || '');
   const dialectMixed = dialectCheck.status !== 0;
   if (dialectMixed) process.stderr.write(dialectCheck.stderr || dialectCheck.stdout || '');
 
@@ -269,8 +279,10 @@ function main(argv) {
   console.log(`декларация угроз сторожей: ${guardsUndeclared ? 'КРАСНО — node tools/guard-lint.mjs' : (guardCheck.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'чисто'}`);
   console.log(`сторож входа приборов: ${entryUnguarded ? 'КРАСНО — node tools/entry-guard-lint.mjs' : (entryCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`диалект ok в батареях: ${dialectMixed ? 'КРАСНО — node tools/assert-dialect-lint.mjs' : (dialectCheck.stdout || '').split('\n')[0] || 'чисто'}`);
+  console.log(`согласие беклога: ${backlogSplit ? 'КРАСНО — node tools/backlog-truth-lint.mjs --report' : (backlogCheck.stdout || '').trim().split('\n').pop() || 'чисто'}`);
+  console.log();
   return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared
-    && !entryUnguarded && !dialectMixed ? 0 : 1;
+    && !entryUnguarded && !dialectMixed && !backlogSplit ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
