@@ -463,8 +463,11 @@ export async function runTrapSuite() {
   // 2026-08-23) и седьмой (T7, тот же день, вечер) ровно так, как должен был, и число правится
   // ВМЕСТЕ с реестром, а не вслед за прогоном. Восьмую (T8, 2026-08-25, `plans/44`) он заметил
   // так же — красным, — и число правится здесь ОСОЗНАННО, а не подгоняется под то, что нашлось.
-  check('ЛОВУШКИ: их ВОСЕМЬ, и класс каждой назван ДО прогона (B3-AC1)',
-    TRAPS.length === 8 && cards.size === 8, `на диске ${cards.size} из ${TRAPS.length}`);
+  // Девятую (T9, 2026-09-07, приёмка эпика 03 → E3-AC2) он заметил ТАК ЖЕ — красным, «на диске 9 из
+  // 9», — и число правится здесь тем же осознанным движением. Сторож за это утро отработал дважды:
+  // сперва потребовал утверждения для новой ловушки, потом — исправления собственного числа.
+  check('ЛОВУШКИ: их ДЕВЯТЬ, и класс каждой назван ДО прогона (B3-AC1)',
+    TRAPS.length === 9 && cards.size === 9, `на диске ${cards.size} из ${TRAPS.length}`);
 
   // ---- 1. T1 — the edge sits above the descent's reach (class A, judged by the REAL searchEdge)
   const t1 = cards.get('T1_edge_above_reach');
@@ -1094,6 +1097,19 @@ export async function runTrapSuite() {
   // condition came true — the only way a waiver may end. What the guard still refuses is the thing it
   // was always for: an assertion that quietly VANISHES. Present-and-run, never absent, and never
   // pending again, because a pending row now would mean the sweep exists and nobody pointed it here.
+  // ⚡ T9 (`E3-AC2`) — РЯД СУЩЕСТВУЕТ И ЖДЁТ, а не отсутствует. Отсутствие утверждения запрещено
+  // ВСЕМ ловушкам (сторож ниже заводился ровно против тихого исчезновения); «ждёт» разрешено
+  // только объявившим `openPhase`, и T9 его объявила — вместе с замером, который к этому привёл.
+  {
+    const t9 = TRAPS.find((x) => x.name === 'T9_edge_within_one_session');
+    if (t9) {
+      pending(`T9: ${t9.mustDo}`,
+        'спуск без ЗАКРЕПЛЕНИЯ частоты края не встречает: замер 2026-09-07 на этой карте — край '
+        + '1022,7 мВ при стоке 1045, а прогон прошёл 1020 (выдано 2835 МГц), 810 (2062 МГц) и '
+        + '450 (180 МГц) и закрылся lever-limited. Нужна фикстура с pinMhz.');
+    }
+  }
+
   for (const t of TRAPS.filter((x) => x.klass === 'B')) {
     const rows = results.filter((r) => r.n.includes(t.mustDo));
     // ⚠️ ОДНО ОБЪЯВЛЕННОЕ ИСКЛЮЧЕНИЕ, И ОНО НЕ ОСЛАБЛЯЕТ СТОРОЖА (`plans/44`). Ловушка, поставленная
