@@ -35,6 +35,9 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// ⚡ `bugs/110`: список режимов движка, пишущих в карту, переехал в свой дом — его читает не только
+// уборка, но и сторож пролога защиты. Разбор довода — в самом модуле.
+import { ENGINE_CARD_WRITING_MODES } from '../automation-engine/lib/entry-points.mjs';
 
 /** Обычная консольная программа — наследует консоль, окна не создаёт. Никогда не бросает. */
 function run(exe, args) {
@@ -114,7 +117,7 @@ export function runInFlight(nodeProcs, armed, isAlive) {
   // Всё, что ДОЛГО ЖИВЁТ и/или ПИШЕТ В КАРТУ. Список положительный и полный: забытая здесь команда
   // — это команда, которую уборка однажды убьёт посреди записи в GPU.
   const MARKERS = [
-    /engine\.mjs.*--sweep/u, /engine\.mjs.*--band/u, /engine\.mjs.*--search/u,
+    ...ENGINE_CARD_WRITING_MODES.map((m) => new RegExp(`engine\\.mjs.*${m}`, 'u')),
     /vf-step\.mjs/u, /ladder-descent\.mjs/u, /thermal-ladder\.mjs/u,
     /fan-ladder\.mjs/u, /trap-suite\.mjs/u, /bench/u,
   ];
