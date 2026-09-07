@@ -1148,6 +1148,19 @@ export async function runJudge({
       // успевает проснуться после него.
       if (stopped) return;
       const now = performance.now();
+      // ⚡ `bugs/111`: СЧЁТ ВЗВЕДЕНИЙ НА ВХОДЕ В ТАКТ — ЧТОБЫ ОТЛИЧИТЬ СВОЙ ЖЕ СБРОС ОТ ОТКАЗА КАРТЫ.
+      //
+      // Вердикт ниже снимается ЗДЕСЬ, а взведение случается СЕРЕДИНОЙ этого же такта — в блоке
+      // полуоткрытого окна, где `closeRescue(true)` зовёт `resetForRearm`. Тот обнуляет и
+      // `lastProgressMs`, и `tripOutcomes`. Значит к воротам трипа внизу приходит вердикт,
+      // снятый ДО сброса, против ворот, открытых ПОСЛЕ него, — и тишина, накопленная за
+      // собственное спасение, бьёт мгновенно. Замерено на первом живом прогоне 07.09:
+      // взведение 10:11:59.776 → трип 10:11:59.777, `progressSilenceMs 6754.37` при уставке 1046,
+      // рука 1 не нашла ни одного образа («убивать было нечего»).
+      //
+      // Признак взят СУЩЕСТВУЮЩИЙ (`rearmsDone` растёт ровно во взведении), а не новый флаг: флаг
+      // был бы парой «правда ↔ зеркало» к нему и разошёлся бы при первой правке `closeRescue`.
+      const rearmsAtTickStart = rearmsDone;
       const verdict = judgeLiveness({ nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired });
       // Every tick lands in the ring — the judge's own wake-up gap included: a judge that stalls
       // with the system records its own stall, which is exactly the timer-role observation.
@@ -1206,6 +1219,20 @@ export async function runJudge({
         }
       }
       lastTickMs = now;
+      // ⚡ `bugs/111`: ВЗВЕДЕНИЕ СЛУЧИЛОСЬ В ЭТОМ ЖЕ ТАКТЕ — СУДИТЬ НЕЧЕМ, ВЕРДИКТ ПРОТУХ.
+      //
+      // Он снят до `resetForRearm` и описывает состояние, которого уже нет: `lastProgressMs` и
+      // `lastBeatMs` указывают в момент ДО спасения. Такт не «пропускается» — он ОТКЛАДЫВАЕТ
+      // суждение на следующий, где вердикт снимется с состояния после взведения. Это не потеря
+      // наблюдения: настоящий отказ никуда не денется за 60 мс, а вот эхо собственного спасения
+      // существует ровно один такт.
+      //
+      // Строка стоит ПОСЛЕ `lastTickMs = now` и после кольца намеренно: сам такт состоялся и обязан
+      // быть записан — иначе взведение оставляло бы в улике дыру ровно там, где её будут искать.
+      if (rearmsDone !== rearmsAtTickStart) {
+        tickTimer = setTimeout(tick, JUDGE_TICK_MS);
+        return;
+      }
       if (verdict.tripped && !tripOutcomes) {
         // The pidfile is read HERE, at the trip, never at judge start: the carrier of the fatal
         // burst is spawned long after the judge was, and a pid cached at start would name a corpse.
@@ -2064,6 +2091,89 @@ async function cmdSelftest() {
     ok('P88-AC5: строка возврата несёт ticksPerSec и healthySeconds — выборка растёт сама',
       rearmLines.every((d) => /ticksPerSec=\d+/u.test(d.detail ?? '') && /healthySeconds=\d+\/1/u.test(d.detail ?? '')),
       rearmLines.map((d) => d.detail).join(' || '));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // 🔴 `bugs/111` — ЗАЩИТА НЕ СМЕЕТ СРАБАТЫВАТЬ ЭХОМ СОБСТВЕННОГО СПАСЕНИЯ
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // НАЙДЕНО ЖИВЫМ ПРОГОНОМ 2026-09-07, не чтением: взведение 10:11:59.776 → трип 10:11:59.777,
+  // `progressSilenceMs 6754.37` при уставке 1046, рука 1 не нашла ни одного образа прожига.
+  // Отказ был ОДИН, счётчик показал ДВА.
+  //
+  // ПОЧЕМУ ЭТОГО НЕ ЛОВИЛ СОСЕДНИЙ БЛОК «Ш5 АПВ» (и это не его вина, а разница входов): там
+  // тишина идёт по входу 1, а сигналы живости ВОЗОБНОВЛЯЮТСЯ — `spawnFn` руки 2 включает подачу
+  // обратно. У входа 2 возобновлять НЕКОМУ: прожиг убит рукой 1, и писать в файл сердцебиения
+  // больше некому по построению. Поэтому эхо живёт только на входе 2, и блок обязан быть свой.
+  //
+  // ФИКСТУРА ВОСПРОИЗВОДИТ ЖИВОЙ ПУТЬ ДОСЛОВНО В ДВУХ МЕСТАХ, и оба важны:
+  //   · `existsFn: () => true` — файл сердцебиения ПЕРЕЖИВАЕТ убитый прожиг. Его снимает `.cu` при
+  //     ШТАТНОМ выходе, а рука 1 прожиг убивает — снимать некому. Значит ворота входа 2
+  //     (`verdict.cause === 'progress-stall' && !burnInFlight()`) на этом пути молчат, и надеяться
+  //     на них нельзя: сторож, читающий труп как живого, — оплаченный класс.
+  //   · удары 0x01 идут ВСЁ ВРЕМЯ — иначе трипнул бы вход 1 и опыт мерил бы не то.
+  {
+    const dgram = await import('node:dgram');
+    const os = await import('node:os');
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-echo-'));
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    let readyPort = null;
+    let handSpawns = 0;
+    let feedProgress = true;
+    const sender = dgram.createSocket('udp4');
+    const receipt = '{"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,"ms":1870}';
+    const judgeDone = runJudge({
+      beatPort: 0, armNMs: 60, armMMs: 200, burnPid: 31337, journalPath, seconds: 5,
+      progressFile: path.join(tmp, 'burn-progress.txt'),
+      existsFn: () => true,             // ← файл пережил убитый прожиг, как на живом пути
+      healthySeconds: 1, healthyTicksPerSec: 40,
+      spawnSyncFn: () => ({ status: 0 }),
+      killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
+      // Рука 2 отработала — но прогресс НЕ возобновляется: прожиг мёртв. В этом вся разница
+      // с блоком «Ш5 АПВ», и потому `feedProgress` здесь обратно НЕ включается.
+      spawnFn: () => { handSpawns += 1; return { pid: 4242, unref() {} }; },
+      isAliveFn: () => true,
+      readLinesFn: () => Array.from({ length: handSpawns }, () => receipt),
+      onReady: ({ port }) => { readyPort = port; },
+    });
+    await new Promise((res) => { setTimeout(res, 50); });
+    const feeder = setInterval(() => {
+      if (!readyPort) return;
+      sender.send(Buffer.from([0x01]), readyPort, '127.0.0.1');                    // вход 1 — всегда жив
+      if (feedProgress) sender.send(Buffer.from([0x02]), readyPort, '127.0.0.1');  // вход 2 — до остановки прожига
+    }, 5);
+    await new Promise((res) => { setTimeout(res, 250); });
+    feedProgress = false;               // прожиг встал → через 200 мс трип progress-stall, и больше НИКОГДА
+    const r = await judgeDone;
+    clearInterval(feeder);
+    sender.close();
+    const lines = readFileSync(journalPath, 'utf8').trim().split('\n');
+    const recs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+    // 🔴 ГЛАВНАЯ СТРОКА. Отказ ОДИН — значит и срабатывание одно. Без правки взведение возвращает
+    // судью на пост с вердиктом, снятым ДО сброса, и он бьёт по трупу в тот же такт: 2 и больше.
+    ok('bugs/111: отказ входа 2 ОДИН — срабатывание тоже одно, эха собственного спасения нет',
+      r.trips === 1, `срабатываний ${r.trips} · перевзведений ${r.rearms} · вышел неперевзведённым: ${r.tripped}`);
+    // Защита при этом ЖИВА и вернулась на пост — иначе «одно срабатывание» означало бы просто
+    // вышедшего судью, а это совсем другой (и худший) исход.
+    ok('bugs/111: судья вернулся на пост и досидел окно — одно срабатывание это НЕ выход защиты',
+      r.rearms === 1 && r.tripped === false, `перевзведений ${r.rearms} · вышел неперевзведённым: ${r.tripped}`);
+    // ⚡ ПРЯМОЕ ВЫСКАЗЫВАНИЕ ДЕФЕКТА, а не только его следствие: между возвратом на пост и следующим
+    // намерением бить обязан пройти хотя бы один ЧЕСТНЫЙ такт. На живом прогоне 07.09 их разделяла
+    // ОДНА миллисекунда. Порог 50 мс — с запасом ниже такта судьи (60 мс уставки), то есть
+    // «в том же такте» и «через такт» им различаются, а дрожь планировщика — нет.
+    const rearmAts = recs.filter((d) => d.phase === 'rearm' && d.action === 'rearm').map((d) => Date.parse(d.at));
+    const intentAts = recs.filter((d) => d.phase === 'intent').map((d) => Date.parse(d.at));
+    const echoes = intentAts.filter((t) => rearmAts.some((rt) => t - rt >= 0 && t - rt < 50));
+    ok('bugs/111: ни одно намерение бить не стоит в том же такте, что и возврат на пост',
+      echoes.length === 0,
+      `намерений ${intentAts.length} · возвратов ${rearmAts.length} · в одном такте с возвратом: ${echoes.length}`);
+    // И причина единственного срабатывания названа правильно: это вход 2, а не сбившийся вход 1.
+    // Без этой строки блок прошёл бы и на фикстуре, где вход 2 не участвовал вовсе.
+    ok('bugs/111: сработал именно вход 2 — причина progress-stall, а не beat-silence',
+      recs.some((d) => d.phase === 'intent' && d.cause === 'progress-stall')
+      && !recs.some((d) => d.phase === 'intent' && d.cause === 'beat-silence'),
+      `причины намерений: ${recs.filter((d) => d.phase === 'intent').map((d) => d.cause).join(',') || '—'}`);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════════
