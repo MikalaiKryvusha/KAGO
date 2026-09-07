@@ -240,6 +240,21 @@ function main(argv) {
   if (entryUnguarded) process.stderr.write(entryCheck.stdout || entryCheck.stderr || '');
 
 // -------------------------------------------------------------------------------------------------
+// ШЕСТЫЕ-БИС: КАЖДЫЙ ПРИБОР-СЕРВЕР ОТВЕЧАЕТ НА `--help` И ВЫХОДИТ САМ (слово владельца 08.09)
+//
+// Прибор, который поднимает сервер, на `--help` МОЛЧА НАЧИНАЛ РАБОТУ: `run-dashboard.mjs` занимал
+// порт 7311, открывал окно и держал вызывающего навсегда, `review.mjs` уходил кодом 2. Спрашивающий
+// «что ты умеешь» получал зависание, неотличимое от поломки. Владелец: *«Моя ошибка — чини. Завтра
+// ты опять её допустишь. Она не на тебя должна опираться, а на код»*. Эти ворота — код, а не память
+// агента, и судят они ПРОГОНОМ под таймаутом: признак справки, вычитанный из исходника, был бы той
+// же ложью, что «ветка написана, но стоит не первой». Долг замораживается в
+// `decisions/help-guard-baseline.json` и может только убывать.
+// -------------------------------------------------------------------------------------------------
+  const helpCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'help-guard.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const helpMute = helpCheck.status !== 0;
+  if (helpMute) process.stderr.write(helpCheck.stdout || helpCheck.stderr || '');
+
+// -------------------------------------------------------------------------------------------------
 // СЕДЬМЫЕ ВОРОТА: НИ ОДИН БЛОК НЕ НАПИСАН ЧУЖИМ ДИАЛЕКТОМ `ok` (`bugs/106`, 2026-09-05)
 //
 // В проекте два законных диалекта помощника: `ok(имя, cond, подробность)` и `ok(имя, got, want)`.
@@ -278,11 +293,12 @@ function main(argv) {
   console.log(`молитва вверху канона: ${prayerDrifted ? 'РАЗОШЛАСЬ — node tools/prayer.mjs --apply' : (prayerCheck.stdout || '').trim() || 'совпадает с источником'}`);
   console.log(`декларация угроз сторожей: ${guardsUndeclared ? 'КРАСНО — node tools/guard-lint.mjs' : (guardCheck.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'чисто'}`);
   console.log(`сторож входа приборов: ${entryUnguarded ? 'КРАСНО — node tools/entry-guard-lint.mjs' : (entryCheck.stdout || '').split('\n')[0] || 'чисто'}`);
+  console.log(`справка у серверов: ${helpMute ? 'КРАСНО — node tools/help-guard.mjs' : (helpCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`диалект ok в батареях: ${dialectMixed ? 'КРАСНО — node tools/assert-dialect-lint.mjs' : (dialectCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`согласие беклога: ${backlogSplit ? 'КРАСНО — node tools/backlog-truth-lint.mjs --report' : (backlogCheck.stdout || '').trim().split('\n').pop() || 'чисто'}`);
   console.log();
   return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared
-    && !entryUnguarded && !dialectMixed && !backlogSplit ? 0 : 1;
+    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
