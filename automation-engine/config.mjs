@@ -337,6 +337,33 @@ export const VF_TABLE_DRIFT_MHZ_PER_C = -1.7;
 export const SESSION_MAX_DEPTH_BEYOND_KNOWN_MV = 30;
 
 /**
+ * ⚡ ЧЕМ КОНЧАЕТСЯ ЧЕРЕДА СПАСЕНИЙ НА КАРТЕ, КОТОРАЯ НЕ ОЖИВАЕТ — РЕШЕНИЕ ВЛАДЕЛЬЦА 2026-09-07.
+ *
+ * `interviews/027` Q1, его собственный вариант, дословно:
+ *
+ *   *«не две попытки, а три, и после трёх попыток — пауза в секунду, и второй раунд частых трёх
+ *    попыток. И потом ещё секунда таймаут — и только потом закрываем прогон. Как бы пытаемся
+ *    спасти.»*
+ *
+ * Разбор задачи с числами — `bugs/108`: на карте, чей удар живости не вернулся никогда, система
+ * оказалась без условия останова (спасение → возврат на пост → через 60 мс снова спасение), и
+ * профиль `strangle` дал 94 срабатывания против восьми, закрыв одну частоту из трёх.
+ *
+ * 🔴 ЭТО НЕ ЛИМИТ СПАСЕНИЙ. Владелец разрешил их «сколько угодно» (`interviews/024` = E), и это не
+ * пересматривается: ограничивается не число спасений, а РАБОТА, ПЕРЕСТАВШАЯ БЫТЬ РАБОТОЙ. Счёт
+ * ведётся только по спасениям ПОДРЯД, между которыми не сгорело ни одной ступени; сгоревшая ступень
+ * обнуляет его, потому что полоса продвинулась.
+ *
+ * Второй раунд — это его «как бы пытаемся спасти»: одна пауза даёт карте шанс, которого версия
+ * «столько-то подряд и стоп» ей не давала.
+ *
+ * ⚠️ ЧИСЛА ЗДЕСЬ — СЛОВО ВЛАДЕЛЬЦА, А НЕ ЗАМЕР, и правятся только его словом.
+ */
+export const RESCUE_ROUND_SIZE = 3;
+export const RESCUE_ROUNDS = 2;
+export const RESCUE_ROUND_PAUSE_MS = 1000;
+
+/**
  * ⚠️ **SUPERSEDED 2026-08-15 by `DESCENT_ZONES` below — kept, not deleted, and the reason is stated
  * here rather than left to be rediscovered.** The owner replaced this rule the same day with a ladder
  * keyed by DEPTH FROM STOCK instead of by an absolute voltage (`GOAL.md` → «📐 ЛЕСТНИЦА ШАГОВ
@@ -1190,6 +1217,9 @@ export default Object.freeze({
   ATOM_RED_BLOCKS_IN_JOURNAL,
   VF_TABLE_DRIFT_MHZ_PER_C,
   SESSION_MAX_DEPTH_BEYOND_KNOWN_MV,
+  RESCUE_ROUND_SIZE,
+  RESCUE_ROUNDS,
+  RESCUE_ROUND_PAUSE_MS,
   FAST_DESCENT_FLOOR_MV,
   DESCENT_ZONES,
   SWEEP_PROBE_SECONDS,
