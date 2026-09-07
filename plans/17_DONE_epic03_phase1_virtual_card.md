@@ -5,7 +5,12 @@
 > **Parent:** `plans/16_EPIC_virtual_gpu_bench.md` — phase 1. Evidence base: `researches/10` (the
 > seams, the industry practice, the doubles already in the tree) · `profile-manager.mjs` (the two
 > interfaces being implemented) · `curves/*.json` (the geometry, already measured)
-> **Status:** 🔲 open · **ZERO GPU WRITES for the whole phase** — every line here runs offline
+> **Статус:** ✅ **ЗАКРЫТА — свидетель: коммит `bc1bf5f` «docs(bugs/25): ревизия беклога — 8 тегов
+> DONE, каждый с ДВУМЯ свидетелями».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем
+> `bugs/25` п.4; расхождение всплыло после того, как словарь сторожа научился читать `open` в любом
+> регистре. Прежняя строка — ниже, дословно.
+>
+> **Прежняя строка статуса (устарела):** 🔲 open · **ZERO GPU WRITES for the whole phase** — every line here runs offline
 > **Outbound:** the harness row → `AGENT_GUIDE.md` · `benches/` → `PROJECT_STRUCTURE_EXTERNAL_MAP.md` ·
 > the virtual card as a BACKEND and not a new writer → `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` (R1/R2) ·
 > closure → `plans/16` §4, then the phase-2 operational plan

@@ -6,7 +6,11 @@
 > **Parent:** `plans/16_EPIC_virtual_gpu_bench.md` — phase 2. Evidence base: `researches/10` §4.2 (the
 > model and what it omits) · `researches/02` (the physics it must not contradict) · `plans/17` (the
 > card this fills the `fiction` block of)
-> **Status:** 🔲 open · **ZERO GPU WRITES** · no owner needed
+> **Статус:** ✅ **ЗАКРЫТА — свидетель: коммит `bc1bf5f` «docs(bugs/25): ревизия беклога — 8 тегов
+> DONE, каждый с ДВУМЯ свидетелями».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем
+> `bugs/25` п.4. Прежняя строка — ниже, дословно.
+>
+> **Прежняя строка статуса (устарела):** 🔲 open · **ZERO GPU WRITES** · no owner needed
 > **Outbound:** the outcome vocabulary → `plans/15` §4.3–4.4 (the sweep engine consumes it) · the
 > provability boundary in reports → `TESTING_FRAMEWORK.md` · closure → `plans/16` §4
 

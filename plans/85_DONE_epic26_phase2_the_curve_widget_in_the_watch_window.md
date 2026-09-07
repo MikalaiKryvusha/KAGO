@@ -4,7 +4,11 @@
 > в визуализаторе. Это тоже оффлайн. Сделаем MVP.»*)
 > **Parent:** `plans/26_EPIC_curve_visualiser.md` — phase 2 «Виджет кривой в окне наблюдения
 > (переключаемый)», gates `E26-AC1 · E26-AC2 · E26-AC4 · виден живой прогон` · `ideas/05` (the order)
-> **Status:** 🟢 planned 2026-09-04 01:37 +03:00 · **MVP EXECUTED 2026-09-04 02:0x +03:00** — Ш1…Ш5 closed,
+> **Статус:** ✅ **ЗАКРЫТА — свидетель: коммит `a3d8aab` «feat(кривая, plans/86): вердикты владельца
+> по виджету исполнены».** Строка приведена в согласие с тегом файла 2026-09-07 сторожем `bugs/25`
+> п.4. Прежняя строка — ниже, дословно.
+>
+> **Прежняя строка статуса (устарела):** 🟢 planned 2026-09-04 01:37 +03:00 · **MVP EXECUTED 2026-09-04 02:0x +03:00** — Ш1…Ш5 closed,
 > Ш6 observation done (two renders looked at, live probe, hashes equal), papers at the session's
 > closure · ✅ **DONE 2026-09-04 (session 80): the owner LOOKED** — three answers plus two verdicts
 > on what he saw, all executed the same session (`homeworks/06`, §6 below)

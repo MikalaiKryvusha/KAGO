@@ -1,6 +1,12 @@
 # Bug 16 — rungs planned against a COLD table while the card warms under its own burns
 
-**Status:** 🟡 partially fixed — the first fix was REFUTED by the live run and the diagnosis corrected
+**Статус:** ✅ **ЗАКРЫТ — свидетель: коммит `109a9b8` «chore(ревизия беклога): bugs/16 закрыт DONE —
+шапка „partially“ отстала от собственного тела».** Строка приведена в согласие с тегом файла
+2026-09-07 сторожем `bugs/25` п.4. Расхождение всплыло только после того, как словарь сторожа
+научился читать 🟡 и 🔧 как ОТКРЫТОЕ состояние — до этого грубый словарь его маскировал.
+Прежняя строка — ниже, дословно.
+
+> **Прежняя строка статуса (устарела):** 🟡 partially fixed — the first fix was REFUTED by the live run and the diagnosis corrected
 (2026-08-16 14:4x +03:00). Read «The fix that did NOT work» before anything else.
 **Version/build:** `main` @ `6f1ec41` · **When/context:** revealed by the FIRST full live sweep of the
 project — the owner's minimal smoke run, band 2887…2820 MHz, session 29.

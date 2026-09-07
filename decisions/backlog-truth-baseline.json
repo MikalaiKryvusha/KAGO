@@ -3,55 +3,7 @@
   "measuredAt": "2026-09-07",
   "known": [
     {
-      "id": "bugs/26_the_rehearsal_stand_ignores_the_write_shape_so_the_lower_half_of_the_band_is_never_rehearsed.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "bugs/63_the_ratchet_compares_a_cold_measurement_with_a_hot_one_and_takes_back_45_mv.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "bugs/65_the_virtual_evening_has_no_window_the_owner_saw_nothing.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "bugs/96_one_run_scatters_its_evidence_over_six_places_so_the_summary_can_report_success_while_the_driver_screamed.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "bugs/98_applying_the_same_profile_twice_erases_the_undervolt_and_reports_success.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "bugs/99_the_worst_case_basis_pushed_the_shipped_vector_over_the_cards_envelope_and_the_profile_can_no_longer_be_applied.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "plans/01_EPIC_kago_orchestrator.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "plans/10_shell_improvements_folder_tray_menu.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "plans/26_EPIC_curve_visualiser.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "plans/47_EPIC_the_descent_follows_the_card.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "plans/52_epic51_phase1_the_death_watch.md",
-      "kind": "no-tag-done-line"
-    },
-    {
       "id": "plans/54_team_deployment_analysis_and_design.md",
-      "kind": "no-tag-done-line"
-    },
-    {
-      "id": "plans/58_epic51_phase5_the_armed_watch.md",
       "kind": "no-tag-done-line"
     }
   ]
