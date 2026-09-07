@@ -10827,6 +10827,9 @@ async function mainBand(argv, arg) {
   // is a separate acceptance step (§4.7), which is exactly the split researches/02 §6 prescribes.
   const seconds = Number(arg('seconds', 10));
   const dryRun = argv.includes('--dry-run');
+  // ⚡ `bugs/112`: воспроизводимый вывод плана — живые чтения карты опускаются, чтобы сухой прогон
+  // можно было сличать с самим собой. Умолчание не тронуто: флаг нужен машине, не глазу владельца.
+  const stableOut = argv.includes('--stable');
 
   // THE DESCENT POLICY AS ARGUMENTS (the owner, 2026-08-15). Defaults come from `config.mjs`, which
   // stays the one place the numbers LIVE; these let a run change them without an edit. They are read
@@ -10940,9 +10943,22 @@ async function mainBand(argv, arg) {
     // ambiguity `bugs/02` was made of.
     if (serving) {
       console.log(`          ${sessionDepthLine(composed.sessionDepth)}`);
+      // ⚡ `bugs/112`: ЖИВОЕ ЧТЕНИЕ ОТДЕЛЕНО ОТ ПОЛИТИКИ — но ТОЛЬКО по флагу, и вот почему.
+      //
+      // «Утечка потолка» и «пол железа» читаются с ЖИВОЙ карты и едут с её текущей частотой: два
+      // сухих прогона ПОДРЯД на одном коде расходятся ровно на этой строке (замер 07.09: 5 МГц /
+      // 2172 против 20 / 2187). Пока они стоят в одной строке с выведенной из политики ФОРМОЙ,
+      // сухой прогон нельзя сличать с самим собой — то есть он не годится в эталон регрессии, чего
+      // от него требует `plans/89` AC1.
+      //
+      // 🔴 ПО УМОЛЧАНИЮ ВЫВОД НЕ ТРОНУТ НИ НА БАЙТ. Эту строку читает ГЛАЗ ВЛАДЕЛЬЦА перед
+      // прогоном, а на том, что он видит, агент не экономит (граница молитвы). Флаг `--stable`
+      // опускает живые чтения и нужен машине — сличению эталонов, — а не человеку.
+      const liveTail = shapeChoice.shape === 'raise-and-cap' ? ''
+        : ` · утечка потолка ${vec.capLeakMhz} МГц, пол железа ${vec.lowestEnforceableCapMhz} МГц`;
       console.log(`          ФОРМА: ${shapeChoice.shape === 'raise-and-cap' ? 'ОТГРУЖАЕМАЯ (подъём с потолком)' : 'равномерный подъём'}`
         + ` · потолок держит ${shapeChoice.heldBy}`
-        + `${shapeChoice.shape === 'raise-and-cap' ? '' : ` · утечка потолка ${vec.capLeakMhz} МГц, пол железа ${vec.lowestEnforceableCapMhz} МГц`}`);
+        + `${stableOut ? '' : liveTail}`);
     }
   }
   console.log('');
@@ -12203,6 +12219,9 @@ async function main(argv) {
   if (!Number.isFinite(capMhz)) { console.error('ОШИБКА: --search требует --cap <МГц>'); return 2; }
   const seconds = Number(arg('seconds', 30));
   const dryRun = argv.includes('--dry-run');
+  // ⚡ `bugs/112`: воспроизводимый вывод плана — живые чтения карты опускаются, чтобы сухой прогон
+  // можно было сличать с самим собой. Умолчание не тронуто: флаг нужен машине, не глазу владельца.
+  const stableOut = argv.includes('--stable');
 
   // THE SET IS THE DEFAULT, and the narrow mode has to be asked for by name. A threshold found with
   // one program is that program's threshold: researches/02 §4 measured Vmin spreading up to 100 mV

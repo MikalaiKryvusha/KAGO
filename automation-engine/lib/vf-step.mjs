@@ -2789,7 +2789,8 @@ export async function selfTest() {
   // функцией по фикстурной кривой — фейк не может принести свою (инвариант I2 эпика 59).
   {
     const { tmpdir } = await import('node:os');
-    const { writeFileSync: wf, mkdirSync: mkd } = await import('node:fs');
+    // `mkdirSync` больше не нужен: песочницу создаёт сам `mkdtempSync` (`bugs/102`, десятая фикстура).
+    const { writeFileSync: wf, mkdtempSync } = await import('node:fs');
     const { join: j } = await import('node:path');
     const N_PTS = 127;
     // Поля — РОВНО те, что читает voltageForClock (i · mv · microVolts · freqKhz · mhz): фикстура,
@@ -2799,8 +2800,19 @@ export async function selfTest() {
     }));
     const POINT = 100;
     const CAP = basePoints[POINT].mhz + 30; // 2030: подъём +30 доводит испытуемую точку ровно до потолка
-    const sandbox = j(tmpdir(), `vfstep-port-${process.pid}`);
-    mkd(sandbox, { recursive: true });
+    // ⚡ `bugs/102`, ДЕСЯТАЯ ФИКСТУРА ЭТОГО КЛАССА — найдена батареей 2026-09-07.
+    //
+    // Здесь стояло `j(tmpdir(), \`vfstep-port-${process.pid}\`)` — песочница по PID (имя врало ещё
+    // и «port»). Windows номера процессов ПЕРЕИСПОЛЬЗУЕТ, а батарея запускает полсотни процессов
+    // подряд: набор попал в чужую песочницу и нашёл там файл архива со штампом прошлого прогона.
+    // Блок «первый прожиг ничего не архивирует» краснел, потому что архивировать БЫЛО что.
+    //
+    // Симптом дословно повторил `bugs/102`: КРАСНЫЙ в батарее, ЗЕЛЁНЫЙ в одиночку (проверено двумя
+    // прогонами подряд, код 0 оба раза). Тот тикет перевёл на `mkdtempSync` девять фикстур,
+    // ключевавшихся по pid; эта уцелела, потому что её имя говорило «port». Диагноз занял минуты
+    // ровно потому, что `bugs/102` научил батарею СОХРАНЯТЬ вывод красного набора
+    // (`runs/selftest/<штамп>/vfstep.log`) — без этого улика умерла бы вместе с прогоном.
+    const sandbox = mkdtempSync(j(tmpdir(), 'vfstep-selftest-'));
     const samplerPath = j(sandbox, 'sampler.jsonl');
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
