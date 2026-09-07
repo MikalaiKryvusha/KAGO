@@ -68,6 +68,9 @@
 // is inside the file rather than in a list of filenames, so a copy or a rename keeps its exemption.
 
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+// ⚡ E3-AC3: единица воспроизведения — зерно + коммит + хеш профиля (`provenanceLine` ниже).
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
@@ -102,6 +105,55 @@ export const MODULE_URL = import.meta.url;
 export const PROVABILITY_LINE =
   'ВИРТУАЛЬНАЯ КАРТА — ВЫМЫСЕЛ. Её числа не являются утверждением о живой карте: '
   + 'зелёный прогон здесь доказывает ЛОГИКУ движка, а не кремний, драйвер или поведение закрепления частоты.';
+
+/**
+ * ⚡ ЕДИНИЦА ВОСПРОИЗВЕДЕНИЯ — ТРИ ВЕЩИ В ОДНОЙ СТРОКЕ (E3-AC3, практика TigerBeetle,
+ * `researches/10` §2.1). Заведено 2026-09-07 приёмкой эпика 03: она нашла, что вторая половина
+ * критерия не выполнена — воспроизводимость по зерну была доказана блоком, а сам ОТЧЁТ не нёс ни
+ * коммита, ни хеша профиля карты.
+ *
+ * 🔴 ПОЧЕМУ ТРЁХ, А НЕ ОДНОГО ЗЕРНА. Зерно воспроизводит прогон только вместе с кодом, который его
+ * читает, и с картой, по которой он бежал. Отчёт с одним зерном обещает воспроизводимость, которой
+ * не даёт: тот же посев на другом коммите или на подправленном профиле даст другой прогон, и
+ * расхождение спишут на «плавает». Три вещи вместе называют прогон ОДНОЗНАЧНО.
+ *
+ * Коммит берётся у git и НЕ выдумывается: не отдал — строка честно говорит «неизвестен». Грязное
+ * дерево называется отдельно (`+грязь`): прогон на незакоммиченных правках воспроизвести нельзя, и
+ * молчать об этом хуже, чем признать.
+ *
+ * @param {{seed?: number|string|null, cardPath?: string|null, cardSha?: string|null, pinnedByCommit?: boolean}} a
+ * @returns {string}
+ */
+export function cardFingerprint(card) {
+  // Хеш берётся с ЗАГРУЖЕННОГО профиля, а не с файла: так он не зависит от того, откуда карту
+  // прочитали, и покрывает случай, когда профиль собран в памяти (генерируемые карты полигона).
+  try { return createHash('sha256').update(JSON.stringify(card)).digest('hex').slice(0, 12); }
+  catch { return 'не сериализуется'; }
+}
+
+export function provenanceLine({ seed = null, cardPath = null, cardSha = null, pinnedByCommit = false } = {}) {
+  let commit = 'неизвестен';
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    commit = dirty ? `${sha}+грязь` : sha;
+  } catch { /* без git — «неизвестен», и это честнее выдуманного */ }
+  // Набор, гоняющий ДЕСЯТКИ карт с зашитыми в код зёрнами, не имеет «своего зерна» и «своего
+  // профиля» — и притворяться, что имеет, значило бы напечатать число, которое ничего не называет.
+  // Честная форма для него другая: коммит фиксирует И зёрна, И карты, потому что и то и другое
+  // лежит в дереве. Три вещи никуда не делись — они просто названы одной, которая их определяет.
+  if (pinnedByCommit) {
+    return `ЕДИНИЦА ВОСПРОИЗВЕДЕНИЯ: коммит ${commit} — зёрна и профили карт ЗАФИКСИРОВАНЫ кодом `
+      + 'и деревом этого коммита, отдельных чисел у набора нет';
+  }
+  let profile = cardSha ?? 'не назван';
+  if (!cardSha && cardPath) {
+    try {
+      profile = createHash('sha256').update(readFileSync(cardPath)).digest('hex').slice(0, 12);
+    } catch { profile = 'не прочитан'; }
+  }
+  return `ЕДИНИЦА ВОСПРОИЗВЕДЕНИЯ: зерно ${seed ?? 'не названо'} · коммит ${commit} · профиль карты ${profile}`;
+}
 
 // =================================================================================================
 // 1. The card profile — a FILE, and a malformed one is refused rather than half-loaded
@@ -2912,6 +2964,28 @@ export async function selfTest() {
   } catch (e) { genWhy = e.message; }
   check('ОБЩНОСТЬ: другая геометрия прогоняется тем же кодом', genOk, genWhy);
 
+  // ---- 11b. E3-AC3: ЕДИНИЦА ВОСПРОИЗВЕДЕНИЯ — ТРИ ВЕЩИ, А НЕ ОДНО ЗЕРНО ---------------------
+  //
+  // Приёмка эпика 03 (2026-09-07) нашла, что критерий выполнен НАПОЛОВИНУ: побайтовая
+  // воспроизводимость по зерну была доказана блоком, а сам ОТЧЁТ не нёс ни коммита, ни хеша
+  // профиля карты. Зерно без них обещает воспроизводимость, которой не даёт: тот же посев на
+  // другом коммите или на подправленном профиле даст другой прогон.
+  {
+    const line = provenanceLine({ seed: 20260815, cardSha: cardFingerprint(CARD) });
+    check('E3-AC3: строка происхождения называет ВСЕ ТРИ вещи — зерно, коммит, профиль карты',
+      /зерно 20260815/u.test(line) && /коммит \S+/u.test(line) && /профиль карты [0-9a-f]{12}/u.test(line), line);
+    // 🔴 ГЛАВНОЕ: отпечаток обязан РАЗЛИЧАТЬ карты. Хеш, одинаковый у разных профилей, — это не
+    // происхождение, а украшение, и он неотличим от отсутствующего.
+    const other2 = buildFiction(otherGeometryCard(), { seed: 7 });
+    check('E3-AC3: отпечаток профиля РАЗЛИЧАЕТ карты — иначе он не называет ничего',
+      cardFingerprint(CARD) !== cardFingerprint(other2), `${cardFingerprint(CARD)} ↔ ${cardFingerprint(other2)}`);
+    // И форма для наборов, гоняющих десятки карт с зашитыми зёрнами: она НЕ притворяется, что у
+    // набора есть своё зерно, а говорит, что и зёрна, и карты фиксирует коммит.
+    const pinned = provenanceLine({ pinnedByCommit: true });
+    check('E3-AC3: форма набора не выдумывает зерна, а называет коммит как то, что фиксирует всё',
+      /коммит \S+/u.test(pinned) && /ЗАФИКСИРОВАНЫ/u.test(pinned) && !/зерно \d/u.test(pinned), pinned);
+  }
+
   // ---- 12. THE FICTION: the edge exists, is on the grid, and is monotone (B2-AC1)
   const F = CARD.fiction;
   check('КРАЙ: у каждой частоты он есть', F.edge.length === CARD.frequencyGridMhz.length,
@@ -3566,6 +3640,7 @@ function show(card) {
   if (!F.edge) {
     console.log('  вымысел (края)        (пусто — края отказа приходят в фазе 2)');
     console.log(`\n${PROVABILITY_LINE}`);
+    console.log(provenanceLine({ seed: card?.fiction?.noise?.seed ?? card?.seed ?? null, cardSha: cardFingerprint(card) }));
     return;
   }
 
@@ -3592,6 +3667,7 @@ function show(card) {
   }
   console.log('');
   console.log(`\n${PROVABILITY_LINE}`);
+  console.log(provenanceLine({ seed: card?.fiction?.noise?.seed ?? card?.seed ?? null, cardSha: cardFingerprint(card) }));
 }
 
 async function main() {
@@ -3641,6 +3717,7 @@ async function main() {
     console.log(`Ловушек ${TRAPS.length}: класса A (судятся сегодня) ${byClass.A ?? 0}, `
       + `класса B (утверждение ждёт plans/15) ${byClass.B ?? 0}. Отказов ${failed}.`);
     console.log(`\n${PROVABILITY_LINE}`);
+    console.log(provenanceLine({ seed: card?.fiction?.noise?.seed ?? card?.seed ?? null, cardSha: cardFingerprint(card) }));
     process.exit(failed ? 1 : 0);
   }
 

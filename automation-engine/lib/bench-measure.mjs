@@ -57,7 +57,7 @@
 
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadCard, GOLDEN_CHECKSUM, PROVABILITY_LINE } from './virtual-gpu.mjs';
+import { loadCard, GOLDEN_CHECKSUM, PROVABILITY_LINE, provenanceLine } from './virtual-gpu.mjs';
 import { runSearch } from './trap-suite.mjs';
 
 const CARD_PATH = join('benches', 'cards', 'rtx5070ti.json');
@@ -236,6 +236,7 @@ export async function measure({ frequencies = [3090, 2842, 2400, 2002, 1702, 110
   console.log('  · стена по полосам — оценка обещает делимость, и её надо проверить');
 
   console.log(`\n${PROVABILITY_LINE}`);
+  console.log(provenanceLine({ pinnedByCommit: true }));
   return { ok: true, measuredRungs, fixture: fx };
 }
 

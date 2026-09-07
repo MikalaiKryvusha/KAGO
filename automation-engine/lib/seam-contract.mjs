@@ -58,7 +58,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import config from '../config.mjs';
 import {
-  loadCard, virtualCard, buildFiction, otherGeometryCard, GOLDEN_CHECKSUM, PROVABILITY_LINE,
+  loadCard, virtualCard, buildFiction, otherGeometryCard, GOLDEN_CHECKSUM, PROVABILITY_LINE, provenanceLine,
 } from './virtual-gpu.mjs';
 
 const CARD_PATH = join('benches', 'cards', 'rtx5070ti.json');
@@ -360,6 +360,7 @@ function report(results, virtualDone, liveDone) {
   console.log('«НЕ ПРОГОНЯЛАСЬ» — это честный ответ и единственный законный для живой стороны, пока живого '
     + 'прогона не было. Зелёной она от виртуального прогона не становится (E3-AC5).');
   console.log(PROVABILITY_LINE);
+  console.log(provenanceLine({ pinnedByCommit: true }));
   return { total: results.length, failed };
 }
 

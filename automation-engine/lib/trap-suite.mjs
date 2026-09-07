@@ -96,7 +96,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import config from '../config.mjs';
-import { loadCard, virtualCard, TRAPS, GOLDEN_CHECKSUM, PROVABILITY_LINE, MODULE_URL } from './virtual-gpu.mjs';
+import { loadCard, virtualCard, TRAPS, GOLDEN_CHECKSUM, PROVABILITY_LINE, provenanceLine, MODULE_URL } from './virtual-gpu.mjs';
 import { searchEdge, sweepRange } from '../engine.mjs';
 // СУДЬЯ ВЫДАННОЙ ЧАСТОТЫ — ТОТ ЖЕ, ЧТО У ЖИВОГО АТОМА, А НЕ ВТОРАЯ ЕГО КОПИЯ (`plans/45` шаг 1).
 // Стенд обязан приходить к тому же решению тем же путём: две реализации одного суждения — это пара
@@ -1318,6 +1318,7 @@ function report(results) {
     console.log('«ЖДЁТ» — это НЕ зелёный. Утверждение написано и будет прогнано, когда движок дорастёт до него.');
   }
   console.log(PROVABILITY_LINE);
+  console.log(provenanceLine({ pinnedByCommit: true }));
   return { total: results.length, failed, waiting };
 }
 
