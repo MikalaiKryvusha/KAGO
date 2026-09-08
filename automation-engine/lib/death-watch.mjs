@@ -56,6 +56,8 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 // главного модуля, при импорте он ничего не запускает.
 import { PROGRESS_POLL_MS } from './fuse.mjs';
 import { performance } from 'node:perf_hooks';
+// ⏱️ `bugs/128` — единственная дверь к разрешению таймера, с отказом от гашения фонового процесса.
+import { loadWinmm } from './timer-resolution.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -373,14 +375,9 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
 // 4. The floor run — both watchers side by side (P52-AC1, P52-AC2)
 // =================================================================================================
 
-function loadWinmm() {
-  const koffi = require('koffi');
-  const winmm = koffi.load('winmm.dll');
-  return {
-    begin: winmm.func('uint32_t timeBeginPeriod(uint32_t)'),
-    end: winmm.func('uint32_t timeEndPeriod(uint32_t)'),
-  };
-}
+// 🔴 `bugs/128`: определение УЕХАЛО в `timer-resolution.mjs` и там же вылечено — отказ от гашения
+// разрешения у фонового процесса. Здесь стояла первая из двух копий (вторая — в `fuse.mjs`).
+// Форма `{ begin, end }` сохранена, поэтому все места вызова ниже не тронуты. Импорт — вверху.
 
 async function cmdFloor({ seconds, tickMs, recordThresholdMs }) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');

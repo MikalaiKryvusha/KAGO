@@ -62,6 +62,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { isMainThread } from 'node:worker_threads';
+// ⏱️ `bugs/128` — единственная дверь к разрешению таймера, с отказом от гашения фонового процесса.
+import { loadWinmm } from './timer-resolution.mjs';
 
 export const FUSE_DIR = fileURLToPath(new URL('../../runs/death-watch/', import.meta.url));
 
@@ -2049,11 +2051,10 @@ async function cmdJitterFloor({ seconds, tickMs }) {
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
-function loadWinmm() {
-  const koffi = require('koffi');
-  const winmm = koffi.load('winmm.dll');
-  return { begin: winmm.func('uint32_t timeBeginPeriod(uint32_t)'), end: winmm.func('uint32_t timeEndPeriod(uint32_t)') };
-}
+// 🔴 `bugs/128`: определение УЕХАЛО в `timer-resolution.mjs` и там же вылечено. Здесь стояла
+// вторая копия той же пары (первая — в `death-watch.mjs`), и лекарство пришлось бы держать в
+// обеих. Форма `{ begin, end }` сохранена, поэтому места вызова не тронуты.
+// Импорт — вверху файла, рядом с остальными.
 
 // =================================================================================================
 // 4b. Loaded floor — the REAL rig: unarmed judge + live probe, load started by the operator
