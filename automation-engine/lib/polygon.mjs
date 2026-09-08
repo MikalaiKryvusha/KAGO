@@ -435,6 +435,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const num = (f, d) => { const i = argv.indexOf(f); return i !== -1 ? Number(argv[i + 1]) : d; };
   const str = (f, d) => { const i = argv.indexOf(f); return i !== -1 ? argv[i + 1] : d; };
   if (argv.includes('--selftest')) process.exit(cmdSelftest());
+  // ⚡ `bugs/118`: СПРАВКА СТОИТ ДО ПЕРВОЙ РАБОТЫ. Здесь её не было вовсе, и `--help` проваливался
+  // в `runBatch` с умолчаниями — то есть попытка УЗНАТЬ о приборе ЗАПУСКАЛА пакет из пяти
+  // виртуальных карт (поймано 2026-09-08: шесть процессов, снято `taskkill /T`).
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log('Использование: node automation-engine/lib/polygon.mjs [--count N] [--amplitude A] '
+      + '[--seed-base S] [--from МГц] [--to МГц] [--max-depth мВ] | --selftest\n'
+      + '  без флагов — пакет из 5 сгенерированных карт на двойнике (карта владельца НЕ трогается)\n'
+      + `  умолчания: --count 5 · --amplitude 0.7 · --seed-base 1000 · --from 2842 · --to 2812 · --max-depth 300\n`
+      + '  --selftest — батарея полигона');
+    process.exit(0);
+  }
   const batch = runBatch({
     count: num('--count', 5),
     amplitude: num('--amplitude', 0.7),
