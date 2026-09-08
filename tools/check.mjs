@@ -296,6 +296,11 @@ function main(argv) {
   const witnessCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'witness-status-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
   const witnessSplit = witnessCheck.status !== 0;
   if (witnessSplit) process.stderr.write(witnessCheck.stderr || witnessCheck.stdout || '');
+  // ⚡ `bugs/118` AC3: у прибора с командной строкой обязана быть ветка `--help`. СТАТИКОЙ, потому
+  // что прогон у приборов, пишущих в карту, сам является тем, чего мы избегаем.
+  const helpStaticCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'help-static-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const helpStaticMute = helpStaticCheck.status !== 0;
+  if (helpStaticMute) process.stderr.write(helpStaticCheck.stderr || helpStaticCheck.stdout || '');
 
   console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
   console.log(`проверено на порчу кодировки ${enc.scanned} текстовых файлов, `
@@ -308,10 +313,11 @@ function main(argv) {
   console.log(`диалект ok в батареях: ${dialectMixed ? 'КРАСНО — node tools/assert-dialect-lint.mjs' : (dialectCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`взведён ≠ доказан: ${armedUnproven ? 'КРАСНО — node tools/armed-proven-lint.mjs' : (armedCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`метка против свидетеля: ${witnessSplit ? 'КРАСНО — node tools/witness-status-lint.mjs --report' : (witnessCheck.stdout || '').split(String.fromCharCode(10))[0] || 'чисто'}`);
+  console.log(`справка у приборов, статика: ${helpStaticMute ? 'КРАСНО — node tools/help-static-lint.mjs --report' : (helpStaticCheck.stdout || '').split(String.fromCharCode(10))[0] || 'чисто'}`);
   console.log(`согласие беклога: ${backlogSplit ? 'КРАСНО — node tools/backlog-truth-lint.mjs --report' : (backlogCheck.stdout || '').trim().split('\n').pop() || 'чисто'}`);
   console.log();
   return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared
-    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit && !armedUnproven && !witnessSplit ? 0 : 1;
+    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit && !armedUnproven && !witnessSplit && !helpStaticMute ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
