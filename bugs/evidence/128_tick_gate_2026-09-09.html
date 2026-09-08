@@ -1,0 +1,112 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bugs/128 — такт чёрного ящика до и после</title>
+<style>
+  :root{--bg:#faf9f7;--fg:#1a1a1a;--dim:#6b6b6b;--line:#e2e0dc;--grid:#eceae6;
+        --bad:#c0392b;--good:#1e8449;--target:#b7791f;--burn:#f3f0e9;--card:#fff}
+  @media (prefers-color-scheme:dark){:root{--bg:#16161a;--fg:#ececec;--dim:#9a9a9a;--line:#2c2c33;
+        --grid:#26262c;--bad:#e57161;--good:#5cba82;--target:#d6a441;--burn:#1e1e24;--card:#1c1c22}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;padding:32px 24px 56px}
+  main{max-width:940px;margin:0 auto}
+  h1{font-size:23px;line-height:1.25;margin:0 0 6px;font-weight:650}
+  .sub{color:var(--dim);margin:0 0 26px;font-size:14px}
+  .verdict{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--good);
+           border-radius:8px;padding:14px 18px;margin:0 0 26px}
+  .verdict b{color:var(--good)}
+  figure{margin:0 0 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px}
+  svg{display:block;width:100%;height:auto}
+  .ax{fill:var(--dim);font-size:11px}
+  .tgt{fill:var(--target);font-size:11px}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin:10px 2px 30px}
+  .legend i{display:inline-block;width:22px;height:3px;vertical-align:middle;margin-right:7px;border-radius:2px}
+  table{border-collapse:collapse;width:100%;margin:0 0 12px;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.03em}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  td.b{font-weight:700}
+  h2{font-size:16px;margin:32px 0 10px}
+  .note{color:var(--dim);font-size:13.5px;margin:6px 0 0}
+  .src{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--dim);
+       background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 12px;
+       overflow-x:auto;white-space:pre}
+  ul{margin:8px 0 0;padding-left:20px}li{margin:5px 0}
+</style></head><body><main>
+
+<h1>Такт чёрного ящика: до починки и под горном после</h1>
+<p class="sub">Улика <code>bugs/128</code> · <code>plans/94</code> ворота P94-AC2 · 2026-09-09</p>
+
+<div class="verdict"><b>Ворота закрыты замером.</b> Под нагрузкой 90 секунд такт держит
+p90&nbsp;=&nbsp;2.68&nbsp;мс при цели ≤&nbsp;4&nbsp;мс. В записи смерти тот же
+судья, так же запущенный, давал p90&nbsp;=&nbsp;15.67&nbsp;мс.</div>
+
+<figure><svg viewBox="0 0 900 260" role="img" aria-label="такт судьи посекундно, до и после починки">
+  <rect x="55.438202247191015" y="16" width="566.2921348314607" height="214" fill="var(--burn)"/>
+  <line x1="46" y1="230" x2="886" y2="230" stroke="var(--grid)" stroke-width="1"/>
+  <text x="38" y="234" text-anchor="end" class="ax">0</text>
+  <line x1="46" y1="182.44444444444446" x2="886" y2="182.44444444444446" stroke="var(--grid)" stroke-width="1"/>
+  <text x="38" y="186.44444444444446" text-anchor="end" class="ax">4</text>
+  <line x1="46" y1="134.8888888888889" x2="886" y2="134.8888888888889" stroke="var(--grid)" stroke-width="1"/>
+  <text x="38" y="138.8888888888889" text-anchor="end" class="ax">8</text>
+  <line x1="46" y1="87.33333333333334" x2="886" y2="87.33333333333334" stroke="var(--grid)" stroke-width="1"/>
+  <text x="38" y="91.33333333333334" text-anchor="end" class="ax">12</text>
+  <line x1="46" y1="39.7777777777778" x2="886" y2="39.7777777777778" stroke="var(--grid)" stroke-width="1"/>
+  <text x="38" y="43.7777777777778" text-anchor="end" class="ax">16</text><line x1="46" y1="182.44444444444446" x2="886" y2="182.44444444444446" stroke="var(--target)" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="882" y="176.44444444444446" text-anchor="end" class="tgt">цель ворот: p90 ≤ 4 мс</text>
+  <path d="M46.0,199.3L55.4,199.3L64.9,198.0L74.3,188.3L83.8,189.7L93.2,45.1L102.6,41.0L112.1,40.6L121.5,40.5L130.9,39.3L140.4,40.3L149.8,41.3L159.3,38.1L168.7,39.9L178.1,40.6L187.6,40.1L197.0,41.7L206.4,39.1L215.9,40.0L225.3,39.4L234.8,39.1L244.2,41.1L253.6,39.8L263.1,39.2L272.5,38.5" fill="none" stroke="var(--bad)" stroke-width="2" />
+  <path d="M46.0,194.5L55.4,198.3L64.9,195.5L74.3,196.8L83.8,198.6L93.2,198.4L102.6,197.4L112.1,197.8L121.5,198.4L130.9,194.5L140.4,197.2L149.8,197.5L159.3,197.9L168.7,197.9L178.1,198.6L187.6,196.9L197.0,197.2L206.4,194.6L215.9,198.1L225.3,199.0L234.8,198.6L244.2,198.1L253.6,198.5L263.1,198.9L272.5,199.6L282.0,199.6L291.4,199.9L300.8,197.9L310.3,198.7L319.7,196.5L329.1,198.4L338.6,199.6L348.0,198.3L357.5,199.7L366.9,199.6L376.3,197.9L385.8,199.6L395.2,199.7L404.7,199.6L414.1,199.3L423.5,199.2L433.0,197.3L442.4,199.4L451.8,199.4L461.3,199.2L470.7,199.1L480.2,199.2L489.6,198.6L499.0,195.6L508.5,194.5L517.9,196.7L527.3,199.2L536.8,198.3L546.2,194.5L555.7,196.1L565.1,194.3L574.5,195.2L584.0,199.4L593.4,194.3L602.9,199.2L612.3,199.2L621.7,198.1L631.2,198.5L640.6,196.7L650.0,198.3L659.5,199.8L668.9,196.1L678.4,197.3L687.8,198.7L697.2,199.3L706.7,198.7L716.1,195.9L725.6,199.3L735.0,195.0L744.4,198.3L753.9,198.5L763.3,197.9L772.7,198.4L782.2,198.7L791.6,199.3L801.1,199.1L810.5,199.8L819.9,198.4L829.4,198.9L838.8,197.3L848.2,198.1L857.7,197.9L867.1,196.4L876.6,196.0L886.0,199.9" fill="none" stroke="var(--good)" stroke-width="2" />
+  
+  <text x="46" y="252" text-anchor="middle" class="ax">0</text>
+  <text x="187.57303370786516" y="252" text-anchor="middle" class="ax">15</text>
+  <text x="329.14606741573033" y="252" text-anchor="middle" class="ax">30</text>
+  <text x="470.7191011235955" y="252" text-anchor="middle" class="ax">45</text>
+  <text x="612.2921348314607" y="252" text-anchor="middle" class="ax">60</text>
+  <text x="753.8651685393259" y="252" text-anchor="middle" class="ax">75</text>
+  <text x="895.438202247191" y="252" text-anchor="middle" class="ax">90</text>
+  <text x="8" y="24" class="ax">мс</text>
+</svg></figure>
+<div class="legend">
+  <span><i style="background:var(--bad)"></i>до — запись смерти 17:53 (24 с)</span>
+  <span><i style="background:var(--good)"></i>после — 90 с, из них 60 под горном</span>
+  <span><i style="background:var(--target);height:0;border-top:2px dashed var(--target)"></i>цель ворот 4 мс</span>
+  <span><i style="background:var(--burn);border:1px solid var(--line)"></i>окно нагрузки</span>
+</div>
+
+<h2>Числа за весь прогон</h2>
+<table><thead><tr><th>прогон</th><th>тактов</th><th>медиана</th><th>p90</th><th>p99</th><th>max</th></tr></thead>
+<tbody><tr><td>до — запись смерти 17:53</td><td class="n">3 699</td><td class="n">2.52</td><td class="n b">15.67</td><td class="n">16.16</td><td class="n">46.37</td></tr><tr><td>после — под горном</td><td class="n">41 259</td><td class="n">2.03</td><td class="n b">2.68</td><td class="n">3.56</td><td class="n">10.28</td></tr></tbody></table>
+<p class="note">Все значения в миллисекундах, посчитаны из колец построчно.</p>
+
+<h2>Что видно на графике, и чего нагрузка объяснить не может</h2>
+<ul>
+  <li><b>Красная дорожка — ступенька, а не деградация.</b> Секунда 4 — 2,20 мс, секунда 6 — 15,34 мс.
+      Между ними один переход, промежуточных значений нет.</li>
+  <li><b>Такт не восстановился после конца прожига.</b> На 14-й секунде нагрузка ушла, а красная
+      дорожка осталась наверху до самой смерти на 24-й. Нагрузка так себя не ведёт.</li>
+  <li><b>Зелёная дорожка ровная ровно там, где красная сломалась</b> — и это при горне, которого
+      у красной уже не было.</li>
+</ul>
+
+<h2>Причина и лекарство</h2>
+<p>Windows 11 применяет к фоновому процессу EcoQoS, и в него входит
+<code>PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION</code>: запрос <code>timeBeginPeriod(1)</code>
+принимается и молча игнорируется. Судья и проба запускаются отсоединёнными, с
+<code>windowsHide: true</code> — то есть ровно так. Лекарство — явный отказ от гашения перед
+подъёмом, одно определение на проект в <code>lib/timer-resolution.mjs</code>.</p>
+<p class="note"><b>Почему это не поймали раньше:</b> <code>NtQueryTimerResolution</code> печатал
+0,5 мс на каждой секунде развала — он читает разрешение системы, а гасят его процессу.</p>
+
+<h2>Чего этот замер НЕ доказывает</h2>
+<ul>
+  <li>В карту за прогон не записано ничего — значит про запись и смерть он не говорит вовсе.</li>
+  <li>Провод входа 2 не был проведён, поэтому доля мощности не считалась: распределение эпизодов
+      (P94-AC4) этим прогоном не снято и требует горна с <code>--progress-file</code>.</li>
+  <li>Одна пара прогонов. Числа пересниматься обязаны.</li>
+</ul>
+
+<h2>Источники</h2>
+<div class="src">до:    runs/death-watch/2026-09-08T14-53-07-965Z-fuse-live-a.jsonl
+после: runs/death-watch/2026-09-08T22-40-46-780Z-loaded-floor-ring.jsonl</div>
+
+</main></body></html>
