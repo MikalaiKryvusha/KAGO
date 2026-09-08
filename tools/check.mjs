@@ -285,6 +285,12 @@ function main(argv) {
   if (backlogSplit) process.stderr.write(backlogCheck.stderr || backlogCheck.stdout || '');
   const dialectMixed = dialectCheck.status !== 0;
   if (dialectMixed) process.stderr.write(dialectCheck.stderr || dialectCheck.stdout || '');
+  // ⚡ `bugs/117` / `plans/91` Ш6: «ВЗВЕДЁН» ≠ «ДОКАЗАН». Утром 08.09 движок напечатал «второй вход
+  // ВЗВЕДЁН», строка была правдой по аргументам, а вход не мог трипнуть НИКОГДА — и на этой строке
+  // агент дал владельцу уверенность, стоившую синего экрана.
+  const armedCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'armed-proven-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const armedUnproven = armedCheck.status !== 0;
+  if (armedUnproven) process.stderr.write(armedCheck.stderr || armedCheck.stdout || '');
 
   console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
   console.log(`проверено на порчу кодировки ${enc.scanned} текстовых файлов, `
@@ -295,10 +301,11 @@ function main(argv) {
   console.log(`сторож входа приборов: ${entryUnguarded ? 'КРАСНО — node tools/entry-guard-lint.mjs' : (entryCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`справка у серверов: ${helpMute ? 'КРАСНО — node tools/help-guard.mjs' : (helpCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`диалект ok в батареях: ${dialectMixed ? 'КРАСНО — node tools/assert-dialect-lint.mjs' : (dialectCheck.stdout || '').split('\n')[0] || 'чисто'}`);
+  console.log(`взведён ≠ доказан: ${armedUnproven ? 'КРАСНО — node tools/armed-proven-lint.mjs' : (armedCheck.stdout || '').split('\n')[0] || 'чисто'}`);
   console.log(`согласие беклога: ${backlogSplit ? 'КРАСНО — node tools/backlog-truth-lint.mjs --report' : (backlogCheck.stdout || '').trim().split('\n').pop() || 'чисто'}`);
   console.log();
   return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared
-    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit ? 0 : 1;
+    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit && !armedUnproven ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).

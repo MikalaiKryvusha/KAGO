@@ -2153,7 +2153,7 @@ async function cmdSelftest() {
     ok('Ш5 отказ: рука умерла без расписки — судья НЕ перевзвёлся, счёт перевзведений 0',
       journal[3]?.ok === false && rearmCount(journal) === 0 && result.rearms === 0
       && /не оставив расписки/u.test(journal[3]?.detail ?? ''), seen);
-    ok('Ш5 отказ: непережитое срабатывание оставляет прежний код выхода (полоса встаёт)',
+    ok('Ш5 отказ: непережитое срабатывание оставляет прежний код выхода (полоса встаёт) [ДОКАЗЫВАЕТ --arm-n]',
       result.tripped === true && result.trips === 1);
     ok('кольцо сброшено при трипе и держит СУБ-пороговые такты (то, чего не было у пустых файлов 28.08)', (() => {
       // ≥ 10, not a tight count: the selftest holds NO timeBeginPeriod, so its setTimeout(2) ticks
@@ -2735,7 +2735,7 @@ async function cmdSelftest() {
         s.send(Buffer.from([0x02]), port, '127.0.0.1', () => s.close());
       },
     });
-    ok('ВХОД 2 РАБОТАЕТ: тот же простой прогресса при ИДУЩЕМ прожиге — трип с причиной progress-stall',
+    ok('ВХОД 2 РАБОТАЕТ: тот же простой прогресса при ИДУЩЕМ прожиге — трип с причиной progress-stall [ДОКАЗЫВАЕТ --arm-m]',
       inFlight.tripped === true && inFlight.tripOutcomes?.[0]?.cause === 'progress-stall',
       `исход: ${JSON.stringify(inFlight.tripOutcomes)}`);
   }
@@ -2832,7 +2832,7 @@ async function cmdSelftest() {
     };
 
     const death = await play('power_collapse_3067mhz_death__captured.jsonl', 100);
-    ok('ВХОД 3 (plans/91 Ш4): ЗАПИСЬ НАСТОЯЩЕЙ СМЕРТИ 3067 МГц / 925 мВ даёт трип power-collapse',
+    ok('ВХОД 3 (plans/91 Ш4): ЗАПИСЬ НАСТОЯЩЕЙ СМЕРТИ 3067 МГц / 925 мВ даёт трип power-collapse [ДОКАЗЫВАЕТ --arm-p]',
       death.r.tripped === true && death.r.tripOutcomes?.[0]?.cause === 'power-collapse',
       `трип ${death.r.tripped}, причина ${death.r.tripOutcomes?.[0]?.cause ?? 'нет'}; `
       + `милливатты ${death.mws.join(' ')}`);
