@@ -736,6 +736,41 @@ export const JUDGE_HEALTHY_TICKS_PER_SEC = 300;
 export const REARM_HEALTHY_SECONDS = 3;
 
 /**
+ * ⚡ ПРОБА ПОЛУОТКРЫТОГО ОКНА — РАЗРЫВ ТАКТА, А НЕ ЧИСЛО ТАКТОВ (`bugs/121`, живой путь 08.09).
+ *
+ * 🔴 ЧИСЛО ТАКТОВ В СЕКУНДУ МЕРЯЕТ НЕ ЗДОРОВЬЕ МАШИНЫ, А РАЗРЕШЕНИЕ СИСТЕМНОГО ТАЙМЕРА WINDOWS,
+ * и держит его ПРОЖИГ — тот самый, который рука 1 убивает ПЕРЕД входом в это окно. Замер живого
+ * пути 08.09 (`2026-09-08T09-42-00-765Z-fuse-alive.jsonl`, 48 секунд подряд):
+ *
+ *   · секунды 1–12, прожиг идёт     — 438…473 такта/с, худший разрыв 3,9–6,1 мс;
+ *   · секунды 14–48, прожиг убит    — 86…105 тактов/с, худший разрыв 16,1–23,9 мс.
+ *
+ * 16,6 мс — штатный квант таймера Windows. Машина была ЗДОРОВА все 35 секунд, и все 35 уставка
+ * 300/с прочитала как больные. То есть возврат на пост после СПАСЕНИЯ не мог сработать НИКОГДА, а
+ * полоса вставала на ПЕРВОМ же спасении. Тот же класс, что `bugs/72`: там пробу сняли с УДАРОВ
+ * прожига, а собственный такт судьи оставили с той же зависимостью, только через таймер. Стена
+ * была НАЗВАНА 07.09 («уставка живого пути 300 при измеренной медиане 65») и закрыта тогда СРОКОМ
+ * окна — то есть быстрым отказом вместо молчания. Отказ стал быстрым; стена осталась стеной.
+ *
+ * РАЗДЕЛЯЮЩАЯ ВЕЛИЧИНА — ХУДШИЙ РАЗРЫВ ТАКТА ЗА ЗАКРЫТУЮ СЕКУНДУ, и она от кванта таймера НЕ
+ * ЗАВИСИТ. Счёт по ВСЕМ 13 строкам жизни на диске (1684 секунды):
+ *
+ *   · здоров, прожиг идёт       — 3,2…6,1 мс;
+ *   · здоров, прожига нет       — 16,1…23,9 мс;
+ *   · секунда смерти 08.09      — 452,16 мс;
+ *   · больные секунды 07.09     — 475…712 мс.
+ *
+ * Между 24 и 452 мс нет НИ ОДНОЙ измеренной точки. Уставка ставится В ЭТОТ РАЗРЫВ и НЕ ВЫБИРАЕТСЯ
+ * вовсе: берётся `DERIVED_ARM_N_MS` = 60 мс — та же уставка сторожа тишины, уже стоящая на службе и
+ * уже измеренная в своём пустом разрыве (`researches/33` §4a: здоровые до 41,21 мс, больные от
+ * 60,89). Одно число на два места — это DRY, а не совпадение.
+ *
+ * Число тактов ОСТАЁТСЯ в журнале и в строке жизни — как НАБЛЮДЕНИЕ, а не как критерий: выборка
+ * растёт сама, а решение больше не висит на чужом таймере.
+ */
+export const JUDGE_HEALTHY_WORST_GAP_MS = DERIVED_ARM_N_MS;
+
+/**
  * ⚡ СРОК ПОЛУОТКРЫТОГО ОКНА — ЧТОБЫ НЕДОСТИГНУТОЕ ЗДОРОВЬЕ КОНЧАЛОСЬ ОТКАЗОМ, А НЕ МОЛЧАНИЕМ.
  *
  * 🔴 ЗАВЕДЕНО 2026-09-07, И ПОВОД ЕСТЬ ДОВОД. В тот день полуоткрытое окно на стенде оказалось
@@ -771,7 +806,8 @@ export const HALF_OPEN_DEADLINE_MS = 30_000;
  * @param {object}  a
  * @param {number}  a.ticksPerSec    такт судьи за последнюю секунду
  * @param {number}  a.healthyNeeded  сколько здоровых секунд подряд нужно
- * @param {number}  a.healthyTicksPerSec  уставка здоровья; умолчание — измеренная (см. ниже)
+ * @param {number}  a.worstGapMs     худший разрыв такта за закрытую секунду — ЭТИМ и решается
+ * @param {number}  a.healthyWorstGapMs  уставка здоровья; умолчание — `DERIVED_ARM_N_MS` (см. выше)
  * @param {object|null} a.state      предыдущее состояние (null — начало полуоткрытого окна)
  * @returns {{healthySeconds:number, onPost:boolean, ticksPerSec:number}}
  *
@@ -784,12 +820,18 @@ export const HALF_OPEN_DEADLINE_MS = 30_000;
  * СРЕДА: живой путь берёт измеренную 300, стенд — свою, и обе видны в журнале (P88-AC5).
  */
 export function halfOpenGate({
-  ticksPerSec, healthyNeeded = REARM_HEALTHY_SECONDS,
-  healthyTicksPerSec = JUDGE_HEALTHY_TICKS_PER_SEC, state = null,
+  ticksPerSec, worstGapMs, healthyNeeded = REARM_HEALTHY_SECONDS,
+  healthyWorstGapMs = JUDGE_HEALTHY_WORST_GAP_MS, state = null,
 } = {}) {
-  const healthy = Number.isFinite(ticksPerSec) && ticksPerSec >= healthyTicksPerSec;
+  // 🔴 РЕШАЕТ РАЗРЫВ, А НЕ ЧИСЛО ТАКТОВ (`bugs/121`). Отсутствующий разрыв — НЕ здоровье:
+  // секунда без замера ничего не доказала, и счёт сбрасывается, а не наследуется.
+  const healthy = Number.isFinite(worstGapMs) && worstGapMs <= healthyWorstGapMs;
   const healthySeconds = healthy ? (state?.healthySeconds ?? 0) + 1 : 0;
-  return { healthySeconds, onPost: healthySeconds >= healthyNeeded, ticksPerSec: ticksPerSec ?? null };
+  return {
+    healthySeconds, onPost: healthySeconds >= healthyNeeded,
+    worstGapMs: Number.isFinite(worstGapMs) ? worstGapMs : null,
+    ticksPerSec: ticksPerSec ?? null,
+  };
 }
 
 /**
@@ -887,7 +929,12 @@ export async function runJudge({
   // может дать 300 тактов/с: фикстура без `timeBeginPeriod` (~62/с) и репетиция смерти, где ту же
   // машину грузит вся полоса (4…70/с). Без этой двери окно стало бы СТЕНОЙ на стенде — тот самый
   // класс, за который проект уже платил (`bugs/72` · [[EXP-0193]]).
-  healthySeconds = REARM_HEALTHY_SECONDS, healthyTicksPerSec = JUDGE_HEALTHY_TICKS_PER_SEC,
+  healthySeconds = REARM_HEALTHY_SECONDS,
+  // ⚡ `bugs/121`: РЕШАЕТ ТЕПЕРЬ РАЗРЫВ, и уставка такта убрана отсюда совсем — держать параметр,
+  // которым никто не судит, значило бы оставить в приборе ручку без провода. Дверь остаётся одна:
+  // фикстура вправе назвать свой разрыв, но умолчание ОДНО на все среды, потому что квант таймера
+  // в него уже уложен.
+  healthyWorstGapMs = JUDGE_HEALTHY_WORST_GAP_MS,
   // ⚡ Срок полуоткрытого окна. Своей дверью, как и уставка: фикстура, которой отведены секунды,
   // не может ждать тридцати, а без двери блок «окно-стена» проверял бы терпение прогонщика.
   halfOpenDeadlineMs = HALF_OPEN_DEADLINE_MS,
@@ -1236,9 +1283,9 @@ export async function runJudge({
         // проверено предикатом, а не надеждой: половина возврата, посчитанная за возврат, пустила
         // бы прожиг без взведённой защиты.
         hand: 2, action: 'half-open', ok: null, ms: now - tripAtMs,
-        detail: `сток подтверждён чтением (рука 2 отчиталась за ${round2(receipt?.ms ?? 0)} мс); ПОЛУОТКРЫТО — нужно ${healthySeconds} здоровых секунд подряд при такте ≥ ${healthyTicksPerSec}/с`,
+        detail: `сток подтверждён чтением (рука 2 отчиталась за ${round2(receipt?.ms ?? 0)} мс); ПОЛУОТКРЫТО — нужно ${healthySeconds} здоровых секунд подряд при разрыве такта ≤ ${healthyWorstGapMs} мс`,
       }));
-      log(`⚡ ПОЛУОТКРЫТО: сток подтверждён, но на пост судья вернётся, ДОКАЗАВ здоровье машины — ${healthySeconds} здоровых секунд подряд (такт ≥ ${healthyTicksPerSec}/с)`);
+      log(`⚡ ПОЛУОТКРЫТО: сток подтверждён, но на пост судья вернётся, ДОКАЗАВ здоровье машины — ${healthySeconds} здоровых секунд подряд (разрыв такта ≤ ${healthyWorstGapMs} мс)`);
     };
 
     /**
@@ -1260,7 +1307,9 @@ export async function runJudge({
         // сама (риск 3 плана 88: шесть эпизодов — малая выборка, и лечится она не угадыванием
         // пошире, а числом в каждом перевзведении).
         detail: gate === null ? detail
-          : `${detail} · ticksPerSec=${gate.ticksPerSec} · healthySeconds=${gate.healthySeconds}/${healthySeconds} · уставка ${healthyTicksPerSec}/с`,
+          // P88-AC5 + `bugs/121`: печатается И РЕШАЮЩАЯ величина, и наблюдаемая. Такт остаётся в
+          // строке ровно затем, чтобы выборка росла: он больше не судит, но всё ещё свидетель.
+          : `${detail} · worstGapMs=${gate.worstGapMs} · ticksPerSec=${gate.ticksPerSec} · healthySeconds=${gate.healthySeconds}/${healthySeconds} · уставка ≤ ${healthyWorstGapMs} мс`,
       }));
       if (ok) {
         rearmsDone += 1;
@@ -1364,6 +1413,9 @@ export async function runJudge({
         // ⚡ Ш3: ЧИСЛО ТАКТОВ ЗА ЗАКРЫВАЕМОЕ ОКНО СНИМАЕТСЯ ДО СБРОСА — `flushAlive` обнуляет
         // накопитель, и полуоткрытому окну мерить было бы уже нечего.
         const ticksThisWindow = aliveTicks;
+        // ⚡ `bugs/121`: ХУДШИЙ РАЗРЫВ ЗАКРЫВАЕМОГО ОКНА СНИМАЕТСЯ ТОЙ ЖЕ СТРОКОЙ, ЧТО И ТАКТЫ —
+        // `flushAlive` обнуляет и его, а решает теперь именно он.
+        const worstGapThisWindow = aliveWorstGap;
         flushAlive(now, startMs);
         // Окно двигается ОТ ПРЕДЫДУЩЕЙ ГРАНИЦЫ, а не от `now`: иначе задержка такта накапливалась
         // бы в дрейф, и «строка в секунду» незаметно стала бы строкой в полторы.
@@ -1388,7 +1440,10 @@ export async function runJudge({
           // за 2,3 секунды. Найдено блоком, а не рассуждением, и потому записано числом.
           halfOpen.state = halfOpenGate({
             ticksPerSec: sleptWindows > 0 ? 0 : ticksThisWindow,
-            healthyNeeded: healthySeconds, healthyTicksPerSec, state: halfOpen.state,
+            // Проспанные границы обесценивают строку целиком — тем же способом, что и раньше:
+            // не «разрыв 16 мс», а «замера нет». Здоровьем это не считается.
+            worstGapMs: sleptWindows > 0 ? Infinity : worstGapThisWindow,
+            healthyNeeded: healthySeconds, healthyWorstGapMs, state: halfOpen.state,
           });
           if (halfOpen.state.onPost) {
             closeRescue(true, `машина доказала здоровье: ${halfOpen.state.healthySeconds} здоровых секунд подряд`, now, halfOpen.state);
@@ -1402,7 +1457,7 @@ export async function runJudge({
       if (halfOpen !== null && now - halfOpen.sinceMs > halfOpenDeadlineMs) {
         closeRescue(false,
           `машина не доказала здоровье за ${Math.round(halfOpenDeadlineMs / 1000)} с: нужно `
-          + `${healthySeconds} здоровых секунд подряд при такте ≥ ${healthyTicksPerSec}/с, набрано `
+          + `${healthySeconds} здоровых секунд подряд при разрыве такта ≤ ${healthyWorstGapMs} мс, набрано `
           + `${halfOpen.state?.healthySeconds ?? 0}`,
           now, halfOpen.state);
         return;
@@ -1710,32 +1765,54 @@ async function cmdSelftest() {
   // — `researches/33` §4b: здоровый такт 356…442/с, больной 4…261/с, пустой разрыв 95 тактов, и ни
   // одной из 716 секунд внутри него; уставка 300 стоит В РАЗРЫВЕ (любая от 262 до 355 даст то же
   // разбиение). Длина окна: шесть непрерывных больных эпизодов, здоровых секунд внутри — НОЛЬ.
-  const gateSeq = (ticksSeq, needed = REARM_HEALTHY_SECONDS) => {
+  // 🔴 `bugs/121`: ВСЯ ЭТА ПРИЁМКА ПЕРЕВЕДЕНА С ЧИСЛА ТАКТОВ НА РАЗРЫВ ТАКТА. Числа ниже — из
+  // строк жизни на диске: здоров при прожиге 3,2…6,1 мс · здоров БЕЗ прожига 16,1…23,9 мс ·
+  // секунда смерти 452 мс · больные 07.09 475…712 мс. Уставка 60 мс стоит в разрыве 24…452.
+  const gateSeq = (gapSeq, needed = REARM_HEALTHY_SECONDS) => {
     let st = null; const armedAt = [];
-    ticksSeq.forEach((t, i) => {
-      st = halfOpenGate({ ticksPerSec: t, healthyNeeded: needed, state: st });
+    gapSeq.forEach((g, i) => {
+      st = halfOpenGate({ worstGapMs: g, healthyNeeded: needed, state: st });
       if (st.onPost) armedAt.push(i);
     });
     return { armedAt, healthy: st?.healthySeconds ?? null };
   };
   ok('P88-AC1: три здоровые секунды подряд ставят судью на пост — и ровно на третьей, не раньше',
-    JSON.stringify(gateSeq([400, 400, 400, 400]).armedAt) === JSON.stringify([2, 3]));
+    JSON.stringify(gateSeq([4.2, 4.2, 4.2, 4.2]).armedAt) === JSON.stringify([2, 3]));
   ok('P88-AC1: больная секунда посреди — пост занимается позже ровно на её цену',
-    JSON.stringify(gateSeq([400, 100, 400, 400, 400]).armedAt) === JSON.stringify([4]));
+    JSON.stringify(gateSeq([4.2, 452, 4.2, 4.2, 4.2]).armedAt) === JSON.stringify([4]));
   ok('P88-AC2: одна больная СБРАСЫВАЕТ накопление в ноль, а не уменьшает на единицу',
-    JSON.stringify(gateSeq([400, 400, 100, 400, 400]).armedAt) === JSON.stringify([]));
+    JSON.stringify(gateSeq([4.2, 4.2, 452, 4.2, 4.2]).armedAt) === JSON.stringify([]));
   ok('P88-AC2: накопитель после сброса считает с нуля (счёт виден числом, а не выводится)',
-    gateSeq([400, 400, 100, 400]).healthy === 1);
+    gateSeq([4.2, 4.2, 452, 4.2]).healthy === 1);
   ok('P88-AC1: больная машина не встаёт на пост НИКОГДА, сколько бы секунд ни прошло',
-    JSON.stringify(gateSeq([4, 100, 261, 4, 200, 4, 250]).armedAt) === JSON.stringify([]));
-  ok('P88-AC1: уставка — ГРАНИЦА ВКЛЮЧИТЕЛЬНАЯ, ровно 300 тактов уже здоровье (канон classifyTick)',
-    JSON.stringify(gateSeq([300, 300, 300]).armedAt) === JSON.stringify([2]));
-  ok('P88-AC1: 299 тактов — больная секунда (сторож на самой границе, оба берега)',
-    JSON.stringify(gateSeq([299, 299, 299]).armedAt) === JSON.stringify([]));
+    JSON.stringify(gateSeq([452, 500.71, 475.47, 618.57, 680.97, 711.78]).armedAt) === JSON.stringify([]));
+  ok('🔴 bugs/121 — РАДИ ЧЕГО ВСЁ: ЗДОРОВАЯ МАШИНА БЕЗ ПРОЖИГА ВСТАЁТ НА ПОСТ. Ровно те 35 секунд '
+    + 'живого пути 08.09, которые уставка 300 тактов/с прочитала как больные',
+    JSON.stringify(gateSeq([16.37, 19.7, 16.11, 16.33, 16.35]).armedAt) === JSON.stringify([2, 3, 4]));
+  ok('bugs/121: и САМАЯ ХУДШАЯ из тех 35 секунд (23,93 мс) — тоже здоровая, а не «на грани»',
+    JSON.stringify(gateSeq([23.93, 23.93, 23.93]).armedAt) === JSON.stringify([2]));
+  ok('P88-AC1: уставка — ГРАНИЦА ВКЛЮЧИТЕЛЬНАЯ, ровно 60 мс уже здоровье (канон classifyTick)',
+    JSON.stringify(gateSeq([60, 60, 60]).armedAt) === JSON.stringify([2]));
+  ok('P88-AC1: 60,01 мс — больная секунда (сторож на самой границе, оба берега)',
+    JSON.stringify(gateSeq([60.01, 60.01, 60.01]).armedAt) === JSON.stringify([]));
+  ok('bugs/121: ОТСУТСТВУЮЩИЙ замер разрыва — НЕ здоровье (проспанное окно ничего не доказало)',
+    JSON.stringify(gateSeq([4.2, 4.2, Infinity, 4.2, 4.2]).armedAt) === JSON.stringify([])
+    && JSON.stringify(gateSeq([null, null, null]).armedAt) === JSON.stringify([]));
   ok('P88-AC8 МУТАЦИЯ: окно в ОДНУ секунду ставит на пост немедленно — сторож AC1 умеет краснеть',
-    JSON.stringify(gateSeq([400, 400, 400], 1).armedAt) === JSON.stringify([0, 1, 2]));
-  ok('plans/88: уставки названы ОДНИМ местом и это числа замера, а не литералы в коде',
-    JUDGE_HEALTHY_TICKS_PER_SEC === 300 && REARM_HEALTHY_SECONDS === 3);
+    JSON.stringify(gateSeq([4.2, 4.2, 4.2], 1).armedAt) === JSON.stringify([0, 1, 2]));
+  ok('🔴 bugs/121 МУТАЦИЯ: ВЕРНИ ПРОБУ НА ЧИСЛО ТАКТОВ — и здоровые 35 секунд снова станут больными',
+    (() => {
+      // Прежняя проба, дословно: ticksPerSec ≥ 300. Кормим ЗАМЕРЕННЫМ тактом тех же секунд.
+      let st = null; const armed = [];
+      [86, 105, 94, 84, 97].forEach((t, i) => {
+        const healthy = t >= JUDGE_HEALTHY_TICKS_PER_SEC;
+        st = { healthySeconds: healthy ? (st?.healthySeconds ?? 0) + 1 : 0 };
+        if (st.healthySeconds >= REARM_HEALTHY_SECONDS) armed.push(i);
+      });
+      return armed.length === 0;   // стена: пост не занят НИ РАЗУ — то, что случилось 08.09
+    })());
+  ok('plans/88 + bugs/121: уставки названы ОДНИМ местом, и решающая — та же, что у сторожа тишины',
+    JUDGE_HEALTHY_WORST_GAP_MS === DERIVED_ARM_N_MS && REARM_HEALTHY_SECONDS === 3);
 
   // ---- judgeLiveness: the deadman core (P55-AC1)
   ok('тишина РОВНО N — трип (граница включительная, канон classifyTick)',
@@ -2210,16 +2287,16 @@ async function cmdSelftest() {
       // прочитает это как «состояние не сброшено». Опыт обязан кончаться на здоровом входе.
       // ⚡ Ш3 (`plans/88` §4b(4)): ОКНО ЗДОРОВЬЯ ФИКСТУРЫ — СВОИМИ ЧИСЛАМИ, И ОБА ИЗМЕРЕНЫ.
       // `healthySeconds: 1` — иначе на трёх секундах окна прогон в 2 с не перевзвёлся бы НИКОГДА
-      // (то самое ограничение, найденное чтением до кода). `healthyTicksPerSec: 40` — внутри
-      // процесса самопроверки `timeBeginPeriod(1)` никто не поднимал, и такт стоит на 64…65/с при
-      // зазоре 16 мс (замер 2026-09-05, четыре секунды подряд: 65 · 65 · 64 · 65). Уставка живого
-      // пути 300 здесь недостижима СТРУКТУРНО — прими её фикстура, и она доказывала бы не механизм,
-      // а разрешение таймера Windows. 40 стоит с запасом вдвое ниже измеренного и заведомо выше
-      // нуля; что окно вообще УМЕЕТ не пустить — доказывает соседний блок «стена» с уставкой 5000.
+      // (то самое ограничение, найденное чтением до кода). ✏️ 08.09 (`bugs/121`): ВТОРОГО ЧИСЛА
+      // ЗДЕСЬ БОЛЬШЕ НЕТ. Фикстуре нужна была своя уставка такта ровно потому, что внутри
+      // самопроверки `timeBeginPeriod(1)` никто не поднимает и такт стоит на 64…65/с при зазоре
+      // 16 мс — то есть проба мерила разрешение таймера Windows, а не механизм. Проба переведена на
+      // РАЗРЫВ такта: те же 16 мс проходят умолчанием 60 мс, и фикстура судится тем же числом, что
+      // живой путь. Что окно УМЕЕТ не пустить — доказывает соседний блок «стена» с уставкой 0.
       // Окно ВЫРОСЛО с 2 с до 5: половина возврата теперь ждёт закрытой секунды строки жизни, и
       // прежние 2 с не вмещали ДВЕ такие секунды — фикстура мерила бы дедлайн, а не механизм.
       beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 5,
-      healthySeconds: 1, healthyTicksPerSec: 40,
+      healthySeconds: 1,
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       spawnFn: () => {
@@ -2342,7 +2419,7 @@ async function cmdSelftest() {
       beatPort: 0, armNMs: 60, armMMs: 200, burnPid: 31337, journalPath, seconds: 5,
       progressFile: path.join(tmp, 'burn-progress.txt'),
       existsFn: () => true,             // ← файл пережил убитый прожиг, как на живом пути
-      healthySeconds: 1, healthyTicksPerSec: 40,
+      healthySeconds: 1,
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       // Рука 2 отработала — но прогресс НЕ возобновляется: прожиг мёртв. В этом вся разница
@@ -2413,7 +2490,7 @@ async function cmdSelftest() {
     const receipt = '{"phase":"outcome","hand":2,"action":"stock-voltage-verified","ok":true,"ms":1870}';
     const judgeDone = runJudge({
       beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 3,
-      healthySeconds: 1, healthyTicksPerSec: 5000,   // НЕДОСТИЖИМО: измерено 64…65 тактов/с
+      healthySeconds: 1, healthyWorstGapMs: 0,   // НЕДОСТИЖИМО (bugs/121): любой реальный разрыв больше нуля — окно-стена в новой величине
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       spawnFn: () => { handSpawns += 1; feeding = true; return { pid: 4242, unref() {} }; },
@@ -2473,7 +2550,7 @@ async function cmdSelftest() {
     const startedAt = Date.now();
     const judgeDone = runJudge({
       beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 5,
-      healthySeconds: 1, healthyTicksPerSec: 5000,   // НЕДОСТИЖИМО: измерено 64…65 тактов/с
+      healthySeconds: 1, healthyWorstGapMs: 0,   // НЕДОСТИЖИМО (bugs/121): любой реальный разрыв больше нуля — окно-стена в новой величине
       halfOpenDeadlineMs: 1200,                      // ...и окно кончается РАНЬШЕ судьи
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
@@ -2545,7 +2622,7 @@ async function cmdSelftest() {
       // Окно судьи (1,2 с) КОРОЧЕ окна здоровья, считая от срабатывания: взведения тут не будет ни
       // при какой погоде, и блок говорит ровно об одном — сколько раз ударила защита.
       beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 1.2,
-      healthySeconds: 1, healthyTicksPerSec: 40,
+      healthySeconds: 1,
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       // Рука 2 запускается, но УДАРЫ НЕ ВОЗВРАЩАЕТ: нагрузка снята, бить некому.
@@ -2592,7 +2669,7 @@ async function cmdSelftest() {
       beatPort: 0, armNMs: 60, burnPid: 31337, journalPath, seconds: 3,
       // Уставка 30 при измеренных 64…65: заморозка обязана сорвать окно ПРОСПАННЫМ ОКНОМ, а не
       // тем, что тактов случайно не хватило, — иначе блок доказывал бы не то, что назван доказывать.
-      healthySeconds: 1, healthyTicksPerSec: 30,
+      healthySeconds: 1,
       spawnSyncFn: () => ({ status: 0 }),
       killFn: (pid, sig) => { if (sig === 0) throw new Error('ESRCH'); },
       spawnFn: () => { handSpawns += 1; return { pid: 4242, unref() {} }; },
@@ -3136,7 +3213,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           // может дать измеренный такт живого пути (стенд, фикстура). Умолчание — измеренное, и
           // живой путь флагов не передаёт: возможность назвать уставку не то же, что необходимость.
           healthySeconds: has('--rearm-healthy-seconds') ? num('--rearm-healthy-seconds', REARM_HEALTHY_SECONDS) : REARM_HEALTHY_SECONDS,
-          healthyTicksPerSec: has('--rearm-healthy-ticks') ? num('--rearm-healthy-ticks', JUDGE_HEALTHY_TICKS_PER_SEC) : JUDGE_HEALTHY_TICKS_PER_SEC,
+          healthyWorstGapMs: has('--rearm-healthy-gap') ? num('--rearm-healthy-gap', JUDGE_HEALTHY_WORST_GAP_MS) : JUDGE_HEALTHY_WORST_GAP_MS,
           spawnSyncFn: spawnSync, spawnFn: spawn, log: console.log,
         });
         console.log(`СУДЬЯ ЗАКОНЧИЛ: ударов ${r.beats} · трип: ${r.tripped} · кольцо: ${r.ringPath}`);
@@ -3146,7 +3223,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
     if (has('--loaded-floor')) {
       return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-ticks T] | --loaded-floor [--seconds 90]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90]');
     console.log(`--rearm-healthy-* — ПОЛУОТКРЫТОЕ ОКНО возврата на пост (plans/88): по умолчанию ${REARM_HEALTHY_SECONDS} здоровых секунд подряд при такте ≥ ${JUDGE_HEALTHY_TICKS_PER_SEC}/с (замер researches/33 §4b). Свои числа называет тот, кто не может дать измеренный такт живого пути: стенд и фикстура.`);
     return 1;
   };
