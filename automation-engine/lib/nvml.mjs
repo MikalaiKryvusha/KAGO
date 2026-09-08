@@ -156,7 +156,71 @@ export function openNvml({ dll = 'nvml.dll' } = {}) {
     getName: lib.func('int nvmlDeviceGetName(uint64_t device, _Out_ void *name, uint32_t length)'),
     getClockOffsets: lib.func('int nvmlDeviceGetClockOffsets(uint64_t device, void *info)'),
     setClockOffsets: lib.func('int nvmlDeviceSetClockOffsets(uint64_t device, void *info)'),
+    // ⚡ `bugs/125`: МГНОВЕННАЯ мощность. `nvmlDeviceGetPowerUsage` возвращает СРЕДНЕЕ ЗА СЕКУНДУ —
+    // это документированное свойство, а не догадка, и им кормили вход 3, чей порог выведен из
+    // архива МГНОВЕННОЙ величины. Поле берётся общим механизмом полей.
+    getFieldValues: lib.func('int nvmlDeviceGetFieldValues(uint64_t device, int valuesCount, void *values)'),
   };
+}
+
+/**
+ * ⚡ ПОЛЯ NVML — идентификаторы из `nvml.h`, сверенные с документацией NVIDIA, а не с памятью.
+ * 185 — мощность, УСРЕДНЁННАЯ за 1 с; 186 — МГНОВЕННАЯ (сама карта снимает её каждые 25 мс).
+ */
+export const NVML_FI_DEV_POWER_AVERAGE = 185;
+export const NVML_FI_DEV_POWER_INSTANT = 186;
+
+/**
+ * Раскладка `nvmlFieldValue_t` в байтах — единственное место, где она записана.
+ *
+ * ```c
+ * unsigned int fieldId;      // +0   4
+ * unsigned int scopeId;      // +4   4
+ * long long    timestamp;    // +8   8
+ * long long    latencyUsec;  // +16  8
+ * nvmlValueType_t valueType; // +24  4
+ * nvmlReturn_t nvmlReturn;   // +28  4
+ * nvmlValue_t value;         // +32  8 (объединение; выравнено на 8)
+ * ```
+ *
+ * ⚠️ **РАСКЛАДКА — ЭТО ПАРА «НАША КОНСТАНТА ↔ ЗАГОЛОВОК ДРАЙВЕРА», и она обязана проверяться
+ * ПРОГОНОМ, а не чтением.** Тот же класс уже стоил проекту дефекта в `nvapi.mjs` (опубликованные
+ * 0x48/+0x00 против настоящих 0x24/+0x14). Сторож — `--verify-power-instant` ниже: он требует, чтобы
+ * поле вернуло статус 0 и правдоподобные милливатты, иначе раскладка не та.
+ */
+export const FIELD_VALUE_SIZE = 40;
+export const FIELD_VALUE_OFF = Object.freeze({
+  fieldId: 0, scopeId: 4, timestamp: 8, latencyUsec: 16, valueType: 24, nvmlReturn: 28, value: 32,
+});
+
+/** Типы значения `nvmlValueType_t` — нужен, чтобы прочитать объединение той шириной, какой оно легло. */
+export const NVML_VALUE_TYPE = Object.freeze({
+  DOUBLE: 0, UNSIGNED_INT: 1, UNSIGNED_LONG: 2, UNSIGNED_LONG_LONG: 3, SIGNED_LONG_LONG: 4, SIGNED_INT: 5,
+});
+
+/**
+ * ОДНО ПОЛЕ ОДНИМ ВЫЗОВОМ. Возвращает `{ status, fieldStatus, mw }`.
+ *
+ * `status` — вернулся ли САМ вызов (датум входа 1: жив ли канал к драйверу).
+ * `fieldStatus` — согласилась ли карта отдать ИМЕННО ЭТО поле (карта может жить и не поддерживать его).
+ * `mw` — милливатты, или `null`, если поле не отдано. `null` честнее нуля: ноль неотличим от простоя.
+ */
+export function readPowerField(nv, handle, fieldId, buf = Buffer.alloc(FIELD_VALUE_SIZE)) {
+  buf.fill(0);
+  buf.writeUInt32LE(fieldId, FIELD_VALUE_OFF.fieldId);
+  buf.writeUInt32LE(0, FIELD_VALUE_OFF.scopeId);
+  const status = nv.getFieldValues(handle, 1, buf);
+  if (status !== 0) return { status, fieldStatus: null, mw: null };
+  const fieldStatus = buf.readInt32LE(FIELD_VALUE_OFF.nvmlReturn);
+  if (fieldStatus !== 0) return { status, fieldStatus, mw: null };
+  const type = buf.readInt32LE(FIELD_VALUE_OFF.valueType);
+  const at = FIELD_VALUE_OFF.value;
+  let mw = null;
+  if (type === NVML_VALUE_TYPE.UNSIGNED_INT || type === NVML_VALUE_TYPE.SIGNED_INT) mw = buf.readUInt32LE(at);
+  else if (type === NVML_VALUE_TYPE.UNSIGNED_LONG || type === NVML_VALUE_TYPE.UNSIGNED_LONG_LONG) mw = Number(buf.readBigUInt64LE(at));
+  else if (type === NVML_VALUE_TYPE.SIGNED_LONG_LONG) mw = Number(buf.readBigInt64LE(at));
+  else if (type === NVML_VALUE_TYPE.DOUBLE) mw = buf.readDoubleLE(at);
+  return { status, fieldStatus, mw };
 }
 
 /** A NUL-terminated C string out of a buffer the driver filled. */

@@ -170,8 +170,20 @@ async function openDriverProbe() {
   const sh = nv.getHandleByIndex(0, handleBuf);
   if (sh !== 0) { nv.shutdown(); throw new Error(`nvmlDeviceGetHandleByIndex_v2(0) отказал: статус ${sh}`); }
   const handle = handleBuf.readBigUInt64LE(0);
-  const getPowerUsage = nv.lib.func('int nvmlDeviceGetPowerUsage(uint64_t device, _Out_ void *mw)');
-  const mwBuf = Buffer.alloc(4);
+  // ⚡ `bugs/125` — МГНОВЕННАЯ МОЩНОСТЬ, А НЕ СРЕДНЯЯ ЗА СЕКУНДУ.
+  //
+  // Здесь стоял `nvmlDeviceGetPowerUsage`, и это документированное СРЕДНЕЕ за 1 секунду. Порог входа
+  // 3 (0,412) выведен из архива `power.draw.instant` — величины, которую карта снимает каждые 25 мс.
+  // То есть порог от одной величины применялся к другой, сглаженной, и вход 3 не сработал на живой
+  // карте НИ РАЗУ, хотя на записях архива срабатывает верно.
+  //
+  // ЗАМЕР, ДОКАЗАВШИЙ ЭТО (08.09, чтение, карта не тронута): поле 186 → 20 967 мВт при
+  // `nvidia-smi power.draw.instant` = 20,97 Вт; поле 185 → 21 544 мВт при `power.draw.average` =
+  // 21,54 Вт; `nvmlDeviceGetPowerUsage` → 21 544 — совпадение со СРЕДНЕЙ до милливатта.
+  // Цена: 0,004 мс на чтение поля против 0,001 мс — при такте 2 мс это даром.
+  const { readPowerField, NVML_FI_DEV_POWER_INSTANT, FIELD_VALUE_SIZE } = await import('./nvml.mjs');
+  const fieldBuf = Buffer.alloc(FIELD_VALUE_SIZE);
+  let lastMw = null;
   return {
     // ⚡ `bugs/117` / `plans/91` Ш1: ЗДЕСЬ СТОЯЛО «the VALUE is irrelevant, the RETURN is the datum»,
     // и это стоило синего экрана 2026-09-08. Возврат — датум ВХОДА 1 (жив ли канал к драйверу).
@@ -179,8 +191,15 @@ async function openDriverProbe() {
     // на 3067 МГц / 925 мВ заявляла 100 % загрузки при 60 Вт вместо 280 две с половиной секунды,
     // а предохранитель мерил только СВОИ процессы и не видел ничего. Оба датума снимаются ОДНИМ
     // вызовом, который и так делается каждые 2 мс.
-    probe() { return getPowerUsage(handle, mwBuf); },
-    powerMw() { return mwBuf.readUInt32LE(0); },
+    // Возврат — датум ВХОДА 1 (жив ли канал к драйверу). Милливатты — датум ВХОДА 3.
+    // Статус ПОЛЯ отдельно от статуса ВЫЗОВА: канал может быть жив, а поле не отдано, и тогда
+    // милливатт нет — это честное «не слышал», а не ноль (ноль неотличим от простоя).
+    probe() {
+      const r = readPowerField(nv, handle, NVML_FI_DEV_POWER_INSTANT, fieldBuf);
+      lastMw = r.mw;
+      return r.status;
+    },
+    powerMw() { return lastMw; },
     close() { try { nv.shutdown(); } catch { /* the watch is over either way */ } },
   };
 }
@@ -292,8 +311,17 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
           // Милливатты кладутся в удар ТОЛЬКО при статусе 0: значение, снятое неудачным вызовом,
           // это мусор, а мусор во входе 3 хуже его отсутствия (потерянная карта отвечает мгновенно
           // кодом ошибки — на таком ответе бить нельзя, см. комментарий выше).
-          beatBuf.writeUInt32LE(driver.powerMw(), 1);
-          beatSock.send(beatBuf, beatPort, '127.0.0.1');
+          //
+          // ⚡ `bugs/125`: и только когда ПОЛЕ отдано. Канал жив, поле не отдано — удар уходит
+          // ОДНОБАЙТНЫЙ: пульс есть, милливатт нет. Судья это уже умеет (`buf.length >= 5`), и это
+          // честнее, чем послать последнее известное число под видом свежего.
+          const mw = driver.powerMw();
+          if (mw === null) {
+            beatSock.send(beatBuf.subarray(0, 1), beatPort, '127.0.0.1');
+          } else {
+            beatBuf.writeUInt32LE(mw, 1);
+            beatSock.send(beatBuf, beatPort, '127.0.0.1');
+          }
         }
       }
 
