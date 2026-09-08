@@ -3776,6 +3776,12 @@ export async function sweepRange({
     frequenciesInBand: groups.reduce((n, g) => n + g.count, 0),
     closed: 0,
     verdicts: { 'edge-found': 0, 'lever-limited': 0 },
+    // ⚡ `bugs/116`: СЧЁТ ПО ТОМУ ЖЕ ВЫВОДУ, ЧТО И ДОКУМЕНТ. `verdicts` держит ГРУБУЮ метку, у
+    // которой наш потолок глубины неотличим от предела сдвига (обе `lever-limited`); документ
+    // уточняет её через `statusForOutcome`. Пока сводка считала по грубой метке и вычитала из неё
+    // отдельный счётчик, она печатала «потолком глубины 0» над строками, только что записанными
+    // как `depth-capped`. Один факт — один вывод.
+    statuses: {},
     seedRejections: 0,
     // ─── ЧАСТОТЫ, КОТОРЫЕ ПОЛОСА ПРОПУСТИЛА, — И ОНИ БОЛЬШЕ НЕ РОНЯЮТ ПОЛОСУ ────────────────────
     //
@@ -4502,6 +4508,8 @@ export async function sweepRange({
     report.closedOutsideBand += [rowMhz.mhz, ...closed.inherited].filter((m) => !inBand(m)).length;
     report.closed += closed.closed;
     report.verdicts[outcome.verdict] += 1;
+    // Тот же `status`, что ушёл в документ пятнадцатью строками выше, — не второй разбор исхода.
+    report.statuses[status] = (report.statuses[status] ?? 0) + 1;
     report.groups.push({ ...g, ...outcome, inherited: closed.inherited.length, raised: closed.raised });
     say('closed', closed.why, {
       frequencyMhz: g.topMhz,
@@ -5132,9 +5140,17 @@ export function sweepReportLines(report) {
   // число над двумя несовместимыми фактами — «карте ниже нельзя» и «мы решили не смотреть» — это
   // ровно то, на чём владелец споткнулся 2026-08-17. Слово «рычаг» тоже убрано: это метафора агента,
   // а не термин, и владелец сказал прямо, что она ему ничего не объясняет.
-  const cappedCount = report.cappedFrequencies ?? 0;
-  const leverCount = Math.max(0, (report.verdicts['lever-limited'] ?? 0) - cappedCount);
-  lines.push(`ВЕРДИКТЫ: край найден ${report.verdicts['edge-found']}`
+  //
+  // 🔴 `bugs/116`, ОПЛАЧЕНО ПРОГОНОМ 2026-09-08: ЗДЕСЬ СТОЯЛО ВЫЧИТАНИЕ ДВУХ ИСТОЧНИКОВ —
+  // `report.cappedFrequencies` минус из `verdicts['lever-limited']`. Первый заполняется ТОЛЬКО в
+  // сухом прогоне (`:4900`); у боевого отчёта такого поля нет вовсе, `?? 0` давал ноль, и вычитать
+  // было нечего. Прогон на двойнике записал в документ ЧЕТЫРЕ строки `depth-capped` и напечатал
+  // в той же секунде «остановлено НАШИМ потолком глубины 0 · упёрлось в предел сдвига 2».
+  // Теперь все три числа читаются из `report.statuses` — того самого вывода, что ушёл в документ.
+  const cappedCount = report.statuses?.[CURVE_STATUS.DEPTH_CAPPED] ?? 0;
+  const leverCount = report.statuses?.[CURVE_STATUS.LEVER_LIMITED] ?? 0;
+  const edgeCount = report.statuses?.[CURVE_STATUS.EDGE_FOUND] ?? report.verdicts['edge-found'];
+  lines.push(`ВЕРДИКТЫ: край найден ${edgeCount}`
     + ` · остановлено НАШИМ потолком глубины ${cappedCount}`
     + ` · упёрлось в предел сдвига ±1000 МГц ${leverCount}`);
   // ─── СТРОКИ, ГДЕ ДОКУМЕНТ ЗНАЛ ГЛУБЖЕ (`bugs/55`) ────────────────────────────────────────────
@@ -9143,6 +9159,36 @@ export function selfTest() {
           [calm.rescues, calm.fuseTrips,
             sweepReportLines(calm).some((l) => l === 'СРАБАТЫВАНИЙ АВАРИЙНОЙ ЗАЩИТЫ: 0 — машину спасать не потребовалось ни разу')],
           [[], 0, true]);
+
+        // ─── `bugs/116`: СТРОКА ВЕРДИКТОВ И ДОКУМЕНТ НЕ МОГУТ РАЗОЙТИСЬ ────────────────────────
+        //
+        // Отчёт СОБРАН ТАК, КАК ЕГО СОБИРАЕТ БОЕВОЙ ПРОГОН, и это весь смысл блока: `verdicts`
+        // несёт ГРУБУЮ метку (у потолка глубины она тоже `lever-limited`), `statuses` — уточнённую,
+        // ту что ушла в документ, а поля `cappedFrequencies` У БОЕВОГО ОТЧЁТА НЕТ ВОВСЕ (оно
+        // считается только в сухом прогоне). Прежний код вычитал одно из другого и на таком отчёте
+        // печатал «потолком глубины 0 · предел сдвига 3» — ровно то, что владелец прочитал бы
+        // после вечера.
+        //
+        // 🔴 ЧЕМ КРАСНЕЕТ: верни `report.cappedFrequencies ?? 0` и вычитание — и обе строки уедут.
+        {
+          // Форма берётся у НАСТОЯЩЕГО отчёта (`calm`), а не собирается руками: у сводки два
+          // десятка полей, и отчёт, собранный по памяти, проверял бы мою память, а не движок.
+          // Подменяются ровно два спорных поля плюс снимается `cappedFrequencies` — у боевого
+          // отчёта его нет, и блок обязан стоять именно на этом.
+          const mixed = {
+            ...calm,
+            verdicts: { 'edge-found': 3, 'lever-limited': 3 },
+            statuses: { 'edge-found': 3, 'lever-limited': 1, 'depth-capped': 2 },
+            cappedFrequencies: undefined,
+          };
+          const line = sweepReportLines(mixed).find((l) => l.startsWith('ВЕРДИКТЫ:'));
+          ok('bugs/116: сводка считает по ТОМУ ЖЕ выводу, что и документ — потолок глубины виден числом',
+            line,
+            'ВЕРДИКТЫ: край найден 3 · остановлено НАШИМ потолком глубины 2 · упёрлось в предел сдвига ±1000 МГц 1');
+          ok('bugs/116: сумма трёх чисел сводки равна числу закрытых строк — ни одна не потерялась',
+            (mixed.statuses['edge-found'] + mixed.statuses['lever-limited'] + mixed.statuses['depth-capped']),
+            6);
+        }
         // ─── И ТРЕТЬЯ: «НЕ СМОГ ПОСМОТРЕТЬ» ≠ «ПОСМОТРЕЛ И НОЛЬ» (R4b) ────────────────────────────
         // Развёртка без счётчика защиты обязана сказать НЕИЗВЕСТНО, а не отчитаться нулём: нулём
         // отчитывается прибор, который смотрел. Это тот же барьер, на котором стоит `npm run events`.
