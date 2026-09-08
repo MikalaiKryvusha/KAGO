@@ -302,6 +302,15 @@ function main(argv) {
   const helpStaticMute = helpStaticCheck.status !== 0;
   if (helpStaticMute) process.stderr.write(helpStaticCheck.stderr || helpStaticCheck.stdout || '');
 
+  // ─── ФИЗИКА СТЕН ЗАВИСАНИЯ (`bugs/124`) ─────────────────────────────────────────────────────────
+  // Стена «частота F зависла на V» несовместима с фактом «частота ВЫШЕ F прошла на напряжении НИЖЕ
+  // V». Найдено подозрением владельца 08.09 и подтверждено числом: 7 стен из 20 противоречат физике,
+  // худшая на 200 мВ. Изготовитель — спасение предохранителя: оно оставляет намерение без вердикта,
+  // а `hangFloors` читает такое намерение как зависание.
+  const floorPhysCheck = spawnSync(process.execPath, [join(ROOT, 'tools', 'hang-floor-physics-lint.mjs')], { cwd: ROOT, encoding: 'utf8' });
+  const floorPhysBad = floorPhysCheck.status !== 0;
+  if (floorPhysBad) process.stderr.write(floorPhysCheck.stderr || floorPhysCheck.stdout || '');
+
   console.log(`checked ${files.length} .mjs file(s), ${failed} failed`);
   console.log(`проверено на порчу кодировки ${enc.scanned} текстовых файлов, `
     + `испорченных ${enc.corrupted} (сам сторож освобождён меткой)`);
@@ -315,9 +324,10 @@ function main(argv) {
   console.log(`метка против свидетеля: ${witnessSplit ? 'КРАСНО — node tools/witness-status-lint.mjs --report' : (witnessCheck.stdout || '').split(String.fromCharCode(10))[0] || 'чисто'}`);
   console.log(`справка у приборов, статика: ${helpStaticMute ? 'КРАСНО — node tools/help-static-lint.mjs --report' : (helpStaticCheck.stdout || '').split(String.fromCharCode(10))[0] || 'чисто'}`);
   console.log(`согласие беклога: ${backlogSplit ? 'КРАСНО — node tools/backlog-truth-lint.mjs --report' : (backlogCheck.stdout || '').trim().split('\n').pop() || 'чисто'}`);
+  console.log(`физика стен зависания: ${floorPhysBad ? 'КРАСНО — node tools/hang-floor-physics-lint.mjs' : (floorPhysCheck.stdout || '').split(String.fromCharCode(10))[0] || 'чисто'}`);
   console.log();
   return failed === 0 && enc.corrupted === 0 && !pageStale && !prayerDrifted && !guardsUndeclared
-    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit && !armedUnproven && !witnessSplit && !helpStaticMute ? 0 : 1;
+    && !entryUnguarded && !helpMute && !dialectMixed && !backlogSplit && !armedUnproven && !witnessSplit && !helpStaticMute && !floorPhysBad ? 0 : 1;
 }
 
 // СТОРОЖ ВХОДА — ворота исполняются ТОЛЬКО как программа, никогда при импорте (`bugs/95`).
