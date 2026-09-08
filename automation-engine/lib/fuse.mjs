@@ -155,6 +155,70 @@ export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs
   };
 }
 
+/**
+ * ⚡ ПРОИГРЫВАТЕЛЬ ЗАПИСИ — «журнал тактов → последовательность вердиктов» (`plans/93` Ш2).
+ *
+ * ЗАЧЕМ. Фикстура, собранная из чисел, набранных руками, доказывает поведение на данных, которых
+ * в бою не было. `bugs/127`: блок `[ДОКАЗЫВАЕТ --arm-p]` даёт трип на ряде мощности настоящей
+ * смерти — и вход всё равно не сработал живьём, потому что фикстура не подавала `progressWired`,
+ * ту самую переменную, которая вход разоружает. Проигрыватель подаёт ВСЁ, что записал чёрный ящик,
+ * и потому не умеет «забыть» неудобную переменную.
+ *
+ * ВЕРНОСТЬ ДОКАЗУЕМА, А НЕ ОБЪЯВЛЕНА. Строки кольца — это ВЫХОД судьи (`powerRatio` в них уже
+ * посчитан живым прогоном). Значит проигрыватель обязан воспроизвести их до значения: сверка
+ * «пересчитанная доля == записанная доля на каждом такте» и есть доказательство, что проигрыватель
+ * не похож на живой путь, а совпадает с ним. Эта сверка стоит блоком в батарее.
+ *
+ * Восстановление входов из выходов (кольцо пишет молчания, судья ждёт метки времени):
+ *   · `progressWired` ⇐ `progressSilenceMs !== null` — судья обнуляет молчание ровно при погасшем
+ *     проводе, и это единственный носитель флага в записи;
+ *   · `lastProgressMs` ⇐ `t − progressSilenceMs`;  · `lastBeatMs` ⇐ `t − beatSilenceMs`.
+ *
+ * @param {Array<object>} rows  строки кольца (`t`, `beatSilenceMs`, `progressSilenceMs`, `powerMw`)
+ * @param {object} opts  уставки прогона; по умолчанию — БОЕВЫЕ
+ * @returns {{ticks:Array<object>, trips:Array<object>, firstTrip:object|null}}
+ */
+export function replayRing(rows, opts = {}) {
+  const {
+    armPowerRatio = POWER_COLLAPSE_RATIO,
+    armNMs = null,
+    armMMs = null,
+    holdMs = POWER_LOW_HOLD_MS,
+    establishedMw = POWER_ESTABLISHED_MW,
+  } = opts;
+  // Порядок хранения ≠ порядок времени (`bugs/123`): сортировка обязательна и здесь, а не у зовущего.
+  const sorted = [...rows].sort((a, b) => a.t - b.t);
+  let win = { peakMw: 0, lowSinceMs: null };
+  const ticks = [];
+  const trips = [];
+  for (const row of sorted) {
+    const nowMs = row.t;
+    const powerMw = (row.powerMw === undefined || row.powerMw === null) ? null : row.powerMw;
+    const progressWired = row.progressSilenceMs !== null && row.progressSilenceMs !== undefined;
+    win = stepPowerWindow(win, { progressWired, powerMw, nowMs, armPowerRatio, establishedMw });
+    const lowForMs = win.lowSinceMs === null ? 0 : nowMs - win.lowSinceMs;
+    const verdict = judgeLiveness({
+      nowMs,
+      lastBeatMs: (row.beatSilenceMs === null || row.beatSilenceMs === undefined)
+        ? null : nowMs - row.beatSilenceMs,
+      armNMs,
+      lastProgressMs: progressWired ? nowMs - row.progressSilenceMs : null,
+      armMMs,
+      progressWired,
+      power: armPowerRatio === null ? null : {
+        mw: powerMw, peakMw: win.peakMw, ratio: armPowerRatio, establishedMw, lowForMs, holdMs,
+      },
+    });
+    const tick = {
+      t: nowMs, powerRatio: verdict.powerRatio, peakMw: win.peakMw, lowForMs,
+      tripped: verdict.tripped, cause: verdict.cause,
+    };
+    ticks.push(tick);
+    if (verdict.tripped) trips.push(tick);
+  }
+  return { ticks, trips, firstTrip: trips.length ? trips[0] : null };
+}
+
 // =================================================================================================
 // 2a. ВХОД 2 — вывод порога M из ФОРМЫ нагрузки (фаза 5в эпика 51, `plans/66`, `researches/24`)
 // =================================================================================================
@@ -318,6 +382,83 @@ export const POWER_ESTABLISHED_MW = 150_000;
  * отсекает.
  */
 export const POWER_LOW_HOLD_MS = 500;
+
+/**
+ * ⚡ ОКНО ВХОДА 3 — БЕГУЩИЙ ПИК И ВЫДЕРЖКА ПРОВАЛА, ОДНОЙ ФУНКЦИЕЙ НА ДВА ПУТИ (`plans/93` Ш2).
+ *
+ * Раньше эта машина состояний жила ВНУТРИ живого цикла судьи, и повторить её можно было только
+ * копией. Копия — пара «правда ↔ зеркало» (`bugs/120`): чинишь одну, вторая молча остаётся со
+ * старым поведением, и батарея продолжает зеленеть на том, чего в бою уже нет. Поэтому окно
+ * ВЫНУТО: живой цикл и проигрыватель записи (`replayPowerWindow`) зовут ОДНУ функцию, и правка
+ * поведения физически не может разойтись между ними.
+ *
+ * Функция чистая: ни времени, ни диска — всё приходит аргументами.
+ *
+ * @param {object}      s                    состояние окна на прошлом такте
+ * @param {number}      s.peakMw             бегущий пик, мВт (0 — пика нет)
+ * @param {number|null} s.lowSinceMs         когда началась выдержка провала (null — провала нет)
+ * @param {boolean}     t.progressWired      идёт ли сердцебиение прогресса прожига
+ * @param {number|null} t.powerMw            мощность этого такта
+ * @param {number}      t.nowMs              время такта
+ * @param {number|null} t.armPowerRatio      порог доли; null — вход не взведён
+ * @param {number}      t.establishedMw      пик обязан состояться выше этого
+ * @returns {{peakMw:number, lowSinceMs:number|null}}
+ */
+/**
+ * ⚡ ВОРОТА ЛОЖНОГО ТРИПА — «прожиг КОНЧИЛСЯ» против «прожиг УМЕР» (`plans/93` Ш5, `bugs/126` AC4).
+ *
+ * 🔴 ЧТО ЭТО ЧИНИТ, ОПЛАЧЕНО СМЕРТЬЮ МАШИНЫ 2026-09-08 17:53. Кандидат в трип по причине
+ * `progress-stall` или `power-collapse` спрашивал у диска «идёт ли прожиг», и при отрицательном
+ * ответе трип ОТМЕНЯЛСЯ, а оба входа гасились. Замысел верен для настоящего конца прожига: между
+ * ступенями прогрессу взяться неоткуда, и мощность законно падает к простою.
+ *
+ * Беда в том, что УМЕРШАЯ КАРТА перестаёт обновлять файл сердцебиения ровно так же, как кончившийся
+ * прожиг. 17:53 вход 2 стал кандидатом на такте t=13053 (тишина 1185 мс при уставке 1177), ворота
+ * прочитали «прожига нет» и отменили трип; тем же движением обнулился пик входа 3, у которого
+ * выдержка шла уже 455 мс из нужных 500. Дальше 829 тактов слепоты и смерть.
+ * **Одна улика разоружила два входа из трёх в пределах одного такта.**
+ *
+ * ✅ РАЗЛИЧИТЕЛЬ — ПОРЯДОК СОБЫТИЙ, И В НЁМ НЕТ НИ ОДНОГО ВЫДУМАННОГО ЧИСЛА. Обвал мощности
+ * ПРЕДШЕСТВУЕТ смерти прожига и НЕ предшествует его нормальному концу:
+ *
+ *   запись 09:42 (нормальные концы) │ выдержка в миг ворот   0 мс
+ *   запись 09:59 (нормальные концы) │ выдержка в миг ворот   0 мс
+ *   запись 17:53 (смерть)           │ выдержка в миг ворот 455 мс
+ *
+ * Поэтому правило беспараметрическое: **отмена законна только когда выдержка провала НЕ ИДЁТ**.
+ * Порога нет — сравнивается наличие, а не величина, и подгонять нечего.
+ *
+ * ⚠️ База тонкая: две записи нормальных концов, обе от 08.09. Названо здесь, а не спрятано.
+ *
+ * @param {string|null}  cause     причина вердикта
+ * @param {boolean}      burnAlive ответ `burnInFlight()` — идёт ли прожиг по файлу сердцебиения
+ * @param {number|null}  lowSinceMs когда началась выдержка провала (null — провала нет)
+ * @returns {boolean} true — трип отменить и входы погасить; false — трип состоится
+ */
+export function cancelsFalseTrip({ cause, burnAlive, lowSinceMs }) {
+  if (cause !== 'progress-stall' && cause !== 'power-collapse') return false;
+  if (burnAlive) return false;
+  // 🔴 ЕДИНСТВЕННАЯ НОВАЯ СТРОКА ПРОТИВ ПРЕЖНЕГО ПОВЕДЕНИЯ, И ОНА КУПЛЕНА СМЕРТЬЮ:
+  // выдержка уже идёт ⇒ карта провалилась ДО того, как пропал прожиг ⇒ это смерть, а не конец.
+  if (lowSinceMs !== null) return false;
+  return true;
+}
+
+export function stepPowerWindow(s, t) {
+  // 🔴 `bugs/126` AC4 / `plans/93`: ВОТ ЭТА ВЕТКА УБИЛА МАШИНУ 08.09 В 17:53.
+  // Замер: выдержка шла 455 мс из нужных 500, и на такте t=13068 `progressWired` погас —
+  // пик обнулился, выдержка выброшена, доля перестала считаться на 829 тактов подряд, до
+  // самой смерти. «Прожиг кончился» и «прожиг умер» приходят сюда ОДНИМ И ТЕМ ЖЕ флагом.
+  // Сброс сам по себе законен: без него нормальный конец прожига читался бы как обвал.
+  if (!t.progressWired || t.powerMw === null) {
+    return { peakMw: 0, lowSinceMs: null };
+  }
+  const peakMw = t.powerMw > s.peakMw ? t.powerMw : s.peakMw;
+  const low = t.armPowerRatio !== null
+    && peakMw >= t.establishedMw
+    && t.powerMw <= t.armPowerRatio * peakMw;
+  return { peakMw, lowSinceMs: low ? (s.lowSinceMs === null ? t.nowMs : s.lowSinceMs) : null };
+}
 
 /**
  * ⚡ КАРТА ОТВЕЧАЕТ, НО ПЕРЕСТАЛА СЧИТАТЬ — СКОЛЬКО ТЕЛЕМЕТРИЯ МОЖЕТ СТОЯТЬ, ПОКА ЭТО ЕЩЁ ЖИЗНЬ.
@@ -1508,15 +1649,21 @@ export async function runJudge({
       // «правда ↔ зеркало» к нему и разошёлся бы при первой правке (тот же довод, что у
       // `rearmsDone` в `bugs/111`). Нет прожига — нет и суждения о работе карты: пик обнуляется,
       // выдержка снимается. Это ровно «источника нет» ≠ «застыл», третий раз в этом файле.
-      if (!progressWired || lastPowerMw === null) {
-        peakPowerMw = 0;
-        lowPowerSinceMs = null;
-      } else {
-        if (lastPowerMw > peakPowerMw) peakPowerMw = lastPowerMw;
-        const low = armPowerRatio !== null
-          && peakPowerMw >= POWER_ESTABLISHED_MW
-          && lastPowerMw <= armPowerRatio * peakPowerMw;
-        if (low) { if (lowPowerSinceMs === null) lowPowerSinceMs = now; } else lowPowerSinceMs = null;
+      // ⚡ `plans/93` Ш2: окно ВЫНЕСЕНО в `stepPowerWindow` — живой путь и проигрыватель записи
+      // зовут одну функцию, поэтому правка поведения не может разойтись между ними (`bugs/120`).
+      {
+        const w = stepPowerWindow(
+          { peakMw: peakPowerMw, lowSinceMs: lowPowerSinceMs },
+          {
+            progressWired,
+            powerMw: lastPowerMw,
+            nowMs: now,
+            armPowerRatio,
+            establishedMw: POWER_ESTABLISHED_MW,
+          },
+        );
+        peakPowerMw = w.peakMw;
+        lowPowerSinceMs = w.lowSinceMs;
       }
       const verdict = judgeLiveness({
         nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired,
@@ -1674,7 +1821,16 @@ export async function runJudge({
         // ⚡ ВХОД 3 ПОД ТЕМИ ЖЕ ВОРОТАМИ, И ЭТО НЕ ПЕРЕСТРАХОВКА. На конце прожига мощность
         // законно падает к простою, а файл сердцебиения ещё может лежать долю секунды — трип по
         // такому падению был бы ложным ровно того класса, что уже оплачен на входе 2.
-        if ((verdict.cause === 'progress-stall' || verdict.cause === 'power-collapse') && !burnInFlight()) {
+        // ⚡ `plans/93` Ш5: решение вынесено в `cancelsFalseTrip` — чистую функцию, которую батарея
+        // судит настоящими числами трёх записей, а не пересказом. Единственная перемена поведения:
+        // идущая выдержка провала ЗАПРЕЩАЕТ отмену (обвал предшествовал пропаже прожига — значит
+        // прожиг умер, а не кончился). `bugs/126` AC4.
+        // Диск спрашивается ЛЕНИВО и только у своих причин — путь `beat-silence` (самый срочный)
+        // обращения к диску как не имел, так и не имеет.
+        const burnGateCause = verdict.cause === 'progress-stall' || verdict.cause === 'power-collapse';
+        if (burnGateCause && cancelsFalseTrip({
+          cause: verdict.cause, burnAlive: burnInFlight(), lowSinceMs: lowPowerSinceMs,
+        })) {
           lastProgressMs = null;
           progressWired = false;
           peakPowerMw = 0;
@@ -3219,6 +3375,111 @@ async function cmdSelftest() {
     ok('ВХОД 3: СОСЕДНЯЯ ЗДОРОВАЯ ступень 935 мВ той же частоты трипа НЕ даёт (парный контроль)',
       alive.r.tripped === false,
       `трипнул на здоровой: ${JSON.stringify(alive.r.tripOutcomes)}; милливатты ${alive.mws.join(' ')}`);
+
+    // =============================================================================================
+    // `plans/93` — ЧЕТЫРЕ НАБОРА ИЗ ПОЛЯ. Первая в проекте фикстура по Ш4 `bugs/127`.
+    //
+    // 🔴 ЗАЧЕМ ОНИ, ЕСЛИ ДВА БЛОКА ВЫШЕ УЖЕ «ДОКАЗЫВАЮТ» ВХОД 3. Оба блока выше держат файл
+    // сердцебиения ЖИВЫМ (`openSync(live,'w')`), поэтому ворота ложного трипа в них не срабатывают
+    // никогда. Они доказывают вход на данных, где нет переменной, которая его разоружает, — и
+    // потому зеленели всё время, пока вход 3 на живой карте не трипал ни разу. Наборы ниже питаются
+    // ЗАПИСЯМИ ЧЁРНОГО ЯЩИКА целиком: и мощностью, и проводом прогресса.
+    // =============================================================================================
+    {
+      const evid = (f) => path.join(
+        path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bugs', 'evidence', f,
+      );
+      const load = (f) => readFileSync(evid(f), 'utf8').trim().split('\n')
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const DEATH = load('p93_ring_death_2026-09-08T17-53.jsonl');
+      const R0942 = load('p93_ring_rescue_2026-09-08T09-42.jsonl');
+      const R0959 = load('p93_ring_rescue_2026-09-08T09-59.jsonl');
+      // Боевое взведение того вечера — из строки 20 журнала прогона 17:53.
+      const LIVE = { armNMs: 60, armMMs: 1177 };
+
+      // ---- ВЕРНОСТЬ ПРОИГРЫВАТЕЛЯ: он СОВПАДАЕТ с живым путём, а не похож на него --------------
+      // Строки кольца — ВЫХОД живого судьи. Значит пересчёт обязан воспроизвести их до значения;
+      // расхождение хоть на одном такте означает, что все наборы ниже судят не тот путь.
+      {
+        let ticks = 0; let diff = 0; let firstBad = null;
+        for (const rows of [DEATH, R0942, R0959]) {
+          const sorted = [...rows].sort((a, b) => a.t - b.t);
+          const rep = replayRing(sorted, {});
+          for (let i = 0; i < sorted.length; i += 1) {
+            ticks += 1;
+            const was = sorted[i].powerRatio === undefined ? null : sorted[i].powerRatio;
+            if (was !== rep.ticks[i].powerRatio) {
+              diff += 1;
+              if (!firstBad) firstBad = `t=${sorted[i].t} записано ${was} пересчитано ${rep.ticks[i].powerRatio}`;
+            }
+          }
+        }
+        ok('`plans/93` ВЕРНОСТЬ ПРОИГРЫВАТЕЛЯ: доля пересчитана по трём записям и совпала с записанной',
+          ticks === 14280 && diff === 0, `тактов ${ticks}, разошлось ${diff}${firstBad ? ` — ${firstBad}` : ''}`);
+      }
+
+      // ---- НАБОР А — БОЕВАЯ СМЕРТЬ 17:53: кандидат в трип есть, и фора ОДИННАДЦАТЬ СЕКУНД --------
+      {
+        const rep = replayRing(DEATH, LIVE);
+        const first = rep.firstTrip;
+        const last = rep.ticks[rep.ticks.length - 1].t;
+        const fora = first ? last - first.t : 0;
+        ok('`plans/93` НАБОР А: запись смерти 17:53 даёт кандидата в трип за 11 секунд до смерти',
+          first !== null && first.t <= 13_100 && fora >= 11_000,
+          `первый трип ${first ? `${first.cause} на t=${first.t.toFixed(0)}` : 'НЕТ'}, `
+          + `последний такт ${last.toFixed(0)}, фора ${fora.toFixed(0)} мс (нужно ≥ 11000)`);
+        // Вход 2 выигрывает гонку у входа 3 на 45 мс — измерено, а не предположено планом.
+        const held = Math.max(...rep.ticks.map((x) => x.lowForMs));
+        ok('`plans/93` НАБОР А: вход 3 накопил 455 мс выдержки — 45 мс не дотянув до уставки 500',
+          Math.round(held) === 455 && POWER_LOW_HOLD_MS === 500,
+          `накоплено ${held.toFixed(0)} мс при уставке ${POWER_LOW_HOLD_MS}`);
+      }
+
+      // ---- НАБОР Б — ЛОЖНЫЕ: базовая линия, снятая ДО правки и обязанная не расти ---------------
+      // Судится окно ДО первого живого трипа: дальше живой путь уходил в спасение, которого
+      // проигрыватель не моделирует, и сравнивать там нечего.
+      {
+        let holds = 0; const detail = [];
+        for (const [name, rows] of [['09:42', R0942], ['09:59', R0959]]) {
+          const rep = replayRing(rows, LIVE);
+          const upto = rep.firstTrip ? rep.ticks.filter((x) => x.t <= rep.firstTrip.t) : rep.ticks;
+          const worst = Math.max(0, ...upto.map((x) => x.lowForMs));
+          const t3 = upto.filter((x) => x.cause === 'power-collapse').length;
+          holds += t3;
+          detail.push(`${name}: трипов входа 3 ${t3}, макс выдержка ${worst.toFixed(0)} мс`);
+        }
+        ok('`plans/93` НАБОР Б: на записях с НОРМАЛЬНЫМИ концами прожига вход 3 не трипает — базовая линия 0',
+          holds === 0, detail.join(' · '));
+      }
+
+      // ---- НАБОР В — ВОРОТА ЛОЖНОГО ТРИПА, судимые настоящими числами трёх записей ---------------
+      {
+        ok('`plans/93` НАБОР В: ворота ОТМЕНЯЮТ трип на нормальном конце прожига (выдержка не идёт)',
+          cancelsFalseTrip({ cause: 'progress-stall', burnAlive: false, lowSinceMs: null }) === true
+          && cancelsFalseTrip({ cause: 'power-collapse', burnAlive: false, lowSinceMs: null }) === true,
+          'отмена на нормальном конце не сработала — вернутся ложные, оплаченные bugs/117');
+        ok('🔴 `plans/93` НАБОР В: ворота НЕ отменяют трип, когда выдержка УЖЕ ИДЁТ — смерть 17:53',
+          cancelsFalseTrip({ cause: 'progress-stall', burnAlive: false, lowSinceMs: 12_599 }) === false
+          && cancelsFalseTrip({ cause: 'power-collapse', burnAlive: false, lowSinceMs: 12_599 }) === false,
+          'ворота отменили трип при идущей выдержке — это и есть механизм смерти 08.09 17:53');
+        ok('`plans/93` НАБОР В: живой прожиг отмены не вызывает, чужая причина воротам не подсудна',
+          cancelsFalseTrip({ cause: 'progress-stall', burnAlive: true, lowSinceMs: null }) === false
+          && cancelsFalseTrip({ cause: 'beat-silence', burnAlive: false, lowSinceMs: null }) === false,
+          'ворота вмешались туда, где не их дело');
+      }
+
+      // ---- НАБОР Г — ГОНКА: разрыв «обвал → пропажа прожига» не должен решать исход -------------
+      // Прежнее поведение зависело от разрыва: успела выдержка добрать уставку — трип, не успела —
+      // разоружение. Новое правило от разрыва НЕ ЗАВИСИТ: важно наличие выдержки, а не её длина.
+      {
+        const gaps = [0, 100, 250, 455, 600];
+        const bad = gaps.filter((g) => cancelsFalseTrip({
+          cause: 'power-collapse', burnAlive: false, lowSinceMs: g === 0 ? 0 : 13_053 - g,
+        }) !== false);
+        ok('`plans/93` НАБОР Г: при любом разрыве обвал→пропажа прожига (0…600 мс) трип НЕ отменяется',
+          bad.length === 0, `отменился на разрывах: ${bad.join(', ')} мс`);
+      }
+    }
 
     // ---- ВЫДЕРЖКА: ОДИНОЧНЫЙ ВЫБРОС ТЕЛЕМЕТРИИ НЕ СМЕЕТ УБИТЬ ВЕЧЕР ВЛАДЕЛЬЦА ------------------
     //
