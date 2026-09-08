@@ -3578,6 +3578,11 @@ export function resolveDeliveredRow(doc, deliveredMhz) {
  * [NOT-TESTED: живой прогон с этими аргументами — первый при владельце, с 08.09]
  */
 export function liveFuseRiders({ armNMs, fuseJournalPath, progressFile = null, armMMs = null,
+  // ⚡ ВХОД 3 (`plans/91`, `bugs/117`): доля от бегущего пика мощности. `null` — НЕ ВЗВЕДЁН.
+  // Проводка ЗДЕСЬ, а не в судье: судья умел `--arm-p` с самого начала, а движок его не передавал —
+  // и живой прогон взвёл бы два входа из трёх, ничего об этом не сказав. Ровно тот класс, против
+  // которого поставлен `tools/armed-proven-lint.mjs`, и он поймал это до карты, а не после.
+  armPowerRatio = null,
   // ⚡ `bugs/101` находка 1: журнал ПОЛОСЫ едет к руке 2 как счётчик сейлока. Судья его не читает —
   // он передаёт его дальше. `null` оставляет поведение прежним до байта: сторож молчит.
   sweepJournalPath = null,
@@ -3586,6 +3591,7 @@ export function liveFuseRiders({ armNMs, fuseJournalPath, progressFile = null, a
   return {
     judgeArgs: ['--judge', '--arm-n', String(armNMs), '--burn-images', burnImages,
       ...(sweepJournalPath ? ['--sweep-journal', sweepJournalPath] : []),
+      ...(armPowerRatio !== null ? ['--arm-p', String(armPowerRatio)] : []),
       ...p2.judge, '--seconds', String(seconds), '--out', fuseJournalPath],
     probeArgs: ['--probe', '--seconds', String(seconds), '--tick', '2', ...p2.probe],
   };
@@ -9014,6 +9020,16 @@ export function selfTest() {
         const armed = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J', progressFile: 'F', armMMs: 1040 });
         const observe = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J', progressFile: 'F', armMMs: null });
         const bare = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J' });
+        // ⚡ ВХОД 3 (`plans/91` Ш7): ПРОВОДКА ОТ ДВИЖКА К СУДЬЕ. Судья умел `--arm-p` с самого
+        // начала — а движок его НЕ ПЕРЕДАВАЛ, и живой прогон взвёл бы два входа из трёх, ничего
+        // об этом не сказав. Поймано ПЕРЕД картой, а не после неё.
+        //   АДРЕС МУТАЦИИ: снять `armPowerRatio` из `liveFuseRiders` → оба блока ниже краснеют.
+        const p3 = liveFuseRiders({ armNMs: 60, fuseJournalPath: 'J', armPowerRatio: 0.412 });
+        ok('ВХОД 3 проведён от движка к судье: --arm-p с долей стоит в строке запуска',
+          [p3.judgeArgs.includes('--arm-p'), p3.judgeArgs[p3.judgeArgs.indexOf('--arm-p') + 1]],
+          [true, '0.412']);
+        ok('ВХОД 3 без доли НЕ взводится — «отсутствует» не читается как «в порядке»',
+          bare.judgeArgs.includes('--arm-p'), false);
         ok('bugs/101 находка 3: живой судья взведён по входу 2 — --arm-m с уставкой и --progress-file в строке',
           [armed.judgeArgs.includes('--arm-m'), armed.judgeArgs[armed.judgeArgs.indexOf('--arm-m') + 1], armed.judgeArgs.includes('--progress-file')],
           [true, '1040', true]);
@@ -11871,6 +11887,7 @@ async function mainSweep(argv, arg) {
   const liveRiders = twin ? null : liveFuseRiders({
     armNMs: fuseMod.DERIVED_ARM_N_MS, fuseJournalPath, progressFile,
     armMMs: (!progressObserve && progressDecision.armed) ? progressDecision.armMMs : null,
+    armPowerRatio: fuseMod.POWER_COLLAPSE_RATIO,
     sweepJournalPath: journal.path,
   });
   // ⚡ `bugs/101` находка 1 — СЧЁТЧИК СЕЙЛОКА ДЛЯ РУКИ 2, И ОН ОДИН НА ОБА ПУТИ.
@@ -11969,7 +11986,13 @@ async function mainSweep(argv, arg) {
     : `⚡ АВАРИЙНАЯ ЗАЩИТА (САЗ): pid ${fuseJudge.pid}, уставка ${fuseMod.DERIVED_ARM_N_MS} мс тишины · АВН: образы прожига · ВЗН: заводское напряжение; протокол в ${fuseJournalHint}`
       + (liveRiders.judgeArgs.includes('--arm-m')
         ? ` · ВТОРОЙ ВХОД (прогресс прожига) ВЗВЕДЁН: ${progressDecision.why}; файл сердцебиения ${progressFile}`
-        : ` · ВТОРОЙ ВХОД (прогресс прожига): НАБЛЮДЕНИЕ (--progress-observe) — тишина прогресса пишется в протокол живости, защита по нему не бьёт; файл сердцебиения ${progressFile}`));
+        : ` · ВТОРОЙ ВХОД (прогресс прожига): НАБЛЮДЕНИЕ (--progress-observe) — тишина прогресса пишется в протокол живости, защита по нему не бьёт; файл сердцебиения ${progressFile}`)
+      // ⚡ ТРЕТИЙ ВХОД ПЕЧАТАЕТСЯ ИЗ АРГУМЕНТОВ, КАК И ВТОРОЙ. Молчание про невзведённый вход
+      // читалось бы как «его нет», а про взведённый — как «он есть и доказан»; и то и другое
+      // сегодня уже стоило нам дня. Строка называет ОБА состояния своим именем.
+      + (liveRiders.judgeArgs.includes('--arm-p')
+        ? ` · ТРЕТИЙ ВХОД (обвал мощности) ВЗВЕДЁН: доля ${fuseMod.POWER_COLLAPSE_RATIO} от бегущего пика, пик от ${fuseMod.POWER_ESTABLISHED_MW / 1000} Вт, выдержка ${fuseMod.POWER_LOW_HOLD_MS} мс (bugs/117)`
+        : ' · ТРЕТИЙ ВХОД (обвал мощности): НЕ ВЗВЕДЁН — карта, переставшая считать, этим прогоном НЕ ловится'));
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
