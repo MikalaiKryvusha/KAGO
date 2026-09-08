@@ -173,7 +173,14 @@ async function openDriverProbe() {
   const getPowerUsage = nv.lib.func('int nvmlDeviceGetPowerUsage(uint64_t device, _Out_ void *mw)');
   const mwBuf = Buffer.alloc(4);
   return {
-    probe() { return getPowerUsage(handle, mwBuf); }, // read-only; the VALUE is irrelevant, the RETURN is the datum
+    // ⚡ `bugs/117` / `plans/91` Ш1: ЗДЕСЬ СТОЯЛО «the VALUE is irrelevant, the RETURN is the datum»,
+    // и это стоило синего экрана 2026-09-08. Возврат — датум ВХОДА 1 (жив ли канал к драйверу).
+    // Милливатты — датум ВХОДА 3 (делает ли карта работу), и он всё это время выбрасывался: карта
+    // на 3067 МГц / 925 мВ заявляла 100 % загрузки при 60 Вт вместо 280 две с половиной секунды,
+    // а предохранитель мерил только СВОИ процессы и не видел ничего. Оба датума снимаются ОДНИМ
+    // вызовом, который и так делается каждые 2 мс.
+    probe() { return getPowerUsage(handle, mwBuf); },
+    powerMw() { return mwBuf.readUInt32LE(0); },
     close() { try { nv.shutdown(); } catch { /* the watch is over either way */ } },
   };
 }
@@ -191,7 +198,19 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
     const dgram = await import('node:dgram');
     beatSock = dgram.createSocket('udp4');
     beatSock.unref?.();
-    beatBuf = Buffer.from([0x01]);
+    // ⚡ `plans/91` Ш1: УДАР НЕСЁТ МИЛЛИВАТТЫ — 5 байт вместо одного, но НЕ вторая датаграмма.
+    //
+    // Вход 3 мог бы слать своё сообщение, и это была бы вторая сущность на том же такте
+    // (`PHILOSOPHY.md` → Оккам) и вдвое больше трафика на петле. Но удар существует ИМЕННО потому,
+    // что проба вернулась, — значит то, что она вернула, и есть его законное содержимое. Судья
+    // читает `buf[0]` как раньше; старший байт протокола не тронут.
+    //
+    // ⚠️ БУФЕР ПЕРЕИСПОЛЬЗУЕТСЯ, И ЭТО ОСОЗНАННО. Выделять новый каждые 2 мс — 500 объектов в
+    // секунду в такте, ДЖИТТЕР КОТОРОГО И ЕСТЬ ИЗМЕРЯЕМАЯ ВЕЛИЧИНА безопасности: пауза сборщика
+    // прочиталась бы как промах пробы. Цена переиспользования — значение может оказаться на один
+    // такт (2 мс) старее отправки; для сигнала длиной 2500 мс это ноль.
+    beatBuf = Buffer.alloc(5);
+    beatBuf[0] = 0x01;
   }
   // ⚡ Вход 2 (`plans/66`): ретранслятор прогресса на СВОЁМ таймере — такт живости он не трогает.
   const progressTimer = beatSock
@@ -269,7 +288,13 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
         const before = performance.now();
         const st = driver.probe();
         callMs = performance.now() - before;
-        if (beatSock && st === 0) beatSock.send(beatBuf, beatPort, '127.0.0.1');
+        if (beatSock && st === 0) {
+          // Милливатты кладутся в удар ТОЛЬКО при статусе 0: значение, снятое неудачным вызовом,
+          // это мусор, а мусор во входе 3 хуже его отсутствия (потерянная карта отвечает мгновенно
+          // кодом ошибки — на таком ответе бить нельзя, см. комментарий выше).
+          beatBuf.writeUInt32LE(driver.powerMw(), 1);
+          beatSock.send(beatBuf, beatPort, '127.0.0.1');
+        }
       }
 
       const verdict = classifyTick({ promisedMs, actualMs: wokeMs, callMs, recordThresholdMs });

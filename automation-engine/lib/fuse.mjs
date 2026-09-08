@@ -905,6 +905,11 @@ export async function runJudge({
   let aliveWorstGap = 0;
   let aliveWorstBeat = null;
   let aliveWorstProgress = null;
+  // ⚡ `plans/91` Ш1 — ВХОД 3: МИНИМУМ мощности за окно, а не максимум. Отказ, который нас убил,
+  // выглядит как ПРОВАЛ потребления при заявленной загрузке (60 Вт вместо 280), поэтому
+  // разборчива нижняя граница. Максимум сказал бы «карта работала» про секунду, в которой она
+  // работала первые 200 мс и умерла.
+  let aliveMinPowerMw = null;
 
   const flushAlive = (nowMs, tStartMs) => {
     // 🔴 ЧЕСТНЫЙ `null` ВМЕСТО ВЫДУМАННОГО НУЛЯ. Пока канал не проведён (ударов не было ни одного,
@@ -919,6 +924,7 @@ export async function runJudge({
       worstGapMs: round2(aliveWorstGap),
       worstBeatSilenceMs: aliveWorstBeat === null ? null : round2(aliveWorstBeat),
       worstProgressSilenceMs: aliveWorstProgress === null ? null : round2(aliveWorstProgress),
+      minPowerMw: aliveMinPowerMw,
     })}\n`;
     if (aliveFd === null) aliveFd = openSync(alivePath, 'a');
     writeSync(aliveFd, line);
@@ -930,6 +936,7 @@ export async function runJudge({
     aliveWorstGap = 0;
     aliveWorstBeat = null;
     aliveWorstProgress = null;
+    aliveMinPowerMw = null;
   };
 
   const killHand = makeKillHand({ spawnSyncFn, killFn });
@@ -947,12 +954,19 @@ export async function runJudge({
   let lastBeatMs = null;
   let lastProgressMs = null;
   let progressWired = false;
+  let lastPowerMw = null;
   let beats = 0;
   sock.on('message', (buf) => {
     const now = performance.now();
     // One byte is the whole protocol: 0x01 = driver-liveness beat, 0x02 = burn progress. Anything
     // else is noise on a loopback port and is counted, not obeyed.
-    if (buf[0] === 0x01) { lastBeatMs = now; beats += 1; }
+    if (buf[0] === 0x01) {
+      lastBeatMs = now; beats += 1;
+      // ⚡ ВХОД 3 (`plans/91` Ш1): удар в пять байт несёт милливатты пробы. Однобайтный удар
+      // старой пробы остаётся законным — поле просто не появится, и это честное «не слышал»,
+      // а не ноль (тот же довод, что у `progressWired`).
+      if (buf.length >= 5) lastPowerMw = buf.readUInt32LE(1);
+    }
     else if (buf[0] === 0x02) { lastProgressMs = now; progressWired = true; }
   });
 
@@ -1029,6 +1043,7 @@ export async function runJudge({
       aliveWorstGap = 0;
       aliveWorstBeat = null;
       aliveWorstProgress = null;
+      aliveMinPowerMw = null;
       // Окно строки жизни переносится ЗА `now`, а не двигается шагами: спасение могло длиться
       // 58 секунд, и догонять его пятьюдесятью восемью пустыми окнами значило бы писать «судья
       // молчал» про судью, который в это время ЖДАЛ расписку — а это разные факты.
@@ -1197,6 +1212,10 @@ export async function runJudge({
         t: round2(now - startMs), gapMs: round2(now - lastTickMs),
         beatSilenceMs: verdict.beatSilenceMs === null ? null : round2(verdict.beatSilenceMs),
         progressSilenceMs: verdict.progressSilenceMs === null ? null : round2(verdict.progressSilenceMs),
+        // ⚡ ВХОД 3 (`plans/91` Ш1): мощность ложится ПОТАКТНО, а не только в секундную строку.
+        // Ш3 выводит порог ИЗ АРХИВА, и архивом будет именно кольцо: обвал 08.09 занял 2,5 с, то
+        // есть в секундной строке от него осталось бы два-три числа, а в кольце их больше тысячи.
+        powerMw: lastPowerMw,
       });
       // ── СТРОКА ЖИЗНИ: накопление идёт ЗДЕСЬ ЖЕ, в такте, без второго таймера ──────────────────
       // Второй таймер — вторая сущность и второй источник расхождения: он способен жить, когда
@@ -1211,6 +1230,9 @@ export async function runJudge({
       }
       if (verdict.progressSilenceMs !== null && (aliveWorstProgress === null || verdict.progressSilenceMs > aliveWorstProgress)) {
         aliveWorstProgress = verdict.progressSilenceMs;
+      }
+      if (lastPowerMw !== null && (aliveMinPowerMw === null || lastPowerMw < aliveMinPowerMw)) {
+        aliveMinPowerMw = lastPowerMw;
       }
       if (now >= aliveWindowEndMs) {
         // ⚡ Ш3: ЧИСЛО ТАКТОВ ЗА ЗАКРЫВАЕМОЕ ОКНО СНИМАЕТСЯ ДО СБРОСА — `flushAlive` обнуляет
@@ -2594,6 +2616,55 @@ async function cmdSelftest() {
       inFlight.tripped === true && inFlight.tripOutcomes?.[0]?.cause === 'progress-stall',
       `исход: ${JSON.stringify(inFlight.tripOutcomes)}`);
   }
+  // ---- ВХОД 3 (`plans/91` Ш1, AC1): милливатты пробы доезжают до судьи --------------------------
+  //
+  // Карта здесь не нужна: удар входа 3 — это пять байт на петле, и блок шлёт их сам. Проверяется
+  // ровно проводка (значение доехало и легло в улику), а НЕ порог: порог выводится из архива на
+  // Ш3, и назначать его здесь значило бы выдумать число в предохранителе.
+  //
+  // 🔴 ЧЕМ КРАСНЕЕТ: убери у судьи разбор полезной нагрузки (`buf.length >= 5`) — и `powerMw`
+  // останется `null` во всех тактах, а `minPowerMw` в строке жизни не появится. Оба ok ниже
+  // покраснеют, и второй разборчивее первого: он требует именно МИНИМУМ, а не последнее значение.
+  {
+    const os = await import('node:os');
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'fuse-power-'));
+    const out = path.join(outDir, 'power.jsonl');
+    const sent = [280_000, 61_000, 84_000]; // милливатты: здоровый прожиг → обвал 08.09 → он же
+    const run = await runJudge({
+      beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
+      journalPath: out, seconds: 1.4,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+      onReady: ({ port }) => {
+        const dgram = require('node:dgram'); const s = dgram.createSocket('udp4');
+        let i = 0;
+        const t = setInterval(() => {
+          if (i >= sent.length) { clearInterval(t); s.close(); return; }
+          const b = Buffer.alloc(5); b[0] = 0x01; b.writeUInt32LE(sent[i], 1); i += 1;
+          s.send(b, port, '127.0.0.1');
+        }, 120);
+      },
+    });
+    const ring = readFileSync(run.ringPath, 'utf8').trim().split('\n')
+      .map((l) => JSON.parse(l)).filter((r) => r.powerMw !== undefined);
+    const withPower = ring.filter((r) => r.powerMw !== null);
+    ok('ВХОД 3 (plans/91 Ш1): милливатты удара доехали до судьи и легли ПОТАКТНО в кольцо',
+      withPower.length > 0 && sent.includes(withPower[withPower.length - 1].powerMw),
+      `тактов с мощностью ${withPower.length} из ${ring.length}; последнее значение `
+      + `${withPower.length ? withPower[withPower.length - 1].powerMw : 'нет'} (слали ${sent.join(', ')})`);
+
+    const aliveRows = existsSync(out.replace(/\.jsonl$/u, '-alive.jsonl'))
+      ? readFileSync(out.replace(/\.jsonl$/u, '-alive.jsonl'), 'utf8').trim().split('\n')
+        .map((l) => JSON.parse(l)).filter(Boolean)
+      : [];
+    const withMin = aliveRows.filter((r) => r.minPowerMw !== null && r.minPowerMw !== undefined);
+    ok('ВХОД 3: строка жизни несёт МИНИМУМ за окно — обвал, а не последнее значение',
+      withMin.length > 0 && withMin.every((r) => sent.includes(r.minPowerMw))
+      && Math.min(...withMin.map((r) => r.minPowerMw)) === Math.min(...sent),
+      `строк жизни ${aliveRows.length}, с минимумом ${withMin.length}: `
+      + `${JSON.stringify(withMin.map((r) => r.minPowerMw))} (слали ${sent.join(', ')})`);
+    try { rmSync(outDir, { recursive: true, force: true }); } catch { /* песочница во временных */ }
+  }
+
   ok('форма БЫСТРЕЕ наблюдателя не взводится вовсе, и причина НАЗВАНА (sdc_fma: 3 мс < 150 мс)', (() => {
     const d = armMDecision('sdc_fma');
     return d.armed === false && d.armMMs === null && /мельче трёх тактов наблюдения/u.test(d.why);
