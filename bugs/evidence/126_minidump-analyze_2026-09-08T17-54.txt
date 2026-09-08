@@ -1,0 +1,288 @@
+﻿
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.032 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 46
+
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [C:\Windows\Minidump\090826-15734-01.dmp]
+Mini Kernel Dump File: Only registers and stack trace are available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+Windows 10 Kernel Version 26100 MP (16 procs) Free x64
+Product: WinNt, suite: TerminalServer SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Kernel base = 0xfffff807`d0600000 PsLoadedModuleList = 0xfffff807`d14f5350
+Debug session time: Tue Sep  8 17:53:32.773 2026 (UTC + 3:00)
+System Uptime: 0 days 2:01:34.452
+Loading Kernel Symbols
+...............................................................
+................................................................
+................................................................
+................................................................
+......
+Loading User Symbols
+PEB is paged out (Peb.Ldr = 000000be`4e099018).  Type ".hh dbgerr001" for details
+Loading unloaded module list
+.................
+For analysis of this file, run !analyze -v
+15: kd> kd: Reading initial command '!analyze -v; lmvm nvlddmkm; q'
+Loading Kernel Symbols
+...............................................................
+................................................................
+................................................................
+................................................................
+......
+Loading User Symbols
+PEB is paged out (Peb.Ldr = 000000be`4e099018).  Type ".hh dbgerr001" for details
+Loading unloaded module list
+.................
+*******************************************************************************
+*                                                                             *
+*                        Bugcheck Analysis                                    *
+*                                                                             *
+*******************************************************************************
+
+SYSTEM_THREAD_EXCEPTION_NOT_HANDLED (7e)
+This is a very common BugCheck.  Usually the exception address pinpoints
+the driver/function that caused the problem.  Always note this address
+as well as the link date of the driver/image that contains this address.
+Arguments:
+Arg1: ffffffffc0000005, The exception code that was not handled
+Arg2: fffff8077115f50c, The address that the exception occurred at
+Arg3: ffffab021e4253e8, Exception Record Address
+Arg4: ffffab021e424bf0, Context Record Address
+
+Debugging Details:
+------------------
+
+*** WARNING: Unable to verify timestamp for nvlddmkm.sys
+
+KEY_VALUES_STRING: 1
+
+    Key  : AV.Type
+    Value: Read
+
+    Key  : Analysis.CPU.mSec
+    Value: 11359
+
+    Key  : Analysis.Elapsed.mSec
+    Value: 9520
+
+    Key  : Analysis.IO.Other.Mb
+    Value: 10
+
+    Key  : Analysis.IO.Read.Mb
+    Value: 1
+
+    Key  : Analysis.IO.Write.Mb
+    Value: 35
+
+    Key  : Analysis.Init.CPU.mSec
+    Value: 8546
+
+    Key  : Analysis.Init.Elapsed.mSec
+    Value: 8308
+
+    Key  : Analysis.Memory.CommitPeak.Mb
+    Value: 93
+
+    Key  : Analysis.Version.DbgEng
+    Value: 10.0.29617.1000
+
+    Key  : Analysis.Version.Description
+    Value: 10.2604.29.1 amd64fre
+
+    Key  : Analysis.Version.Ext
+    Value: 1.2604.29.1
+
+    Key  : Bugcheck.Code.LegacyAPI
+    Value: 0x1000007e
+
+    Key  : Bugcheck.Code.TargetModel
+    Value: 0x1000007e
+
+    Key  : Failure.Bucket
+    Value: AV_nvlddmkm!unknown_function
+
+    Key  : Failure.Exception.Code
+    Value: 0xc0000005
+
+    Key  : Failure.Exception.IP.Address
+    Value: 0xfffff8077115f50c
+
+    Key  : Failure.Exception.IP.Module
+    Value: nvlddmkm
+
+    Key  : Failure.Exception.IP.Offset
+    Value: 0xacf50c
+
+    Key  : Failure.Exception.Record
+    Value: 0xffffab021e4253e8
+
+    Key  : Failure.Hash
+    Value: {7eea5677-f68d-2154-717e-887e07e55cd3}
+
+    Key  : Faulting.IP.Type
+    Value: Paged
+
+    Key  : WER.OS.Branch
+    Value: ge_release
+
+    Key  : WER.OS.Version
+    Value: 10.0.26100.1
+
+    Key  : WER.System.BIOSRevision
+    Value: 5.17.0.0
+
+
+BUGCHECK_CODE:  7e
+
+BUGCHECK_P1: ffffffffc0000005
+
+BUGCHECK_P2: fffff8077115f50c
+
+BUGCHECK_P3: ffffab021e4253e8
+
+BUGCHECK_P4: ffffab021e424bf0
+
+FILE_IN_CAB:  090826-15734-01.dmp
+
+FAULTING_THREAD:  ffff998fcde25080
+
+EXCEPTION_RECORD:  ffffab021e4253e8 -- (.exr 0xffffab021e4253e8)
+ExceptionAddress: fffff8077115f50c (nvlddmkm+0x0000000000acf50c)
+   ExceptionCode: c0000005 (Access violation)
+  ExceptionFlags: 00000000
+NumberParameters: 2
+   Parameter[0]: 0000000000000000
+   Parameter[1]: 0000000000000219
+Attempt to read from address 0000000000000219
+
+CONTEXT:  ffffab021e424bf0 -- (.cxr 0xffffab021e424bf0)
+rax=0000000000000000 rbx=0000000000000000 rcx=ffffab021e425664
+rdx=00000000000bcbd0 rsi=ffff998fb963d000 rdi=0000000000468046
+rip=fffff8077115f50c rsp=ffffab021e425620 rbp=ffff998fb9813050
+ r8=000000000075f621  r9=ffffab021e42566c r10=0000000000000000
+r11=ffffab021e4255c0 r12=0000000000000000 r13=ffff998fb9815330
+r14=0000000000000001 r15=0000000000000000
+iopl=0         nv up ei pl zr na pe nc
+cs=0010  ss=0018  ds=002b  es=002b  fs=0053  gs=002b             efl=00050246
+nvlddmkm+0xacf50c:
+fffff807`7115f50c 4438a319020000  cmp     byte ptr [rbx+219h],r12b ds:002b:00000000`00000219=??
+Resetting default scope
+
+BLACKBOXBSD: 1 (!blackboxbsd)
+
+
+BLACKBOXNTFS: 1 (!blackboxntfs)
+
+
+BLACKBOXPNP: 1 (!blackboxpnp)
+
+
+BLACKBOXWINLOGON: 1 (!blackboxwinlogon) (!blackboxwinlogonnotify)
+
+
+CUSTOMER_CRASH_COUNT:  1
+
+PROCESS_NAME:  csrss.exe
+
+READ_ADDRESS: fffff807d15c54d8: Unable to get MiVisibleState
+ 0000000000000219 
+
+ERROR_CODE: (NTSTATUS) 0xc0000005 -                      0x%p                               0x%p.                      %s.
+
+EXCEPTION_CODE_STR:  c0000005
+
+EXCEPTION_PARAMETER1:  0000000000000000
+
+EXCEPTION_PARAMETER2:  0000000000000219
+
+EXCEPTION_STR:  0xc0000005
+
+IP_IN_PAGED_CODE: 
+nvlddmkm+acf50c
+fffff807`7115f50c 4438a319020000  cmp     byte ptr [rbx+219h],r12b
+
+STACK_TEXT:  
+ffffab02`1e425620 00000000`00000046     : ffff5b26`01651100 00000000`00000000 00000000`00000000 00000000`00000000 : nvlddmkm+0xacf50c
+ffffab02`1e425628 ffff5b26`01651100     : 00000000`00000000 00000000`00000000 00000000`00000000 ffffab02`1e420000 : 0x46
+ffffab02`1e425630 00000000`00000000     : 00000000`00000000 00000000`00000000 ffffab02`1e420000 00000000`00d00040 : 0xffff5b26`01651100
+
+
+SYMBOL_NAME:  nvlddmkm+acf50c
+
+MODULE_NAME: nvlddmkm
+
+IMAGE_NAME:  nvlddmkm.sys
+
+STACK_COMMAND: .cxr 0xffffab021e424bf0 ; kb
+
+BUCKET_ID_FUNC_OFFSET:  acf50c
+
+FAILURE_BUCKET_ID:  AV_nvlddmkm!unknown_function
+
+OS_VERSION:  10.0.26100.1
+
+BUILDLAB_STR:  ge_release
+
+OSPLATFORM_TYPE:  x64
+
+OSNAME:  Windows 10
+
+FAILURE_ID_HASH:  {7eea5677-f68d-2154-717e-887e07e55cd3}
+
+Followup:     MachineOwner
+---------
+
+Browse full module list
+start             end                 module name
+fffff807`70690000 fffff807`77a05000   nvlddmkm T (no symbols)           
+    Loaded symbol image file: nvlddmkm.sys
+    Image path: \SystemRoot\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_0373d825005116d0\nvlddmkm.sys
+    Image name: nvlddmkm.sys
+    Browse all global symbols  functions  data  Symbol Reload
+    Timestamp:        Wed Jul 22 04:44:26 2026 (6A60207A)
+    CheckSum:         072C72CE
+    ImageSize:        07375000
+    Mapping Form:     Loaded
+    Translations:     0000.04b0 0000.04e4 0409.04b0 0409.04e4
+    Information from resource tables:
+quit:
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\Kernel.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\Usb4Kd.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2606.22001.0_x64__8wekyb3d8bbwe\amd64\Visualizers\winrt.natvis'
