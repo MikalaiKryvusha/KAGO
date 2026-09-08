@@ -74,6 +74,16 @@ export const JUDGE_TICK_MS = 2;
 export const RING_CAPACITY = 15_000;
 
 /**
+ * ⚡ КАК ЧАСТО НЕПРЕРЫВНЫЙ ЧЁРНЫЙ ЯЩИК ДОЖИМАЕТ ЗАПИСЬ ДО ДИСКА (`bugs/123`).
+ *
+ * Не выбор вкуса, а размен, названный числами: `fsync` на NVMe стоит единицы миллисекунд, такт
+ * судьи — 2 мс, уставка здоровья такта — 60 мс (`DERIVED_ARM_N_MS`). Ежетактный `fsync` съел бы
+ * такт целиком; 500 мс — это 250 тактов между дожимами и потеря не более полусекунды при синем
+ * экране, при том что окно записанного составляет 30…60 секунд.
+ */
+export const LIVE_RING_FSYNC_MS = 500;
+
+/**
  * ⚡ THE DERIVED DEADMAN THRESHOLD — phase 3's number (`plans/56` §Итог замера, 2026-08-28), the
  * one constant `plans/52` forbade inventing and this measurement finally earned:
  *
@@ -968,6 +978,9 @@ export async function runJudge({
   // спрашивает о его СУЩЕСТВОВАНИИ, и только когда вход 2 уже собрался трипнуть.
   progressFile = null, existsFn = existsSync,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
+  // ⚡ `bugs/123`: дверь нужна РОВНО для мутации — блок обязан уметь воспроизвести прежнюю беду,
+  // иначе он не сторож, а украшение. В боевом пути непрерывная запись включена всегда.
+  liveRing = true,
   // ⚡ Ш3 (`plans/88` §4b(4) и §4c): ПОЛУОТКРЫТОЕ ОКНО ПРИХОДИТ ПАРАМЕТРАМИ, А НЕ ТОЛЬКО КОНСТАНТОЙ.
   // Умолчания — измеренные числа живого пути. Своими значениями окно называют те, кто физически не
   // может дать 300 тактов/с: фикстура без `timeBeginPeriod` (~62/с) и репетиция смерти, где ту же
@@ -1033,6 +1046,65 @@ export async function runJudge({
       fsyncSync(rfd);
       ringDumped = true;
     } finally { closeSync(rfd); }
+  };
+
+  /**
+   * ⚡ НЕПРЕРЫВНЫЙ ЧЁРНЫЙ ЯЩИК — `bugs/123`, куплен ТРЕМЯ смертями 08.09 подряд.
+   *
+   * @forensic fuse-live-ring
+   * EXPLAINS:   что видел судья в разрешении 2 мс перед смертью машины, КОТОРАЯ НЕ ДАЛА ТРИПА
+   * DURABLE-AT: every-tick (сброс на диск батчем, окно потери названо числом ниже)
+   *
+   * 🔴 ЗАЧЕМ. Кольцо в памяти объясняет ТРИП и ложится на трипе — для своего события оно
+   * долговечно, и это записано этажом выше честно. Но смерть машины трипа не даёт: 08.09 в 13:26
+   * машина умерла из полностью здорового состояния (мощность 250 Вт, разрыв такта 16,53 мс, пульс
+   * 15,44 мс) между двумя тактами, срабатывания не было — и пятнадцать тысяч тактов высокого
+   * разрешения умерли вместе с процессом. Так же ушли обе смерти до неё. Заказ владельца от
+   * 26.08 — *«чтобы по результатам нагрузки можно было предсказывать приближение видеокарты к краю
+   * и отказу»* — на секундной строке жизни неисполним: там предвестника НЕТ. Он может быть только
+   * в такте 2 мс, а такт 2 мс мы каждый раз выбрасывали.
+   *
+   * КАК. Две файла-половины по `ringCapacity` записей. Пишем в текущую; заполнилась — переключаемся
+   * на другую и обнуляем её. На диске всегда лежит от одного до двух объёмов кольца, то есть
+   * 30…60 секунд при такте 2 мс, а размер ограничен сверху и не растёт с длиной прогона.
+   * Разбор читает обе половины и сортирует по `t` — порядок хранения не является порядком времени,
+   * ровно как у кольца в памяти.
+   *
+   * ⚠️ ОКНО ПОТЕРИ НАЗВАНО, А НЕ ЗАМОЛЧАНО. `writeSync` кладёт такт в страничный кэш ОС; синий
+   * экран уносит кэш. Поэтому `fsync` идёт раз в `LIVE_RING_FSYNC_MS`, и при синем экране теряется
+   * НЕ ВСЁ, а последнее окно — до 500 мс. Ежетактный `fsync` не рассматривается: он стоит
+   * миллисекунды на вызов при такте 2 мс, то есть убил бы сам такт, ради которого всё делается.
+   * Обещание здесь ровно такое: «последние полсекунды могут не долететь, всё предыдущее долетит».
+   */
+  const liveRingPaths = [
+    journalPath.replace(/\.jsonl$/u, '-live-a.jsonl'),
+    journalPath.replace(/\.jsonl$/u, '-live-b.jsonl'),
+  ];
+  let liveHalf = 0;
+  let liveCount = 0;
+  let liveFd = liveRing ? openSync(liveRingPaths[0], 'w') : null;
+  let liveLastFsyncMs = 0;
+  const recordLive = (row) => {
+    if (!liveRing) return;
+    try {
+      writeSync(liveFd, `${JSON.stringify(row)}\n`);
+      liveCount += 1;
+      if (liveCount >= ringCapacity) {
+        closeSync(liveFd);
+        liveHalf = 1 - liveHalf;
+        // 'w' — половина ОБНУЛЯЕТСЯ при переключении: иначе файл рос бы весь вечер, и «ограничен
+        // сверху» было бы неправдой.
+        liveFd = openSync(liveRingPaths[liveHalf], 'w');
+        liveCount = 0;
+        liveLastFsyncMs = 0;
+      }
+      const nowMs = performance.now();
+      if (nowMs - liveLastFsyncMs >= LIVE_RING_FSYNC_MS) { fsyncSync(liveFd); liveLastFsyncMs = nowMs; }
+    } catch { /* чёрный ящик НИКОГДА не роняет судью: улика дешевле защиты (R14) */ }
+  };
+  const closeLive = () => {
+    if (!liveRing || liveFd === null) return;
+    try { fsyncSync(liveFd); closeSync(liveFd); } catch { /* уже закрыт */ }
   };
 
   /**
@@ -1459,7 +1531,7 @@ export async function runJudge({
       });
       // Every tick lands in the ring — the judge's own wake-up gap included: a judge that stalls
       // with the system records its own stall, which is exactly the timer-role observation.
-      pushRing(ring, {
+      const tickRow = {
         t: round2(now - startMs), gapMs: round2(now - lastTickMs),
         beatSilenceMs: verdict.beatSilenceMs === null ? null : round2(verdict.beatSilenceMs),
         progressSilenceMs: verdict.progressSilenceMs === null ? null : round2(verdict.progressSilenceMs),
@@ -1468,7 +1540,12 @@ export async function runJudge({
         // есть в секундной строке от него осталось бы два-три числа, а в кольце их больше тысячи.
         powerMw: lastPowerMw,
         powerRatio: verdict.powerRatio,
-      });
+      };
+      pushRing(ring, tickRow);
+      // ⚡ `bugs/123` — И ТОТ ЖЕ ТАКТ ЛОЖИТСЯ НА ДИСК СРАЗУ. Кольцо в памяти объясняет ТРИП; смерть
+      // машины без трипа оно не переживает вовсе, потому что процесс умирает вместе с памятью.
+      // Три смерти 08.09 унесли с собой ровно ту улику, ради которой заведён предсказатель края.
+      recordLive(tickRow);
       // ── СТРОКА ЖИЗНИ: накопление идёт ЗДЕСЬ ЖЕ, в такте, без второго таймера ──────────────────
       // Второй таймер — вторая сущность и второй источник расхождения: он способен жить, когда
       // такт уже встал, и написать «судья жив» про мёртвого судью. Накопитель едет на самом такте,
@@ -1652,6 +1729,7 @@ export async function runJudge({
   });
 
   if (!ringDumped) dumpRing(); // graceful close = step close: the black box lands either way
+  closeLive();                 // `bugs/123`: непрерывная половина дожимается и закрывается тоже
   // Последнее окно строки жизни — только если в нём БЫЛИ такты. Пустая строка не улика, а шум,
   // и в разборе она читалась бы как «секунда прошла, судья молчал».
   if (aliveTicks > 0) flushAlive(performance.now(), startMs);
@@ -1674,6 +1752,7 @@ export async function runJudge({
     rearms: rearmsDone,
     tripOutcomes,
     ringPath,
+    liveRingPaths,   // `bugs/123`: две половины непрерывного чёрного ящика
   };
 }
 
@@ -2544,6 +2623,72 @@ async function cmdSelftest() {
       recs.some((d) => d.phase === 'intent' && d.cause === 'progress-stall')
       && !recs.some((d) => d.phase === 'intent' && d.cause === 'beat-silence'),
       `причины намерений: ${recs.filter((d) => d.phase === 'intent').map((d) => d.cause).join(',') || '—'}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ⚡ `bugs/123` — НЕПРЕРЫВНЫЙ ЧЁРНЫЙ ЯЩИК: УЛИКА 2 мс ПЕРЕЖИВАЕТ СМЕРТЬ БЕЗ ТРИПА
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // Три смерти 08.09 не дали ни одного трипа, и каждая унесла кольцо целиком. Блок доказывает
+  // РОВНО то, чего не хватало: такты лежат на диске УЖЕ, пока судья ещё работает и ничего не
+  // случилось. Проверка идёт ЧТЕНИЕМ ФАЙЛА ВО ВРЕМЯ ПРОГОНА — то есть в тот момент, в который
+  // синий экран и приходил.
+  {
+    const os = await import('node:os');
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'fuse-livering-'));
+    const journalPath = path.join(tmp, 'judge.jsonl');
+    let midRunLines = 0;
+    let midRunTripped = null;
+    const judgeDone = runJudge({
+      beatPort: 0, armNMs: null, armMMs: null, burnPid: null, journalPath, seconds: 1.2,
+      // Ёмкость мала НАРОЧНО: так за прогон случится переключение половин, и блок судит ротацию,
+      // а не только запись.
+      ringCapacity: 40,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+    });
+    // Через полсекунды после старта — читаем файл ПРЯМО СЕЙЧАС, не дожидаясь конца прогона.
+    await new Promise((res) => { setTimeout(res, 500); });
+    const half = (n) => journalPath.replace(/\.jsonl$/u, `-live-${n}.jsonl`);
+    for (const n of ['a', 'b']) {
+      try { midRunLines += readFileSync(half(n), 'utf8').trim().split('\n').filter(Boolean).length; } catch { /* половина ещё не заведена */ }
+    }
+    midRunTripped = false;
+    const r = await judgeDone;
+    ok('🔴 bugs/123: ТАКТЫ ЛЕЖАТ НА ДИСКЕ ПОСРЕДИ ПРОГОНА, БЕЗ ЕДИНОГО ТРИПА — мгновенная смерть больше не уносит улику',
+      midRunLines > 0 && r.trips === 0,
+      `строк на диске через 0,5 с: ${midRunLines} · трипов за прогон: ${r.trips}`);
+    const total = ['a', 'b'].reduce((s, n) => {
+      try { return s + readFileSync(half(n), 'utf8').trim().split('\n').filter(Boolean).length; } catch { return s; }
+    }, 0);
+    ok('bugs/123: размер ограничен сверху — две половины по ёмкости кольца, а не файл, растущий весь вечер',
+      total > 0 && total <= 2 * 40,
+      `строк в обеих половинах после прогона: ${total} при потолке ${2 * 40}`);
+    // Порядок хранения ≠ порядок времени: половины пишутся по кругу, разбор ОБЯЗАН сортировать.
+    const rows = ['a', 'b'].flatMap((n) => {
+      try { return readFileSync(half(n), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; }
+    }).sort((x, y) => x.t - y.t);
+    ok('bugs/123: записанное читается как ВРЕМЕННОЙ РЯД — метки растут после сортировки, разрыв такта у каждой',
+      rows.length > 1 && rows.every((x, i) => i === 0 || x.t >= rows[i - 1].t) && rows.every((x) => typeof x.gapMs === 'number'),
+      `тактов ${rows.length}`);
+    // МУТАЦИЯ: сними непрерывную запись — и посреди прогона на диске не будет НИЧЕГО, ровно как
+    // 08.09. Проверяется тем же способом: файл читается ДО конца прогона.
+    const tmp2 = mkdtempSync(path.join(os.tmpdir(), 'fuse-livering-mut-'));
+    const jp2 = path.join(tmp2, 'judge.jsonl');
+    const done2 = runJudge({
+      beatPort: 0, armNMs: null, armMMs: null, burnPid: null, journalPath: jp2, seconds: 1.2,
+      ringCapacity: 40, liveRing: false,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+    });
+    await new Promise((res) => { setTimeout(res, 500); });
+    let mutLines = 0;
+    for (const n of ['a', 'b']) {
+      try { mutLines += readFileSync(jp2.replace(/\.jsonl$/u, `-live-${n}.jsonl`), 'utf8').trim().split('\n').filter(Boolean).length; } catch { /* файла нет — это и есть прежняя беда */ }
+    }
+    await done2;
+    ok('bugs/123 МУТАЦИЯ: без непрерывной записи посреди прогона на диске НОЛЬ тактов — прежняя беда воспроизведена',
+      mutLines === 0, `строк на диске: ${mutLines}`);
+    try { rmSync(tmp, { recursive: true, force: true }); rmSync(tmp2, { recursive: true, force: true }); } catch { /* песочница во временных */ }
+    void midRunTripped;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════════
