@@ -111,17 +111,37 @@ export const DERIVED_ARM_N_MS = 60;
  * `beat-silence` WINS over `progress-stall` when both hold — it is the more specific fact about
  * the card (the probe walks through the driver into the card; progress only walks out of our own
  * workload), mirroring how `call-stall` wins over `late` in the watch.
+ *
+ * ⚡ ВХОД 3 — `power-collapse` (`plans/91`, `bugs/117`). Третий датум — РАБОТА КАРТЫ, а не жизнь
+ * наших процессов: карта, тихо переставшая считать, отвечает на звонки (вход 1 здоров) и позволяет
+ * нашему циклу тикать (вход 2 здоров), но потребляет четверть своих ватт. Порядок причин по
+ * КОНКРЕТНОСТИ факта о карте: канал мёртв (`beat-silence`) → карта не работает
+ * (`power-collapse`) → наш цикл встал (`progress-stall`).
+ *
+ * Величина — ДОЛЯ ОТ БЕГУЩЕГО ПИКА, а не абсолютные ватты: 45 Вт на 2145 МГц законны, а на
+ * 3060 МГц невозможны. Карта сравнивается с собой же минуту назад.
  */
-export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs = null, armMMs = null, progressWired = false }) {
+export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs = null, armMMs = null, progressWired = false, power = null }) {
   const beatSilenceMs = lastBeatMs === null ? null : Math.max(0, nowMs - lastBeatMs);
   const progressSilenceMs = (progressWired && lastProgressMs !== null) ? Math.max(0, nowMs - lastProgressMs) : null;
   const beatTripped = armNMs !== null && beatSilenceMs !== null && beatSilenceMs >= armNMs;
   const progressTripped = armMMs !== null && progressSilenceMs !== null && progressSilenceMs >= armMMs;
+  // Вход 3 взводится ТОЛЬКО когда: порог назван · пик СОСТОЯЛСЯ (иначе делить не на что — на
+  // разгоне доля близка к единице у любой карты) · провал держится дольше выдержки. Три условия,
+  // и каждое снимает свой класс ложного: невзведённость, разгон, одиночный выброс.
+  const powerTripped = power !== null && power.ratio !== null && power.mw !== null
+    && power.peakMw >= power.establishedMw
+    && power.mw <= power.ratio * power.peakMw
+    && power.lowForMs >= power.holdMs;
   return {
-    tripped: beatTripped || progressTripped,
-    cause: beatTripped ? 'beat-silence' : (progressTripped ? 'progress-stall' : null),
+    tripped: beatTripped || powerTripped || progressTripped,
+    cause: beatTripped ? 'beat-silence' : (powerTripped ? 'power-collapse' : (progressTripped ? 'progress-stall' : null)),
     beatSilenceMs,
     progressSilenceMs,
+    // Доля печатается в улику РЯДОМ с вердиктом: разбор следующей смерти начнётся с вопроса
+    // «насколько глубоко провалилась карта», и ответ обязан лежать в той же строке, что и причина.
+    powerRatio: (power !== null && power.mw !== null && power.peakMw > 0)
+      ? round2(power.mw / power.peakMw) : null,
   };
 }
 
@@ -217,6 +237,69 @@ export function deriveArmMMs(workload, { lowestMhz = null } = {}) {
  * смотреть файл каждые 2 мс незачем. 50 мс — двадцать чтений двадцати байт в секунду.
  */
 export const PROGRESS_POLL_MS = 50;
+
+// =================================================================================================
+// 2b. ВХОД 3 — ОБВАЛ МОЩНОСТИ. Три числа, и все три ИЗМЕРЕНЫ, а не назначены
+// =================================================================================================
+//
+// Прибор, которым они получены: `npm run powerfloor` (`tools/power-collapse-floor.mjs`). Он читает
+// архив прожигов и журнал развёртки и печатает зазор. Числа ниже — его вывод от 2026-09-08 на
+// 166 прожигах, и он воспроизводим: запусти прибор и сверь.
+//
+// 🔴 ПОЧЕМУ ДОЛЯ, А НЕ ВАТТЫ. Абсолютный порог не работает: в архиве первый процентиль мощности
+// под нагрузкой — 65 Вт, есть пробы по 43 Вт в прогонах, никого не убивших. На 2145 МГц 45 Вт
+// законны, на 3060 МГц невозможны. Доля от БЕГУЩЕГО пика сравнивает карту с ней же самой минуту
+// назад и потому не зависит ни от частоты, ни от режима.
+
+/**
+ * @guard fuse-power-collapse
+ * THREAT:         тихий отказ недовольтажа — карта заявляет 100 % загрузки и НЕ СЧИТАЕТ. Оплачен
+ *                 синим экраном 2026-09-08 09:50 на 3067 МГц / 925 мВ (`bugs/117`): 60 Вт вместо
+ *                 280 в течение 2500 мс, оба прежних входа предохранителя здоровы до последнего
+ *                 такта (пульс 4,86 мс при пороге 60)
+ * PROVED-AGAINST: ДВЕ ЖИВЫЕ ЗАПИСИ ПРОБ 2026-09-08, одна частота 3067 МГц, СОСЕДНИЕ ступени —
+ *                 935 мВ прошло, 925 мВ убило машину; проиграны в настоящего судью через сокет.
+ *                 Смерть даёт трип `power-collapse`, здоровая ступень молчит. Четыре мутации
+ *                 краснят каждая своё: снять взведение · снять выдержку · порог 0,95 · порог 0,25
+ * GAP:            🔴 МГНОВЕННАЯ СМЕРТЬ БЕЗ ПРЕДВЕСТНИКА ЭТОМУ ВХОДУ НЕВИДИМА. Правило требует, чтобы
+ *                 провал держался 500 мс; отказ, убивающий машину быстрее, не будет пойман — как не
+ *                 будет пойман и отказ, при котором мощность НЕ падает. Второе: порог выведен на
+ *                 архиве ОДНОЙ карты, ОДНОГО драйвера (610.88) и ОДНОЙ формы нагрузки (`furnace`);
+ *                 на другой форме его надо выводить заново. Третье: проверка идёт на ЗАПИСЯХ проб,
+ *                 а живая проба шлёт милливатты каждые 2 мс — частота потока в 250 раз выше, и
+ *                 поведение входа на ней НЕ НАБЛЮДАЛОСЬ
+ * ON-REAL-PATH:   NOT YET — вход 3 на живой полосе не поднимался ни разу. Это шаг 7 `plans/91`:
+ *                 прогон при владельце на ДОКАЗАННО безопасной ступени, без поиска края
+ *
+ * Строка `GAP` написана ДО живого прогона намеренно: у предохранителя, которого она описывает,
+ * ровно такая строка от 28 августа сняла бы инцидент 30-го, и не была прочитана (`plans/76`, М1).
+ */
+
+/**
+ * ДОЛЯ ОТ ПИКА, НИЖЕ КОТОРОЙ КАРТА СЧИТАЕТСЯ ПЕРЕСТАВШЕЙ РАБОТАТЬ.
+ *
+ * Выведена как СЕРЕДИНА самого широкого разрыва в нижней трети ряда: 0,331 → 0,494. Замер на
+ * 166 прожигах архива: онлайн-форма правила дала 7 трипов, ВСЕ СЕМЬ на частотах с записанным полом
+ * зависания, ЛОЖНЫХ 0. При этом 92 прожига на ТЕХ ЖЕ частотах провала не дали — величина различает
+ * события, а не частоты. Ноль ложных проверен на подвижность: порог 0,504 даёт 1 ложный, 0,650 —
+ * 36, 0,900 — 68, то есть счётчик умеет расти и его ноль что-то значит.
+ */
+export const POWER_COLLAPSE_RATIO = 0.412;
+
+/**
+ * ПИК ОБЯЗАН СОСТОЯТЬСЯ, ИНАЧЕ ДЕЛИТЬ НЕ НА ЧТО. Пока прожиг разгоняется от простоя, доля от пика
+ * близка к единице у любой карты — и живой, и мёртвой. 150 Вт лежат ниже самого слабого пика в
+ * архиве (213 Вт), поэтому условие отсекает не прожиги, а их первые миллисекунды.
+ */
+export const POWER_ESTABLISHED_MW = 150_000;
+
+/**
+ * СКОЛЬКО ПРОВАЛ ДОЛЖЕН ДЕРЖАТЬСЯ. Правило, давшее 7 из 7 при нуле ложных, требовало ДВУХ проб
+ * подряд при такте архива 500 мс — то есть низкое состояние жило ≥ 500 мс. Наблюдённое окно
+ * смерти 08.09 — 2500 мс, впятеро больше: выдержка не съедает запас, а одиночный выброс телеметрии
+ * отсекает.
+ */
+export const POWER_LOW_HOLD_MS = 500;
 
 /**
  * ВЗВОДИТЬ ЛИ ВХОД 2 ДЛЯ ЭТОЙ НАГРУЗКИ — и если нет, то ПОЧЕМУ, вслух.
@@ -779,6 +862,9 @@ export function runTrip({ verdict, burnPid, burnImages = null, killHand, imageKi
  */
 export async function runJudge({
   beatPort = 0, armNMs = null, armMMs = null, burnPid = null, burnImages = null,
+  // ⚡ ВХОД 3 (`plans/91`): доля от бегущего пика. `null` — НЕ ВЗВЕДЁН, как у входов 1 и 2:
+  // невзведённый вход не трипает никогда, и «отсутствует» не читается как «в порядке».
+  armPowerRatio = null,
   burnPidFile = null, twinStockCard = null,
   // ⚡ `bugs/101` находка 1: ПУТЬ ЖУРНАЛА ПОЛОСЫ, и судья им НЕ ПОЛЬЗУЕТСЯ — он лишь передаёт его
   // руке 2, которой счётчик намерений нужен как сейлок вокруг собственной записи. Судья читать его
@@ -955,6 +1041,8 @@ export async function runJudge({
   let lastProgressMs = null;
   let progressWired = false;
   let lastPowerMw = null;
+  let peakPowerMw = 0;         // бегущий пик прожига — вход 3 делит на него
+  let lowPowerSinceMs = null;  // когда началась выдержка провала; null — провала нет
   let beats = 0;
   sock.on('message', (buf) => {
     const now = performance.now();
@@ -1044,6 +1132,8 @@ export async function runJudge({
       aliveWorstBeat = null;
       aliveWorstProgress = null;
       aliveMinPowerMw = null;
+      peakPowerMw = 0;           // вход 3: прожиг убит рукой 1, пик прошлой ступени судить нечем
+      lowPowerSinceMs = null;
       // Окно строки жизни переносится ЗА `now`, а не двигается шагами: спасение могло длиться
       // 58 секунд, и догонять его пятьюдесятью восемью пустыми окнами значило бы писать «судья
       // молчал» про судью, который в это время ЖДАЛ расписку — а это разные факты.
@@ -1205,7 +1295,34 @@ export async function runJudge({
       // Признак взят СУЩЕСТВУЮЩИЙ (`rearmsDone` растёт ровно во взведении), а не новый флаг: флаг
       // был бы парой «правда ↔ зеркало» к нему и разошёлся бы при первой правке `closeRescue`.
       const rearmsAtTickStart = rearmsDone;
-      const verdict = judgeLiveness({ nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired });
+      // ⚡ ВХОД 3: БЕГУЩИЙ ПИК И ВЫДЕРЖКА ПРОВАЛА — считаются здесь, в памяти, без диска.
+      //
+      // Признак «идёт ли прожиг» взят СУЩЕСТВУЮЩИЙ — `progressWired`, а не новый: сердцебиение
+      // прогресса поднимает его ударом `0x02` и гасит на конце прожига. Новый флаг был бы парой
+      // «правда ↔ зеркало» к нему и разошёлся бы при первой правке (тот же довод, что у
+      // `rearmsDone` в `bugs/111`). Нет прожига — нет и суждения о работе карты: пик обнуляется,
+      // выдержка снимается. Это ровно «источника нет» ≠ «застыл», третий раз в этом файле.
+      if (!progressWired || lastPowerMw === null) {
+        peakPowerMw = 0;
+        lowPowerSinceMs = null;
+      } else {
+        if (lastPowerMw > peakPowerMw) peakPowerMw = lastPowerMw;
+        const low = armPowerRatio !== null
+          && peakPowerMw >= POWER_ESTABLISHED_MW
+          && lastPowerMw <= armPowerRatio * peakPowerMw;
+        if (low) { if (lowPowerSinceMs === null) lowPowerSinceMs = now; } else lowPowerSinceMs = null;
+      }
+      const verdict = judgeLiveness({
+        nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired,
+        power: armPowerRatio === null ? null : {
+          mw: lastPowerMw,
+          peakMw: peakPowerMw,
+          ratio: armPowerRatio,
+          establishedMw: POWER_ESTABLISHED_MW,
+          lowForMs: lowPowerSinceMs === null ? 0 : now - lowPowerSinceMs,
+          holdMs: POWER_LOW_HOLD_MS,
+        },
+      });
       // Every tick lands in the ring — the judge's own wake-up gap included: a judge that stalls
       // with the system records its own stall, which is exactly the timer-role observation.
       pushRing(ring, {
@@ -1216,6 +1333,7 @@ export async function runJudge({
         // Ш3 выводит порог ИЗ АРХИВА, и архивом будет именно кольцо: обвал 08.09 занял 2,5 с, то
         // есть в секундной строке от него осталось бы два-три числа, а в кольце их больше тысячи.
         powerMw: lastPowerMw,
+        powerRatio: verdict.powerRatio,
       });
       // ── СТРОКА ЖИЗНИ: накопление идёт ЗДЕСЬ ЖЕ, в такте, без второго таймера ──────────────────
       // Второй таймер — вторая сущность и второй источник расхождения: он способен жить, когда
@@ -1336,9 +1454,14 @@ export async function runJudge({
         // случаться каждый такт. Погашенный источник больше не даёт кандидата в трип, поэтому
         // `burnInFlight()` не спрашивается до следующего удара `0x02` — то есть до старта
         // следующего прожига, который сам поднимет `progressWired` и заведёт часы с нуля.
-        if (verdict.cause === 'progress-stall' && !burnInFlight()) {
+        // ⚡ ВХОД 3 ПОД ТЕМИ ЖЕ ВОРОТАМИ, И ЭТО НЕ ПЕРЕСТРАХОВКА. На конце прожига мощность
+        // законно падает к простою, а файл сердцебиения ещё может лежать долю секунды — трип по
+        // такому падению был бы ложным ровно того класса, что уже оплачен на входе 2.
+        if ((verdict.cause === 'progress-stall' || verdict.cause === 'power-collapse') && !burnInFlight()) {
           lastProgressMs = null;
           progressWired = false;
+          peakPowerMw = 0;
+          lowPowerSinceMs = null;
           tickTimer = setTimeout(tick, JUDGE_TICK_MS);
           return;
         }
@@ -2665,6 +2788,121 @@ async function cmdSelftest() {
     try { rmSync(outDir, { recursive: true, force: true }); } catch { /* песочница во временных */ }
   }
 
+  // ---- ВХОД 3 (`plans/91` Ш4, AC3): ОБВАЛ МОЩНОСТИ, СЫГРАННЫЙ ПО ЗАПИСИ НАСТОЯЩЕЙ СМЕРТИ --------
+  //
+  // Обе фикстуры — ЖИВЫЕ пробы 2026-09-08 с одной частоты 3067 МГц и СОСЕДНИХ ступеней:
+  // 935 мВ прошло, 925 мВ убило машину синим экраном. Различаются только напряжением, поэтому
+  // контроль здесь не «какой-то здоровый прогон», а тот самый, что был за пять секунд до смерти.
+  //
+  // 🔴 БЕЗ ПАРНОГО БЛОКА ПЕРВЫЙ НЕ СТОИТ НИЧЕГО: вход, трипающий на всём подряд, прошёл бы его.
+  // Замер прибора `npm run powerfloor` на этих двух: доля 0,217 против 0,855.
+  {
+    const os = await import('node:os');
+    const fixDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__');
+    const powersFrom = (file) => readFileSync(path.join(fixDir, file), 'utf8').trim().split('\n')
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((o) => o?.sample && typeof o.sample['power.draw.instant'] === 'number'
+        && o.sample['utilization.gpu'] >= 90)
+      .map((o) => Math.round(o.sample['power.draw.instant'] * 1000));
+
+    const play = async (file, stepMs) => {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'fuse-p3-'));
+      const live = path.join(dir, 'burn-progress.txt');
+      closeSync(openSync(live, 'w'));            // прожиг ИДЁТ — иначе ворота погасят вход 3
+      const mws = powersFrom(file);
+      const r = await runJudge({
+        beatPort: 0, armNMs: null, armMMs: null, armPowerRatio: POWER_COLLAPSE_RATIO,
+        burnPid: null, progressFile: live,
+        journalPath: path.join(dir, 'p3.jsonl'), seconds: (mws.length * stepMs) / 1000 + 0.4,
+        spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+        onReady: ({ port }) => {
+          const dgram = require('node:dgram'); const s = dgram.createSocket('udp4');
+          let i = 0;
+          const t = setInterval(() => {
+            if (i >= mws.length) { clearInterval(t); s.close(); return; }
+            const b = Buffer.alloc(5); b[0] = 0x01; b.writeUInt32LE(mws[i], 1);
+            s.send(b, port, '127.0.0.1');
+            s.send(Buffer.from([0x02]), port, '127.0.0.1'); // прогресс жив: вход 2 судить не должен
+            i += 1;
+          }, stepMs);
+        },
+      });
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* песочница во временных */ }
+      return { r, mws };
+    };
+
+    const death = await play('power_collapse_3067mhz_death__captured.jsonl', 100);
+    ok('ВХОД 3 (plans/91 Ш4): ЗАПИСЬ НАСТОЯЩЕЙ СМЕРТИ 3067 МГц / 925 мВ даёт трип power-collapse',
+      death.r.tripped === true && death.r.tripOutcomes?.[0]?.cause === 'power-collapse',
+      `трип ${death.r.tripped}, причина ${death.r.tripOutcomes?.[0]?.cause ?? 'нет'}; `
+      + `милливатты ${death.mws.join(' ')}`);
+
+    const alive = await play('power_healthy_3067mhz_935mv__captured.jsonl', 80);
+    ok('ВХОД 3: СОСЕДНЯЯ ЗДОРОВАЯ ступень 935 мВ той же частоты трипа НЕ даёт (парный контроль)',
+      alive.r.tripped === false,
+      `трипнул на здоровой: ${JSON.stringify(alive.r.tripOutcomes)}; милливатты ${alive.mws.join(' ')}`);
+
+    // ---- ВЫДЕРЖКА: ОДИНОЧНЫЙ ВЫБРОС ТЕЛЕМЕТРИИ НЕ СМЕЕТ УБИТЬ ВЕЧЕР ВЛАДЕЛЬЦА ------------------
+    //
+    // 🔴 ЭТОТ БЛОК НАПИСАН ПОТОМУ, ЧТО МУТАЦИЯ НАШЛА ДЫРУ В МОИХ ЖЕ БЛОКАХ: `POWER_LOW_HOLD_MS = 0`
+    // не покрасил НИЧЕГО, то есть выдержку не проверял никто. Ложное срабатывание для владельца
+    // дороже пропуска — оно останавливает работу, — и оставить его без блока было нельзя.
+    //
+    // Провал длиной в ОДИН замер (100 мс) короче выдержки (500 мс) и обязан быть проигнорирован.
+    {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'fuse-p3s-'));
+      const live = path.join(dir, 'burn-progress.txt');
+      closeSync(openSync(live, 'w'));
+      const mws = [280_000, 280_000, 280_000, 55_000, 280_000, 280_000, 280_000];
+      const spike = await runJudge({
+        beatPort: 0, armNMs: null, armMMs: null, armPowerRatio: POWER_COLLAPSE_RATIO,
+        burnPid: null, progressFile: live,
+        journalPath: path.join(dir, 'p3s.jsonl'), seconds: (mws.length * 100) / 1000 + 0.4,
+        spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+        onReady: ({ port }) => {
+          const dgram = require('node:dgram'); const s = dgram.createSocket('udp4');
+          let i = 0;
+          const t = setInterval(() => {
+            if (i >= mws.length) { clearInterval(t); s.close(); return; }
+            const b = Buffer.alloc(5); b[0] = 0x01; b.writeUInt32LE(mws[i], 1);
+            s.send(b, port, '127.0.0.1');
+            s.send(Buffer.from([0x02]), port, '127.0.0.1');
+            i += 1;
+          }, 100);
+        },
+      });
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* песочница во временных */ }
+      ok('ВХОД 3: ОДИНОЧНЫЙ провал короче выдержки трипа НЕ даёт — ложное дороже пропуска',
+        spike.tripped === false,
+        `трипнул на выбросе: ${JSON.stringify(spike.tripOutcomes)}`);
+    }
+
+    // ---- САМО ЗНАЧЕНИЕ ПОРОГА ЗАКРЕПЛЕНО ЗА УЛИКАМИ В РЕПОЗИТОРИИ ------------------------------
+    //
+    // 🔴 ВТОРАЯ ДЫРА, НАЙДЕННАЯ МУТАЦИЕЙ: задери порог до 0,95 — и не покраснеет НИЧЕГО. Блоки выше
+    // проверяли механизм, а не калибровку. Число выведено прибором `npm run powerfloor` по архиву,
+    // но `runs/` под gitignore: свежий клон не может его перепроверить, и константа осталась бы
+    // висеть в воздухе.
+    //
+    // Здесь она привязана к ДВУМ ФИКСТУРАМ, которые в репозитории лежат. Запас 0,1 с каждой
+    // стороны — чтобы порог не жался к границе: подвинется карта или запись, и блок скажет об этом
+    // раньше, чем скажет живой прогон.
+    {
+      const ratioOf = (file) => {
+        const mws = powersFrom(file);
+        const peak = Math.max(...mws);
+        const trough = Math.min(...mws.slice(mws.indexOf(peak) + 1));
+        return trough / peak;
+      };
+      const dead = ratioOf('power_collapse_3067mhz_death__captured.jsonl');
+      const live = ratioOf('power_healthy_3067mhz_935mv__captured.jsonl');
+      ok('ВХОД 3: ПОРОГ лежит между смертью и здоровьем с запасом 0,1 с обеих сторон',
+        POWER_COLLAPSE_RATIO >= dead + 0.1 && POWER_COLLAPSE_RATIO <= live - 0.1,
+        `порог ${POWER_COLLAPSE_RATIO} · смерть ${dead.toFixed(3)} · здоровье ${live.toFixed(3)} — `
+        + `допустимо [${(dead + 0.1).toFixed(3)}; ${(live - 0.1).toFixed(3)}]`);
+    }
+  }
+
   ok('форма БЫСТРЕЕ наблюдателя не взводится вовсе, и причина НАЗВАНА (sdc_fma: 3 мс < 150 мс)', (() => {
     const d = armMDecision('sdc_fma');
     return d.armed === false && d.armMMs === null && /мельче трёх тактов наблюдения/u.test(d.why);
@@ -2874,6 +3112,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
           beatPort: num('--beat-port', 0),
           armNMs: has('--arm-n') ? num('--arm-n', null) : null,
           armMMs: has('--arm-m') ? num('--arm-m', null) : null,
+          armPowerRatio: has('--arm-p') ? num('--arm-p', null) : null,
           burnPid: has('--burn-pid') ? num('--burn-pid', null) : null,
           burnImages: str('--burn-images', null)?.split(',').map((x) => x.trim()).filter(Boolean) ?? null,
           burnPidFile: str('--burn-pidfile', null),
@@ -2899,7 +3138,7 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
     if (has('--loaded-floor')) {
       return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-ticks T] | --loaded-floor [--seconds 90]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-ticks T] | --loaded-floor [--seconds 90]');
     console.log(`--rearm-healthy-* — ПОЛУОТКРЫТОЕ ОКНО возврата на пост (plans/88): по умолчанию ${REARM_HEALTHY_SECONDS} здоровых секунд подряд при такте ≥ ${JUDGE_HEALTHY_TICKS_PER_SEC}/с (замер researches/33 §4b). Свои числа называет тот, кто не может дать измеренный такт живого пути: стенд и фикстура.`);
     return 1;
   };
