@@ -90,6 +90,7 @@ import {
   assertSandbox as assertJournalSandbox,
 } from './lib/sweep-journal.mjs';
 import { VMIN_DIR, allowedOffset, allowedVoltageMv, append, assertSandbox, bestPassing, bestPassingMv, openStore, readAll, partitionByStamp, partitionByWriteShape, resolveAttempts, summarizePoint } from './lib/vmin-store.mjs';
+import { openWriteWatch } from './lib/write-watch.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -11362,6 +11363,14 @@ async function mainSweep(argv, arg) {
       return 2;
     }
     console.log(`ЗАВОДСКОЕ СОСТОЯНИЕ КАРТЫ: подтверждено — ${factoryState.why}`);
+    // ⚡ ЧЁРНЫЙ ЯЩИК ЗАПИСИ ВЗВОДИТСЯ ЗДЕСЬ (`researches/36`) — живой путь, заводское состояние
+    // подтверждено, в карту не написано ещё ни байта. Прибор пишет две строки вокруг КАЖДОГО
+    // обращения в драйвер; незакрытый вызов и есть отпечаток «ушёл и не вернулся», которого у нас
+    // не было ни для одной из четырёх смертей 08.09. Цена измерена: ~160 мс на ступень при 19 с.
+    // Сухой прогон в карту не пишет — прибор ему не нужен, и пустой файл в улики не кладём.
+    const writeWatch = argv.includes('--dry-run') ? null : openWriteWatch({});
+    if (writeWatch) console.log(`ЧЁРНЫЙ ЯЩИК ЗАПИСИ: ${writeWatch.file} — по две строки на каждое обращение в драйвер;`
+      + ' разбор: node automation-engine/lib/write-watch.mjs --read <файл>');
   }
   // ONE SOURCE FOR THE ENVELOPE — the curve document's own `card.maxGraphicsMhz`, which is the very
   // field `curve-store`'s R13 check reads. Deriving it a second time from the clock ladder here would

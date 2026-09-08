@@ -45,6 +45,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 import config from '../config.mjs';
+import { noteCall, noteReturn } from './write-watch.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -1371,9 +1372,16 @@ export function readVfOffsets(nv, handle, { version = 1, mask = 'all' } = {}) {
  * action from the owner (MASTER_PLAN.md → заводское состояние по умолчанию).
  */
 export function writeVfOffset(nv, handle, pointIndex, offsetKhz, { version = 1, mode = 'rmw' } = {}) {
+  // ⚡ ЧЁРНЫЙ ЯЩИК ЗАПИСИ (`researches/36`). Метка ставится на ВХОД функции, а возврат — на каждый
+  // выход, поэтому «незакрытый вызов» покрывает и чтение состояния, и саму запись: умереть можно
+  // в любом из них, и до сегодня оба были невидимы. Прибор выключен ⇒ `mark === null` и ноль работы.
+  const mark = noteCall({ what: 'writeVfOffset', point: pointIndex, khz: offsetKhz, mode });
   const { koffi, protos, resolve } = nv;
   const entry = resolve(0x0733E009);
-  if (!entry.ok) return { ok: false, why: 'ClkVfPointsSetControl не разрешился' };
+  if (!entry.ok) {
+    noteReturn(mark, { ok: false, why: 'не разрешился' });
+    return { ok: false, why: 'ClkVfPointsSetControl не разрешился' };
+  }
 
   let buf;
   if (mode === 'zero-filled') {
@@ -1388,7 +1396,10 @@ export function writeVfOffset(nv, handle, pointIndex, offsetKhz, { version = 1, 
     // at 0x1220), and a driver handed a structure describing nothing does nothing — while still
     // answering OK, because nothing about the call was malformed.
     const current = readVfOffsets(nv, handle, { version });
-    if (!current.ok) return { ok: false, why: `не удалось прочитать текущее состояние: ${current.why}` };
+    if (!current.ok) {
+      noteReturn(mark, { ok: false, why: 'чтение состояния не удалось' });
+      return { ok: false, why: `не удалось прочитать текущее состояние: ${current.why}` };
+    }
     buf = Buffer.from(current.raw);
     buf.fill(0, 0x04, 0x14);                                   // clear the mask the READ requested
     buf[0x04 + (pointIndex >> 3)] = 1 << (pointIndex & 7);      // exactly one bit — one point per call
@@ -1396,6 +1407,7 @@ export function writeVfOffset(nv, handle, pointIndex, offsetKhz, { version = 1, 
   }
 
   const status = koffi.call(entry.ptr, protos.ClkVfPointsSetControl, handle, buf);
+  noteReturn(mark, { ok: status === 0, status });
   return { ok: status === 0, status, why: statusName(status), mode };
 }
 

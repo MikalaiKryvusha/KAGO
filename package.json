@@ -61,6 +61,7 @@
     "prayer": "node tools/prayer.mjs",
     "team": "node tools/team-board.mjs",
     "workplace": "node tools/team-workplace.mjs",
+    "writewatch": "node automation-engine/lib/write-watch.mjs",
     "fuse": "node automation-engine/lib/fuse.mjs",
     "twin": "node automation-engine/lib/twin-assembly.mjs",
     "polygon": "node automation-engine/lib/polygon.mjs",

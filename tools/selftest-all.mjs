@@ -279,6 +279,11 @@ const SUITES = [
   // Inertness proof for the battery rule above: the fuse selftest binds ONLY port 0 (OS-assigned
   // ephemeral, loopback) — no fixed port to collide with; artefacts go to os.tmpdir(), never to
   // runs/death-watch/ (EXP-0025); the card is never opened — hands are injected fakes.
+  // ВОШЁЛ 2026-09-08 (`researches/36`): у ПАУЗЫ между прожигами не было ни одного прибора, а
+  // четыре смерти дня случились именно в ней. Инертность: пишет только во временную папку,
+  // карту не открывает, `nv` подсовывается поддельный.
+  { id: 'writewatch', npm: 'npm run writewatch -- --selftest', argv: ['automation-engine/lib/write-watch.mjs', '--selftest'],
+    what: 'чёрный ящик записи: незакрытый вызов в драйвер опознаётся поимённо (researches/36)', done: /^САМОПРОВЕРКА write-watch/mu },
   { id: 'fuse', npm: 'npm run fuse -- --selftest', argv: ['automation-engine/lib/fuse.mjs', '--selftest'],
     what: 'предохранитель: deadman-судья, руки спасения, кольцо чёрного ящика (эпик 51 фаза 2)', done: /^САМОПРОВЕРКА fuse/mu },
   // ВОШЛИ 2026-08-28 ВМЕСТЕ СО СВОИМ КОДОМ (развёртывание команды, plans/54). ДОКАЗАТЕЛЬСТВО
