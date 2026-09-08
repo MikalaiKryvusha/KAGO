@@ -170,9 +170,9 @@ function selftest() {
   {
     const src = readFileSync(FUSE, 'utf8');
     const g = fieldBlocks(src).get('--arm-p');
-    ok('боевой файл: вход 3 ВЫШЕЛ из долга поля и вышел ПРАВИЛЬНО — у него есть блок, зовущий запись',
-      !readFieldDebt().has('--arm-p') && g !== undefined && g.playsRecord === true,
-      `в долге: ${readFieldDebt().has('--arm-p')}, блок: ${g ? `строка ${g.line}, зовёт запись ${g.playsRecord}` : 'НЕТ'}`);
+    ok('боевой файл: вход 3 ВЕРНУЛСЯ в долг поля — его «полевые трипы» 19:21 оказались концами прожига (bugs/130)',
+      readFieldDebt().has('--arm-p') && g === undefined,
+      `в долге: ${readFieldDebt().has('--arm-p')}, блок: ${g ? `строка ${g.line}` : 'НЕТ'}`);
   }
   console.log(`\nИТОГ: ${pass} зелёных, ${fail} красных.`);
   return fail === 0 ? 0 : 1;
