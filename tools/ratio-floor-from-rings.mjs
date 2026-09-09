@@ -82,6 +82,62 @@ export function dipEpisodes(rows, ratio, freshMs = FRESH_PROGRESS_MS) {
   return out;
 }
 
+/**
+ * ⚡ ПЛОЩАДКИ «ОДНО ЗНАЧЕНИЕ МОЩНОСТИ» — ВТОРАЯ ВЕЛИЧИНА ЭТОГО ПРИБОРА, И ОНА РАЗЛИЧАЕТ ТО, ЧТО
+ * ДОЛЯ НЕ РАЗЛИЧАЕТ.
+ *
+ * Найдено 2026-09-09 при попытке вывести порог входа 3 и обнаружении, что его вывести НЕЛЬЗЯ:
+ * просадка доли в записи смерти (0,21 за 266 мс) неотличима от просадок в чистых записях
+ * (0,21-0,24 за 230-364 мс). Тогда померена другая величина того же кольца — как долго мощность
+ * стоит на ОДНОМ значении, байт в байт. Карта обновляет её примерно раз в полсекунды, поэтому
+ * здоровая площадка ограничена сверху тактом опроса NVML, а не поведением карты.
+ *
+ * ⚠️ ЧТО ЭТО НЕ ЕСТЬ: это НЕ уставка `CARD_TELEMETRY_FROZEN_MS` (5000 мс) и не довод её менять.
+ * Та сторожит ДРУГУЮ сцену — ожидание расписки руки 2 внутри уже случившегося спасения, где
+ * наблюдённая заморозка была 119 000 мс. Спутать их — ровно класс `bugs/124`: две величины под
+ * одним словом «замерла». Здесь величина предсмертная, там — послетриповая.
+ *
+ * @returns {{plateaus:number, medianMs:number, p99Ms:number, maxMs:number, maxAtMs:number, maxMw:number|null}}
+ */
+export function frozenPlateaus(rows) {
+  const live = rows.filter((r) => r.powerMw !== null && r.powerMw !== undefined);
+  if (live.length === 0) return { plateaus: 0, medianMs: null, p99Ms: null, maxMs: null, maxAtMs: null, maxMw: null };
+  const runs = [];
+  let cur = { mw: live[0].powerMw, fromMs: live[0].t, toMs: live[0].t };
+  for (const r of live.slice(1)) {
+    if (r.powerMw === cur.mw) { cur.toMs = r.t; continue; }
+    runs.push({ ...cur, ms: cur.toMs - cur.fromMs });
+    cur = { mw: r.powerMw, fromMs: r.t, toMs: r.t };
+  }
+  runs.push({ ...cur, ms: cur.toMs - cur.fromMs });
+  const sorted = runs.map((x) => x.ms).sort((a, b) => a - b);
+  const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+  const worst = runs.reduce((a, b) => (a === null || b.ms > a.ms ? b : a), null);
+  return {
+    plateaus: runs.length,
+    medianMs: Math.round(at(0.5)),
+    p99Ms: Math.round(at(0.99)),
+    maxMs: Math.round(worst.ms),
+    maxAtMs: Math.round(worst.fromMs),
+    maxMw: worst.mw,
+  };
+}
+
+/**
+ * ПОРОГ ИЗ РАЗРЫВА — ГЕОМЕТРИЧЕСКАЯ СЕРЕДИНА, А НЕ АРИФМЕТИЧЕСКАЯ, И ЭТОМУ ЕСТЬ ПРИЧИНА.
+ *
+ * Запас должен быть РАВНЫМ В РАЗАХ с обеих сторон: «вдвое выше здорового потолка» и «вдвое ниже
+ * подписи смерти» — утверждения одного веса, а «на 500 мс выше» и «на 500 мс ниже» — разного,
+ * потому что величины разного масштаба. Арифметическая середина 515 и 2060 дала бы 1287 — ближе к
+ * смерти в разах (2,5× от здоровья против 1,6× до смерти), то есть незаметно перекошенный порог.
+ *
+ * Число ОБЯЗАНО пересниматься: правило живёт здесь, а не в голове следующей сессии.
+ */
+export function thresholdFromGap(healthyMaxMs, deathMs) {
+  if (!(healthyMaxMs > 0) || !(deathMs > healthyMaxMs)) return null;
+  return Math.round(Math.sqrt(healthyMaxMs * deathMs));
+}
+
 /** Сводка записи: сколько тактов под пиком, какова самая глубокая и самая долгая просадка. */
 export function ringSummary(rows) {
   const wired = rows.filter((r) => isBurning(r));
@@ -138,6 +194,19 @@ function selfTest() {
   ok('непроведённый провод не считается горном ни при какой доле',
     isBurning({ progressSilenceMs: null }) === false && dipEpisodes([{ t: 0, powerRatio: 0.01, progressSilenceMs: null }], 0.5).length === 0);
 
+  // Площадки замершей мощности и порог из разрыва.
+  const flat = [];
+  for (let i = 0; i < 500; i += 1) flat.push({ t: i * 2, powerMw: i < 100 ? 300_000 : 70_000 });
+  const fr = frozenPlateaus(flat);
+  ok('площадка меряется по КРАЯМ одного значения, а не по числу тактов',
+    fr.plateaus === 2 && fr.maxMs === 798 && fr.maxMw === 70_000, JSON.stringify(fr));
+  ok('порог из разрыва — геометрическая середина, а не арифметическая (равный запас В РАЗАХ)',
+    thresholdFromGap(500, 2000) === 1000 && thresholdFromGap(515, 2060) === 1030,
+    `${thresholdFromGap(500, 2000)} · ${thresholdFromGap(515, 2060)}`);
+  ok('РАЗРЫВА НЕТ — порог не выводится вовсе: «смерть не выше здоровья» это ответ, а не ошибка',
+    thresholdFromGap(1971, 2060) !== null && thresholdFromGap(2100, 2060) === null
+    && thresholdFromGap(0, 2060) === null);
+
   const bad = results.filter((x) => !x).length;
   console.log(`\nИТОГ: ${results.length - bad} зелёных, ${bad} красных.`);
   return bad === 0 ? 0 : 1;
@@ -155,7 +224,11 @@ function main(argv) {
     return 0;
   }
   if (argv.includes('--selftest')) return selfTest();
-  const files = argv.filter((a) => !a.startsWith('--'));
+  // Значения флагов файлами НЕ считаются. Наивный фильтр «всё, что не начинается с --» принял
+  // значение `--death` за путь и упал на несуществующем файле — ошибка дешёвая, но в приборе,
+  // который читает архивы, она означала бы «прочитал не то, о чём доложил».
+  const VALUED = new Set(['--hold', '--death']);
+  const files = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUED.has(argv[i - 1])));
   const holdIdx = argv.indexOf('--hold');
   const holdMs = holdIdx !== -1 && argv[holdIdx + 1] ? Number(argv[holdIdx + 1]) : 500;
   if (files.length === 0) {
@@ -165,11 +238,20 @@ function main(argv) {
   }
   const CANDIDATES = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.412, 0.45, 0.5, 0.6, 0.7];
   let worstAcross = null;
+  const plateauRows = [];
+  // Записи, где машина УМЕРЛА, называются ЯВНО. Прибор не умеет догадаться об этом по кольцу, а
+  // сложить здоровье со смертью в один потолок значило бы вывести порог из смеси — то есть
+  // получить число, которое не описывает ни одну из двух сторон.
+  const deathIdx = argv.indexOf('--death');
+  const deathMarks = deathIdx !== -1 ? (argv[deathIdx + 1] ?? '').split(',').filter(Boolean) : [];
 
   for (const f of files) {
     const rows = fs.readFileSync(f, 'utf8').trim().split(/\r?\n/u).map((l) => JSON.parse(l));
     const s = ringSummary(rows);
+    const fr = frozenPlateaus(rows);
+    plateauRows.push({ f, fr });
     console.log(`\n=== ${f}`);
+    console.log(`ПЛОЩАДКИ «одно значение мощности»: ${fr.plateaus} · медиана ${fr.medianMs} мс · p99 ${fr.p99Ms} мс · САМАЯ ДЛИННАЯ ${fr.maxMs} мс (${fr.maxMw} мВт, с t=${fr.maxAtMs})`);
     console.log(`тактов ${s.ticks} · ГОРН ИДЁТ (прогресс свежее ${FRESH_PROGRESS_MS} мс) ${s.wired} · доля посчитана ${s.withRatio}`);
     console.log(`доля: минимум ${s.minRatio} · p01 ${s.p01} · p05 ${s.p05} · медиана ${s.median}`);
     console.log(`порог │ эпизодов │ самый долгий │ самый глубокий │ эпизодов ≥ ${holdMs} мс`);
@@ -198,7 +280,36 @@ function main(argv) {
     console.log(`(глубина ${worstAcross.minRatio}) в ${worstAcross.file} при выдержке ${holdMs} мс.`);
     console.log('Значит уставка обязана лежать НИЖЕ этого порога либо требовать более долгой выдержки.');
   }
-  console.log('\n⚠️ Порог обнаружения отсюда НЕ выводится (границы фазы 6б-бис, записано до работы).');
+  console.log('\n⚠️ Порог обнаружения ПО ДОЛЕ отсюда НЕ выводится (границы фазы 6б-бис, записано до работы).');
+
+  // ── ВТОРАЯ ВЕЛИЧИНА: ПЛОЩАДКА ЗАМЕРШЕЙ МОЩНОСТИ ──────────────────────────────────────────────
+  if (plateauRows.length > 0) {
+    const isDeath = (f) => deathMarks.some((d) => f.includes(d));
+    const healthy = plateauRows.filter((x) => !isDeath(x.f));
+    const deaths = plateauRows.filter((x) => isDeath(x.f));
+    console.log('\n=== ПЛОЩАДКА ЗАМЕРШЕЙ МОЩНОСТИ: ЗДОРОВЬЕ ПРОТИВ СМЕРТИ ===');
+    for (const x of healthy) console.log(`  здоровье │ ${String(x.fr.maxMs).padStart(6)} мс │ ${x.f}`);
+    for (const x of deaths) console.log(`  СМЕРТЬ   │ ${String(x.fr.maxMs).padStart(6)} мс │ ${x.f}`);
+    if (healthy.length === 0) {
+      console.log('  Здоровых записей не названо — потолок брать не из чего.');
+    } else if (deaths.length === 0) {
+      const ceil = Math.max(...healthy.map((x) => x.fr.maxMs));
+      console.log(`  ПОТОЛОК ЗДОРОВЬЯ ${ceil} мс. Записей со смертью не названо (--death <часть имени>),`);
+      console.log('  поэтому порог НЕ выводится: одна сторона разрыва неизвестна, и это честный ответ.');
+    } else {
+      const ceil = Math.max(...healthy.map((x) => x.fr.maxMs));
+      const dmin = Math.min(...deaths.map((x) => x.fr.maxMs));
+      const t = thresholdFromGap(ceil, dmin);
+      console.log(`  ПОТОЛОК ЗДОРОВЬЯ ${ceil} мс (записей ${healthy.length}) · КОРОТЧАЙШАЯ ПОДПИСЬ СМЕРТИ ${dmin} мс (записей ${deaths.length})`);
+      if (t === null) {
+        console.log('  РАЗРЫВА НЕТ: смерть не выше здоровья. Порог не выводится, и это тоже ответ.');
+      } else {
+        console.log(`  ПОРОГ ИЗ РАЗРЫВА: ${t} мс — геометрическая середина: ${(t / ceil).toFixed(2)}× от здоровья, ${(dmin / t).toFixed(2)}× до смерти.`);
+        console.log(`  ⚠️ Сторона ЗДОРОВЬЯ измерена на ${healthy.length} записях, сторона СМЕРТИ — на ${deaths.length}.`);
+        console.log('  Порог выведен ОТ ПОЛА ЛОЖНЫХ; смерть его подтверждает, но НЕ ЗАДАЁТ.');
+      }
+    }
+  }
   return 0;
 }
 
