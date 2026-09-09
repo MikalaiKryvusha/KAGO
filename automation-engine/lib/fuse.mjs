@@ -60,7 +60,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { isMainThread } from 'node:worker_threads';
 // ⏱️ `bugs/128` — единственная дверь к разрешению таймера, с отказом от гашения фонового процесса.
 import { loadWinmm } from './timer-resolution.mjs';
@@ -2157,6 +2157,32 @@ export function recordVerdict({ rows, progressFile }) {
 }
 
 /**
+ * ⚡ СТРОКА ВСАДНИКА СТЕНДА — ОДНО МЕСТО, И ОНО ВИДИМО БЛОКУ.
+ *
+ * `bugs/101` находка 1: строки жили у `spawn`, и ни один блок батареи их не видел — расхождение
+ * живого пути и репетиции нашлось живым прогоном, а не проверкой. Стенд записи получил ВТОРУЮ
+ * сцену (проигрыватель профиля вместо живой пробы), то есть ровно ту развилку, на которой такие
+ * расхождения и заводятся. Поэтому строка собирается здесь.
+ *
+ * @param {'probe'|string} play  null — живая проба; иначе имя профиля остановов
+ * @returns {{ mode: 'probe'|'play', args: string[] }}
+ */
+export function loadedFloorRiderArgs({ play = null, port, seconds, tickMs, progressFile = null, burnPidFile = null }) {
+  if (play === null) {
+    return {
+      mode: 'probe',
+      args: ['--probe', '--port', String(port), '--seconds', String(seconds), '--tick', String(tickMs),
+        ...progressRiderArgs({ progressFile }).probe],
+    };
+  }
+  return {
+    mode: 'play',
+    args: ['--beat-sender', '--port', String(port), '--play-profile', play,
+      '--after-pidfile', String(burnPidFile), '--tick', String(tickMs)],
+  };
+}
+
+/**
  * Phase 3's measurement (`plans/56` шаги 2, 4): the judge runs UNARMED in this process, the live
  * probe (`death-watch --probe`) rides as a child on this judge's port, and the OPERATOR starts the
  * load in another window when told — the rig measures beat gaps exactly as the armed fuse will see
@@ -2164,12 +2190,23 @@ export function recordVerdict({ rows, progressFile }) {
  * measurement, the same standing the phase-1 night floor files have — NOT a rehearsal (rehearsals
  * take `--judge --out` into a sandbox).
  */
-async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSeconds = 0, burnAfterSeconds = 15, wantWindow = true }) {
+async function cmdLoadedFloor({
+  seconds, tickMs, progressFile = null, burnSeconds = 0, burnAfterSeconds = 15, wantWindow = true,
+  // ⚡ ДВЕ ДВЕРИ ЗАПИСИ 3 (`plans/94` Ш5-бис). До них стенд умел ровно одну сцену — невзведённый
+  // судья с живой пробой, — и записью со спасением его было не провести вовсе.
+  armNMs = null, play = null,
+}) {
   const { spawn, spawnSync } = await import('node:child_process');
   const dash = await import('./run-dashboard.mjs');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const journalPath = path.join(FUSE_DIR, `${stamp}-loaded-floor.jsonl`);
-  console.log(`ПОЛ ПОД НАГРУЗКОЙ: судья unarmed · такт ${JUDGE_TICK_MS} мс · ${seconds} с · проба живая (NVML, чтение)`);
+  // Пид-файл горна — единственный способ сказать проигрывателю «прожиг РОДИЛСЯ». По часам это
+  // делать нельзя: удушение попало бы в случайную точку прожига (эпик 59 фаза 4, шаг 2).
+  const burnPidFile = path.join(FUSE_DIR, `${stamp}-burn.pid`);
+  console.log(`ПОЛ ПОД НАГРУЗКОЙ: судья ${armNMs === null ? 'unarmed' : `ВЗВЕДЁН по входу 1, N = ${armNMs} мс`} · такт ${JUDGE_TICK_MS} мс · ${seconds} с · ${play === null ? 'проба живая (NVML, чтение)' : `ПРОИГРЫВАТЕЛЬ «${play}» вместо пробы`}`);
+  if (armNMs !== null) {
+    console.log('⚠️ СУДЬЯ ВЗВЕДЁН: на срабатывании рука 1 снимет горн, а рука 2 НАПИШЕТ в карту заводское напряжение. Это запись, а не чтение.');
+  }
   console.log(progressFile
     ? `ВХОД 2 ПРОВЕДЁН: файл сердцебиения ${progressFile} — доля мощности будет считаться.`
     : 'ВХОД 2 НЕ ПРОВЕДЁН (нет --progress-file): доля мощности останется null весь прогон — стенд годится для ПОЛА ТАКТА, но НЕ для записи фазы 6б-бис.');
@@ -2280,7 +2317,10 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
       console.log('ОКНО НАБЛЮДЕНИЯ: не поднимается (--no-window) — прогон не считается записью фазы.');
     }
     const r = await runJudge({
-      beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
+      beatPort: 0, armNMs, armMMs: null, burnPid: null,
+      // Рука 1 ищет прожиг ПО ОБРАЗАМ — тем же трём, что на живом пути. Пид здесь не годится:
+      // горн рождается ПОЗЖЕ судьи, а образ известен заранее.
+      burnImages: armNMs === null ? null : ['furnace.exe', 'branchy.exe', 'sdc_fma.exe'],
       // ⚡ `plans/94` Ш4: СТЕНД ОБЯЗАН ПРОВОДИТЬ ВХОД 2, ИНАЧЕ ЗАПИСЬ ПУСТА. Судья сам файл не
       // читает — он спрашивает лишь о его СУЩЕСТВОВАНИИ (`burnInFlight`); поднимает
       // `progressWired` удар `0x02` от пробы. Поэтому файл идёт В ОБА: сюда и в строку пробы ниже.
@@ -2292,11 +2332,27 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
       ringCapacity: Math.ceil((seconds * 1000) / JUDGE_TICK_MS) + 2000,
       spawnSyncFn: spawnSync, spawnFn: spawn, log: console.log,
       onReady: ({ port }) => {
-        probe = spawn(process.execPath, [watchScript, '--probe', '--port', String(port), '--seconds', String(seconds), '--tick', String(tickMs),
-          // ⚡ DRY: строку пробы собирает ТА ЖЕ функция, что и на живом пути (`progressRiderArgs`).
-          // Вторая копия «`--progress-file`, путь» здесь была бы ровно парой из `bugs/101`.
-          ...progressRiderArgs({ progressFile }).probe], { windowsHide: true, stdio: 'inherit' });
-        console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}${progressFile ? ' · ретранслятор прогресса включён' : ''}.`);
+        if (play === null) {
+          probe = spawn(process.execPath, [watchScript,
+            ...loadedFloorRiderArgs({ play: null, port, seconds, tickMs, progressFile }).args],
+          { windowsHide: true, stdio: 'inherit' });
+          console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}${progressFile ? ' · ретранслятор прогресса включён' : ''}.`);
+        } else {
+          // ⚡ ДВЕРЬ ВТОРАЯ (`plans/94` Ш5-бис): ПОСТАНОВОЧНОЕ УДУШЕНИЕ ВМЕСТО ЖИВОЙ ПРОБЫ.
+          //
+          // Проигрыватель ведёт ЗДОРОВЫЙ ритм, пока не появится пид-файл горна, и только потом
+          // отыгрывает ИЗМЕРЕННЫЙ профиль остановов (эпик 59 фаза 4). Ожидание пид-файла — не
+          // удобство: удушение, начатое по часам, попадало бы в случайную точку прожига, и
+          // запись описывала бы наш таймер, а не сцену.
+          //
+          // ⚠️ ЧЕГО ЭТА ЗАПИСЬ НЕ ДАЁТ (записано в плане до работы): проигрыватель подделывает
+          // УДАРЫ, а не мощность карты. Ни доля, ни площадка замершей мощности в ней не отличаются
+          // от чистой записи — уставка отсюда не выводится, и это измерено шагом 6, а не мнение.
+          probe = spawn(process.execPath, [watchScript,
+            ...loadedFloorRiderArgs({ play, port, seconds, tickMs, progressFile, burnPidFile }).args],
+          { windowsHide: true, stdio: 'inherit' });
+          console.log(`ПРОИГРЫВАТЕЛЬ «${play}»: pid ${probe.pid}, порт ${port} · здоровый ритм до появления ${burnPidFile}, затем измеренный профиль остановов.`);
+        }
         // Судья на посту и кольцо пишется — подъём кончился. Страница обязана сказать это ТЕПЕРЬ,
         // а не через 15 секунд вместе с горном: пятнадцать секунд «ПОДЪЁМ ПРОГОНА» на идущей
         // записи владелец прочитал как «прогона нет», и прочитал верно.
@@ -2315,7 +2371,11 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
             const args = ['2400', '8192', '256', '64', '--sustain', String(burnSeconds),
               ...(progressFile ? ['--progress-file', progressFile] : [])];
             burn = spawn(furnace, args, { windowsHide: true, stdio: 'ignore' });
-            console.log(`ГОРН: pid ${burn.pid} · ${burnSeconds} с нагрузки${progressFile ? ' · сердцебиение прогресса пишется' : ''}`);
+            // Пид-файл пишется СРАЗУ после рождения: проигрыватель ждёт именно его, и каждая
+            // миллисекунда задержки здесь — миллисекунда здорового ритма поверх уже идущего горна.
+            try { writeFileSync(burnPidFile, `${burn.pid}
+`, 'utf8'); } catch { /* сцена дороже улики */ }
+            console.log(`ГОРН: pid ${burn.pid} · ${burnSeconds} с нагрузки${progressFile ? ' · сердцебиение прогресса пишется' : ''}${play ? ` · пид-файл ${burnPidFile}` : ''}`);
             // Состояние на экране называется ТЕМ, что происходит: под нагрузкой — стресс-тест,
             // после неё — закрытие. Иначе окно показывало бы «поднимаемся» все девяносто секунд.
             pulse?.event({ kind: 'rung-start', text: `горн ${burnSeconds} с` });
@@ -4002,6 +4062,25 @@ async function cmdSelftest() {
     const v = recordVerdict({ rows, progressFile: 'F' });
     return v.counted === true && v.wired === 2 && v.withRatio === 1;
   })());
+  // ---- ⚡ `plans/94` Ш5-бис: ДВЕ ДВЕРИ ЗАПИСИ 3. Строка всадника — та самая, что у `bugs/101`
+  //   жила у `spawn` и не судилась ничем.
+  //   АДРЕСАТЫ МУТАЦИЙ: убрать `--after-pidfile` → «проигрыватель ждёт рождения горна»;
+  //   отдать пробе `--play-profile` → «сцены не перепутаны».
+  ok('без проигрывателя стенд поднимает ЖИВУЮ пробу, и провод входа 2 едет в её строке', (() => {
+    const r = loadedFloorRiderArgs({ play: null, port: 7, seconds: 90, tickMs: 2, progressFile: 'F' });
+    return r.mode === 'probe' && r.args[0] === '--probe' && r.args.includes('--progress-file')
+      && r.args[r.args.indexOf('--progress-file') + 1] === 'F' && !r.args.includes('--play-profile');
+  })());
+  ok('с проигрывателем — БЕЗ пробы и БЕЗ провода: подделываются удары, а мощность карты настоящая', (() => {
+    const r = loadedFloorRiderArgs({ play: 'strangle', port: 7, seconds: 90, tickMs: 2, progressFile: 'F', burnPidFile: 'P' });
+    return r.mode === 'play' && r.args[0] === '--beat-sender' && !r.args.includes('--probe')
+      && !r.args.includes('--progress-file') && r.args.includes('--play-profile')
+      && r.args[r.args.indexOf('--play-profile') + 1] === 'strangle';
+  })());
+  ok('проигрыватель ЖДЁТ РОЖДЕНИЯ ГОРНА по пид-файлу — удушение по часам попало бы в случайную точку', (() => {
+    const r = loadedFloorRiderArgs({ play: 'strangle', port: 7, seconds: 90, tickMs: 2, burnPidFile: 'P' });
+    return r.args.includes('--after-pidfile') && r.args[r.args.indexOf('--after-pidfile') + 1] === 'P';
+  })());
   ok('живой провод при НУЛЕВОЙ доле — тоже не запись, и причина названа ОТДЕЛЬНО от немого провода', (() => {
     const rows = [{ progressSilenceMs: 10, powerRatio: null }, { progressSilenceMs: 12, powerRatio: null }];
     const v = recordVerdict({ rows, progressFile: 'F' });
@@ -4253,10 +4332,17 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
         burnSeconds: num('--burn', 0),
         burnAfterSeconds: num('--burn-after', 15),
         wantWindow: !has('--no-window'),
+        // Взведение — ЯВНОЕ и с числом по умолчанию из измеренного пола канала (DERIVED_ARM_N_MS).
+        // Умолчание не «на всякий случай»: невзведённый судья — состояние двух чистых записей, и
+        // получить его случайной опечаткой во флаге было бы хуже, чем не иметь флага вовсе.
+        armNMs: has('--arm-n') ? num('--arm-n', DERIVED_ARM_N_MS) : null,
+        play: has('--play') ? (str('--play', 'strangle') ?? 'strangle') : null,
       });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90] [--progress-file [F]] [--burn СЕК] [--burn-after 15] [--no-window]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90] [--progress-file [F]] [--burn СЕК] [--burn-after 15] [--no-window] [--arm-n [МС]] [--play strangle|instant]');
     console.log('--progress-file у --loaded-floor — ВХОД 2: без него доля мощности в кольце null весь прогон, и запись не годится в фазу 6б-бис (plans/94). Путь необязателен — стенд выберет сам.');
+    console.log(`--arm-n [МС] у --loaded-floor — ВЗВЕСТИ вход 1 (умолчание ${DERIVED_ARM_N_MS} мс, измеренный пол канала). На срабатывании рука 2 ПИШЕТ в карту заводское напряжение: это запись, а не чтение.`);
+    console.log('--play strangle|instant — вместо живой пробы проигрыватель ИЗМЕРЕННОГО профиля остановов; здоровый ритм до рождения горна, затем профиль (plans/94 Ш5). Уставок такая запись не даёт: подделываются УДАРЫ, а не мощность карты.');
     console.log('--burn СЕК — стенд сам запускает горн на СЕК секунд (по умолчанию через 15 с после старта) и сам его гасит. Окно наблюдения поднимается вместе с прогоном и умирает вместе с ним: слово владельца «есть прогон — есть окно, нет прогона — нет окна». --no-window снимает окно и вместе с ним право называть прогон записью фазы.');
     console.log(`--rearm-healthy-* — ПОЛУОТКРЫТОЕ ОКНО возврата на пост (plans/88): по умолчанию ${REARM_HEALTHY_SECONDS} здоровых секунд подряд при такте ≥ ${JUDGE_HEALTHY_TICKS_PER_SEC}/с (замер researches/33 §4b). Свои числа называет тот, кто не может дать измеренный такт живого пути: стенд и фикстура.`);
     return 1;
