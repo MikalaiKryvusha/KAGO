@@ -1908,6 +1908,88 @@ export function selftestShape() {
       JSON.stringify(roomy.envelopeClamp));
   }
 
+  // ─── ПОДРЕЗКА ПОРЯДКА — `bugs/133`, И ГЛАВНОЕ ЗДЕСЬ ТО ЖЕ, ЧТО У КОНВЕРТА: РАЗЛИЧЕНИЕ ──────────
+  //
+  // Первая половина («подрезать, чтобы режим владельца применялся») дёшева. Вторая («не обезоружить
+  // R12») — та, ради которой блоки написаны: вектор, немонотонный УЖЕ против своей опоры, обязан
+  // получить ОТКАЗ, а не тихую правку (EXP-0225, и ровно этим первая редакция подрезки конверта
+  // пропустила бомбу `bugs/11`).
+  //
+  // АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона (EXP-0016):
+  //   M1 — снять привратник (`allowed: true` всегда) → краснеют блоки «не заявлено» и «немонотонен»;
+  //   M2 — читать заявление истинностью (`!!intentMonotone`) → краснеет блок про не-булево;
+  //   M3 — подрезать ВВЕРХ (поднимать соседку вместо опускания) → краснеет блок про направление;
+  //   M4 — не считать цену (оставить `points: 0`) → краснеет блок про число;
+  //   M5 — убрать пол подрезки `Math.max(p.mhz, ...)` → краснеет блок про заводской пол.
+  {
+    // Фикстура СИНТЕТИЧЕСКАЯ И РОВНАЯ, и это не лень, а требование блока: судить надо инверсию,
+    // которую внесли МЫ. Первая редакция правила две точки прямо в настоящей фикстурной таблице и
+    // тем сломала порядок САМОЙ таблицы — `introducesInversion` стал false по определению, и блоки
+    // покраснели, судя не то. Ровная таблица делает вносимую инверсию единственной.
+    const t = Array.from({ length: 127 }, (_, i) => ({ mv: 450 + 5 * i, mhz: 2000 + 10 * i, freqKhz: (2000 + 10 * i) * 1000 }));
+    // Вектор ровный, кроме ОДНОЙ точки: она поднята слабее соседки снизу — ровно форма 2026-09-09,
+    // где одно намерение легло на разошедшиеся полосы таблицы.
+    const DIP = 60;
+    const vec = Array.from({ length: 127 }, () => 100);
+    vec[DIP] = 80;
+    const OFFER_DIP = t[DIP].mhz + 80;        // 2680
+    const OFFER_PREV = t[DIP - 1].mhz + 100;  // 2690 — выше соседки СВЕРХУ, то есть инверсия
+
+    const bare = buildRaiseAndCapVector(t, vec, {});
+    check('B133: без заявления вектор идёт к сторожу КАК БЫЛ — инверсия цела, подрезки нет',
+      bare.introducesInversion === true && bare.orderClamp.points === 0 && bare.orderClamp.allowed === false,
+      JSON.stringify({ inv: bare.introducesInversion, clamp: bare.orderClamp.points, allowed: bare.orderClamp.allowed }));
+    check('B133: и причина названа СВОИМИ словами — «не заявлено» ≠ «не понадобилась»',
+      /не заявлена/u.test(bare.orderClamp.why ?? ''), bare.orderClamp.why ?? '(пусто)');
+
+    const clamped = buildRaiseAndCapVector(t, vec, { intentMonotone: true });
+    check('B133: заявлена монотонность против опоры — инверсия снята, вектор записываем',
+      clamped.introducesInversion === false, JSON.stringify(clamped.firstInversionAt));
+    // 🔴 НАПРАВЛЕНИЕ — ГЛАВНОЕ В ЭТОМ БЛОКЕ. Подъём нижней точки до верхней тоже снял бы инверсию и
+    // стоил бы 0 МГц выгоды — и предложил бы напряжению частоту, которую на нём не прожигали.
+    check('B133: снята ОПУСКАНИЕМ соседки, а не подъёмом провала — ни одного нового утверждения о кремнии',
+      t[DIP - 1].mhz + clamped.offsets[DIP - 1] === OFFER_DIP && clamped.offsets[DIP] === vec[DIP],
+      JSON.stringify({ prevOffer: t[DIP - 1].mhz + clamped.offsets[DIP - 1], dipOffset: clamped.offsets[DIP] }));
+    check('B133: цена НАЗВАНА числом — точки, сумма и максимум на точке',
+      clamped.orderClamp.points === 1 && clamped.orderClamp.totalMhz === 10 && clamped.orderClamp.maxMhz === 10,
+      JSON.stringify(clamped.orderClamp));
+    check('B133: подрезанная точка названа ПОИМЁННО, с напряжением и обоими предложениями',
+      clamped.orderClamp.rows.length === 1 && clamped.orderClamp.rows[0].point === DIP - 1
+        && clamped.orderClamp.rows[0].was === OFFER_PREV && clamped.orderClamp.rows[0].now === OFFER_DIP,
+      JSON.stringify(clamped.orderClamp.rows));
+
+    // 🔴 РАЗЛИЧЕНИЕ: вектор, немонотонный УЖЕ против опоры, — дефект вектора, а не разница таблиц.
+    const broken = buildRaiseAndCapVector(t, vec, { intentMonotone: false });
+    check('B133: заявлено «немонотонен против опоры» — подрезки нет, инверсия доезжает до R12',
+      broken.orderClamp.allowed === false && broken.introducesInversion === true,
+      JSON.stringify({ allowed: broken.orderClamp.allowed, inv: broken.introducesInversion }));
+    check('B133: и ЭТА причина отличима от «не заявлено» — вызывающему они говорят разное',
+      /немонотонен УЖЕ против опоры/u.test(broken.orderClamp.why ?? ''), broken.orderClamp.why ?? '(пусто)');
+
+    // ⚠️ Блок класса, оплаченного соседом: у конверта `Number(null) === 0` превратил «не заявлено» в
+    // «заявлено 0». Здесь тот же капкан носит вид истинности строки.
+    const notBool = buildRaiseAndCapVector(t, vec, { intentMonotone: 'да' });
+    check('B133: НЕ-БУЛЕВО заявление не читается как «да» — подрезки нет',
+      notBool.orderClamp.allowed === false && notBool.orderClamp.declared === null,
+      JSON.stringify({ allowed: notBool.orderClamp.allowed, declared: notBool.orderClamp.declared }));
+
+    // Пол подрезки — ЗАВОДСКОЕ предложение точки: инверсия самой карты не наша, и опускать ниже
+    // заводского значило бы делать работу потолка чужими руками.
+    const own = t.map((p) => ({ ...p }));
+    own[DIP] = { ...own[DIP], mhz: 1500, freqKhz: 1500 * 1000 };  // провал ЗАВОДСКОЙ таблицы, не наш
+    const zeros = Array.from({ length: 127 }, () => 0);
+    const factoryInv = buildRaiseAndCapVector(own, zeros, { intentMonotone: true });
+    check('B133: инверсию САМОЙ карты подрезка не трогает — ни одной точки ниже заводской',
+      factoryInv.orderClamp.points === 0 && factoryInv.offsets.every((o) => o === 0),
+      JSON.stringify({ clamp: factoryInv.orderClamp.points, nonZero: factoryInv.offsets.filter((o) => o !== 0).length }));
+
+    // И ноль подрезанных точек при законном заявлении — отчёт, а не молчание (R4b).
+    const fine = buildRaiseAndCapVector(points, 5, { intentMonotone: true });
+    check('B133: подрезка НЕ ПОНАДОБИЛАСЬ — сказано числом 0 и признаком «разрешена», а не пустотой',
+      fine.orderClamp.points === 0 && fine.orderClamp.allowed === true && fine.orderClamp.why === null,
+      JSON.stringify(fine.orderClamp));
+  }
+
   // --- THE CASE THAT ACTUALLY BUYS WATTS: a cap BELOW the curve's top
   //
   // Measured 2026-08-10: with the cap at the TOP the card never reached it under load (it sat at 2887 of
