@@ -1,5 +1,19 @@
 # TEAM_STATUS — KAGO team status board
 
+> 🔴 **КОМАНДА РАСПУЩЕНА 2026-09-09 ПО СЛОВУ ВЛАДЕЛЬЦА. ДОСКА НЕ ЖИВАЯ — ЧИТАТЬ КАК ИСТОРИЮ.**
+> Дословно: *«я не давал разрешения на ворктри и воркспейс»* · *«закрыть его, слить в main»* ·
+> *«работает в одной ветке main»*.
+>
+> Что сделано: рабочие места `KAGO-team-engineer` и `KAGO-team-verifier` сняты
+> (`git worktree remove`), их ветки удалены, каталоги с диска убраны. **Ничего не потеряно и
+> сливать было нечего:** в обеих ветках ноль коммитов, которых нет в `main` (проверено
+> `git rev-list main..<ветка>` до удаления), рабочие копии чисты, обе отставали на 441 коммит —
+> то есть были заброшенными копиями от 28.08, а не работой.
+>
+> **Правило впредь: одна ветка `main`, одно рабочее место.** Разворачивать команду — только по
+> отдельному слову владельца.
+
+
 > Generated 2026-08-28 by `/team-deployment` (KAIF 2.4), one row per seat of the approved design
 > (plans/54). Rules — the team's constitution (`TEAM_CONSTITUTION.md` § 4); this file carries the
 > board itself, its form rules, and the CONTRACT the board tool (`tools/team-board.mjs`,
