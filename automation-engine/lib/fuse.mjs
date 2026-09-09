@@ -2164,18 +2164,119 @@ export function recordVerdict({ rows, progressFile }) {
  * measurement, the same standing the phase-1 night floor files have — NOT a rehearsal (rehearsals
  * take `--judge --out` into a sandbox).
  */
-async function cmdLoadedFloor({ seconds, tickMs, progressFile = null }) {
+async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSeconds = 0, burnAfterSeconds = 15, wantWindow = true }) {
   const { spawn, spawnSync } = await import('node:child_process');
+  const dash = await import('./run-dashboard.mjs');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const journalPath = path.join(FUSE_DIR, `${stamp}-loaded-floor.jsonl`);
   console.log(`ПОЛ ПОД НАГРУЗКОЙ: судья unarmed · такт ${JUDGE_TICK_MS} мс · ${seconds} с · проба живая (NVML, чтение)`);
   console.log(progressFile
     ? `ВХОД 2 ПРОВЕДЁН: файл сердцебиения ${progressFile} — доля мощности будет считаться.`
     : 'ВХОД 2 НЕ ПРОВЕДЁН (нет --progress-file): доля мощности останется null весь прогон — стенд годится для ПОЛА ТАКТА, но НЕ для записи фазы 6б-бис.');
+
   const mm = loadWinmm(); mm.begin(1);
+  // Ссылки, нужные гасителю: он зовётся и из `process.on('exit')`, где `await import` уже поздно.
+  const spawnSyncRef = spawnSync;
+  const dashScriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-dashboard.mjs');
   let probe = null;
+  let burn = null;
+  let dashProc = null;
+  let sampler = null;
+  let pulse = null;
+  let pulseTimer = null;
+  let burnTimer = null;
+
+  /**
+   * ⚡ ОКНО ЖИВЁТ РОВНО СТОЛЬКО, СКОЛЬКО ПРОГОН — ТРЕБОВАНИЕ ВЛАДЕЛЬЦА 2026-09-09, ДОСЛОВНО:
+   * *«Запускается прогон — он открывает окно визуализатора. Нет прогона — нет окна визуализатора.
+   * Есть прогон — есть окно визуализатора»*.
+   *
+   * Оплачено накануне: я поднял окно РУКАМИ при отсутствующем прогоне, и оно показало пустоту —
+   * *«ну так закрой визуализатор, если нет прогона !!!!!!!!!!!!!»*. Окно, пережившее свой прогон,
+   * это `bugs/04`: застывшая картинка того, чего уже не происходит.
+   *
+   * Гасится на ЛЮБОМ выходе, а не только на предусмотренном: на Windows дочерний процесс НЕ
+   * умирает вместе с родителем, поэтому `finally` (возврат и исключение), `exit` (в том числе
+   * чужой `process.exit`) и сигналы — три слоя, тот же приём, что у развёртки в `engine.mjs`.
+   */
+  const stopSideCars = () => {
+    if (pulseTimer !== null) { clearInterval(pulseTimer); pulseTimer = null; }
+    if (burnTimer !== null) { clearTimeout(burnTimer); burnTimer = null; }
+    // 🔴 ОКНО ГАСИТСЯ ЕГО СОБСТВЕННОЙ КОМАНДОЙ, А НЕ `kill()` — ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО.
+    //
+    // Первая проба этого стенда (09.09, 12 с): сервер на 7311 умер, а ОКНО БРАУЗЕРА ОСТАЛОСЬ —
+    // два процесса `msedge` с адресом окна пережили прогон. Причина: на Windows `child.kill()`
+    // это `TerminateProcess`, процесс не получает шанса отработать свой `exit`, а закрывает окно
+    // именно он. То есть механика «окно умирает вместе с прогоном» существовала только в
+    // намерении. Владелец бы увидел ровно то, на что жаловался накануне.
+    //
+    // `--close` гасит ОБЕ половины (окно и сервер) и написан ровно для этого. Синхронный вызов
+    // законен и в `process.on('exit')`, где асинхронному уже нечем работать.
+    if (dashProc) {
+      try {
+        spawnSyncRef(process.execPath, [dashScriptPath, '--close'], { windowsHide: true, stdio: 'ignore', timeout: 8000 });
+      } catch { /* гасим дальше руками */ }
+    }
+    for (const child of [burn, probe, sampler, dashProc]) {
+      if (child) { try { child.kill(); } catch { /* уже вышел */ } }
+    }
+    burn = null; probe = null; sampler = null; dashProc = null;
+  };
+  process.on('exit', stopSideCars);
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(sig, () => { stopSideCars(); process.exit(130); });
+  }
+
   try {
     const watchScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'death-watch.mjs');
+    const monScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'hardware-mon.mjs');
+
+    // ── ОКНО НАБЛЮДЕНИЯ: УСЛОВИЕ ПРОГОНА, А НЕ УКРАШЕНИЕ ────────────────────────────────────────
+    if (wantWindow) {
+      // Телеметрия карты приходит от ОТДЕЛЬНОГО сэмплера, и это не выбор стиля: судья занят своим
+      // тактом, а показания карты нужны раз в секунду — тот же довод и тот же сэмплер, что у
+      // развёртки (`bugs/27`: занятый процесс не отдаёт ни HTTP, ни SSE, ни собственных проб).
+      try {
+        const mon = await import('./hardware-mon.mjs');
+        const archived = mon.archivePulseFile(dash.TELEMETRY_PATH);
+        console.log(archived.archived
+          ? `ТЕЛЕМЕТРИЯ ПРОШЛОГО ПРОГОНА: убрана в ${archived.to} — не затёрта`
+          : `ТЕЛЕМЕТРИЯ ПРОШЛОГО ПРОГОНА: ${archived.why}`);
+      } catch (e) { console.log(`ТЕЛЕМЕТРИЯ ПРОШЛОГО ПРОГОНА: не убрана (${e.message}) — сэмплер всё равно начнёт файл заново`); }
+      sampler = spawn(process.execPath, [monScript, '--seconds', String(seconds + 30), '--period', '1000', '--out', dash.TELEMETRY_PATH],
+        { windowsHide: true, stdio: 'ignore' });
+      sampler.unref?.();
+
+      // Пульс открывается ДО окна, чтобы открывшееся окно показало «поднимаемся», а не пустоту.
+      pulse = dash.openPulse({
+        source: burnSeconds > 0 ? `запись такта под горном · ${burnSeconds} с нагрузки` : 'пол такта под наблюдением',
+        band: '',
+        probeSeconds: burnSeconds > 0 ? burnSeconds : seconds,
+      });
+
+      dashProc = spawn(process.execPath, [dashScriptPath, '--port', String(dash.DEFAULT_PORT)],
+        { windowsHide: true, stdio: 'ignore' });
+      dashProc.unref?.();
+      const seen = await dash.waitForViewer(dash.DEFAULT_PORT);
+      const watch = await dash.viewersWatching({ port: dash.DEFAULT_PORT });
+      if (!seen || !watch.ok || watch.viewers < 1) {
+        console.error('ОТКАЗ: ОКНО НАБЛЮДЕНИЯ НЕ ОТКРЫЛОСЬ, а прогон без окна запрещён владельцем.');
+        console.error(`       ${watch?.why ?? 'зритель не появился'}`);
+        console.error('       Слово владельца 2026-09-09: «Есть прогон — есть окно визуализатора».');
+        console.error('       ЧТО СДЕЛАТЬ: `npm run dashboard` руками и посмотреть, на чём он встанет.');
+        return 2;
+      }
+      console.log(`ОКНО НАБЛЮДЕНИЯ: открыто, смотрящих ${watch.viewers} — условие прогона выполнено.`);
+
+      // Пульс обязан ДЫШАТЬ: страница меряет молчание от отметки внутри записи, и прогон,
+      // не написавший ни строки за 90 секунд, выглядел бы на ней ЗАМЕРШИМ — то есть прибор
+      // докладывал бы о зависании там, где всё в порядке (`bugs/14`, дважды оплачено).
+      // Раз в секунду, а не в такте: диск в такте судьи запрещён с фазы 2.
+      pulseTimer = setInterval(() => { try { pulse.write(); } catch { /* окно дешевле прогона */ } }, 1000);
+      pulseTimer.unref?.();
+    } else {
+      console.log('ОКНО НАБЛЮДЕНИЯ: не поднимается (--no-window) — прогон не считается записью фазы.');
+    }
     const r = await runJudge({
       beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
       // ⚡ `plans/94` Ш4: СТЕНД ОБЯЗАН ПРОВОДИТЬ ВХОД 2, ИНАЧЕ ЗАПИСЬ ПУСТА. Судья сам файл не
@@ -2194,12 +2295,31 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null }) {
           // Вторая копия «`--progress-file`, путь» здесь была бы ровно парой из `bugs/101`.
           ...progressRiderArgs({ progressFile }).probe], { windowsHide: true, stdio: 'inherit' });
         console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}${progressFile ? ' · ретранслятор прогресса включён' : ''}.`);
-        // LOAD-NOW is deliberately ASCII: an orchestrating shell greps for it, and both Cyrillic
-        // bytes and backslash paths already cost one silently-spinning wait loop (run 1).
-        // ⚡ `plans/94`: КОМАНДА ГОРНА ПЕЧАТАЕТСЯ ЦЕЛИКОМ, ВМЕСТЕ С ПУТЁМ ФАЙЛА. Оператор, набравший её
-        // руками без `--progress-file`, даёт ровно ту немую запись, ради которой всё это и
-        // делается: провод есть у судьи и у пробы, а трогать файл некому.
-        console.log(`>>> LOAD-NOW — нагрузку можно запускать (окно 2): workloads/furnace.exe 2400 8192 256 64 --sustain <с>${progressFile ? ` --progress-file ${progressFile}` : ''} <<<`);
+        // ⚡ ГОРН ЗАПУСКАЕТ САМ СТЕНД — ОДНО ДЕЙСТВИЕ, А НЕ ДВА ОКНА И РИТУАЛ.
+        //
+        // Здесь стояла метка `LOAD-NOW`: стенд печатал команду, а нагрузку набирал руками оператор
+        // во втором окне. Владелец 2026-09-09: *«LOAD-NOW — не понимаю, о чём ты»*, и он прав —
+        // это машинерия, протёкшая наружу. Оператор, набирающий команду руками, к тому же способен
+        // потерять `--progress-file` и дать немую запись; стенд, запускающий горн сам, не способен.
+        if (burnSeconds > 0) {
+          burnTimer = setTimeout(() => {
+            const furnace = path.join(fileURLToPath(new URL('../../workloads/', import.meta.url)), 'furnace.exe');
+            const args = ['2400', '8192', '256', '64', '--sustain', String(burnSeconds),
+              ...(progressFile ? ['--progress-file', progressFile] : [])];
+            burn = spawn(furnace, args, { windowsHide: true, stdio: 'ignore' });
+            console.log(`ГОРН: pid ${burn.pid} · ${burnSeconds} с нагрузки${progressFile ? ' · сердцебиение прогресса пишется' : ''}`);
+            // Состояние на экране называется ТЕМ, что происходит: под нагрузкой — стресс-тест,
+            // после неё — закрытие. Иначе окно показывало бы «поднимаемся» все девяносто секунд.
+            pulse?.event({ kind: 'rung-start', text: `горн ${burnSeconds} с` });
+            burn.on('exit', (code) => {
+              console.log(`ГОРН ЗАКОНЧИЛ: код ${code}`);
+              burn = null;
+              pulse?.event({ kind: 'rung', text: 'горн отработал' });
+            });
+          }, burnAfterSeconds * 1000);
+        } else {
+          console.log('ГОРН: не запускается (--burn 0) — прогон идёт БЕЗ нагрузки.');
+        }
       },
     });
     const { readFileSync } = await import('node:fs');
@@ -2230,7 +2350,11 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null }) {
     return verdict.counted ? 0 : 3;
   } finally {
     mm.end(1);
-    if (probe) { try { probe.kill(); } catch { /* уже вышла */ } }
+    // Пульс закрывается ПЕРЕД гашением окна: страница держит завершённый прогон минуту, и это
+    // единственная возможность оператора прочитать, чем всё кончилось. Закрытый прогон не выглядит
+    // зависшим — ровно ради этого различения `finish` и существует.
+    try { pulse?.finish({ ok: true, why: 'запись закончена' }); } catch { /* окно дешевле прогона */ }
+    stopSideCars();
   }
 }
 
@@ -4095,10 +4219,20 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
       const progressFile = has('--progress-file')
         ? ((pfRaw === null || pfRaw.startsWith('--')) ? path.join(FUSE_DIR, `${new Date().toISOString().replace(/[:.]/g, '-')}-burn-progress.txt`) : pfRaw)
         : null;
-      return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS), progressFile });
+      return cmdLoadedFloor({
+        seconds: num('--seconds', 90),
+        tickMs: num('--tick', JUDGE_TICK_MS),
+        progressFile,
+        // Горн внутри прогона: одно действие вместо двух окон. `--burn 0` оставляет прежнюю форму
+        // (стенд без нагрузки) для тех замеров, где нагрузка не нужна вовсе.
+        burnSeconds: num('--burn', 0),
+        burnAfterSeconds: num('--burn-after', 15),
+        wantWindow: !has('--no-window'),
+      });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90] [--progress-file [F]]');
-    console.log('--progress-file у --loaded-floor — ВХОД 2: без него доля мощности в кольце null весь прогон, и запись не годится в фазу 6б-бис (plans/94). Путь необязателен: без него стенд выберет сам и напечатает готовую строку горна.');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90] [--progress-file [F]] [--burn СЕК] [--burn-after 15] [--no-window]');
+    console.log('--progress-file у --loaded-floor — ВХОД 2: без него доля мощности в кольце null весь прогон, и запись не годится в фазу 6б-бис (plans/94). Путь необязателен — стенд выберет сам.');
+    console.log('--burn СЕК — стенд сам запускает горн на СЕК секунд (по умолчанию через 15 с после старта) и сам его гасит. Окно наблюдения поднимается вместе с прогоном и умирает вместе с ним: слово владельца «есть прогон — есть окно, нет прогона — нет окна». --no-window снимает окно и вместе с ним право называть прогон записью фазы.');
     console.log(`--rearm-healthy-* — ПОЛУОТКРЫТОЕ ОКНО возврата на пост (plans/88): по умолчанию ${REARM_HEALTHY_SECONDS} здоровых секунд подряд при такте ≥ ${JUDGE_HEALTHY_TICKS_PER_SEC}/с (замер researches/33 §4b). Свои числа называет тот, кто не может дать измеренный такт живого пути: стенд и фикстура.`);
     return 1;
   };
