@@ -81,7 +81,7 @@ Fourteen key documents ship with a deployment (thirteen project documents plus t
 | `REQUIREMENTS_FRAMEWORK.md` | How requirements are written and checked: goal vector + acceptance criteria first, the ten quality criteria, EARS, fit criterion, the stop-word dictionary as a lintable guard (2.2, epic N). | Deployed verbatim. |
 | `GOAL.md` | The owner's vision. | **The owner.** |
 | `MASTER_PLAN.md` | The phased road from the current state to the GOAL. | Agent derives (`/revision`). |
-| `STATUS.md` | The living SUMMARY of now and the baton between sessions (soft target ~200 lines — the first of the re-read core's size budgets that `check` warns above, all nine since 2.5; closed work moves to the chronicle — the bonsai trim). | Agent, after every task. |
+| `STATUS.md` | The living SUMMARY of now and the handover between sessions (soft target ~200 lines — the first of the re-read core's size budgets that `check` warns above, all nine since 2.5; closed work moves to the chronicle — the bonsai trim). | Agent, after every task. |
 | `PROJECT_HISTORY.md` | The append-only chronicle: closed sessions/phases/releases, newest first; NOT in `/resume`'s canon set — archaeology on demand (2.1, epic H). | Agent, at `/end-chat-soft`'s trim. |
 | `EXPERIENCE.md` | The grep-friendly journal of lessons with trigger tags. | Agent (`/experience`). |
 | `PROJECT_STRUCTURE_EXTERNAL_MAP.md` | The external map: directories, files. | Agent maintains. |
@@ -116,7 +116,7 @@ mirrored into every declared agent system (§7.3). Groups:
 
 - **Session:** `resume` (read ALL canon documents, pick one main thing) · `pause` (soft-park the
   chat: logical stopping point, green tree, local commit, NO pushes) · `end-chat-soft` (the unhurried full closure) + `end-chat-force` (the urgent capture-and-go closure:
-  STATUS baton, judge, commit AND push) · `refresh-context` · `check-backlog`.
+  STATUS handover, judge, commit AND push) · `refresh-context` · `check-backlog`.
 - **Autonomy loops:** `autoloop` · `dayloop` · `nightloop` — grind the backlog; every item ends
   with a mandatory judge pass; an owner's drive-by note is filed to the backlog, not a task switch —
   plus `guarded-loop` (2.1): the same loop under a WATCHDOG (external wake-ups every N minutes,

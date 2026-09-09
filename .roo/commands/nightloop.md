@@ -85,7 +85,7 @@ Until one fires — don't stop, don't wait for confirmations, work.
 ## Finishing (when a stop condition fired)
 
 - Stop = the wake time → **start `/end-chat-soft`**: finish the current item to a natural cut at
-  your normal pace, then the full unhurried ceremonies (status + baton, judge pass, commit AND
+  your normal pace, then the full unhurried ceremonies (status + handover, judge pass, commit AND
   push, the night's summary in the chat). The wake time bounds the WORKING, not the closing.
 - Stop = the human wrote — switch to them; give a short summary of the night.
 - Stop = a critical error — get the current micro-step compiling if you can, **commit and push**

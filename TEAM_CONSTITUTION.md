@@ -94,7 +94,7 @@ reachable from every worktree (the tool resolves the common git directory); ever
 ONLY its own row via the board tool (`npm run team`, `tools/team-board.mjs`). Form, rules, and
 the tool contract — in the board document itself. Update your row at every state change: took a
 task · waiting · freed. Statuses are SHORT; the document never grows. The board shows the
-moment; the project's `STATUS.md` still carries the baton between sessions — the board never
+moment; the project's `STATUS.md` still carries the handover between sessions — the board never
 replaces it.
 
 ## 5. Git discipline

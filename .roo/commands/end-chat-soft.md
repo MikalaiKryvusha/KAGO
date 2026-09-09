@@ -1,5 +1,5 @@
 ---
-description: SOFTLY CLOSE this chat with full ceremonies — usually ordered IN ADVANCE, while work is still going. Acknowledge in one line, finish the current work to a natural cut WITHOUT rushing, and only then unhurriedly run the full closure (status + baton, bonsai trim, README, rebuild, pairs registry, judge pass, commit AND push, farewell). Use when the human says "wrap up when you're done", "finish up and close the chat later", "потихоньку потом закроешь чат", "нужно будет доделать и закругляться", "доделай и сворачивайся" — an advance request is NOT an order to drop the work right now. Neutral closing phrases with no urgency ("закончим чат", "завершаем чат", "wrap up", "end the chat") also mean THIS skill. For an urgent right-now closure use /end-chat-force; for a light in-chat pause (the chat continues) use /pause. Trigger aliases (ru): «потихоньку потом закроешь чат», «доделай и закругляйся», «закончим чат», «завершаем чат», «передай эстафету», «сверни сессию», «сохрани прогресс», «зафиксируй статус», «заверши сессию»
+description: SOFTLY CLOSE this chat with full ceremonies — usually ordered IN ADVANCE, while work is still going. Acknowledge in one line, finish the current work to a natural cut WITHOUT rushing, and only then unhurriedly run the full closure (status + handover, bonsai trim, README, rebuild, pairs registry, judge pass, commit AND push, farewell). Use when the human says "wrap up when you're done", "finish up and close the chat later", "потихоньку потом закроешь чат", "нужно будет доделать и закругляться", "доделай и сворачивайся" — an advance request is NOT an order to drop the work right now. Neutral closing phrases with no urgency ("закончим чат", "завершаем чат", "wrap up", "end the chat") also mean THIS skill. For an urgent right-now closure use /end-chat-force; for a light in-chat pause (the chat continues) use /pause. Trigger aliases (ru): «потихоньку потом закроешь чат», «доделай и закругляйся», «закончим чат», «завершаем чат», «передай эстафету», «сверни сессию», «сохрани прогресс», «зафиксируй статус», «заверши сессию»
 ---
 
 # /end-chat-soft — the soft closure: finish properly, then say goodbye
@@ -27,22 +27,22 @@ If the ask arrives when nothing is in progress — Phase A collapses: begin the 
 Run the steps **in order**, narrate briefly. Don't skip steps. A step fails — stop, tell the
 human, don't continue blindly.
 
-### Step 1. Record status & the baton in STATUS.md
+### Step 1. Record status & the handover in STATUS.md
 
 Update `STATUS.md`:
 - **What was done in this chat** — concrete, tied to bugs/features and files.
 - **Current position** — what works, what's in progress, where we are.
-- **The baton ("where to continue")** — a checklist written for a STRANGER: the next session knows
+- **The handover ("where to continue")** — a checklist written for a STRANGER: the next session knows
   nothing this chat knew. Commands, file paths, what to verify first, open questions with owners.
 - Convert relative dates to absolute (find today's date from context / `date`).
 
 Reconcile with the active bug docs in `bugs/` and reflect their status. If a reusable lesson
-emerged in this chat, capture it in `EXPERIENCE.md` (skill: `/experience`) before the baton is
+emerged in this chat, capture it in `EXPERIENCE.md` (skill: `/experience`) before the handover is
 passed. If a previous `/end-chat-force` left a "ceremonies skipped" debt line in `STATUS.md` —
 this closure pays it: run what was skipped and remove the line.
 
 If the project keeps a **truth↔mirror pairs registry**, run its check commands before passing the
-baton — a handoff over a drifted pair hands the next session a lie.
+handover — a handoff over a drifted pair hands the next session a lie.
 
 **The bonsai trim (STATUS is a summary, not a chronicle):** entries that stopped being "now" —
 closed phases, finished sessions, shipped releases — move VERBATIM into `PROJECT_HISTORY.md`
@@ -78,7 +78,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ### Step 5. The farewell report
 
 Report to the human: what was recorded, what was built, the commit hash(es), what was pushed, and
-the baton in one paragraph — the main thing the NEXT chat should do first. The report OPENS with
+the handover in one paragraph — the main thing the NEXT chat should do first. The report OPENS with
 the forced delivery line — `DELIVERY: <the owner's metric> X → Y; moved by: <one line> | blocker:
 <named>` — the ONE acceptance metric named in `MASTER_PLAN.md`; a zero delta is legal only with a
 named blocker (`/fable-judge` hunts a farewell without the line — the delivery-line hunt). That's

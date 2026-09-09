@@ -115,7 +115,7 @@ Output: a short analysis note (a plan or research doc per project convention). N
 The manager reads the board before dispatching and watches team health: friction, idle roles,
 bottlenecks, uneven context load. Every role updates its row at every state change (took a task ·
 waiting on someone · freed). The board shows the moment; the project's `STATUS.md` still carries
-the baton between sessions — the board never replaces it.
+the handover between sessions — the board never replaces it.
 
 ## Operation 5 — retrospective: after a milestone, judge the ORGANIZATION
 

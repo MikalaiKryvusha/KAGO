@@ -7,7 +7,7 @@ description: SOFT-PARK the current chat — a temporary pause with the intent to
 
 A temporary pause, not a goodbye: the human intends to come back to THIS chat and continue. The whole
 point is a **cheap, precise parking** — no heavyweight rituals. (The heavy closure — STATUS, commits,
-pushes, handing the baton to other agents — is `/end-chat-soft` (or the urgent `/end-chat-force`), a different skill.)
+pushes, handing over to other agents — is `/end-chat-soft` (or the urgent `/end-chat-force`), a different skill.)
 
 ## Step 1. Reach a logical stopping point — never park mid-surgery
 

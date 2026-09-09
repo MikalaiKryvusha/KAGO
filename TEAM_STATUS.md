@@ -7,7 +7,7 @@
 >
 > The board is the state IN THE MOMENT — transparent to the whole team so agents do not
 > interrupt each other, respect each other's busyness, and can see where help is needed.
-> The project's `STATUS.md` still carries the baton between sessions; the board never replaces it.
+> The project's `STATUS.md` still carries the handover between sessions; the board never replaces it.
 
 ## Board
 

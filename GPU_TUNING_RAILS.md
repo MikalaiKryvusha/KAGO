@@ -210,7 +210,7 @@ the 2026-08-14 conflict verbatim — three rungs whose every load shape PASSED w
    непредвиденного для нас не осталось, и багов и дыр в движке нет»*
    (`GOAL.md` → «🤖 KAGO ТЮНИТ САМ И ОТДАЁТ ПРОФИЛИ»).
    **There is nothing left to weigh.** The old trade — stop and lose the evening, or note it in the
-   baton and keep the tempo — is settled: the finding IS the reason to stop. **«Unforeseen
+   handover and keep the tempo — is settled: the finding IS the reason to stop. **«Unforeseen
    behaviour» ranks with «bug»**: it is enough that the system did something you did not expect;
    proving it is a defect is NOT a precondition for stopping.
    Why this is correct rather than merely cautious: a hole walked past for tempo stays in the

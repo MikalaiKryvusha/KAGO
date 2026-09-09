@@ -1,14 +1,14 @@
 ---
 name: end-chat-force
-description: URGENTLY CLOSE this chat RIGHT NOW, without the long ceremonies — capture only the essentials that must not be lost (status + the baton for the next chat), commit AND push, say goodbye in one line. Use when the human says "закрой чат срочно", "сворачиваемся прямо сейчас", "закрывай немедленно, без церемоний", "end the chat now", "force-close the chat", "end-chat-force". The skipped ceremonies (judge pass, bonsai trim, README refresh, showcase linters) become an explicit debt line in STATUS.md that the next /end-chat-soft pays. For an unhurried full closure use /end-chat-soft; for a light in-chat pause use /pause. Trigger aliases (ru): «закрой чат срочно», «сворачиваемся прямо сейчас», «закрывай немедленно», «без церемоний»
+description: URGENTLY CLOSE this chat RIGHT NOW, without the long ceremonies — capture only the essentials that must not be lost (status + the handover for the next chat), commit AND push, say goodbye in one line. Use when the human says "закрой чат срочно", "сворачиваемся прямо сейчас", "закрывай немедленно, без церемоний", "end the chat now", "force-close the chat", "end-chat-force". The skipped ceremonies (judge pass, bonsai trim, README refresh, showcase linters) become an explicit debt line in STATUS.md that the next /end-chat-soft pays. For an unhurried full closure use /end-chat-soft; for a light in-chat pause use /pause. Trigger aliases (ru): «закрой чат срочно», «сворачиваемся прямо сейчас», «закрывай немедленно», «без церемоний»
 ---
 
 # /end-chat-force — the urgent closure: save what must not be lost, and go
 
-The human needs this chat closed NOW. Speed wins over ceremony — but never over the baton: a
+The human needs this chat closed NOW. Speed wins over ceremony — but never over the handover: a
 closure that loses the essentials is not fast, it is destructive. Three steps, minutes total.
 
-## Step 1. The baton — only what must not be lost
+## Step 1. The handover — only what must not be lost
 
 Update `STATUS.md`, tersely:
 
@@ -20,7 +20,7 @@ Update `STATUS.md`, tersely:
   linters) — the first /end-chat-soft pays this debt.`
 - Convert relative dates to absolute.
 
-Uncommitted work-in-progress that cannot land safely: name it in the baton (file, state, next
+Uncommitted work-in-progress that cannot land safely: name it in the handover (file, state, next
 move) instead of finishing it — naming survives, rushing corrupts.
 
 ## Step 2. Commit and push
@@ -43,7 +43,7 @@ the reminder that the ceremonies debt is recorded in `STATUS.md` — prefixed by
 
 ## What this skill refuses to skip
 
-- **The baton.** No closure without Step 1 — that is the one thing force mode exists to protect.
+- **The handover.** No closure without Step 1 — that is the one thing force mode exists to protect.
 - **The staging gate.** A sweeping add that grabs the owner's stray files is not faster, it is a
   leak; the gate's refusal is obeyed even in force mode.
 - **Honesty.** Skipped ceremonies are DECLARED (the debt line), never silently dropped — a force

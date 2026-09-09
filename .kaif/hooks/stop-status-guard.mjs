@@ -4,7 +4,7 @@
 // hook of the module — and even it blocks softly: once per session, with a reason that asks
 // for an update or an explicit "nothing changed", never a hard wall.
 //
-// What it does: STATUS.md is the baton between sessions — a session that changed the tree but
+// What it does: STATUS.md is the handover between sessions — a session that changed the tree but
 // never touched STATUS hands the next session a stale summary. When the agent is about to
 // finish its turn, this hook checks: did this session do work (dirty worktree or a recent
 // commit) while STATUS.md stayed untouched longer than the staleness window? If yes — one soft

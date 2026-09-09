@@ -94,7 +94,7 @@ The board lives in ONE place (reference: the main copy), reachable from every wo
 role rewrites ONLY its own row via the board tool. Form, rules, and the tool contract — in the
 board document itself. Update your row at every state change: took a task · waiting · freed.
 Statuses are SHORT; the document never grows. The board shows the moment; the project's
-`STATUS.md` still carries the baton between sessions — the board never replaces it.
+`STATUS.md` still carries the handover between sessions — the board never replaces it.
 The board lives OUTSIDE git (ignore-first; board document → "Where the board lives"); a tracked
 board is a named opt-out recorded HERE with its price: `<n/a | opt-out: <why> — price: a dirty
 main copy by construction>`.
