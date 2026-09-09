@@ -134,6 +134,46 @@
 //   deliver every single beat and still be three times its own tick late. Delivery and CADENCE are
 //   two facts, and an instrument that reports only the first would have passed P96-AC2 while being
 //   useless for milliseconds.
+//
+// ---- UNDER THE FURNACE — phase 2, `plans/97`, 2026-09-09. THIS is the floor the setpoint stands on.
+//
+//   Card held at the FULL envelope by `furnace.exe 2400 8192 256 64 --sustain 60`: 299,8…302,3 W,
+//   79…80 °C. Two series, canary at tick 5 ms for 90 s, independent receiver counting:
+//
+//     beats delivered    18 001 of 18 001 · 18 001 of 18 001 — 100 %; receiver max 11 281 / 9 919 µs
+//                        against the canary's own 11 289 / 9 872 — two clocks, ten microseconds apart
+//     kernel latency µs  median 150 · 152     p90 300 · 356
+//                        p99   2307 · 2793    max 6470 · 5568
+//     beat gap µs        median 4999 · 5000   p90 5101 · 5141
+//                        p99   7009 · 7138    max 11 289 · 9 872
+//
+//   🎯 THE PRIORITY HOLDS, and that is the phase's answer: with the card busy at 300 W the MEDIAN gap
+//   did not move at all — 5000 µs against 5000 µs idle. Had `cudaStreamCreateWithPriority` been
+//   ignored, the canary would have queued behind the furnace's own launches (≈ 280 ms each) and the
+//   median would have gone there. The tail grew honestly instead: p99 5,17 → 7,07 ms, max 6,55 →
+//   11,29 ms.
+//
+//   THE COST TO THE BURN IS NOT ZERO AND IS NOT HIDDEN: −2,93 % of the furnace's launches per second
+//   (3,5711 → 3,4666), which is 6,3× the instrument's own scatter (0,462 % between two baseline
+//   series), and −2,35 % of VRAM bytes read — two independent quantities naming one effect. The
+//   CHECKSUM was identical across all four runs (`2fa22073660f99b5`, distinct=1, bad_launches=0), so
+//   the oracle's verdict is untouched. ⚠️ But R4's THIRD observation — work per second, the
+//   clock-stretching detector — moves by exactly those 2,93 %: a canary riding an edge search needs
+//   its throughput golden captured WITH it, or the oracle sees a clock stretch that is not there.
+//
+//   CANDIDATE SETPOINT for input 5, by the SAME rule input 4 was derived with (from the CEILING of
+//   health, never the middle of the gap — a false trip costs a rung, a missed one costs the machine):
+//       ceiling of health under full load = 11,289 ms  (worst gap over 36 002 beats)
+//       setpoint = 3 × ceiling = 33,9 ms               (the same ×3 as input 4: 3 × 515 = 1500)
+//   Against input 4's ~1500 ms that is 44× on detection. ⚠️ CANDIDATE, not a decision: two series of
+//   one evening, one load shape, and the worst gap is a SINGLE sample — the project has already paid
+//   for a setpoint drawn from one observation (`bugs/126`, 455 ms). Arming is phase 4, and phase 3
+//   must first say what a REALLY hung card does to the poll.
+//
+//   AND THE FINDING THAT OUTLIVES THE NUMBER: the bottleneck moved. Detection was 1500 ms against
+//   282 ms of rescue hands, so the hands were rounding error; now it is 34 against 282, i.e. 89 % of
+//   the rescue is spent by the HANDS. The owner's «milliseconds» is reached at the input and not yet
+//   through the whole contour — and the next place to work is named by a number, not by a feeling.
 // ---------------------------------------------------------------------------------------------
 
 // One block, one thread — the kernel must PROVE the card accepts and retires work, not load it.
