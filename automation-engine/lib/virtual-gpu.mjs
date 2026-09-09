@@ -1822,7 +1822,7 @@ export function virtualCard(cardProfile, {
       return { ok: true };
     },
 
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null, boundHeldBy = null } = {}) {
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null, boundHeldBy = null, intentMonotone = null } = {}) {
       // КОНВЕРТ ПЕРЕДАЁТСЯ ТЕМ ЖЕ ЧИСЛОМ, ЧТО У ЖИВОГО БЭКЕНДА (`bugs/99`), и это не удобство, а
       // ПАРИТЕТ: подрежь живая карта подъём, а двойник нет — двойник начал бы ОТКАЗЫВАТЬ там, где
       // карта пишет. Двойник, отказывающий больше карты, врёт мягче, чем отказывающий меньше, но
@@ -1831,7 +1831,7 @@ export function virtualCard(cardProfile, {
       // против опоры выше по течению, и резать его второй раз значило бы снова сделать его зависимым
       // от момента. Тот же выбор, что у живого бэкенда, тем же признаком.
       const heldByLock = boundHeldBy === 'lock';
-      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz, envelopeMhz: heldByLock ? null : cardMaxClockMhz, intentTopMhz });
+      const vec = buildRaiseAndCapVector(this.points(), deltaMhz, { capMhz, envelopeMhz: heldByLock ? null : cardMaxClockMhz, intentTopMhz, intentMonotone });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE SAME FOUR REFUSALS THE LIVE BACKEND APPLIES — one function, called by both. A mutation
       // that removes this line must redden the parity block, and that is the block's whole job.
@@ -1854,7 +1854,7 @@ export function virtualCard(cardProfile, {
       if (!w.ok) return w;
       // ⚠️ `vector` — ЗАКАЗ, а не то, что легло. Вызывающий, сверяющий запись, обязан спрашивать
       // карту (`readCurve`/`readCurveOffsets`), иначе он сверяет свою заявку сам с собой.
-      return { ok: true, vector: requested, envelopeClamp: vec.envelopeClamp, momentOvershootMhz, highestRaisedOfferMhz: vec.highestRaisedOfferMhz };
+      return { ok: true, vector: requested, envelopeClamp: vec.envelopeClamp, orderClamp: vec.orderClamp, momentOvershootMhz, highestRaisedOfferMhz: vec.highestRaisedOfferMhz };
     },
 
     async readCurveOffsets() {

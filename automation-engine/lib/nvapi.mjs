@@ -571,6 +571,31 @@ export function buildRaiseAndCapVector(points, deltaMhz, {
   // требует положительного утверждения, а не отсутствия возражений. Та же логика, по которой R13
   // требует передать максимум карты, а не подставляет умолчание.
   intentTopMhz = null,
+  // ─── ПОРЯДОК КРИВОЙ КАК ГРАНИЦА ПОДЪЁМА (`bugs/133`) ────────────────────────────────────────────
+  //
+  // ТОТ ЖЕ КЛАСС, ЧТО У КОНВЕРТА ВЫШЕ, И ПОТОМУ ТА ЖЕ ФОРМА. Сдвиг задаётся АБСОЛЮТНО, а заводская
+  // таблица у этой карты не одна: под нагрузкой она в полосе 800…849 мВ стоит выше, чем в покое
+  // (`bugs/97`). Вектор, сшитый по опоре худшего случая, монотонен ПРОТИВ СВОЕЙ ОПОРЫ — и в покое
+  // те же сдвиги ложатся на другую таблицу, где разница между полосами не одна и та же. Замерено
+  // 2026-09-09: точки 53…56 совпадают с опорой в ноль, точки 57…60 стоят на 19 МГц ниже, и одно и
+  // то же намерение 2332 МГц даёт 2332 в одной полосе и 2313 в соседней. Порядок сломан, R12
+  // отказывает — верно по букве и делает отгружаемый режим неприменимым на холодной карте.
+  //
+  // РАЗЛИЧАЮТСЯ ДВА СЛУЧАЯ, И РАЗЛИЧАЮТСЯ ПО НАМЕРЕНИЮ, А НЕ ПО РАЗМЕРУ ИНВЕРСИИ:
+  //
+  //   · вектор МОНОТОНЕН против своей опоры, а порядок момента ломает только разница таблиц —
+  //     подрезается ВНИЗ, и цена называется числом;
+  //   · вектор немонотонен УЖЕ ПРОТИВ ОПОРЫ — это дефект самого вектора, и он обязан получить ОТКАЗ.
+  //
+  // `intentMonotone` — заявление вызывающего, посчитанное там, где живёт опора (`resolveProfileCurve`).
+  // `null` значит «ничего не заявлено», и тогда подрезки НЕТ ВОВСЕ: новое поведение требует
+  // положительного утверждения, а не отсутствия возражений (та же логика, что у `intentTopMhz`).
+  //
+  // ⚠️ ПОДРЕЗКА ТОЛЬКО ВНИЗ, И ЭТО НЕ ОСТОРОЖНОСТЬ, А ГРАНИЦА ДОКАЗАННОГО. Поднять точку до соседки
+  // тоже восстановило бы порядок и стоило бы 0 МГц выгоды — но это предложило бы напряжению частоту,
+  // которую на нём никто не прожигал. Опускание отдаёт выгоду и не выдаёт ни одного нового
+  // утверждения о кремнии.
+  intentMonotone = null,
 } = {}) {
   const usable = points.slice(0, count).filter((p) => p.freqKhz > 0);
   if (!usable.length) return { ok: false, why: 'ни одной точки с частотой' };
@@ -664,6 +689,50 @@ export function buildRaiseAndCapVector(points, deltaMhz, {
     // graphics domain (`researches/05` §8), and config carries it with `..._IS_MEASURED = true`.
     offsets.push(Math.max(config.CLOCK_OFFSET_MIN_MHZ, Math.min(config.CLOCK_OFFSET_MAX_MHZ, bounded)));
   }
+
+  // ─── ПОДРЕЗКА ПОРЯДКА (`bugs/133`) — ЦЕНА НАЗЫВАЕТСЯ ЧИСЛОМ, ВКЛЮЧАЯ НОЛЬ ──────────────────────
+  //
+  // Идёт ПОСЛЕ конверта и ДО всех чисел, которые от сдвигов зависят: и `highestRaisedOfferMhz`, и
+  // вердикт о порядке обязаны судить то, что реально уедет в карту, а не промежуточную форму.
+  // ⚠️ `=== true`, А НЕ ИСТИННОСТЬ. `Boolean(null)` даёт false, а вот `Boolean('нет')` дало бы true:
+  // заявление читается только как настоящее булево, иначе «не заявлено» когда-нибудь превратится в
+  // «заявлено». Тот же урок, что оплатил `typeof` у `intentTopMhz` этажом выше.
+  const orderDeclared = intentMonotone === true || intentMonotone === false ? intentMonotone : null;
+  const orderClamp = {
+    declared: orderDeclared,
+    allowed: orderDeclared === true,
+    why: orderDeclared === null ? 'монотонность вектора против опоры не заявлена — подрезка порядка запрещена, судит R12'
+      : orderDeclared === false ? 'вектор немонотонен УЖЕ против опоры — это дефект вектора, а не разница таблиц; подрезка запрещена, судит R12'
+        : null,
+    points: 0, totalMhz: 0, maxMhz: 0, rows: [],
+  };
+  if (orderClamp.allowed) {
+    // Сверху вниз: каждая точка не смеет предлагать больше той, что стоит ВЫШЕ неё по напряжению.
+    let ceilingMhz = Infinity;
+    for (let i = count - 1; i >= 0; i--) {
+      const p = points[i];
+      if (!p || p.freqKhz <= 0) continue;
+      const offer = p.mhz + offsets[i];
+      // Пол — ЗАВОДСКОЕ предложение точки: инверсия, которая уже есть у самой карты, не наша, и
+      // опускать ниже заводского значило бы делать работу потолка (`capMhz`) чужими руками.
+      const allowedOffer = Math.max(p.mhz, ceilingMhz);
+      if (allowedOffer < offer) {
+        const cut = offer - allowedOffer;
+        orderClamp.points += 1;
+        orderClamp.totalMhz += cut;
+        orderClamp.maxMhz = Math.max(orderClamp.maxMhz, cut);
+        // Первые несколько точек поимённо: цена одним итогом не показывает, ГДЕ она заплачена, а
+        // «в полосе прожигов» и «наверху кривой» — разные новости для владельца (тот же довод, что
+        // у подрезки по конверту).
+        if (orderClamp.rows.length < 8) {
+          orderClamp.rows.push({ point: i, voltageMv: p.mv ?? null, was: offer, now: allowedOffer, cutMhz: cut });
+        }
+        offsets[i] = allowedOffer - p.mhz;
+      }
+      ceilingMhz = p.mhz + offsets[i];
+    }
+  }
+
   // WHAT THE CURVE ACTUALLY OFFERS AFTER THE WRITE — computed, never assumed. The cap is a WISH until
   // this number confirms it, and on this card the wish does not always come true: see below.
   let highestOfferedMhz = -Infinity;
@@ -744,6 +813,9 @@ export function buildRaiseAndCapVector(points, deltaMhz, {
     // ЦЕНА ПОДРЕЗКИ ПО КОНВЕРТУ — всегда, включая ноль подрезанных точек, и `envelopeMhz: null`
     // отличимо от «конверт был, подрезать не пришлось» (`bugs/99`).
     envelopeClamp,
+    // ЦЕНА ПОДРЕЗКИ ПОРЯДКА — всегда, включая ноль подрезанных точек, и `declared: null` отличимо
+    // от «заявили монотонность, резать не пришлось» (`bugs/133`, та же форма, что у конверта).
+    orderClamp,
     capEnforced: highestOfferedMhz <= cap,
     capLeakMhz: Math.max(0, highestOfferedMhz - cap),
     stockMonotone: stockOrder.monotone,

@@ -281,7 +281,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
   const COUNT = () => (mod.CLK_VF_POINT_COUNT ?? 128) - 1;
 
   return {
-    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null, boundHeldBy = null } = {}) {
+    async writeRaiseAndCap(deltaMhz, capMhz, { cardMaxClockMhz = null, intentTopMhz = null, boundHeldBy = null, intentMonotone = null } = {}) {
       await open();
       const curve = mod.readVfCurve(nv, handle);
       if (!curve.ok) return { ok: false, why: `кривая не прочиталась: ${curve.why}` };
@@ -355,7 +355,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
       // и подрезка против таблицы МОМЕНТА не делается — иначе вектор снова зависел бы от температуры
       // клика. Отказы ниже судят тогда НАМЕРЕНИЕ, а превышение момента возвращается числом.
       const heldByLock = boundHeldBy === 'lock';
-      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz, envelopeMhz: heldByLock ? null : cardMaxClockMhz, intentTopMhz });
+      const vec = mod.buildRaiseAndCapVector(basePoints, deltaMhz, { capMhz, envelopeMhz: heldByLock ? null : cardMaxClockMhz, intentTopMhz, intentMonotone });
       if (!vec.ok) return { ok: false, why: `вектор не построился: ${vec.why}` };
       // THE FOUR REFUSALS — R11, R13 (bound), R13 (raised offer), R12 — live in `curveWriteRefusal`
       // above, so the virtual card of epic 03 is held to the SAME bar rather than to a copy of it.
@@ -376,7 +376,7 @@ export function nvapiCurveBackend({ nvapi = null } = {}) {
           why: w.why ?? `запись кривой: ${w.failed} точек из ${COUNT()} не записались`,
         };
       }
-      return { ok: true, vector: vec.offsets.slice(0, COUNT()), envelopeClamp: vec.envelopeClamp ?? null, momentOvershootMhz, highestRaisedOfferMhz: vec.highestRaisedOfferMhz };
+      return { ok: true, vector: vec.offsets.slice(0, COUNT()), envelopeClamp: vec.envelopeClamp ?? null, orderClamp: vec.orderClamp ?? null, momentOvershootMhz, highestRaisedOfferMhz: vec.highestRaisedOfferMhz };
     },
 
     async readCurveOffsets() {
@@ -874,6 +874,27 @@ export async function resolveProfileCurve(profile, {
       if (top === null || offer > top) top = offer;
     }
     resolved.__intentTopMhz = top;
+    // ─── МОНОТОНЕН ЛИ ВЕКТОР ПРОТИВ СВОЕЙ ОПОРЫ (`bugs/133`) ─────────────────────────────────────
+    //
+    // Второе заявление, и оно живёт здесь по той же причине, что и первое: опора есть ТОЛЬКО в этой
+    // функции, а бэкенд записи видит готовый вектор и таблицу МОМЕНТА, которая от опоры отличается.
+    //
+    // Критерий СТРОГИЙ: монотонно ли само предложение против опоры. Соблазн был мягче — «не вносим
+    // ли МЫ инверсию сверх той, что уже есть у опоры», по образцу `introducesInversion`. Он
+    // отвергнут: опора этой карты немонотонна сама (замер 2026-09-09, точки 52→53: 1980 → 1455 МГц),
+    // и на такой опоре мягкий критерий стал бы вакуумно истинным — то есть разрешал бы подрезку
+    // ровно там, где опоре доверять нельзя. Строгий критерий в этом случае говорит «нет», и вектор
+    // получает отказ R12, а не тихую правку.
+    let mono = true;
+    let prev = -Infinity;
+    for (let i = 0; i < resolved.deltaByPointMhz.length; i += 1) {
+      const p = base[i];
+      if (!p || !(p.freqKhz > 0)) continue;
+      const offer = p.mhz + (Number(resolved.deltaByPointMhz[i]) || 0);
+      if (offer < prev) { mono = false; break; }
+      prev = offer;
+    }
+    resolved.__intentMonotone = mono;
   }
   if (typeof onBase === 'function') onBase({ source: baseSource, base, liveTable, cardBase, drift: resolved?.__baseDrift ?? null });
   return resolved;
@@ -1035,6 +1056,9 @@ export async function apply(backend, profile, {
         const w = await curveBackend.writeRaiseAndCap(raise, wantCurve.capMhz, {
           cardMaxClockMhz: before.clockMaxMhz, intentTopMhz: wantCurve.__intentTopMhz ?? null,
           boundHeldBy: wantCurve.__boundHeldBy ?? null,
+          // `intentMonotone` — монотонен ли вектор против СВОЕЙ опоры (`bugs/133`). Едет отдельным
+          // полем по той же причине, что и намерение по конверту: бэкенд опоры не видит.
+          intentMonotone: wantCurve.__intentMonotone ?? null,
         });
         if (!w.ok) throw new Error(`запись кривой не удалась: ${w.why ?? 'причина не названа'}`);
         // P6-AC3 — PROVED BY READ-BACK, never by a status code. `nvidia-smi` already taught this
@@ -1077,7 +1101,16 @@ export async function apply(backend, profile, {
               : ` · ПОДРЕЗКА ПО КОНВЕРТУ (${ec.envelopeMhz} МГц): ${ec.points} точ., суммарно −${ec.totalMhz} МГц, `
                 + `максимум на точке −${ec.maxMhz} МГц (${ec.rows.map((r) => `${r.voltageMv ?? '?'} мВ ${r.was}→${r.now}`).join(', ')}`
                 + `${ec.points > ec.rows.length ? ' …' : ''})`));
-        return { value: sampleWritable(backend), samples: [], proof: 'curve-read-back', note };
+        // ─── ЦЕНА ПОДРЕЗКИ ПОРЯДКА — В ТУ ЖЕ СТРОКУ, ВСЕГДА (`bugs/133`) ──────────────────────────
+        // Тот же барьер, что у конверта: подъём, не доехавший до карты, владелец узнаёт числом и от
+        // меня. Ноль печатается тоже, и «не заявляли» отличимо от «заявили, резать не пришлось».
+        const oc = w.orderClamp ?? null;
+        const orderNote = oc === null ? ' · ПОДРЕЗКА ПОРЯДКА: не проверялась — бэкенд не вернул отчёта'
+          : oc.allowed !== true ? ` · ПОДРЕЗКА ПОРЯДКА: запрещена — ${oc.why}`
+            : oc.points === 0 ? ' · ПОДРЕЗКА ПОРЯДКА: не потребовалась, 0 точек'
+              : ` · ПОДРЕЗКА ПОРЯДКА: ${oc.points} точ., суммарно −${oc.totalMhz} МГц, максимум на точке −${oc.maxMhz} МГц `
+                + `(${oc.rows.map((r) => `${r.voltageMv ?? '?'} мВ ${r.was}→${r.now}`).join(', ')}${oc.points > oc.rows.length ? ' …' : ''})`;
+        return { value: sampleWritable(backend), samples: [], proof: 'curve-read-back', note: note + orderNote };
       },
       undo: async () => {
         const z = await curveBackend.zeroCurve();
