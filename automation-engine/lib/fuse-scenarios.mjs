@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import {
   judgeLiveness, stepPowerWindow, cancelsFalseTrip,
   POWER_ESTABLISHED_MW, POWER_LOW_HOLD_MS, DERIVED_ARM_N_MS,
+  CARD_STALE_TELEMETRY_MS, BEATS_FRESH_MS,
 } from './fuse.mjs';
 
 /** Уставка входа 2 для горна на полосе — то самое число, что стояло в погибшем прогоне. */
@@ -49,12 +50,18 @@ export function runScenario(at, { seconds = 20, armNMs = DERIVED_ARM_N_MS, armMM
   let progressWired = false;
   let win = { peakMw: 0, lowSinceMs: null };
   let ticks = 0;
+  // Вход 4 живёт мигом ПОСЛЕДНЕГО ИЗМЕНЕНИЯ числа — ровно как в такте судьи.
+  let lastPowerMw = null;
+  let lastPowerChangeMs = null;
   for (let now = 0; now <= seconds * 1000; now += TICK_MS) {
     const s = at(now);
     ticks += 1;
     // ⚡ ЕДИНСТВЕННАЯ МОДЕЛИРУЕМАЯ ЧАСТЬ: провод поднимает удар `0x02`, и больше ничто.
     // Ровно эта строка живёт в судье (`fuse.mjs`, ветка `buf[0] === 0x02`), и её сторожит блок ниже.
     if (s.progressBeat) { lastProgressMs = now; progressWired = true; }
+    const mwNow = s.powerMw ?? null;
+    if (mwNow !== null && (lastPowerChangeMs === null || mwNow !== lastPowerMw)) lastPowerChangeMs = now;
+    if (mwNow !== null) lastPowerMw = mwNow;
     win = stepPowerWindow(win, {
       progressWired, powerMw: s.powerMw ?? null, nowMs: now, armPowerRatio, establishedMw: POWER_ESTABLISHED_MW,
     });
@@ -67,6 +74,11 @@ export function runScenario(at, { seconds = 20, armNMs = DERIVED_ARM_N_MS, armMM
         establishedMw: POWER_ESTABLISHED_MW,
         lowForMs: win.lowSinceMs === null ? 0 : now - win.lowSinceMs,
         holdMs: POWER_LOW_HOLD_MS,
+      },
+      staleTelemetry: {
+        limitMs: CARD_STALE_TELEMETRY_MS,
+        frozenForMs: lastPowerChangeMs === null ? null : now - lastPowerChangeMs,
+        beatsFresh: s.beatAgeMs !== null && s.beatAgeMs <= BEATS_FRESH_MS,
       },
     });
     if (!verdict.tripped) continue;
@@ -89,6 +101,21 @@ const HOT_MW = 300_000;
 const IDLE_MW = 47_000;     // ровно то, что стояло в кольце смерти 09.09
 
 /**
+ * 🔴 ЖИВАЯ КАРТА НЕ ДЕРЖИТ ЧИСЛО НЕПОДВИЖНЫМ, И МОДЕЛЬ ОБЯЗАНА ЭТО ЗНАТЬ.
+ *
+ * Первая редакция сценариев отдавала мощность КОНСТАНТОЙ — и как только появился вход 4, три
+ * здоровых сценария (E, F, G) немедленно покраснели ложным срабатыванием. Дефект был не во входе,
+ * а в модели: карта обновляет число примерно дважды в секунду, и самая длинная площадка на
+ * 95 000 тактов настоящей работы 09.09 — 515 мс. Константа в фикстуре описывала МЁРТВУЮ карту и
+ * называла её здоровой.
+ *
+ * Здесь число меняется каждые 490 мс — чуть чаще измеренного потолка, как и на живой карте.
+ * Матрица поймала это на первом же прогоне; ради этого она и написана.
+ */
+const REFRESH_MS = 490;
+const alive = (base) => (t) => base + (Math.floor(t / REFRESH_MS) % 7) * 137;
+
+/**
  * Каждый сценарий: имя · что случилось физически · чем это кончилось в жизни (если случалось) ·
  * ожидание. `expect: 'trip'` — обязан сработать; `'silent'` — обязан промолчать; `'HOLE'` — сегодня
  * не ловит НИКТО, и это записано как дыра, а не как норма.
@@ -102,7 +129,7 @@ export const SCENARIOS = [
     at: (t) => ({
       beatAgeMs: t < 3000 ? 2 : t - 3000,
       progressBeat: t < 3000 && t % BURN_TICK_MS < TICK_MS,
-      powerMw: HOT_MW, burnAlive: true,
+      powerMw: alive(HOT_MW)(t), burnAlive: true,
     }),
   },
   {
@@ -113,7 +140,7 @@ export const SCENARIOS = [
     at: (t) => ({
       beatAgeMs: 2,
       progressBeat: t < 4000 && t % BURN_TICK_MS < TICK_MS,
-      powerMw: t < 4000 ? HOT_MW : IDLE_MW, burnAlive: true,
+      powerMw: t < 4000 ? alive(HOT_MW)(t) : alive(IDLE_MW)(t), burnAlive: true,
     }),
   },
   {
@@ -121,7 +148,7 @@ export const SCENARIOS = [
     what: 'напряжение применено, прожиг запущен, карта встала СРАЗУ: ни одного удара прогресса, '
       + 'удары живости идут (драйвер отвечает), мощность стоит на простое',
     paid: '🔴 ЗАВИСАНИЕ 09.09 14:44, 3090 МГц / 900 мВ. Предохранитель молчал 3 минуты и умер с машиной',
-    expect: 'trip', by: 'сегодня — НИКТО',
+    expect: 'trip', by: 'ВХОД 4 — телеметрия карты замерла при живом канале (bugs/132)',
     at: () => ({ beatAgeMs: 2, progressBeat: false, powerMw: IDLE_MW, burnAlive: true }),
   },
   {
@@ -133,7 +160,7 @@ export const SCENARIOS = [
     at: (t) => ({
       beatAgeMs: 2,
       progressBeat: t % BURN_TICK_MS < TICK_MS,
-      powerMw: t < 3000 ? HOT_MW : 60_000, burnAlive: true,
+      powerMw: t < 3000 ? alive(HOT_MW)(t) : alive(60_000)(t), burnAlive: true,
     }),
   },
   {
@@ -144,7 +171,7 @@ export const SCENARIOS = [
     at: (t) => ({
       beatAgeMs: 2,
       progressBeat: t < 5000 && t % BURN_TICK_MS < TICK_MS,
-      powerMw: t < 5000 ? HOT_MW : IDLE_MW, burnAlive: t < 5000,
+      powerMw: t < 5000 ? alive(HOT_MW)(t) : alive(IDLE_MW)(t), burnAlive: t < 5000,
     }),
   },
   {
@@ -152,7 +179,7 @@ export const SCENARIOS = [
     what: 'полоса считает следующую ступень: прожига нет вовсе, карта в покое, удары идут',
     paid: 'ложный трип 29.08 — тишина 994 мс при идеальных ударах',
     expect: 'silent', by: '«источника нет» ≠ «застыл»',
-    at: () => ({ beatAgeMs: 2, progressBeat: false, powerMw: IDLE_MW, burnAlive: false }),
+    at: (t) => ({ beatAgeMs: 2, progressBeat: false, powerMw: alive(IDLE_MW)(t), burnAlive: false }),
   },
   {
     id: 'G-зазор-DPC-под-занятым-драйвером',
@@ -162,7 +189,7 @@ export const SCENARIOS = [
     at: (t) => ({
       beatAgeMs: t % 100 < 50 ? 40 : 2,
       progressBeat: t % BURN_TICK_MS < TICK_MS,
-      powerMw: HOT_MW, burnAlive: true,
+      powerMw: alive(HOT_MW)(t), burnAlive: true,
     }),
   },
   {
@@ -173,7 +200,7 @@ export const SCENARIOS = [
     at: (t) => ({
       beatAgeMs: t < 1000 ? 2 : t - 1000,
       progressBeat: t % BURN_TICK_MS < TICK_MS,
-      powerMw: HOT_MW, burnAlive: true,
+      powerMw: alive(HOT_MW)(t), burnAlive: true,
     }),
   },
 ];
@@ -219,5 +246,14 @@ export function selfTest() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('fuse-scenarios.mjs')) {
+  if (process.argv.includes('--help')) {
+    console.log('fuse-scenarios — МАТРИЦА ОТКАЗОВ ПРЕДОХРАНИТЕЛЯ (bugs/132).');
+    console.log('  node automation-engine/lib/fuse-scenarios.mjs            прогнать матрицу целиком');
+    console.log('  node automation-engine/lib/fuse-scenarios.mjs --selftest то же самое: матрица И ЕСТЬ самопроверка');
+    console.log('Печатает по сценарию: что случилось физически · чем оплачено · кто обязан сработать · что вышло.');
+    console.log('Сценарий, которого не ловит НИКТО, называется ДЫРОЙ вслух и роняет код выхода.');
+    console.log('Карту не трогает: фикстуры в памяти, читается один файл — исходник судьи, ради сторожа пары.');
+    process.exit(0);
+  }
   process.exit(selfTest());
 }

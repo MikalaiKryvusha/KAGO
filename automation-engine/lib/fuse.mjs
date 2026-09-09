@@ -143,7 +143,7 @@ export const DERIVED_ARM_N_MS = 60;
  * Величина — ДОЛЯ ОТ БЕГУЩЕГО ПИКА, а не абсолютные ватты: 45 Вт на 2145 МГц законны, а на
  * 3060 МГц невозможны. Карта сравнивается с собой же минуту назад.
  */
-export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs = null, armMMs = null, progressWired = false, power = null }) {
+export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs = null, armMMs = null, progressWired = false, power = null, staleTelemetry = null }) {
   const beatSilenceMs = lastBeatMs === null ? null : Math.max(0, nowMs - lastBeatMs);
   const progressSilenceMs = (progressWired && lastProgressMs !== null) ? Math.max(0, nowMs - lastProgressMs) : null;
   const beatTripped = armNMs !== null && beatSilenceMs !== null && beatSilenceMs >= armNMs;
@@ -155,9 +155,22 @@ export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs
     && power.peakMw >= power.establishedMw
     && power.mw <= power.ratio * power.peakMw
     && power.lowForMs >= power.holdMs;
+  // ⚡ ВХОД 4 (`bugs/132`): КАРТА ПЕРЕСТАЛА ОБНОВЛЯТЬ ЧИСЛО, А КАНАЛ ЖИВ. Три условия, и каждое
+  // снимает свой класс ложного: порог назван (невзведённость) · удары СВЕЖИЕ (замолчавшая проба
+  // даёт ту же неподвижность — это беда входа 1, и приписывать её карте нельзя) · неподвижность
+  // держится дольше такта опроса NVML. Прожиг здесь НЕ спрашивается намеренно: смерть 09.09
+  // случилась между ступенями, когда прожига не было вовсе, и требование «под нагрузкой» вернуло
+  // бы ровно ту слепоту, ради которой вход и заводится.
+  const staleTripped = staleTelemetry !== null && staleTelemetry.limitMs !== null
+    && staleTelemetry.frozenForMs !== null && staleTelemetry.beatsFresh === true
+    && staleTelemetry.frozenForMs >= staleTelemetry.limitMs;
   return {
-    tripped: beatTripped || powerTripped || progressTripped,
-    cause: beatTripped ? 'beat-silence' : (powerTripped ? 'power-collapse' : (progressTripped ? 'progress-stall' : null)),
+    tripped: beatTripped || powerTripped || progressTripped || staleTripped,
+    // ПОРЯДОК ПРИЧИН — ПО КОНКРЕТНОСТИ ФАКТА О КАРТЕ, и вход 4 встаёт ВТОРЫМ: «карта перестала
+    // отвечать числом» конкретнее, чем «наш цикл встал», но менее конкретно, чем мёртвый канал.
+    cause: beatTripped ? 'beat-silence'
+      : (staleTripped ? 'card-telemetry-stale'
+        : (powerTripped ? 'power-collapse' : (progressTripped ? 'progress-stall' : null))),
     beatSilenceMs,
     progressSilenceMs,
     // Доля печатается в улику РЯДОМ с вердиктом: разбор следующей смерти начнётся с вопроса
@@ -620,6 +633,36 @@ export const CARD_TELEMETRY_FROZEN_MS = 5_000;
  * карту. Секунда — тот же порядок, что уставка входа 1 (60 мс), с запасом на шестнадцать пропусков.
  */
 export const BEATS_FRESH_MS = 1_000;
+
+/**
+ * 🔴 ВХОД 4 — КАРТА ПЕРЕСТАЛА ОБНОВЛЯТЬ ТЕЛЕМЕТРИЮ. `bugs/132`, оплачено зависанием 09.09 14:44.
+ *
+ * ЧТО СЛУЧИЛОСЬ. Машина зависла на 3090 МГц / 900 мВ МЕЖДУ намерением и вердиктом — прожига в тот
+ * момент не было вовсе. Вход 1 видел идеальные удары (драйвер отвечал на опрос), вход 2 не имел
+ * источника (прожига нет — нечему стучать), вход 3 разоружён. Все три оказались слепы ПО
+ * ПОСТРОЕНИЮ, а не по недосмотру: ни один из них не смотрит на карту, когда она не работает.
+ *
+ * ЧТО ЭТО МЕНЯЕТ В МЕТОДЕ. Владелец: *«177 секунд комп уже висел, я просто не перезагружал его в
+ * надежде, что КАГО спасёт. Не спас»* и *«не рассчитывай на секунды, рассчитывай на миллисекунды
+ * на спасение»*. Значит различитель обязан жить в потоке, который идёт ВСЕГДА — не только под
+ * нагрузкой, — и срабатывать раньше, чем человек успеет потянуться к кнопке.
+ *
+ * ВЕЛИЧИНА И ЕЁ РОДОСЛОВНАЯ, ОБЕ СТОРОНЫ ИЗМЕРЕНЫ:
+ *   · ЗДОРОВЬЕ — 95 000 тактов настоящей работы 09.09 (две чистые записи по 90 с + прогон девяти
+ *     спасений): самая длинная площадка байт-в-байт **515 мс**. Потолок задаёт не карта, а такт
+ *     опроса NVML — она обновляет число примерно дважды в секунду.
+ *   · СМЕРТЬ — кольцо зависания 09.09: мощность стояла на 46 981 мВт **44 726 мс подряд**, одной
+ *     площадкой на всё окно кольца, при идеальных ударах живости.
+ * Разрыв в восемьдесят семь раз. Порог берётся ОТ ПОТОЛКА ЗДОРОВЬЯ: 3 × 515 ≈ 1545, округлено до
+ * 1500 мс. Это НЕ середина разрыва: цена ложного здесь — прерванная ступень, цена пропуска —
+ * мёртвая машина, и запас смещён к скорости намеренно.
+ *
+ * ⚠️ ЧЕСТНАЯ ГРАНИЦА СКОРОСТИ. Быстрее ~500 мс этот вход не может по физике источника: карта не
+ * обновляет число чаще. Обнаружение выходит ~1,5 с плюс ~0,5 с на руки. Настоящие МИЛЛИСЕКУНДЫ
+ * даст только сигнал, идущий с карты чаще, — собственная канарейка на GPU, независимая от прожига
+ * (`bugs/132` AC4). Этот вход — не замена ей, а то, что можно поставить сегодня.
+ */
+export const CARD_STALE_TELEMETRY_MS = 1_500;
 
 /**
  * ВЗВОДИТЬ ЛИ ВХОД 2 ДЛЯ ЭТОЙ НАГРУЗКИ — и если нет, то ПОЧЕМУ, вслух.
@@ -1235,6 +1278,9 @@ export async function runJudge({
   // ⚡ Вход 2 (`plans/66`): путь файла сердцебиения прожига. Судья его НЕ ЧИТАЕТ в такте — он лишь
   // спрашивает о его СУЩЕСТВОВАНИИ, и только когда вход 2 уже собрался трипнуть.
   progressFile = null, existsFn = existsSync,
+  // ⚡ ВХОД 4: уставка приходит параметром, чтобы фикстура могла назвать свою, а живой путь брал
+  // ИЗМЕРЕННОЕ умолчание. Та же форма, что у полуоткрытого окна (`plans/88` Ш3).
+  cardStaleTelemetryMs = CARD_STALE_TELEMETRY_MS,
   journalPath, ringCapacity = RING_CAPACITY, seconds = null,
   // ⚡ `bugs/123`: дверь нужна РОВНО для мутации — блок обязан уметь воспроизвести прежнюю беду,
   // иначе он не сторож, а украшение. В боевом пути непрерывная запись включена всегда.
@@ -1784,6 +1830,14 @@ export async function runJudge({
       }
       const verdict = judgeLiveness({
         nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired,
+        // ⚡ ВХОД 4 (`bugs/132`): величины уже есть в такте — `lastPowerChangeMs` заведён для
+        // сторожа ожидания расписки. Здесь он же питает ТРИП: неподвижное число при живом канале
+        // означает вставшую карту раньше, чем это заметит что-либо ещё.
+        staleTelemetry: {
+          limitMs: cardStaleTelemetryMs,
+          frozenForMs: lastPowerChangeMs === null ? null : now - lastPowerChangeMs,
+          beatsFresh: lastBeatMs !== null && (now - lastBeatMs) <= BEATS_FRESH_MS,
+        },
         // ⚡ `plans/94` Ш4: ДОЛЯ ПИШЕТСЯ ВСЕГДА, ТРИПАЕТ — ТОЛЬКО ВЗВЕДЁННАЯ. Раньше здесь стояло
         // `armPowerRatio === null ? null : {...}`, и невзведённый вход 3 не давал В КОЛЬЦО ни
         // одной доли: измерять было нечем ровно в том режиме, в котором проходят чистые записи
