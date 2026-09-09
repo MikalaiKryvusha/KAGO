@@ -9045,6 +9045,24 @@ export function selfTest() {
         ok('уставка входа 2 следует за НИЖНЕЙ частотой полосы: 900 МГц → 3109 мс, 2842 → 993 (как прежде)',
           [fuseMod.armMDecision('furnace', { lowestMhz: 900 }).armMMs, fuseMod.armMDecision('furnace', { lowestMhz: 2842 }).armMMs],
           [3109, 993]);
+        // ⚡ `bugs/131`: ВХОД 3 ВЗВОДИТ РОДОСЛОВНАЯ, А НЕ СТРОКА ЗАПУСКА — И СУДИТСЯ ЭТО ПО
+        // ИСХОДНИКУ, потому что решение живёт в МЕСТЕ ВЫЗОВА, а место вызова не видно ни одному
+        // блоку. Мутация «вернуть POWER_COLLAPSE_RATIO в строку» проверена: без этого блока она
+        // проходит ЗЕЛЁНОЙ — ровно дыра `bugs/101`, из-за которой строки жили у `spawn`.
+        {
+          const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+          // lastIndexOf, а не indexOf: ПЕРВОЕ вхождение обеих меток — в строке САМОГО ЭТОГО БЛОКА,
+          // и наивный поиск резал кусок из сторожа, а не из живого пути. Сторож, судящий себя,
+          // зелен всегда и не значит ничего; поймано мутацией, которая обязана была покраснеть.
+          const from = src.lastIndexOf('const liveRiders = twin ? null : liveFuseRiders({');
+          const call = src.slice(from, src.indexOf('sweepJournalPath: journal.path', from));
+          ok('bugs/131: живой путь берёт долю у armPowerDecision, а НЕ у константы',
+            [/armPowerRatio: powerDecision\.armed/u.test(call), /armPowerRatio: fuseMod\.POWER_COLLAPSE_RATIO/u.test(call)],
+            [true, false]);
+          ok('bugs/131: при пустой родословной вход 3 не взводится, и причина уезжает в строку прогона',
+            [fuseMod.armPowerDecision().armed, /bugs\/125/u.test(fuseMod.armPowerDecision().why)],
+            [false, true]);
+        }
       }
 
       // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -11893,10 +11911,14 @@ async function mainSweep(argv, arg) {
   //  флагом (`workloads:build`, distinct=1). Форма аргументов доказана блоками `liveFuseRiders`.]
   const progressFile = twin ? null : join(fuseMod.FUSE_DIR, `${fuseStamp}-burn-progress.txt`);
   const progressDecision = twin ? null : fuseMod.armMDecision('furnace', { lowestMhz: toMhz });
+  // ⚡ `bugs/131`: ВХОД 3 ВЗВОДИТСЯ ПО РОДОСЛОВНОЙ ПОРОГА, А НЕ ПО КОНСТАНТЕ. Здесь стояло
+  // `armPowerRatio: POWER_COLLAPSE_RATIO` — то есть решение о взведении принимала строка запуска,
+  // и порог с отменённой родословной ехал в живой прогон молча. Форма та же, что у входа 2 выше.
+  const powerDecision = twin ? null : fuseMod.armPowerDecision();
   const liveRiders = twin ? null : liveFuseRiders({
     armNMs: fuseMod.DERIVED_ARM_N_MS, fuseJournalPath, progressFile,
     armMMs: (!progressObserve && progressDecision.armed) ? progressDecision.armMMs : null,
-    armPowerRatio: fuseMod.POWER_COLLAPSE_RATIO,
+    armPowerRatio: powerDecision.armed ? powerDecision.armPowerRatio : null,
     sweepJournalPath: journal.path,
   });
   // ⚡ `bugs/101` находка 1 — СЧЁТЧИК СЕЙЛОКА ДЛЯ РУКИ 2, И ОН ОДИН НА ОБА ПУТИ.
@@ -12000,8 +12022,8 @@ async function mainSweep(argv, arg) {
       // читалось бы как «его нет», а про взведённый — как «он есть и доказан»; и то и другое
       // сегодня уже стоило нам дня. Строка называет ОБА состояния своим именем.
       + (liveRiders.judgeArgs.includes('--arm-p')
-        ? ` · ТРЕТИЙ ВХОД (обвал мощности) ВЗВЕДЁН: доля ${fuseMod.POWER_COLLAPSE_RATIO} от бегущего пика, пик от ${fuseMod.POWER_ESTABLISHED_MW / 1000} Вт, выдержка ${fuseMod.POWER_LOW_HOLD_MS} мс (bugs/117)`
-        : ' · ТРЕТИЙ ВХОД (обвал мощности): НЕ ВЗВЕДЁН — карта, переставшая считать, этим прогоном НЕ ловится'));
+        ? ` · ТРЕТИЙ ВХОД (обвал мощности) ВЗВЕДЁН: доля ${powerDecision.armPowerRatio} от бегущего пика, пик от ${fuseMod.POWER_ESTABLISHED_MW / 1000} Вт, выдержка ${fuseMod.POWER_LOW_HOLD_MS} мс (bugs/117)`
+        : ` · ТРЕТИЙ ВХОД (обвал мощности): НЕ ВЗВЕДЁН — карта, переставшая считать, этим прогоном НЕ ловится. ПРИЧИНА: ${powerDecision.why}`));
 
   // ЛЕСТНИЦА ИНТЕНСИВНОСТИ СЧИТАЕТСЯ ОДИН РАЗ И КОРМИТ ВСЕХ ТРОИХ — прогон, прибор и ПЛАН. Пара
   // «правда↔зеркало», которую лучше СХЛОПНУТЬ, чем сторожить: окну надо знать, сколько форм жжётся
