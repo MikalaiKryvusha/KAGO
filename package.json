@@ -54,6 +54,7 @@
     "entryguard": "node tools/entry-guard-lint.mjs",
     "probeoffer": "node tools/probe-offer.mjs",
     "powerfloor": "node tools/power-collapse-floor.mjs",
+    "ratiofloor": "node tools/ratio-floor-from-rings.mjs",
     "pulse": "node tools/pulse-report.mjs",
     "hold": "node tools/hold-vs-raise.mjs",
     "deathwatch": "node automation-engine/lib/death-watch.mjs",
