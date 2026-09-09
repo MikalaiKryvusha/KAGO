@@ -1,6 +1,6 @@
 {
   "note": "Бинарники едут в репозиторий по решению владельца (интервью 001, Q3 = B). Манифест — способ проверить их, не веря байтам: пересоберите и сверьте.",
-  "built_at": "2026-09-07T12:53:20+03:00",
+  "built_at": "2026-09-09T17:31:15+03:00",
   "toolchain": "nvcc C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.3\\bin\\nvcc.exe (found by PATH) + MSVC env C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat [host x64 -> x64]",
   "gpu": {
     "name": "NVIDIA GeForce RTX 5070 Ti",
@@ -15,17 +15,27 @@
       "source": "branchy.cu",
       "binary": "branchy.exe",
       "source_sha256": "19341f376f0d27e578231e29c97fb08f32fba70d4565167e911223e6b28f6304",
-      "binary_sha256": "94288cef93131ff8fe6f0e3aff354a135849522a491a3afd9987bd89e4dbdec1",
+      "binary_sha256": "e751878b97db63931fe789c80a6e0738b489a652f5ddf89d7c64f1c46749910f",
       "run_checksum": "67e95c85bb6299a2",
       "repeats": 5,
       "size_bytes": 188928
+    },
+    {
+      "name": "canary",
+      "source": "canary.cu",
+      "binary": "canary.exe",
+      "source_sha256": "2f404905a650b166736f78a7de160cc54503d76534f652e43d7c120db37ca7c4",
+      "binary_sha256": "449be8a37b1e6ff7c1e51f1071d48efec340df85cdf082a87f3395fdf4ec454c",
+      "run_checksum": "315486a086a29df3",
+      "repeats": 5,
+      "size_bytes": 181760
     },
     {
       "name": "furnace",
       "source": "furnace.cu",
       "binary": "furnace.exe",
       "source_sha256": "9f2a534354ce077ad3a2f0ff9d295d8b66037b0a9aaabd69ba3205008d570505",
-      "binary_sha256": "42c00fcd891b1097488e1c13dbd6b9c0ae407c56ca29c248c41bed60a0e67dda",
+      "binary_sha256": "b56e2098b27287180ce7077a10a91ab7b03fb811a82f72ab06e1225a340ac703",
       "run_checksum": "2fa22073660f99b5",
       "repeats": 5,
       "size_bytes": 202752
@@ -35,7 +45,7 @@
       "source": "sdc_fma.cu",
       "binary": "sdc_fma.exe",
       "source_sha256": "7d51f729e05caf229917f11f94aa284d82a49644e9df705baa00c1cae9bc15df",
-      "binary_sha256": "b9d264231cfc78983e118e6e68c7e6e3549433b6937015f4fd617a91fb66f875",
+      "binary_sha256": "3904b615edbc396b431dd1afe604d00342170d8d39a02feaf080657cebde43b9",
       "run_checksum": "e27ec24a82d509d7",
       "repeats": 5,
       "size_bytes": 185344

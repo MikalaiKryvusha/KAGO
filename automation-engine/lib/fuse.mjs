@@ -143,9 +143,15 @@ export const DERIVED_ARM_N_MS = 60;
  * Величина — ДОЛЯ ОТ БЕГУЩЕГО ПИКА, а не абсолютные ватты: 45 Вт на 2145 МГц законны, а на
  * 3060 МГц невозможны. Карта сравнивается с собой же минуту назад.
  */
-export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs = null, armMMs = null, progressWired = false, power = null, staleTelemetry = null }) {
+export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs = null, armMMs = null, progressWired = false, power = null, staleTelemetry = null, lastCanaryMs = null, canaryWired = false }) {
   const beatSilenceMs = lastBeatMs === null ? null : Math.max(0, nowMs - lastBeatMs);
   const progressSilenceMs = (progressWired && lastProgressMs !== null) ? Math.max(0, nowMs - lastProgressMs) : null;
+  // ⚡ ВХОД 5 — КАНАРЕЙКА, ПОКА ТОЛЬКО НАБЛЮДЕНИЕ (эпик 95 фаза 1). Величина считается и ложится в
+  // кольцо; НИ ОДНОГО слагаемого в `tripped` она не даёт, и это не забывчивость, а граница фазы:
+  // уставка выводится из пола под нагрузкой (фаза 2), взведение — фаза 4. Взвести её сейчас
+  // значило бы взять порог с холостой карты, то есть повторить `bugs/131` — вход с порогом без
+  // родословной.
+  const canarySilenceMs = (canaryWired && lastCanaryMs !== null) ? Math.max(0, nowMs - lastCanaryMs) : null;
   const beatTripped = armNMs !== null && beatSilenceMs !== null && beatSilenceMs >= armNMs;
   const progressTripped = armMMs !== null && progressSilenceMs !== null && progressSilenceMs >= armMMs;
   // Вход 3 взводится ТОЛЬКО когда: порог назван · пик СОСТОЯЛСЯ (иначе делить не на что — на
@@ -173,6 +179,7 @@ export function judgeLiveness({ nowMs, lastBeatMs, armNMs = null, lastProgressMs
         : (powerTripped ? 'power-collapse' : (progressTripped ? 'progress-stall' : null))),
     beatSilenceMs,
     progressSilenceMs,
+    canarySilenceMs,
     // Доля печатается в улику РЯДОМ с вердиктом: разбор следующей смерти начнётся с вопроса
     // «насколько глубоко провалилась карта», и ответ обязан лежать в той же строке, что и причина.
     powerRatio: (power !== null && power.mw !== null && power.peakMw > 0)
@@ -230,6 +237,14 @@ export function replayRing(rows, opts = {}) {
       lastProgressMs: progressWired ? nowMs - row.progressSilenceMs : null,
       armMMs,
       progressWired,
+      // ⚡ ВХОД 5 — КАНАРЕЙКА, восстанавливается из строки тем же способом, что прогресс. Записи,
+      // снятые ДО эпика 95, поля не несут — и это честное «канарейки в том прогоне не было», а не
+      // ноль: `canaryWired` остаётся false, величина остаётся `null`. Проведено здесь ВМЕСТЕ с
+      // живым путём намеренно: половина провода — это ровно `bugs/132` AC5, где вход 2 был проведён
+      // в блоках и не проведён в прогоне, и разбор стоил суток.
+      lastCanaryMs: (row.canarySilenceMs === null || row.canarySilenceMs === undefined)
+        ? null : nowMs - row.canarySilenceMs,
+      canaryWired: row.canarySilenceMs !== null && row.canarySilenceMs !== undefined,
       // Зеркало живого пути обязано двигаться ВМЕСТЕ с ним: проигрыватель, оставшийся на старой
       // форме, пересчитал бы записанную долю в `null` и объявил бы кольцо расходящимся с собой.
       power: {
@@ -238,6 +253,11 @@ export function replayRing(rows, opts = {}) {
     });
     const tick = {
       t: nowMs, powerRatio: verdict.powerRatio, peakMw: win.peakMw, lowForMs,
+      // ⚡ ВХОД 5: восстановленный возраст канарейки печатается В ТАКТ проигрывателя. Без этого поля
+      // реконструкция ненаблюдаема — блок мог бы утверждать только «тактов столько же», то есть был
+      // бы зелёным и на проигрывателе, который канарейку игнорирует вовсе. Ровно класс `bugs/106`:
+      // блок, не умеющий краснеть, — украшение. Поймано мутационным проходом этой же фазы.
+      canarySilenceMs: verdict.canarySilenceMs,
       tripped: verdict.tripped, cause: verdict.cause,
     };
     ticks.push(tick);
@@ -1518,6 +1538,10 @@ export async function runJudge({
   let lastBeatMs = null;
   let lastProgressMs = null;
   let progressWired = false;
+  // ⚡ ВХОД 5 — КАНАРЕЙКА. Пара «когда стучала в последний раз» + «стучала ли вообще», ровно как у
+  // прогресса: «источника нет» ≠ «застыл» — правило, которым вход 2 не соврал ни разу.
+  let lastCanaryMs = null;
+  let canaryWired = false;
   let lastPowerMw = null;
   // ⚡ `bugs/122`: когда мощность в последний раз ИЗМЕНИЛАСЬ (а не когда пришла).
   let lastPowerChangeMs = null;
@@ -1544,6 +1568,13 @@ export async function runJudge({
       }
     }
     else if (buf[0] === 0x02) { lastProgressMs = now; progressWired = true; }
+    // ⚡ ВХОД 5 — КАНАРЕЙКА (эпик 95, фаза 1 `plans/96` Ш4). `0x03` = КАРТА ЗАВЕРШИЛА крошечное
+    // ядро, отправленное ей отдельным процессом. Это единственный из пяти входов, который
+    // спрашивает САМУ КАРТУ, считает ли она; остальные спрашивают наши процессы или драйвер о его
+    // показаниях, и 09.09 все четверо промолчали на вставшей карте (`bugs/132`).
+    // 🔴 В ЭТОЙ ФАЗЕ — ТОЛЬКО НАБЛЮДЕНИЕ, ТРИПА НЕТ. Взведение — фаза 4 эпика, и уставка выводится
+    // из пола под нагрузкой (фаза 2), а не из этих чисел: холостая карта самый лёгкий случай.
+    else if (buf[0] === 0x03) { lastCanaryMs = now; canaryWired = true; }
   });
 
   await new Promise((resolve, reject) => {
@@ -1830,6 +1861,8 @@ export async function runJudge({
       }
       const verdict = judgeLiveness({
         nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired,
+        // ⚡ ВХОД 5 — наблюдение без взведения (`plans/96` Ш4).
+        lastCanaryMs, canaryWired,
         // ⚡ ВХОД 4 (`bugs/132`): величины уже есть в такте — `lastPowerChangeMs` заведён для
         // сторожа ожидания расписки. Здесь он же питает ТРИП: неподвижное число при живом канале
         // означает вставшую карту раньше, чем это заметит что-либо ещё.
@@ -1860,6 +1893,11 @@ export async function runJudge({
         t: round2(now - startMs), gapMs: round2(now - lastTickMs),
         beatSilenceMs: verdict.beatSilenceMs === null ? null : round2(verdict.beatSilenceMs),
         progressSilenceMs: verdict.progressSilenceMs === null ? null : round2(verdict.progressSilenceMs),
+        // ⚡ ВХОД 5 — КАНАРЕЙКА: возраст её последнего удара ОТДЕЛЬНЫМ полем, не подмешанный к
+        // ударам живости. Смешать их значило бы получить один канал под двумя фактами — ровно та
+        // путаница, из которой родился `bugs/27`, и ровно то, что вход 1 не смог различить 09.09:
+        // канал был жив, а карта стояла.
+        canarySilenceMs: verdict.canarySilenceMs === null ? null : round2(verdict.canarySilenceMs),
         // ⚡ ВХОД 3 (`plans/91` Ш1): мощность ложится ПОТАКТНО, а не только в секундную строку.
         // Ш3 выводит порог ИЗ АРХИВА, и архивом будет именно кольцо: обвал 08.09 занял 2,5 с, то
         // есть в секундной строке от него осталось бы два-три числа, а в кольце их больше тысячи.
@@ -3764,6 +3802,94 @@ async function cmdSelftest() {
       inFlight.tripped === true && inFlight.tripOutcomes?.[0]?.cause === 'progress-stall',
       `исход: ${JSON.stringify(inFlight.tripOutcomes)}`);
   }
+  // ---- ВХОД 5 — КАНАРЕЙКА (`plans/96` Ш4, P96-AC5/AC6): судья слышит `0x03` -------------------
+  //
+  // Карта здесь не нужна и НАМЕРЕННО не нужна: удар канарейки — один байт на петле, и блок шлёт
+  // его сам. Проверяется ровно проводка — величина доехала, легла в кольцо ОТДЕЛЬНЫМ полем и НЕ
+  // трипнула, — а не порог: уставка выводится из пола под нагрузкой (фаза 2 эпика 95), и назначить
+  // её здесь значило бы повторить `bugs/131` — вход с порогом без родословной.
+  //
+  // 🔴 ЧЕМ ЭТИ БЛОКИ КРАСНЕЮТ: убери у судьи ветку `buf[0] === 0x03` — и `canarySilenceMs` останется
+  // `null` во всех тактах, покраснеет первый ok. Смешай канарейку с ударами живости
+  // (`lastBeatMs = now` вместо `lastCanaryMs`) — покраснеет третий: канарейка обязана быть ОТДЕЛЬНЫМ
+  // фактом, иначе повторяется беда входа 1 от 09.09, где канал был жив, а карта стояла.
+  {
+    const os = await import('node:os');
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'fuse-canary-'));
+
+    // (а) канарейка стучит — величина считается и лежит в кольце своим полем
+    const beating = await runJudge({
+      beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
+      journalPath: path.join(outDir, 'canary-a.jsonl'), seconds: 0.8,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+      onReady: ({ port }) => {
+        const dgram = require('node:dgram'); const s = dgram.createSocket('udp4');
+        const timer = setInterval(() => s.send(Buffer.from([0x03]), port, '127.0.0.1'), 5);
+        setTimeout(() => { clearInterval(timer); s.close(); }, 700);
+      },
+    });
+    const beatRows = readFileSync(beating.ringPath, 'utf8').trim().split('\n')
+      .map((l) => JSON.parse(l)).filter((r) => r.canarySilenceMs !== undefined);
+    const measured = beatRows.filter((r) => r.canarySilenceMs !== null);
+    ok('P96-AC5: судья принимает удар 0x03 и пишет возраст канарейки в кольцо ОТДЕЛЬНЫМ полем',
+      beatRows.length > 5 && measured.length > 0,
+      `тиков ${beatRows.length}, из них мерящих ${measured.length}`);
+    // Величина обязана быть МАЛОЙ при такте 5 мс: если бы поле писалось, но не обновлялось, оно
+    // росло бы монотонно весь прогон — и блок выше остался бы зелёным на сломанном коде.
+    ok('P96-AC5: возраст удара ОБНОВЛЯЕТСЯ, а не растёт монотонно — при такте 5 мс он мал',
+      measured.length > 0 && measured[measured.length - 1].canarySilenceMs < 200,
+      `последний возраст ${measured.length ? measured[measured.length - 1].canarySilenceMs : 'нет'} мс`);
+    // 🔴 КАНАРЕЙКА — НЕ УДАР ЖИВОСТИ. Вход 1 в этом прогоне источника не имеет вовсе, значит
+    // `beatSilenceMs` обязан остаться `null`: если бы `0x03` подмешивался к ударам живости, он
+    // оживил бы вход 1 и подделал бы факт, которого не было.
+    ok('P96-AC5: 0x03 НЕ подмешивается к ударам живости — вход 1 остаётся без источника',
+      beatRows.every((r) => r.beatSilenceMs === null),
+      `ненулевых beatSilenceMs: ${beatRows.filter((r) => r.beatSilenceMs !== null).length}`);
+    // ГРАНИЦА ФАЗЫ, И ОНА ПРОВЕРЯЕТСЯ, А НЕ ОБЪЯВЛЯЕТСЯ: наблюдение без взведения. Канарейка
+    // замолкает на середине прогона, и трипа не происходит — потому что входа в `tripped` у неё нет.
+    ok('P96-AC5: канарейка ТОЛЬКО наблюдает — её молчание не трипает (взведение это фаза 4)',
+      beating.tripped === false, `исход: ${JSON.stringify(beating.tripOutcomes)}`);
+
+    // (б) ПАРНЫЙ БЛОК, и без него первый ничего не стоит: «источника нет» ≠ «застыл». Тот же
+    // судья, ни одного `0x03` — величина обязана остаться `null`, а не показать ноль или возраст
+    // от старта судьи. Это правило спасло вход 2 от лжи и обязано действовать здесь с рождения.
+    const silent = await runJudge({
+      beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
+      journalPath: path.join(outDir, 'canary-b.jsonl'), seconds: 0.5,
+      spawnSyncFn: () => ({ status: 0 }), spawnFn: () => ({ pid: 1, unref() {} }), log: () => {},
+    });
+    const silentRows = readFileSync(silent.ringPath, 'utf8').trim().split('\n')
+      .map((l) => JSON.parse(l)).filter((r) => r.canarySilenceMs !== undefined);
+    ok('P96-AC5: канарейки не было вовсе — величина `null` («источника нет» ≠ «застыл»)',
+      silentRows.length > 5 && silentRows.every((r) => r.canarySilenceMs === null),
+      `тиков ${silentRows.length}, ненулевых ${silentRows.filter((r) => r.canarySilenceMs !== null).length}`);
+  }
+  // ---- ВХОД 5: суждение и проигрыватель записи, на фикстурах, без сокета ------------------------
+  ok('P96-AC6: judgeLiveness считает возраст канарейки и НЕ трипает по нему', (() => {
+    const v = judgeLiveness({ nowMs: 10_000, lastBeatMs: 9_990, armNMs: 60,
+      lastCanaryMs: 4_000, canaryWired: true });
+    return v.canarySilenceMs === 6_000 && v.tripped === false && v.cause === null;
+  })());
+  ok('P96-AC6: непроведённая канарейка даёт `null`, а не возраст от нуля', (() => {
+    const v = judgeLiveness({ nowMs: 10_000, lastBeatMs: 9_990, lastCanaryMs: null, canaryWired: false });
+    return v.canarySilenceMs === null;
+  })());
+  // 🔴 ЭТИ ДВА БЛОКА БЫЛИ УКРАШЕНИЕМ И ИСПРАВЛЕНЫ ЗДЕСЬ ЖЕ. Первая редакция утверждала
+  // `ticks.length === 2 && trips.length === 0` — истина и на проигрывателе, который канарейку
+  // игнорирует вовсе; ни одна из четырёх мутаций фазы их не покрасила, и это назвало их классом
+  // `bugs/106` быстрее любого рассуждения. Лечение — не переписать утверждение сильнее, а сделать
+  // восстановленную величину НАБЛЮДАЕМОЙ (поле в такте проигрывателя), и только потом её требовать.
+  ok('P96-AC6: проигрыватель ВОССТАНАВЛИВАЕТ возраст канарейки из строки, а не теряет его', (() => {
+    const rows = [{ t: 0, canarySilenceMs: 5 }, { t: 2, canarySilenceMs: 7 }];
+    const r = replayRing(rows, { armNMs: null, armMMs: null });
+    return r.ticks.length === 2 && r.ticks[0].canarySilenceMs === 5 && r.ticks[1].canarySilenceMs === 7
+      && r.trips.length === 0;
+  })());
+  ok('P96-AC6: запись БЕЗ канарейки (снятая до эпика 95) читается как «её не было», а не как ноль', (() => {
+    const rows = [{ t: 0, beatSilenceMs: 1 }, { t: 2, beatSilenceMs: 1 }];
+    const r = replayRing(rows, { armNMs: null, armMMs: null });
+    return r.ticks.length === 2 && r.ticks.every((x) => x.canarySilenceMs === null) && r.trips.length === 0;
+  })());
   // ---- ВХОД 3 (`plans/91` Ш1, AC1): милливатты пробы доезжают до судьи --------------------------
   //
   // Карта здесь не нужна: удар входа 3 — это пять байт на петле, и блок шлёт их сам. Проверяется
