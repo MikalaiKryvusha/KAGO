@@ -71,6 +71,16 @@ export const FUSE_DIR = fileURLToPath(new URL('../../runs/death-watch/', import.
  *  that perturbs the experiment. */
 export const JUDGE_TICK_MS = 2;
 
+/** ⚡ `bugs/128` AC3 — ОБЪЯВЛЕННОЕ ЗДОРОВЬЕ ТАКТА, ИЗМЕРЕННОЕ, А НЕ ЖЕЛАЕМОЕ.
+ *  p90 = 2,68 мс — живой прогон 2026-09-09 22:40 при владельце: 90 секунд, из них 60 под настоящим
+ *  горном, 41 259 тактов, судья пущен СКРЫТЫМ ОТСОЕДИНЁННЫМ (условия, в которых он и терял
+ *  разрешение). Кольцо этого прогона лежит под git фикстурой:
+ *  `bugs/evidence/p94_ring_tick_gate_loaded_2026-09-09.jsonl`. «До» — 15,67 мс, запись смерти 17:53.
+ *  Множитель 2 — расстояние до тревоги: изменчивость машины лежит НИЖЕ него, сломанный прибор
+ *  (15,3-15,7) — втрое ВЫШЕ. Сторож впритык краснел бы на шуме и был бы снят первым уставшим. */
+export const TICK_P90_DECLARED_MS = 2.68;
+export const TICK_P90_REGRESSION_FACTOR = 2;
+
 /** Ring capacity. 15 000 entries at 2 ms ≈ the last 30 s — longer than any measured strangling
  *  precursor (4,49 s), short enough to dump in one write. */
 export const RING_CAPACITY = 15_000;
@@ -207,7 +217,9 @@ export function replayRing(rows, opts = {}) {
       lastProgressMs: progressWired ? nowMs - row.progressSilenceMs : null,
       armMMs,
       progressWired,
-      power: armPowerRatio === null ? null : {
+      // Зеркало живого пути обязано двигаться ВМЕСТЕ с ним: проигрыватель, оставшийся на старой
+      // форме, пересчитал бы записанную долю в `null` и объявил бы кольцо расходящимся с собой.
+      power: {
         mw: powerMw, peakMw: win.peakMw, ratio: armPowerRatio, establishedMw, lowForMs, holdMs,
       },
     });
@@ -1722,7 +1734,14 @@ export async function runJudge({
       }
       const verdict = judgeLiveness({
         nowMs: now, lastBeatMs, armNMs, lastProgressMs, armMMs, progressWired,
-        power: armPowerRatio === null ? null : {
+        // ⚡ `plans/94` Ш4: ДОЛЯ ПИШЕТСЯ ВСЕГДА, ТРИПАЕТ — ТОЛЬКО ВЗВЕДЁННАЯ. Раньше здесь стояло
+        // `armPowerRatio === null ? null : {...}`, и невзведённый вход 3 не давал В КОЛЬЦО ни
+        // одной доли: измерять было нечем ровно в том режиме, в котором проходят чистые записи
+        // фазы (взводить порог, выведенный из отменённого замера, запрещено эстафетой 92).
+        // Наблюдение отделено от взведения ОДНИМ полем: `ratio: null` — и `powerTripped` выше
+        // мёртв по первому же условию (`power.ratio !== null`), а `powerRatio` считается как
+        // считался. Это та же граница «проведён ≠ взведён», что у входа 2 (`--progress-observe`).
+        power: {
           mw: lastPowerMw,
           peakMw: peakPowerMw,
           ratio: armPowerRatio,
@@ -1995,10 +2014,47 @@ export function gapsFromRing(rows) {
 /** median / p99 / max over a list — the three the floor prints, together (a median alone hides
  *  the one long stall, a max alone reads a hiccup as a way of life — `summarize`'s reasoning). */
 export function distStats(xs) {
-  if (xs.length === 0) return { n: 0, medianMs: null, p99Ms: null, maxMs: null };
+  if (xs.length === 0) return { n: 0, medianMs: null, p90Ms: null, p99Ms: null, maxMs: null };
   const s = [...xs].sort((a, b) => a - b);
   const at = (p) => s[Math.min(s.length - 1, Math.floor(s.length * p))];
-  return { n: s.length, medianMs: round2(at(0.5)), p99Ms: round2(at(0.99)), maxMs: round2(s[s.length - 1]) };
+  // ⚡ `bugs/128` AC3: p90 добавлен сюда, а не посчитан у сторожа. Ворота фазы объявлены В p90
+  // (15,67 → 2,68 мс при цели ≤ 4), и вторая формула квантиля в проекте означала бы, что сторож
+  // и объявление меряют РАЗНОЕ одним словом — тот самый класс `bugs/124`.
+  return { n: s.length, medianMs: round2(at(0.5)), p90Ms: round2(at(0.9)), p99Ms: round2(at(0.99)), maxMs: round2(s[s.length - 1]) };
+}
+
+/**
+ * ⚡ `bugs/128` AC3 — СТОРОЖ ПОЧИНЕННОГО ТАКТА, И ОН СТОРОЖИТ РЕГРЕСС, А НЕ ПОРОГ.
+ *
+ * Что случилось (сессии 92-93): судья, пущенный СКРЫТЫМ ОТСОЕДИНЁННЫМ процессом, попадал под
+ * EcoQoS Windows 11, где `timeBeginPeriod(1)` принимается и МОЛЧА игнорируется; такт разваливался
+ * с 2,2 до 15,4 мс на третьей секунде и не восстанавливался. Лекарство — `refuseTimerThrottling`
+ * (`lib/timer-resolution.mjs`), и живой прогон 09.09 22:40 закрыл ворота: p90 = 2,68 мс.
+ *
+ * Порог — ВДВОЕ хуже объявленного, а не «около»: между 2,68 и 5,36 мс лежит вся разумная
+ * изменчивость машины (фон, температура, чужой процесс), а сломанный прибор давал 15,3-15,7 мс,
+ * то есть промахивался мимо порога в три раза. Сторож, поставленный впритык к 2,68, краснел бы на
+ * шуме и был бы снят первым же, кто устал от ложных тревог, — и тогда регресс проехал бы молча.
+ *
+ * ⚠️ ЧЕГО ЭТОТ СТОРОЖ НЕ ДЕЛАЕТ: он не спрашивает у ядра, поднято ли разрешение таймера.
+ * `NtQueryTimerResolution` печатал 0,5 мс НА КАЖДОЙ СЕКУНДЕ РАЗВАЛА — он читает разрешение
+ * СИСТЕМЫ, а гасят его ПРОЦЕССУ. Свидетель здесь один: НАБЛЮДЁННЫЙ ЗАЗОР, величина, которую
+ * гашение подделать не может.
+ *
+ * @param {Array<object>} rows строки кольца (поле `gapMs` — наблюдённый зазор такта)
+ * @returns {{ p90Ms: number|null, ticks: number, ok: boolean, why: string }}
+ */
+export function tickHealthVerdict({ rows, declaredP90Ms = TICK_P90_DECLARED_MS, factor = TICK_P90_REGRESSION_FACTOR }) {
+  const gaps = rows.map((x) => x.gapMs).filter((x) => typeof x === 'number' && Number.isFinite(x));
+  const d = distStats(gaps);
+  const limit = round2(declaredP90Ms * factor);
+  if (d.n === 0) {
+    return { p90Ms: null, ticks: 0, ok: false, why: '🔴 ТАКТ НЕ СУДИМ: в кольце нет ни одного зазора `gapMs`. Пустое кольцо — это не здоровый такт, а отсутствие свидетеля.' };
+  }
+  if (d.p90Ms > limit) {
+    return { p90Ms: d.p90Ms, ticks: d.n, ok: false, why: `🔴 РЕГРЕСС ТАКТА (bugs/128 AC3): p90 ${d.p90Ms} мс при пороге ${limit} (вдвое от объявленных ${declaredP90Ms}). Медиана ${d.medianMs} · p99 ${d.p99Ms} · max ${d.maxMs}. Так выглядел прибор ДО починки (p90 15,67) — проверь, что процесс не пущен фоновым без refuseTimerThrottling.` };
+  }
+  return { p90Ms: d.p90Ms, ticks: d.n, ok: true, why: `🟢 ТАКТ ЗДОРОВ: p90 ${d.p90Ms} мс ≤ ${limit} (объявлено ${declaredP90Ms}, тактов ${d.n}).` };
 }
 
 // =================================================================================================
@@ -2061,6 +2117,46 @@ const require = createRequire(import.meta.url);
 // =================================================================================================
 
 /**
+ * ⚡ `plans/94` Ш4 — ВОРОТА ЗАСЧИТЫВАНИЯ ЗАПИСИ, И ОНИ МАШИННЫЕ, А НЕ В ГОЛОВЕ ОПЕРАТОРА.
+ *
+ * Запись фазы 6б-бис существует ради РАСПРЕДЕЛЕНИЯ доли мощности (`P94-AC4`), а доля считается
+ * только при проведённом входе 2: `stepPowerWindow` держит `peakMw = 0`, пока `progressWired`
+ * погашен, и кольцо получает `powerRatio: null` от первой строки до последней. Прогон 09.09 22:40
+ * прошёл ровно так — 90 секунд, 41 259 тактов, НОЛЬ эпизодов, и понято это было ПОСЛЕ прогона.
+ *
+ * Поэтому стенд печатает не «прогон кончился», а ЗАСЧИТАНА ли запись, и отдаёт код 3: «отработал,
+ * но материала нет» — это ни успех (0), ни отказ прибора (1).
+ *
+ * Функция отдельная и чистая ровно потому, что решение «засчитано» дороже прогона, которым оно
+ * получено: внутри `cmdLoadedFloor` его нельзя было бы накрыть блоком, не подняв судью и NVML, —
+ * то есть непроверяемым осталось бы единственное место, ради которого шаг и делается (класс
+ * `bugs/101`: строка жила у `spawn`, и ни один блок её не видел).
+ *
+ * @param {Array<object>} rows         строки кольца
+ * @param {string|null}   progressFile проведённый файл сердцебиения (null — вход 2 не проводили)
+ * @returns {{ wired: number, withRatio: number, counted: boolean, why: string }}
+ */
+export function recordVerdict({ rows, progressFile }) {
+  const live = (v) => v !== null && v !== undefined;
+  const wired = rows.filter((x) => live(x.progressSilenceMs)).length;
+  const withRatio = rows.filter((x) => live(x.powerRatio)).length;
+  if (!progressFile) {
+    return { wired, withRatio, counted: false, why: '🟡 ЗАПИСЬ НЕ ЗАСЧИТАНА ЗА ФАЗУ 6б-бис: стенд пущен БЕЗ `--progress-file`. Как замер ПОЛА ТАКТА прогон полноценен, как одна из трёх записей — нет.' };
+  }
+  if (wired === 0) {
+    return { wired, withRatio, counted: false, why: '🔴 ЗАПИСЬ НЕ ЗАСЧИТАНА: провод входа 2 не ожил НИ РАЗУ. Файл сердцебиения провели, но его никто не трогал — горн запущен БЕЗ `--progress-file` либо не запускался вовсе. Материала для распределения P94-AC4 здесь нет.' };
+  }
+  // Провод и ДОЛЯ судятся порознь, хотя после правки Ш4 второе следует из первого. Проверяется
+  // именно та величина, которую заказывает `P94-AC4`: живой провод при нулевой доле означал бы,
+  // что доля перестала считаться по какой-то ТРЕТЬЕЙ причине, и запись снова пуста — но уже
+  // незаметно, потому что провод зелен.
+  if (withRatio === 0) {
+    return { wired, withRatio, counted: false, why: `🔴 ЗАПИСЬ НЕ ЗАСЧИТАНА: провод входа 2 оживал (${wired} строк), а доля мощности не посчитана НИ РАЗУ. Это не тот отказ, что немой провод, — ищи причину в самом суждении, а не в горне.` };
+  }
+  return { wired, withRatio, counted: true, why: `🟢 ЗАПИСЬ ЗАСЧИТАНА: вход 2 оживал (${wired} строк), доля мощности считалась в ${withRatio}.` };
+}
+
+/**
  * Phase 3's measurement (`plans/56` шаги 2, 4): the judge runs UNARMED in this process, the live
  * probe (`death-watch --probe`) rides as a child on this judge's port, and the OPERATOR starts the
  * load in another window when told — the rig measures beat gaps exactly as the armed fuse will see
@@ -2068,17 +2164,24 @@ const require = createRequire(import.meta.url);
  * measurement, the same standing the phase-1 night floor files have — NOT a rehearsal (rehearsals
  * take `--judge --out` into a sandbox).
  */
-async function cmdLoadedFloor({ seconds, tickMs }) {
+async function cmdLoadedFloor({ seconds, tickMs, progressFile = null }) {
   const { spawn, spawnSync } = await import('node:child_process');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const journalPath = path.join(FUSE_DIR, `${stamp}-loaded-floor.jsonl`);
   console.log(`ПОЛ ПОД НАГРУЗКОЙ: судья unarmed · такт ${JUDGE_TICK_MS} мс · ${seconds} с · проба живая (NVML, чтение)`);
+  console.log(progressFile
+    ? `ВХОД 2 ПРОВЕДЁН: файл сердцебиения ${progressFile} — доля мощности будет считаться.`
+    : 'ВХОД 2 НЕ ПРОВЕДЁН (нет --progress-file): доля мощности останется null весь прогон — стенд годится для ПОЛА ТАКТА, но НЕ для записи фазы 6б-бис.');
   const mm = loadWinmm(); mm.begin(1);
   let probe = null;
   try {
     const watchScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'death-watch.mjs');
     const r = await runJudge({
       beatPort: 0, armNMs: null, armMMs: null, burnPid: null,
+      // ⚡ `plans/94` Ш4: СТЕНД ОБЯЗАН ПРОВОДИТЬ ВХОД 2, ИНАЧЕ ЗАПИСЬ ПУСТА. Судья сам файл не
+      // читает — он спрашивает лишь о его СУЩЕСТВОВАНИИ (`burnInFlight`); поднимает
+      // `progressWired` удар `0x02` от пробы. Поэтому файл идёт В ОБА: сюда и в строку пробы ниже.
+      progressFile,
       journalPath, seconds,
       // The ring must cover the WHOLE run: the default 30-second cap silently drops the loaded
       // window's head on a 90-second floor (paid on run 1: 15 000 ticks kept, load at t≈12-72
@@ -2086,11 +2189,17 @@ async function cmdLoadedFloor({ seconds, tickMs }) {
       ringCapacity: Math.ceil((seconds * 1000) / JUDGE_TICK_MS) + 2000,
       spawnSyncFn: spawnSync, spawnFn: spawn, log: console.log,
       onReady: ({ port }) => {
-        probe = spawn(process.execPath, [watchScript, '--probe', '--port', String(port), '--seconds', String(seconds), '--tick', String(tickMs)], { windowsHide: true, stdio: 'inherit' });
-        console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}.`);
+        probe = spawn(process.execPath, [watchScript, '--probe', '--port', String(port), '--seconds', String(seconds), '--tick', String(tickMs),
+          // ⚡ DRY: строку пробы собирает ТА ЖЕ функция, что и на живом пути (`progressRiderArgs`).
+          // Вторая копия «`--progress-file`, путь» здесь была бы ровно парой из `bugs/101`.
+          ...progressRiderArgs({ progressFile }).probe], { windowsHide: true, stdio: 'inherit' });
+        console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}${progressFile ? ' · ретранслятор прогресса включён' : ''}.`);
         // LOAD-NOW is deliberately ASCII: an orchestrating shell greps for it, and both Cyrillic
         // bytes and backslash paths already cost one silently-spinning wait loop (run 1).
-        console.log('>>> LOAD-NOW — нагрузку можно запускать (окно 2): workloads/furnace.exe 2400 8192 256 64 --sustain <с> <<<');
+        // ⚡ `plans/94`: КОМАНДА ГОРНА ПЕЧАТАЕТСЯ ЦЕЛИКОМ, ВМЕСТЕ С ПУТЁМ ФАЙЛА. Оператор, набравший её
+        // руками без `--progress-file`, даёт ровно ту немую запись, ради которой всё это и
+        // делается: провод есть у судьи и у пробы, а трогать файл некому.
+        console.log(`>>> LOAD-NOW — нагрузку можно запускать (окно 2): workloads/furnace.exe 2400 8192 256 64 --sustain <с>${progressFile ? ` --progress-file ${progressFile}` : ''} <<<`);
       },
     });
     const { readFileSync } = await import('node:fs');
@@ -2100,10 +2209,25 @@ async function cmdLoadedFloor({ seconds, tickMs }) {
     const expected = Math.floor((seconds * 1000) / 2);
     console.log(`\nударов ${r.beats} из ~${expected} (${round2((r.beats / expected) * 100)} %) · тактов судьи в кольце ${rows.length}`);
     console.log(`ЗАЗОРЫ УДАРОВ (±${JUDGE_TICK_MS} мс такта): закрытых ${gaps.n} · медиана ${gaps.medianMs} мс · p99 ${gaps.p99Ms} мс · max ${gaps.maxMs} мс`);
-    console.log(`такт самого судьи: медиана ${ticks.medianMs} мс · p99 ${ticks.p99Ms} мс · max ${ticks.maxMs} мс`);
+    console.log(`такт самого судьи: медиана ${ticks.medianMs} мс · p90 ${ticks.p90Ms} мс · p99 ${ticks.p99Ms} мс · max ${ticks.maxMs} мс`);
+    // ⚡ `bugs/128` AC3: сторож такта стоит и ЗДЕСЬ, а не только в батарее. Батарея судит фикстуру
+    // и ловит регресс кода; живая запись судится собственным кольцом и ловит регресс СРЕДЫ —
+    // фоновый запуск, чужой процесс, вернувшийся EcoQoS. Числа те же, источник разный.
+    const tickHealth = tickHealthVerdict({ rows });
+    console.log(tickHealth.why);
     console.log(`кольцо: ${r.ringPath}`);
     console.log('N выводится ТОЛЬКО из прогона С НАГРУЗКОЙ: N = k × max, k ≥ 5, и N ≤ 302 мс (десятая предвестника 3042 мс).');
-    return 0;
+    const verdict = recordVerdict({ rows, progressFile });
+    console.log(`ВХОД 2 В КОЛЬЦЕ: строк с живым прогрессом ${verdict.wired} из ${rows.length} · строк с посчитанной долей мощности ${verdict.withRatio}`);
+    console.log(verdict.why);
+    // Такт и провод судятся ОТДЕЛЬНО и оба обязаны быть зелёными: запись с немым входом 2 не несёт
+    // материала, а запись на разваленном такте несёт материал, измеренный сломанным прибором, —
+    // и второе опаснее первого, потому что выглядит полноценным.
+    if (!tickHealth.ok) {
+      console.log('🔴 ЗАПИСЬ НЕ ЗАСЧИТАНА: такт судьи хуже объявленного вдвое — числа этой записи сняты сломанным прибором.');
+      return 3;
+    }
+    return verdict.counted ? 0 : 3;
   } finally {
     mm.end(1);
     if (probe) { try { probe.kill(); } catch { /* уже вышла */ } }
@@ -3239,10 +3363,10 @@ async function cmdSelftest() {
     const rows = [null, null, 0, 2, 0.5].map((v) => ({ beatSilenceMs: v }));
     return JSON.stringify(gapsFromRing(rows)) === '[2]';
   })());
-  ok('distStats несёт медиану, p99 и max ВМЕСТЕ; пустой список — нули честно null', (() => {
+  ok('distStats несёт медиану, p90, p99 и max ВМЕСТЕ; пустой список — нули честно null', (() => {
     const d = distStats([1, 2, 3, 4, 100]);
     const e = distStats([]);
-    return d.medianMs === 3 && d.maxMs === 100 && e.maxMs === null && e.n === 0;
+    return d.medianMs === 3 && d.maxMs === 100 && d.p90Ms === 100 && e.maxMs === null && e.p90Ms === null && e.n === 0;
   })());
 
   // ---- вход 2: вывод M из формы (P66-AC4) — порог не константа и не догадка
@@ -3706,6 +3830,64 @@ async function cmdSelftest() {
       && JSON.stringify(none) === JSON.stringify({ judge: [], probe: [] });
   })());
 
+  // ---- ⚡ `plans/94` Ш4: ВОРОТА ЗАСЧИТЫВАНИЯ ЗАПИСИ. Оплачено прогоном 09.09 22:40 — стенд
+  //   отработал безупречно и дал НОЛЬ материала, а понято это было после, чтением кольца.
+  //   АДРЕСАТЫ МУТАЦИЙ: снять ветку `wired === 0` → «немое кольцо засчитано»;
+  //   снять ветку `!progressFile` → «стенд без провода засчитан».
+  ok('немое кольцо НЕ засчитано за запись фазы: провод есть, оживать было нечему', (() => {
+    const rows = [{ progressSilenceMs: null, powerRatio: null }, { progressSilenceMs: null, powerRatio: null }];
+    const v = recordVerdict({ rows, progressFile: 'F' });
+    return v.counted === false && v.wired === 0 && /не ожил НИ РАЗУ/u.test(v.why);
+  })());
+  ok('стенд БЕЗ провода не засчитан, и причина названа отдельно от немого кольца (это разные беды)', (() => {
+    const rows = [{ progressSilenceMs: null, powerRatio: null }];
+    const v = recordVerdict({ rows, progressFile: null });
+    return v.counted === false && /БЕЗ `--progress-file`/u.test(v.why) && !/не ожил НИ РАЗУ/u.test(v.why);
+  })());
+  ok('ожившего провода достаточно: запись засчитана, и обе величины посчитаны по кольцу', (() => {
+    const rows = [
+      { progressSilenceMs: null, powerRatio: null },
+      { progressSilenceMs: 12, powerRatio: 0.98 },
+      { progressSilenceMs: 40, powerRatio: null },
+    ];
+    const v = recordVerdict({ rows, progressFile: 'F' });
+    return v.counted === true && v.wired === 2 && v.withRatio === 1;
+  })());
+  ok('живой провод при НУЛЕВОЙ доле — тоже не запись, и причина названа ОТДЕЛЬНО от немого провода', (() => {
+    const rows = [{ progressSilenceMs: 10, powerRatio: null }, { progressSilenceMs: 12, powerRatio: null }];
+    const v = recordVerdict({ rows, progressFile: 'F' });
+    return v.counted === false && v.wired === 2 && v.withRatio === 0 && /ТРЕТЬЕЙ причине|не посчитана НИ РАЗУ/u.test(v.why);
+  })());
+  ok('`undefined` в строке кольца читается как «нет величины», а не как живая (старые кольца поля не несли)', (() => {
+    const v = recordVerdict({ rows: [{}, {}], progressFile: 'F' });
+    return v.counted === false && v.wired === 0 && v.withRatio === 0;
+  })());
+
+  // ---- ⚡ `bugs/128` AC3: СТОРОЖ ПОЧИНЕННОГО ТАКТА. Судится ЖИВОЙ фикстурой — кольцом прогона
+  //   09.09 22:40, а не синтетикой: синтетика доказала бы арифметику квантиля, а стеречь надо
+  //   ПРИБОР. «До» здесь тоже настоящее: 15,3-15,7 мс — квант Windows, снятый записью смерти 17:53.
+  //   АДРЕСАТЫ МУТАЦИЙ: factor 2 → 10 → «сломанное кольцо зелено»; убрать ветку d.n === 0 →
+  //   «пустое кольцо здорово».
+  ok('живое кольцо ПОСЛЕ починки такта — зелено, и p90 совпадает с объявленным (41 259 тактов под горном)', (() => {
+    const fx = path.join(fileURLToPath(new URL('../../bugs/evidence/', import.meta.url)), 'p94_ring_tick_gate_loaded_2026-09-09.jsonl');
+    const rows = readFileSync(fx, 'utf8').trim().split(/\r?\n/u).map((l) => JSON.parse(l));
+    const v = tickHealthVerdict({ rows });
+    return v.ok === true && rows.length === 41_259 && v.p90Ms === TICK_P90_DECLARED_MS;
+  })());
+  ok('кольцо со сломанным тактом КРАСНЕЕТ: 15,6 мс — штатный квант Windows, то есть погашенное разрешение', (() => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ gapMs: i < 100 ? 2.1 : 15.6 }));
+    const v = tickHealthVerdict({ rows });
+    return v.ok === false && v.p90Ms > 5.36 && /РЕГРЕСС ТАКТА/u.test(v.why) && /refuseTimerThrottling/u.test(v.why);
+  })());
+  ok('порог именно ВДВОЕ: 5,36 мс проходит, 5,37 краснеет — граница названа числом, а не «около»', (() => {
+    const at = (g) => tickHealthVerdict({ rows: Array.from({ length: 100 }, () => ({ gapMs: g })) }).ok;
+    return at(5.36) === true && at(5.37) === false;
+  })());
+  ok('пустое кольцо — НЕ здоровый такт: отсутствие свидетеля не читается как отсутствие беды', (() => {
+    const v = tickHealthVerdict({ rows: [{ gapMs: undefined }, {}] });
+    return v.ok === false && v.p90Ms === null && /НЕ СУДИМ/u.test(v.why);
+  })());
+
   // ---- настройка на двойнике (P65-AC3/AC5): словарь исходов и различитель «на чём трипнуло»
   ok('перелёт и роковой останов НЕ различаются по тишине трипа — различает счёт зазоров в кольце', (() => {
     // Один и тот же порог, две разные смерти: записанная тишина в обоих случаях ≈ N.
@@ -3906,9 +4088,17 @@ if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === path.re
       } finally { mm.end(1); }
     }
     if (has('--loaded-floor')) {
-      return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS) });
+      // ⚡ `plans/94`: путь у флага НЕОБЯЗАТЕЛЕН. Оператор, набравший голый `--progress-file`,
+      // получает файл рядом с журналом прогона и готовую строку горна — вариантов разойтись
+      // путями у судьи, пробы и горна не остаётся ни одного.
+      const pfRaw = str('--progress-file', null);
+      const progressFile = has('--progress-file')
+        ? ((pfRaw === null || pfRaw.startsWith('--')) ? path.join(FUSE_DIR, `${new Date().toISOString().replace(/[:.]/g, '-')}-burn-progress.txt`) : pfRaw)
+        : null;
+      return cmdLoadedFloor({ seconds: num('--seconds', 90), tickMs: num('--tick', JUDGE_TICK_MS), progressFile });
     }
-    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90]');
+    console.log('Использование: --selftest | --jitter-floor [--seconds 60] [--tick 2] | --judge [--beat-port P] [--arm-n N] [--arm-m M] [--arm-p RATIO] [--burn-pid PID | --burn-pidfile F | --burn-images a.exe,b.exe] [--twin-stock CARD] [--seconds S] [--out FILE] [--rearm-healthy-seconds N] [--rearm-healthy-gap MS] | --loaded-floor [--seconds 90] [--progress-file [F]]');
+    console.log('--progress-file у --loaded-floor — ВХОД 2: без него доля мощности в кольце null весь прогон, и запись не годится в фазу 6б-бис (plans/94). Путь необязателен: без него стенд выберет сам и напечатает готовую строку горна.');
     console.log(`--rearm-healthy-* — ПОЛУОТКРЫТОЕ ОКНО возврата на пост (plans/88): по умолчанию ${REARM_HEALTHY_SECONDS} здоровых секунд подряд при такте ≥ ${JUDGE_HEALTHY_TICKS_PER_SEC}/с (замер researches/33 §4b). Свои числа называет тот, кто не может дать измеренный такт живого пути: стенд и фикстура.`);
     return 1;
   };

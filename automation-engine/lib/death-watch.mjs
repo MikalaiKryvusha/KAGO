@@ -238,6 +238,11 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
     ? startProgressRelay({
       file: progressFile, port: beatPort, pollMs: PROGRESS_POLL_MS,
       sendFn: (b, p, h) => beatSock.send(b, p, h),
+      // ⚡ `plans/94`: ОДНА СТРОКА НА ВЕСЬ ПРОГОН — «провод входа 2 ожил». Стенд под ней решает,
+      // писать ли запись дальше; без неё оператор узнавал бы о немом проводе через 90 секунд,
+      // то есть уже потратив присутствие владельца (оплачено прогоном 22:40 09.09: 90 секунд
+      // `powerRatio: null` и ноль эпизодов в распределение).
+      onFirst: () => console.log(`ПРОВОД ВХОДА 2 ОЖИЛ: первый удар прогресса ретранслирован (${progressFile}).`),
     })
     : null;
   progressTimer?.unref?.();
@@ -539,16 +544,26 @@ export function strangleProfileStalls() {
  * Нет файла (ещё не создан) — молчим: «источника нет» ≠ «прогресс застыл», и судья различает эти
  * два случая сторожем `progressWired` с фазы 2.
  */
-export function startProgressRelay({ file, port, pollMs, sendFn, readFn = null, setIntervalFn = setInterval }) {
+export function startProgressRelay({ file, port, pollMs, sendFn, readFn = null, setIntervalFn = setInterval, onFirst = null }) {
   if (!file || port === null || port === undefined) return null;
   const read = readFn || ((p) => { try { return readFileSync(p, 'utf8').trim(); } catch { return null; } });
   const buf = Buffer.from([0x02]);
   let last = null;
+  let relayed = 0;
   return setIntervalFn(() => {
     const v = read(file);
     if (v === null || v === '' || v === last) return;
     last = v;
     sendFn(buf, port, '127.0.0.1');
+    relayed += 1;
+    // ⚡ `plans/94` ШД3: СВИДЕТЕЛЬ ПРОВОДА СТОИТ ЗДЕСЬ, А НЕ В СТЕНДЕ, И ЭТО ЗАПРЕТ ВЛАДЕЛЬЦА.
+    // Стенд живёт В ОДНОМ ПРОЦЕССЕ С СУДЬЁЙ, и любая его проверка «жив ли провод» чтением
+    // кольца раз в секунду была бы ДИСКОМ В ТАКТЕ судьи — тем самым «НЕ ДИСК РАЗ В
+    // СЕКУНДУ», которым владелец закрыл эту дверь ещё в фазе 2. Здесь же — чужой процесс пробы,
+    // и его собственный таймер. Свидетельствует ПЕРВЫЙ ОТПРАВЛЕННЫЙ УДАР: судья поднимает
+    // `progressWired` на любом `0x02` независимо от своего `--progress-file`, значит отправленный
+    // удар есть достаточное условие того, что `progressSilenceMs` в кольце перестанет быть `null`.
+    if (relayed === 1 && onFirst) { try { onFirst(); } catch { /* свидетель не смеет уронить ретранслятор */ } }
   }, pollMs);
 }
 
