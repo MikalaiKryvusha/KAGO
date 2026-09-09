@@ -246,6 +246,11 @@ async function runWatcher({ role, tickMs, seconds, outPath, recordThresholdMs, b
     })
     : null;
   progressTimer?.unref?.();
+  // ⚡ СВИДЕТЕЛЬ ВТОРОЙ ПОЛОВИНЫ ПРОВОДА (`bugs/132`): что получила САМА проба. 09.09 стало нечем
+  // отличить «пробе не дали файл» от «горн его не тронул» — оба конца молчали одинаково.
+  console.log(progressFile
+    ? `ПРОБА: ретранслятор прогресса ВЗВЕДЁН на ${progressFile} (опрос ${PROGRESS_POLL_MS} мс)`
+    : 'ПРОБА: 🔴 файла сердцебиения НЕ ПОЛУЧЕНО — вход 2 предохранителя останется непроведённым');
   mkdirSync(path.dirname(outPath), { recursive: true });
   const fd = openSync(outPath, 'a');
   const overshoots = [];
