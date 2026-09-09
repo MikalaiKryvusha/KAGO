@@ -157,9 +157,18 @@
 //   (3,5711 → 3,4666), which is 6,3× the instrument's own scatter (0,462 % between two baseline
 //   series), and −2,35 % of VRAM bytes read — two independent quantities naming one effect. The
 //   CHECKSUM was identical across all four runs (`2fa22073660f99b5`, distinct=1, bad_launches=0), so
-//   the oracle's verdict is untouched. ⚠️ But R4's THIRD observation — work per second, the
-//   clock-stretching detector — moves by exactly those 2,93 %: a canary riding an edge search needs
-//   its throughput golden captured WITH it, or the oracle sees a clock stretch that is not there.
+//   the oracle's verdict is untouched — and that is not a hope: `judgeBursts` and `verdictFor` build
+//   PASS/SDC/CRASH from the CHECKSUM and the Windows event log only, and `opsPerSecond` is compared
+//   to no threshold anywhere in the tree (checked by reading the source, after a first draft of this
+//   comment claimed a false SDC that cannot happen).
+//   ⚠️ WHERE IT DOES LAND IS THE PRICE, AND THAT IS WORSE. `opsPerSecond` feeds `priceRow`
+//   (`ladder-descent.mjs`), which calls anything above `floorPriceFraction` an effect — 0,18 % in
+//   the recorded reference, so our −2,93 % is SIXTEEN of those floors. A descent measured WITH the
+//   canary against a reference taken WITHOUT it would report 2,93 % of performance the card never
+//   paid — and price is the currency of the owner's own formula «снижаем потребление, пока не платим
+//   больше, чем N». So: a run that measures PRICE alongside the canary needs its reference captured
+//   WITH it; a run that measures the VERDICT does not. Two quantities, and what separates them is
+//   not caution — it is that only one of them has a threshold.
 //
 //   CANDIDATE SETPOINT for input 5, by the SAME rule input 4 was derived with (from the CEILING of
 //   health, never the middle of the gap — a false trip costs a rung, a missed one costs the machine):
