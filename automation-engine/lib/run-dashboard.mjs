@@ -69,6 +69,11 @@ export const DEFAULT_PORT = 7311;
  *  actually happens is a stability stress test, and that is what the screen says (`ideas/06`). */
 export const RUN_STATE = Object.freeze({
   STARTING: 'ПОДЪЁМ ПРОГОНА',
+  // ⚡ Прогон, у которого НЕТ ступеней полосы (стенд записи, `plans/94`): он идёт и пишет кольцо
+  // с первой секунды, но нагрузки в этот момент может не быть. Владелец 2026-09-09, глядя на
+  // страницу: «почему-то в визуализаторе ПОДЪЁМ ПРОГОНА - нет прогона». Он прав дважды: подъём
+  // к тому моменту кончился, а «прогона нет» — это то, что страница показывала счётчиком.
+  RECORDING: 'ИДЁТ ЗАПИСЬ',
   STRESS: 'ИДЁТ СТРЕСС-ТЕСТ',
   CLOSING: 'ЗАКРЫВАЕТСЯ ЧАСТОТА',
   DONE: 'ПРОГОН ЗАВЕРШЁН',
@@ -328,6 +333,19 @@ export function openPulse({
         );
       }
       this.write();
+    },
+
+    /**
+     * ЯВНАЯ СМЕНА СОСТОЯНИЯ — для прогонов без ступеней полосы.
+     *
+     * `event()` переводит состояние по событиям РАЗВЁРТКИ (`rung-start`, `rung`), и это верно для
+     * неё. Стенду записи переводить нечем: у него нет ни ступеней, ни частот, а сказать, что он
+     * делает прямо сейчас, он обязан — иначе страница держит «ПОДЪЁМ ПРОГОНА» весь прогон.
+     */
+    state(name, note = null) {
+      snap.run.state = name;
+      if (note !== null) snap.run.note = note;
+      return this.write();  /* МУТАЦИЯ: снять — состояние не доедет до файла, два блока краснеют */
     },
 
     /** The end. A finished run must NOT look like a hung one — that is the whole point of saying so. */
@@ -1207,6 +1225,29 @@ export async function selfTest() {
     afterStart.run.frequencyMhz === 2842 && afterStart.run.voltageMv === 995
     && afterStart.run.stockVoltageMv === 1045 && afterStart.run.state === RUN_STATE.STRESS,
     JSON.stringify(afterStart.run));
+  // ⚡ `plans/94`: ЯВНОЕ СОСТОЯНИЕ ДЛЯ ПРОГОНА БЕЗ СТУПЕНЕЙ. Оплачено словом владельца
+  //   2026-09-09: «почему-то в визуализаторе ПОДЪЁМ ПРОГОНА - нет прогона» — стенд записи не
+  //   умел сказать, что он делает, и страница держала подъём всю запись.
+  //   АДРЕС МУТАЦИИ: убрать `this.write()` из `state()` → «состояние не доехало до файла».
+  {
+    // СВОЙ ПУЛЬС — по тому же доводу, что у блока ступеней ниже: ниже стоит проверка, судящая
+    // НОМЕР записи, и лишние записи в общий пульс сломали бы её. Проверка, ломающая соседнюю
+    // своим побочным действием, — это не проверка, а помеха.
+    const statePath = join(dir, 'live-state.json');
+    clearPulse(statePath);
+    const sp = openPulse({ path: statePath, source: 'стенд записи', probeSeconds: 60 });
+    // МУТАЦИЯ, НАЗВАННАЯ ДО ПРОГОНА: убрать `this.write()` из `state()` → оба блока краснеют.
+    sp.state(RUN_STATE.RECORDING, 'судья на посту, кольцо пишется');
+    const afterState = readPulse(statePath);
+    check('ПУЛЬС: прогон без ступеней называет состояние САМ, и оно доезжает до файла вместе с причиной',
+      afterState.run.state === RUN_STATE.RECORDING && /кольцо пишется/u.test(afterState.run.note),
+      JSON.stringify({ state: afterState.run.state, note: afterState.run.note }));
+    sp.state(RUN_STATE.STARTING);
+    const keep = readPulse(statePath);
+    check('ПУЛЬС: смена состояния БЕЗ причины не затирает прежнюю причину — молчание не есть «причины нет»',
+      keep.run.state === RUN_STATE.STARTING && /кольцо пишется/u.test(keep.run.note),
+      JSON.stringify({ state: keep.run.state, note: keep.run.note }));
+  }
   check('ПУЛЬС: полоса даёт знаменатель покрытия', afterStart.run.coverage.total === 43,
     `в пульсе ${afterStart.run.coverage.total}`);
 

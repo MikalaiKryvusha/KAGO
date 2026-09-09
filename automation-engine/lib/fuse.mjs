@@ -2185,6 +2185,7 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
   let pulse = null;
   let pulseTimer = null;
   let burnTimer = null;
+  let burnTicker = null;
 
   /**
    * ⚡ ОКНО ЖИВЁТ РОВНО СТОЛЬКО, СКОЛЬКО ПРОГОН — ТРЕБОВАНИЕ ВЛАДЕЛЬЦА 2026-09-09, ДОСЛОВНО:
@@ -2202,6 +2203,7 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
   const stopSideCars = () => {
     if (pulseTimer !== null) { clearInterval(pulseTimer); pulseTimer = null; }
     if (burnTimer !== null) { clearTimeout(burnTimer); burnTimer = null; }
+    if (burnTicker !== null) { clearInterval(burnTicker); burnTicker = null; }
     // 🔴 ОКНО ГАСИТСЯ ЕГО СОБСТВЕННОЙ КОМАНДОЙ, А НЕ `kill()` — ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО.
     //
     // Первая проба этого стенда (09.09, 12 с): сервер на 7311 умер, а ОКНО БРАУЗЕРА ОСТАЛОСЬ —
@@ -2295,6 +2297,12 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
           // Вторая копия «`--progress-file`, путь» здесь была бы ровно парой из `bugs/101`.
           ...progressRiderArgs({ progressFile }).probe], { windowsHide: true, stdio: 'inherit' });
         console.log(`ПРОБА: pid ${probe.pid}, удары на порт ${port}${progressFile ? ' · ретранслятор прогресса включён' : ''}.`);
+        // Судья на посту и кольцо пишется — подъём кончился. Страница обязана сказать это ТЕПЕРЬ,
+        // а не через 15 секунд вместе с горном: пятнадцать секунд «ПОДЪЁМ ПРОГОНА» на идущей
+        // записи владелец прочитал как «прогона нет», и прочитал верно.
+        pulse?.state(dash.RUN_STATE.RECORDING, burnSeconds > 0
+          ? `судья на посту, кольцо пишется · нагрузка через ${burnAfterSeconds} с`
+          : 'судья на посту, кольцо пишется · нагрузки в этом прогоне нет');
         // ⚡ ГОРН ЗАПУСКАЕТ САМ СТЕНД — ОДНО ДЕЙСТВИЕ, А НЕ ДВА ОКНА И РИТУАЛ.
         //
         // Здесь стояла метка `LOAD-NOW`: стенд печатал команду, а нагрузку набирал руками оператор
@@ -2311,10 +2319,27 @@ async function cmdLoadedFloor({ seconds, tickMs, progressFile = null, burnSecond
             // Состояние на экране называется ТЕМ, что происходит: под нагрузкой — стресс-тест,
             // после неё — закрытие. Иначе окно показывало бы «поднимаемся» все девяносто секунд.
             pulse?.event({ kind: 'rung-start', text: `горн ${burnSeconds} с` });
+            // 🔴 СЕКУНДЫ НАГРУЗКИ ДВИГАЕТ СТЕНД, А НЕ СЕРВЕР — И ВОТ ПОЧЕМУ.
+            //
+            // Сервер считает пройденное как «время с отметки пульса» (`pulseNow`), потому что
+            // развёртка на время прожига БЛОКИРУЕТСЯ и отметку не обновляет. Стенд записи не
+            // блокируется вовсе и пишет пульс раз в секунду — возраст отметки всегда ~1 с, и
+            // формула сервера честно возвращает ~1. Владелец увидел счётчик, стоящий на нуле
+            // все шестьдесят секунд, и назвал это «нет прогона».
+            //
+            // `telemetry({ underLoad: true })` — штатная дверь: она и придумана, чтобы секунды
+            // двигал тот, кто ЗНАЕТ, что нагрузка идёт. Раз в секунду, отдельным таймером, вне
+            // такта судьи.
+            burnTicker = setInterval(() => { try { pulse?.telemetry({ underLoad: true }); } catch { /* окно дешевле прогона */ } }, 1000);
+            burnTicker.unref?.();
             burn.on('exit', (code) => {
               console.log(`ГОРН ЗАКОНЧИЛ: код ${code}`);
               burn = null;
+              if (burnTicker !== null) { clearInterval(burnTicker); burnTicker = null; }
               pulse?.event({ kind: 'rung', text: 'горн отработал' });
+              // «ЗАКРЫВАЕТСЯ ЧАСТОТА» — слово развёртки, и здесь оно было бы неправдой: частоты у
+              // этой записи нет вовсе. Хвост записи называется тем, что он есть.
+              pulse?.state(dash.RUN_STATE.RECORDING, 'горн отработал · запись докатывается');
             });
           }, burnAfterSeconds * 1000);
         } else {
