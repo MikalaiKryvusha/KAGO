@@ -114,6 +114,10 @@ export function candidateProfile(mhz, card) {
       // OMITTED setting as ambiguous: «leave as is» and «restore factory» are different instructions
       // (`plans/14` §4.3 added the reference; the rule is older than it).
       curveRef: null,
+      // The battle snapshot (`plans/99` Ш2, 2026-09-13) — the third curve source, REQUIRED-presence like
+      // the other two. This builder is exactly the site EXP-0091 says a file migration misses: omitted
+      // here, every pinned rung refuses at apply time again, the `bugs/24` shape one key later.
+      curveSnapshot: null,
       // The mode's frequency ceiling over a curve document (`profile-store.mjs`, 2026-08-16). An
       // instrument holds its ceiling with the PIN above and never with a curve cap — and the cap is
       // meaningless without `curveRef` anyway. Spelled out for the same reason as the two above, and
@@ -174,6 +178,7 @@ export function ceilingLockProfile(capMhz, card) {
       // границы её не трогает: два писателя одной кривой — это две правды о том, что стоит на карте.
       curveRaiseAndCapMhz: null,
       curveRef: null,
+      curveSnapshot: null,
       curveCapMhz: null,
     },
     stamp: {

@@ -522,7 +522,7 @@ export function resolveTarget(profile, state) {
  * as tuning the card while the applier quietly writes nothing is the exact defect `profiles/README.md`
  * is written against.
  */
-export function effectiveCurveSetting(profile, { loadCurve = null, liveTable = null, toOffsets = null } = {}) {
+export function effectiveCurveSetting(profile, { loadCurve = null, loadSnapshot = null, liveTable = null, toOffsets = null } = {}) {
   const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
   const ref = profile?.settings?.curveRef ?? null;
   if (inline && ref) {
@@ -530,22 +530,52 @@ export function effectiveCurveSetting(profile, { loadCurve = null, liveTable = n
     err.refusals = [{ field: 'settings.curveRef', why: 'кривая задана дважды; формат это отвергает, применяющий тоже' }];
     throw err;
   }
+  // ─── БОЕВОЙ СНИМОК (`plans/99` Ш3) — ТА ЖЕ АРИФМЕТИКА, ДРУГОЙ ИСТОЧНИК СТРОК ─────────────────────
+  //
+  // Ветка отличается от ссылки РОВНО одним: откуда берутся строки «частота → напряжение». Опора, перевод
+  // в смещения, потолок режима, заявления намерения — общие, буква в букву. Вторая копия арифметики
+  // стала бы парой «правда ↔ зеркало» ровно на пути записи в карту владельца; блок «снимок и документ
+  // с одинаковыми строками дают один вектор» в `--selftest` стоит против этого.
+  const snap = profile?.settings?.curveSnapshot ?? null;
+  if (snap && (inline || ref)) {
+    const err = new Error(`профиль «${profile.name}» задаёт кривую дважды — снимком и ${inline ? 'встроенным объектом' : 'ссылкой на рабочий документ'}`);
+    err.refusals = [{ field: 'settings.curveSnapshot', why: 'кривая задана дважды; формат это отвергает, применяющий тоже' }];
+    throw err;
+  }
   if (inline) return inline;
-  if (!ref) return null;
+  if (!ref && !snap) return null;
 
-  const load = loadCurve ?? defaultCurveLoader;
-  const doc = load(ref);
+  // ОДИН ПУТЬ ОТСЮДА И ДО ВОЗВРАТА — источник строк единственное, что различается. Тексты отказов
+  // ссылки сохранены дословно: их цитируют блоки набора, и починка чужого пути не имеет права их менять.
+  const source = snap
+    ? {
+      field: 'settings.curveSnapshot',
+      doc: () => (loadSnapshot ?? defaultSnapshotLoader)(snap),
+      missing: [`профиль «${profile.name}» указывает на боевой снимок «${snap}», которого нет`,
+        `снимка «${snap}» нет — применять профиль частично запрещено`],
+      noLive: `профиль «${profile.name}» указывает на снимок «${snap}», но живая таблица карты не передана`,
+      origin: { __fromSnapshot: snap },
+    }
+    : {
+      field: 'settings.curveRef',
+      doc: () => (loadCurve ?? defaultCurveLoader)(ref),
+      missing: [`профиль «${profile.name}» ссылается на кривую «${ref}», которой нет`,
+        `документа кривой «${ref}» нет — применять профиль частично запрещено`],
+      noLive: `профиль «${profile.name}» ссылается на кривую «${ref}», но живая таблица карты не передана`,
+      origin: { __fromRef: ref },
+    };
+  const doc = source.doc();
   if (!doc) {
-    const err = new Error(`профиль «${profile.name}» ссылается на кривую «${ref}», которой нет`);
-    err.refusals = [{ field: 'settings.curveRef', why: `документа кривой «${ref}» нет — применять профиль частично запрещено` }];
+    const err = new Error(source.missing[0]);
+    err.refusals = [{ field: source.field, why: source.missing[1] }];
     throw err;
   }
   // The document says «this frequency costs this voltage». The card takes per-entry frequency
   // offsets. The conversion is COMPUTED against the LIVE table (`curve-store.offsetsFor`), never
   // stored — that is what makes one document produce the right write at 40 °C and at 57 °C.
   if (!liveTable) {
-    const err = new Error(`профиль «${profile.name}» ссылается на кривую «${ref}», но живая таблица карты не передана`);
-    err.refusals = [{ field: 'settings.curveRef', why: 'перевод «частота → напряжение» в смещения требует ЖИВОГО чтения таблицы' }];
+    const err = new Error(source.noLive);
+    err.refusals = [{ field: source.field, why: 'перевод «частота → напряжение» в смещения требует ЖИВОГО чтения таблицы' }];
     throw err;
   }
   const { offsets, clamped } = toOffsets(doc, liveTable);
@@ -555,7 +585,7 @@ export function effectiveCurveSetting(profile, { loadCurve = null, liveTable = n
   // одна арифметика, один писатель (R1), и `buildRaiseAndCapVector` придавит всё, что торчит выше.
   // `null` — потолка нет вовсе, и это НЕ то же самое, что «потолок на верху кривой» (EXP-0031).
   const capMhz = profile?.settings?.curveCapMhz ?? null;
-  return { deltaByPointMhz: offsets, capMhz, __fromRef: ref, __clamped: clamped };
+  return { deltaByPointMhz: offsets, capMhz, ...source.origin, __clamped: clamped };
 }
 
 function defaultCurveLoader(name) {
@@ -563,6 +593,12 @@ function defaultCurveLoader(name) {
   // the real loader is injected by the CLI (which can `await import`). A module that reaches for the
   // store on its own would drag the card probes into every consumer of this file.
   throw new Error(`ссылка на кривую «${name}» не разрешена: загрузчик не передан (loadCurve)`);
+}
+
+function defaultSnapshotLoader(id) {
+  // The same reason as above: `resolveProfileCurve` injects `curve-store.loadSnapshot` after an
+  // `await import`; a bare call with nothing injected is a wiring defect and says so by name.
+  throw new Error(`боевой снимок «${id}» не разрешён: загрузчик не передан (loadSnapshot)`);
 }
 
 /**
@@ -636,6 +672,9 @@ export function curveBaseSaid(wantCurve) {
 
 export async function resolveProfileCurve(profile, {
   loadCurve = null, readLive = null, toOffsets = null,
+  // Загрузчик боевого снимка (`plans/99` Ш3). Внедряется по той же причине, что и `loadCurve`: набор
+  // резолвит снимок без каталога `curves/`, а внедрённый загрузчик означает песочницу и для опоры ниже.
+  loadSnapshot = null,
   // Внедряемые чтения текущих сдвигов карты (`bugs/98`). Отсутствуют — импортируются; заданы —
   // набор проверяет вычитание без карты.
   readVfOffsetsFn = null, openNvapiFn = null,
@@ -657,8 +696,12 @@ export async function resolveProfileCurve(profile, {
 } = {}) {
   const inline = profile?.settings?.curveRaiseAndCapMhz ?? null;
   const ref = profile?.settings?.curveRef ?? null;
-  if (!inline && !ref) return null;
+  const snap = profile?.settings?.curveSnapshot ?? null;
+  if (!inline && !ref && !snap) return null;
+  // Встроенная кривая вместе со снимком падает сюда же и получает отказ «кривая задана дважды» внутри.
   if (inline && !ref) return effectiveCurveSetting(profile);
+  // Поле отказов этой функции называет ТОТ источник, из которого профиль берёт строки.
+  const sourceField = snap ? 'settings.curveSnapshot' : 'settings.curveRef';
 
   // Only a REFERENCE needs the store and a live reading of the card's table — and each import happens
   // only where its injection is ABSENT, so the selftest below resolves a reference with no `curves/`
@@ -669,6 +712,13 @@ export async function resolveProfileCurve(profile, {
     const store = await import('./curve-store.mjs');
     load = load ?? ((name) => store.loadCurveDoc({ name }));
     offs = offs ?? store.offsetsFor;
+  }
+  // Снимок импортирует хранилище ТОЛЬКО когда он есть в профиле и загрузчик не внедрён: путь ссылки
+  // не получает ни одного нового импорта (`plans/99` Ш3 — старая ветка цела буква в букву).
+  let loadSnap = loadSnapshot;
+  if (snap && !loadSnap) {
+    const store = await import('./curve-store.mjs');
+    loadSnap = (id) => store.loadSnapshot({ id });
   }
   let live = readLive;
   if (!live) ({ readLiveCurvePoints: live } = await import('./card-grids.mjs'));
@@ -723,7 +773,8 @@ export async function resolveProfileCurve(profile, {
     // `bugs/18` («без карты и без curves/») получил смещение 0 вместо 200, потому что мой код взял
     // реальный артефакт вместо поданной фикстуры. Это не придирка теста — это ровно тот класс, когда
     // код тайком опирается на состояние машины, и на чужой машине он повёл бы себя иначе.
-    const loadRef = loadReferenceFn ?? (loadCurve ? () => null : (await import('./curve-store.mjs')).loadReferenceTable);
+    // Внедрённый загрузчик СНИМКА — та же граница песочницы, что и внедрённый документ (`plans/99` Ш3).
+    const loadRef = loadReferenceFn ?? ((loadCurve || loadSnapshot) ? () => null : (await import('./curve-store.mjs')).loadReferenceTable);
     const refDoc = loadRef();
     if (refDoc) {
       const { referenceUsableFor } = await import('./curve-store.mjs');
@@ -788,7 +839,7 @@ export async function resolveProfileCurve(profile, {
   // `bugs/83`). Прицеплено к возвращаемому объекту, а не отдано в колбэк, потому что печатает её
   // `apply`, и лишний провод, который вызывающий обязан не забыть подключить, — это провод, который
   // забудут.
-  const resolved = effectiveCurveSetting(profile, { loadCurve: load, liveTable: base, toOffsets: offs });
+  const resolved = effectiveCurveSetting(profile, { loadCurve: load, loadSnapshot: loadSnap, liveTable: base, toOffsets: offs });
   if (resolved && baseSource) {
     resolved.__base = baseSource;
     if (baseSource.kind === 'reference') {
@@ -812,7 +863,7 @@ export async function resolveProfileCurve(profile, {
     const refusals = [];
     if (env === null) refusals.push({ field: 'envelopeMhz', why: 'подрезка против опоры требует максимума карты, а он не передан' });
     if (baseSource?.kind !== 'reference') {
-      refusals.push({ field: 'settings.curveRef', why: `подрезка против опоры требует опоры-АРТЕФАКТА, а опорой стало «${baseSource?.kind ?? '—'}»`
+      refusals.push({ field: sourceField, why: `подрезка против опоры требует опоры-АРТЕФАКТА, а опорой стало «${baseSource?.kind ?? '—'}»`
         + (baseSource?.after?.why ? ` (${baseSource.after.why})` : '') + ' — без артефакта вектор считался бы против таблицы момента, '
         + 'и флаг не покупал бы воспроизводимости. Снимите опору: npm run curve -- --take-reference, либо примените без флага' });
     }
@@ -845,7 +896,7 @@ export async function resolveProfileCurve(profile, {
       const err = new Error(`профиль «${profile?.name}» отвергнут до записи: намерение вектора против ОПОРЫ — ${intentAtBasis} МГц при `
         + `максимуме карты ${env} МГц (превышение ${intentAtBasis - env} МГц). Замок держит выданную частоту, но не право целиться `
         + 'выше максимума — это правило владельца «НИКОГДА НЕ ГНАТЬ КАРТУ ВЫШЕ ЭТОЙ ЧАСТОТЫ» (R13, bugs/11); против опоры это не режется, а отвергается');
-      err.refusals = [{ field: 'settings.curveRef', why: `намерение ${intentAtBasis} МГц выше конверта ${env} МГц (R13, plans/84)` }];
+      err.refusals = [{ field: sourceField, why: `намерение ${intentAtBasis} МГц выше конверта ${env} МГц (R13, plans/84)` }];
       throw err;
     }
     resolved.__basisJudge = { envelopeMhz: env, basis: 'reference', intentTopMhz: intentAtBasis, verdict: intentAtBasis === null ? 'ничего не поднято' : 'внутри конверта — резать нечего' };
@@ -1658,14 +1709,14 @@ const silentColdFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null },
 });
 
 /**
@@ -1922,7 +1973,7 @@ async function cmdSelftest() {
     const p = {
       name: 'max-performance', title: '🚀 Max Perfomance', mode: 'max-performance',
       qualified: false, draft: { candidate: '+180, потолок 3172', source: 'STATUS факты 24, 27' },
-      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
+      settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null },
     };
     try {
       await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
@@ -2340,7 +2391,7 @@ async function cmdSelftest() {
     title: '⚖️ Optimised',
     mode: 'optimised',
     qualified: true,
-    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRef: null, curveCapMhz: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null, curveRaiseAndCapMhz: { deltaMhz: 592, capMhz: 2130 } },
     stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-15T00:30:00+03:00' },
   });
 
@@ -2730,6 +2781,143 @@ async function cmdSelftest() {
       return `стоковые строки сдвинуты: ${eff.deltaByPointMhz[0]}/${eff.deltaByPointMhz[1]}`;
     }
     return null;
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // БОЕВОЙ СНИМОК В РАЗРЕШЕНИИ КРИВОЙ (`plans/99` Ш3). АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+  //   Р1. ветка снимка считает смещения ПО-СВОЕМУ               → «СНИМОК (P99-AC2): … ОДИН вектор»
+  //   Р2. ветка снимка берёт строки из РАБОЧЕГО документа        → «СНИМОК (P99-AC3): запись прогона …»
+  //   Р3. отказ ветки снимка называет поле ссылки                → «СНИМОК: снимка нет — отказ по полю …»
+  //   Р4. внедрённый загрузчик снимка не держит границу песочницы → «СНИМОК: … опора с диска НЕ читается»
+  //   Р5. снята взаимоисключаемость снимка и ссылки у применителя → «СНИМОК: … дважды»
+  // Фикстура та же, что у `bugs/18` выше: четыре строки против четырёх записей таблицы, числа читаются
+  // глазом. Мост к карте внедрён пустым (`openNvapiFn: () => null`) — ни одного обращения к драйверу.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  const snapProfile = (id = '2026-09-13T20-15-30') => {
+    const p = curveProfile();
+    p.settings.curveRaiseAndCapMhz = null;
+    p.settings.curveSnapshot = id;
+    return p;
+  };
+  const snapTable = () => [
+    { i: 0, mhz: 500, mv: 700, freqKhz: 500_000 }, { i: 1, mhz: 1000, mv: 800, freqKhz: 1_000_000 },
+    { i: 2, mhz: 1800, mv: 900, freqKhz: 1_800_000 }, { i: 3, mhz: 2800, mv: 1000, freqKhz: 2_800_000 },
+  ];
+  // Документ, проходящий СВОЙ валидатор: снимок грузится через `validateSnapshot`, и фикстура с
+  // выдуманной формой умерла бы на нём, а не покраснела (EXP-0075).
+  const snapWorkingDoc = () => {
+    const at = '2026-09-13T20:00:00+03:00';
+    const row = (mhz, mv) => ({ mhz, voltageMv: mv, stockVoltageMv: mv, tags: ['stop:untouched'], provenBy: null, editedAt: at });
+    return {
+      kind: 'tuning-curve', name: 'measured',
+      card: { name: 'стенд', maxGraphicsMhz: 3090, frequencyCount: 4 },
+      voltageGridMv: [700, 800, 850, 900, 1000],
+      stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: at, tempC: 50 },
+      frequencies: [row(3000, 1000), row(2000, 900), row(1000, 800), row(500, 700)],
+    };
+  };
+  const snapVectorOf = (eff) => JSON.stringify({
+    d: eff?.deltaByPointMhz, cap: eff?.capMhz, top: eff?.__intentTopMhz, mono: eff?.__intentMonotone, base: eff?.__base?.kind,
+  });
+
+  block('СНИМОК (P99-AC2): снимок и рабочий документ с ОДИНАКОВЫМИ строками дают ОДИН вектор — побайтно, с намерением и опорой', async () => {
+    const { offsetsFor } = await import('./curve-store.mjs');
+    const doc = snapWorkingDoc();
+    // Опора-артефакт подана, чтобы сравнение прошло ВЕСЬ путь, включая выбор опоры (`bugs/97`), а не
+    // только перевод в смещения.
+    const loadedRef = {
+      kind: 'reference-table',
+      stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-31T23:13:42+03:00', tempC: 68, powerW: 197.17, utilPct: 69, pstate: 'P0', underLoad: true },
+      points: snapTable().map((p) => ({ i: p.i, mv: p.mv, freqKhz: p.freqKhz, mhz: p.i >= 2 ? p.mhz + 30 : p.mhz })),
+    };
+    const common = {
+      readLive: async () => snapTable(), toOffsets: (d, t) => offsetsFor(d, t, { count: 4 }),
+      loadReferenceFn: () => loadedRef, cardStamp: { driver: '610.88', vbios: '98.03.58.40.8b' }, openNvapiFn: () => null,
+    };
+    const viaRef = await resolveProfileCurve(refProfile(), { ...common, loadCurve: (n) => (n === 'measured' ? JSON.parse(JSON.stringify(doc)) : null) });
+    const viaSnap = await resolveProfileCurve(snapProfile(), { ...common, loadSnapshot: (id) => (id === '2026-09-13T20-15-30' ? JSON.parse(JSON.stringify(doc)) : null) });
+    if (!viaRef || !viaSnap) return 'один из путей разрешился в «кривой нет»';
+    if (viaSnap.__fromSnapshot !== '2026-09-13T20-15-30') return 'разрешённая кривая не помнит, из какого снимка она';
+    if (viaSnap.__fromRef !== undefined) return 'вектор снимка выдаёт себя за вектор ссылки';
+    if (snapVectorOf(viaRef) !== snapVectorOf(viaSnap)) return `векторы разошлись: ссылка ${snapVectorOf(viaRef)} · снимок ${snapVectorOf(viaSnap)}`;
+    // Контроль, что сравнивалось не пустое с пустым: против опоры 900 мВ обслуживает 1830 → +170.
+    if (viaSnap.deltaByPointMhz[2] !== 170) return `вектор не тот, что считает опора: ${JSON.stringify(viaSnap.deltaByPointMhz)}`;
+    return null;
+  });
+
+  block('СНИМОК (P99-AC3): запись прогона в рабочий документ НЕ меняет боевой вектор — а вектор ссылки меняет (контроль)', async () => {
+    const store = await import('./curve-store.mjs');
+    const os = await import('node:os');
+    const fsm = await import('node:fs');
+    const sandbox = fsm.mkdtempSync(path.join(os.tmpdir(), 'kago-p99-ac3-'));
+    try {
+      fsm.writeFileSync(store.curvePath('measured', sandbox), `${JSON.stringify(snapWorkingDoc(), null, 2)}\n`);
+      const { snapshot } = store.takeSnapshot({ dir: sandbox, nowIso: '2026-09-13T20:15:30+03:00' });
+      const id = store.snapshotIdFor(snapshot.takenAt);
+      // ОБА загрузчика поданы ОБОИМ профилям: если ветка снимка возьмёт строки из рабочего документа,
+      // она возьмёт их из ТОЙ ЖЕ песочницы — и это покраснеет, а не спрячется за настоящим curves/.
+      const opts = {
+        loadCurve: (n) => store.loadCurveDoc({ name: n, dir: sandbox }),
+        loadSnapshot: (s) => store.loadSnapshot({ id: s, dir: sandbox }),
+        readLive: async () => snapTable(), toOffsets: (d, t) => store.offsetsFor(d, t, { count: 4 }),
+        loadReferenceFn: () => null, openNvapiFn: () => null,
+      };
+      const snapBefore = snapVectorOf(await resolveProfileCurve(snapProfile(id), opts));
+      const refBefore = snapVectorOf(await resolveProfileCurve(refProfile(), opts));
+      // «Прогон дописывает строку»: 1000 МГц закрыта краем на 700 мВ — тем же атомарным писателем, что
+      // у развёртки (R14a).
+      const doc = store.loadCurveDoc({ dir: sandbox });
+      const r = doc.frequencies.find((x) => x.mhz === 1000);
+      r.voltageMv = 700; r.tags = ['stop:edge-found', 'origin:measured']; r.provenBy = 'furnace/sustained PASS';
+      store.saveCurveDoc(doc, { dir: sandbox });
+      const snapAfter = snapVectorOf(await resolveProfileCurve(snapProfile(id), opts));
+      const refAfter = snapVectorOf(await resolveProfileCurve(refProfile(), opts));
+      if (refAfter === refBefore) return `КОНТРОЛЬ не сработал: запись в документ не сдвинула даже вектор ссылки — блок мерит не то (${refAfter})`;
+      if (snapAfter !== snapBefore) return `боевой вектор ИЗМЕНИЛСЯ от записи в рабочий документ: было ${snapBefore}, стало ${snapAfter}`;
+      return null;
+    } finally {
+      fsm.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  block('СНИМОК: снимка нет — отказ по полю settings.curveSnapshot, до карты не дошло', async () => {
+    const { offsetsFor } = await import('./curve-store.mjs');
+    try {
+      await resolveProfileCurve(snapProfile(), {
+        loadSnapshot: () => null, readLive: async () => snapTable(), toOffsets: (d, t) => offsetsFor(d, t, { count: 4 }),
+        loadReferenceFn: () => null, openNvapiFn: () => null,
+      });
+      return 'профиль на несуществующем снимке разрешился без отказа';
+    } catch (e) {
+      const f = e?.refusals?.[0]?.field;
+      if (f !== 'settings.curveSnapshot') return `отказ назвал поле «${f}», а не снимок: ${e.message}`;
+      if (!/снимка «2026-09-13T20-15-30» нет/u.test(e.refusals[0].why)) return `причина не называет снимок: ${e.refusals[0].why}`;
+      return null;
+    }
+  });
+
+  block('СНИМОК: внедрённый загрузчик снимка держит границу песочницы — опора с диска НЕ читается', async () => {
+    const { offsetsFor } = await import('./curve-store.mjs');
+    // `loadReferenceFn` намеренно НЕ подан: на этой машине в curves/ лежит настоящая опора, и если
+    // граница протекла, опорой станет она — ровно класс, найденный своим же набором у `bugs/18`.
+    const eff = await resolveProfileCurve(snapProfile(), {
+      loadSnapshot: () => snapWorkingDoc(), readLive: async () => snapTable(), toOffsets: (d, t) => offsetsFor(d, t, { count: 4 }),
+      openNvapiFn: () => null,
+    });
+    if (!eff) return 'снимок разрешился в «кривой нет»';
+    if (eff.__base?.kind === 'reference') return 'опорой стал артефакт С ДИСКА при внедрённом снимке — песочница протекла';
+    return null;
+  });
+
+  block('СНИМОК: снимок вместе со ссылкой — применитель отказывает «дважды» по полю снимка', async () => {
+    const p = snapProfile();
+    p.settings.curveRef = 'measured';
+    try {
+      effectiveCurveSetting(p, { loadCurve: () => snapWorkingDoc(), loadSnapshot: () => snapWorkingDoc(), liveTable: snapTable(), toOffsets: () => ({ offsets: [0, 0, 0, 0], clamped: 0 }) });
+      return 'кривая из двух источников разрешилась без отказа';
+    } catch (e) {
+      return e?.refusals?.[0]?.field === 'settings.curveSnapshot' ? null : `отказ не тот: ${e?.refusals?.[0]?.field} · ${e?.message}`;
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -3292,9 +3480,11 @@ async function main(argv) {
     }
     if (needsCurve) {
       const c = effCurve;
-      const shape = c.__fromRef
-        ? `вектор из документа «${c.__fromRef}» на ${c.deltaByPointMhz.length} точек`
-        : (Array.isArray(c.deltaByPointMhz) ? `вектор на ${c.deltaByPointMhz.length} точек` : `подъём +${c.deltaMhz} МГц`);
+      const shape = c.__fromSnapshot
+        ? `вектор из боевого снимка «${c.__fromSnapshot}» на ${c.deltaByPointMhz.length} точек (запись прогона его не меняет)`
+        : c.__fromRef
+          ? `вектор из документа «${c.__fromRef}» на ${c.deltaByPointMhz.length} точек`
+          : (Array.isArray(c.deltaByPointMhz) ? `вектор на ${c.deltaByPointMhz.length} точек` : `подъём +${c.deltaMhz} МГц`);
       console.log(`    кривая V/F: ${shape}, ${c.capMhz === null ? 'ПОТОЛКА НЕТ' : `потолок ${c.capMhz} МГц`} (пишется через NVAPI)`);
       if (c.capMhz === null) {
         console.log('    ⚠️  БЕЗ ПОТОЛКА карта уйдёт на частоты ВЫШЕ измеренных: андервольт проверялся');

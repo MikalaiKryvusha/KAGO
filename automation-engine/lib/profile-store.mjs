@@ -43,8 +43,20 @@ export const PROFILES_DIR = fileURLToPath(new URL('../../profiles/', import.meta
 const GPU_INFO = fileURLToPath(new URL('../../tools/gpu-info.mjs', import.meta.url));
 
 /** The settings a profile may carry. An unknown key is REFUSED, never ignored — `powerLimitWats`
- *  silently ignored is a profile that does nothing while reading as if it does. */
-const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz', 'curveRef', 'curveCapMhz']);
+ *  silently ignored is a profile that does nothing while reading as if it does.
+ *
+ *  `curveSnapshot` JOINED 2026-09-13 (`plans/99` Ш2, epic 98) as a REQUIRED-presence key, like every
+ *  other one here.
+ *  FORK: options <required, migrated in the same step over every file AND every code builder | optional,
+ *  absent read as null> · price of error <required: a builder missed by the migration refuses — loudly,
+ *  in the battery and on the pin path (EXP-0091 is exactly that miss, paid 2026-08-21); optional: a
+ *  second convention inside one format, and «omitted» becomes legal for one key while it means nothing
+ *  for the other five> · consulted <this format's own rule below — «пропуск не означает ничего»,
+ *  `validateProfile` · EXP-0091 (the migration is complete only when CONSTRUCTORS are enumerated, not
+ *  files) · `bugs/24`>. Chosen: required. The enumeration was taken before the edit: 8 profile files
+ *  (5 in git, 3 `*.local`) and 8 construction sites — `ladder-descent.candidateProfile` ×2,
+ *  `virtual-gpu`'s pl250 profile, this module's two fixtures, `profile-manager`'s four. */
+const SETTING_KEYS = Object.freeze(['powerLimitWatts', 'graphicsClockLockMhz', 'curveRaiseAndCapMhz', 'curveRef', 'curveSnapshot', 'curveCapMhz']);
 const STAMP_KEYS = Object.freeze(['driver', 'vbios', 'takenAt']);
 
 /**
@@ -223,7 +235,7 @@ export function probeCard() {
  * @param {{fileName?: string|null, card?: object|null}} opts
  * @returns {Array<{field:string, why:string}>} empty means accepted
  */
-export function validateProfile(profile, { fileName = null, card = null, resolveCurve = null } = {}) {
+export function validateProfile(profile, { fileName = null, card = null, resolveCurve = null, resolveSnapshot = null } = {}) {
   const out = [];
 
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
@@ -478,9 +490,13 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
     const hasCap = cap !== null && cap !== undefined;
     // `s.curveRef` напрямую, а не через `ref` ниже: этот блок стоит ВЫШЕ объявления, и обращение к
     // нему было бы ошибкой временной мёртвой зоны — набор поймал бы её, но лучше не заводить.
-    const hasRef = s.curveRef !== null && s.curveRef !== undefined;
+    // БОЕВОЙ СНИМОК (`plans/99` Ш2) — такая же ссылка на ЗАМЕР, только замороженный: потолок режима
+    // при нём законен по тому же доводу, что и при `curveRef`. Без этой строки `Silent Cold` не смог
+    // бы встать на снимок вовсе.
+    const hasRef = (s.curveRef !== null && s.curveRef !== undefined)
+      || (s.curveSnapshot !== null && s.curveSnapshot !== undefined);
     if (hasCap && !hasRef) {
-      out.push(refuse('settings.curveCapMhz', 'потолок задан без ссылки на документ кривой (curveRef). '
+      out.push(refuse('settings.curveCapMhz', 'потолок задан без ссылки на документ кривой (curveRef) и без боевого снимка (curveSnapshot). '
         + 'У встроенной кривой свой потолок внутри curveRaiseAndCapMhz — два потолка на один профиль '
         + 'не имеют честного прочтения'));
     } else {
@@ -525,6 +541,48 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
       out.push(refuse('settings.curveRef', 'кривая задана ДВАЖДЫ — и ссылкой (curveRef), и встроенным объектом '
         + '(curveRaiseAndCapMhz). У этого нет честного прочтения: правило старшинства молча выбросило бы половину '
         + 'написанного в файле. Оставьте ровно одно'));
+    }
+  }
+
+  // --- curveSnapshot (`plans/99` Ш2, epic 98 — the owner's ruling of 2026-09-09) -----------------
+  //
+  // *«должны указывать на снимок»* (`GOAL.md` → «📸 БОЕВОЙ РЕЖИМ СТОИТ НА СНИМКЕ»). The profile names a
+  // FROZEN snapshot, `curves/battle/<id>.json`, instead of the live working document, so a sweep's
+  // write no longer reaches the owner's shortcut by itself.
+  //
+  // `curveRef` IS DEPRECATED FOR WORKING MODES AS OF 2026-09-13, AND IT IS NOT REMOVED: it stays legal
+  // so that rolling phase 1 back costs one line of JSON per profile, not a revert of code (`plans/99`
+  // §7, decision 2). The three curve sources are mutually exclusive — «two sources» has no honest
+  // reading, the same rule the ref-vs-inline block above applies.
+  //
+  // THE ID IS CHECKED FOR SHAPE ONLY, and deliberately NOT against `curve-store`'s own id pattern:
+  // importing that module would drag the card probes into this pure format (the reason `resolveCurve`
+  // is injected), and copying the pattern would plant a pair. The shape check has one job — a value that
+  // could climb out of `curves/battle/` is refused. Whether the snapshot EXISTS and is SOUND is the
+  // injected resolver's job here, and at apply time `curve-store.loadSnapshot` refuses a malformed file.
+  const snap = s.curveSnapshot;
+  if (snap !== null && snap !== undefined) {
+    if (typeof snap !== 'string' || !/^[0-9A-Za-z][0-9A-Za-z-]*$/u.test(snap)) {
+      out.push(refuse('settings.curveSnapshot', 'ожидался идентификатор боевого снимка (цифры, латиница, дефисы — '
+        + `например 2026-09-13T20-15-30) или null, получено ${JSON.stringify(snap)}`));
+    } else if (resolveSnapshot) {
+      const r = resolveSnapshot(snap);
+      if (!r || r.missing) {
+        out.push(refuse('settings.curveSnapshot', `снимка «${snap}» нет на диске: профиль указывает на заморозку, которой не существует`));
+      } else if (Array.isArray(r.problems) && r.problems.length) {
+        out.push(refuse('settings.curveSnapshot', `снимок «${snap}» сам не проходит валидатор: ${r.problems.slice(0, 3).map((p) => `${p.field} — ${p.why}`).join('; ')}`));
+      } else if (card && r.doc?.stamp && (r.doc.stamp.driver !== card.driver || r.doc.stamp.vbios !== card.vbios)) {
+        out.push(refuse('settings.curveSnapshot', `снимок «${snap}» заморозил кривую, снятую на драйвере ${r.doc.stamp.driver} / VBIOS ${r.doc.stamp.vbios}, `
+          + `а карта сейчас ${card.driver} / ${card.vbios} — по R6 недействителен до перепроверки`));
+      }
+    }
+    if (ref !== null && ref !== undefined) {
+      out.push(refuse('settings.curveSnapshot', 'кривая задана ДВАЖДЫ — и снимком (curveSnapshot), и ссылкой на рабочий документ '
+        + '(curveRef). Боевой режим стоит на ОДНОМ источнике; правило старшинства молча выбросило бы половину файла. Оставьте ровно одно'));
+    }
+    if (s.curveRaiseAndCapMhz !== null && s.curveRaiseAndCapMhz !== undefined) {
+      out.push(refuse('settings.curveSnapshot', 'кривая задана ДВАЖДЫ — и снимком (curveSnapshot), и встроенным объектом '
+        + '(curveRaiseAndCapMhz). Оставьте ровно одно'));
     }
   }
 
@@ -756,7 +814,26 @@ function renderSettings(s) {
   // Документ читается СВОИМ чтением, без `curve-store`: тот транзитивно тянет зонды карты, а список
   // профилей обязан работать на машине без видеокарты (это условие соседних блоков набора).
   const ref = s.curveRef ?? null;
-  if (raise === null && ref !== null) {
+  // БОЕВОЙ СНИМОК (`plans/99` Ш2) печатается ТЕМИ ЖЕ числами документа, что и ссылка, плюс покрытие,
+  // зафиксированное в момент снятия: список отвечает на тот же честный вопрос — что лежит в источнике,
+  // которым профиль питается, — и читает его своим чтением, без `curve-store` (довод выше).
+  const snapId = s.curveSnapshot ?? null;
+  if (raise === null && snapId !== null) {
+    const snapDoc = readCurveDocQuietly(snapId, fileURLToPath(new URL('../../curves/battle/', import.meta.url)));
+    const capSaid = s.curveCapMhz === null || s.curveCapMhz === undefined
+      ? 'ПОТОЛКА НЕТ — выигрыш уходит в частоту'
+      : `потолок ${s.curveCapMhz} МГц — выигрыш уходит в ватты и градусы`;
+    if (snapDoc === null) {
+      lines.push(`    кривая V/F         🔴 СНИМОК «${snapId}» — файл НЕ НАЙДЕН, применение откажет · ${capSaid}`);
+    } else {
+      const tuned = snapDoc.frequencies.filter((r) => Number.isFinite(r?.voltageMv)
+        && Number.isFinite(r?.stockVoltageMv) && r.voltageMv < r.stockVoltageMv);
+      const cov = snapDoc.coverage ?? {};
+      lines.push(`    кривая V/F         БОЕВОЙ СНИМОК «${snapId}»: строк ${snapDoc.frequencies.length}, с НАЙДЕННЫМ андервольтом ${tuned.length}`
+        + ` · краёв на момент снятия ${cov.edges ?? '?'} из ${cov.total ?? '?'} · ${capSaid}`);
+      lines.push('                       смещения считаются ПРИ ПРИМЕНЕНИИ против живой таблицы карты; запись прогона снимок не меняет');
+    }
+  } else if (raise === null && ref !== null) {
     const doc = readCurveDocQuietly(ref);
     const capSaid = s.curveCapMhz === null || s.curveCapMhz === undefined
       ? 'ПОТОЛКА НЕТ — выигрыш уходит в частоту'
@@ -844,14 +921,14 @@ const FAKE_CARD = Object.freeze({
 const factoryFixture = () => ({
   name: 'factory',
   title: '🔄 Сброс к заводским',
-  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
+  settings: { powerLimitWatts: null, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null },
 });
 
 const measuredFixture = () => ({
   name: 'silent-cold',
   title: '❄️ Silent Cold',
   qualified: true,
-  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
+  settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 1200, max: 1200 }, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null },
   stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-10T10:00:00+03:00' },
 });
 
@@ -1129,6 +1206,100 @@ function cmdSelftest() {
       resolveCurve: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
       expect: ['mode'],
     },
+    // --- БОЕВОЙ СНИМОК (`plans/99` Ш2). Каждая враждебная фикстура несёт РОВНО один дефект и слово,
+    // уникальное для ЭТОГО отказа (EXP-0089). АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+    //   П1. `curveSnapshot` выпал из SETTING_KEYS      → «профиль стоит на здоровом снимке -> принят»,
+    //                                                     «потолок режима при снимке -> принят», «ОПУЩЕННЫЙ ключ»
+    //   П2. снята взаимоисключаемость снимка и ссылки   → «ДВАЖДЫ — снимком и ссылкой»
+    //   П3. проверка потолка не видит снимка            → «потолок режима при снимке -> принят»
+    //   П4. ветка «снимка нет на диске» снята           → «снимка нет на диске»
+    {
+      what: 'СНИМОК: профиль стоит на существующем здоровом снимке -> принят',
+      profile: (() => { const p = measuredFixture(); p.settings.curveSnapshot = '2026-09-13T20-15-30'; return p; })(),
+      resolveSnapshot: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: [],
+    },
+    {
+      what: 'СНИМОК: кривая задана ДВАЖДЫ — снимком и ссылкой на рабочий документ -> отказ',
+      profile: (() => {
+        const p = measuredFixture();
+        p.settings.curveSnapshot = '2026-09-13T20-15-30';
+        p.settings.curveRef = 'measured';
+        return p;
+      })(),
+      resolveSnapshot: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      resolveCurve: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['снимком (curveSnapshot), и ссылкой'],
+    },
+    {
+      what: 'СНИМОК: кривая задана ДВАЖДЫ — снимком и встроенным объектом -> отказ',
+      profile: (() => {
+        const p = measuredFixture();
+        p.settings.curveSnapshot = '2026-09-13T20-15-30';
+        p.settings.curveRaiseAndCapMhz = { deltaMhz: 100, capMhz: null };
+        return p;
+      })(),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['снимком (curveSnapshot), и встроенным'],
+    },
+    {
+      what: 'СНИМОК: снимка нет на диске -> отказ (профиль указывает на заморозку, которой не существует)',
+      profile: (() => { const p = measuredFixture(); p.settings.curveSnapshot = '2026-09-13T20-15-30'; return p; })(),
+      resolveSnapshot: () => ({ missing: true }),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['которой не существует'],
+    },
+    {
+      what: 'СНИМОК: идентификатор, выводящий из каталога снимков -> отказ по форме',
+      profile: (() => { const p = measuredFixture(); p.settings.curveSnapshot = '../measured'; return p; })(),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['идентификатор боевого снимка'],
+    },
+    {
+      what: 'СНИМОК: сам снимок не проходит валидатор -> отказ, и он цитирует ЕГО поле',
+      profile: (() => { const p = measuredFixture(); p.settings.curveSnapshot = '2026-09-13T20-15-30'; return p; })(),
+      resolveSnapshot: () => ({ doc: {}, problems: [{ field: 'coverage.total', why: 'покрытие насчитало 390 частот, а строк в снимке 389' }] }),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['coverage.total'],
+    },
+    {
+      what: 'СНИМОК: заморожен с кривой другого драйвера -> отказ по R6',
+      profile: (() => { const p = measuredFixture(); p.settings.curveSnapshot = '2026-09-13T20-15-30'; return p; })(),
+      resolveSnapshot: () => ({ doc: { stamp: { driver: '620.10', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['заморозил кривую', 'R6'],
+    },
+    {
+      what: 'СНИМОК: потолок режима (curveCapMhz) при снимке законен, как при ссылке -> принят',
+      profile: (() => {
+        const p = measuredFixture();
+        p.settings.graphicsClockLockMhz = null;
+        p.settings.curveSnapshot = '2026-09-13T20-15-30';
+        p.settings.curveCapMhz = 2130;
+        return p;
+      })(),
+      resolveSnapshot: () => ({ doc: { stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: [],
+    },
+    {
+      what: 'потолок режима без ссылки И без снимка -> отказ, и отказ называет оба источника',
+      profile: (() => { const p = measuredFixture(); p.settings.graphicsClockLockMhz = null; p.settings.curveCapMhz = 2130; return p; })(),
+      expect: ['settings.curveCapMhz'],
+      alsoMustSay: ['curveRef', 'curveSnapshot'],
+    },
+    {
+      what: 'СНИМОК: ОПУЩЕННЫЙ ключ curveSnapshot -> отказ (пропуск не означает ничего — ключ обязателен, как остальные)',
+      profile: (() => { const p = measuredFixture(); delete p.settings.curveSnapshot; return p; })(),
+      expect: ['settings.curveSnapshot'],
+      alsoMustSay: ['пропуск не означает ничего'],
+    },
+    {
+      what: 'СНИМОК: stock-default со снимком -> отказ (сброс, который настраивает, не сброс)',
+      profile: (() => { const p = factoryFixture(); p.mode = 'stock-default'; p.settings.curveSnapshot = '2026-09-13T20-15-30'; return p; })(),
+      expect: ['mode'],
+      alsoMustSay: ['все 6 настройки null'],
+    },
     {
       what: 'stock-default, который что-то задаёт -> отказ (сброс, который настраивает, это не сброс)',
       profile: (() => { const p = measuredFixture(); p.mode = 'stock-default'; return p; })(),
@@ -1230,6 +1401,7 @@ function cmdSelftest() {
       // The curve resolver is INJECTED per block: this module must stay provable without a card and
       // without `curve-store` (which transitively imports the FFI probes).
       resolveCurve: b.resolveCurve ?? null,
+      resolveSnapshot: b.resolveSnapshot ?? null,
     });
     const fields = refusals.map((r) => r.field);
     const text = refusals.map((r) => `${r.field}: ${r.why}`).join(' | ');

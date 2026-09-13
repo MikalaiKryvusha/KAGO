@@ -8,6 +8,7 @@
   "graphicsClockLockMhz": { "min": 180, "max": 3090 },
   "curveRaiseAndCapMhz": null,
   "curveRef": "measured",
+  "curveSnapshot": null,
   "curveCapMhz": null
  },
  "stamp": {

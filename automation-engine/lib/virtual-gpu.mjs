@@ -2965,7 +2965,8 @@ export async function selfTest() {
     // `curveCapMhz: null` is not decoration: presence is REQUIRED by the format since 2026-08-16, and
     // this fixture is built in code, so the migration's file-rewriting script never reached it
     // (`bugs/24`). Omitted, it reddens the applier block below — which is exactly what it is for.
-    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveCapMhz: null },
+    // `curveSnapshot: null` joined 2026-09-13 by the same rule (`plans/99` Ш2).
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: null, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null, curveCapMhz: null },
     stamp: { driver: CARD.stamp.driver, vbios: CARD.stamp.vbios, takenAt: CARD.stamp.takenAt },
   };
   let applyOk = false; let applyWhy = '';

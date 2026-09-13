@@ -36,12 +36,16 @@
 //   npm run curve -- --show      print the table
 //   npm run curve -- --verify    hold the document against the live card
 //   npm run curve -- --progress  the delivery line: edges known / 389, modes shipped / 4 (ideas/14)
+//   npm run curve -- --snapshot [--from <doc>]  freeze the working document into curves/battle/
+//                                (epic 98 phase 1 — the promotion GATE is phase 2 and does not exist yet)
 //   npm run curve -- --selftest  hostile fixtures, no GPU
 //
 // [NOT-TESTED] — born 2026-08-15 with plan 14; re-keyed to frequency the same day on the owner's word.
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, writeFileSync, linkSync, unlinkSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import path from 'node:path';
 
 import { CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ, CURVE_GRAPHICS_POINT_COUNT } from '../config.mjs';
@@ -657,7 +661,7 @@ export const ACCEPTANCE_MODES = Object.freeze(['max-performance', 'optimised', '
  * `qualified === true` (the qualification gate P3-AC3 refuses anything else before the first
  * write). Today the honest answer is 0/4 and the counter must say so (ideas/14 step 3).
  */
-export function acceptanceProgress(doc, { profiles = [] } = {}) {
+export function acceptanceProgress(doc, { profiles = [], snapshots = {} } = {}) {
   const rows = doc?.frequencies ?? [];
   const has = (r, t) => Array.isArray(r.tags) && r.tags.includes(t);
 
@@ -687,6 +691,19 @@ export function acceptanceProgress(doc, { profiles = [] } = {}) {
   const restingOnUnwatched = unwatched.length === 0 ? [] : shipped.filter(
     (m) => (byMode.get(m)?.settings?.curveRef ?? null) === (doc?.name ?? null),
   );
+  // БОЕВОЙ СНИМОК (`plans/99`): режим на снимке опирается на СТРОКИ СНИМКА, а не документа, — и
+  // метка «без сторожа на посту» заморожена в них вместе со всем остальным. Без этой ветки перевод
+  // режима на снимок молча снял бы предупреждение, хотя опора не изменилась ни на строку: молчание
+  // читалось бы как «чисто» (R4b). Снимок, который вызывающий не подал, называется отдельно — «не
+  // прочитан» не то же самое, что «меток нет».
+  const snapshotUnread = [];
+  for (const m of shipped) {
+    const id = byMode.get(m)?.settings?.curveSnapshot ?? null;
+    if (id === null) continue;
+    const snap = snapshots?.[id] ?? null;
+    if (snap === null) { snapshotUnread.push(m); continue; }
+    if ((snap.frequencies ?? []).some((r) => has(r, CURVE_TAGS.ORIGIN_UNWATCHED))) restingOnUnwatched.push(m);
+  }
 
   return {
     total: rows.length,
@@ -702,7 +719,7 @@ export function acceptanceProgress(doc, { profiles = [] } = {}) {
     unwatchedRows: unwatched.length,
     untouched,
     touched: rows.length - untouched,
-    modes: { shipped: shipped.length, total: ACCEPTANCE_MODES.length, names: shipped, restingOnUnwatched },
+    modes: { shipped: shipped.length, total: ACCEPTANCE_MODES.length, names: shipped, restingOnUnwatched, snapshotUnread },
   };
 }
 
@@ -723,6 +740,9 @@ export function renderDeliveryLine(p) {
     line += `
 отгружённые режимы опираются на помеченную кривую: ${p.modes.restingOnUnwatched.join(' · ')}`
       + ' — счёт отгрузки не тронут, отзыв это слово владельца';
+  }
+  if (p.modes.snapshotUnread?.length > 0) {
+    line += `\nбоевой снимок режима НЕ ПРОЧИТАН, метки в нём не сверены: ${p.modes.snapshotUnread.join(' · ')}`;
   }
   if (e.unclassified.length > 0) {
     line += `\nне классифицировано: ${e.unclassified.length} — ${e.unclassified.map((r) => `${r.mhz} МГц [${r.tags.join(', ')}]`).join(' · ')}`;
@@ -1569,6 +1589,266 @@ export function attachDerivedStatus(doc) {
 }
 
 // =================================================================================================
+// 3c. THE BATTLE SNAPSHOT — the curve the owner's shortcut applies, frozen (`plans/99` Ш1, epic 98)
+// =================================================================================================
+
+/**
+ * ─── WHY IT EXISTS — THE OWNER'S RULING OF 2026-09-09 ────────────────────────────────────────────
+ *
+ * *«должны указывать на снимок, и передача рабочей копии в снимок - должна проходить суд и валидатор.
+ * который проверяет адекватность и корректность передаваемой кривой из рабочего слепка в боевой
+ * снимок»* (`GOAL.md` → «📸 БОЕВОЙ РЕЖИМ СТОИТ НА СНИМКЕ»). Until this section every working mode
+ * carried `curveRef: "measured"`: a sweep's write reached the owner's shortcut the moment it landed,
+ * with nothing in between but the write-time guards on the card — an emergency brake, not a rule of
+ * passage (`bugs/134`).
+ *
+ * ─── WHAT IS FROZEN, AND WHAT MUST NEVER BE (EXP-0082, `researches/37` §1.5) ─────────────────────
+ *
+ * The DOCUMENT — an artefact with one author (R14a) that moves only when we move it. NEVER the card's
+ * live table: that slides with temperature (R14b), and a snapshot of something that moves is a lie
+ * that grows with time. The offsets are still COMPUTED at apply time from the frozen rows, by the same
+ * arithmetic the working document goes through (`profile-manager.resolveProfileCurve`); a snapshot
+ * changes only WHERE the rows come from.
+ *
+ * ─── THE SHAPE: THE DOCUMENT'S OWN BODY, PLUS THREE FIELDS ABOUT THE ACT ─────────────────────────
+ *
+ *   kind       'battle-snapshot'
+ *   takenAt    the moment of the act, local ISO. The FILE NAME is derived from it, so the id is not
+ *              stored twice — a name ↔ field pair PREVENTED rather than watched (the profile format's
+ *              «профиль не может врать о том, кто он», applied to snapshots).
+ *   source     { doc, sha256 } — which working document, and the hash of the exact BYTES frozen. A
+ *              content hash and not a commit id: a sweep may write the document after the last commit,
+ *              and a commit id would then name bytes that were never snapshotted.
+ *   coverage   { total, edges, untouched } — counted AT THE ACT by `acceptanceProgress` and stored,
+ *              never re-counted on load: it is what the act SAID, and a counting rule that evolves later
+ *              must not rewrite an old snapshot's testimony.
+ *   card · voltageGridMv · stamp · frequencies — the source document's body, so `validateCurveDoc`
+ *              judges it and the row rules keep ONE home.
+ *
+ * ─── IMMUTABILITY IS A PROPERTY, NOT A PROMISE ────────────────────────────────────────────────────
+ *
+ * The writer never replaces an existing file: the bytes go to a temp file that is then HARD-LINKED
+ * under the final name, and linking to a taken name fails with EEXIST atomically. A rename would not
+ * do — on Windows `renameSync` replaces its target, so «refuse if it exists» would be a check-then-act
+ * race dressed up as a guarantee. Overwriting a snapshot is substituting evidence. (Hard links need
+ * NTFS; the project volume is NTFS, probed 2026-09-13. Elsewhere the link throws and the act refuses
+ * loudly rather than falling back to the replacing write.)
+ *
+ * ─── THE PHASE BOUNDARY, NAMED SO NOBODY MISTAKES THIS FOR THE GATE ───────────────────────────────
+ *
+ * This is the FORMAT (epic 98 phase 1). `validateSnapshot` refuses what could not BE a snapshot; it
+ * does NOT judge whether a curve DESERVES promotion — that is the gate of phase 2 (`plans/98` checks
+ * 1–7), and it will stand in front of this same writer. Until it exists, the CLI says out loud that it
+ * snapshotted without a gate: silence there would read as «checked» (R4b).
+ *
+ * [NOT-TESTED] at birth 2026-09-13 — blocks in `--selftest`, section «БОЕВОЙ СНИМОК».
+ */
+export const SNAPSHOT_KIND = 'battle-snapshot';
+export const SNAPSHOT_SUBDIR = 'battle';
+const SNAPSHOT_KEYS = Object.freeze(['kind', 'takenAt', 'source', 'coverage', 'card', 'voltageGridMv', 'stamp', 'frequencies']);
+const SNAPSHOT_SOURCE_KEYS = Object.freeze(['doc', 'sha256']);
+const SNAPSHOT_COVERAGE_KEYS = Object.freeze(['total', 'edges', 'untouched']);
+/** The working document's name as it is allowed into a path: `--from ../x` must not become one. */
+const SOURCE_DOC_NAME_RE = /^[a-z0-9][a-z0-9-]*$/u;
+/** What `snapshotIdFor` produces, and the only shape the loader turns into a path. */
+const SNAPSHOT_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/u;
+
+/**
+ * The snapshot id of a moment: `2026-09-13T20:15:30+03:00` → `2026-09-13T20-15-30`. `:` cannot stand
+ * in a Windows file name, and the offset is dropped because `takenAt` inside the file carries it — the
+ * validator holds the name against that field. `null` for anything that is not a local ISO moment
+ * (`Z` included, EXP-0012).
+ */
+export function snapshotIdFor(takenAt) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})[+-]\d{2}:\d{2}$/u.exec(String(takenAt ?? ''));
+  return m ? `${m[1]}T${m[2]}-${m[3]}-${m[4]}` : null;
+}
+
+export function snapshotPath(id, dir = CURVES_DIR) {
+  return path.join(dir, SNAPSHOT_SUBDIR, `${id}.json`);
+}
+
+/**
+ * Build a snapshot from the working document's BYTES. Pure apart from the clock, which is injectable.
+ *
+ * The body is parsed from the very bytes that are hashed, so `source.sha256` names exactly what is
+ * frozen. Building from a LOADED document instead would hash a re-serialisation — and the loader
+ * attaches things (`attachDerivedStatus`), so the hash would describe an object, not the file.
+ */
+export function buildSnapshot({ sourceName, sourceBytes, nowIso = null }) {
+  const doc = JSON.parse(Buffer.isBuffer(sourceBytes) ? sourceBytes.toString('utf8') : String(sourceBytes));
+  // Counted by the project's own predicate, never re-derived here (EXP-0278): «край» is what the
+  // delivery line calls a край, unwatched edges apart (P87-AC3).
+  const p = acceptanceProgress(doc);
+  return {
+    kind: SNAPSHOT_KIND,
+    takenAt: nowIso ?? localIso(),
+    source: { doc: sourceName, sha256: createHash('sha256').update(sourceBytes).digest('hex') },
+    coverage: { total: p.total, edges: p.edges.total, untouched: p.untouched },
+    card: doc.card ?? null,
+    voltageGridMv: doc.voltageGridMv ?? null,
+    stamp: doc.stamp ?? null,
+    frequencies: doc.frequencies ?? null,
+  };
+}
+
+/**
+ * THE FORMAT GATE — refuses what could not have been produced by `buildSnapshot`. Pure.
+ *
+ * `fileName`, when given, is held against `takenAt`: a snapshot whose name and moment disagree is
+ * lying about when it was taken. The body goes through `validateCurveDoc` whole, so a snapshot of a
+ * document that fails its own validator is not a snapshot either — and no row rule is copied here.
+ */
+export function validateSnapshot(snap, { fileName = null } = {}) {
+  if (!snap || typeof snap !== 'object' || Array.isArray(snap)) return [refuse('<снимок>', 'ожидался JSON-объект')];
+  const out = [];
+  for (const k of Object.keys(snap)) {
+    if (!SNAPSHOT_KEYS.includes(k)) out.push(refuse(k, `неизвестное поле снимка; известны: ${SNAPSHOT_KEYS.join(', ')}`));
+  }
+  for (const k of SNAPSHOT_KEYS) {
+    if (!(k in snap)) out.push(refuse(k, 'обязательное поле снимка отсутствует'));
+  }
+  if (snap.kind !== SNAPSHOT_KIND) out.push(refuse('kind', `ожидался ${SNAPSHOT_KIND}, получено ${JSON.stringify(snap.kind)}`));
+
+  const id = snapshotIdFor(snap.takenAt);
+  if (id === null) {
+    out.push(refuse('takenAt', `момент снятия — локальный ISO 8601 со смещением, получено ${JSON.stringify(snap.takenAt)}; «Z» отвергается намеренно — EXP-0012`));
+  } else if (fileName !== null && path.basename(fileName, '.json') !== id) {
+    out.push(refuse('takenAt', `имя файла ${path.basename(fileName, '.json')} не совпадает с моментом снятия ${snap.takenAt} (${id}) — `
+      + 'снимок не может врать о том, когда он снят'));
+  }
+
+  const src = snap.source;
+  if (!src || typeof src !== 'object' || Array.isArray(src)) {
+    out.push(refuse('source', 'источник обязателен: какой рабочий документ заморожен и хеш его байтов'));
+  } else {
+    for (const k of Object.keys(src)) {
+      if (!SNAPSHOT_SOURCE_KEYS.includes(k)) out.push(refuse(`source.${k}`, `неизвестное поле источника; известны: ${SNAPSHOT_SOURCE_KEYS.join(', ')}`));
+    }
+    if (typeof src.doc !== 'string' || !SOURCE_DOC_NAME_RE.test(src.doc)) {
+      out.push(refuse('source.doc', `ожидалось имя рабочего документа (строчные буквы, цифры, дефисы), получено ${JSON.stringify(src.doc)}`));
+    }
+    if (typeof src.sha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(src.sha256)) {
+      out.push(refuse('source.sha256', `ожидался SHA-256 байтов источника — 64 шестнадцатеричных знака, получено ${JSON.stringify(src.sha256)}`));
+    }
+  }
+
+  const cov = snap.coverage;
+  const rows = Array.isArray(snap.frequencies) ? snap.frequencies.length : null;
+  if (!cov || typeof cov !== 'object' || Array.isArray(cov)) {
+    out.push(refuse('coverage', 'покрытие обязательно: сколько краёв было известно в момент снятия'));
+  } else {
+    for (const k of Object.keys(cov)) {
+      if (!SNAPSHOT_COVERAGE_KEYS.includes(k)) out.push(refuse(`coverage.${k}`, `неизвестное поле покрытия; известны: ${SNAPSHOT_COVERAGE_KEYS.join(', ')}`));
+    }
+    for (const k of SNAPSHOT_COVERAGE_KEYS) {
+      if (!Number.isInteger(cov[k]) || cov[k] < 0) out.push(refuse(`coverage.${k}`, `ожидалось целое неотрицательное число, получено ${JSON.stringify(cov[k])}`));
+    }
+    if (Number.isInteger(cov.total) && rows !== null && cov.total !== rows) {
+      out.push(refuse('coverage.total', `покрытие насчитало ${cov.total} частот, а строк в снимке ${rows}`));
+    }
+    for (const k of ['edges', 'untouched']) {
+      if (Number.isInteger(cov[k]) && Number.isInteger(cov.total) && cov[k] > cov.total) {
+        out.push(refuse(`coverage.${k}`, `${cov[k]} больше всего частот (${cov.total}) — покрытие противоречит само себе`));
+      }
+    }
+  }
+
+  const body = {
+    kind: 'tuning-curve', name: src?.doc ?? null,
+    card: snap.card, voltageGridMv: snap.voltageGridMv, stamp: snap.stamp, frequencies: snap.frequencies,
+  };
+  const card = snap.card && typeof snap.card === 'object' && !Array.isArray(snap.card) ? snap.card : null;
+  out.push(...validateCurveDoc(body, { card }));
+  return out;
+}
+
+/**
+ * Write a snapshot — only after it passes its own format gate, and NEVER over an existing file.
+ * Throws with `code: 'SNAPSHOT_EXISTS'` and the file named when the id is taken.
+ */
+export function saveSnapshot(snap, { dir = CURVES_DIR, fs = null } = {}) {
+  const id = snapshotIdFor(snap?.takenAt);
+  const file = id === null ? null : snapshotPath(id, dir);
+  const bad = validateSnapshot(snap, { fileName: file });
+  if (bad.length) {
+    const e = new Error(`снимок не записан: ${bad.slice(0, 5).map((b) => `${b.field}: ${b.why}`).join(' · ')}`);
+    e.refusals = bad;
+    throw e;
+  }
+  const io = fs ?? { existsSync, mkdirSync, writeFileSync, linkSync, unlinkSync };
+  const folder = path.dirname(file);
+  if (!io.existsSync(folder)) io.mkdirSync(folder, { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  io.writeFileSync(tmp, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
+  try {
+    io.linkSync(tmp, file);
+  } catch (e) {
+    if (e?.code === 'EEXIST') {
+      const err = new Error(`снимок ${file} уже существует — снятие НИКОГДА не перезаписывает снимок: перезапись снимка есть подмена улики`);
+      err.code = 'SNAPSHOT_EXISTS';
+      err.file = file;
+      throw err;
+    }
+    throw e;
+  } finally {
+    // After a successful link the final name holds the bytes; the temp name is only scaffolding.
+    try { io.unlinkSync(tmp); } catch { /* the link, not the temp file, is the result */ }
+  }
+  return file;
+}
+
+/** The act of phase 1: read the working document's bytes, build, gate the FORMAT, write. No promotion
+ *  gate — see the phase boundary above. */
+export function takeSnapshot({ name = 'measured', dir = CURVES_DIR, nowIso = null, fs = null } = {}) {
+  if (typeof name !== 'string' || !SOURCE_DOC_NAME_RE.test(name)) {
+    const e = new Error(`имя рабочего документа ${JSON.stringify(name)} недопустимо: строчные буквы, цифры, дефисы`);
+    e.code = 'BAD_SOURCE_NAME';
+    throw e;
+  }
+  const source = curvePath(name, dir);
+  if (!existsSync(source)) {
+    const e = new Error(`рабочего документа «${name}» нет: ${source}`);
+    e.code = 'NO_SOURCE';
+    throw e;
+  }
+  const snapshot = buildSnapshot({ sourceName: name, sourceBytes: readFileSync(source), nowIso });
+  return { file: saveSnapshot(snapshot, { dir, fs }), snapshot };
+}
+
+/**
+ * Load a snapshot for APPLYING. `null` when there is no such file; a THROW with `refusals` when the
+ * file is there but fails its own format gate — a snapshot that is not a snapshot must not reach the
+ * card, and «битый» must not read as «нет».
+ */
+export function loadSnapshot({ id, dir = CURVES_DIR } = {}) {
+  if (typeof id !== 'string' || !SNAPSHOT_ID_RE.test(id)) return null;
+  const file = snapshotPath(id, dir);
+  if (!existsSync(file)) return null;
+  const snap = JSON.parse(readFileSync(file, 'utf8'));
+  const bad = validateSnapshot(snap, { fileName: file });
+  if (bad.length) {
+    const e = new Error(`снимок «${id}» не проходит свой валидатор: ${bad.slice(0, 3).map((b) => `${b.field} — ${b.why}`).join('; ')}`);
+    e.refusals = [{ field: 'settings.curveSnapshot', why: e.message }];
+    throw e;
+  }
+  return attachDerivedStatus(snap);
+}
+
+/** What the act prints — a pure function, so the «no gate» line is provable by a block, not by
+ *  remembering to keep a `console.log` (P99-AC4). */
+export function snapshotReportLines({ file, snapshot }) {
+  const c = snapshot.coverage;
+  return [
+    '⚠️ СНЯТО БЕЗ ВОРОТ ПЕРЕДАЧИ (фаза 2 эпика 98): проверен ФОРМАТ снимка, пригодность кривой к бою не судилась',
+    `снимок:    ${file}`,
+    `источник:  «${snapshot.source.doc}» · sha256 ${snapshot.source.sha256}`,
+    `покрытие:  краёв ${c.edges} из ${c.total} · не тронуто ${c.untouched}`,
+    `в профиле: "curveSnapshot": "${snapshotIdFor(snapshot.takenAt)}"`,
+  ];
+}
+
+// =================================================================================================
 // 4. The conversion to what the hardware takes — COMPUTED, never stored
 // =================================================================================================
 
@@ -1771,10 +2051,37 @@ function cmdProgress({ json = false } = {}) {
   const doc = loadCurveDoc();
   if (!doc) { console.log(`Документа кривой нет: ${curvePath()}. Посеять — \`npm run curve -- --init\`.`); return 1; }
   const { profiles, broken } = readProfileObjects();
-  const p = acceptanceProgress(doc, { profiles });
+  // Снимки, на которых стоят режимы, читаются здесь, в CLI: счётчик чистый и файлов не касается. Битый
+  // или пропавший снимок не роняет строку доставки — он остаётся неподанным и называется ею отдельно.
+  const snapshots = {};
+  for (const prof of profiles) {
+    const id = prof?.settings?.curveSnapshot ?? null;
+    if (id === null || id in snapshots) continue;
+    try { const s = loadSnapshot({ id }); if (s) snapshots[id] = s; } catch { /* named by the line as unread */ }
+  }
+  const p = acceptanceProgress(doc, { profiles, snapshots });
   if (json) { console.log(JSON.stringify({ ...p, brokenProfileFiles: broken }, null, 2)); return 0; }
   console.log(renderDeliveryLine(p));
   if (broken.length > 0) console.log(`⚠️ профили не прочитались и отгруженными не считаются: ${broken.join(', ')}`);
+  return 0;
+}
+
+/**
+ * БОЕВОЙ СНИМОК — `plans/99` Ш4. Замораживает рабочий документ в `curves/battle/<момент>.json`.
+ * Ворот передачи здесь НЕТ (фаза 2 эпика 98), и отчёт говорит это первой строкой. Отказ — код 1 и
+ * причина по полю; существующий снимок не перезаписывается никогда.
+ */
+function cmdSnapshot({ from = 'measured' } = {}) {
+  console.log(H('БОЕВОЙ СНИМОК — заморозка рабочего документа кривой (plans/99, эпик 98 фаза 1)'));
+  let r;
+  try {
+    r = takeSnapshot({ name: from });
+  } catch (e) {
+    console.log(`ОТКАЗ: ${e.message}`);
+    for (const b of (e.refusals ?? []).slice(0, 8)) console.log(`  ${b.field}: ${b.why}`);
+    return 1;
+  }
+  for (const line of snapshotReportLines(r)) console.log(line);
   return 0;
 }
 
@@ -1854,7 +2161,7 @@ function cmdSelftest() {
   console.log('АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона (EXP-0016): словарь статусов · напряжение с сетки · '
     + 'напряжение не выше стокового · монотонность по частоте · порядок таблицы · частота с сетки карты · '
     + 'потолок R13 · штамп · свидетель прожига · атомарная запись · перевод в смещения · сверка сетки · '
-    + 'счётчик приёмки (подмена происхождения)');
+    + 'счётчик приёмки (подмена происхождения) · боевой снимок (перезапись · тело · байты · отчёт без ворот · имя ↔ момент)');
 
   console.log('\n— ЗДОРОВЫЙ ДОКУМЕНТ —');
   ok('чистый документ принимается', fieldsOf(healthyDoc()).length === 0, JSON.stringify(fieldsOf(healthyDoc()).slice(0, 3)));
@@ -1970,6 +2277,32 @@ function cmdSelftest() {
       profiles: [modeRef('optimised', 'measured')],
     });
     return p.modes.restingOnUnwatched.length === 0 && !renderDeliveryLine(p).includes('опираются на помеченную');
+  })());
+  // ── P87-AC5 × БОЕВОЙ СНИМОК (`plans/99`) — перевод режима на снимок НЕ снимает предупреждения ──
+  // Адресат мутации С6 (названа до прогона): ветка снимка в `acceptanceProgress` удалена → краснеет
+  // первый блок ниже, и строка доставки молча перестаёт называть режим, опора которого не изменилась.
+  const modeSnap = (mode, id) => ({ mode, qualified: true, settings: { curveRef: null, curveSnapshot: id } });
+  const markedRows = () => namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED]]).frequencies;
+  ok('СНИМОК × P87-AC5: режим на СНИМКЕ с помеченными строками назван так же, как на ссылке', (() => {
+    const p = acceptanceProgress(namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]]), {
+      profiles: [modeSnap('optimised', '2026-09-13T20-15-30')],
+      snapshots: { '2026-09-13T20-15-30': { frequencies: markedRows() } },
+    });
+    return p.modes.shipped === 1 && p.modes.restingOnUnwatched.join() === 'optimised'
+      && renderDeliveryLine(p).includes('опираются на помеченную кривую: optimised');
+  })());
+  ok('СНИМОК × P87-AC5: снимок без меток не называется, даже если рабочий документ помечен', (() => {
+    const p = acceptanceProgress(namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED, T.ORIGIN_UNWATCHED]]), {
+      profiles: [modeSnap('optimised', '2026-09-13T20-15-30')],
+      snapshots: { '2026-09-13T20-15-30': { frequencies: namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]]).frequencies } },
+    });
+    return p.modes.restingOnUnwatched.length === 0 && p.modes.snapshotUnread.length === 0;
+  })());
+  ok('СНИМОК × P87-AC5: неподанный снимок называется «НЕ ПРОЧИТАН», а не молчит как чистый (R4b)', (() => {
+    const p = acceptanceProgress(namedDoc([[T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED]]), {
+      profiles: [modeSnap('optimised', '2026-09-13T20-15-30')],
+    });
+    return p.modes.snapshotUnread.join() === 'optimised' && renderDeliveryLine(p).includes('НЕ ПРОЧИТАН');
   })());
 
   // ── P87-AC7 — МЕТКУ СНИМАЕТ ТОЛЬКО ПЕРЕПРОЖИГ ПОД ЖИВЫМ СТОРОЖЕМ ──────────────────────────────
@@ -2808,7 +3141,125 @@ function cmdSelftest() {
   ok('М5 «строка расхождения молчит при нуле» — молчание нельзя прочитать (R4b)',
     compareToReference(refDoc(), refPts(), { count: 8 }).line.length > 0);
 
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // БОЕВОЙ СНИМОК (`plans/99` Ш1 · Ш4). АДРЕСАТЫ МУТАЦИЙ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
+  //   С1. `saveSnapshot` кладёт файл `renameSync`, а не жёсткой ссылкой → «НЕ ПЕРЕЗАПИСЫВАЕТ»
+  //   С2. `validateSnapshot` не зовёт `validateCurveDoc` на тело        → «ТЕЛО: неизвестное поле строки»
+  //   С3. `buildSnapshot` хеширует пересериализацию, а не байты           → «sha256 — хеш ТЕХ байтов»
+  //   С4. отчёт снятия теряет строку «без ворот»                          → «отчёт ПЕРВОЙ строкой говорит»
+  //   С5. сверка имени файла с моментом снята                             → «имя файла не совпадает с моментом»
+  // Песочница — настоящий временный каталог, а не подменённый fs: неизменяемость обещана ФАЙЛОВОЙ
+  // СИСТЕМЕ (жёсткая ссылка отказывает на занятом имени), и доказывать её надо на ней.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  console.log('\n— БОЕВОЙ СНИМОК (plans/99): формат, неизменяемость, отчёт без ворот —');
+  const battleBefore = existsSync(path.join(CURVES_DIR, SNAPSHOT_SUBDIR)) ? readdirSync(path.join(CURVES_DIR, SNAPSHOT_SUBDIR)).sort().join('|') : null;
+  const SNAP_AT = '2026-09-13T20:15:30+03:00';
+  const docBytes = (d = healthyDoc()) => Buffer.from(`${JSON.stringify(d, null, 2)}\n`, 'utf8');
+  const snapOf = (d) => buildSnapshot({ sourceName: 'measured', sourceBytes: docBytes(d), nowIso: SNAP_AT });
+  const snapSays = (s, field, word, opts) => validateSnapshot(s, opts).some((b) => b.field === field && b.why.includes(word));
+
+  ok('СНИМОК: здоровый снимок принимается, и имя файла выводится из момента снятия', (() => {
+    const s = snapOf();
+    return validateSnapshot(s, { fileName: snapshotPath('2026-09-13T20-15-30', 'X') }).length === 0
+      && snapshotIdFor(SNAP_AT) === '2026-09-13T20-15-30' && snapshotIdFor('2026-09-13T17:15:30Z') === null;
+  })(), JSON.stringify(validateSnapshot(snapOf()).slice(0, 2)));
+  ok('СНИМОК: покрытие считает счётчик приёмки в момент снятия (краёв 2 · частот 10 · не тронуто 8)', (() => {
+    const d = healthyDoc();
+    d.frequencies[0].tags = [T.STOP_EDGE_FOUND, T.ORIGIN_MEASURED];
+    d.frequencies[1].tags = [T.STOP_EDGE_FOUND, T.ORIGIN_INHERITED];
+    const c = snapOf(d).coverage;
+    return c.edges === 2 && c.total === 10 && c.untouched === 8;
+  })());
+  ok('СНИМОК: sha256 — хеш ТЕХ байтов, что заморожены, и лишний пробел в источнике его меняет', (() => {
+    const b = docBytes();
+    const s = buildSnapshot({ sourceName: 'measured', sourceBytes: b, nowIso: SNAP_AT });
+    const s2 = buildSnapshot({ sourceName: 'measured', sourceBytes: Buffer.concat([b, Buffer.from(' ')]), nowIso: SNAP_AT });
+    return s.source.sha256 === createHash('sha256').update(b).digest('hex') && s2.source.sha256 !== s.source.sha256;
+  })());
+
+  // Каждая враждебная фикстура несёт ОДИН дефект и слово, уникальное для ЭТОГО отказа (EXP-0089).
+  const hostileSnapshots = [
+    ['неизвестное поле верхнего уровня', (s) => { s.note = 'x'; }, 'note', 'неизвестное поле снимка'],
+    ['нет покрытия', (s) => { delete s.coverage; }, 'coverage', 'обязательное поле снимка отсутствует'],
+    ['чужой вид', (s) => { s.kind = 'tuning-curve'; }, 'kind', 'ожидался battle-snapshot'],
+    ['момент в «Z»', (s) => { s.takenAt = '2026-09-13T17:15:30Z'; }, 'takenAt', 'EXP-0012'],
+    ['хеш не той длины', (s) => { s.source.sha256 = 'abc'; }, 'source.sha256', '64 шестнадцатеричных'],
+    ['имя источника с обходом каталога', (s) => { s.source.doc = '../secret'; }, 'source.doc', 'строчные буквы, цифры, дефисы'],
+    ['покрытие насчитало не столько частот, сколько строк', (s) => { s.coverage.total = 11; }, 'coverage.total', 'строк в снимке'],
+    ['краёв больше, чем частот', (s) => { s.coverage.edges = 12; }, 'coverage.edges', 'противоречит само себе'],
+    ['ТЕЛО: неизвестное поле строки — судит валидатор документа', (s) => { s.frequencies[0].foo = 1; }, 'frequencies[0].foo', 'неизвестное поле; известны'],
+  ];
+  for (const [name, spoil, field, word] of hostileSnapshots) {
+    const s = snapOf();
+    spoil(s);
+    ok(`СНИМОК ОТВЕРГАЕТ: ${name} → ${field}`, snapSays(s, field, word), JSON.stringify(validateSnapshot(s).slice(0, 3)));
+  }
+  ok('СНИМОК ОТВЕРГАЕТ: имя файла не совпадает с моментом снятия → takenAt',
+    snapSays(snapOf(), 'takenAt', 'не совпадает с моментом', { fileName: snapshotPath('2026-09-13T20-15-31', 'X') }));
+
+  const sandbox = mkdtempSync(path.join(os.tmpdir(), 'kago-snapshot-'));
+  try {
+    writeFileSync(curvePath('measured', sandbox), docBytes());
+    ok('СНИМОК НЕ ПЕРЕЗАПИСЫВАЕТ: второе снятие в тот же момент — отказ с именем файла, байты первого целы (P99-AC1)', (() => {
+      const first = takeSnapshot({ dir: sandbox, nowIso: SNAP_AT });
+      const before = createHash('sha256').update(readFileSync(first.file)).digest('hex');
+      // Другие БАЙТЫ источника в тот же момент: замени запись файл — его хеш сдвинулся бы.
+      writeFileSync(curvePath('measured', sandbox), Buffer.concat([docBytes(), Buffer.from(' ')]));
+      let refused = null;
+      try { takeSnapshot({ dir: sandbox, nowIso: SNAP_AT }); } catch (e) { refused = e; }
+      const after = createHash('sha256').update(readFileSync(first.file)).digest('hex');
+      const leftovers = readdirSync(path.dirname(first.file)).filter((f) => f.endsWith('.tmp'));
+      return refused?.code === 'SNAPSHOT_EXISTS' && refused.message.includes(first.file) && before === after && leftovers.length === 0;
+    })());
+    ok('СНИМОК: источника нет — отказ с причиной, каталог снимков не создан', (() => {
+      const empty = mkdtempSync(path.join(os.tmpdir(), 'kago-snapshot-empty-'));
+      try {
+        let e = null;
+        try { takeSnapshot({ dir: empty, nowIso: SNAP_AT }); } catch (x) { e = x; }
+        return e?.code === 'NO_SOURCE' && !existsSync(path.join(empty, SNAPSHOT_SUBDIR));
+      } finally { rmSync(empty, { recursive: true, force: true }); }
+    })());
+    ok('СНИМОК: источник, не проходящий СВОЙ валидатор, не замораживается — файла не появилось', (() => {
+      const bad = healthyDoc();
+      bad.frequencies[3].foo = 1;
+      writeFileSync(curvePath('broken', sandbox), docBytes(bad));
+      let e = null;
+      try { takeSnapshot({ name: 'broken', dir: sandbox, nowIso: '2026-09-13T20:16:00+03:00' }); } catch (x) { e = x; }
+      return Array.isArray(e?.refusals) && e.refusals.some((b) => b.field === 'frequencies[3].foo')
+        && !existsSync(snapshotPath('2026-09-13T20-16-00', sandbox));
+    })());
+    ok('СНИМОК: обход каталога в имени источника — отказ ДО чтения', (() => {
+      let e = null;
+      try { takeSnapshot({ name: '../measured', dir: sandbox, nowIso: SNAP_AT }); } catch (x) { e = x; }
+      return e?.code === 'BAD_SOURCE_NAME';
+    })());
+    ok('СНИМОК: загрузка отдаёт строки с производным статусом; нет файла — null; битый файл — отказ по полю профиля', (() => {
+      const s = loadSnapshot({ id: '2026-09-13T20-15-30', dir: sandbox });
+      if (!s || s.frequencies.length !== 10 || typeof s.frequencies[0].status !== 'string') return false;
+      if (loadSnapshot({ id: '2026-01-01T00-00-00', dir: sandbox }) !== null) return false;
+      if (loadSnapshot({ id: '../measured', dir: sandbox }) !== null) return false;
+      // Порча снимка В ПЕСОЧНИЦЕ: напряжение, которого нет на сетке карты.
+      const f = snapshotPath('2026-09-13T20-15-30', sandbox);
+      const raw = JSON.parse(readFileSync(f, 'utf8'));
+      raw.frequencies[0].voltageMv = 1101;
+      writeFileSync(f, JSON.stringify(raw));
+      let e = null;
+      try { loadSnapshot({ id: '2026-09-13T20-15-30', dir: sandbox }); } catch (x) { e = x; }
+      return e?.refusals?.[0]?.field === 'settings.curveSnapshot' && e.message.includes('voltageMv');
+    })());
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+  ok('СНИМОК: отчёт снятия ПЕРВОЙ строкой говорит, что ворот передачи нет (P99-AC4)', (() => {
+    const lines = snapshotReportLines({ file: snapshotPath('2026-09-13T20-15-30', 'X'), snapshot: snapOf() });
+    return lines[0].includes('СНЯТО БЕЗ ВОРОТ ПЕРЕДАЧИ') && lines.some((l) => l.includes('"curveSnapshot": "2026-09-13T20-15-30"'));
+  })());
+
   console.log('\n— ПЕСОЧНИЦА —');
+  ok('самопроверка не тронула каталог боевых снимков curves/battle/', (() => {
+    const now = existsSync(path.join(CURVES_DIR, SNAPSHOT_SUBDIR)) ? readdirSync(path.join(CURVES_DIR, SNAPSHOT_SUBDIR)).sort().join('|') : null;
+    return now === battleBefore;
+  })());
   ok('самопроверка не выросла в рабочем каталоге curves/', (() => {
     if (!existsSync(CURVES_DIR)) return true;
     return !readdirSync(CURVES_DIR).some((f) => f.endsWith('.tmp'));
@@ -3013,11 +3464,12 @@ async function main() {
   if (has('--verify')) return cmdVerify();
   if (has('--progress')) return cmdProgress({ json: has('--json') });
   if (has('--unwatched')) return cmdUnwatched({ json: has('--json') });
+  if (has('--snapshot')) return cmdSnapshot({ from: has('--from') ? argv[argv.indexOf('--from') + 1] : 'measured' });
   if (has('--take-reference')) return cmdTakeReference({ seconds: num('--seconds', 240), withLoad: !has('--no-load') });
   if (has('--reference')) return cmdShowReference();
   if (has('--show') || argv.length === 0) return cmdShow();
   console.log('Использование: --grids | --init [--force] | --show | --verify | --progress [--json]'
-    + ' | --reference | --take-reference [--seconds N] [--no-load] | --selftest');
+    + ' | --snapshot [--from <документ>] | --reference | --take-reference [--seconds N] [--no-load] | --selftest');
   return 1;
 }
 
@@ -3032,4 +3484,7 @@ export default {
   // `bugs/97` — the reference table: one base for every apply, taken in the regime we tune FOR.
   REFERENCE_FILE, REFERENCE_REGIME, referencePath, referenceRegimeRefusals, buildReferenceTable,
   validateReferenceTable, saveReferenceTable, loadReferenceTable, referenceUsableFor, compareToReference,
+  // `plans/99` — the battle snapshot: the frozen curve a mode applies (epic 98 phase 1).
+  SNAPSHOT_KIND, SNAPSHOT_SUBDIR, snapshotIdFor, snapshotPath, buildSnapshot, validateSnapshot, saveSnapshot,
+  takeSnapshot, loadSnapshot, snapshotReportLines,
 };
