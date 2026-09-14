@@ -31,6 +31,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { loadFacts, effectiveCurve, curveFacts, CURVE_PATH } from '../automation-engine/lib/curve-map.mjs';
+import { contradictions } from './hang-floor-physics-lint.mjs';
 
 const EDITS_DIR = join('curves', 'edits');
 const IDLE_EXIT_MS = 3 * 60 * 60 * 1000; // a forgotten server leaves by itself after three quiet hours
@@ -153,6 +154,8 @@ function pageHtml(data) {
   .orig { fill: none; stroke: #1e9e5a; stroke-width: 2; stroke-dasharray: 6 5; opacity: .55; }
   .edit { fill: none; stroke: #6b3fd4; stroke-width: 3; }
   .proven { fill: #2b6cb0; opacity: .5; } .floor { fill: #d23b3b; }
+  .cmp { fill: none; stroke: #e07b39; stroke-width: 2; opacity: .9; } .anchor { fill: #111; }
+  .refuted { fill: none; stroke: #9aa1ae; stroke-width: 1.6; }
   .h { fill: #fff; stroke: #6b3fd4; stroke-width: 3; cursor: grab; }
   .h:hover, .h.drag { fill: #6b3fd4; } .h.bad { stroke: #d23b3b; } .h.warn { stroke: #d98a1c; }
   .tip { font-size: 15px; font-weight: 600; fill: #3a1f8a; paint-order: stroke; stroke: #fff; stroke-width: 4; }
@@ -170,17 +173,24 @@ function pageHtml(data) {
 <h1>Кривая V/F — редактор</h1>
 <p class="sub">Источник: <code>${data.source}</code> · драйвер ${data.stamp.driver ?? '?'} · VBIOS ${data.stamp.vbios ?? '?'} · тронуто частот ${data.touched} из ${data.ladder.length}.
 Тяните фиолетовые точки. Двойной клик по полю — добавить точку, правый клик по точке — убрать.</p>
+${data.start ? `<p class="sub">Открыта: <b>${data.start.label}</b> <code>${data.start.path}</code>${data.start.refusal ? ` — <span class="bad">не открылась: ${data.start.refusal}</span>` : ''}</p>` : ''}
 <div class="card"><svg id="plot" viewBox="0 0 1400 720"></svg>
 <div class="legend">
  <span><i style="background:#9aa1ae"></i>сток</span>
  <span><i style="background:#1e9e5a;opacity:.6"></i>кривая сейчас (то, что ложится в карту)</span>
- <span><i style="background:#6b3fd4"></i>ваша кривая</span>
+ <span><i style="background:#6b3fd4"></i>кривая на экране — её сохраняет кнопка</span>
+ ${data.compare ? `<span><i style="background:#e07b39"></i>${data.compare.label}</span>` : ''}
+ ${data.anchors.length ? '<span><b style="background:#111;border-radius:1px;transform:rotate(45deg)"></b>найденный край: рабочая точка по правилу «последняя стабильная + шаг»</span>' : ''}
  <span><b style="background:#2b6cb0;opacity:.6"></b>самое глубокое, что прошло прожиг</span>
  <span><b style="background:#d23b3b"></b>пол зависания — здесь карта уже вешала машину</span>
+ ${data.refutedFloors.length ? `<span><b style="border:1.6px solid #9aa1ae"></b>стена, опровергнутая прожигом выше по частоте (${data.refutedFloors.length}, bugs/124) — не край</span>` : ''}
 </div></div>
 <div class="card"><div id="warn" class="warnbox"></div></div>
 <div class="card bar">
  <button class="save" id="save">Сохранить</button>
+ <button id="down">Вся кривая на шаг вниз</button>
+ <button id="up">Вся кривая на шаг вверх</button>
+ ${data.start && !data.start.refusal ? '<button id="back">Вернуть открытую</button>' : ''}
  <button id="reset">Сбросить к текущей</button>
  <span id="status" class="status"></span>
 </div>
@@ -199,7 +209,8 @@ const snap = (arr, v) => arr.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) 
 const svg = document.getElementById('plot');
 const NS = 'http://www.w3.org/2000/svg';
 const el = (t, a, parent = svg) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); parent.appendChild(e); return e; };
-let corners = D.corners.map(c => ({ ...c }));
+const opened = () => (D.start && D.start.corners ? D.start.corners : D.corners).map(c => ({ ...c }));
+let corners = opened();
 let flags = new Map();
 
 // Step line through corners exactly as the card reads it: a rung serves its corner's frequency until the next corner.
@@ -212,8 +223,16 @@ function drawStatic() {
   el('text', { x: 10, y: P.t + 4, class: 'ax' }).textContent = 'МГц';
   el('polyline', { points: D.stock.filter(s => s.mv >= xMin).map(s => X(s.mv) + ',' + Y(s.mhz)).join(' '), class: 'stock' });
   el('polyline', { points: stepPts(D.corners), class: 'orig' });
+  if (D.compare) el('polyline', { points: stepPts(D.compare.corners), class: 'cmp' });
+  for (const a of D.anchors) {
+    if (a.workingMv < xMin) continue;
+    const cx = X(a.workingMv), cy = Y(a.mhz);
+    el('rect', { x: cx - 6, y: cy - 6, width: 12, height: 12, class: 'anchor', transform: 'rotate(45 ' + cx + ' ' + cy + ')' })
+      .appendChild(title(a.mhz + ' МГц: отказ ' + a.failMv + ' мВ (' + a.failKind + '), стабильно ' + a.lastStableMv + ' мВ' + (a.lastStableAt !== a.mhz ? ' на ' + a.lastStableAt + ' МГц' : '') + ' → рабочая точка ' + a.workingMv + ' мВ'));
+  }
   for (const p of D.proven) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 3, class: 'proven' }).appendChild(title(p.mhz + ' МГц: прошло ' + p.mv + ' мВ'));
   for (const p of D.floors) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 5, class: 'floor' }).appendChild(title(p.mhz + ' МГц: пол зависания ' + p.mv + ' мВ'));
+  for (const p of D.refutedFloors) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 5, class: 'refuted' }).appendChild(title(p.mhz + ' МГц: стена ' + p.mv + ' мВ противоречит физике — ' + p.higherMhz + ' МГц прошла на ' + p.passedMv + ' мВ (bugs/124), краем не считается'));
 }
 function title(t) { const e = document.createElementNS(NS, 'title'); e.textContent = t; return e; }
 
@@ -252,7 +271,7 @@ svg.addEventListener('dblclick', ev => {
 });
 
 async function post(path) {
-  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ corners }) });
+  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ corners, startedFrom: D.start && !D.start.refusal ? D.start.path : null }) });
   return r.json();
 }
 function setStatus(t, cls) { const s = document.getElementById('status'); s.textContent = t; s.className = 'status ' + (cls || ''); }
@@ -273,17 +292,27 @@ async function changed() {
   const hangTxt = list => list.map(x => rng(x) + (x.floor ? ' (пол ' + x.floor + ')' : '')).join(' · ');
   const unTxt = list => list.map(x => rng(x) + (x.proven ? ' (доказано ' + x.proven + ')' : ' (прожигов выше нет)')).join(' · ');
   let html = '';
-  if (s.hang.length) html += '<div class="bad"><b>🔴 Ваши правки кладут на пол зависания или ниже — ' + count(s.hang) + ' частот:</b> ' + hangTxt(s.hang) + '</div>';
-  if (s.unproven.length) html += '<div class="warn"><b>🟡 Ваши правки глубже доказанного прожигом — ' + count(s.unproven) + ' частот:</b> ' + unTxt(s.unproven) + '</div>';
-  if (s.deeper && !s.hang.length && !s.unproven.length) html += '<div class="ok">Правки не уходят глубже доказанного прожигом.</div>';
+  if (s.hang.length) html += '<div class="bad"><b>🔴 Кривая на экране кладёт на пол зависания или ниже — ' + count(s.hang) + ' частот:</b> ' + hangTxt(s.hang) + '</div>';
+  if (s.unproven.length) html += '<div class="warn"><b>🟡 Кривая на экране глубже доказанного прожигом — ' + count(s.unproven) + ' частот:</b> ' + unTxt(s.unproven) + '</div>';
+  if (s.deeper && !s.hang.length && !s.unproven.length) html += '<div class="ok">Кривая на экране не уходит глубже доказанного прожигом.</div>';
   const a = s.already;
-  if (a.hang.length || a.unproven.length) html += '<div class="hint" style="margin-top:6px">Уже в текущей кривой, без ваших правок: '
+  if (a.hang.length || a.unproven.length) html += '<div class="hint" style="margin-top:6px">Уже в текущей кривой: '
     + (a.hang.length ? 'на полу зависания ' + count(a.hang) + ' частот — ' + hangTxt(a.hang) : '')
     + (a.hang.length && a.unproven.length ? '; ' : '')
     + (a.unproven.length ? 'глубже доказанного ' + count(a.unproven) + ' частот — ' + unTxt(a.unproven) : '') + '</div>';
   document.getElementById('warn').innerHTML = html || '<div class="hint">Правок нет.</div>';
 }
 document.getElementById('reset').onclick = () => { corners = D.corners.map(c => ({ ...c })); changed(); };
+if (document.getElementById('back')) document.getElementById('back').onclick = () => { corners = opened(); changed(); };
+// One step of the CARD'S grid for every corner at once — the grid is uneven (5 and 10 mV), so it is a step, not a number.
+function shift(dir) {
+  const g = D.grid;
+  const moved = corners.map(c => { const i = g.indexOf(c.mv); const j = i + dir; return j >= 0 && j < g.length && g[j] >= xMin ? { mv: g[j], mhz: c.mhz } : null; });
+  if (moved.some(m => m === null)) { setStatus('Дальше сдвигать некуда: крайняя точка упёрлась в край сетки', 'warn'); return; }
+  corners = moved; changed();
+}
+document.getElementById('down').onclick = () => shift(-1);
+document.getElementById('up').onclick = () => shift(1);
 document.getElementById('save').onclick = async () => {
   const b = document.getElementById('save'); b.disabled = true;
   const r = await post('/save'); b.disabled = false;
@@ -298,22 +327,49 @@ drawStatic(); svg.appendChild(dyn); changed();
 // 3. The server — 127.0.0.1 only
 // -------------------------------------------------------------------------------------------------
 
-function snapshotData() {
+/**
+ * A saved curve to open or to compare with — ONLY from the two directories this tool and
+ * `curve-proposal.mjs` write, never an arbitrary path from a URL.
+ */
+export function readSavedCurve(path, limits) {
+  if (!path) return null;
+  const p = String(path).replace(/\\/g, '/');
+  if (!/^curves\/(edits|proposals)\/[\w.+-]+\.json$/.test(p)) return { path: p, label: p, refusal: 'открываются только файлы из curves/edits/ и curves/proposals/' };
+  if (!existsSync(p)) return { path: p, label: p, refusal: 'файла нет' };
+  let doc;
+  try { doc = JSON.parse(readFileSync(p, 'utf8')); } catch (e) { return { path: p, label: p, refusal: `не разбирается: ${e.message}` }; }
+  const time = String(doc.takenAt ?? '').slice(11, 16);
+  const label = doc.kind === 'agent-curve-proposal' ? `предложение агента ${time}` : `ваша правка ${time}`;
+  const refusal = cornerRefusal(doc.corners, limits);
+  return { path: p, label, kind: doc.kind ?? null, refusal, corners: refusal ? null : doc.corners, anchors: Array.isArray(doc.anchors) ? doc.anchors : [] };
+}
+
+function snapshotData({ start = null, compare = null } = {}) {
   const r = loadFacts();
   if (!r.ok) throw new Error(r.why);
-  const f = r.facts;
+  // A WALL THAT CONTRADICTS PHYSICS IS NOT AN EDGE (`bugs/124`): a higher frequency passed on a lower voltage.
+  // Asked of the project's own lint, not re-derived here; such walls are drawn hollow and never flagged red.
+  const refutedFloors = new Map(contradictions(r.facts.floors, new Map([...r.facts.proven].map(([m, p]) => [m, p.voltageMv]))).map((c) => [c.mhz, c]));
+  const f = { ...r.facts, floors: new Map([...r.facts.floors].filter(([m]) => !refutedFloors.has(m))) };
   const effective = effectiveCurve(f);
+  const limits = { grid: f.grid, ladder: f.rows.map((x) => x.mhz), maxMhz: f.card.maxGraphicsMhz ?? Math.max(...f.rows.map((x) => x.mhz)) };
+  const opened = readSavedCurve(start, limits);
+  const cmp = readSavedCurve(compare, limits);
   return {
     facts: f,
     page: {
       source: CURVE_PATH.replace(/\\/g, '/'),
       stamp: f.stamp, touched: f.touched.length,
-      maxMhz: f.card.maxGraphicsMhz ?? Math.max(...f.rows.map((x) => x.mhz)),
-      grid: f.grid, ladder: f.rows.map((x) => x.mhz),
+      maxMhz: limits.maxMhz,
+      grid: f.grid, ladder: limits.ladder,
       stock: f.rows.map((x) => ({ mhz: x.mhz, mv: x.stockVoltageMv })),
       corners: cornersOf(effective),
       proven: [...f.proven].map(([mhz, p]) => ({ mhz, mv: p.voltageMv })),
       floors: [...f.floors].map(([mhz, p]) => ({ mhz, mv: p.voltageMv })),
+      refutedFloors: [...refutedFloors.values()].map((c) => ({ mhz: c.mhz, mv: c.wallMv, higherMhz: c.higherMhz, passedMv: c.passedMv })),
+      start: opened ? { path: opened.path, label: opened.label, refusal: opened.refusal, corners: opened.corners } : null,
+      compare: cmp && !cmp.refusal ? { path: cmp.path, label: cmp.label, corners: cmp.corners } : null,
+      anchors: opened && !opened.refusal ? opened.anchors : [],
     },
   };
 }
@@ -324,13 +380,17 @@ function serve(port, open) {
     clearTimeout(idle); idle = setTimeout(() => process.exit(0), IDLE_EXIT_MS);
     const send = (code, type, body) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
     try {
-      if (req.method === 'GET' && req.url === '/') { send(200, 'text/html; charset=utf-8', pageHtml(snapshotData().page)); return; }
+      const url = new URL(req.url, 'http://127.0.0.1');
+      if (req.method === 'GET' && url.pathname === '/') {
+        send(200, 'text/html; charset=utf-8', pageHtml(snapshotData({ start: url.searchParams.get('start'), compare: url.searchParams.get('compare') }).page));
+        return;
+      }
       if (req.method === 'POST' && (req.url === '/preview' || req.url === '/save')) {
         let body = '';
         req.on('data', (c) => { body += c; });
         req.on('end', () => {
           try {
-            const { corners } = JSON.parse(body || '{}');
+            const { corners, startedFrom = null } = JSON.parse(body || '{}');
             const { facts, page } = snapshotData();
             const refusal = cornerRefusal(corners, { grid: page.grid, ladder: page.ladder, maxMhz: page.maxMhz });
             if (refusal) { send(200, 'application/json', JSON.stringify({ refusal })); return; }
@@ -347,6 +407,7 @@ function serve(port, open) {
             const src = readFileSync(CURVE_PATH);
             writeFileSync(file, JSON.stringify({
               kind: 'owner-curve-edit', takenAt,
+              startedFrom: typeof startedFrom === 'string' && /^curves\/(edits|proposals)\/[\w.+-]+\.json$/.test(startedFrom) ? startedFrom : null,
               basedOn: { path: CURVE_PATH.replace(/\\/g, '/'), sha256: createHash('sha256').update(src).digest('hex') },
               stamp: facts.stamp, corners, summary, frequencies: rows,
             }, null, 1) + '\n');
@@ -408,6 +469,18 @@ export function selfTest() {
     const ps = summarize(rowsFromCorners(pulled, facts), rows, page.ladder);
     check('ТОЧКА, СДВИНУТАЯ ВЛЕВО, ДАЁТ «ГЛУБЖЕ»', ps.deeper > 0 && ps.shallower === 0, `глубже ${ps.deeper} · выше ${ps.shallower}`);
   }
+
+  // A4b. A wall the physics lint refutes (bugs/124) is shown, but never flagged as a floor under the curve.
+  const ref = page.refutedFloors[0];
+  if (ref) {
+    const deepRow = rowsFromCorners([{ mv: page.grid.find((v) => v >= 700), mhz: page.maxMhz }], facts).find((x) => x.mhz === ref.mhz);
+    check('СТЕНА, ОПРОВЕРГНУТАЯ ФИЗИКОЙ, НЕ ПОМЕЧАЕТСЯ ПОЛОМ', deepRow && deepRow.voltageMv <= ref.mv && deepRow.atOrBelowHangFloor === false, `${ref.mhz} МГц / стена ${ref.mv} ← ${ref.higherMhz} прошла на ${ref.passedMv}`);
+  }
+  check('ОПРОВЕРГНУТЫЕ СТЕНЫ ВЫНУТЫ ИЗ ПОЛОВ', page.refutedFloors.length > 0 && page.refutedFloors.every((x) => !facts.floors.has(x.mhz)), `опровергнуто ${page.refutedFloors.length}`);
+
+  // A5. A saved curve opens only from the two directories the tools write.
+  const outside = ['curves/measured.json', 'curves/edits/../measured.json', 'profiles/optimised.json', 'C:/Windows/win.ini'].map((p) => readSavedCurve(p, lim));
+  check('ОТКРЫВАЮТСЯ ТОЛЬКО curves/edits И curves/proposals', outside.every((o) => o && /только файлы/.test(o.refusal ?? '')), outside.map((o) => o?.refusal).join(' | '));
 
   // B. Refusals by name.
   const c = page.corners.map((x) => ({ ...x }));
