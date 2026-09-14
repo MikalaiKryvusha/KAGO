@@ -45,6 +45,10 @@ import { cornersOf } from './curve-editor.mjs';
 
 export const PROPOSALS_DIR = join('curves', 'proposals');
 const EXTRAPOLATION_FLOOR_MV = 25; // plans/25 «решено владельцем» item 2 — not the agent's number
+// What a written proposal says about its own method — ONE place, next to the code it describes. The closing judge of
+// 2026-09-14 found the 23:34 file carrying the hull's R5 and the through-edges method: strings that lived far from the code drifted.
+export const PROPOSAL_R5 = 'R5 сток минус ТРЕНД глубины краёв (прямая МНК, сдвиг до касания самого требовательного края; «ну так проведи тренд», эксперимент №2): у края с чужой «последней стабильной» граница = отказ + 2 шага сетки; ниже нижнего края — не глубже его; выше верхнего — не глубже его и не ниже «верхний край + 25 мВ» (plans/25 п.2)';
+export const PROPOSAL_METHOD = 'тренд: глубина под стоком = a + b·f по методу наименьших квадратов через границы краёв, сдвинутая до касания самого требовательного края; разброс краёв вокруг тренда (RMS) — мера надёжности модели';
 const OFF_POST_DAY = '2026-09-04';  // the day FUSE_OFF_POST_MHZ refers to (mark-unwatched-rows.mjs header)
 const dayOf = (at) => String(at ?? '').slice(0, 10);
 
@@ -364,7 +368,10 @@ if (isMain) {
   console.log(`проверочные проходы подняли: к отказам ${p.failRaises} · монотонность ${p.monotoneRaises}`);
   const lo = p.anchors[0]?.mhz ?? 0; const hi = p.anchors.at(-1)?.mhz ?? 0;
   console.log(`самая длинная полка между краями ${lo}…${hi} МГц: агент ${longestShelf(p.rows, 'voltageMv', lo, hi)} частот · сток ${longestShelf(p.rows, 'stockVoltageMv', lo, hi)}`);
-  console.log('ЗАПАС НАД РАБОЧЕЙ ТОЧКОЙ КРАЯ:', p.anchors.map((a) => `${a.mhz}: +${p.rows.find((r) => r.mhz === a.mhz).voltageMv - a.workingMv}`).join(' · '));
+  // Judged against the edge FLOOR the trend actually honours (edgeFloorMv), signed honestly — the first print used the working
+  // point and showed «+-15» for the nine edges whose floor is hang + two steps (caught by the closing judge, 2026-09-14).
+  console.log('ЗАПАС НАД ГРАНИЦАМИ КРАЁВ (* — граница = отказ + 2 шага):', p.trend.margins.map((m) => `${m.mhz}${m.own ? '' : '*'}: ${m.marginMv >= 0 ? '+' : ''}${m.marginMv}`).join(' · '));
+  console.log(`ТРЕНД: глубина = ${p.trend.a.toFixed(1)} + ${p.trend.b.toFixed(4)}·f · сдвиг ${p.trend.shiftMv.toFixed(1)} мВ · разброс краёв RMS ${p.trend.rmsMv.toFixed(1)} мВ`);
   console.log('\nУГЛЫ КРИВОЙ АГЕНТА:', p.corners.map((c) => `${c.mhz}@${c.mv}`).join(' '));
   if (argv.includes('--write')) {
     const now = new Date(); const off = -now.getTimezoneOffset();
@@ -377,10 +384,11 @@ if (isMain) {
       kind: 'agent-curve-proposal', takenAt,
       basedOn: { curve: { path: CURVE_PATH.replace(/\\/g, '/'), sha256: sha(CURVE_PATH) }, journal: { path: JOURNAL_PATH.replace(/\\/g, '/'), sha256: sha(JOURNAL_PATH), lines: p.records.length } },
       rules: ['R1 GOAL «ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ»', `R2 interviews/026 Q1=B: прожиги с ${ORACLE_DATE}`, 'R3 bugs/124 + interviews/022=B: отказ, опровергнутый прожигом выше и ниже по напряжению, не край',
-        'R4 GOAL «КРИТЕРИЙ ПРИЁМКИ» §2: рабочая точка = последняя стабильная + шаг сетки', 'R5 сток минус ПЛАВНАЯ глубина (выбор владельца 14.09, вариант A): глубина — нижняя выпуклая оболочка ограничений; не глубже рабочей точки края; ниже нижнего края — не глубже его (plans/25 п.2); выше верхнего — не глубже его и не ниже «верхний край + 25 мВ» (plans/25 п.2)',
+        'R4 GOAL «КРИТЕРИЙ ПРИЁМКИ» §2: рабочая точка = последняя стабильная + шаг сетки', PROPOSAL_R5,
         'R6 кривая не убывает с частотой, не выше стока и 3090 МГц'],
       anchors: p.anchors, refuted: p.refuted.map((f) => ({ mhz: f.mhz, mv: f.mv, kind: f.kind, seq: f.seq, refutedBy: f.refutedBy })),
-      method: 'через рабочие точки краёв; глубина под стоком между краями — линейно от края к краю, напряжение между рабочими точками соседних краёв',
+      method: PROPOSAL_METHOD,
+      trend: p.trend,
       corners: p.corners, frequencies: p.rows,
     }, null, 1) + '\n');
     console.log(`\nзаписано: ${file.replace(/\\/g, '/')}`);
