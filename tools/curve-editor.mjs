@@ -158,9 +158,10 @@ function pageHtml(data) {
   .edit { fill: none; stroke: #6b3fd4; stroke-width: 3; }
   .proven { fill: #2b6cb0; opacity: .5; } .floor { fill: #d23b3b; }
   .cmp { fill: none; stroke: #e07b39; stroke-width: 2; opacity: .9; } .anchor { fill: #111; }
-  .refuted { fill: none; stroke: #9aa1ae; stroke-width: 1.6; }
-  .h { fill: #fff; stroke: #6b3fd4; stroke-width: 3; cursor: grab; }
-  .h:hover, .h.drag { fill: #6b3fd4; } .h.bad { stroke: #d23b3b; } .h.warn { stroke: #d98a1c; }
+  .refuted { fill: none; stroke: #9aa1ae; stroke-width: 1; }
+  .h { fill: #6b3fd4; stroke: none; pointer-events: none; }
+  .h.drag { fill: #3a1f8a; } .h.bad { fill: #d23b3b; } .h.warn { fill: #d98a1c; }
+  .hit { fill: transparent; stroke: none; cursor: grab; } .hit:hover { fill: rgba(107, 63, 212, .18); }
   .tip { font-size: 15px; font-weight: 600; fill: #3a1f8a; paint-order: stroke; stroke: #fff; stroke-width: 4; }
   .legend { display: flex; gap: 20px; flex-wrap: wrap; font-size: 14px; color: #3b414d; margin: 8px 2px 0; }
   .legend i { display: inline-block; width: 24px; height: 3px; vertical-align: middle; margin-right: 6px; }
@@ -180,7 +181,7 @@ ${data.start ? `<p class="sub">Открыта: <b>${data.start.label}</b> <code>
 <div class="card"><svg id="plot" viewBox="0 0 1400 720"></svg>
 <div class="legend">
  <span><i style="background:#9aa1ae"></i>сток</span>
- <span><i style="background:#1e9e5a;opacity:.6"></i>кривая сейчас (то, что ложится в карту)</span>
+ <span><i style="background:#1e9e5a;opacity:.6"></i>документ прожигов measured</span>
  <span><i style="background:#6b3fd4"></i>кривая на экране — её сохраняет кнопка</span>
  ${data.compare ? `<span><i style="background:#e07b39"></i>${data.compare.label}</span>` : ''}
  ${data.anchors.length ? '<span><b style="background:#111;border-radius:1px;transform:rotate(45deg)"></b>найденный край: рабочая точка по правилу «последняя стабильная + шаг»</span>' : ''}
@@ -230,12 +231,12 @@ function drawStatic() {
   for (const a of D.anchors) {
     if (a.workingMv < xMin) continue;
     const cx = X(a.workingMv), cy = Y(a.mhz);
-    el('rect', { x: cx - 6, y: cy - 6, width: 12, height: 12, class: 'anchor', transform: 'rotate(45 ' + cx + ' ' + cy + ')' })
+    el('rect', { x: cx - 3, y: cy - 3, width: 6, height: 6, class: 'anchor', transform: 'rotate(45 ' + cx + ' ' + cy + ')' })
       .appendChild(title(a.mhz + ' МГц: отказ ' + a.failMv + ' мВ (' + a.failKind + '), стабильно ' + a.lastStableMv + ' мВ' + (a.lastStableAt !== a.mhz ? ' на ' + a.lastStableAt + ' МГц' : '') + ' → рабочая точка ' + a.workingMv + ' мВ'));
   }
-  for (const p of D.proven) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 3, class: 'proven' }).appendChild(title(p.mhz + ' МГц: прошло ' + p.mv + ' мВ'));
-  for (const p of D.floors) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 5, class: 'floor' }).appendChild(title(p.mhz + ' МГц: пол зависания ' + p.mv + ' мВ'));
-  for (const p of D.refutedFloors) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 5, class: 'refuted' }).appendChild(title(p.mhz + ' МГц: стена ' + p.mv + ' мВ противоречит физике — ' + p.higherMhz + ' МГц прошла на ' + p.passedMv + ' мВ (bugs/124), краем не считается'));
+  for (const p of D.proven) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 1.6, class: 'proven' }).appendChild(title(p.mhz + ' МГц: прошло ' + p.mv + ' мВ'));
+  for (const p of D.floors) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 2.4, class: 'floor' }).appendChild(title(p.mhz + ' МГц: пол зависания ' + p.mv + ' мВ'));
+  for (const p of D.refutedFloors) if (p.mv >= xMin) el('circle', { cx: X(p.mv), cy: Y(p.mhz), r: 2.4, class: 'refuted' }).appendChild(title(p.mhz + ' МГц: стена ' + p.mv + ' мВ противоречит физике — ' + p.higherMhz + ' МГц прошла на ' + p.passedMv + ' мВ (bugs/124), краем не считается'));
 }
 function title(t) { const e = document.createElementNS(NS, 'title'); e.textContent = t; return e; }
 
@@ -246,7 +247,10 @@ function draw() {
   el('polyline', { points: stepPts(corners), class: 'edit' }, dyn);
   corners.forEach((c, i) => {
     const f = flags.get(i);
-    const h = el('circle', { cx: X(c.mv), cy: Y(c.mhz), r: 9, class: 'h' + (i === dragI ? ' drag' : '') + (f ? ' ' + f : '') }, dyn);
+    // The owner 2026-09-14: «точки очень мелкие рисуй — сейчас они перекрывают кривые». The VISIBLE dot is tiny;
+    // the grab target stays finger-sized and invisible, so dragging is as easy as before.
+    el('circle', { cx: X(c.mv), cy: Y(c.mhz), r: 2.6, class: 'h' + (i === dragI ? ' drag' : '') + (f ? ' ' + f : '') }, dyn);
+    const h = el('circle', { cx: X(c.mv), cy: Y(c.mhz), r: 9, class: 'hit' }, dyn);
     h.addEventListener('pointerdown', ev => { dragI = i; svg.setPointerCapture(ev.pointerId); draw(); });
     h.addEventListener('contextmenu', ev => { ev.preventDefault(); if (corners.length > 2) { corners.splice(i, 1); changed(); } });
     if (i === dragI) el('text', { x: X(c.mv) + 14, y: Y(c.mhz) - 12, class: 'tip' }, dyn).textContent = c.mhz + ' МГц · ' + c.mv + ' мВ';
