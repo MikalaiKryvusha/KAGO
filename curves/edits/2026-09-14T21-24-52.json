@@ -1,0 +1,4093 @@
+{
+ "kind": "owner-curve-edit",
+ "takenAt": "2026-09-14T21:24:52+03:00",
+ "basedOn": {
+  "path": "curves/measured.json",
+  "sha256": "ba2536364f0e7986bebdf4b587507c17cf07daf279e9c11bdd24b7268a88e0f1"
+ },
+ "stamp": {
+  "driver": "610.88",
+  "vbios": "98.03.58.40.8b",
+  "takenAt": "2026-08-15T17:37:40+03:00",
+  "tempC": 52
+ },
+ "corners": [
+  {
+   "mv": 700,
+   "mhz": 180
+  },
+  {
+   "mv": 720,
+   "mhz": 187
+  },
+  {
+   "mv": 735,
+   "mhz": 495
+  },
+  {
+   "mv": 740,
+   "mhz": 705
+  },
+  {
+   "mv": 745,
+   "mhz": 877
+  },
+  {
+   "mv": 750,
+   "mhz": 1170
+  },
+  {
+   "mv": 760,
+   "mhz": 1372
+  },
+  {
+   "mv": 770,
+   "mhz": 1672
+  },
+  {
+   "mv": 785,
+   "mhz": 1912
+  },
+  {
+   "mv": 795,
+   "mhz": 2152
+  },
+  {
+   "mv": 815,
+   "mhz": 2280
+  },
+  {
+   "mv": 835,
+   "mhz": 2437
+  },
+  {
+   "mv": 860,
+   "mhz": 2565
+  },
+  {
+   "mv": 885,
+   "mhz": 2670
+  },
+  {
+   "mv": 910,
+   "mhz": 2790
+  },
+  {
+   "mv": 940,
+   "mhz": 2902
+  },
+  {
+   "mv": 965,
+   "mhz": 2992
+  },
+  {
+   "mv": 990,
+   "mhz": 3045
+  },
+  {
+   "mv": 1015,
+   "mhz": 3090
+  }
+ ],
+ "summary": {
+  "changed": 364,
+  "deeper": 228,
+  "shallower": 136,
+  "hang": [
+   {
+    "from": 2977,
+    "to": 2985,
+    "mv": 965,
+    "n": 2,
+    "floor": 1095,
+    "proven": 925
+   },
+   {
+    "from": 3000,
+    "to": 3015,
+    "mv": 990,
+    "n": 3,
+    "floor": 1115,
+    "proven": 925
+   },
+   {
+    "from": 3030,
+    "to": 3030,
+    "mv": 990,
+    "n": 1,
+    "floor": 1120,
+    "proven": 925
+   },
+   {
+    "from": 3052,
+    "to": 3060,
+    "mv": 1015,
+    "n": 2,
+    "floor": 1135,
+    "proven": 935
+   }
+  ],
+  "unproven": [
+   {
+    "from": 187,
+    "to": 187,
+    "mv": 720,
+    "n": 1,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 345,
+    "to": 495,
+    "mv": 735,
+    "n": 21,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 502,
+    "to": 705,
+    "mv": 740,
+    "n": 28,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 712,
+    "to": 877,
+    "mv": 745,
+    "n": 23,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 885,
+    "to": 1170,
+    "mv": 750,
+    "n": 39,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 1177,
+    "to": 1372,
+    "mv": 760,
+    "n": 27,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 1380,
+    "to": 1672,
+    "mv": 770,
+    "n": 40,
+    "floor": null,
+    "proven": 775
+   },
+   {
+    "from": 3075,
+    "to": 3090,
+    "mv": 1015,
+    "n": 3,
+    "floor": 900,
+    "proven": 1025
+   }
+  ],
+  "already": {
+   "hang": [],
+   "unproven": []
+  }
+ },
+ "frequencies": [
+  {
+   "mhz": 180,
+   "voltageMv": 450,
+   "stockVoltageMv": 450,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": true
+  },
+  {
+   "mhz": 187,
+   "voltageMv": 720,
+   "stockVoltageMv": 725,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 195,
+   "voltageMv": 725,
+   "stockVoltageMv": 725,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": true
+  },
+  {
+   "mhz": 202,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 210,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 217,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 225,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 232,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 240,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 247,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 255,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 262,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 270,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 277,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 285,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 292,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 300,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 307,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 315,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 322,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 330,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 337,
+   "voltageMv": 735,
+   "stockVoltageMv": 735,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 345,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 352,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 360,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 367,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 375,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 382,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 390,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 397,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 405,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 412,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 420,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 427,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 435,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 442,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 450,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 457,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 465,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 472,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 480,
+   "voltageMv": 735,
+   "stockVoltageMv": 740,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 487,
+   "voltageMv": 735,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 495,
+   "voltageMv": 735,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 502,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 510,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 517,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 525,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 532,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 540,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 547,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 555,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 562,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 570,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 577,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 585,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 592,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 600,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 607,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 615,
+   "voltageMv": 740,
+   "stockVoltageMv": 745,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 622,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 630,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 637,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 645,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 652,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 660,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 667,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 675,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 682,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 690,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 697,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 705,
+   "voltageMv": 740,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 712,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 720,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 727,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 735,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 742,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 750,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 757,
+   "voltageMv": 745,
+   "stockVoltageMv": 750,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 765,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 772,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 780,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 787,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 795,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 802,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 810,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 817,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 825,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 832,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 840,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 847,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 855,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 862,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 870,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 877,
+   "voltageMv": 745,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 885,
+   "voltageMv": 750,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 892,
+   "voltageMv": 750,
+   "stockVoltageMv": 760,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 900,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 907,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 915,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 922,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 930,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 937,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 945,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 952,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 960,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 967,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 975,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 982,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 990,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 997,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1005,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1012,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1020,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1027,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1035,
+   "voltageMv": 750,
+   "stockVoltageMv": 765,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1042,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1050,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1057,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1065,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1072,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1080,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1087,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1095,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1102,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1110,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1117,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1125,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1132,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1140,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1147,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1155,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1162,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1170,
+   "voltageMv": 750,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1177,
+   "voltageMv": 760,
+   "stockVoltageMv": 770,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1185,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1192,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1200,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1207,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1215,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1222,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1230,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1237,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1245,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1252,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1260,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1267,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1275,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1282,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1290,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1297,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1305,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1312,
+   "voltageMv": 760,
+   "stockVoltageMv": 775,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1320,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1327,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1335,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1342,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1350,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1357,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1365,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1372,
+   "voltageMv": 760,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1380,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1387,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1395,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1402,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1410,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1417,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1425,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1432,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1440,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1447,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1455,
+   "voltageMv": 770,
+   "stockVoltageMv": 785,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1462,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1470,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1477,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1485,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1492,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1500,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1507,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1515,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1522,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1530,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1537,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1545,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1552,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1560,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1567,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1575,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1582,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1590,
+   "voltageMv": 770,
+   "stockVoltageMv": 790,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1597,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1605,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1612,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1620,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1627,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1635,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1642,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1650,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1657,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1665,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1672,
+   "voltageMv": 770,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1680,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1687,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1695,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1702,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1710,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1717,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1725,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1732,
+   "voltageMv": 785,
+   "stockVoltageMv": 795,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1740,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1747,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1755,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1762,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1770,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1777,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1785,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1792,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1800,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1807,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1815,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1822,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1830,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1837,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1845,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1852,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1860,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1867,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1875,
+   "voltageMv": 785,
+   "stockVoltageMv": 800,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1882,
+   "voltageMv": 785,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1890,
+   "voltageMv": 785,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1897,
+   "voltageMv": 785,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1905,
+   "voltageMv": 785,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1912,
+   "voltageMv": 785,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1920,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1927,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1935,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1942,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1950,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1957,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1965,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1972,
+   "voltageMv": 795,
+   "stockVoltageMv": 810,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1980,
+   "voltageMv": 795,
+   "stockVoltageMv": 815,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1987,
+   "voltageMv": 795,
+   "stockVoltageMv": 815,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 1995,
+   "voltageMv": 795,
+   "stockVoltageMv": 815,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2002,
+   "voltageMv": 795,
+   "stockVoltageMv": 815,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2010,
+   "voltageMv": 795,
+   "stockVoltageMv": 820,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2017,
+   "voltageMv": 795,
+   "stockVoltageMv": 820,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2025,
+   "voltageMv": 795,
+   "stockVoltageMv": 820,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2032,
+   "voltageMv": 795,
+   "stockVoltageMv": 820,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2040,
+   "voltageMv": 795,
+   "stockVoltageMv": 825,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2047,
+   "voltageMv": 795,
+   "stockVoltageMv": 825,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2055,
+   "voltageMv": 795,
+   "stockVoltageMv": 825,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2062,
+   "voltageMv": 795,
+   "stockVoltageMv": 825,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2070,
+   "voltageMv": 795,
+   "stockVoltageMv": 835,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2077,
+   "voltageMv": 795,
+   "stockVoltageMv": 835,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2085,
+   "voltageMv": 795,
+   "stockVoltageMv": 835,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2092,
+   "voltageMv": 795,
+   "stockVoltageMv": 835,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2100,
+   "voltageMv": 795,
+   "stockVoltageMv": 840,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2107,
+   "voltageMv": 795,
+   "stockVoltageMv": 840,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2115,
+   "voltageMv": 795,
+   "stockVoltageMv": 840,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 790,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2122,
+   "voltageMv": 795,
+   "stockVoltageMv": 845,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2130,
+   "voltageMv": 795,
+   "stockVoltageMv": 845,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2137,
+   "voltageMv": 795,
+   "stockVoltageMv": 845,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2145,
+   "voltageMv": 795,
+   "stockVoltageMv": 845,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 770,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2152,
+   "voltageMv": 795,
+   "stockVoltageMv": 850,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2160,
+   "voltageMv": 815,
+   "stockVoltageMv": 850,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2167,
+   "voltageMv": 815,
+   "stockVoltageMv": 850,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2175,
+   "voltageMv": 815,
+   "stockVoltageMv": 850,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2182,
+   "voltageMv": 815,
+   "stockVoltageMv": 860,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2190,
+   "voltageMv": 815,
+   "stockVoltageMv": 860,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2197,
+   "voltageMv": 815,
+   "stockVoltageMv": 860,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 785,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2205,
+   "voltageMv": 815,
+   "stockVoltageMv": 865,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2212,
+   "voltageMv": 815,
+   "stockVoltageMv": 865,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2220,
+   "voltageMv": 815,
+   "stockVoltageMv": 865,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2227,
+   "voltageMv": 815,
+   "stockVoltageMv": 865,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2235,
+   "voltageMv": 815,
+   "stockVoltageMv": 870,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2242,
+   "voltageMv": 815,
+   "stockVoltageMv": 870,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2250,
+   "voltageMv": 815,
+   "stockVoltageMv": 870,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2257,
+   "voltageMv": 815,
+   "stockVoltageMv": 875,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2265,
+   "voltageMv": 815,
+   "stockVoltageMv": 875,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2272,
+   "voltageMv": 815,
+   "stockVoltageMv": 875,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2280,
+   "voltageMv": 815,
+   "stockVoltageMv": 875,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2287,
+   "voltageMv": 835,
+   "stockVoltageMv": 885,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2295,
+   "voltageMv": 835,
+   "stockVoltageMv": 885,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2302,
+   "voltageMv": 835,
+   "stockVoltageMv": 885,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 775,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2310,
+   "voltageMv": 835,
+   "stockVoltageMv": 890,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2317,
+   "voltageMv": 835,
+   "stockVoltageMv": 890,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2325,
+   "voltageMv": 835,
+   "stockVoltageMv": 890,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2332,
+   "voltageMv": 835,
+   "stockVoltageMv": 890,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2340,
+   "voltageMv": 835,
+   "stockVoltageMv": 895,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2347,
+   "voltageMv": 835,
+   "stockVoltageMv": 895,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2355,
+   "voltageMv": 835,
+   "stockVoltageMv": 895,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2362,
+   "voltageMv": 835,
+   "stockVoltageMv": 900,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2370,
+   "voltageMv": 835,
+   "stockVoltageMv": 900,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 810,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2377,
+   "voltageMv": 835,
+   "stockVoltageMv": 900,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 785,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2385,
+   "voltageMv": 835,
+   "stockVoltageMv": 910,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 810,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2392,
+   "voltageMv": 835,
+   "stockVoltageMv": 910,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 810,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2400,
+   "voltageMv": 835,
+   "stockVoltageMv": 910,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 810,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2407,
+   "voltageMv": 835,
+   "stockVoltageMv": 910,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 810,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2415,
+   "voltageMv": 835,
+   "stockVoltageMv": 915,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 820,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2422,
+   "voltageMv": 835,
+   "stockVoltageMv": 915,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 820,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2430,
+   "voltageMv": 835,
+   "stockVoltageMv": 915,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 820,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2437,
+   "voltageMv": 835,
+   "stockVoltageMv": 920,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 820,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2445,
+   "voltageMv": 860,
+   "stockVoltageMv": 920,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 820,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2452,
+   "voltageMv": 860,
+   "stockVoltageMv": 920,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 820,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2460,
+   "voltageMv": 860,
+   "stockVoltageMv": 925,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2467,
+   "voltageMv": 860,
+   "stockVoltageMv": 925,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2475,
+   "voltageMv": 860,
+   "stockVoltageMv": 925,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2482,
+   "voltageMv": 860,
+   "stockVoltageMv": 935,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2490,
+   "voltageMv": 860,
+   "stockVoltageMv": 935,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2497,
+   "voltageMv": 860,
+   "stockVoltageMv": 935,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2505,
+   "voltageMv": 860,
+   "stockVoltageMv": 940,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2512,
+   "voltageMv": 860,
+   "stockVoltageMv": 940,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2520,
+   "voltageMv": 860,
+   "stockVoltageMv": 940,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2527,
+   "voltageMv": 860,
+   "stockVoltageMv": 945,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2535,
+   "voltageMv": 860,
+   "stockVoltageMv": 945,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2542,
+   "voltageMv": 860,
+   "stockVoltageMv": 945,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2550,
+   "voltageMv": 860,
+   "stockVoltageMv": 950,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2557,
+   "voltageMv": 860,
+   "stockVoltageMv": 950,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2565,
+   "voltageMv": 860,
+   "stockVoltageMv": 950,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2572,
+   "voltageMv": 885,
+   "stockVoltageMv": 960,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2580,
+   "voltageMv": 885,
+   "stockVoltageMv": 960,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2587,
+   "voltageMv": 885,
+   "stockVoltageMv": 960,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2595,
+   "voltageMv": 885,
+   "stockVoltageMv": 965,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2602,
+   "voltageMv": 885,
+   "stockVoltageMv": 965,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2610,
+   "voltageMv": 885,
+   "stockVoltageMv": 965,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2617,
+   "voltageMv": 885,
+   "stockVoltageMv": 970,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2625,
+   "voltageMv": 885,
+   "stockVoltageMv": 970,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2632,
+   "voltageMv": 885,
+   "stockVoltageMv": 975,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2640,
+   "voltageMv": 885,
+   "stockVoltageMv": 975,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2647,
+   "voltageMv": 885,
+   "stockVoltageMv": 975,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2655,
+   "voltageMv": 885,
+   "stockVoltageMv": 985,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2662,
+   "voltageMv": 885,
+   "stockVoltageMv": 985,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2670,
+   "voltageMv": 885,
+   "stockVoltageMv": 990,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2677,
+   "voltageMv": 910,
+   "stockVoltageMv": 990,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2685,
+   "voltageMv": 910,
+   "stockVoltageMv": 990,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2692,
+   "voltageMv": 910,
+   "stockVoltageMv": 995,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2700,
+   "voltageMv": 910,
+   "stockVoltageMv": 995,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2707,
+   "voltageMv": 910,
+   "stockVoltageMv": 1000,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2715,
+   "voltageMv": 910,
+   "stockVoltageMv": 1000,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2722,
+   "voltageMv": 910,
+   "stockVoltageMv": 1000,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2730,
+   "voltageMv": 910,
+   "stockVoltageMv": 1000,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2737,
+   "voltageMv": 910,
+   "stockVoltageMv": 1000,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 825,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2745,
+   "voltageMv": 910,
+   "stockVoltageMv": 1010,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 835,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2752,
+   "voltageMv": 910,
+   "stockVoltageMv": 1010,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 825,
+   "deeperThanProven": false,
+   "provenMv": 835,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2760,
+   "voltageMv": 910,
+   "stockVoltageMv": 1015,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 840,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2767,
+   "voltageMv": 910,
+   "stockVoltageMv": 1015,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 840,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2775,
+   "voltageMv": 910,
+   "stockVoltageMv": 1015,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 835,
+   "deeperThanProven": false,
+   "provenMv": 840,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2782,
+   "voltageMv": 910,
+   "stockVoltageMv": 1020,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 845,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2790,
+   "voltageMv": 910,
+   "stockVoltageMv": 1020,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 840,
+   "deeperThanProven": false,
+   "provenMv": 845,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2797,
+   "voltageMv": 940,
+   "stockVoltageMv": 1020,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 840,
+   "deeperThanProven": false,
+   "provenMv": 845,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2805,
+   "voltageMv": 940,
+   "stockVoltageMv": 1025,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 845,
+   "deeperThanProven": false,
+   "provenMv": 850,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2812,
+   "voltageMv": 940,
+   "stockVoltageMv": 1035,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 850,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2820,
+   "voltageMv": 940,
+   "stockVoltageMv": 1035,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 850,
+   "deeperThanProven": false,
+   "provenMv": 850,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2827,
+   "voltageMv": 940,
+   "stockVoltageMv": 1040,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 850,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2835,
+   "voltageMv": 940,
+   "stockVoltageMv": 1040,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 890,
+   "deeperThanProven": false,
+   "provenMv": 850,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2842,
+   "voltageMv": 940,
+   "stockVoltageMv": 1045,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 845,
+   "deeperThanProven": false,
+   "provenMv": 850,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2850,
+   "voltageMv": 940,
+   "stockVoltageMv": 1050,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 870,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2857,
+   "voltageMv": 940,
+   "stockVoltageMv": 1050,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 885,
+   "deeperThanProven": false,
+   "provenMv": 870,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2865,
+   "voltageMv": 940,
+   "stockVoltageMv": 1060,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 870,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2872,
+   "voltageMv": 940,
+   "stockVoltageMv": 1060,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 865,
+   "deeperThanProven": false,
+   "provenMv": 870,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2880,
+   "voltageMv": 940,
+   "stockVoltageMv": 1065,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 865,
+   "deeperThanProven": false,
+   "provenMv": 870,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2887,
+   "voltageMv": 940,
+   "stockVoltageMv": 1070,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 865,
+   "deeperThanProven": false,
+   "provenMv": 870,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2895,
+   "voltageMv": 940,
+   "stockVoltageMv": 1070,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2902,
+   "voltageMv": 940,
+   "stockVoltageMv": 1075,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2910,
+   "voltageMv": 965,
+   "stockVoltageMv": 1085,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2917,
+   "voltageMv": 965,
+   "stockVoltageMv": 1085,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2925,
+   "voltageMv": 965,
+   "stockVoltageMv": 1090,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2932,
+   "voltageMv": 965,
+   "stockVoltageMv": 1090,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2940,
+   "voltageMv": 965,
+   "stockVoltageMv": 1095,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2947,
+   "voltageMv": 965,
+   "stockVoltageMv": 1100,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2955,
+   "voltageMv": 965,
+   "stockVoltageMv": 1100,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 890,
+   "deeperThanProven": false,
+   "provenMv": 895,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2962,
+   "voltageMv": 965,
+   "stockVoltageMv": 1110,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2970,
+   "voltageMv": 965,
+   "stockVoltageMv": 1115,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2977,
+   "voltageMv": 965,
+   "stockVoltageMv": 1115,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1090,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2985,
+   "voltageMv": 965,
+   "stockVoltageMv": 1120,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1095,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 2992,
+   "voltageMv": 965,
+   "stockVoltageMv": 1125,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3000,
+   "voltageMv": 990,
+   "stockVoltageMv": 1125,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1100,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3007,
+   "voltageMv": 990,
+   "stockVoltageMv": 1135,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1110,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3015,
+   "voltageMv": 990,
+   "stockVoltageMv": 1140,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1115,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3022,
+   "voltageMv": 990,
+   "stockVoltageMv": 1145,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3030,
+   "voltageMv": 990,
+   "stockVoltageMv": 1145,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1120,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3037,
+   "voltageMv": 990,
+   "stockVoltageMv": 1150,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 920,
+   "deeperThanProven": false,
+   "provenMv": 925,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3045,
+   "voltageMv": 990,
+   "stockVoltageMv": 1160,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": false,
+   "provenMv": 935,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3052,
+   "voltageMv": 1015,
+   "stockVoltageMv": 1160,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1135,
+   "deeperThanProven": false,
+   "provenMv": 935,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3060,
+   "voltageMv": 1015,
+   "stockVoltageMv": 1165,
+   "atOrBelowHangFloor": true,
+   "hangFloorMv": 1015,
+   "deeperThanProven": false,
+   "provenMv": 935,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3067,
+   "voltageMv": 1015,
+   "stockVoltageMv": 1170,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 925,
+   "deeperThanProven": false,
+   "provenMv": 935,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3075,
+   "voltageMv": 1015,
+   "stockVoltageMv": 1175,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 1025,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3082,
+   "voltageMv": 1015,
+   "stockVoltageMv": 1175,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": null,
+   "deeperThanProven": true,
+   "provenMv": 1025,
+   "clampedToStock": false
+  },
+  {
+   "mhz": 3090,
+   "voltageMv": 1015,
+   "stockVoltageMv": 1185,
+   "atOrBelowHangFloor": false,
+   "hangFloorMv": 900,
+   "deeperThanProven": true,
+   "provenMv": 1145,
+   "clampedToStock": false
+  }
+ ]
+}
