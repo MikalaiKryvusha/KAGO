@@ -16,11 +16,13 @@
 //      interviews/022 = B for the same frequency.
 //   R4 working point = the last stable voltage + one step of the card's grid — GOAL.md «КРИТЕРИЙ
 //      ПРИЁМКИ ТЮНИНГА» §2.
-//   R5 between edges: interpolation; above the top edge: extrapolation on the slope DERIVED from the
-//      edges; derived depth (stock − V) never deeper than the shallowest proven neighbour; extrapolated
-//      rows never below «nearest lower tuned + 25 mV» — plans/25 «Что решено владельцем» item 2.
-//      ⚠️ The +25 floor is applied to EXTRAPOLATED rows only: the rule's wording is ambiguous for
-//      interpolated rows, and that reading is named to the owner, not hidden.
+//   R5 the curve is stock minus a SMOOTH depth — the owner's choice 2026-09-14 («плавная глубина»,
+//      after he rejected the jagged first edition). The depth is the lower convex hull of upper bounds:
+//      never deeper than a found edge's working point; below the lowest edge not deeper than that edge
+//      (plans/25 «решено владельцем» п. 2); above the highest edge not deeper than it and not below
+//      «top edge + 25 mV» (same item). Between edges the depth is interpolated SMOOTHLY — deliberately
+//      deeper than the plans/25 «not deeper than the shallower neighbour» reading allowed; that trade was
+//      put to the owner as option A and he chose it.
 //   R6 the curve never decreases with frequency (Vmin does not decrease — the project's physics) and
 //      never exceeds stock or 3090 MHz (R13).
 //
@@ -146,54 +148,89 @@ export function anchorsFrom({ passes, fails, grid, stockAt }) {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 3. The curve — every frequency of the ladder
+// 3. The curve — stock minus a SMOOTH depth (the owner's choice 2026-09-14: «плавная глубина»)
 // -------------------------------------------------------------------------------------------------
+//
+// WHY THE FIRST EDITION WAS JAGGED, AND WHY THIS ONE IS NOT. The first edition glued every row from
+// minima and maxima of several rules (a depth floor, an edge ceiling, a proven-pass ceiling, a +25 step),
+// and each rule is itself a staircase made of separate burns — every switch between rules drew a step:
+// a 400-MHz shelf at 835 mV, a pothole at 2325 MHz, shelves at 875 and 900, a jump at 3030. The owner
+// saw it at once: *«почему твоя кривая такая рваная… не такая гладкая, как сток»*.
+//
+// THE MODEL NOW: V(f) = stock(f) − d(f). Every rule becomes an UPPER BOUND on the depth d at some
+// frequency, and d is the LOWER CONVEX HULL of those bounds — the deepest depth line that bends only one
+// way and is nowhere deeper than a bound. No tunable number is involved; the shape comes from stock.
+//   · a found edge:            d ≤ stock − working point                    (never deeper than the edge)
+//   · a credible failure:      d ≤ stock − (failure + two grid steps)
+//   · below the lowest edge:   d ≤ that edge's depth                        (plans/25: not deeper than the proven neighbour)
+//   · above the highest edge:  d ≤ min(that edge's depth, stock − (its working point + 25 mV))   (plans/25)
+// The +25 mV floor thereby lands SMOOTHLY — the hull bends under it instead of drawing a step.
 
-/**
- * ⚠️ TWO BOUNDS ON A DERIVED ROW, AND THE FIRST EDITION HAD ONLY ONE. The owner's depth rule is a
- * FLOOR (never deeper than the proven neighbour). Physics adds a CEILING: the working point proven at a
- * HIGHER frequency is sufficient for every frequency below it, and so is a trusted pass one grid step
- * up. Without the ceiling, a shallow anchor far below (2137 MHz, 60 mV under stock) lifted the
- * interpolated middle to 935 mV at 2700 MHz, and the monotone pass then dragged the found edges of
- * 2745…3030 MHz (840…940 mV) up with it — found on the first real run, 2026-09-14.
- */
-export function buildRows({ ladder, stockAt, grid, anchors, credible, passes = [], maxMhz }) {
-  if (anchors.length === 0) return { rows: ladder.map((mhz) => ({ mhz, voltageMv: stockAt(mhz), stockVoltageMv: stockAt(mhz), origin: 'stock' })), monotoneRaises: 0 };
+/** Lower convex hull of {x, y} points (Andrew's monotone chain, lower half); equal x keeps the lowest y. */
+export function lowerHull(points) {
+  const pts = points.filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y)).sort((a, b) => a.x - b.x || a.y - b.y);
+  const uniq = [];
+  for (const p of pts) if (!uniq.length || uniq.at(-1).x !== p.x) uniq.push(p);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const hull = [];
+  for (const p of uniq) { while (hull.length >= 2 && cross(hull.at(-2), hull.at(-1), p) <= 0) hull.pop(); hull.push(p); }
+  return hull;
+}
+
+export function smoothDepth({ ladder, stockAt, grid, anchors, credible }) {
   const lo = anchors[0];
   const hi = anchors.at(-1);
-  const slope = (a, b) => (b && a && b.mhz !== a.mhz ? Math.max(0, (b.workingMv - a.workingMv) / (b.mhz - a.mhz)) : 0);
-  const sLow = slope(anchors[0], anchors[1]);
-  const sHigh = slope(anchors.at(-2), anchors.at(-1));
-  const provenStep = (mhz) => { const e = envelopeAt(passes, mhz); return e ? nextStep(grid, e.mv) : Infinity; };
-  const rows = ladder.map((mhz) => {
+  const bounds = [];
+  for (const a of anchors) bounds.push({ x: a.mhz, y: a.stockMv - a.workingMv, why: 'край' });
+  for (const f of credible) if (Number.isFinite(stockAt(f.mhz))) bounds.push({ x: f.mhz, y: stockAt(f.mhz) - nextStep(grid, nextStep(grid, f.mv)), why: 'отказ' });
+  for (const m of ladder) {
+    if (m < lo.mhz) bounds.push({ x: m, y: lo.depthMv, why: 'вниз' });
+    if (m > hi.mhz) bounds.push({ x: m, y: Math.min(hi.depthMv, stockAt(m) - (hi.workingMv + EXTRAPOLATION_FLOOR_MV)), why: 'вверх' });
+  }
+  const hull = lowerHull(bounds);
+  const at = (x) => {
+    if (x <= hull[0].x) return hull[0].y;
+    if (x >= hull.at(-1).x) return hull.at(-1).y;
+    const k = hull.findIndex((p) => p.x >= x);
+    const a = hull[k - 1]; const b = hull[k];
+    return a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x);
+  };
+  return { hull, at, bounds };
+}
+
+export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) {
+  if (anchors.length === 0) return { rows: ladder.map((mhz) => ({ mhz, voltageMv: stockAt(mhz), stockVoltageMv: stockAt(mhz), origin: 'stock' })), hull: [], monotoneRaises: 0, failRaises: 0 };
+  const { hull, at } = smoothDepth({ ladder, stockAt, grid, anchors, credible });
+  const lo = anchors[0].mhz;
+  const hi = anchors.at(-1).mhz;
+  const edge = new Set(anchors.map((a) => a.mhz));
+  const rows = ladder.filter((m) => m <= maxMhz).map((mhz) => {
     const stock = stockAt(mhz);
-    let v; let origin;
-    const at = anchors.find((a) => a.mhz === mhz);
-    if (at) { v = at.workingMv; origin = 'edge'; }
-    else if (mhz < lo.mhz) {
-      v = Math.min(Math.max(lo.workingMv - sLow * (lo.mhz - mhz), stock - lo.depthMv), lo.workingMv, provenStep(mhz));
-      origin = 'extrapolated-down';
-    } else if (mhz > hi.mhz) {
-      const proven = provenStep(mhz);
-      if (Number.isFinite(proven)) { v = Math.max(proven, hi.workingMv); origin = 'inherited'; }
-      else { v = Math.max(hi.workingMv + sHigh * (mhz - hi.mhz), hi.workingMv + EXTRAPOLATION_FLOOR_MV, stock - hi.depthMv); origin = 'extrapolated-up'; }
-    } else {
-      const k = anchors.findIndex((a) => a.mhz > mhz);
-      const a = anchors[k - 1]; const b = anchors[k];
-      const t = (mhz - a.mhz) / (b.mhz - a.mhz);
-      const wanted = Math.max(a.workingMv + t * (b.workingMv - a.workingMv), stock - Math.min(a.depthMv, b.depthMv));
-      v = Math.max(Math.min(wanted, b.workingMv, provenStep(mhz)), a.workingMv);
-      origin = 'interpolated';
-    }
-    // a credible failure at or below this frequency bounds it from below (two grid steps over the failure)
-    for (const f of credible) if (f.mhz <= mhz) v = Math.max(v, nextStep(grid, nextStep(grid, f.mv)));
-    v = Math.min(gridUp(grid, v), stock);
-    return { mhz, voltageMv: v, stockVoltageMv: stock, origin };
+    const voltageMv = Math.min(gridUp(grid, stock - at(mhz)), stock);
+    const origin = edge.has(mhz) ? 'edge' : (mhz < lo ? 'extrapolated-down' : (mhz > hi ? 'extrapolated-up' : 'interpolated'));
+    return { mhz, voltageMv, stockVoltageMv: stock, origin };
   });
-  // The construction is monotone; this pass only COUNTS what it would have to fix, so a regression is visible.
+  // Two verification passes. The construction already satisfies both; they COUNT what they would have to
+  // fix, so a regression shows up as a number instead of silently reshaping the curve.
+  let failRaises = 0;
+  for (const r of rows) {
+    for (const f of credible) {
+      const need = nextStep(grid, nextStep(grid, f.mv));
+      if (f.mhz <= r.mhz && r.voltageMv < need && need <= r.stockVoltageMv) { r.voltageMv = need; failRaises++; }
+    }
+  }
   let run = -Infinity; let monotoneRaises = 0;
   for (const r of rows) { if (r.voltageMv < run && run <= r.stockVoltageMv) { r.voltageMv = run; monotoneRaises++; } run = Math.max(run, r.voltageMv); }
-  return { rows: rows.filter((r) => r.mhz <= maxMhz), monotoneRaises };
+  return { rows, hull, monotoneRaises, failRaises };
+}
+
+/** The longest run of consecutive frequencies on ONE voltage — the owner's «полка», as a number. */
+export function longestShelf(rows, key = 'voltageMv', from = -Infinity, to = Infinity) {
+  let best = 0; let cur = 0; let prev = null;
+  for (const r of rows.filter((x) => x.mhz >= from && x.mhz <= to).sort((a, b) => a.mhz - b.mhz)) {
+    cur = r[key] === prev ? cur + 1 : 1; prev = r[key]; best = Math.max(best, cur);
+  }
+  return best;
 }
 
 /** The effective corners of a frequency → voltage table, in the editor's language. */
@@ -220,8 +257,8 @@ export function propose() {
   const fails = failures(records).filter((f) => stock.has(f.mhz));
   const { anchors, credible, refuted } = anchorsFrom({ passes, fails, grid: facts.grid, stockAt });
   const maxMhz = facts.card.maxGraphicsMhz ?? Math.max(...ladder);
-  const { rows, monotoneRaises } = buildRows({ ladder, stockAt, grid: facts.grid, anchors, credible, passes, maxMhz });
-  return { facts, records, passes, fails, anchors, credible, refuted, rows, monotoneRaises, corners: cornersFromRows(rows, facts.grid), current: cornersOf(effectiveCurve(facts)) };
+  const { rows, hull, monotoneRaises, failRaises } = buildRows({ ladder, stockAt, grid: facts.grid, anchors, credible, maxMhz });
+  return { facts, records, passes, fails, anchors, credible, refuted, rows, hull, monotoneRaises, failRaises, corners: cornersFromRows(rows, facts.grid), current: cornersOf(effectiveCurve(facts)) };
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -231,9 +268,9 @@ export function propose() {
 export function selfTest() {
   const results = [];
   const check = (n, ok, why = '') => results.push({ n, ok: !!ok, why });
-  const grid = [800, 805, 810, 815, 820, 825, 830, 835, 840, 845, 850, 860, 870, 880, 890, 900, 910, 920, 930, 940, 950, 960, 980, 1000];
+  const grid = []; for (let v = 800; v <= 1000; v += 5) grid.push(v);          // a fine grid: shelves cannot hide in coarse steps
   const ladder = [2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000];
-  const stockAt = (m) => 900 + Math.round((m - 2000) / 10); // 900 … 1000, rising
+  const stockAt = (m) => 900 + Math.round((m - 2000) / 10);                   // 900 … 1000, rising
   const passes = [{ mhz: 2300, mv: 830 }, { mhz: 2700, mv: 860 }, { mhz: 2900, mv: 900 }];
   const fails = [
     { mhz: 2300, mv: 825, kind: 'hung' },  // real edge: pass 830 just above
@@ -243,27 +280,36 @@ export function selfTest() {
   const { anchors, credible, refuted } = anchorsFrom({ passes, fails, grid, stockAt });
   check('ФИЗИКА СНИМАЕТ ОТКАЗ, ОПРОВЕРГНУТЫЙ ПРОЖИГОМ ВЫШЕ', refuted.length === 1 && refuted[0].mhz === 2500 && credible.length === 2);
   check('ПРОЖИГ НИЖЕ ПО ЧАСТОТЕ ОТКАЗ НЕ ОПРОВЕРГАЕТ', refutedBy({ mhz: 2800, mv: 900 }, [{ mhz: 2700, mv: 860 }]) === null);
-  const a23 = anchors.find((a) => a.mhz === 2300);
+  const a23 = anchors.find((x) => x.mhz === 2300);
   check('РАБОЧАЯ ТОЧКА = ПОСЛЕДНЯЯ СТАБИЛЬНАЯ + ШАГ СЕТКИ', a23?.workingMv === 835, `2300: ${a23?.workingMv}`);
-  const { rows } = buildRows({ ladder, stockAt, grid, anchors, credible, passes, maxMhz: 3000 });
+
+  const { rows, hull, failRaises, monotoneRaises } = buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz: 3000 });
+  // The verification passes must find nothing to fix: if they do, the hull is wrong and they are HIDING it.
+  check('ПРОВЕРОЧНЫЕ ПРОХОДЫ НИЧЕГО НЕ ПОДНИМАЮТ', failRaises === 0 && monotoneRaises === 0, `отказы ${failRaises} · монотонность ${monotoneRaises}`);
   check('КРИВАЯ НЕ УБЫВАЕТ С ЧАСТОТОЙ', rows.every((r, i) => i === 0 || r.voltageMv >= rows[i - 1].voltageMv));
   check('НИ ОДНА СТРОКА НЕ ВЫШЕ СТОКА', rows.every((r) => r.voltageMv <= stockAt(r.mhz)));
-  // A fixture where the +25 floor is the DECIDING bound: flat top (slope 0), depth cap gives 880, the floor 895 → grid 900.
-  const flat = [{ mhz: 2700, workingMv: 870, depthMv: 100 }, { mhz: 2800, workingMv: 870, depthMv: 110 }];
-  const r29 = buildRows({ ladder, stockAt, grid, anchors: flat, credible: [], passes: [], maxMhz: 3000 }).rows.find((r) => r.mhz === 2900);
-  check('ЭКСТРАПОЛЯЦИЯ ВВЕРХ НЕ НИЖЕ «ВЕРХНИЙ КРАЙ + 25 мВ»', r29.origin === 'extrapolated-up' && r29.voltageMv === 900, `2900: ${r29.voltageMv} (без пола было бы 880)`);
-  const mid = rows.find((r) => r.mhz === 2500);
-  const depthCap = Math.min(...anchors.map((a) => a.depthMv));
-  check('ВЫВЕДЕННАЯ ГЛУБИНА НЕ ГЛУБЖЕ ДОКАЗАННОЙ СОСЕДКИ', mid.origin === 'interpolated' && stockAt(2500) - mid.voltageMv <= depthCap, `2500: ${mid.voltageMv} при стоке ${stockAt(2500)}`);
-  check('ПРОИСХОЖДЕНИЕ НАЗВАНО В КАЖДОЙ СТРОКЕ', rows.every((r) => ['edge', 'interpolated', 'inherited', 'extrapolated-down', 'extrapolated-up'].includes(r.origin)));
-  // The defect of the first real run: a shallow anchor far below must not lift the middle over the next anchor.
-  const far = [{ mhz: 2000, workingMv: 850, depthMv: 50 }, { mhz: 2800, workingMv: 870, depthMv: 110 }];
-  const farRows = buildRows({ ladder, stockAt, grid, anchors: far, credible: [], passes: [], maxMhz: 3000 }).rows;
-  const r27 = farRows.find((r) => r.mhz === 2700); const r28 = farRows.find((r) => r.mhz === 2800);
-  check('НАЙДЕННЫЙ КРАЙ НЕ ЗАДИРАЕТСЯ ИНТЕРПОЛЯЦИЕЙ СНИЗУ', r28.voltageMv === 870 && r27.voltageMv <= 870, `2700: ${r27.voltageMv} · 2800: ${r28.voltageMv}`);
-  // 840 + one grid step = 845, deliberately BELOW the next anchor's 870 — so this block cannot pass on the anchor cap alone.
-  const provenCap = buildRows({ ladder, stockAt, grid, anchors: far, credible: [], passes: [{ mhz: 2500, mv: 840 }], maxMhz: 3000 }).rows.find((r) => r.mhz === 2400);
-  check('ВЫВЕДЕННАЯ СТРОКА НЕ ВЫШЕ ДОКАЗАННОГО ПРОЖИГОМ + ШАГ', provenCap.voltageMv === 850, `2400: ${provenCap.voltageMv} (ждём 850: доказано 845, но не ниже нижней опоры 850)`);
+  check('ГЛАДКАЯ КРИВАЯ НИГДЕ НЕ ГЛУБЖЕ НАЙДЕННОГО КРАЯ', anchors.every((x) => rows.find((r) => r.mhz === x.mhz).voltageMv >= x.workingMv),
+    anchors.map((x) => `${x.mhz}: ${rows.find((r) => r.mhz === x.mhz).voltageMv} ≥ ${x.workingMv}`).join(' · '));
+  const slopes = hull.slice(1).map((p, i) => (p.y - hull[i].y) / (p.x - hull[i].x));
+  check('ГЛУБИНА ГНЁТСЯ В ОДНУ СТОРОНУ (выпуклая оболочка)', slopes.every((k, i) => i === 0 || k >= slopes[i - 1] - 1e-9), slopes.map((k) => k.toFixed(3)).join(' → '));
+  check('ВНИЗ — НЕ ГЛУБЖЕ НИЖНЕГО КРАЯ', rows.filter((r) => r.origin === 'extrapolated-down').every((r) => r.stockVoltageMv - r.voltageMv <= anchors[0].depthMv));
+  check('ПРОИСХОЖДЕНИЕ НАЗВАНО В КАЖДОЙ СТРОКЕ', rows.every((r) => ['edge', 'interpolated', 'extrapolated-down', 'extrapolated-up'].includes(r.origin)));
+
+  // THE OWNER'S COMPLAINT AS A BLOCK: a shallow edge far below and a deep one above used to leave a shelf
+  // (the first edition put 2200…2800 on one voltage). Now the longest shelf may not exceed two frequencies.
+  const far = [{ mhz: 2000, workingMv: 850, stockMv: 900, depthMv: 50 }, { mhz: 2800, workingMv: 870, stockMv: 980, depthMv: 110 }];
+  const farRows = buildRows({ ladder, stockAt, grid, anchors: far, credible: [], maxMhz: 3000 }).rows;
+  const shelf = longestShelf(farRows, 'voltageMv', 2000, 2800);
+  check('НЕТ ПОЛОК: МЕЖДУ КРАЯМИ НИ ОДНО НАПРЯЖЕНИЕ НЕ СТОИТ ДОЛЬШЕ ДВУХ ЧАСТОТ', shelf <= 2, `самая длинная полка: ${shelf} · ${farRows.map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
+
+  // The +25 floor as the DECIDING bound, landing smoothly: flat top, the floor gives 895 at 2900 (without it 880).
+  const flat = [{ mhz: 2700, workingMv: 870, stockMv: 970, depthMv: 100 }, { mhz: 2800, workingMv: 870, stockMv: 980, depthMv: 110 }];
+  const r29 = buildRows({ ladder, stockAt, grid, anchors: flat, credible: [], maxMhz: 3000 }).rows.find((r) => r.mhz === 2900);
+  check('ЭКСТРАПОЛЯЦИЯ ВВЕРХ НЕ НИЖЕ «ВЕРХНИЙ КРАЙ + 25 мВ»', r29.origin === 'extrapolated-up' && r29.voltageMv === 895, `2900: ${r29.voltageMv} (без пола было бы 880)`);
+
+  const hullPts = lowerHull([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 0.5 }, { x: 3, y: 3 }]);
+  check('ОБОЛОЧКА ВЫБРАСЫВАЕТ ТОЧКУ НАД ХОРДОЙ', hullPts.map((p) => p.x).join(',') === '0,2,3', hullPts.map((p) => p.x + ':' + p.y).join(' '));
+
   // R2 on real record shapes: a pass before the oracle date is not evidence
   const recs = [
     { state: 'intent', seq: 1, frequencyMhz: 2800, voltageMv: 850, at: '2026-08-20T10:00:00+03:00' },
@@ -300,7 +346,11 @@ if (isMain) {
   for (const a of p.anchors) console.log(`${a.mhz} · отказ ${a.failMv} (${a.failKind}, ${a.failFrom}) · стабильно ${a.lastStableMv}${a.lastStableAt !== a.mhz ? ' на ' + a.lastStableAt : ''} · РАБОЧАЯ ${a.workingMv}${a.raisedFromMv ? ' (поднята с ' + a.raisedFromMv + ')' : ''} · сток ${a.stockMv} · −${a.depthMv}`);
   console.log('\nОПРОВЕРГНУТЫЕ ОТКАЗЫ (частота/напряжение → чем)');
   console.log(p.refuted.map((f) => `${f.mhz}/${f.mv} ← ${f.refutedBy.mhz}/${f.refutedBy.mv}`).join(' · '));
-  console.log(`\nподнято проходом монотонности: ${p.monotoneRaises}`);
+  console.log(`\nГЛУБИНА (выпуклая оболочка, частота:мВ под стоком): ${p.hull.map((h) => `${h.x}:${h.y.toFixed(1)}`).join(' → ')}`);
+  console.log(`проверочные проходы подняли: к отказам ${p.failRaises} · монотонность ${p.monotoneRaises}`);
+  const lo = p.anchors[0]?.mhz ?? 0; const hi = p.anchors.at(-1)?.mhz ?? 0;
+  console.log(`самая длинная полка между краями ${lo}…${hi} МГц: агент ${longestShelf(p.rows, 'voltageMv', lo, hi)} частот · сток ${longestShelf(p.rows, 'stockVoltageMv', lo, hi)}`);
+  console.log('ЗАПАС НАД РАБОЧЕЙ ТОЧКОЙ КРАЯ:', p.anchors.map((a) => `${a.mhz}: +${p.rows.find((r) => r.mhz === a.mhz).voltageMv - a.workingMv}`).join(' · '));
   console.log('\nУГЛЫ КРИВОЙ АГЕНТА:', p.corners.map((c) => `${c.mhz}@${c.mv}`).join(' '));
   if (argv.includes('--write')) {
     const now = new Date(); const off = -now.getTimezoneOffset();
@@ -313,9 +363,10 @@ if (isMain) {
       kind: 'agent-curve-proposal', takenAt,
       basedOn: { curve: { path: CURVE_PATH.replace(/\\/g, '/'), sha256: sha(CURVE_PATH) }, journal: { path: JOURNAL_PATH.replace(/\\/g, '/'), sha256: sha(JOURNAL_PATH), lines: p.records.length } },
       rules: ['R1 GOAL «ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ»', `R2 interviews/026 Q1=B: прожиги с ${ORACLE_DATE}`, 'R3 bugs/124 + interviews/022=B: отказ, опровергнутый прожигом выше и ниже по напряжению, не край',
-        'R4 GOAL «КРИТЕРИЙ ПРИЁМКИ» §2: рабочая точка = последняя стабильная + шаг сетки', 'R5 plans/25 «решено владельцем» п.2: интерполяция, экстраполяция по выведенному наклону, глубина ≤ доказанной соседки, экстраполяция ≥ верхний край + 25 мВ',
+        'R4 GOAL «КРИТЕРИЙ ПРИЁМКИ» §2: рабочая точка = последняя стабильная + шаг сетки', 'R5 сток минус ПЛАВНАЯ глубина (выбор владельца 14.09, вариант A): глубина — нижняя выпуклая оболочка ограничений; не глубже рабочей точки края; ниже нижнего края — не глубже его (plans/25 п.2); выше верхнего — не глубже его и не ниже «верхний край + 25 мВ» (plans/25 п.2)',
         'R6 кривая не убывает с частотой, не выше стока и 3090 МГц'],
       anchors: p.anchors, refuted: p.refuted.map((f) => ({ mhz: f.mhz, mv: f.mv, kind: f.kind, seq: f.seq, refutedBy: f.refutedBy })),
+      depthHull: p.hull.map((h) => ({ mhz: h.x, depthMv: Math.round(h.y * 10) / 10, bound: h.why })),
       corners: p.corners, frequencies: p.rows,
     }, null, 1) + '\n');
     console.log(`\nзаписано: ${file.replace(/\\/g, '/')}`);
