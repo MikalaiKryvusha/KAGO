@@ -28,12 +28,15 @@ import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { loadFacts, effectiveCurve, curveFacts, CURVE_PATH } from '../automation-engine/lib/curve-map.mjs';
 import { contradictions } from './hang-floor-physics-lint.mjs';
+import { browserCandidates, windowArgs } from '../automation-engine/lib/run-dashboard.mjs';
 
 const EDITS_DIR = join('curves', 'edits');
+const EDITOR_PROFILE_DIR = join(tmpdir(), 'kago-curve-editor-window');
 const IDLE_EXIT_MS = 3 * 60 * 60 * 1000; // a forgotten server leaves by itself after three quiet hours
 
 // -------------------------------------------------------------------------------------------------
@@ -424,7 +427,15 @@ function serve(port, open) {
   server.listen(port, '127.0.0.1', () => {
     const url = `http://127.0.0.1:${port}/`;
     console.log(`curve editor: ${url}`);
-    if (open) spawn('explorer.exe', [url], { detached: true, stdio: 'ignore' }).unref();
+    // A PAGE OPENS IN A BROWSER WINDOW, NEVER THROUGH explorer.exe — the owner 2026-09-14, after the agent
+    // did exactly that: *«зачем в проводнике пытаться открыть веб страницу?»*. The project's way is the
+    // watch window's: the browser with `--app=` in its OWN profile (`run-dashboard.windowArgs`), so the
+    // window is ours and closable, and the dashboard's pid file is not touched.
+    if (open) {
+      const browser = browserCandidates().find(([, p]) => p && existsSync(p));
+      if (browser) spawn(browser[1], windowArgs(url, { size: '--window-size=1500,1250', profileDir: EDITOR_PROFILE_DIR }), { detached: true, stdio: 'ignore' }).unref();
+      else console.error('curve editor: браузер (Edge/Chrome) не найден — откройте адрес вручную');
+    }
   });
 }
 
@@ -477,6 +488,10 @@ export function selfTest() {
     check('СТЕНА, ОПРОВЕРГНУТАЯ ФИЗИКОЙ, НЕ ПОМЕЧАЕТСЯ ПОЛОМ', deepRow && deepRow.voltageMv <= ref.mv && deepRow.atOrBelowHangFloor === false, `${ref.mhz} МГц / стена ${ref.mv} ← ${ref.higherMhz} прошла на ${ref.passedMv}`);
   }
   check('ОПРОВЕРГНУТЫЕ СТЕНЫ ВЫНУТЫ ИЗ ПОЛОВ', page.refutedFloors.length > 0 && page.refutedFloors.every((x) => !facts.floors.has(x.mhz)), `опровергнуто ${page.refutedFloors.length}`);
+
+  // A4c. The owner 2026-09-14: a web page is never handed to explorer.exe — only to a browser window.
+  const own = readFileSync(new URL(import.meta.url), 'utf8');
+  check('СТРАНИЦА ОТКРЫВАЕТСЯ БРАУЗЕРОМ, НЕ ПРОВОДНИКОМ', !/spawn\('explorer\.exe'/.test(own) && /windowArgs\(url/.test(own));
 
   // A5. A saved curve opens only from the two directories the tools write.
   const outside = ['curves/measured.json', 'curves/edits/../measured.json', 'profiles/optimised.json', 'C:/Windows/win.ini'].map((p) => readSavedCurve(p, lim));
