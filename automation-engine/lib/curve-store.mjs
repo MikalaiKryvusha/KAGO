@@ -298,6 +298,24 @@ export const CURVE_TAGS = Object.freeze({
    *
    *  [NOT-TESTED] at birth — the blocks in `--selftest` are what flip this. */
   ORIGIN_UNWATCHED: 'origin:unwatched',
+  /** НАПРЯЖЕНИЕ ЗАДАНО ЭКСПЕРИМЕНТОМ ВЛАДЕЛЬЦА, А НЕ ЗАМЕРОМ — прожига на этой строке нет вовсе.
+   *
+   *  Born 2026-09-14 with the first such curve. The owner, verbatim: *«Под мою ответственность — заложи в
+   *  Оптимайзд профиль»* · *«и запиши, что ЭТО ЖКСПЕРИМЕНТ, НИКОЛАЙ ЗАХОТЕЛ ПРОВЕРИТЬ КРИВУЮ ПРИДУМАННУЮ
+   *  ПРОСТО ИЗ ВОЗДУХА»*. The curve is the agent's smooth proposal (`tools/curve-proposal.mjs`,
+   *  `curves/proposals/2026-09-14T22-40-17.json`): stock minus a depth drawn through the found edges.
+   *
+   *  ⚠️ **WHY A NEW VALUE AND NOT AN EXISTING ONE.** Every existing tag would lie about such a row:
+   *  `origin:measured` / `origin:inherited` claim a burn or its downward inheritance; the reserved
+   *  `origin:interpolated` / `origin:extrapolated` (`DERIVED_ORIGIN_TAGS`) name DERIVED EDGES of the
+   *  owner's acceptance criterion — which this is not; an empty tag set is refused by design.
+   *
+   *  ⚠️ **NEVER AN EDGE, NEVER PROOF.** Not in `PROVEN_TAGS` (no witness is owed, none exists), not
+   *  `stop:*`, so `acceptanceProgress` cannot count it toward «краёв X/389», and `isUnmeasured` is false
+   *  (the row does claim a voltage — it just does not claim to know it holds).
+   *
+   *  [NOT-TESTED] at birth — the experiment document's validation is the first observation. */
+  ORIGIN_EXPERIMENT: 'origin:experiment',
 });
 
 const TAG_VALUES = Object.freeze(Object.values(CURVE_TAGS));
