@@ -1,10 +1,15 @@
 ---
-description: Resume work where the last session left off — read the key project documents, decide the single most important thing to do now, announce it, and start. Use when the human says "continue", "let's continue", "what's next", "where did we leave off", "resume", "pick up where we left off", "продолжи", "продолжим", "что дальше". Trigger aliases (ru): «продолжи», «продолжим», «возобнови», «на чём мы остановились», «что дальше по работе»
+description: Resume work where the last session left off — read the key project documents, decide the single most important thing to do now, announce it, and start. Use when the human says "continue", "let's continue", "what's next", "where did we leave off", "resume", "резюм", "резюме", "pick up where we left off", "продолжи", "продолжим", "что дальше" — and ALWAYS when "resume" (or "резюм") is the FIRST word of the human's message with the task written below it: the skill runs FIRST, in full, then the task (AGENT_GUIDE.md → "A leading skill word is an order"). Trigger aliases (ru): «resume», «резюм», «резюме», «продолжи», «продолжим», «возобнови», «на чём мы остановились», «что дальше по работе»
 ---
 
 # /resume — pick up where we left off
 
 A new session starts with empty context. This skill rebuilds the picture fast and gets to work.
+
+> **The word at the top of the message is the order; the task under it waits.** A message that
+> opens with `resume` (or its Russian shorthand) and continues with a task runs THIS skill first, in full — the task
+> is read only after the Step-2 announcement (`AGENT_GUIDE.md` → "A leading skill word is an
+> order"; the mechanical half is the `prompt-resume-word.mjs` hook of the refresh-hooks module).
 
 ## Step 1. Read ALL the canon documents of the KAIF framework (in parallel)
 
@@ -30,6 +35,11 @@ If relevant to open questions:
 > `PROJECT_HISTORY.md` (the chronicle) is deliberately NOT in this set — it is the project's past,
 > not its now. Open it on demand when you need the archaeology of a decision or an old phase.
 
+> **This list is guarded.** `node .kaif/kaif-core.mjs check` warns BY NAME when one of the nine
+> re-read core documents (`AGENT_GUIDE.md` → Document taxonomy, tier 1) is missing from the bullets
+> above — a field `/resume` once opened 5 of 9 and nothing said a word (KAIF 2.7, epic TR). Put the
+> bullet back; never silence the line.
+
 > **Boundary with the context router** (`AGENT_GUIDE.md`): the router's "read only the relevant
 > slice" governs tasks INSIDE a session; `/resume` is the session's ENTRY point — the one full pass
 > here is exactly what makes the lazy slices safe afterwards. Never "optimize" one with the other.
@@ -37,6 +47,19 @@ If relevant to open questions:
 The full pass IS a context refresh (`AGENT_GUIDE.md` → Context refresh): on completing it, rewrite
 `.kaif/refresh-marker.json` (trigger `ritual:/resume`); the Step-2 announcement doubles as the
 quote-acceptance when it cites at least one concrete line from the read — quote it.
+
+## Step 1b. Run the owner's queue — a command with an exit condition, not a wish
+
+Before choosing the session's direction, run the queue command of the project's interactive
+contour (the one `/owner-reviews` built — e.g. `node tools/review.mjs --queue --list`, no browser)
+and read what it prints: every waiting document shows its age and whether the owner has EVER seen
+it (contract I40–I42). The step is not complete while a waiting document reads `NEVER SHOWN`: raise
+it — the page, or a pointed question in chat with the fact recorded by `--mark-shown` — or write one
+line here saying why not (a dead document → fix its status, and it leaves the queue). Printing the
+queue is not delivering the question. The owner's word (field issue #47, a question printed by
+~40 sessions for 48 days and never once shown): "questions to the owner come in priority number
+ONE". A project without the contour runs the same step by hand: `ls interviews/` plus the status
+line of every waiting document — and the same exit condition.
 
 ## Step 2. Synthesize — choose the one main thing
 

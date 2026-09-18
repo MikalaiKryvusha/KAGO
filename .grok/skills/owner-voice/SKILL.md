@@ -1,6 +1,6 @@
 ---
 name: owner-voice
-description: Take a stylometric PORTRAIT of the owner's written voice from their own texts and rewrite a project artifact by it, so AI text sounds like the owner's text. Two modes — portrait (capture the voice) and rewrite (re-voice an artifact under machine-checkable invariants). Use when the human says "make a portrait of my style", "write like me", "this is not my language", "перепиши моим голосом", "это не мой язык", "match my voice" — AND ON YOUR OWN INITIATIVE when the owner rejects a text over its language or style for the SECOND time: that is the signal that styleguide bans are not working and a portrait is needed. Field-proven methodology (project B, then applied cross-project); the portrait skeleton ships as .kaif/_owner-voice-template.md. The filled portrait is a separate OPTIONAL canon file: AUTHOR_STYLOMETRY.md. Trigger aliases (ru): «портрет моего стиля», «пиши как я», «это не мой язык», «перепиши моим голосом»
+description: Take a stylometric PORTRAIT of the owner's written voice from their own texts and rewrite a project artifact by it, so AI text sounds like the owner's text. Three modes — portrait (capture the voice), rewrite (re-voice an artifact under machine-checkable invariants) and check (the machine half of the independent check that follows writing BY the portrait). The writing contract for any text the owner reads as his own — written BY the portrait, then checked independently by it, fixed, only then written and brought to the owner. Use when the human says "make a portrait of my style", "write like me", "this is not my language", "перепиши моим голосом", "это не мой язык", "match my voice" — AND ON YOUR OWN INITIATIVE when the owner rejects a text over its language or style for the SECOND time: that is the signal that styleguide bans are not working and a portrait is needed. Field-proven methodology (one field project, then applied cross-project); the portrait skeleton ships as .kaif/_owner-voice-template.md. The filled portrait is a separate OPTIONAL canon file: AUTHOR_STYLOMETRY.md. Trigger aliases (ru): «портрет моего стиля», «пиши как я», «это не мой язык», «перепиши моим голосом», «проверь голос», «сверь со стилометрией»
 ---
 
 # /owner-voice — the owner's voice
@@ -27,8 +27,92 @@ thinking and speaking.
 ## When to invoke
 
 - On the owner's ask; on the proactive trigger "second rejection over language".
-- NOT for touching up three paragraphs — there, write with the portrait open and run its
-  checklist; the full ritual starts at several units of work.
+- NOT for touching up three paragraphs — there, the writing contract below applies as it is (written
+  BY the portrait, checked independently, fixed, then shown); the full ritual of `portrait`/`rewrite`
+  starts at several units of work.
+- The writing contract — EVERY time a text the owner signs or reads as his own is written (a rulebook
+  chapter, a player sheet, a UI string table, site copy, a README section): the fable loop's fourth
+  KAIF obligation (`AGENT_GUIDE.md`), spelled out in the next section; mode `check` is its machine half.
+
+## The writing contract — by the portrait, independently checked, then the owner
+
+The obligation "open the portrait and run its checklist" lived as prose in a checklist, and a field
+agent rewrote a player sheet through seven rounds under the owner's eyes without opening the
+portrait once; the owner caught it by the language ("how many times did you compare this text with
+my stylometry?" — zero). His statement of the expected behaviour (origin, 2026-09-12, rendered from
+Russian): **"the AI agent writes the text in the voice and by the rules the owner's stylometry
+prescribes; after writing, by that same stylometry, the agent runs an independent check of what it
+wrote, fixes it, and only then counts the text as written and brings it to the owner for approval."**
+Three steps, in this order — and the report of the unit names each:
+
+1. **Write BY the portrait — with it in your working context.** Before the first word:
+   `node .kaif/tools/kaif-voice-lint.mjs load` (or `load --sections <regex>` for the modules the unit
+   needs — the rules §2, the lexicon §2-C, the anti-portrait §5, the before/after pairs §6) prints
+   `AUTHOR_STYLOMETRY.md` INTO YOUR WORKING CONTEXT and leaves the witness `.kaif/voice-marker.json`;
+   write by it while it is there — the owner's word: write BY the stylometry, WITH IT IN THE WORKING
+   CACHE — the lexicon's turn of phrase, not a synonym; the skeleton of the section the owner uses; the
+   register of the artifact. A draft written "natively" and re-voiced afterwards is the class this
+   contract closes, not its execution: `check` refuses a text with no load witness or last written
+   before the first load ("written past the portrait").
+2. **Check INDEPENDENTLY by the same portrait.** Two halves, both named in the report: (a) the
+   machine minute — mode `check` below (the §8 table; a `SKIPPED` is said aloud, never read as green);
+   (b) the semantic pass §7B by a CLEAN instance — a subagent, or a fresh pass forbidden to see the
+   writer's rationale, reading the text against the anti-portrait and the pairs (the judge of the
+   `rewrite` pipeline, applied to one unit). The writer's own glance at its own text is not an
+   independent check.
+3. **Fix — only then it is written.** Every hit is rewritten by the portrait's hint or answered in the
+   portrait's exception column (the owner's canon: his word or a journal row §9); only after that the
+   text counts as written — and only then it is shown to the owner for approval, never before.
+
+What the report of the unit carries: the portrait modules read before the first word · the command
+line and its outcome (hits answered, or `SKIPPED` in so many words) · the clean pass and its verdict ·
+the fixes made. `/fable-judge` hunts owner text past the portrait: written without it open, checked by
+no independent pass, or shown before the fixes.
+
+## Mode `check` — the machine half of the independent check
+
+A rule that yields an artifact names the command that produces it — this is that command, the
+machine half of step 2 above (the semantic half is the clean-instance pass §7B):
+
+```
+node .kaif/tools/kaif-voice-lint.mjs load [--sections <regex>]     # step 1: the portrait into your context + the witness
+node .kaif/tools/kaif-voice-lint.mjs check <file…> [--warn]        # step 2, the machine half
+```
+
+- **What it reads:** the §8 TABLE of `AUTHOR_STYLOMETRY.md` (or the file named in `.kaif/kaif.json`
+  → `voicePortrait`) — `pattern · class · hint · legal exception`, the form the skeleton
+  `.kaif/_owner-voice-template.md` carries. The portrait is the single source of the patterns; the
+  module has none of its own.
+- **The witness:** `load` records `.kaif/voice-marker.json` (the moments taken by the tool — a
+  history of loads, the portrait's path and sha, the sections printed; session state, ignored by git
+  like the refresh marker; another portrait starts a new witness). `check` refuses a text with no
+  witness, with a witness for another portrait, last written BEFORE the first load, or written MORE
+  THAN AN HOUR after the last load before it (the hour rule of context refresh: the portrait had left
+  the cache — reload before every unit) — "written past the portrait", exit 1, never muted by
+  `--warn`; it warns when the portrait changed since the load. `load --sections <regex>` that matches
+  no section loads nothing and writes no witness. The witness is a marker with the marker class's
+  boundary: it proves the load ran, not that the print was read — the judge reads the named modules
+  against the text.
+- **What it prints:** every hit as `file:line — «fragment» → hint (exception: …)` and exits 1; a
+  clean file exits 0 with the count of lines judged; a `positive`-class row absent from the file is a
+  warning. `--warn` prints the hits and exits 0 — the calibration mode ("warning mode first; noise
+  above signal = no guard"). A row's `/regex/` exception silences a hit on its line; prose is printed
+  beside the hit for you to weigh.
+- **`SKIPPED=3` is an outcome you REPORT, never a pass:** no portrait · no §8 section · a §8 without
+  the table (greps as prose — move them into the table) · a table with placeholder rows only. The
+  report line for the show says "voice check: SKIPPED — no portrait" in so many words.
+- **On a hit:** rewrite by the hint; a hit that is legal in this place is answered in the portrait's
+  exception column (the owner's canon, so his word or a journal row §9), never by silencing the rule
+  or deleting the row — that is a weakened check, and `/fable-judge` hunts it.
+- **Boundary, said every run:** likeness is not judged — "sounds like the owner" is the taste class
+  and the owner's verdict; the command catches only the explicit patterns of §8. The semantic pass
+  (§7B) and the owner's eyes remain.
+- **Wiring:** a text class with a build script (a sheet generator, a string table, a README section)
+  runs the command inside the script — a hit stops the build or is answered (the deployment task
+  `owner-voice` of the installer asks for exactly this); a text without a script runs it by hand
+  after writing, before the text counts as written (`AGENT_GUIDE.md` → "Showing is an action").
+- **What the command is NOT:** it is not the writing step (the text is written BY the portrait first,
+  step 1 of the contract) and not the whole check (the clean-instance pass §7B is the other half).
 
 ## Mode `portrait` — capturing the voice
 
@@ -85,10 +169,11 @@ owner names the last revision they vouch for (via `/interview`) → everything a
 do `portrait` + "all new AI text under marks from now on"; the existing artifact is edited
 fragment-by-fragment at the owner's direct word.
 
-**The pipeline is a DELTA to `/fable-loop`** (do not restate it: rewriter → adversarial judge,
-separate instance, reads the diff LINE BY LINE → up to two repair rounds → verified → invariants
-check → one commit per unit). New here is only: the provenance gate, the invariants ladder, and
-the no-meaning-fixes rule. The judge checks TWO things separately: meaning identity (numbers,
+**The pipeline is a DELTA to `/fable-loop`** (do not restate it: rewriter writing BY the portrait →
+mode `check` over the unit (zero hits, or every hit answered) → adversarial judge, separate instance,
+reads the diff LINE BY LINE against the anti-portrait and the pairs → up to two repair rounds →
+verified → invariants check → one commit per unit — the writing contract above, per unit). New here
+is only: the provenance gate, the machine minute, the invariants ladder, and the no-meaning-fixes rule. The judge checks TWO things separately: meaning identity (numbers,
 formulas, references, enumerated cases) and portrait conformity (by the anti-portrait and pairs).
 
 **Invariants named BEFORE work, shown after** — the ladder, top to bottom:

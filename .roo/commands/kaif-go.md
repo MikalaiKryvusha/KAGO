@@ -11,6 +11,9 @@ grants **authority**.
 > **One line of difference from its neighbours.** `/resume` = ENTER a session with empty context
 > (full canon pass). `/pause` = park and leave a note. **`/kaif-go` = a session already warm, work
 > already chosen — go.** If the context is cold, do not fake warmth: run `/resume` instead.
+> And the neighbour rule of position: a message that OPENS with a skill's word (`resume` …) and
+> carries the task below it runs that skill first (`AGENT_GUIDE.md` → "A leading skill word is an
+> order") — the kick's "standalone only" boundary is about the word mid-sentence, not the first word.
 
 ## Step 1. Find the resume point — read it, do not reconstruct it
 

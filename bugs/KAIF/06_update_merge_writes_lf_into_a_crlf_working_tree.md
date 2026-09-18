@@ -7,6 +7,12 @@
 > **Delivery:** tracking `origin` — folded into the 2.3 field update report
 > (`reports/KAIF_UPDATES/KAGO_KAIF_2.3_UPDATE_REPORT.md`), delivered upstream with it.
 
+**Delivered upstream:** https://github.com/MikalaiKryvusha/KAIF/issues/23
+
+> ✏️ Line added 2026-09-18 during the KAIF 2.7 update: the ticket never carried the machine-read
+> field. #23 is this project's 2.3 field report; its body embeds this ticket in full (verified:
+> «# KAIF ticket 06 — update merge writes LF endings…» at line 112 of the issue body).
+
 ## Symptom
 
 On a Windows deployment with `core.autocrlf = true` (the working tree is CRLF), `update` writes

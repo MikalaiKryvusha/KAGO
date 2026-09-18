@@ -1,6 +1,6 @@
 ---
 name: owner-reviews
-description: Deploy the interactive review contour "agent ↔ owner" — everything the agent wants from the owner (forks, reviews, approvals, answers) rendered as local HTML pages with recorded one-click decisions, a send-side approval gate, signaling, and accumulation for autonomous loops. Optional sugar on top of the hard canon rule "the place of questions is interviews/" (AGENT_GUIDE.md). Use when the owner asks to move approvals to rendered pages ("render my interviews", "set up owner reviews", "сделай вычитку страницей") or when a project adopts the place-of-questions practice with tooling. KAIF fixes the methodology (what must hold); the project's agent builds the tools (how). Field-proven contour (project E: "Мне нравится. Получилось удобно"). Trigger aliases (ru): «сделай вычитку страницей», «отрендери интервью», «разверни контур согласований»
+description: Deploy the interactive review contour "agent ↔ owner" — everything the agent wants from the owner (forks, reviews, approvals, answers) rendered as local HTML pages with recorded one-click decisions, a send-side approval gate, signaling, and accumulation for autonomous loops. Optional sugar on top of the hard canon rule "the place of questions is interviews/" (AGENT_GUIDE.md). Use when the owner asks to move approvals to rendered pages ("render my interviews", "set up owner reviews", "сделай вычитку страницей") or when a project adopts the place-of-questions practice with tooling. KAIF fixes the methodology (what must hold); the project's agent builds the tools (how). Field-proven contour (a field project: "Мне нравится. Получилось удобно"). Trigger aliases (ru): «сделай вычитку страницей», «отрендери интервью», «разверни контур согласований»
 ---
 
 # /owner-reviews — the owner-review contour
@@ -17,6 +17,18 @@ dependencies is explicitly encouraged — the field contour is a ~100-line markd
 stdlib localhost server that lives seconds (serve → record → die), system utilities for
 voice/sound/notification/browser; the page is self-contained and opens offline. The temptation to
 take a static-site generator or UI framework is large and the win is zero.
+
+**KAIF 2.6 — the contract has a ONE-PAGE executable form: `.kaif/INTERACTIVE_CONTOUR_SPEC.md`** (ships
+with the update as a bundle-only page beside the other `.kaif/_*` skeletons; origin issues #19 #38 #47
+#51 — four contours rebuilt per project and broken on their own edge cases, the last one opened WITHOUT
+radio buttons because the options were typed as paragraphs). The page names, in a form a session verifies
+in a minute: the two legal option forms, the pre-flight that refuses to open a page whose question has no
+options and no declared free field (exit 3), the three records and the fact of showing, what the owner
+must see (the header scrolls with the page — the owner's word), the three outcomes and exit codes, the
+call, and the faces and flags of the shipped generator (`.kaif/tools/contour/`, 2.6: interview · notice
+· proofreading · mockup review; parameters are read from `.kaif/kaif.json`, never asked). **Run the
+shipped generator; do not build a contour** (`node .kaif/tools/contour/review.mjs <doc>`) — a project that still runs its own checks it against that
+page before every opening. The 47 invariants below remain the long-form canon behind the page.
 
 ## Build order (field-corrected: "ours was worse")
 
@@ -39,7 +51,7 @@ and the lessons, never the files: a copy is a second truth with two places to fi
 
 ## The invariants (normative — a contour without them falls apart)
 
-One number space, I1–I39. I1–I7 are the original core; I8–I36 were each paid for by a field
+One number space, I1–I47. I1–I7 are the original core; I8–I36 were each paid for by a field
 incident in one of three projects running this contour (the tool ate an hour of the owner's work ·
 a show replaced by a file path · an answered question re-asked two days later). I37–I38 name the
 notice class and arrived differently — not after an incident, but on the owner's request that the
@@ -93,6 +105,9 @@ raised in a batch next to a live question.
   worse than a crash: a crash is seen at once, silence eats an hour.
 - **I11. A rescue ring on the client.** Recording failed → the human's text comes back onto the
   page: a field with the full content, a Copy button, a Retry button, the save button re-enabled.
+  Since 2.7 this is the path of a server that ANSWERED with a refusal, of a browser with no local
+  store and of a page in a TAB; a server that is simply GONE under the app window is I47's path — the
+  answer is stored locally, no ring.
   The human's work has no right to exist only in the RAM of someone else's process.
 - **I12. A draft in the browser.** `localStorage` on every input, restored on page load with a
   visible "picked up N fields" notice. Insurance never lives inside the thing it insures against —
@@ -119,7 +134,9 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   human are banned as a way of showing. The path is a footnote AFTER the show, never an errand.
 - **I16. The show contour = the question contour.** The page opens ANY markdown, not only
   documents with questions; the document-wide comment field lets the human answer or stay silent.
-  No separate show tool is ever built.
+  No separate show tool is ever built. **The page has a READING VIEW (2.7, origin issue #54):** live
+  questions first, the answered ones and the document text in one collapsed archive below, nothing removed;
+  and a show has THREE legal outcomes — an answer · a remark · «read, no remarks» (origin issue #58, bug 113).
 - **I17. A mechanical check on showing.** Grep the agent's own reply for "double-click", "opens
   offline", "see file", "lies at" next to an artifact extension — a hit means the show was
   replaced by a link. The rule holds through an executable command in rituals, not through intent.
@@ -176,6 +193,24 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
 - **I31. Process termination is the answer-delivery channel.** The agent starts the contour as a
   TRACKED background task and subscribes to its termination; a bare `&` is not tracked by the
   harness and no notification ever comes.
+  **The launch is a COMMAND the agent copies, never a paragraph it interprets** (KAIF 2.7, origin
+  issue #64: an agent launched the contour in the foreground with `--timeout 60` — the shell's
+  timeout killed it and the owner's window with it; a second launch took a fresh port and orphaned
+  the draft; a third handed the URL to `Start-Process` — a tab in the owner's working browser; three
+  invariants in a row, nothing went red; the owner lost the answer he was typing):
+
+  | Agent system | Ready launch |
+  |---|---|
+  | Claude Code | the `Bash` tool with `run_in_background: true`: `node .kaif/tools/contour/review.mjs <doc>` — the harness notifies on exit; never a foreground call, never `--timeout` for a human |
+  | a harness with a background / tracked-task facility (Codex, Cursor, others) | that facility, the same command |
+  | a plain shell, nothing tracks | `node .kaif/tools/contour/review.mjs <doc> > .kaif/contour.log 2>&1 &` — then poll the lock `interviews/decisions/<doc>.lock`: gone, or its `pid` no longer running (`kill -0 <pid>` fails), = the process ended — a killed process leaves its lock on purpose, so the next run reuses the port; the outcome is in the log |
+
+  `--timeout N` is for automation only (I9). The URL is never handed to `Start-Process` / `open` /
+  `xdg-open`: the generator raises the app window itself (I26), and the page says out loud — to the
+  owner as a yellow note, to the agent as a `Window check:` log line — when it finds itself in a tab
+  (`display-mode: standalone` is false there). And the generator comes up on the PREVIOUS run's port
+  when that process is gone (I29 mechanized): the draft of the window that outlived the process is
+  restored on load; a taken port is named in the log together with the loss — never a silent fresh port.
 
 **The call (I32–I36):**
 
@@ -241,6 +276,76 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   weeks earlier was raised in a batch next to a live question — the owner's word: "the release is
   long out, the review is overdue, why did you open this for me". Age comes from the queue's own
   timestamp, then from the document header's first ISO date; a document with neither cannot go stale.
+- **I40. The third fact about a question is SHOWN — recorded at the moment the document actually
+  stands in front of the owner.** The contour already records that a question EXISTS (the waiting
+  status) and that it was ANSWERED (the decision record); nothing recorded that it was ever SEEN,
+  so no ritual could tell "he is thinking" from "he has no idea it exists" and every ritual treated
+  the cheaper state as true. Paid for in the field (issue #47): a question printed by every
+  session's queue for 48 days and never once put in front of the owner — his words: "it lies there
+  without my slightest notion that some question exists". The fact lives in ONE map next to the
+  decisions (`interviews/decisions/shown.json`: `{ "<doc>": { "at": "<ISO>", "transport":
+  "page | batch | chat" } }`), written when the browser window opens (page, batch) or, for a pointed
+  question asked in chat, by the agent's hand (`--mark-shown <doc> --transport chat`). The transport
+  is NAMED and changes nothing about the answer's force (HTML = md = chat).
+- **I41. The queue prints AGE, and the never-shown come FIRST.** Every waiting document prints
+  `waiting N d · shown: <date> — M d ago (<transport>)` or `NEVER SHOWN — the owner does not know
+  this question exists`; the order is never-shown first, then the oldest show first. A queue whose
+  output is byte-identical on day 1 and on day 48 cannot escalate anything.
+- **I42. A ritual that prints the queue has an EXIT CONDITION, not a wish.** The queue command
+  without a browser (`--queue --list`) exits non-zero while a waiting document is never-shown; the
+  ritual that calls it (`/resume` step 1b, the closing ceremonies, the loops) is not complete until
+  the document is raised (page or chat) or one line says why not (a dead document → fix its status
+  and it leaves the queue). Printing is not delivery: "show" is the agent's action (I15), and the
+  exit code is what makes the duty mechanical (field issue #22: a rule with a command is honoured,
+  a rule in prose accumulates debt).
+- **I43. The queue says WHO is blocked — and can be wrong out loud.** A waiting document whose
+  only open question is marked "answer elsewhere" (moved to a bug, a plan) is not waiting on the
+  owner: it is the AGENT's debt wearing an owner-facing label, and the queue names it so. Field
+  correction to #47: the blocked mechanic was waiting on the agent for 48 days while every session
+  read "round 2 — awaiting the owner" and concluded the owner was the blocker.
+- **I44. The FOURTH fact about a question is IMPLEMENTED — written by the agent's hand, with an
+  address, at the moment the decision lands (KAIF 2.7).** Exists · shown · answered were three facts;
+  nothing recorded that the decision had already been carried into rules or code, so the queue raised
+  a question the agent had already implemented and manufactured a FALSE SECOND decision that read as
+  the owner's will (origin issue #54: "you brought me an OLD question… WHICH YOU YOURSELF ALREADY
+  FIXED"). The fact lives next to the others (`<decisionsDir>/implemented.json`: `{ "<doc>": {
+  "<Q>": { "at", "where" } } }`) and is written by `--mark-implemented <doc> <Q> --where <commit or
+  file>` — never inferred from a diff, never written "later": implementing and marking are one move.
+- **I45. The queue and the show REFUSE what is already implemented — out loud, exit 2.** A document
+  whose every open question is implemented is not owed to the owner: `--queue`, `--queue --list` and
+  a direct show print `implemented, but open: <doc> Q1 → close the status (or fill the answer)` and
+  exit 2 — the same gate class as never-shown (I42); the page renders an implemented question as
+  settled with its address. The status is then closed by propagation (I19), never before it.
+- **I46. A live owner page is closed ONLY by `<doc> --close` — a neighbour session's word is not evidence.**
+  (2.7, epic LP; origin issue #66 — a field agent killed the contour on a neighbour's "close that page" while
+  the owner was typing into it: "the contour closed and I did not give my answers — I WAS WRITING AT THAT
+  MOMENT".) The command reads the lock — port · pid · title · the page's last input · draft state (the pulse
+  carries them: `/alive?i=&d=&s=`) — prints them so the agent can compare with the window it was told about,
+  and REFUSES with exit 4 while the last input is younger than the quiet threshold (180 s, DEF6's own
+  envelope; `contour.closeQuietMs`), while the PAGE ITSELF is younger than it (no pulse yet — the owner may be
+  reading), or while a draft is unsaved; otherwise it ends the process and prints `closed
+  <doc>`. The command never kills a pid read from a file: it asks the page's OWN server to end (a token
+  from the lock), so the waiting agent sees exit 2, and a page that does not answer is left alone unless
+  forced. `--force` needs `--owner-word "<quote>"` and logs the quote — an AUDIT trail, not a gate: the
+  machine cannot tell the owner's words from the agent's, only the record and the judge can. No `pkill`, no
+  `taskkill` on a port, no "I think it is stale". An unknown flag refuses before any page (exit 1).
+- **I47. The answer survives the server — the window's profile lives in the project folder.** (2.7, epic LP;
+  the owner's word on interview 032: "no choice, no 'save as' — everything works for the user as it did! JS
+  itself writes the file to the computer, into the project folder".) The app window runs on
+  `.kaif/contour-window/` (ignore-first before the first window; the three sign-in-off flags; `account_info`
+  checked after launch — EXP-0134), so the draft is on the owner's disk IN THE PROJECT; Save with the server gone
+  stores the answer there — IndexedDB is the PRIMARY carrier (measured: on disk half a second after the write even when the
+  browser is then killed; `localStorage` needs about six, so it only keeps a copy and the typed DRAFT) — and
+  the page says "saved on this computer, the agent will pick it up", no dialog. The agent picks it up at the
+  next `--queue --list`, `--check` or show: a headless run of the same profile on the same port posts it
+  back; it is recorded as the owner's decision with `recovered: true`, the lock is released, and the agent
+  TELLS the owner in its next message (the provenance comment is invisible on a rendered page). While a
+  browser still holds the profile — the owner's window is open — the pick-up is DEFERRED: a second browser on
+  a held profile would hand its page to that window. A draft not yet saved is named and kept.
+  Only the app window promises the pick-up — the page OBSERVES it (`display-mode: standalone`); a page in a
+  TAB lives in a browser profile the agent never reads, so there Save with the server gone takes I11's path:
+  the rescue ring with the answer text, Copy and Retry, and no word about the agent (2.7, court finding D-F2).
+  Verified on Edge/Windows; Chrome, macOS and Linux take the same flags and are NOT verified — say so.
 
 ## The named class: "handling the human's work"
 
@@ -440,7 +545,8 @@ hand over a path is born (I15).
 - **T5 (OS).** Machine sleep stops the timers on BOTH sides → two strikes: the first check only
   marks a suspicion, the second (a tick later) decides.
 - **T6 (browser).** The port is part of the web origin — the draft "vanishes" on a new port →
-  a lock per document, never a second window, restore the draft on load (I29, I12).
+  a lock per document, never a second window, restore the draft on load (I29, I12); and since 2.7
+  the lock outlives the process: a relaunch comes up on the previous run's port (#64).
 - **T7 (JS templating).** A backtick inside a template string of the page builder drops the
   module with a syntax error in an UNRELATED place → only typographic quotes inside the block;
   print the warning in the file itself.
@@ -562,10 +668,14 @@ server that outlives the silence threshold → red.
   not a check.
 - **QA6. Cleanup:** debug windows and browser profiles are extinguished at the run's end — the
   owner works at the same machine.
-- **QA7. The dead-server headless check:** capture the live page → kill the server → type an
-  answer in a real headless browser → click → read the DOM. The "after the fix" etalon, all
-  five: rescue block present = true · save button re-enabled = true · the answer present in
-  the output = true · the draft persisted = true · the status honest.
+- **QA7. The dead-server headless check:** capture the live page IN AN APP WINDOW (headless `--app`, as the
+  owner sees it) → kill the server → type an
+  answer in a real headless browser → click → read the DOM. The etalon since 2.7 (I47 — the answer
+  survives the server), all five: the answer stored on this computer (`__submitted`) = true · NO
+  rescue ring while the local store works = true · the save button switched off (no second click
+  is needed) = true · the draft persisted = true · the status honest ("saved on this computer").
+  The 2.6 etalon (rescue block shown · button re-enabled · the answer in the ring) now holds only
+  for a browser with no local store, for a page in a TAB and for a server that ANSWERED with a refusal (I11).
 
 ## Rakes to warn about (in falling price order)
 

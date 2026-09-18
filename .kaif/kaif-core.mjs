@@ -20,7 +20,7 @@
 //   node kaif-core.mjs adopt-current               # rebuild the snapshot after a MANUAL migration
 //   node kaif-core.mjs version                     # report the deployed version from .kaif/kaif.json
 // Unknown commands, flags and stray arguments REFUSE (exit 1) instead of being silently
-// ignored — a plausible-but-wrong run is the most expensive kind (bug 33, project D Г10).
+// ignored — a plausible-but-wrong run is the most expensive kind (bug 33, field report Г10).
 //
 // Install options:
 //   --lang <code>       owner's working language (default: en). Owner-facing docs come from the
@@ -110,6 +110,13 @@ const PLACEHOLDERS = ['<PROJECT_NAME>', '<SHORT_NAME>', '<AUTHOR>', '<REPO_URL>'
 // even lists them as "diverged" (their divergence is the whole point of their existence).
 const OWNER_SEEDED = ['GOAL.md', 'STATUS.md', 'PROJECT_HISTORY.md', 'EXPERIENCE.md', 'MASTER_PLAN.md',
   'PROJECT_STRUCTURE_EXTERNAL_MAP.md', 'PROJECT_ARCHITECTURE_INTERNAL_MAP.md', 'KAIF_FRAMEWORK.md'];
+// A wholesale-verdict CANDIDATE path — the same three tests classifyAndApply applies before its
+// modular merge (an md file · not owner-seeded · not skipped by anonymity). `diff --source` judges
+// by this ONE predicate so the rehearsal it records and the update's receipt count the same files
+// (2.6, UR1; origin #42 side observation: the preview recorded 16 verdicts, the receipt 15 —
+// MASTER_PLAN.md is owner-seeded and never a candidate of the update, and the canon promised the
+// two lists "compare line by line").
+const wholesaleCandidatePath = (p) => p.endsWith('.md') && !OWNER_SEEDED.includes(p) && !isSkippedAnon(p);
 // Where update fetches the fresh machinery from (mirrors KAIF-LOADER.mjs).
 const SOURCES = { release: `${ORIGIN}/releases/latest/download`,
                   main: 'https://raw.githubusercontent.com/MikalaiKryvusha/KAIF/main/dist' };
@@ -121,9 +128,23 @@ const UPDATE_TASK = 'KAIF_UPDATE_TASK.md';
 // core re-read hourly, STATUS at 6× its target with the debt acknowledged inside the file).
 // `check` WARNS above a budget, never fails: the cure is move-out (chronicle, researches/, a
 // house-rules file), not a bigger number. ONE place for the numbers — the canon points here.
-const DOC_BUDGETS = { 'STATUS.md': 200, 'GOAL.md': 300, 'MASTER_PLAN.md': 300,
-  'PROJECT_STRUCTURE_EXTERNAL_MAP.md': 300, 'PHILOSOPHY.md': 300, 'TESTING_FRAMEWORK.md': 300,
-  'BUG_FIXING_FRAMEWORK.md': 300, 'REQUIREMENTS_FRAMEWORK.md': 250, 'AGENT_GUIDE.md': 1200 };
+// Since 2.7 (epic CB, origin issues #43/#45 + the field pain of three deployments) the budget is
+// judged by the project's OWN lines, and each row carries the ADDRESS the overflow moves to: a
+// warning that says "too long" without saying "where to" is a warning the agent cannot execute
+// (AGENT_GUIDE → "The form of an obligation"). STATUS has its own address, because its overflow
+// is closed history and the chronicle is where closed history lives.
+const MOVE_OUT_ADDRESS = 'the chronicle PROJECT_HISTORY.md · researches/ · a house-rules file';
+const DOC_BUDGETS = {
+  'STATUS.md': { budget: 200, overflowTo: 'the chronicle PROJECT_HISTORY.md (move closed history VERBATIM — the /end-chat-soft bonsai trim)' },
+  'GOAL.md': { budget: 300, overflowTo: MOVE_OUT_ADDRESS },
+  'MASTER_PLAN.md': { budget: 300, overflowTo: MOVE_OUT_ADDRESS },
+  'PROJECT_STRUCTURE_EXTERNAL_MAP.md': { budget: 300, overflowTo: MOVE_OUT_ADDRESS },
+  'PHILOSOPHY.md': { budget: 300, overflowTo: MOVE_OUT_ADDRESS },
+  'TESTING_FRAMEWORK.md': { budget: 300, overflowTo: MOVE_OUT_ADDRESS },
+  'BUG_FIXING_FRAMEWORK.md': { budget: 300, overflowTo: MOVE_OUT_ADDRESS },
+  'REQUIREMENTS_FRAMEWORK.md': { budget: 250, overflowTo: MOVE_OUT_ADDRESS },
+  'AGENT_GUIDE.md': { budget: 1200, overflowTo: MOVE_OUT_ADDRESS },
+};
 
 const log = (s) => console.log(s);
 const die = (s) => { console.error('✖ ' + s); process.exit(1); };
@@ -139,7 +160,7 @@ const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 const fileSha = (p) => sha256(readFileSync(p));
 const sh = (cmd) => { try { return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
 // JSON reader tolerant of a UTF-8 BOM (Windows tools like PowerShell 5 write one).
-const readJson = (p) => JSON.parse(readFileSync(p, 'utf8').replace(/^﻿/, ''));
+const readJson = (p) => JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
 
 // The CLI-passed --lang is validated the moment die() is live (bug 92.1; checkedLang above).
 if (val('--lang')) LANG = checkedLang(val('--lang'), '--lang');
@@ -164,6 +185,11 @@ if (!val('--mode') && okOnDisk(KAIF_JSON)) {
 const normEol = (s) => s.replace(/\r\n/g, '\n');
 const normSha = (data) => sha256(normEol(String(data)));           // EOL-normalized sha: CRLF never
 const fileShaNorm = (p) => normSha(readFileSync(p, 'utf8'));       // fakes a divergence (bug 12)
+// Two-part version compare (major.minor) — ONE definition (2.6, UR3; origin #44's own correction:
+// the same closure lived twice, inside newsInterval and policyInterval, and the stale-claims
+// filter that needed it had neither in scope).
+const vnum = (v) => String(v || '0').split('.').map(Number);
+const gt = (a, b) => { const [a1, a2 = 0] = vnum(a), [b1, b2 = 0] = vnum(b); return a1 !== b1 ? a1 > b1 : a2 > b2; };
 
 function splitModules(content) {
   const lines = content.split('\n');
@@ -223,6 +249,17 @@ const SCRIPTS = { ru: /[А-Яа-яЁё]/, uk: /[А-Яа-я]/, be: /[А-Яа-я]/
 const OVERLAP_LOCALIZED_BELOW = 0.6;
 const OVERLAP_MIN_WORDS = 12;      // below this a body carries no evidence either way — abstain
 const PROSE_WORD = /[\p{L}][\p{L}\p{M}'-]{2,}/gu;
+// Prose is what a HUMAN language claim can be made about; a command, a path or a flag is not
+// (2.7, epic CB, plan 95 risk б). A localized skill quotes English machinery by the dozen — the
+// language-mix axis strips fenced blocks and inline code spans before it counts a single token.
+// BOUNDARY, observed and written down rather than assumed: an UNCLOSED fence is not stripped — the
+// pattern needs the closing fence — so the code below it is counted as prose and the body can be
+// named a mix. That is the fail-safe direction (a document with an unbalanced fence is broken in a
+// way other gates already care about), and it is said here instead of in a claim that the axis
+// "does not count code".
+const stripCodeSpans = (t) => String(t)
+  .replace(/^([`~]{3,})[\s\S]*?^\1[^\n]*$/gm, ' ')   // fenced blocks, closed by the same fence
+  .replace(/`[^`\n]*`/g, ' ');                       // inline code spans (never across a newline)
 const distinctWords = (t) => new Set(String(t).toLowerCase().match(PROSE_WORD) || []);
 function proseOverlap(diskText, newText) {
   const disk = distinctWords(diskText);
@@ -252,10 +289,10 @@ function bodyLocalized(diskText, newText) {
 // frontmatter comparisons must ignore it, or a trigger-pack change between versions makes every
 // skill's preamble read as owner-edited forever — and an updated `description` never reaches the
 // disk while the body merges on, leaving one file with two contradicting claims (bug 43,
-// project D /dayloop: the routing field kept asserting the OLD rule the merged body had dropped).
+// a field project's /dayloop: the routing field kept asserting the OLD rule the merged body had dropped).
 const stripAliasTail = (t) => t.replace(/ Trigger aliases \([a-zA-Z-]+\): [^\n]*/g, '');
 
-// A real translation keeps some TERM headings untranslated (project C field: KISS and DRY survived —
+// A real translation keeps some TERM headings untranslated (a field deployment: KISS and DRY survived —
 // 2 of PHILOSOPHY's 21), so the wholesale net tolerates up to this share of surviving base
 // signatures instead of the old absolute "≤1" that read every real translation as English (bug 31).
 const WHOLESALE_SURVIVOR_SHARE = 0.15;
@@ -281,7 +318,7 @@ function lineDiff(oldText, newText) {
 
 // Ignore-first (canon 1.6, bug 18): the transient installer artifacts enter .gitignore BEFORE
 // they hit the tree, so a `git add -A` during the manual-merge window between update and
-// update-verify cannot drag a 425 KB bundle into history (field-caught on project A, which trapped
+// update-verify cannot drag a 425 KB bundle into history (field-caught in a field project, which trapped
 // exactly that). The lines stay useful after self-clean — updates recur.
 // [TESTED: 2026-08-07 · npm run test:core all 13 suites green — S1 (entries present right after
 // install) + S4 (idempotent on update), re-run with the refresh-marker entry added]
@@ -293,6 +330,8 @@ function ensureIgnoreFirst() {
                   '.kaif/heartbeat.log',    // the guarded loop's pulse is runtime state, not history
                   '.kaif/guarded-loop.json', // the guarded loop's armed boundary (2.5, CN4) — same class as the pulse; the origin once swept it into a commit
                   '.kaif/refresh-marker.json',  // the context-refresh witness is session state, not history (AGENT_GUIDE → Context refresh)
+                  '.kaif/voice-marker.json',    // the voice-portrait load witness — the same class (2.7, epic VC: `kaif-voice-lint load`)
+                  '.kaif/contour-window/',      // the owner page's own browser profile IN THE PROJECT (2.7, epic LP, origin issue #66): the draft and a locally saved answer live here; ignore-first BEFORE the first window
                   '.kaif/update-rehearsal.json']; // the preview's recorded wholesale verdicts — consumed by the next update (2.5, P1)
   let text = existsSync('.gitignore') ? readFileSync('.gitignore', 'utf8') : '';
   const have = new Set(text.split(/\r?\n/).map((s) => s.trim()));
@@ -362,7 +401,7 @@ function applyLanguage(files) {
     else overrides.set(f.path.slice(prefix.length), f.content);
   }
   const out = [];
-  // No alias counter lives here. The pack's key count was the first proxy (bug 34 / project C D3:
+  // No alias counter lives here. The pack's key count was the first proxy (bug 34 / field report D3:
   // "34 skills trigger-aliased" while 23 carried aliases on disk); counting APPLIED rewrites here
   // was the second, and it drifted the same way as soon as the anonymity filter appeared below
   // this function (bugs/65 №1). The summary reads the deployed skills back — `countAliasedOnDisk`.
@@ -392,10 +431,19 @@ const FROZEN_PACKS = ['ar', 'de', 'es', 'fr', 'hi', 'ja', 'pt', 'zh-hans'];
 // arrived as "a raw English body with a localized alias line glued on" and read as a defect;
 // the packs are owner-doc-only BY DESIGN — the framework is English-first). One honest line
 // names exactly what arrives in English and needs manual transfer if the owner wants it local.
-function logPackHonesty(files, deploy) {
-  if (LANG === 'en') return;
+//
+// Since 2.7 (epic CB, criterion 3) this returns its lines instead of printing them, because WHERE
+// they are printed decides how they READ. On the install road they used to be the first thing on
+// the screen — before a single file was written and long before the success line — and a field
+// reader took "INCOMPLETE BY DESIGN" for a refusal. cmdInstall now prints them AFTER "deployed
+// mechanically": the same words, read as a note about a finished install instead of its verdict.
+// The update road prints them where it always did — an update can die mid-flight, and a boundary
+// declared before the tree is touched is better there than a boundary that may never be reached.
+function packHonesty(files, deploy) {
+  const out = [];
+  if (LANG === 'en') return out;
   if (FROZEN_PACKS.includes(LANG)) {
-    log(`⟳ language pack "${LANG}" is FROZEN at its KAIF 2.2 state (origin decision #56): it deploys as before but receives no updates — en/ru are the maintained packs. A frozen pack is revived on community demand: open an issue at the origin.`);
+    out.push(`⟳ language pack "${LANG}" is FROZEN at its KAIF 2.2 state (origin decision #56): it deploys as before but receives no updates — en/ru are the maintained packs. A frozen pack is revived on community demand: open an issue at the origin.`);
   }
   const prefix = `templates/languages/${LANG}/`.toLowerCase();
   let hasPack = false;
@@ -406,7 +454,7 @@ function logPackHonesty(files, deploy) {
     hasPack = true;
     if (lower !== prefix + 'skill-triggers.json') packed.add(f.path.slice(prefix.length));
   }
-  if (!hasPack) return;   // no pack for this language at all — the task's `language` item owns the honesty
+  if (!hasPack) return out;   // no pack for this language at all — the task's `language` item owns the honesty
   const enDocs = deploy.filter((f) => f.path.endsWith('.md') && !packed.has(f.path)
     && !/^\.claude\/skills\//.test(f.path) && !f.path.startsWith('.kaif/spheres/')
     && !f.path.startsWith('templates/languages/')).map((f) => f.path).sort();
@@ -414,8 +462,15 @@ function logPackHonesty(files, deploy) {
   // sites do (bugs/99 №2: "all 35 skill bodies" one line above "31 skills trigger-aliased" of
   // the same run; the 4 ORIGIN_TIED skills never land on an anonymous install).
   const skills = deploy.filter((f) => skillName(f.path) && !isSkippedAnon(f.path)).length;
-  log(`⟳ language pack "${LANG}" is INCOMPLETE BY DESIGN (the framework is English-first): it localizes ${packed.size} owner doc(s). Arriving in ENGLISH and needing manual transfer if you want them localized: ${enDocs.join(', ')} + all ${skills} skill bodies (their trigger aliases ARE localized).`);
+  // The line names what to DO with the boundary, not only what it is (2.7, epic CB): a declared
+  // limit with no address is a limit the reader can only accept. Both addresses are named — the
+  // origin's tracker for a pack that should exist, and the project's own bugs/KAIF/ for a defect
+  // in what did arrive, which the `report` command then delivers.
+  out.push(`⟳ language pack "${LANG}" is INCOMPLETE BY DESIGN (the framework is English-first): it localizes ${packed.size} owner doc(s). Arriving in ENGLISH and needing manual transfer if you want them localized: ${enDocs.join(', ')} + all ${skills} skill bodies (their trigger aliases ARE localized).`);
+  out.push(`  ↳ WHAT TO REPORT: a pack file that should exist for "${LANG}" but did not arrive, or a localized file that arrived damaged — file it as a KAIF defect in bugs/KAIF/NN_*.md and deliver it with \`node .kaif/kaif-core.mjs report bugs/KAIF/NN_*.md\`, or open it directly at ${ORIGIN}/issues. The boundary above is BY DESIGN and is not a defect — do not report it.`);
+  return out;
 }
+const logPackHonesty = (files, deploy) => { for (const s of packHonesty(files, deploy)) log(s); };
 
 // ---------------------------------------------------------------------------- placeholder autofill
 // Detect real project values mechanically. Undetected placeholders stay literal and
@@ -485,6 +540,99 @@ function fillPlaceholders(content, values, unresolved) {
   return out;
 }
 
+// ── Hand-filled slots — DERIVED from the disk, never asked (2.6, UR2; origin #48 R2/R3) ────────
+// Slots the machinery cannot fill at deploy time (<BUILD_COMMAND>, <TEST_HARNESS>, <YOUR AGENT/MODEL>…
+// when package.json has no scripts) are filled BY HAND in the adaptation task — and from then on
+// every file carrying them differed from its template, so each interval classified them as owner
+// edits: three hand merges and one hand deprecation per interval for files the owner never touched,
+// plus `update-verify` counting the template's slot lines as "promised upstream lines" (a weaker
+// session would paste the placeholders back). The cure is arithmetic, not ceremony: read the fills
+// off the disk by matching a template as a REGEX (each unfilled slot → one single-line capture
+// group; a repeated slot → a back-reference to its first capture), then judge "untouched modulo
+// fills" by the EXACT sha of the disk text with the fills folded back into their slots. A false
+// positive is impossible by construction (the un-filled disk text IS the old template); a false
+// negative lands on the safe side (the file stays "diverged", as in 2.5). The derived map is cached
+// in the deploy manifest (`fills`) and re-derived when absent — an old manifest reads as before.
+// [TESTED: 2026-09-05 · polygon s21 B1–B6 green (fills recognized «(2): <BUILD_COMMAND>, <TEST_HARNESS>»;
+// /autoloop replaced with the fills kept and out of the task; /dayloop retired mechanically; no
+// «promised upstream line … <BUILD_COMMAND>» from update-verify; `fills` in the manifest; the identity
+// module equal to the incoming template makes no item) + s11 U1/U1s (a slot filled everywhere is
+// filled in the declared sphere too; a slot filled nowhere still makes the placeholders item);
+// red on the cb42039 core via KAIF_DIST: B1–B6 all ✖; the first draft LEARNED GARBAGE from literal
+// slots (`<YOUR` / `AGENT/MODEL> …`) and matched the NEW template only — both caught by the polygon
+// on the first run (s03 S10c, s21 B1/B5) and fixed here: literal-on-disk slots stay literal in the
+// pattern, matching is per module and against the OLD template texts first]
+const slotsIn = (text) => PLACEHOLDERS.filter((ph) => text.includes(ph));
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Match ONE template text (a module, normally) against its disk text. A slot the disk still carries
+// LITERALLY is emitted as a literal, never as a capture — otherwise a lazy group happily split
+// `<YOUR AGENT/MODEL> <YOUR AGENT'S noreply EMAIL>` at the space and "learned" garbage (polygon-caught
+// on the first run); a capture never spans `<`/`>` for the same reason.
+function matchFills(template, disk) {
+  const slots = slotsIn(template);
+  if (!slots.length) return null;
+  const literalOnDisk = new Set(slots.filter((s) => disk.includes(s)));
+  if (literalOnDisk.size === slots.length) return null;   // nothing was filled here
+  const groups = new Map();
+  const slotRe = new RegExp(`(${slots.map(reEscape).join('|')})`, 'g');
+  let pat = '', last = 0;
+  for (let m; (m = slotRe.exec(template)); ) {
+    pat += reEscape(template.slice(last, m.index));
+    const slot = m[1];
+    if (literalOnDisk.has(slot)) pat += reEscape(slot);
+    else if (groups.has(slot)) pat += `\\k<${groups.get(slot)}>`;
+    else { const g = `s${groups.size}`; groups.set(slot, g); pat += `(?<${g}>[^\\n<>]+?)`; }
+    last = m.index + slot.length;
+  }
+  pat += reEscape(template.slice(last));
+  const hit = new RegExp(`^${pat}$`).exec(disk);
+  if (!hit) return null;
+  const out = {};
+  for (const [slot, g] of groups) {
+    const v = hit.groups[g];
+    if (v && v.trim()) out[slot] = v;
+  }
+  return out;
+}
+// Fold the fills back into their slots — the inverse of fillPlaceholders for the hand-filled map.
+function unfill(text, fills) {
+  let out = text;
+  for (const [slot, v] of Object.entries(fills || {})) if (v) out = out.split(v).join(slot);
+  return out;
+}
+// The deployment's hand-filled map: the manifest's cached map first, then every deployed md file
+// whose template still carries a slot after the deploy VALUES — matched MODULE BY MODULE (by
+// signature), so an upstream change or an owner edit elsewhere in the file costs nothing. The
+// template the disk was filled FROM is the OLD one (`oldTplTexts` — the previous release's own
+// artifact), when in hand; the incoming template is tried as well and suffices wherever the module
+// did not change. Templates that changed simply fail to match; the fills come from the ones that did not.
+function deriveFills(deploy, values, cached, oldTplTexts = {}) {
+  const fills = { ...(cached || {}) };
+  const learn = (tplText, diskText) => {
+    let diskBySig = null;
+    for (const m of splitModules(tplText)) {
+      const t = modText(m);
+      if (!slotsIn(t).some((s) => !(s in fills))) continue;   // nothing new to learn from this module
+      if (!diskBySig) diskBySig = new Map(splitModules(diskText).map((d) => [d.signature, modText(d)]));
+      const d = diskBySig.get(m.signature);
+      if (d == null) continue;
+      for (const [s, v] of Object.entries(matchFills(t, d) || {})) if (!(s in fills)) fills[s] = v;
+    }
+  };
+  for (const f of deploy) {
+    if (!f.path.endsWith('.md') || !okOnDisk(f.path)) continue;
+    let tpl = fillPlaceholders(f.content, values, new Set());
+    if (ANON) tpl = anonymize(tpl);
+    tpl = normEol(tpl);
+    const old = oldTplTexts && oldTplTexts[f.path];
+    if (!slotsIn(tpl).some((s) => !(s in fills)) && !(old != null && slotsIn(normEol(old)).some((s) => !(s in fills)))) continue;
+    const disk = normEol(readFileSync(f.path, 'utf8'));
+    if (old != null) learn(normEol(old), disk);
+    learn(tpl, disk);
+  }
+  return fills;
+}
+
 // Anonymous install: strip marked author regions and de-expand the brand acronym —
 // mechanically, so no cognitive "scrubbing" pass is needed (anonymity by design).
 function anonymize(content) {
@@ -504,13 +652,17 @@ const CONTEXT_POINTER =
   '# Agent rules\n\nThis project is KAIF-wrapped. Before every task read `AGENT_GUIDE.md` (the canon) and ' +
   '`STATUS.md` (current state); think per `PHILOSOPHY.md`; write requirements per `REQUIREMENTS_FRAMEWORK.md`; ' +
   'test per `TESTING_FRAMEWORK.md`; debug per `BUG_FIXING_FRAMEWORK.md`; execute ' +
-  'tasks per the fable loop (`/fable-method`, `/fable-judge`).\n';
+  'tasks per the fable loop (`/fable-method`, `/fable-judge`).\n\n' +
+  // The pointer carries ONE rule of its own (2.7, epic RS — the origin owner's word): the context
+  // file is the first thing a session reads, and the entry ritual was named nowhere in it.
+  'A message that opens with the word `resume` (or the /resume alias of your language) is an ORDER to run ' +
+  '/resume in full before the rest of the message (`AGENT_GUIDE.md` → "A leading skill word is an order").\n';
 
 // Returns true when the template was actually written; false when an existing file was
 // ADOPTED (kept as found). Adoption is provenance the deploy manifest must remember:
 // for adopted paths the sha snapshot records the OWNER'S content, not a template — so a
 // later `update` may never take "sha still matches" as permission to replace them
-// (field-caught on project A, 2026-07-17: 18 owner-adapted skills silently templated over).
+// (field-caught in a field project, 2026-07-17: 18 owner-adapted skills silently templated over).
 function writeIfNew(path, content) {
   if (okOnDisk(path) && !FORCE) { log(`= kept existing ${path}`); return false; }
   mkdirSync(dirname(path) || '.', { recursive: true });
@@ -556,7 +708,7 @@ function expectedAgentArtifacts(skillNames) {
 // deployed files that LITERALLY carry each slot; foreign sphere libraries are reference
 // material and never gate (only the DECLARED sphere is a working surface), so only it may appear.
 // The addresses come from the SAME predicate the final gate judges by (`placeholderSurfaces`,
-// 2.5 — project F `bugs/KAIF/10`): a chronicle line quoting `<BUILD_COMMAND>` verbatim is history,
+// 2.5 — a field project's `bugs/KAIF/10`): a chronicle line quoting `<BUILD_COMMAND>` verbatim is history,
 // not a slot, and the gate never asked for it — so the item must not send anyone to "fill" it.
 // Canonical copies only: per-system mirrors re-sync from them at update-verify.
 function unresolvedOnDisk(unresolved, deploy) {
@@ -708,7 +860,7 @@ function writeAdaptationTask(unresolvedLive, translated, meta, values = {}) {
   // intervene twice. The item stands BEFORE goal-plan — the first owner-facing text of the pass —
   // and the ignore decision travels in the same step (ignore-first is already canon: a public
   // repo + a quote-bearing portrait = the owner's private writing published).
-  items.push(['owner-voice', 'Ask the owner whether a voice portrait exists (`AUTHOR_STYLOMETRY.md`; skill /owner-voice). If YES: install it at the project root, and when the repository is PUBLIC add it to .gitignore in the SAME step — a portrait may quote the owner\'s private writing. If NO: record the canonical line `no voice portrait` (with date) in AGENT_GUIDE.md → "Notes from the human", so no future session re-asks. Either way this item closes BEFORE any owner-facing text (GOAL wording, README) is written.']);
+  items.push(['owner-voice', 'Ask the owner whether a voice portrait exists (`AUTHOR_STYLOMETRY.md`; skill /owner-voice). If YES: install it at the project root, wire its machine minute into the build path of EVERY owner-facing text class you find (`node .kaif/tools/kaif-voice-lint.mjs check <files…>` inside the script that builds a sheet, a string table, a README section — a hit stops the build or is answered in the portrait\'s exception column; the portrait\'s §8 must be the TABLE the skeleton shows, greps as prose are SKIPPED), and when the repository is PUBLIC add it to .gitignore in the SAME step — a portrait may quote the owner\'s private writing. If NO: record the canonical line `no voice portrait` (with date) in AGENT_GUIDE.md → "Notes from the human", so no future session re-asks. Either way this item closes BEFORE any owner-facing text (GOAL wording, README) is written.']);
   items.push(['goal-plan', 'If GOAL.md is empty, seed it and ask the owner; derive MASTER_PLAN.md from GOAL.md (skill: /revision).']);
   items.push(['sphere', 'Pick the project\'s sphere (libraries ship in .kaif/spheres/; do NOT author a new document unless none fits) and record it by running `node .kaif/kaif-core.mjs sphere <name>` (e.g. `sphere programming`) — never edit .kaif/kaif.json by hand.']);
   if (needTranslate) items.push(['language', `Translate the owner-facing docs (GOAL.md, KAIF_FRAMEWORK.md, the directory READMEs) into "${LANG}" — no bundled template for this language yet. Keep agent-only docs in English.`]);
@@ -755,8 +907,6 @@ function writeAdaptationTask(unresolvedLive, translated, meta, values = {}) {
 function newsInterval(meta, fromVersion) {
   const byVer = meta.templateNotesByVersion;
   if (!byVer) return (meta.templateNotes || []).map((n) => `- ${n}`).join('\n') || '- (no template notes shipped with this version)';
-  const vnum = (v) => String(v || '0').split('.').map(Number);
-  const gt = (a, b) => { const [a1, a2 = 0] = vnum(a), [b1, b2 = 0] = vnum(b); return a1 !== b1 ? a1 > b1 : a2 > b2; };
   const vers = Object.keys(byVer).filter((v) => gt(v, fromVersion || '0') && !gt(v, meta.version)).sort((a, b) => (gt(a, b) ? 1 : -1));
   if (!vers.length) return '- (no template notes recorded for this interval)';
   return vers.map((v) => [`**${v}:**`, ...byVer[v].map((n) => `- ${n}`)].join('\n')).join('\n\n');
@@ -768,21 +918,21 @@ function newsInterval(meta, fromVersion) {
 // marker, outside the owner's quotes, dated journals and derivative mirrors.
 // DELIBERATE RECALL TRADE (bugs/35 closure, L4 judge): precision is the gate here — a claim
 // that is dated, quoted, parenthesized or far from the marker is now SKIPPED by construction
-// (a real dated claim, a blockquote tagline, prose staleness far from the marker — the project C
+// (a real dated claim, a blockquote tagline, prose staleness far from the marker — the field project
 // D11 "(с 1.5)" class — will be missed). The scan is an ADVISOR, not a blocker: the task item
 // says "update each or state why", and the judge verdict carries the reasoning (decision #42).
 function scanStaleClaims(fromVersion, toVersion, templateShas = null) {
   if (!fromVersion || fromVersion === toVersion) return [];
   // Knowledge directories and EXPERIENCE/HISTORY are JOURNALS OF THE PAST by definition — a line
   // "we updated to <old>" cannot be "updated to <new>" without lying; half the field scan's hits
-  // were exactly that (bug 23 / project A K5), and a noisy guard teaches the agent to ignore it.
+  // were exactly that (bug 23 / field report K5), and a noisy guard teaches the agent to ignore it.
   // Agent-system mirrors are DERIVATIVE — the machinery itself re-syncs them from the canon,
-  // yet they once ate 44 of 46 hits and the whole cap (bugs/35, project D Г4).
+  // yet they once ate 44 of 46 hits and the whole cap (bugs/35, field report Г4).
   const SKIP_DIRS = ['.git', 'node_modules', '.kaif', 'researches', 'interviews', 'homeworks', 'bugs', 'ideas',
                      'reports',   // dated field/audit journals — same noise class as the other knowledge dirs (bugs/35)
                      '.agents', '.grok', '.cline', '.roo'];
   // GOAL.md and the declared canon artifacts are the OWNER's documents: the scan once proposed
-  // editing GOAL.md — a file the machinery itself declares untouchable (bugs/35, project A гр.3).
+  // editing GOAL.md — a file the machinery itself declares untouchable (bugs/35, field report гр.3).
   // AUTHOR_STYLOMETRY.md is the same class (bugs/54): the owner's voice portrait is written by the
   // agent but ACCEPTED by the owner, and it LEGALLY carries version tokens — the corpus registry
   // names its sources' versions and the history journal records the versions the portrait changed
@@ -794,20 +944,32 @@ function scanStaleClaims(fromVersion, toVersion, templateShas = null) {
   // A claim = the version token within a few characters of the framework marker. Mere
   // co-occurrence on one line is NOT a claim: "building Product 2.0 … KAIF leads the process"
   // is the PRODUCT's version — a project whose own version matches a KAIF release number once
-  // turned this scanner into a false-positive generator (bugs/35, project A гр.3).
-  const escVer = fromVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // the negative guards reject a LONGER version number ("21.6", "1.6.3", "1.60"), never a
-  // sentence period right after the token ("… KAIF 1.6." is a claim, sandbox-caught)
-  const ADJACENT = new RegExp(`(?:kaif|каиф)[^\\n]{0,16}${escVer}(?!\\d|\\.\\d)|(?<!\\d)(?<!\\d\\.)${escVer}[^\\n]{0,16}(?:kaif|каиф)`, 'i');
+  // turned this scanner into a false-positive generator (bugs/35, field report гр.3).
+  // 2.6 (UR3; origin #44): the window is ANY version token strictly OLDER than the version being
+  // installed — not only the one being replaced. A one-version window made the blind spot grow
+  // with the age of the lie (a README badge stuck on 2.2 survived three green updates: no later
+  // interval had fromVersion === "2.2"). Every exemption below stays exactly as it was; the
+  // adjacency regex is built per token found on the line.
+  const VERSION_TOKEN = /(?<!\d)(?<!\d\.)\d+\.\d+(?!\d|\.\d)/g;
+  const adjacentCache = new Map();
+  const adjacent = (v) => {
+    if (!adjacentCache.has(v)) {
+      const escVer = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // the negative guards reject a LONGER version number ("21.6", "1.6.3", "1.60"), never a
+      // sentence period right after the token ("… KAIF 1.6." is a claim, sandbox-caught)
+      adjacentCache.set(v, new RegExp(`(?:kaif|каиф)[^\\n]{0,16}${escVer}(?!\\d|\\.\\d)|(?<!\\d)(?<!\\d\\.)${escVer}[^\\n]{0,16}(?:kaif|каиф)`, 'i'));
+    }
+    return adjacentCache.get(v);
+  };
   const CAP_FILES = 20;      // cap by FILES, not hits: a hit cap was once exhausted by one
-  const byFile = new Map();  // directory before the walk reached the only real public claim (project D Г4)
+  const byFile = new Map();  // directory before the walk reached the only real public claim (field report Г4)
   const walk = (dir) => {
     for (const n of readdirSync(dir)) {
       const p = (dir === '.' ? '' : dir + '/') + n;
       if (SKIP_DIRS.includes(n) || SKIP_FILES.includes(p)) continue;
       if (statSync(p).isDirectory()) { walk(p); continue; }
-      // Prose AND the project's own scripts (2.5, epic US; field wish plans/73 U2 p.4, QA_Engineer
-      // p.14): a version pin in `package.json` scripts or a local guard asserting the OLD version
+      // Prose AND the project's own scripts (2.5, epic US; field wish plans/73 U2 p.4, a field
+      // report p.14): a version pin in `package.json` scripts or a local guard asserting the OLD version
       // is the claim that bites hardest — it fails CI after a green update. Lock FILES carry no
       // claim of the project's own and are skipped — judged by the lock-file NAME, never by the
       // word "lock" anywhere in a name: BLOCKERS.md and lockstep.mjs are claims like any other
@@ -824,50 +986,63 @@ function scanStaleClaims(fromVersion, toVersion, templateShas = null) {
       const lines = readFileSync(p, 'utf8').split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (!line.includes(fromVersion) || line.includes(toVersion)) continue;
-        if (/^\s*>/.test(line)) continue;          // blockquote = the owner's quoted word (bugs/35, project B Г5)
-        // project A 2.3 field wish R2: a JUSTIFIED old-version mention re-flagged on EVERY interval,
+        if (line.includes(toVersion)) continue;
+        // `%20` is a URL-encoded space: a shields.io badge writes `KAIF%202.2` and must read as
+        // "KAIF 2.2", never as version "202.2" (origin #44's own README line, polygon-caught).
+        const scan = line.replace(/%20/g, ' ');
+        const older = [...new Set(scan.match(VERSION_TOKEN) || [])].filter((v) => gt(toVersion, v));
+        if (!older.length) continue;
+        if (/^\s*>/.test(line)) continue;          // blockquote = the owner's quoted word (bugs/35, field report Г5)
+        // a 2.3 field wish (R2): a JUSTIFIED old-version mention re-flagged on EVERY interval,
         // forever ("minutes per update, forever"). The canonical marker `KAIF-VERSION-OK` (an
         // English greppable token, same family as [TESTED]/DONE) on the hit line or the line
         // right above it records the justification ONCE — <!-- KAIF-VERSION-OK: reason --> —
         // and the scan converges to zero instead of re-litigating history each time.
         if (/KAIF-VERSION-OK/i.test(line) || (i > 0 && /KAIF-VERSION-OK/i.test(lines[i - 1]))) continue;
-        if (/\b\d{4}-\d{2}/.test(line)) continue;  // a dated record = journal/chronicle/decision row, not a claim (project B Г5, project A гр.4)
+        if (/\b\d{4}-\d{2}/.test(line)) continue;  // a dated record = journal/chronicle/decision row, not a claim (project B Г5, project A гр.4) // source-kept: two independent field reports
         if (p === 'STATUS.md' && /предыдущ|previous/i.test(line)) continue;   // history, not a claim
         // Attributions — "(KAIF 1.6)" naming the version a rule arrived with — are history, not
-        // staleness (project D Г4: rewriting them would forge it); judge the line with its
+        // staleness (field report Г4: rewriting them would forge it); judge the line with its
         // parenthesized segments removed, so only unparenthesized adjacency counts as a claim.
         // In a SCRIPT parentheses are syntax, not attribution — `assert(v === 'KAIF 2.4')` IS the pin.
-        if (!ADJACENT.test(isProse ? line.replace(/\([^)]*\)/g, '') : line)) continue;
+        // A parenthesis right after `]` is a markdown link/image TARGET, not an attribution — the
+        // shields.io badge keeps its version inside exactly such a target (`![…](…KAIF%202.2…)`),
+        // and stripping it hid origin #44's own README line from the scan (2.6, polygon-caught).
+        const judged = isProse ? scan.replace(/(?<!\])\([^)]*\)/g, '') : scan;
+        const claimed = older.find((v) => adjacent(v).test(judged));
+        if (!claimed) continue;
         if (!byFile.has(p)) byFile.set(p, []);
-        byFile.get(p).push(`${p}:${i + 1} — ${line.trim().slice(0, 100)}`);
+        // a token older than the one just replaced is NAMED — the reader must not assume fromVersion
+        byFile.get(p).push(`${p}:${i + 1} — ${line.trim().slice(0, 100)}${claimed === fromVersion ? '' : ` (asserts ${claimed})`}`);
       }
     }
   };
   try { walk('.'); } catch { /* best-effort scan */ }
   const files = [...byFile.keys()];
   const hits = files.slice(0, CAP_FILES).flatMap((p) => byFile.get(p));
-  if (files.length > CAP_FILES)   // honest truncation: "shown N of M", never a silent cut (project D Г4)
+  if (files.length > CAP_FILES)   // honest truncation: "shown N of M", never a silent cut (field report Г4)
     hits.push(`shown ${CAP_FILES} of ${files.length} file(s) with hits — fix these, then re-run the scan (checkpoint stale-claims re-runs it)`);
   return hits;
 }
 
 // Deprecations (plan 21 §3.5, field gap T10): a release may RETIRE artifacts that EARLIER
 // releases deployed — the mechanism that replaced another mechanism owns the cleanup of its
-// predecessor (project C: a 1.2-era validator survived four versions printing false greens).
+// predecessor (a field project: a 1.2-era validator survived four versions printing false greens).
 // Untouched instances are removed mechanically; locally edited ones go to the task.
 // 2.5 (epic US; origin #32 R-D): a deprecation NAMES ITS SUCCESSOR wherever it is reported —
 // "retired" without "use X instead" sent a field agent hunting — and the ones KEPT (local edits)
 // are COUNTED, not just listed: the summary used to print only what was removed, so a tree that
 // kept every deprecated artifact read as "nothing retired" instead of "N await you".
-function handleDeprecations(meta, old) {
+function handleDeprecations(meta, old, fills = null) {
   const out = { removed: 0, kept: 0, items: [] };
   for (const d of meta.deprecations || []) {
     if (!d.path || !existsSync(d.path)) continue;
     const reason = d.reason || 'deprecated upstream';
     const succ = d.successor ? ` → successor: ${d.successor}` : '';
     const tpl = (old.templateShas || {})[d.path];
-    if (tpl && fileShaNorm(d.path) === tpl) {
+    // untouched MODULO the hand-filled slots retires mechanically too (2.6, UR2; origin #48 R2: a
+    // deprecated skill whose only local difference was its <BUILD_COMMAND> fill went to the hand)
+    if (tpl && (fileShaNorm(d.path) === tpl || (fills && normSha(unfill(readFileSync(d.path, 'utf8'), fills)) === tpl))) {
       unlinkSync(d.path);
       out.removed++;
       log(`- retired ${d.path} (${reason})${succ}`);
@@ -886,11 +1061,39 @@ function handleDeprecations(meta, old) {
 function policyInterval(meta, fromVersion) {
   const byVer = meta.policyChanges;
   if (!byVer) return [];
-  const vnum = (v) => String(v || '0').split('.').map(Number);
-  const gt = (a, b) => { const [a1, a2 = 0] = vnum(a), [b1, b2 = 0] = vnum(b); return a1 !== b1 ? a1 > b1 : a2 > b2; };
   const out = [];
   for (const v of Object.keys(byVer).filter((v) => gt(v, fromVersion || '0') && !gt(v, meta.version)).sort((a, b) => (gt(a, b) ? 1 : -1)))
     for (const p of byVer[v]) out.push(`[${v}] ${p}`);
+  return out;
+}
+
+// Headings RENAMED since `fromVersion` (2.7, epic HO; origin issue #57), flattened into
+// { path: [[old, new], …] }. Lower bound as for the policy changes: a tree that skipped three
+// releases gets every rename of those three, in version order, so a heading renamed twice
+// (A→B in 2.7, B→C in 2.8) is chased through both hops rather than read as two strangers.
+// NO upper ceiling, on purpose (judge of epic HO, bugs/114): a policy note is prose and must stay
+// inert until its release ships, but a rename pair is VALIDATED AGAINST THE SHIPPED TEMPLATE at
+// the point of use (it only fires when the template carries the new heading and no longer the
+// old one), so the ceiling bought no safety and opened a window — a tree updating from `main`
+// between the rename and the version bump got the renamed headings with the map switched off,
+// i.e. the very duplicate the map exists to prevent.
+function renameInterval(meta, fromVersion) {
+  const byVer = meta.renamesByVersion;
+  if (!byVer) return {};
+  const out = {};
+  for (const v of Object.keys(byVer).filter((v) => gt(v, fromVersion || '0')).sort((a, b) => (gt(a, b) ? 1 : -1)))
+    for (const [path, pairs] of Object.entries(byVer[v] || {}))
+      for (const [o, n] of pairs) {
+        out[path] = out[path] || [];
+        const has = (a, b) => out[path].some(([x, y]) => x === a && y === b);
+        // A heading renamed twice across the interval (A→B in one release, B→C in the next) keeps
+        // BOTH hops plus the derived A→C: which one a given tree can use depends on where that tree
+        // started, and only the merge (which sees the disk) can tell. Collapsing the chain here
+        // would drop the hop a tree skipping only ONE release actually needs.
+        const prior = out[path].find(([, mid]) => mid === o);
+        if (!has(o, n)) out[path].push([o, n]);
+        if (prior && !has(prior[0], n)) out[path].push([prior[0], n]);
+      }
   return out;
 }
 
@@ -945,12 +1148,12 @@ function writeUpdateTask(diverged, meta, contextLine, opts = {}) {
   items.push(['review-news', 'Read the template news below; apply anything relevant to files this update could not touch mechanically.']);
   // stale-claims comes AFTER review-news: the news carry the history-migration instruction, and
   // the scan once flagged the very STATUS lines that migration moves two items later (bugs/35,
-  // project A гр.4); the checkpoint re-runs the scanner, so the post-migration state is what counts.
+  // field report гр.4); the checkpoint re-runs the scanner, so the post-migration state is what counts.
   // #31 (2.5, epic US; field: the item was present in one run and absent in the next, and an
   // ABSENT item is indistinguishable from "nothing found" — a silent scanner failure would pass
   // as a clean tree): the item is UNCONDITIONAL on a version-changing update; an empty scan says so.
   if (fromVersion) items.push(['stale-claims', staleClaims.length
-    ? `These lines still assert the OLD version (${fromVersion}) — after the history migration from the news above, update each or state why it is correct. A line that is correct BY DESIGN (a rule's arrival version, a verbatim quote) gets the permanent justification marker on it or on the line above — \`<!-- KAIF-VERSION-OK: reason -->\` — and stops re-flagging on every future interval:\n${staleClaims.map((h) => `    · ${h}`).join('\n')}`
+    ? `These lines still assert an OLD version (older than ${meta.version}; the one just replaced is ${fromVersion} — a line stuck on an earlier one names it) — after the history migration from the news above, update each or state why it is correct. A line that is correct BY DESIGN (a rule's arrival version, a verbatim quote) gets the permanent justification marker on it or on the line above — \`<!-- KAIF-VERSION-OK: reason -->\` — and stops re-flagging on every future interval:\n${staleClaims.map((h) => `    · ${h}`).join('\n')}`
     : `no lines found — the scan for claims of the OLD version (${fromVersion}) ran over the tree and found nothing to update; recorded so that a silent scanner failure can never pass as a clean result (the checkpoint re-runs the scan)`]);
   items.push(['recheck', 'Run `node .kaif/kaif-core.mjs check` — the deployed manifest must be 100% green.']);
   items.push(['judge', 'Run a /fable-judge pass over this update (versions in .kaif/kaif.json, nothing owner-authored lost, the merges real) — its verdict is quoted in the field report below and update-verify is not green without it (decision #46).']);
@@ -1043,9 +1246,9 @@ async function fetchMaybe(base, name) {
 // The synthetic baseline (plan 21 §5.5, field gap П7): a pre-2.0 deployment carries no content
 // snapshots, but the OLD version's own release artifact IS one — fetch it, run it through the
 // same transform pipeline (language, fill, anonymize), and the blind adopt-everything legacy
-// path becomes an ordinary modular update. Field prototype: project C's kaif-baseline-diff.mjs.
+// path becomes an ordinary modular update. Field prototype: a field project's kaif-baseline-diff.mjs.
 // --baseline <dir|url> overrides the source (sandboxes; offline owners with a saved artifact).
-async function buildSyntheticBaseline(legacyOld) {
+async function buildSyntheticBaseline(legacyOld, purpose = 'baseline') {
   const ver = legacyOld && legacyOld.version;
   if (!ver) return null;
   const base = val('--baseline') || `${ORIGIN}/releases/download/v${ver}`;
@@ -1082,7 +1285,10 @@ async function buildSyntheticBaseline(legacyOld) {
     log(`⟳ synthetic baseline: v${ver}'s own ${name} (${Object.keys(templateShas).length} templates) — old template texts in hand for real diffs`);
     return { shas: {}, templateShas, moduleShas, templateTexts, kept: [], synthetic: true };
   }
-  log(`⟳ no baseline artifact reachable for v${ver} (${base}) — classic adopt-everything legacy path`);
+  // The bootstrap over a SURVIVING manifest asks only for the old texts (2.6, UR5): its road stays
+  // modular either way, so the honest line here is about the diffs' rendering, not about the road.
+  if (purpose === 'texts') log(`⟳ no artifact of v${ver} reachable for the OLD template texts (${base}) — module diffs on this route show the incoming template only; pass --baseline <dir|url> with that version's artifacts to see −/+`);
+  else log(`⟳ no baseline artifact reachable for v${ver} (${base}) — classic adopt-everything legacy path`);
   return null;
 }
 
@@ -1107,7 +1313,7 @@ async function buildSyntheticBaseline(legacyOld) {
 // exactly the shape a piecewise merge leaves behind. Returns { NAME: reason } for the bad ones only;
 // the multi-line author-note comment (`KAIF:AUTHOR-NOTE`) is not a line marker and is not judged.
 // ONE fence-aware scanner feeds both judges — `check`'s parity and the merge's indivisibility rule
-// below (project F 10: two scanners of one thing drift apart; one predicate cannot).
+// below (field report 10: two scanners of one thing drift apart; one predicate cannot).
 function anchorMarkers(text) {
   const out = [];
   let inFence = false;
@@ -1137,7 +1343,7 @@ function unpairedAnchors(text) {
   return out;
 }
 
-// KAIF ticket 06 (project F 2.3 field report): rewriting an EXISTING file keeps the file's dominant
+// KAIF ticket 06 (a 2.3 field report): rewriting an EXISTING file keeps the file's dominant
 // line-ending convention. On an autocrlf=true tree `update` used to write LF into a CRLF working
 // tree — git normalizes on commit, so the REPO was unharmed, but any local guard comparing text
 // blocks byte-exact across files on disk went transiently red right after a green mechanical
@@ -1160,7 +1366,7 @@ function writeMatchingEol(path, content) {
   writeFileSync(path, out);
 }
 
-function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null) {
+function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null, fills = null, renames = []) {
   const disk = normEol(readFileSync(path, 'utf8'));
   const diskMods = splitModules(disk);
   if (joinModules(diskMods) !== disk) return null;                      // pathological file — file-level fallback
@@ -1172,7 +1378,7 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
   if (dupCheck(diskMods) || dupCheck(newMods)) return null;
   const newBySig = new Map(newMods.map((m) => [m.signature, m]));
   const oldBySig = new Map(oldMods.map((e) => [e.signature, e]));
-  // Translated-wholesale net (bug 20 / project A K1): a file whose HEADINGS were translated matches
+  // Translated-wholesale net (bug 20 / field report K1): a file whose HEADINGS were translated matches
   // (almost) no baseline signature, so a by-signature merge would read it as "all owner-added"
   // and DOUBLE the document with the English template (field: 25 files, +6534 lines). If the
   // baseline's signatures are (all but one) gone from disk AND the disk body carries the owner's
@@ -1193,7 +1399,7 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
   // freeze the file with a lying task note (judge finding F1, s07/T6) — small bases demand that
   // NO base signature survives before the net may fire. On a real-size base the ceiling is a
   // SHARE of the base, not an absolute: real translations leave TERMS untranslated, and the old
-  // "≤1" ceiling read project C's 2-survivors-of-21 translation as English and doubled it (bug 31).
+  // "≤1" ceiling read a field project's 2-survivors-of-21 translation as English and doubled it (bug 31).
   const baseN = counted(oldMods).length;
   const wholesaleCeiling = baseN <= 2 ? 0 : Math.max(1, Math.floor(baseN * WHOLESALE_SURVIVOR_SHARE));
   // One predicate for both axes (bugs/66 №3) — the net used to re-implement the script test
@@ -1206,17 +1412,53 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
   const verdict = localized ? { baseFound, baseN, ceiling: wholesaleCeiling } : null;
   if (localized && baseFound <= wholesaleCeiling)
     return { translatedWholesale: true, verdict };
+  // 2.7 (epic HO; origin issue #57): a heading RENAMED by this release. The module is addressed by
+  // its signature, so without a declaration a rename reads as "removed upstream + new upstream" —
+  // harmless for an untouched module (removed, then re-inserted), a silent DUPLICATE for a module
+  // the owner edited, and wordless in the log either way (probe ho-rename-duplicate: 2 of 8 red).
+  // The declaration is the bundle's rename map for this interval; nothing is ever guessed by
+  // similarity — the same answer Django and Liquibase give to the same ambiguity.
+  const renameTo = new Map();      // old signature (on disk) → new signature (in the template)
+  const renameFrom = new Map();    // new signature → old, to suppress the duplicate insertion below
+  const onDisk = new Set(diskMods.map((d) => d.signature));
+  // Live pairs only: the template must carry the NEW heading and must no longer carry the old one
+  // (both alive means two separate sections, not a rename).
+  const declared = (renames || []).filter(([o, n]) => newBySig.has(n) && !newBySig.has(o));
+  // Bind each target to the hop that is ACTUALLY on disk. The interval may offer several hops for
+  // one target (a heading renamed twice, plus the derived end-to-end pair), and only one of them
+  // names a section THIS tree has — binding by declaration order instead would pick the hop for a
+  // tree that started somewhere else and leave the real section behind as a duplicate.
+  for (const [o, n] of declared) if (onDisk.has(o) && !renameFrom.has(n)) { renameTo.set(o, n); renameFrom.set(n, o); }
+  const renamed = [];              // [{ from, to, outcome }] — named in the log and in the task
+  // A declared rename whose OLD heading is nowhere on disk: the owner removed or translated that
+  // section. Not an error and never a crash — the update says so by name (once per target) and the
+  // new module takes the ordinary "new in this release" road.
+  const renameMissing = declared.filter(([, n]) => !renameFrom.has(n))
+    .filter(([, n], i, a) => a.findIndex(([, m]) => m === n) === i)
+    .map(([o, n]) => ({ from: o, to: n }));
+  // A declaration whose OLD heading IS on this disk but whose NEW heading the template does not
+  // carry (a typo in the declared pair, or a rename that was itself renamed again without a
+  // record) — bugs/114, judge E4: silently dropping it hands the owner the very duplicate the map
+  // exists to prevent, at exit 0. It cannot be repaired here; it is SAID, by name, and the build
+  // guard upstream refuses to ship such a pair.
+  const renameBroken = (renames || []).filter(([o, n]) => onDisk.has(o) && !newBySig.has(n) && !newBySig.has(o))
+    .map(([o, n]) => ({ from: o, to: n }));
   let replaced = 0;
   const divergedList = [];
   const out = [];
   for (const dm of diskMods) {
     const dSha = normSha(modText(dm));
     const oldE = oldBySig.get(dm.signature);
-    const newM = newBySig.get(dm.signature);
+    const renamedTo = renameTo.get(dm.signature);
+    const newM = newBySig.get(dm.signature) || (renamedTo ? newBySig.get(renamedTo) : undefined);
+    if (renamedTo && newM) renamed.push({ from: dm.signature, to: renamedTo, outcome: oldE && dSha === oldE.sha256 ? 'replaced' : 'kept (local edits — see the task)' });
     // Frontmatter is a named pseudo-module with one extra right (bug 43): equality with its old
     // template is judged MODULO the machinery-appended alias tail — the old text comes from the
     // baseline artifact and must agree with the deploy's own module snapshot before it is trusted.
     let untouchedMod = oldE && dSha === oldE.sha256;
+    // 2.6 (UR2; origin #48 R2): untouched MODULO the hand-filled slots — the module's disk text with
+    // the fills folded back equals the old template module exactly (matchFills / unfill above).
+    if (!untouchedMod && oldE && fills && normSha(unfill(modText(dm), fills)) === oldE.sha256) untouchedMod = true;
     if (!untouchedMod && oldE && dm.signature === '<preamble>' && oldTexts && oldTexts.has('<preamble>')) {
       const ot = oldTexts.get('<preamble>');
       if (normSha(ot) === oldE.sha256 && stripAliasTail(modText(dm)) === stripAliasTail(ot)) untouchedMod = true;
@@ -1235,7 +1477,7 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
         else { out.push({ signature: dm.signature, lines: [], was: dm }); replaced++; }   // empty entry = removed; `was` lets the pair rule below restore it
         continue;
       }
-      const newText = modText(newM);
+      const newText = fills ? fillPlaceholders(modText(newM), fills, new Set()) : modText(newM);   // the new template module with the deployment's own fills folded in (2.6, UR2)
       if (dSha === normSha(newText)) { out.push(dm); }                  // unchanged upstream too
       // The safety net never judges the preamble: machinery aliases make it carry the owner's
       // script by construction (bug 43) — the alias tail is preserved by the replacement below.
@@ -1255,14 +1497,23 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
       }
     } else {
       // owner/agent-edited, or a module the deploy never shipped (owner-added section) — keep.
-      // A diff lands in the task ONLY when upstream ACTUALLY changed this module (KPOT F2:
-      // "diverged but upstream untouched" is zero work and must not make noise).
+      // A diff lands in the task ONLY when upstream ACTUALLY changed this module (a field update
+      // report, finding F2: "diverged but upstream untouched" is zero work and must not make noise).
       out.push(dm);
       // A CONFLICT diff stays "your version → the new template" (the 2.0 canon, s02/S6): the
       // owner's edit must be visible as `-` lines right where the merge happens. Template→template
       // diffs are reserved for files whose DISK text shows nothing (translated/wholesale/absent).
-      if (oldE && newM && normSha(modText(newM)) !== oldE.sha256)
-        divergedList.push({ signature: dm.signature, note: 'carries local edits AND upstream changed it', diff: lineDiff(modText(dm), modText(newM)) });
+      // 2.6 (UR2; origin #48 R3): a disk module ALREADY equal to the incoming template (fills folded
+      // in) has nothing to merge — the sentence below used to fire when the deploy VALUES drifted
+      // (project-name healing) and the task rendered an empty "upstream changed it" diff.
+      const newFilled = newM ? (fills ? fillPlaceholders(modText(newM), fills, new Set()) : modText(newM)) : null;
+      if (newM && dSha === normSha(newFilled)) { /* already the new template — nothing to hand over */ }
+      else if (renamedTo && newM)
+        // The renamed-and-edited case — the one the duplicate came from. Your section stays where it
+        // is, under its old heading; the item carries the rename and the diff, and NOTHING is inserted.
+        divergedList.push({ signature: dm.signature, note: `renamed upstream to "${renamedTo}" AND carries local edits — fold your edits into the renamed section by hand (nothing was inserted: a second copy under the new heading is exactly what this declaration prevents)`, diff: lineDiff(modText(dm), newFilled) });
+      else if (oldE && newM && normSha(modText(newM)) !== oldE.sha256)
+        divergedList.push({ signature: dm.signature, note: 'carries local edits AND upstream changed it', diff: lineDiff(modText(dm), newFilled) });
       else if (oldE && !newM)
         divergedList.push({ signature: dm.signature, note: 'upstream REMOVED this module; your edited version kept', diff: lineDiff(modText(dm), '') });
     }
@@ -1273,11 +1524,14 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
   for (let i = 0; i < newMods.length; i++) {
     const nm = newMods[i];
     if (diskMods.some((d) => d.signature === nm.signature)) continue;
+    // A renamed module is NOT new: its old heading is on disk and the loop above already decided
+    // its fate (replaced in place, or kept with an item). Inserting it here is the duplicate.
+    if (renameFrom.has(nm.signature) && diskMods.some((d) => d.signature === renameFrom.get(nm.signature))) continue;
     // A module absent on disk is inserted ONLY when it is genuinely NEW upstream — absent from
     // the previous release's template too. If the old template had it: unchanged upstream means
     // the absence is the OWNER's doing (translation or deletion) — never re-insert (bug 31: the
     // English doubling of translated files; the same gate kills the false "NEW module in this
-    // release" items at zero upstream delta — bug 32, project A's 19 phantoms); changed upstream
+    // release" items at zero upstream delta — bug 32, a field project's 19 phantoms); changed upstream
     // means the owner must reconcile — a diff, never a resurrection.
     const oldEIns = oldBySig.get(nm.signature);
     if (oldEIns && oldEIns.sha256 === normSha(modText(nm))) continue;
@@ -1303,14 +1557,14 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
       const pos = out.findIndex((o) => o.signature === newMods[k].signature);
       if (pos >= 0) { at = pos + 1; break; }
     }
-    // project F R2 (2.5, epic US): an insertion point INSIDE an anchored pair that is open at that spot
+    // field report R2 (2.5, epic US): an insertion point INSIDE an anchored pair that is open at that spot
     // (a localized prayer cut into the owner's own headings) would land upstream text between the
     // owner's BEGIN and END — the point moves past the module that closes every open pair.
     at = pastOpenPairs(out, at);
     out.splice(at, 0, { signature: nm.signature, lines: modText(nm).split('\n'), inserted: true });
     replaced++;
   }
-  // P2 (2.5, epic US; origin #27 R1b, project F R2): an anchored block is INDIVISIBLE. Its markers may
+  // P2 (2.5, epic US; origin #27 R1b, field report R2): an anchored block is INDIVISIBLE. Its markers may
   // live in different modules (the prayer's BEGIN sits in the H1 module, its END in the prayer
   // module), so a by-module merge can apply one carrier and keep the other — the field got an END
   // without its BEGIN. The plan above is judged as a whole: a pair balanced on disk and unbalanced
@@ -1338,10 +1592,10 @@ function mergeModules(path, newContent, oldMods, dryRun = false, oldTexts = null
     divergedList.push({ signature: `(anchored block KAIF:${name})`, note: `anchored block KAIF:${name} is indivisible and not all of its carrier modules could be applied (a piecewise merge would leave ${reason}) — the whole block was kept as on disk; fold it in by hand from this diff of all its carriers`, diff: lineDiff(wholeOld, wholeNew) });
   }
   const merged = joinModules(out);
-  return { merged, changed: !dryRun && merged !== disk, replaced, divergedList, verdict };
+  return { merged, changed: !dryRun && merged !== disk, replaced, divergedList, verdict, renamed, renameMissing, renameBroken };
 }
 // The insertion point for a NEW module, moved past every anchored pair still open at `at`
-// (project F R2); an unclosable pair (already broken on disk) leaves the point where it was.
+// (field report R2); an unclosable pair (already broken on disk) leaves the point where it was.
 function pastOpenPairs(mods, at) {
   const open = new Set();
   const feed = (m) => { for (const { name, kind } of anchorMarkers(modText(m))) { if (kind === 'BEGIN') open.add(name); else open.delete(name); } };
@@ -1353,8 +1607,8 @@ function pastOpenPairs(mods, at) {
 
 // The real delivery for a file the machinery may not touch (translated wholesale): the
 // old-template → new-template delta, module by module, judged against the deploy's own module
-// snapshot (bug 32; project C D12 — the costliest task section used to arrive EMPTY for exactly these
-// files, and project B counted 5 norms it would have silently lost). Old module TEXTS come from
+// snapshot (bug 32; field report D12 — the costliest task section used to arrive EMPTY for exactly these
+// files, and a field project counted 5 norms it would have silently lost). Old module TEXTS come from
 // the baseline artifact; without one the delta is still DETECTED by the snapshot shas and the
 // item says the diff is unavailable instead of staying silent — zero upstream delta = zero items.
 function templateDelta(oldEntries, newContent, oldTexts) {
@@ -1394,7 +1648,7 @@ function templateDelta(oldEntries, newContent, oldTexts) {
 // release's synthetic baseline: template provenance for v1 manifests and old template TEXTS for
 // the real old→new diffs of bug 32.
 // [TESTED: 2026-07-28 · extraction verified by re-running suites S5–S12c unchanged-green]
-function classifyAndApply(deploy, old, values, unresolved, cur, base = null, rehearsal = null) {
+function classifyAndApply(deploy, old, values, unresolved, cur, base = null, rehearsal = null, renames = {}) {
   const oldShas = old.shas || {};
   const oldTplShas = old.templateShas || (base && base.templateShas) || {};   // v2: what the previous deploy's TEMPLATES were
   const oldModShas = { ...((base && base.moduleShas) || {}), ...(old.moduleShas || {}) };  // v2: their per-module cut (manifest wins per path)
@@ -1419,7 +1673,7 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null, reh
   // the owner's script where the template does not (machinery-appended skill aliases are not a
   // translation). Protected files are never written; upstream changes ship as per-module diffs
   // (a dry-run merge). Pure-English files keep their mechanical updates — the old all-or-nothing
-  // flag silently froze 21 untouched files forever (project A field report).
+  // flag silently froze 21 untouched files forever (a field report).
   const i18nTranslated = String((cur || {}).i18n || '').toLowerCase() === 'translated';
   if (i18nTranslated) log('⟳ marker declares i18n: translated — mechanical replacement disabled for files carrying the owner\'s script; upstream changes ship as per-module diffs');
   const translatedWholesale = [];
@@ -1429,6 +1683,13 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null, reh
   // P1 (2.5, epic US; #27 R1): the rehearsal's verdict for this file, when one was recorded.
   const rehearsed = (p) => (rehearsal && rehearsal.verdicts && rehearsal.verdicts[p]) || null;
   const fmtV = (v) => `${v.outcome} — baseFound ${v.baseFound} of ${v.baseN}, ceiling ${v.ceiling}`;
+  // 2.6 (UR2; origin #48 R2/R3): the hand-filled slots of THIS deployment, derived before the loop
+  // rewrites f.content — see matchFills. Files and modules equal to "template + fills" are untouched
+  // and move mechanically with the fills folded into the NEW template.
+  const fills = deriveFills(deploy, values, old.fills, oldTplTexts);
+  const fillsN = Object.keys(fills).length;
+  if (fillsN) log(`⟳ hand-filled slots recognized (${fillsN}): ${Object.keys(fills).join(', ')} — a file equal to "template + fills" is untouched and moves mechanically, fills kept`);
+  const withFills = (text) => (fillsN ? fillPlaceholders(text, fills, new Set()) : text);
   let replaced = 0, added = 0, kept = 0, mergedModules = 0;
   for (const f of deploy) {
     if (isSkippedAnon(f.path)) continue;
@@ -1450,19 +1711,33 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null, reh
     // sha never mutates with the disk, so "restored by hand at update N" can no longer read as
     // "untouched" at update N+1. v1 manifests (no templateShas) keep the old byte-sha + kept-guard.
     const untouched = oldTplShas[f.path]
-      ? fileShaNorm(f.path) === oldTplShas[f.path]
+      ? (fileShaNorm(f.path) === oldTplShas[f.path]
+         || (fillsN && normSha(unfill(readFileSync(f.path, 'utf8'), fills)) === oldTplShas[f.path]))   // untouched MODULO the hand-filled slots (2.6, UR2)
       : (!adoptedBefore.has(f.path) && oldShas[f.path] && fileSha(f.path) === oldShas[f.path]);
     if (untouched) {
       // An untouched file IS the old template — replacing it with the new one is right even
       // under the i18n flag (the flag protects the owner's translation, and an untouched file
       // carries none; s07 T2 guards this for pure-EN files on translated deployments).
-      if (fileShaNorm(f.path) === normSha(content)) { kept++; continue; } // upstream didn't change it either
-      writeMatchingEol(f.path, content); log(`↻ replaced ${f.path}`); replaced++; continue;
+      // The replacement carries the deployment's own fills folded into the NEW template (2.6, UR2).
+      const want = f.path.endsWith('.mjs') ? content : withFills(content);
+      if (fileShaNorm(f.path) === normSha(want)) { kept++; continue; } // upstream didn't change it either
+      // A rename inside an UNTOUCHED file lands correctly by wholesale replacement — but it must
+      // still be SAID (2.7, epic HO; origin #57): silence here is what leaves the owner unable to
+      // tell a renamed section from a deleted one plus a new one. The module merge below says it
+      // for diverged files; this is the same sentence for the file-level road.
+      if (renames[f.path] && okOnDisk(f.path)) {
+        const before = normEol(readFileSync(f.path, 'utf8'));
+        const after = normEol(want);
+        for (const [o, n] of renames[f.path])
+          if (before.includes(o + '\n') && !after.includes(o + '\n') && after.includes(n + '\n'))
+            log(`↻ renamed: ${f.path} :: ${o} → ${n} (replaced with the file — it carried no local edits)`);
+      }
+      writeMatchingEol(f.path, want); log(`↻ replaced ${f.path}${want !== content ? ' (fills kept)' : ''}`); replaced++; continue;
     }
     // bugs/32 (all four 2.1 field reports): a diverged/translated file whose TEMPLATE did not
     // change in this interval has NOTHING to deliver — it stays as-is and never makes a task
-    // item ("zero upstream delta = zero items"; project A: 77% of the task was diffs nobody needed,
-    // project D: 8 of 23 merge-diverged items were byte-identical between the releases).
+    // item ("zero upstream delta = zero items"; project A: 77% of the task was diffs nobody needed, // source-kept: two independent field measurements
+    // project D: 8 of 23 merge-diverged items were byte-identical between the releases). // source-kept: two independent field measurements
     if (oldTplShas[f.path] && oldTplShas[f.path] === normSha(content)) { kept++; adopted.push(f.path); continue; }
     // The flag freezes only files that ARE a translation — judged by the BODY, because
     // machinery-appended aliases put the owner's script into every skill's frontmatter on both
@@ -1475,11 +1750,16 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null, reh
     if (f.path.endsWith('.md') && oldModShas[f.path]) {
       const oldTexts = oldTplTexts[f.path] != null
         ? new Map(splitModules(normEol(oldTplTexts[f.path])).map((m) => [m.signature, modText(m)])) : null;
-      const res = mergeModules(f.path, content, oldModShas[f.path], fileTranslated, oldTexts);
+      const res = mergeModules(f.path, content, oldModShas[f.path], fileTranslated, oldTexts, fillsN ? fills : null, renames[f.path] || []);
+      // The rename is SAID, always — an update that silently swaps a heading leaves the owner unable
+      // to tell a rename from a delete-plus-add (2.7, epic HO; origin #57).
+      for (const r of (res && res.renamed) || []) log(`↻ renamed: ${f.path} :: ${r.from} → ${r.to} (${r.outcome})`);
+      for (const r of (res && res.renameMissing) || []) log(`⚠ rename anchor not found on disk: ${f.path} :: ${r.from} (upstream renamed it to ${r.to}; the section arrives as new)`);
+      for (const r of (res && res.renameBroken) || []) log(`⚠ rename declaration broken: ${f.path} :: ${r.from} → ${r.to} — the incoming template carries no such heading; this section may arrive DOUBLED (your old one kept + a new one inserted) — fold it by hand and report the declaration upstream (bugs/114)`);
       if (res && res.translatedWholesale) {
         // headings translated — merging would double the document (bug 20/K1); hands off. The
         // task item now carries the REAL old→new template delta instead of "fold the news in
-        // by hand" with nothing attached (bug 32 / project C D12).
+        // by hand" with nothing attached (bug 32 / field report D12).
         diverged.push(f.path); translatedWholesale.push(f.path); kept++; adopted.push(f.path);
         const delta = templateDelta(oldModShas[f.path], content, oldTexts);
         if (delta.length) divergedModules[f.path] = delta;
@@ -1520,7 +1800,7 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null, reh
           continue;
         }
         if (res.changed) { writeMatchingEol(f.path, res.merged); mergedModules += res.replaced;
-          // project F 2.3 field wish: NAME the kept modules by signature — "1 kept for you" made the
+          // a 2.3 field wish: NAME the kept modules by signature — "1 kept for you" made the
           // answer require a sandbox diff, and the answer should not require a sandbox.
           log(`↻ merged ${res.replaced} module(s) into ${f.path}${res.divergedList.length ? ` (kept for you: ${res.divergedList.map((d) => d.signature).join(' · ')})` : ''}`); }
         if (res.divergedList.length) { divergedModules[f.path] = res.divergedList; kept++; adopted.push(f.path); }
@@ -1550,7 +1830,7 @@ function classifyAndApply(deploy, old, values, unresolved, cur, base = null, reh
     if (f.path.endsWith('.md') && localizedAgainst(readFileSync(f.path, 'utf8'), content))
       log(`⟳ ${f.path} is localized on disk — kept (no silent English takeover)`);
   }
-  return { replaced, added, kept, mergedModules, diverged, divergedModules, ownerConvention, adopted, translatedWholesale, addedPaths, verdicts, verdictMismatches };
+  return { replaced, added, kept, mergedModules, diverged, divergedModules, ownerConvention, adopted, translatedWholesale, addedPaths, verdicts, verdictMismatches, fills };
 }
 
 // ---------------------------------------------------------------------------- update (idea 14 / plan 15)
@@ -1609,8 +1889,8 @@ async function cmdUpdate() {
   for (const f of deploy) if (okOnDisk(f.path)) sizeBefore[f.path] = statSync(f.path).size;
   backupTree(deploy, cur.version, man.version);      // rollback material BEFORE anything is written
   writeUpdateJournal(cur.version, man.version, base, 'core-update', deploy);   // crash journal: after the backup, before the first mutation
-  const { replaced, added, kept, mergedModules, diverged, divergedModules, ownerConvention, adopted, translatedWholesale, addedPaths, verdicts, verdictMismatches } =
-    classifyAndApply(deploy, old, values, unresolved, cur, oldBase, rehearsal);
+  const { replaced, added, kept, mergedModules, diverged, divergedModules, ownerConvention, adopted, translatedWholesale, addedPaths, verdicts, verdictMismatches, fills } =
+    classifyAndApply(deploy, old, values, unresolved, cur, oldBase, rehearsal, renameInterval(meta, cur.version));
   const sizeJumps = deploy
     .filter((f) => sizeBefore[f.path] && okOnDisk(f.path))
     .map((f) => ({ path: f.path, before: sizeBefore[f.path], after: statSync(f.path).size }))
@@ -1626,7 +1906,7 @@ async function cmdUpdate() {
   // sha snapshots + adoption provenance in `kept` + the pristine marker snapshot that
   // backs the final self-heal).
   // An honest log line: "replaced" on byte-identical machinery sent a field agent hunting a
-  // phantom swap failure (bug 10 facet, KPOT) — when the shas match, say so instead.
+  // phantom swap failure (bug 10 facet, a field deployment) — when the shas match, say so instead.
   if (okOnDisk('.kaif/kaif-core.mjs') && fileSha('.kaif/kaif-core.mjs') === sha256(bufs['KAIF-CORE.mjs'])) {
     log('= .kaif/kaif-core.mjs unchanged in this release');
   } else {
@@ -1647,7 +1927,7 @@ async function cmdUpdate() {
   const marker = { ...cur, version: man.version, released: man.released };
   // Seed the canonArtifacts key on updates of older deployments too (bug 34 — see cmdInstall).
   if (!('canonArtifacts' in marker)) marker.canonArtifacts = [];
-  // project C D2 (bug 31): pre-2.0 translated deployments carry no i18n key, so the per-file freeze
+  // field report D2 (bug 31): pre-2.0 translated deployments carry no i18n key, so the per-file freeze
   // is off for them. When the wholesale net just recognized translated files on a non-English
   // deployment, record the fact — every future update protects them by FLAG, not only by net.
   if (LANG !== 'en' && translatedWholesale.length && String(cur.i18n || '').toLowerCase() !== 'translated') {
@@ -1657,9 +1937,9 @@ async function cmdUpdate() {
   writeFileSync(KAIF_JSON, JSON.stringify(marker, null, 2) + '\n');
   writeFileSync(DEPLOY_MANIFEST, JSON.stringify({ manifestVersion: 2, paths: deployedPaths,
     agents: agentPaths, shas, templateShas, moduleShas, kept: adopted,
-    values: persistValues(values), marker }, null, 2) + '\n');
+    values: persistValues(values), fills, marker }, null, 2) + '\n');   // `fills` — the hand-filled slots, derived (2.6, UR2)
 
-  const dep = handleDeprecations(meta, old);
+  const dep = handleDeprecations(meta, old, fills);
   const staleClaims = scanStaleClaims(cur.version, man.version, templateShas);
   // The task lists only slots that are LITERALLY on disk after the pass (judge finding: the raw
   // `unresolved` set collects every null-valued slot seen in incoming templates — on a fully
@@ -1680,7 +1960,7 @@ async function cmdUpdate() {
       sphereSync: scopes.sphereSync, skeletonDelta: scopes.skeletonDelta, nameFallback });
 
   // The permanent receipt (plan 21 §3.4; field: "update-verify passed" was unfalsifiable a day
-  // later — project B §4). Survives self-clean; update-verify stamps it when the gates pass.
+  // later — a field report, §4). Survives self-clean; update-verify stamps it when the gates pass.
   writeReceipt({ from: cur.version, to: man.version, route: 'core-update',
     source: base,   // where THIS update came from — the previous delta stays recomputable (field ask №3)
     counters: { replaced, mergedModules, added, kept },
@@ -1860,7 +2140,7 @@ function splicePackageJson(raw, addName, addScripts) {
 // ---------------------------------------------------------------------------- final gates
 // The closing guarantees are a property of the DEPLOYED TREE, not of the road taken to it:
 // install's verify-final and update's update-verify run the SAME gate sequence (field-caught
-// on project A, 2026-07-17 — the update path used to skip these, so owner-side merges made between
+// in a field project, 2026-07-17 — the update path used to skip these, so owner-side merges made between
 // the mechanical pass and the final check never reached the per-system skill copies).
 
 // placeholder scan on the canon + skills across EVERY deployed surface (GOAL/maps may
@@ -1868,7 +2148,7 @@ function splicePackageJson(raw, addName, addScripts) {
 // <BUILD_COMMAND> live in the .agents/.grok/.cline/.roo copies and .kaif/spheres/ for a
 // whole release while the gate stayed green (bug 11, three field reports).
 // ONE predicate for both readers of "where may a slot still sit" — the gate below and the task's
-// `placeholders` item (2.5, epic US; project F `bugs/KAIF/10`): the generator used to name EVERY
+// `placeholders` item (2.5, epic US; a field project's `bugs/KAIF/10`): the generator used to name EVERY
 // deployed file carrying the token, chronicle quotes included, while the gate judged only these
 // surfaces — an instruction wider than its gate sends a weak session to "fill" a verbatim quote
 // in the history. The surfaces: the canon, every skill (canonical + per-system mirrors), and the
@@ -1879,7 +2159,7 @@ function placeholderSurfaces() {
     if (existsSync(base)) for (const n of readdirSync(base)) { const p = `${base}/${n}/SKILL.md`; if (existsSync(p)) scan.add(p); }
   if (existsSync('.roo/commands')) for (const n of readdirSync('.roo/commands').filter((f) => f.endsWith('.md'))) scan.add(`.roo/commands/${n}`);
   // Sphere libraries: only the DECLARED sphere is a working surface — the others are reference
-  // libraries that carry template slots BY DESIGN (bugs/36, project B Г11: a literal <BUILD_COMMAND>
+  // libraries that carry template slots BY DESIGN (bugs/36, field report Г11: a literal <BUILD_COMMAND>
   // in a FOREIGN sphere's library blocked the whole acceptance).
   try {
     const declared = readJson(KAIF_JSON).sphere;
@@ -1898,7 +2178,7 @@ function scanPlaceholders() {
 
 // The declared sphere must EXIST as a library: fable-method calls the sphere's minimum
 // evidence set binding, yet a marker could point into the void with every gate green
-// (bug 11, project B: sphere "game-design" with no .kaif/spheres/game-design.md).
+// (bug 11, a field project: sphere "game-design" with no .kaif/spheres/game-design.md).
 // A loud warning, not a failure: legitimate mid-adaptation states pass through here.
 // [TESTED: 2026-07-27 · sandbox S2: `sphere game-design` without a library → check exit 0 + the warning]
 function warnSphereLibrary() {
@@ -2125,6 +2405,11 @@ function runFinalGates(taskFile, tag, verb) {
   if (!i18nTranslated && task.includes('## Module diffs')) {
     let curFile = null, inDiff = false, unmergedLines = 0, skipSection = false;
     const perFile = new Map();
+    // 2.6 (UR2; origin #48 R2): a promised line that carries a hand-filled slot is on disk in its
+    // FILLED form — judge it with the deployment's fills folded in, never tell the agent to paste
+    // `<BUILD_COMMAND>` back over `npm run build`.
+    let fills = {};
+    try { fills = (okOnDisk(DEPLOY_MANIFEST) && readJson(DEPLOY_MANIFEST).fills) || {}; } catch { fills = {}; }
     for (const line of task.split('\n')) {
       const h = line.match(/^### (.+)$/);
       if (h) { curFile = h[1].trim(); continue; }
@@ -2135,7 +2420,7 @@ function runFinalGates(taskFile, tag, verb) {
       if (skipSection) continue;
       if (inDiff && curFile && line.startsWith('+ ') && line.length > 12 && okOnDisk(curFile)) {
         if (!perFile.has(curFile)) perFile.set(curFile, readFileSync(curFile, 'utf8'));
-        if (!perFile.get(curFile).includes(line.slice(2))) {
+        if (!perFile.get(curFile).includes(line.slice(2)) && !perFile.get(curFile).includes(fillPlaceholders(line.slice(2), fills, new Set()))) {
           console.error(`⚠ promised upstream line not found on disk (unmerged?): ${curFile} :: ${line.slice(2, 80)}`);
           unmergedLines++;
         }
@@ -2154,8 +2439,8 @@ function runFinalGates(taskFile, tag, verb) {
   if (missing) die(`${verb} FAILED: ${missing} issues — finish them and re-run`);
   warnSphereLibrary();
   healMarker();
-  // Re-snapshot the DISK shas now that every merge landed (plan 21 §3.2; field: KPOT caught the
-  // manifest asserting pre-merge shas forever). templateShas stay untouched — they are the
+  // Re-snapshot the DISK shas now that every merge landed (plan 21 §3.2; field: a deployment caught
+  // the manifest asserting pre-merge shas forever). templateShas stay untouched — they are the
   // release's truth, not the disk's.
   if (okOnDisk(DEPLOY_MANIFEST)) {
     try {
@@ -2166,6 +2451,58 @@ function runFinalGates(taskFile, tag, verb) {
     } catch { /* unreadable manifest — check flags it separately */ }
   }
   selfCleanArtifacts(taskFile, anonDeploy);
+}
+
+// OWN lines of a budgeted document (2.7, epic CB; origin issues #43/#45, three field reports): the
+// size budget used to count EVERY line, so a deployment whose AGENT_GUIDE.md ran 1655 lines with 300
+// of them byte-equal to the shipped template was warned about canon it never wrote — and the only
+// executable answer, "move YOUR content out", was invisible under the arrived text. The carrier
+// already existed and is REUSED here rather than invented: moduleAudit() compares the disk's module
+// cut against `moduleShas` of the deploy manifest by the pair (signature, sha256). A disk module
+// whose pair is in the deployed cut ARRIVED; every other line is the project's own.
+//
+// Three honest fallbacks, each of them said aloud in the warning, never silently:
+//   • no manifest, or no cut for this file → every line counts as own (the fail-safe direction: the
+//     budget keeps working exactly as it did before 2.7 rather than going quiet);
+//   • the file was translated WHOLESALE — not ONE template signature survives on disk, so
+//     by-signature comparison is not applicable BY CONSTRUCTION (bugs/36, and `i18n: translated` is
+//     real state on two field deployments) → every line counts as own, and the line says the arrived
+//     canon cannot be told apart from the project's own text. The predicate is the SHAPE of the loss,
+//     not the marker: a file whose every template signature is gone cannot be cut either way, and the
+//     arithmetic is the same in both branches — the flag only chooses which sentence is printed.
+// The same shape has TWO causes, and calling them both "translated" is a lie the run on real state
+// caught: an OWNER-SEEDED document (STATUS, GOAL, MASTER_PLAN, the external map) ships a skeleton the
+// project then writes over completely, so its template signatures are gone in every healthy
+// deployment — nothing was translated, the document is simply the project's own. Same arithmetic,
+// honest sentence: the branch splits on OWNER_SEEDED, which the core already knows.
+// Returns { total, own, arrived, basis } — `basis` is what the warning says about itself.
+function ownLines(doc) {
+  const raw = readFileSync(doc, 'utf8');
+  const total = raw.replace(/\r?\n$/, '').split(/\r?\n/).length;
+  let cut = null;
+  try { if (okOnDisk(DEPLOY_MANIFEST)) cut = (readJson(DEPLOY_MANIFEST).moduleShas || {})[doc] || null; }
+  catch { cut = null; }                                   // unreadable manifest — the marker gate flags it separately
+  if (!cut || !cut.length) return { total, own: total, arrived: 0, basis: 'no-cut' };
+  const disk = splitModules(normEol(raw));
+  const diskSigs = new Set(disk.map((d) => d.signature));
+  // `<preamble>` is machinery's, not the owner's (bug 43): it survives every translation and so
+  // carries no evidence about whether this file was translated.
+  const judged = cut.filter((e) => e.signature !== '<preamble>');
+  if (judged.length && !judged.some((e) => diskSigs.has(e.signature)))
+    return { total, own: total, arrived: 0, basis: OWNER_SEEDED.includes(doc) ? 'owner-seeded' : 'translated' };
+  // The key is sha FIRST: a sha256 is 64 hex characters of fixed length, so concatenating it with an
+  // arbitrary signature is unambiguous and needs no separator byte at all. (A raw NUL separator here
+  // cost nothing at runtime and made this whole file read as BINARY to grep — caught by the judge.)
+  const arrivedPairs = new Set(cut.map((e) => `${e.sha256}${e.signature}`));
+  let arrived = 0;
+  disk.forEach((m, i) => {
+    if (!arrivedPairs.has(`${normSha(modText(m))}${m.signature}`)) return;
+    let n = m.lines.length;
+    // the last module carries the empty tail the final newline produces — `total` strips it too
+    if (i === disk.length - 1 && n && m.lines[n - 1] === '') n--;
+    arrived += n;
+  });
+  return { total, own: Math.max(0, total - arrived), arrived, basis: 'cut' };
 }
 
 // The module audit (field proposal A, third 2.0 report §5): re-cut the DISK with the same
@@ -2230,6 +2567,10 @@ function moduleAudit() {
 }
 
 function cmdUpdateVerify() {
+  // The update from the previous release is run by the DEPLOYED core, whose ignore list may lack this release's
+  // lines (court of 2.7, D-F1: `.kaif/contour-window/` never reached .gitignore on 2.6 -> 2.7); update-verify is
+  // run by THIS core on every route, so ignore-first is re-asserted here, before any gate. Idempotent.
+  ensureIgnoreFirst();
   runFinalGates(UPDATE_TASK, 'KAIF-UPDATE', 'update-verify');
   moduleAudit();
   // Stamp the receipt: the proof of a verified update must outlive the self-clean (bug 17).
@@ -2254,7 +2595,10 @@ async function cmdInstall() {
     try { const j = readJson(KAIF_JSON); if (j.language) LANG = checkedLang(j.language, 'the deploy marker'); } catch { /* CLI default stands */ }
   }
   const { deploy, translated, overridePaths } = applyLanguage(files);
-  logPackHonesty(files, deploy);   // the pack boundary is declared, not discovered post-factum
+  // The pack boundary is declared, not discovered post-factum — but AFTER the success line, never
+  // before it (2.7, epic CB, criterion 3): printed first, "INCOMPLETE BY DESIGN" is the opening
+  // sentence of an install that has not yet written a file, and the field read it as a refusal.
+  const packNotes = packHonesty(files, deploy);
   const values = stableValues();   // a re-run/bootstrap over an existing deploy keeps ITS values (bug 26)
   const unresolved = new Set();
 
@@ -2280,7 +2624,7 @@ async function cmdInstall() {
   }
   if (legacyOld) refuseOnJournal();   // a crashed previous update/bootstrap stays LOUD until resumed
   // A legacy bootstrap must not silently WIDEN the deployment: the old default (all five
-  // systems) handed a two-system project ~80 unrequested files (bug 14, project C). Inherit the
+  // systems) handed a two-system project ~80 unrequested files (bug 14, a field project). Inherit the
   // marker's agents — the 1.4-era singular `agent` included — and always say what was chosen.
   if (legacyOld && !val('--agents')) {
     const inherited = Array.isArray(legacyOld.agents) && legacyOld.agents.length ? legacyOld.agents
@@ -2300,6 +2644,9 @@ async function cmdInstall() {
   //    release artifact. Only with no baseline at all does classic adopt-everything run.
   let adopted = [];
   let cls = null;
+  let rehearsal = null;   // the recorded rehearsal this bootstrap is bound to (2.6, UR1) — consumed at the end, like cmdUpdate's
+  if (!legacyOld && val('--rehearsal'))
+    die('--rehearsal binds an update-by-bootstrap over an EXISTING deployment to a sandbox copy\'s receipt — this tree carries no .kaif/kaif.json, so there is nothing to rehearse against');
   if (legacyOld) {
     if (legacyOld.version !== meta.version) {
       backupTree(deploy, legacyOld.version, meta.version); // rollback material BEFORE any write
@@ -2311,7 +2658,19 @@ async function cmdInstall() {
     }
     if (!baseline) baseline = await buildSyntheticBaseline(legacyOld);
     if (baseline) {
-      cls = classifyAndApply(deploy, baseline, values, unresolved, legacyOld, null, loadRehearsal(legacyOld.version, meta.version));
+      // 2.6 (UR5; origin #41 wish 3): the surviving manifest holds SHAS, never TEXTS — so a module
+      // absent on disk rendered as an all-`+` block on this route while the core-update route
+      // showed the real −/+ (its synthetic baseline carries the old template texts). Fetch the old
+      // release's own artifact for the TEXTS only (modules and shas stay the manifest's — it wins
+      // per path in classifyAndApply); absence degrades to the 2.5 rendering and never blocks.
+      // `--baseline <dir|url>` is the same switch as on every other road.
+      const texts = baseline.synthetic ? null : await buildSyntheticBaseline(legacyOld, 'texts');
+      // 2.6 (UR1; origin #42, three field trees in one day): `--rehearsal <receipt>` reaches this
+      // route now (the flag is in install's whitelist AND the loader's), and the auto record is
+      // CONSUMED below exactly like cmdUpdate's — all three trees found it still on disk after
+      // the update it rehearsed.
+      rehearsal = loadRehearsal(legacyOld.version, meta.version);
+      cls = classifyAndApply(deploy, baseline, values, unresolved, legacyOld, texts, rehearsal, renameInterval(meta, legacyOld.version));
       cls.baselineOld = baseline; // deprecations later need the OLD template shas (step 5)
       adopted = cls.adopted;
       log(`⟳ bootstrap classified against ${baseline.synthetic ? `a synthetic baseline of v${legacyOld.version}` : 'the surviving deploy manifest'}: ${cls.replaced} replaced, ${cls.mergedModules} modules merged in-place, ${cls.added} added, ${cls.kept} kept`);
@@ -2373,7 +2732,7 @@ async function cmdInstall() {
       && anonymize(f.content) !== f.content && fileShaNorm(f.path) !== normSha(f.content)).map((f) => f.path).sort();
     if (modeSwitch.length) log(`⚠ ${modeSwitch.length} kept file(s) were deployed with the anonymous wording — the task names each for a re-read`);
   }
-  // Same auto-record as cmdUpdate (project C D2, bug 31): a legacy bootstrap that just recognized
+  // Same auto-record as cmdUpdate (field report D2, bug 31): a legacy bootstrap that just recognized
   // translated-wholesale files on a non-English deployment writes the i18n fact down.
   if (legacyOld && cls && LANG !== 'en' && cls.translatedWholesale.length && String(legacyOld.i18n || '').toLowerCase() !== 'translated') {
     marker.i18n = 'translated';
@@ -2388,12 +2747,12 @@ async function cmdInstall() {
   let pkg = null, pkgRaw = null;
   if (ANON) { /* no handles by design */ }
   else if (existsSync('package.json')) {
-    try { pkgRaw = readFileSync('package.json', 'utf8'); pkg = JSON.parse(pkgRaw.replace(/^﻿/, '')); }
+    try { pkgRaw = readFileSync('package.json', 'utf8'); pkg = JSON.parse(pkgRaw.replace(/^\uFEFF/, '')); }
     catch { pkg = null; console.error('⚠ package.json exists but is not parseable JSON — kaif:* handles NOT wired (add them by hand)'); }
   } else pkg = {};
   if (pkg) {
     // Write ONLY when something was actually added: an unconditional rewrite re-serialized the
-    // user's file (CRLF→LF) into a phantom whole-file diff on every install (bug 22 / project A K4).
+    // user's file (CRLF→LF) into a phantom whole-file diff on every install (bug 22 / field report K4).
     // And when something IS added, it is SPLICED into the owner's text (issue #16): the old
     // JSON.stringify(pkg) rewrite restyled every hand-formatted key under a log line that
     // promised an additive edit — the exact diff class the git-hygiene canon tells agents to stop on.
@@ -2413,8 +2772,8 @@ async function cmdInstall() {
       const sane = (() => {
         if (next == null) return false;
         try {
-          const orig = JSON.parse(pkgRaw.replace(/^﻿/, ''));
-          const chk = JSON.parse(next.replace(/^﻿/, ''));
+          const orig = JSON.parse(pkgRaw.replace(/^\uFEFF/, ''));
+          const chk = JSON.parse(next.replace(/^\uFEFF/, ''));
           for (const [k, v] of addScripts) { if (!chk.scripts || chk.scripts[k] !== v) return false; delete chk.scripts[k]; }
           if (addName) { if (chk.name !== addName) return false; delete chk.name; }
           if (addScripts.length && !orig.scripts) { if (Object.keys(chk.scripts).length) return false; delete chk.scripts; }
@@ -2458,7 +2817,7 @@ async function cmdInstall() {
   // the final gates self-heal from this snapshot.
   writeFileSync(DEPLOY_MANIFEST, JSON.stringify({ manifestVersion: 2, paths: deployedPaths,
     agents: agentPaths, shas, templateShas, moduleShas, kept: adopted,
-    values: persistValues(values), marker }, null, 2) + '\n');
+    values: persistValues(values), fills: cls ? cls.fills : {}, marker }, null, 2) + '\n');   // `fills` — hand-filled slots, derived on a classified bootstrap (2.6, UR2)
 
   // 5) the final cognitive task for the agent: fresh install → adaptation;
   //    install over an OLDER deployed KAIF (legacy 1.4-style project bootstrapped
@@ -2494,7 +2853,7 @@ async function cmdInstall() {
         && existsSync(UPDATE_TASK) && /^KAIF-UPDATE: /m.test(readFileSync(UPDATE_TASK, 'utf8'))) {
       log(`= kept existing ${UPDATE_TASK} (it carries recorded checkpoints — not overwritten)`);
     } else if (existsSync(UPDATE_TASK) && legacyOld.version === meta.version) {
-      // Bug 33 / project D Г1 — THE field data loss: a same-version re-run used to REGENERATE
+      // Bug 33 / field report Г1 — THE field data loss: a same-version re-run used to REGENERATE
       // the task even when it carried NO checkpoints yet, silently dropping its module diffs
       // and release news (the regenerated task is computed against the post-update manifest
       // and carries neither). An unfinished task IS the delivery: it survives byte-exact;
@@ -2523,7 +2882,7 @@ async function cmdInstall() {
       const why = legacyOld.tracking === 'anonymous'
         ? 'this anonymous deployment kept no content snapshots'
         : 'this deployment has no content snapshots (pre-1.5 deployments never wrote them)';
-      const dep = cls ? handleDeprecations(meta, cls.baselineOld || {}) : { removed: 0, items: [] };
+      const dep = cls ? handleDeprecations(meta, cls.baselineOld || {}, cls.fills) : { removed: 0, items: [] };
       const staleClaims = rerun ? [] : scanStaleClaims(legacyOld.version, meta.version,
         okOnDisk(DEPLOY_MANIFEST) ? (() => { try { return readJson(DEPLOY_MANIFEST).templateShas || null; } catch { return null; } })() : null);
       // Only slots literally on disk make the task item (judge finding — see cmdUpdate),
@@ -2573,8 +2932,10 @@ async function cmdInstall() {
     if (ANON && !f.path.endsWith('.mjs')) want = anonymize(want);
     return normEol(readFileSync(p, 'utf8')) === normEol(want);
   }).length;
+  consumeRehearsal(rehearsal);   // 2.6 (UR1): one-shot on THIS route too — the auto record used to survive the bootstrap it rehearsed (origin #42)
   clearUpdateJournal();   // bootstrap road completed — nothing left to resume
   log(`\n✅ KAIF ${meta.version} deployed mechanically (lang ${LANG}${translatedOnDisk ? ` · ${translatedOnDisk} owner docs templated` : ''}${aliased ? ` · ${aliased} skills trigger-aliased` : ''}, mode ${MODE}, agents ${AGENTS.join(',')}).`);
+  for (const s of packNotes) log(s);   // the pack boundary reads as a note on a finished install, never as its verdict (2.7, CB)
   // Agent clients read their command list ONCE at startup: skills that appeared on disk after that
   // are absent from it, and the first thing the human sees when trying one is "no such command" —
   // which reads as "the install failed". Saying it HERE costs one line and prevents that diagnosis.
@@ -2627,7 +2988,7 @@ function cmdCheck() {
     for (const k of ['agent', 'agentsSupported']) if (k in j) schemaIssues.push(`superseded field "${k}" present (an older schema — update should have dropped it)`);
     for (const s of schemaIssues) { console.error(`✖ marker schema: ${s} (Reference §12.1)`); missing++; }
   } catch { console.error('✖ marker unreadable as JSON'); missing++; }
-  // Two-headed deployed docs (bug 31; field: project D's /pause and /kaif-remove, project C's doubled
+  // Two-headed deployed docs (bug 31; field: project D's /pause and /kaif-remove, project C's doubled // source-kept: two independent field projects
   // PHILOSOPHY): a broken merge that ever leaves a SECOND H1 in a framework-owned .md means two
   // documents living in one file — and both `check` and `update-verify` were green on it.
   // Every deployed non-owner .md is in scope (a zero-delta update legally skips a file, so the
@@ -2660,7 +3021,7 @@ function cmdCheck() {
   if (missing) die(`INCOMPLETE: ${missing} artifacts missing`);
   // Content gate (warning, not failure): a mirror that EXISTS but drifted from its canon
   // skill passed the old existence-only check for a whole release (bug 11; nine days of five
-  // systems on stale skills, project A). Non-fatal by design: between `update` and `update-verify`
+  // systems on stale skills, a field project). Non-fatal by design: between `update` and `update-verify`
   // the mirrors legitimately lag the canon until the re-sync runs.
   let drifted = 0;
   if (existsSync('.claude/skills')) {
@@ -2685,19 +3046,45 @@ function cmdCheck() {
   // Language mix (2.5, epic US; field #32 R-C: a ru deployment's own skill directory was already
   // bilingual — 18 of 45 skills English — and no gate said a word). Skills are agent-read and stay
   // English by policy; the count is HONESTY about the tree, not a defect: a warning, never a failure.
+  // Since 2.7 (epic CB, criterion 2) MIX is judged by the SHARE of foreign-script prose tokens, not
+  // by a single occurrence of a script: `re.test(body)` made one English word in a Russian skill
+  // indistinguishable from an English skill, and — the other way round — a fully English skill with
+  // three stray Cyrillic words read as localized and was invisible to the count. Two states, one
+  // named threshold:
+  //   • not ONE token in the owner's script → ENGLISH (exactly the old predicate, by tokens) — the
+  //     count below, unchanged in wording, because English arrival is policy and not a defect;
+  //   • the owner's script present AND the foreign share at or above the threshold → MIXED, named
+  //     with its percentage, because that is a half-finished translation and nothing said a word.
+  // Below the threshold the skill is localized and this axis stays silent.
+  // Code is NOT prose (plan 95 risk б): a Russian skill quotes commands, paths and flags by the
+  // dozen, and counting them would redden every legitimate localized skill — fenced blocks and
+  // inline code spans are removed before tokenizing.
+  // The threshold was MEASURED, not chosen: over the origin's own 37-skill ru layer (2026-09-18), of the
+  // 29 skills carrying the owner's script 28 run 0.003 … 0.130 foreign share and ONE (English body,
+  // three stray Cyrillic words) sits at 0.993 — invisible to the old predicate and named as a mix by
+  // this one; the 8 English ones run 1.000. The threshold sits inside that gap, far from both sides,
+  // and below one half, so a body whose paragraphs are half English is named.
+  const LANGUAGE_MIX_FOREIGN_SHARE = 0.35;
   try {
     const lang = String(readJson(KAIF_JSON).language || 'en').toLowerCase();
     const re = SCRIPTS[lang];
     if (lang !== 'en' && re && existsSync('.claude/skills')) {
       let total = 0, english = 0;
+      const mixed = [];
       for (const n of readdirSync('.claude/skills')) {
         const p = `.claude/skills/${n}/SKILL.md`;
         if (!okOnDisk(p)) continue;
         total++;
         const body = splitModules(normEol(readFileSync(p, 'utf8'))).filter((m) => m.signature !== '<preamble>').map(modText).join('\n');
-        if (!re.test(body)) english++;
+        const tokens = stripCodeSpans(body).match(PROSE_WORD) || [];
+        let own = 0;
+        for (const t of tokens) if (re.test(t)) own++;
+        const share = tokens.length ? (tokens.length - own) / tokens.length : 0;
+        if (!own) { english++; continue; }
+        if (share >= LANGUAGE_MIX_FOREIGN_SHARE) mixed.push(`${n} (${Math.round(share * 100)} % foreign)`);
       }
       if (english) console.error(`⚠ language mix: ${english} of ${total} skills are English (language: ${lang}) — skills are agent-read and arrive English by policy; translate on demand, and expect NEW skills to arrive English too`);
+      if (mixed.length) console.error(`⚠ language mix: ${mixed.length} of ${total} skills are a MIX — at or above ${Math.round(LANGUAGE_MIX_FOREIGN_SHARE * 100)} % of their prose tokens are not ${lang} while the rest is: ${mixed.slice(0, 5).join(', ')}${mixed.length > 5 ? ` (${mixed.length - 5} more)` : ''} — a half-finished translation reads as two documents to an agent; finish it or leave the skill English`);
     }
   } catch { /* unreadable marker — the marker gate flags it separately */ }
   warnSphereLibrary();
@@ -2705,27 +3092,202 @@ function cmdCheck() {
   // PROMISED a warning at the ~200-line soft target and shipped prose only, field STATUS files
   // grew to 1647/1928 lines because "there was no one to warn"; the other eight: 2.5, epic CN).
   // A warning, never a failure; each warning names the budget it measured against.
+  // Since 2.7 (epic CB) the number judged is the project's OWN lines — see ownLines() — and each
+  // warning carries the ADDRESS its overflow moves to, from the one table above. `--gate-budgets`
+  // turns the advice into a DOOR for the closing ritual (origin issue #71, proposal 3: "three core
+  // documents above budget, the warning printed for weeks and acted on once"); with no flag the
+  // behaviour is exactly what it was — a warning and exit 0, because a warning that can fail a
+  // mid-update `check` would block work the budget was never meant to block.
   // @guard doc-budgets
-  // THREAT:         the re-read core grows past what a session can hold and nobody warns (field: a 5.8k-line
-  //                 core re-read hourly, STATUS at 6× its target with the debt acknowledged inside the file)
-  // PROVED-AGAINST: sandbox s16 — a deployed copy with AGENT_GUIDE / STATUS padded by filler lines; the mutant
-  //                 with this warning disabled reddens exactly the three addressed asserts (2026-09-04)
-  // GAP:            filler is not organic growth — real sections raise the line count the same way, but a
-  //                 document that stays under budget while its CONTENT rots is not this guard's threat
-  // ON-REAL-PATH:   NOT YET — the path is a field deployment's own `check` after the 2.5 update
-  for (const [doc, budget] of Object.entries(DOC_BUDGETS)) {
+  // THREAT:         the re-read core grows past what a session can hold and nobody warns (field: a 5.8k-line core re-read hourly, STATUS at
+  //                 6× its target); since 2.7 also: the warning counted ARRIVED canon as the project's own lines, so a deployment was told to
+  //                 shorten text it never wrote (field: AGENT_GUIDE.md 1661 lines, 596 of them arrived), and it cost nothing to ignore —
+  //                 three core documents above budget, the line printed for weeks and acted on once (origin issue #71)
+  // PROVED-AGAINST: sandbox s16 on a deployed copy, 44 asserts — a fresh install padded with OWN modules is SILENT while over budget in total
+  //                 lines and under it in own lines; padded past the OWN budget it is named `own lines N of budget ~M`, own+arrived adds up to
+  //                 wc -l, and it carries its address (STATUS: the chronicle); wholesale-translated, owner-seeded and no-module-cut each say
+  //                 which they are; a deployment INSIDE its budgets keeps the gate open (exit 0, nothing printed) while an overflow closes it
+  //                 with exit 1 from the DOOR and not from an unrecognised flag; bare `check` stays 0; an unknown flag still refuses. Red: the
+  //                 2.6 core (KAIF_DIST) 27 of 44; five mutants of THIS block's predicates on a COPY of dist — own-lines returns the whole file
+  //                 (3 red), the gate never closes (5), the mix threshold at 0 (2) and at 1 (4), owner-seeded folded into translated (2); none invisible
+  // GAP:            it counts LINES, not weight — a document under its own-line budget can still be unreadably long; a MODULE edited by one
+  //                 character counts WHOLE, the unit of the deployed cut being the module; a translated or owner-seeded file is judged as if
+  //                 every line were its own — honest but over-naming, and the line says so; the gate fires only where ASKED FOR, so a ritual
+  //                 that never runs the flag is as toothless as the warning was, and nothing here sees that
+  // ON-REAL-PATH:   NOT YET — the path is a field deployment's own `check` after the 2.7 update. Observed instead, and it is seeded state, not that
+  //                 path: the command over two field deployments' manifest-listed files copied into a temp tree — 3 and 4 PRINTED numbers read back
+  //                 against wc -l and their own moduleShas, 0 disagreements, the other 6 and 5 documents silent on both sides, sources re-hashed
+  //                 unchanged; the cross-check re-implements the same algorithm, so it catches an assembly error and never one of the algorithm.
+  //                 It paid for itself anyway: it is what showed an owner-seeded document reading as "translated wholesale"
+  const overBudget = [];
+  for (const [doc, { budget, overflowTo }] of Object.entries(DOC_BUDGETS)) {
     if (!okOnDisk(doc)) continue;
-    const n = readFileSync(doc, 'utf8').replace(/\r?\n$/, '').split(/\r?\n/).length;
-    if (n > budget)
-      console.error(`⚠ ${doc}: ${n} lines against its budget of ~${budget} — ${doc === 'STATUS.md'
-        ? 'time for a bonsai trim: move closed history verbatim into PROJECT_HISTORY.md (the /end-chat-soft rules)'
-        : 'move content OUT (chronicle, researches/, a house-rules file) rather than raise the budget (AGENT_GUIDE → Document taxonomy, tier 1)'}`);
+    const { total, own, basis } = ownLines(doc);
+    if (own <= budget) continue;
+    overBudget.push({ doc, own, budget, overflowTo });
+    const how = basis === 'cut' ? `${total} lines on disk, ${total - own} of them arrived with KAIF and are not counted`
+      : basis === 'owner-seeded' ? `${total} lines on disk, all of them yours — this is an owner-seeded document whose shipped skeleton the project wrote over, so there is no arrived canon to subtract`
+      : basis === 'translated' ? `${total} lines on disk, translated wholesale — arrived canon cannot be told from your own lines, so every line counts as yours`
+      : `${total} lines on disk, no deployed module cut for this file — every line counts as yours`;
+    console.error(`⚠ ${doc}: own lines ${own} of budget ~${budget} (${how}) — move content OUT to ${overflowTo}, rather than raise the budget (AGENT_GUIDE → Document taxonomy, tier 1)`);
+  }
+  // The re-read core ↔ the /resume ritual (2.7, epic TR; origin issue #59 + the 2.7 scope recon: a
+  // field /resume opened 5 of the 9 re-read core documents and nobody said a word — the skill's
+  // list and the documents on disk drift silently). The core is the budgeted nine above (ONE
+  // place — AGENT_GUIDE → Document taxonomy, tier 1); the ritual's list is every `- `NAME.md``
+  // bullet of the deployed /resume skill (its Step 1; quotes and numbered items are not bullets).
+  // A warning, never a failure — a localized or owner-edited /resume must not block update-verify;
+  // each line names the documents, so the fix is one bullet per name.
+  // @guard resume-covers-core
+  // THREAT:         the /resume list drifts from the re-read core (a document dropped from the skill, or a
+  //                 core document the ritual never opened) and every session resumes with a hole exactly there
+  // PROVED-AGAINST: sandbox s25 — a deployed copy whose /resume lost the `GOAL.md` bullet → check prints the
+  //                 warning naming GOAL.md and "1 of the 9"; the intact copy prints nothing; the 2.6 core
+  //                 (KAIF_DIST seam) prints nothing on the mutant → ✖
+  // GAP:            a document named in the list but skipped by the session is not visible here — the
+  //                 refresh-marker witness and the judge's refresh-witness hunt cover the execution half
+  // ON-REAL-PATH:   NOT YET — the path is a field deployment's own `check` after the 2.7 update
+  const RESUME_SKILL = '.claude/skills/resume/SKILL.md';
+  if (okOnDisk(RESUME_SKILL)) {
+    const named = new Set();
+    for (const m of readFileSync(RESUME_SKILL, 'utf8').matchAll(/^\s*- `([A-Za-z0-9_./-]+\.md)`/gm)) named.add(m[1]);
+    const core = Object.keys(DOC_BUDGETS);
+    const unnamed = core.filter((d) => !named.has(d));
+    if (unnamed.length)
+      console.error(`⚠ /resume does not name ${unnamed.length} of the ${core.length} re-read core documents: ${unnamed.join(', ')} — add each as a bullet to ${RESUME_SKILL} Step 1 (AGENT_GUIDE → Document taxonomy, tier 1; a field ritual once opened 5 of 9 and nothing said a word)`);
+    const absent = [...named].filter((d) => !okOnDisk(d));
+    if (absent.length)
+      console.error(`⚠ /resume names ${absent.length} document(s) missing on disk: ${absent.join(', ')} — restore the file or drop the bullet`);
+  }
+  // The undelivered SIGNAL on an origin-tracked deployment (2.7, epic SD; origin issue #65 — a recurrence of #37:
+  // two tickets sat "waiting to be sent" for ~40 minutes until the owner said "send" a second time; the carve-out
+  // lived as prose and lost twice to the broad "confirm outward actions" reflex). The carve-out now stands in the
+  // AUTH gate's own line (AGENT_GUIDE → the fable loop) and /report-bug files and delivers in ONE step; this axis
+  // is the machine behind both. It is an ALLOWLIST: a numbered KAIF ticket is silent ONLY on positive evidence of
+  // delivery — an issue (URL `…/issues/N` or `#NN`) and no `not yet` in its `**Delivered upstream:**` paragraph, read
+  // by deliveryState(), the one reading `report` shares. Every other state is named with the next step. Why not "warn
+  // on NOT YET": the delivery lines of the field's own tickets come in more shapes than the template's — the field
+  // name translated into the project language (the #65 incident itself committed «Сигнал в исток: ждёт отправки»),
+  // a promise instead of an address ("⏳ being sent by this session"), a delivery claimed in words with no issue
+  // ("✅ this issue — sent", "folded into the field report"), no line at all; a check that looked only for NOT YET
+  // was silent on every one of them (fail-safe defaults — Saltzer & Schroeder 1975: "a design or implementation
+  // mistake in a mechanism that explicitly excludes access tends to fail by allowing access, a failure which may go
+  // unnoticed in normal use"). A warning, never a failure — the debt is the agent's, and an owner-edited tree must
+  // not fail update-verify on it; on tracking: anonymous the axis is silent, because a local signal is legal there.
+  // @guard undelivered-signal
+  // THREAT:         a KAIF-defect ticket filed locally on an origin-tracked deployment and never sent — the origin
+  //                 never learns, and the owner discovers it by asking "did you file that?" (field: #37, #65)
+  // PROVED-AGAINST: sandbox s17 on a deployed copy — NOT YET → named with the report command; the field name
+  //                 translated (no `**Delivered upstream:**` line) and a promise value → named "no readable delivery
+  //                 state" with both legal forms; NOT YET plus an issue URL → named by check AND refused by report
+  //                 (one reading); delivered through the gh stand-in → silent; tracking: anonymous → silent; README in
+  //                 bugs/KAIF → silent. Red: the 2.6 core (KAIF_DIST); the first, NOT-YET-only build of this axis;
+  //                 three mutants of this block — the tracking gate removed (anonymous → ✖), the delivered branch
+  //                 removed (delivered → ✖), the NN_*.md filter widened (README → ✖). Real state: the 46 ticket files
+  //                 of four field deployments copied into fresh installs (plans/109, run report 2026-09-13 SD)
+  // GAP:            a ticket never written at all is invisible here (the judge's "signal filed, not delivered" hunt
+  //                 covers that side); an issue number that points at the WRONG issue reads as delivered — the axis
+  //                 sees that an issue is named, not that it is the right one; a `#NN` in the project language's own
+  //                 words ("в истоке #37") is not recognised and gets named — the fail-safe direction
+  // ON-REAL-PATH:   NOT YET — the path is a field deployment's own `check` after the 2.7 update (seeded real state
+  //                 is not that path)
+  try {
+    const jm = readJson(KAIF_JSON);
+    const KAIF_BUGS = 'bugs/KAIF';
+    if (jm.tracking === 'origin' && existsSync(KAIF_BUGS)) {
+      for (const f of readdirSync(KAIF_BUGS).filter((n) => /^\d+_.*\.md$/i.test(n)).sort()) {   // tickets are bugs/KAIF/NN_*.md
+        const p = KAIF_BUGS + '/' + f;
+        const ds = deliveryState(readFileSync(p, 'utf8'));
+        if (ds.state === 'not-yet')
+          console.error(`⚠ undelivered KAIF signal: ${p} — "Delivered upstream: NOT YET" on tracking: origin is a debt with an owner, not a resting state (origin issue #65): node .kaif/kaif-core.mjs report ${p}`);
+        else if (ds.state !== 'delivered')
+          console.error(`⚠ KAIF signal with no readable delivery state: ${p} — ${ds.state === 'missing' ? 'no `**Delivered upstream:**` line (the field name is machine-read: it stays verbatim in English in any project language)' : ds.state === 'ambiguous' ? `"${ds.line.trim().slice(0, 120)}" says NOT YET and names an issue (${ds.evidence}) at once` : `"${ds.line.trim().slice(0, 120)}" is neither NOT YET nor an issue URL or #NN`}; delivered → write only \`**Delivered upstream:** <issue URL or #NN>\`; not sent → write \`**Delivered upstream:** NOT YET — <why>\` with no issue URL or #NN and run node .kaif/kaif-core.mjs report ${p} (origin issue #65)`);
+      }
+    }
+  } catch { /* unreadable marker or directory — the marker gate flags it separately */ }
+  // The GENERATED team constitution against the TEMPLATE it came from (2.7, epic FR; origin issue #68 — a field
+  // seat finished its half of a smoke, reported, and stopped while `STATUS.md` named three tickets "claimed by
+  // nobody" and a second seat sat idle on the board; the owner ended the idling himself). The obligation existed —
+  // as a trailing clause of the rule about blockers — and it did not survive GENERATION: the project's
+  // `TEAM_CONSTITUTION.md` carried 5 rules where the template carried 9, template rules 4-7 simply absent, and no
+  // gate said a word, because "a shorter document looks like editorial tightening rather than loss". This axis is
+  // the gate the ticket asked for, and it generalises past its own rule: ANY obligation a skill's template carries
+  // can be dropped in generation or translation, and until now nothing noticed.
+  // WHAT AN OBLIGATION IS HERE: the bold anchor of every numbered item of § 2 (the communication regimen — where
+  // the rules that bind a seat live) plus the nine invariant `## N.` section headings. Sections are matched by
+  // their NUMBER, which survives translation; § 2 rules by their English anchor — and when NOT ONE anchor matches,
+  // the document is translated, so the axis says so and falls back to COUNTING the items instead of judging a
+  // translated document against English strings it never had. A warning, never a failure: the constitution is the
+  // owner's document, and an owner-edited tree must not fail its own `check`. A deliberate omission is DECLARED,
+  // not argued with — `<!-- constitution-ok: <why> -->` beside the item (or naming it) exempts that obligation.
+  // No constitution on disk, or no template beside it, and the axis is silent: there is nothing to compare.
+  // @guard constitution-keeps-obligations
+  // THREAT:         an obligation of a skill's template is dropped when the skill GENERATES (or translates) the
+  //                 project's document and nothing notices — the field constitution kept 5 of the template's 9 § 2
+  //                 rules, "a free seat asks for work" among the four that vanished (origin issue #68)
+  // PROVED-AGAINST: sandbox s25 on a deployed copy — constitution copied from the template → silent; the same file
+  //                 with § 2 rules 4-7 cut (the field's own shape) → each of the four named by its anchor; a
+  //                 translated copy whose § 2 holds five items → the counting warning "10 expected in §2, 5 found";
+  //                 a deleted `## 7.` heading → named by number; a declared `<!-- constitution-ok: … -->` → that one
+  //                 not named; no constitution → silent. Red: the 2.6 core (KAIF_DIST seam) silent on the cut file;
+  //                 a mutant whose anchor parser returns nothing, silent on the same loss. Real state: a live field
+  //                 team's own constitution copied into a fresh install (plans/113, run report 2026-09-18)
+  // GAP:            it judges ANCHORS, not meaning — a bold lead over a gutted body reads as present; a PARTIALLY
+  //                 translated § 2 (one English anchor surviving) is judged by anchors and over-names, the fail-safe
+  //                 direction; only § 2 and the nine headings are compared, so a loss in § 5 or § 7 is invisible;
+  //                 whether a seat OBEYS the rule belongs to the judge's two hunts, never here
+  // ON-REAL-PATH:   NOT YET — the path is a field team's own `check` after the 2.7 update (a seeded copy of a real
+  //                 constitution is not that path)
+  try {
+    const CONSTITUTION = 'TEAM_CONSTITUTION.md';
+    const tplPath = ['.claude/skills', '.agents/skills', '.grok/skills', '.cline/skills']
+      .map((b) => `${b}/team-deployment/references/team-constitution-template.md`).find((p) => okOnDisk(p));
+    if (okOnDisk(CONSTITUTION) && tplPath) {
+      const tpl = normEol(readFileSync(tplPath, 'utf8')), doc = normEol(readFileSync(CONSTITUTION, 'utf8'));
+      const sections = (t) => Object.fromEntries([...t.matchAll(/^## (\d+)\.[ \t]*(.*)$/gm)].map((m) => [m[1], m[2].trim()]));
+      // § 2 of a document — its numbered items are the rules that bind a seat
+      const regimen = (t) => { const i = t.search(/^## 2\./m); if (i < 0) return ''; const r = t.slice(i + 3); const j = r.search(/^## /m); return j < 0 ? r : r.slice(0, j); };
+      const anchors = (t) => [...regimen(t).matchAll(/^[ \t]*\d+\.[ \t]+(?:[^\sA-Za-z*]+[ \t]*)?\*\*(.+?)\*\*/gm)].map((m) => m[1].trim());
+      const tplSections = sections(tpl), docSections = sections(doc);
+      const tplAnchors = anchors(tpl), docAnchors = anchors(doc);
+      const exempt = [...doc.matchAll(/<!--[ \t]*constitution-ok:([\s\S]*?)-->/g)].map((m) => m[1].trim());
+      const declared = (s) => exempt.some((e) => e.includes(s));
+      const lost = [];
+      for (const [n, title] of Object.entries(tplSections))
+        if (!(n in docSections) && !declared(title)) lost.push(`§${n} "${title}"`);
+      // An obligation is KEPT only when it stands where obligations stand — as the anchor of a numbered item of
+      // § 2. Matching the anchor anywhere in the text would let a constitution that MENTIONS a rule it deleted
+      // (an appendix of dropped rules, or the `constitution-ok` comment itself) read as compliant; that mistake
+      // was caught by the mutant that ignores the exemption and changed nothing (plans/113 FR6).
+      const kept = (a) => docAnchors.includes(a);
+      // Translated: not ONE English anchor of § 2 survived, yet § 2 has numbered items — judge by COUNT, say so.
+      const translated = tplAnchors.length > 0 && docAnchors.length > 0 && !tplAnchors.some(kept);
+      if (!translated) for (const a of tplAnchors) if (!kept(a) && !declared(a)) lost.push(`§2 "${a}"`);
+      const hint = `restore them, or declare the omission beside the item with \`<!-- constitution-ok: <why> -->\` (origin issue #68; template: ${tplPath})`;
+      if (lost.length)
+        console.error(`⚠ ${CONSTITUTION} lost ${lost.length} obligation(s) of the template: ${lost.join(', ')} — ${hint}`);
+      if (translated) {
+        const found = docAnchors.length + exempt.length;
+        if (found < tplAnchors.length)
+          console.error(`⚠ ${CONSTITUTION} cannot match translated anchors: ${tplAnchors.length} expected in §2, ${found} found — ${tplAnchors.length - found} obligation(s) of the template are missing from the communication regimen (the template's own order: ${tplAnchors.map((a, i) => `${i + 1} "${a}"`).join(', ')}) — ${hint}`);
+      }
+    }
+  } catch { /* unreadable constitution or template — nothing to compare, and no other gate depends on it */ }
+  // The budget DOOR of the closing ritual (2.7, epic CB6; origin issue #71 proposal 3 — the owner's
+  // own audit: "three core documents above budget, the warning printed for weeks and executed once").
+  // It stands HERE, after every other axis has spoken, so the run that fails on it still reports
+  // everything else it saw; and it is opt-in by flag, because a budget is a reading cost, not a
+  // broken deployment — `update-verify` and `verify-final` must never fail on it.
+  if (has('--gate-budgets') && overBudget.length) {
+    for (const o of overBudget)
+      console.error(`✖ ${o.doc}: own lines ${o.own} of budget ${o.budget} → ${o.overflowTo}`);
+    die(`--gate-budgets: ${overBudget.length} document(s) of the re-read core are over their budget in the project's OWN lines — move the content out to the address named on each line, then run this again (raising a budget is not the cure; origin issue #71)`);
   }
   log(`✅ manifest satisfied: ${paths.length} files + ${agents.length} agent artifacts present${drifted ? ` (⚠ ${drifted} drifted mirrors — see above)` : ''}`);
 }
 
 // sync — the standalone handle over resyncCopies(): mirror drift accumulates BETWEEN updates,
-// where the re-sync used to be unreachable (bug 11 facet; asked for by the project D report).
+// where the re-sync used to be unreachable (bug 11 facet; asked for by the field report).
 function cmdSync() {
   resyncCopies();
   log('✅ sync done — the per-system mirrors now equal the canon .claude/skills/');
@@ -2775,6 +3337,31 @@ function ghSpawn(ghArgs) {
   return spawnSync(cmd, [...pre, ...ghArgs], { encoding: 'utf8', timeout: GH_TIMEOUT_MS });
 }
 const refuse = (msg, code) => { console.error('✖ ' + msg); process.exit(code); };
+// deliveryState(text) — the ONE reading of a ticket's delivery contract, shared by `report` (idempotency,
+// refusals) and `check` (the undelivered-signal axis), so the two can never disagree about the same line
+// (2.7, epic SD). The contract is read as a PARAGRAPH (2.6 UR4; origin #40) — the line plus its wrapped
+// continuations up to a blank line or the next `**field**` (a hand-delivered field ticket wrote `origin **#37**`
+// on the next line). Evidence of delivery is an ISSUE — an issue URL (`…/issues/N`), or `#NN` that stands as the
+// value itself (`**Delivered upstream:** #37`, `✅ #37`) or right after the word origin/issue (`origin #37`,
+// `origin **#37**`) — never any URL and never any `#digits` ("see step #2 of the skill" is not a delivery).
+// States: delivered (an issue, no `not yet`) · not-yet (`not yet` in any case, no issue) · ambiguous (`not yet`
+// AND an issue: "NOT YET — a recurrence of …/issues/37" must not read as sent, "…/issues/40 — fix not yet
+// released" must not be sent twice, so both commands name it and neither guesses) · unrecognized · missing.
+// Until 2.7 `report` let ANY URL win over `not yet` — a NOT YET ticket quoting a link could never be sent.
+function deliveryState(text) {
+  const t = normEol(text);
+  const line = (t.match(/^\*\*Delivered upstream:\*\*[^\n]*$/m) || [])[0];
+  if (!line) return { state: 'missing' };
+  const para = (t.match(/^\*\*Delivered upstream:\*\*[^\n]*(?:\n(?![ \t]*$)(?!\*\*)[^\n]*)*/m) || [line])[0];
+  const notYet = /not yet/i.test(para);
+  const issue = para.match(/https?:\/\/[^\s)*]*\/issues\/\d+/)
+    || para.match(/^\*\*Delivered upstream:\*\*[ \t]*(?:✅[ \t]*)?(?:\*\*)?(#\d+)\b/)
+    || para.match(/\b(?:origin|issue)[ \t]+(?:\*\*)?(#\d+)\b/i);
+  if (issue && issue[1]) issue[0] = issue[1];   // evidence prints as `#NN`, not with the words around it
+  if (issue && !notYet) return { state: 'delivered', line, evidence: issue[0] };
+  if (issue) return { state: 'ambiguous', line, evidence: issue[0] };
+  return { state: notYet ? 'not-yet' : 'unrecognized', line };
+}
 function cmdReport() {
   const ticket = args.slice(1).find((a) => !a.startsWith('-')); // the flag may precede the path (court RL 2.5, C-H2)
   if (!ticket || ticket.startsWith('--')) die('usage: kaif-core report <path to bugs/KAIF/NN_*.md> [--dry-run]');
@@ -2789,12 +3376,17 @@ function cmdReport() {
   const text = readFileSync(ticket, 'utf8');
   const h1 = (text.match(/^# (.+?)\s*$/m) || [])[1];
   const lineRe = /^\*\*Delivered upstream:\*\*[^\n]*$/m;
-  const deliveredLine = (text.match(lineRe) || [])[0];
-  if (!h1 || !deliveredLine)
-    die(`${ticket} is not a KAIF ticket: it needs an H1 title and a \`**Delivered upstream:**\` line (/report-bug templates A/B)`);
-  const already = deliveredLine.match(/https?:\/\/\S+/);
-  if (already) { log(`✔ already delivered: ${already[0]} — nothing sent (idempotent; edit the line by hand only if that issue is gone)`); return; }
-  if (!/NOT YET/.test(deliveredLine)) die(`the Delivered upstream line is neither NOT YET nor a URL: "${deliveredLine.trim()}"`);
+  // The contract is read by deliveryState() — the same reading the `check` axis uses (see its comment for the
+  // paragraph rule). A delivered ticket fires the idempotency branch instead of a refusal, so a ticket delivered
+  // by hand can never be sent twice; a refusal names BOTH legal forms and the edit.
+  const ds = deliveryState(text);
+  if (!h1 || ds.state === 'missing')
+    die(`${ticket} is not a KAIF ticket: it needs an H1 title and a \`**Delivered upstream:**\` line (/report-bug templates A/B; the field name stays verbatim in English in any project language)`);
+  if (ds.state === 'delivered') { log(`✔ already delivered: ${ds.evidence} — nothing sent (idempotent; edit the line by hand only if that issue is gone)`); return; }
+  if (ds.state === 'ambiguous')
+    die(`the Delivered upstream line says NOT YET and names an issue (${ds.evidence}) at once: "${ds.line.trim()}" — nothing sent: a delivered ticket must never be sent twice, and an undelivered one must never read as sent. Delivered by hand → keep only \`**Delivered upstream:** <issue URL or #NN>\`; not sent → keep \`**Delivered upstream:** NOT YET — <why it waits>\` without an issue URL or #NN (name a related issue in the body), then re-run`);
+  if (ds.state === 'unrecognized')
+    die(`the Delivered upstream line is neither NOT YET nor a delivery: "${ds.line.trim()}" — write it in one of the two legal forms and re-run: \`**Delivered upstream:** NOT YET — <why it waits>\` (undelivered; the case of "not yet" does not matter) or \`**Delivered upstream:** <issue URL or #NN>\` (delivered by hand)`);
   // The body is the ticket itself plus the authorship trailer — transport ≠ author (#15).
   const trailer = '\n\n---\nFiled by the project\'s agent under the KAIF owner\'s standing authorization (origin issue #15); ' +
     'transport — the `gh` account of the deploying machine. Delivered by `kaif-core report` (KAIF ' + (j.version || '?') + ').\n';
@@ -2824,8 +3416,8 @@ function cmdReport() {
 
 // project-name "<Name>" — the file-edit-free way to record the project's CANONICAL name
 // (identity belongs to the owner: <PROJECT_NAME> used to be seeded from package.json/folder —
-// a lowercase tech id — and landed in H1 headings; "# project C" while the project's canon said
-// project C). Heals the deploy manifest's frozen fill map too, or the tech id tiles forever.
+// a lowercase tech id — and landed in H1 headings; "# my-shop" while the project's canon said
+// My Shop). Heals the deploy manifest's frozen fill map too, or the tech id tiles forever.
 // ── ONE door for every piece of HUMAN text on the command line (bugs/75) ─────────────────────
 // The canon rule binds the ARGUMENT, not the document: "TEXT TRAVELS THROUGH FILES, NEVER THROUGH
 // COMMAND-LINE ARGUMENTS." It had been applied to ONE command (`checkpoint --verdict`) and never
@@ -2844,7 +3436,7 @@ function readOwnerText(inline, filePath, what) {
   if (filePath && inline) die(`pass either --${what}-file or the inline value, not both — two sources of one truth drift apart`);
   if (filePath) {
     if (!existsSync(filePath)) die(`${what} file not found: ${filePath}`);
-    const full = normEol(readFileSync(filePath, 'utf8').replace(/^﻿/, '')).trim();
+    const full = normEol(readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')).trim();
     if (!full) die(`${what} file is empty: ${filePath}`);
     return { full, firstLine: full.split('\n').find((l) => l.trim()).trim(), fromFile: true };
   }
@@ -2864,7 +3456,7 @@ function readOwnerText(inline, filePath, what) {
 function cmdProjectName() {
   const { full: name } = readOwnerText(
     args[1] && !args[1].startsWith('--') ? args[1] : null, val('--name-file'), 'name');
-  if (!name) die('usage: kaif-core project-name "<Canonical Name>" | --name-file <path>   (the OWNER\'s form, e.g. "project C" — confirm it with the owner, never guess; non-ASCII belongs in a file)');
+  if (!name) die('usage: kaif-core project-name "<Canonical Name>" | --name-file <path>   (the OWNER\'s form, e.g. "My Shop" — confirm it with the owner, never guess; non-ASCII belongs in a file)');
   if (!okOnDisk(KAIF_JSON)) die('no .kaif/kaif.json — KAIF is not deployed here');
   const j = readJson(KAIF_JSON);
   j.projectName = name;
@@ -2895,10 +3487,10 @@ function cmdCheckpoint() {
   if (!task.includes(`kaif-core.mjs checkpoint ${id}`) && !task.includes(`${tag}: ${id} done`))
     die(`unknown item id "${id}" — it is not named in ${file}`);
   // Checkpoints EXECUTE their own gate where one exists (bug 17: recording a tick used to be
-  // free — a weak model could stamp all four without doing anything; bug 34 / project C D5: the
+  // free — a weak model could stamp all four without doing anything; bug 34 / field report D5: the
   // scanners for placeholders and stale-claims EXISTED and re-running them at tick time costs
   // zero — a tick that skips an existing scanner is self-attestation):
-  //   recheck      — re-syncs the mirrors (closes the drift window — project D Г11), then runs the
+  //   recheck      — re-syncs the mirrors (closes the drift window — field report Г11), then runs the
   //                  actual `check` and refuses to record on failure;
   //   placeholders — runs the placeholder scanner and refuses while literal slots remain
   //                  (the item's contract is "fill each" — an unfilled slot is objective);
@@ -2908,7 +3500,7 @@ function cmdCheckpoint() {
   //                  the tick, and into the committable receipt — decision #42).
   if (id === 'recheck') {
     // The mirror re-sync used to live only in update-verify, leaving five agent systems on
-    // contradicting skills for the whole merge window (bug 34, project D Г11) — close it here.
+    // contradicting skills for the whole merge window (bug 34, field report Г11) — close it here.
     resyncCopies();
     // execFileSync + process.execPath: no shell (paths with $/backticks survive on POSIX),
     // no PATH lookup (the same node binary that runs this process runs the check).
@@ -3005,7 +3597,7 @@ function cmdCheckpoint() {
 }
 
 // adopt-current — rebuild the snapshot after a MANUAL migration (field: one hand-made pass left
-// 113/160 stale shas and killed the mechanical path forever — project D №10). Every path that
+// 113/160 stale shas and killed the mechanical path forever — field report №10). Every path that
 // now diverges from its deployed template is adopted (protected); disk shas and the marker
 // snapshot are refreshed. Respectful by definition: it only RECORDS reality, changes no content.
 function cmdAdoptCurrent() {
@@ -3045,11 +3637,13 @@ async function cmdDiff() {
       die('this deployment carries a v1 manifest (no template provenance) — the audit would report a hollow green. Run the next `update` (it upgrades the manifest to v2), then `diff` works.');
     let match = 0, missing = 0;
     const divFiles = [];
+    const fills = m.fills || {};   // "template + fills" is a MATCH in the audit too (2.6, UR2)
+    const hasFills = Object.keys(fills).length > 0;
     for (const p of m.paths || []) {
       const tpl = (m.templateShas || {})[p];
       if (!tpl) continue;
       if (!okOnDisk(p)) { missing++; continue; }
-      if (fileShaNorm(p) === tpl) match++; else divFiles.push(p);
+      if (fileShaNorm(p) === tpl || (hasFills && normSha(unfill(readFileSync(p, 'utf8'), fills)) === tpl)) match++; else divFiles.push(p);
     }
     log(`diff (audit vs deployed templates): ${divFiles.length} diverged file(s) — protected from replacement; ${match} match — replace-eligible on update${missing ? `; ${missing} missing` : ''}`);
     for (const p of divFiles) log('  ≠ ' + p);
@@ -3073,7 +3667,7 @@ async function cmdDiff() {
   const values = stableValues();   // preview must fill exactly like the deploy did (bug 26)
   // A v1 manifest has no module provenance, and the loop below would skip every file and print
   // a hollow "0 files / 0 nothing to do" — worse than an honest refusal, and it hit exactly the
-  // first-ever update, the moment of highest risk (bug 21 / project A K3). Build the deployed
+  // first-ever update, the moment of highest risk (bug 21 / field report K3). Build the deployed
   // version's SYNTHETIC baseline instead (same code as the legacy bootstrap; --baseline works).
   let mineModShas = m.moduleShas;
   if (!mineModShas || !Object.keys(mineModShas).length) {
@@ -3112,14 +3706,17 @@ async function cmdDiff() {
   // copy's receipt: hand it to the live run as `update --rehearsal <copy>/.kaif/last-update.json`.
   const fromVer = okOnDisk(KAIF_JSON) ? (() => { try { return readJson(KAIF_JSON).version; } catch { return null; } })() : null;
   const tplShas = m.templateShas || {};
+  const fills = deriveFills(otherDeploy, values, m.fills);   // the same fills-aware skips as the update (2.6, UR2)
+  const fillsN = Object.keys(fills).length;
   const verdicts = {};
   for (const f of otherDeploy) {
-    if (!f.path.endsWith('.md') || !mineModShas[f.path] || !okOnDisk(f.path)) continue;
+    if (!wholesaleCandidatePath(f.path) || !mineModShas[f.path] || !okOnDisk(f.path)) continue;   // one predicate with classifyAndApply (2.6, UR1)
     let filled = fillPlaceholders(f.content, values, new Set());
     if (ANON) filled = anonymize(filled);
-    if (tplShas[f.path] && (fileShaNorm(f.path) === tplShas[f.path] || tplShas[f.path] === normSha(filled))) continue;
+    if (tplShas[f.path] && (fileShaNorm(f.path) === tplShas[f.path] || tplShas[f.path] === normSha(filled)
+        || (fillsN && normSha(unfill(readFileSync(f.path, 'utf8'), fills)) === tplShas[f.path]))) continue;
     let res = null;
-    try { res = mergeModules(f.path, filled, mineModShas[f.path], true, null); } catch { /* unreadable — no verdict */ }
+    try { res = mergeModules(f.path, filled, mineModShas[f.path], true, null, fillsN ? fills : null); } catch { /* unreadable — no verdict */ }
     if (!res || !res.verdict) continue;
     const outcome = res.translatedWholesale ? 'frozen' : 'merged';
     verdicts[f.path] = { ...res.verdict, outcome };
@@ -3162,10 +3759,10 @@ function cmdModules() {
 const COMMANDS = {
   help:            { fn: cmdHelp,         desc: 'this list (also the bare-run and --help default)', flags: {}, pos: 0 },
   version:         { fn: cmdVersion,      desc: 'report the deployed version from .kaif/kaif.json', flags: {}, pos: 0 },
-  check:           { fn: cmdCheck,        desc: 'validate the deployed manifest (marker schema, mirrors, two-headed docs)', flags: { '--bundle': true, '--agents': true, '--mode': true, '--lang': true }, pos: 0 },
+  check:           { fn: cmdCheck,        desc: 'validate the deployed manifest (marker schema, mirrors, two-headed docs); --gate-budgets makes the size budgets of the re-read core a DOOR — exit 1 on a document over budget in the project\'s OWN lines (the closing ritual runs it)', flags: { '--bundle': true, '--agents': true, '--mode': true, '--lang': true, '--gate-budgets': false }, pos: 0 },
   diff:            { fn: cmdDiff,         desc: 'audit disk vs deployed templates; --source <x> previews another version', flags: { '--source': true, '--baseline': true, '--lang': true }, pos: 0 },
   modules:         { fn: cmdModules,      desc: 'print the module cut of a bundle as JSON (audit surface)', flags: { '--bundle': true }, pos: 0 },
-  install:         { fn: cmdInstall,      mutating: true, desc: 'deploy KAIF from a bundle (the loader calls this explicitly)', flags: { '--bundle': true, '--lang': true, '--mode': true, '--agents': true, '--baseline': true, '--force': false }, pos: 0 },
+  install:         { fn: cmdInstall,      mutating: true, desc: 'deploy KAIF from a bundle (the loader calls this explicitly); over an existing deployment it is an update-by-bootstrap — --rehearsal <receipt> binds it to a sandbox copy\'s verdicts', flags: { '--bundle': true, '--lang': true, '--mode': true, '--agents': true, '--baseline': true, '--force': false, '--rehearsal': true }, pos: 0 },
   update:          { fn: cmdUpdate,       mutating: true, desc: 'respectful mechanical update from the origin/release; --rehearsal <receipt> binds the run to a sandbox copy\'s verdicts', flags: { '--source': true, '--channel': true, '--lang': true, '--agents': true, '--baseline': true, '--rehearsal': true }, pos: 0 },
   resume:          { fn: cmdResume,       mutating: true, desc: 'restore the pre-update tree after a crashed update (per .kaif/update-journal.json)', flags: {}, pos: 0 },
   'update-verify': { fn: cmdUpdateVerify, mutating: true, desc: 'final gates of an update; self-cleans on green', flags: {}, pos: 0 },

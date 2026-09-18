@@ -22,6 +22,12 @@
             "command": "node",
             "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/prompt-refresh-timer.mjs"],
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/prompt-resume-word.mjs"],
+            "timeout": 15
           }
         ]
       }

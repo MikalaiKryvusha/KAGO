@@ -30,9 +30,14 @@ diverged places. Your cognitive work is that task, not the migration.
 2. **Predict the pass BEFORE touching the tree** (both moves are cheap; the field proved both).
    Route note: `update` runs the interval with your CURRENTLY DEPLOYED core (the fresh one is
    swapped in at the end) — so the NEW version's update-time guarantees (pre-update backup
-   tree, new task scopes) apply to the NEXT interval. To get them on THIS pass, update by the
-   thin-`KAIF.md` bootstrap route instead: the fresh core classifies against your surviving
-   deploy manifest and the pass is equally mechanical.
+   tree, new task scopes, merge rules) apply to the NEXT interval. To get them on THIS pass, update
+   by the thin-`KAIF.md` bootstrap route instead: the fresh core classifies against your surviving
+   deploy manifest and the pass is equally mechanical. **The bootstrap route is MANDATORY, not an
+   option, when the deployed core is older than 2.5 and the canon carries anchored pairs** (the
+   creed and the prayer, `<!-- KAIF:NAME:BEGIN/END -->`, typically localized): the old core's merge
+   can land a new module INSIDE such a pair — a field tree got the severity ladder planted between
+   the prayer's BEGIN and END, and the project's own prayer tool would have deleted the arrival as
+   its "cure". The fresh core places it after the END; only the route decides which happens.
    - `node .kaif/kaif-core.mjs diff --source <url|dir>` — a per-module preview of what the new
      version would change *here*. Works even on a v1 manifest: the machinery builds a synthetic
      baseline of your CURRENT version (`--baseline <dir|url>` points it at saved artifacts when
@@ -45,9 +50,19 @@ diverged places. Your cognitive work is that task, not the migration.
      the copy and read its diff. A minute and a few MB buy a byte-accurate preview — in the field
      the live pass matched the sandbox byte for byte. Prefer this on the first-ever update and on
      any deployment with heavy localization. The copy's receipt (`<copy>/.kaif/last-update.json`)
-     carries the verdicts it printed: hand it to the live run as
-     `update --rehearsal <copy>/.kaif/last-update.json`, and a file the copy froze can never be
-     merged live — a mismatch freezes it and names both number sets in the task.
+     carries the verdicts it printed: hand it to the live run — `update --rehearsal
+     <copy>/.kaif/last-update.json` on the core-update route, `node KAIF-LOADER.mjs --lang <code>
+     --rehearsal <copy>/.kaif/last-update.json` on the bootstrap route (since 2.6 the loader knows
+     the flag and refuses an unknown one BEFORE it downloads anything) — and a file the copy froze
+     can never be merged live: a mismatch freezes it and names both number sets in the task. Where
+     the flag cannot be passed (a wrapper runs the loader for you), the equivalent is `cp
+     <copy>/.kaif/last-update.json .kaif/update-rehearsal.json` — the bootstrap picks the default
+     path up by itself and consumes the record. Two field-paid details of the recipe: download the
+     release assets ONCE (`gh release download vX.Y --pattern 'KAIF*' --pattern 'kaif-manifest.json'
+     -D <dir>`) and hand `<dir>` to BOTH runs as `--source <dir>` — the sandbox and the live pass
+     then read the same sha256-verified bytes and their logs differ by the rehearsal line alone;
+     and on Windows run `git config core.longpaths true` in the copy before `git add` (a long
+     archive name under `interviews/` fails the copy otherwise).
 
 3. **Route by what the project has:**
    - **`.kaif/kaif-core.mjs` exists (KAIF ≥ 1.5):** run `node .kaif/kaif-core.mjs update`
@@ -55,11 +70,15 @@ diverged places. Your cognitive work is that task, not the migration.
      replaces every framework file that is byte-identical to its install snapshot, adds new files,
      keeps diverged ones untouched, swaps the machinery itself, stamps `.kaif/kaif.json`, and writes
      `KAIF_UPDATE_TASK.md`.
-   - **No machinery (KAIF ≤ 1.4, or an anonymous install):** put the fresh **thin `KAIF.md`** from the
-     origin release in the project root and follow its bootstrap (three `KAIF-BOOT:` steps). The
-     installer detects the existing older `.kaif/kaif.json` and runs as an update: existing files are
-     KEPT, new entities added, owner-level fields of the marker preserved, and `KAIF_UPDATE_TASK.md`
-     replaces the usual adaptation task.
+   - **No machinery (KAIF ≤ 1.4, or an anonymous install) — and every tree named MANDATORY in
+     step 2:** put the fresh **thin `KAIF.md`** from the origin release in the project root and follow
+     its bootstrap (three `KAIF-BOOT:` steps; `--rehearsal`, `--source` and `--baseline` ride on the
+     loader's line). The installer detects the existing older `.kaif/kaif.json` and runs as an update:
+     existing files are KEPT, new entities added, owner-level fields of the marker preserved, and
+     `KAIF_UPDATE_TASK.md` replaces the usual adaptation task. Since 2.6 this route renders its module
+     diffs with the OLD template's lines too (`−`/`+`, not `+` alone): the machinery fetches the
+     previous release's own artifact for the texts — offline, pass `--baseline <dir>` with that
+     version's assets, or read the incoming template alone.
 
 4. **Work `KAIF_UPDATE_TASK.md`** — the only cognitive part: merge the template news into the files the
    machinery could not touch (they carry your local edits), review what's new, run

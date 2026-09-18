@@ -25,7 +25,7 @@
 [![Version](https://img.shields.io/badge/Version-0.9.2-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9.2)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
-[![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
+[![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.7-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
 <p align="center"><strong>Version 0.9.2</strong> · 2026-09-01</p>
 
@@ -294,7 +294,7 @@ assumes.
 
 ## 6. Built with KAIF
 
-The project runs under [KAIF 2.5](https://github.com/MikalaiKryvusha/KAIF) — the author's framework
+The project runs under [KAIF 2.7](https://github.com/MikalaiKryvusha/KAIF) — the author's framework
 for AI agents: external memory, autonomy made wider and better, and the discipline that keeps a
 claim of "it works" attached to an observation.
 
@@ -332,7 +332,7 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 [![Версия](https://img.shields.io/badge/Версия-0.9.2-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9.2)
 [![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
 [![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
-[![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.2-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
+[![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.7-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
 
 <p align="center"><strong>Версия 0.9.2</strong> · 2026-09-01</p>
 
@@ -699,7 +699,7 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 ## 6. Собран на KAIF
 
-Проект живёт под [KAIF 2.5](https://github.com/MikalaiKryvusha/KAIF) — авторским фреймворком для
+Проект живёт под [KAIF 2.7](https://github.com/MikalaiKryvusha/KAIF) — авторским фреймворком для
 ИИ-агентов: внешняя память, расширенная и улучшенная автономия и дисциплина, которая держит
 заявление «работает» привязанным к наблюдению.
 

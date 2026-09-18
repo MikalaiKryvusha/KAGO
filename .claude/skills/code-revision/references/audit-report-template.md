@@ -19,6 +19,9 @@ tasks: never `DONE`-tagged, never rewritten, corrections appended. One run produ
 | `<date>_<scope>_SUMMARY.md` | the owner, and the next revision | verdict first · scope & methodology · coverage map · family table · inventory of confirmed/refuted · limits |
 | `<date>_<scope>_<family-slug>.md` | the executors who will fix | one FAMILY: its mechanism, then a finding card per occurrence |
 
+In `KAIF_AUDIT/` the index of a file is its DATE, not a running number: the `NN_<name>.md` form of
+`reports/README.md` belongs to the other report folders.
+
 One document per finding family — never one per finding, and never one per subsystem. The family
 is the unit because a class is what a fix must close (`BUG_FIXING_FRAMEWORK.md` → "Close the class,
 not the instance"), and because it lets the next revision recognise a NEW FACE of a known class
@@ -131,14 +134,62 @@ list and let the project add its own:
 
 **Effective false positive** = a finding on which the executor took no action. It is the metric
 that decides whether the next revision gets read at all: past roughly one in ten, operators start
-ignoring the tool, and a report nobody reads is worse than no report. Count it on the NEXT run —
-findings from the previous report that produced no action — and record the number in the summary.
-A noisy reviewer is repaired like any other noisy scanner: with a labelled fixture and a precision
-number before and after, never with one more ad-hoc exclusion.
+ignoring the tool, and a report nobody reads is worse than no report. Count it on the NEXT run, by
+this procedure, not by feel: for every finding of the previous summary's inventory, "action" means
+its `bugs/` document is `DONE` or a commit names the finding's family or bug (`git log --grep`);
+anything else is "no action". Write `Effective FP of the previous run: <no action> of <findings>`
+plus the list into the new summary's methodology table. A noisy reviewer is repaired like any
+other noisy scanner: with a labelled fixture and a precision number before and after, never with
+one more ad-hoc exclusion.
 
 ## 6. Series, not a single run
 
 One pass finds roughly half of what is there, and repeating the same pass finds the same half —
 the pesticide paradox in `TESTING_FRAMEWORK.md`. So the coverage map is mandatory, and the summary
 closes by naming what the NEXT run should change: a different axis, a different slice, different
-data. A revision recorded without its coverage map cannot be continued, only repeated.
+data. A revision recorded without its coverage map cannot be continued, only repeated. The newest
+summary IS the baseline the next run starts from (skill, Step 0).
+
+## 7. The reviewer brief — what one reviewer receives, and nothing else
+
+A reviewer handed the whole skill silently drops part of it; a reviewer told "look for problems"
+reports style. The executor fills this page per zone and sends it as the reviewer's entire task
+(field origin: the first run wrote thirteen such briefs by hand; a reviewer cut by claim clusters
+rather than by directory converged on the same defect from four sides — that convergence became
+evidence):
+
+```markdown
+# Reviewer brief — zone: <name>
+
+**Read WHOLE, top to bottom — no grep as a substitute:** <files with line counts>
+**What this zone is FOR, and its boundaries:** <two sentences from the ground map>
+**Paid classes to hunt — their new faces:** <EXP-NNNN + one-line lesson · bugs/NN + one-line mechanism>
+**Axes:** <the standing axes of Step 1 + the project's own>
+**Deterministic layer already run — its output is evidence, do not repeat it:** <commands + verdicts>
+**Excluded classes — do not report:** <§5 list + the project's own>
+**Budget:** at most <N> cards; stop at the noise budget; say "nothing found on <axis>" by name.
+**Output:** one card per finding, fields 1–8 of §3, the quote FIRST and byte-exact (`path:line`);
+the baseline mark with the fingerprint; no fixes, no edits, nothing that raises a window or a sound.
+**Coverage line at the end:** read whole · read partly · not read — by file.
+```
+
+## 8. The skeptic brief — independent by construction
+
+Independence is the property, not the head-count: one skeptic per finding, or one per family
+ruling on each finding, or — without subagents — a fresh pass of the executor that reads only the
+card. The skeptic never sees the reviewer's rationale beyond the card:
+
+```markdown
+# Skeptic brief — finding <F#> of family <name>
+
+**Default verdict: NOT A DEFECT.** Your job is to refute. Confirm only what survives all three lenses:
+1. **Address** — open `path:line`; is the quote byte-exact? A wrong address kills the finding even
+   when the thought behind it is right.
+2. **Reproduction** — reach the failure yourself: a command, a fixture, a mutation — on a COPY. The
+   reviewer's scenario is a claim, not evidence.
+3. **Coverage** — does a recorded owner decision (`interviews/`), an idea, a bug, a guard's selftest,
+   a declared exclusion or a genre boundary already cover this case? Any of them refutes.
+**Output:** `REFUTED — <the document, guard or observation that killed it>` or `CONFIRMED — <your own
+reproduction: command and output>`; never "plausible".
+**Rules:** no fixes; no edits; nothing that raises a window or a sound on the owner's machine.
+```

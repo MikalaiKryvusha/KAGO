@@ -81,7 +81,7 @@ Fourteen key documents ship with a deployment (thirteen project documents plus t
 | `REQUIREMENTS_FRAMEWORK.md` | How requirements are written and checked: goal vector + acceptance criteria first, the ten quality criteria, EARS, fit criterion, the stop-word dictionary as a lintable guard (2.2, epic N). | Deployed verbatim. |
 | `GOAL.md` | The owner's vision. | **The owner.** |
 | `MASTER_PLAN.md` | The phased road from the current state to the GOAL. | Agent derives (`/revision`). |
-| `STATUS.md` | The living SUMMARY of now and the handover between sessions (soft target ~200 lines — the first of the re-read core's size budgets that `check` warns above, all nine since 2.5; closed work moves to the chronicle — the bonsai trim). | Agent, after every task. |
+| `STATUS.md` | The living SUMMARY of now and the handover between sessions (soft target ~200 lines — the first of the re-read core's size budgets that `check` warns above, all nine since 2.5; since 2.7 the budget counts the project's OWN lines and the warning names the chronicle as the address; closed work moves to the chronicle — the bonsai trim, and `check --gate-budgets` is the door the closing ritual runs after it). | Agent, after every task. |
 | `PROJECT_HISTORY.md` | The append-only chronicle: closed sessions/phases/releases, newest first; NOT in `/resume`'s canon set — archaeology on demand (2.1, epic H). | Agent, at `/end-chat-soft`'s trim. |
 | `EXPERIENCE.md` | The grep-friendly journal of lessons with trigger tags. | Agent (`/experience`). |
 | `PROJECT_STRUCTURE_EXTERNAL_MAP.md` | The external map: directories, files. | Agent maintains. |
@@ -93,7 +93,35 @@ One OPTIONAL canon document joins the fourteen only when it is earned: **`AUTHOR
 the project root — the owner's voice portrait (`/owner-voice`), written by the agent from the owner's
 own texts and accepted by the owner. It ships as a SKELETON (`.kaif/_owner-voice-template.md`), never
 as a filled file or a stub: a deployment without a portrait is complete and `check` stays green. Its
-history is kept INSIDE the file, append-only (§9 of the skeleton).
+history is kept INSIDE the file, append-only (§9 of the skeleton), and its §8 is a TABLE of machine
+heuristics (pattern · class · hint · exception) that the shipped linter `kaif-voice-lint` reads as the
+machine half of the independent check after a text is written BY the portrait (2.7, epic VC: written by
+the portrait → checked independently by it → fixed → only then written and brought to the owner). Two
+bundle-only skeletons of the
+same family serve the testing canon: `.kaif/_testcases-template.md` (2.3 — the case set per feature,
+`TESTING_FRAMEWORK.md` → the activities chain) and `.kaif/_testrun-report-template.md` (2.7, epic TR —
+the seven-field report an EXECUTED run leaves at `<testdocs>/reports/<YYYY-MM-DD>_<work>.md`;
+`TESTING_FRAMEWORK.md` → "An executed run produces its report"). One more
+bundle-only page of the same family (2.6, epic IC; origin issues #19 #38 #47 #51): **`.kaif/INTERACTIVE_CONTOUR_SPEC.md`**
+— the one-page executable CONTRACT of the owner-facing interactive contour (the two legal option forms,
+the pre-flight that refuses a page without radio buttons with exit 3, the three records and the fact of
+showing, outcomes and exit codes, the call, the faces and flags of the shipped generator under
+`.kaif/tools/contour/`). The form check is a door of its own — `review.mjs <doc> --check`: parse,
+pre-flight and render self-check with no server, no sound and no call (2.7, epic QL, origin issue #56) —
+and that door has a SECOND axis, the ARCHAEOLOGY of every live question (2.7, epic AQ, origin issue #70:
+13 questions brought to one owner that his own prior answers had already settled, one of them 44 days
+after his answer). A question to the owner is a CLAIM that the matter is not settled, so a live question
+of a document dated on or after `2026-09-18` opens only with the attestation of the search that was run —
+`<!-- archaeology: grep -rniE "<the heading's words>" interviews/ GOAL.md MASTER_PLAN.md plans/ → N hits ·
+read: <files|none> · prior: <none | "<the prior answer>" + address> -->` between the heading and the first
+option; without it the door exits 3 and PRINTS that ready command, `N > 0` with `prior: none` is refused
+too, `N = 0` is honest, and documents dated before that day are never judged (`--check` says which of the
+two it did). `/interview` step 3d carries the same five steps for the agent's hand. It is not a skeleton to fill: a session checks a page against it in a minute,
+and `/owner-reviews` says "run the shipped generator, do not build a contour". The generator itself ships
+as three tool modules under `.kaif/tools/contour/` — `core.mjs` (parsing, records, pre-flight), `review.mjs`
+(the page, the server, the call, the queue, the faces interview · notice · proofreading · mockup review, `--selftest`; since 2.7, epic IW — origin issue #64 — the server comes up on the previous run's port when that process is gone so the owner's browser draft is restored, names a taken port together with the loss, and the page reports when it lives in a tab instead of the app window; since 2.7, epic LP — origin issue #66 — `<doc> --close` is the only way to end a live page from outside: it reads the lock (port · pid · title · last input · draft state carried by the pulse) and refuses with exit 4 while the owner typed less than the quiet threshold ago, while the page is younger than it, or while a draft is unsaved — and it ends the page by asking the page's own server, never by killing a pid read from a file; the app window runs on its own browser profile in the project, `.kaif/contour-window/`, so an answer saved while the server was gone (IndexedDB is the primary carrier, durable half a second after the write) is picked up headless at the next queue, check or show — once no browser holds the profile — and recorded with `recovered: true`; an unknown flag refuses before any page, exit 1)
+and `texts.mjs` (the RU/EN dictionaries and parser labels; other languages fall back to EN and the page says so) —
+and reads every parameter from `.kaif/kaif.json`, never asking the owner.
 
 Knowledge directories, each with its own README: `plans/` `ideas/` `bugs/` `researches/`
 `interviews/` `homeworks/` `reports/`. Closed items take the `DONE` tag in the filename (§13.1);
@@ -115,7 +143,7 @@ Thirty-seven skills — the verbs of project work — deploy to `.claude/skills/
 mirrored into every declared agent system (§7.3). Groups:
 
 - **Session:** `resume` (read ALL canon documents, pick one main thing) · `pause` (soft-park the
-  chat: logical stopping point, green tree, local commit, NO pushes) · `end-chat-soft` (the unhurried full closure) + `end-chat-force` (the urgent capture-and-go closure:
+  chat: logical stopping point, green tree, local commit, NO pushes) · `end-chat-soft` (the unhurried full closure; since 2.7, epic SF — origin issue #67 — the farewell report answers `Standing falsehood: none` or names the statement and the places it was corrected in; the force closure carries the same line as one phrase) + `end-chat-force` (the urgent capture-and-go closure:
   STATUS handover, judge, commit AND push) · `refresh-context` · `check-backlog`.
 - **Autonomy loops:** `autoloop` · `dayloop` · `nightloop` — grind the backlog; every item ends
   with a mandatory judge pass; an owner's drive-by note is filed to the backlog, not a task switch —
@@ -139,7 +167,11 @@ mirrored into every declared agent system (§7.3). Groups:
   "not a defect"; survivors become bug docs and feed the guardrails. Since 2.2 the run also leaves
   audit reports in `reports/KAIF_AUDIT/` — one document per finding family plus a summary with the
   coverage map and the limits — and each finding is written as an eight-field contract a weaker
-  model can execute (skeletons: the skill's `references/audit-report-template.md`).
+  model can execute (skeletons: the skill's `references/audit-report-template.md`). Rewritten by its
+  executor in 2.7 (epic CR) and then proven by a functional run on a real zone: the reference now
+  carries the reviewer and skeptic briefs and the effective-FP procedure, the newest summary that IS
+  a revision is named as the run's baseline, and the seven places where the executor stopped were
+  fixed in the text.
 - **Shipping:** `release` (owner-confirmed only).
 - **Execution discipline (vendored from fable-method, MIT):** `fable-method` · `fable-loop` ·
   `fable-judge` · `fable-domain`.
@@ -213,7 +245,8 @@ the block's destination path is exact.
 `kaif-bundle-manifest.json` — data for the machinery, never written to disk: `version`,
 `released`, `templateNotes` (current release), `templateNotesByVersion` (per-release news, printed
 as the UNION of the update interval), `deprecations` (artifacts retired by this release, §10.5),
-`moduleClasses` (manual class overrides), `policyChanges` (§10.6).
+`moduleClasses` (manual class overrides), `policyChanges` (§10.6), `renamesByVersion` (headings
+renamed by a release — §9.3).
 
 ## 9. The module map
 
@@ -232,6 +265,26 @@ build.
 Split-and-rejoin is byte-identical for every file (the build fails otherwise). The map is
 validated against the bundle by re-splitting; a stale or tampered map fails the self-check.
 
+### 9.3 Renamed headings (2.7)
+
+A module's address is its signature — the full heading line — so renaming a heading looks, to an
+update, exactly like removing one module and adding another. That ambiguity is not resolved by
+guessing (neither does any migration system: an explicit declaration is the industry's answer), so
+a release DECLARES its renames in the meta block: `renamesByVersion` → `{ '<version>': { '<template
+dest>': [['<old heading>', '<new heading>'], …] } }`, applied over the `(from, to]` interval like
+policy changes, with both hops of a twice-renamed heading kept so a tree that skipped one release
+still finds its own. The merge binds each target to the hop that is actually ON DISK and then
+treats the pair as ONE module: untouched → replaced under the new heading; carrying local edits →
+your section stays, with ONE heading and a task item naming the rename; old anchor absent → a log
+line by name, never a failure. Every outcome is logged as `renamed: <path> :: <old> → <new>`,
+because silence leaves the owner unable to tell a rename from a delete-plus-add. The build warns
+by name when a heading vanished from a template since the previous release with neither a rename
+nor a deprecation behind it. The first hop INTO a release that declares a rename is the exception: that
+update is run by the DEPLOYED older core, which does not read the map, so a section the owner edited under a
+renamed heading arrives twice and the update task names it as "upstream removed" — the release notes and
+the task tell the owner to fold it by hand once (2.6 → 2.7: `/end-chat-soft` and `/end-chat-force` Step 1,
+`/code-revision` Step 0).
+
 ## 10. Updating
 
 ### 10.1 Classification
@@ -239,7 +292,13 @@ validated against the bundle by re-splitting; a stale or tampered map fails the 
 For every bundle file, against the deployment's snapshots: an owner file is never in scope (but a
 changed owner TEMPLATE surfaces as an "owner-conventions" task item); a missing file is added; a
 file whose disk sha equals its TEMPLATE sha is replaced (or kept if upstream did not change it);
-a diverged markdown file undergoes the MODULAR merge.
+a diverged markdown file undergoes the MODULAR merge. Equality is judged MODULO the hand-filled
+slots (2.6, origin issue #48): a file that differs from its template only by the values the
+adaptation task filled into slots the machinery could not fill (`<BUILD_COMMAND>`, `<TEST_HARNESS>`,
+the co-author line) is untouched — the replacement carries those fills into the new template, and
+a deprecated file of that shape retires mechanically. The fills are DERIVED from the disk (the
+template matched as a pattern with one capture per slot; the proof is the exact sha of the disk
+text with the fills folded back), cached in the deploy manifest as `fills`, never asked of anyone.
 
 ### 10.2 The modular merge
 
@@ -247,15 +306,21 @@ Reconstruction starts from the DISK order (the owner's inserted sections keep th
 A module untouched since deploy takes the new template's text; a localized module is never
 replaced by a template that carries none of the owner's script; an edited module is kept — and
 lands in the task WITH a "your version → new template" diff ONLY when upstream actually changed
-it. New template modules insert by template order. A file whose body carries the owner's
+it (2.6: a module already equal to the incoming template — the deploy values healed since, e.g.
+by `project-name` — is nothing to hand over and makes no item; the comparison is by the FILLED
+texts, because the manifest keeps no raw template texts and the healing rewrites the fill map).
+New template modules insert by template order. A file whose body carries the owner's
 script prints its verdict WITH the numbers that produced it — `baseFound N of M, ceiling K →
 frozen | merged` (2.5: a rehearsal and the live run compare line by line, not by outcome).
 The H1 is OUT of that count (2.5, origin bug 100): it is the one heading that carries a deploy-time
 value, and a synthetic baseline fills it from whatever the folder resolves to — one tree under two
 folder names once got two verdicts, ±1 at the ceiling; the polygon now runs exactly that and
 demands one verdict. The rehearsal is BINDING (2.5, origin issue #27 R1): `diff --source` prints the same verdicts
-over the same candidate set and records them in `.kaif/update-rehearsal.json`; the next `update`
-over that tree (or one given `--rehearsal <receipt>` from a sandbox copy) freezes any file whose
+over the same candidate set (2.6: ONE predicate for both — an md file neither owner-seeded nor
+skipped by anonymity — so the rehearsal file and the receipt count the same files; origin issue
+#42) and records them in `.kaif/update-rehearsal.json`; the next `update` over that tree (or one
+given `--rehearsal <receipt>` from a sandbox copy — on the bootstrap route the same flag rides the
+loader's line into `install`, 2.6, and the auto record is consumed on both routes) freezes any file whose
 live verdict is `merged` where the rehearsal said `frozen` — kept intact, the template delta in
 the task, both number sets in the `verdict-mismatch` item — so what the rehearsal showed the
 owner stays true; every candidate's verdict also rides the receipt (`verdicts`), and a record
@@ -278,8 +343,10 @@ translated-wholesale file also names its UPSTREAM path and a ready `git diff v<f
 <src>` — the dest → src map ships in the bundle meta as `sources`, 2.5) · owner-convention
 transfers · deprecations carrying local edits (every deprecation names its SUCCESSOR in the log
 and in the item, and the kept ones are counted in the task's context line and the receipt —
-2.5, origin issue #32 R-D) · stale claims (lines still asserting the OLD
-version anywhere in the project — prose AND the project's own scripts: `package.json`,
+2.5, origin issue #32 R-D) · stale claims (lines asserting ANY version older than the one being
+installed — not only the one just replaced: a one-version window let a README badge two releases
+back survive three green updates, so a line stuck on an earlier version now names it, `(asserts
+2.2)`, 2.6, origin issue #44 — anywhere in the project: prose AND the project's own scripts: `package.json`,
 `*.mjs/js/ts/sh/ps1/py/yml/toml`, lock files excluded, 2.5; the item is UNCONDITIONAL on a
 version change — an empty scan says `no lines found`, so a silent scanner failure can never pass
 as a clean tree, 2.5) ·
@@ -323,11 +390,18 @@ per-module preview against another version — a v1 manifest gets a synthetic ba
 deployed version, `--baseline` overrides its source; a bare `github.com/<owner>/<repo>` source
 resolves to its latest-release assets) · `adopt-current` (after a MANUAL migration: re-adopt
 reality so the mechanical road stays alive) · `sync` (re-mirror skills) · `modules` (print the
-machinery's module cut) · `checkpoint` · `update-verify` · `check` · `version` · `report
+machinery's module cut) · `checkpoint` · `update-verify` · `check` (since 2.7, epic SD — origin issue #65 — also the axis "undelivered signal", an allowlist: on tracking: origin a numbered `bugs/KAIF/NN_*.md` ticket is silent only when its `Delivered upstream:` line names an issue — a `…/issues/N` URL or `#NN` — and does not say NOT YET; NOT YET is named with the ready `report` command, a missing, translated or unreadable line, or NOT YET beside an issue, as "no readable delivery state" with both legal forms; a warning, read by the same function as `report`) · (since 2.7, epic FR — origin issue #68 — also the axis "constitution keeps the obligations of its template": with a `TEAM_CONSTITUTION.md` in the root and the skill's template on disk, every bold anchor of § 2's numbered items and every one of the nine `## N.` headings must survive generation — headings matched by NUMBER, rules by anchor, and a document where not one anchor matches is translated, so the axis counts and says so; losses are named one by one, a warning never a failure, and `<!-- constitution-ok: <why> -->` beside the item is the declared exemption) · (since 2.7, epic CB — origin issues #43/#45/#71 — the size budgets of the re-read core are judged by the project's OWN lines: a disk module whose (signature, sha256) pair is in the deployment's `moduleShas` ARRIVED and is not counted, so a 1655-line `AGENT_GUIDE.md` with 300 arrived lines is judged at 1355; the warning carries `own lines N of budget ~M` and the ADDRESS the overflow moves to, taken per document from `DOC_BUDGETS` — the chronicle for `STATUS.md`, the chronicle · `researches/` · a house-rules file for the rest; three fallbacks name themselves in the line instead of going silent — no module cut for the file, a file translated WHOLESALE (not one template signature survives, so a by-signature cut is impossible by construction) and an OWNER-SEEDED document whose shipped skeleton the project wrote over, all three counting every line as the project's own; `--gate-budgets` turns the advice into a DOOR — exit 1 after every other axis has spoken, one `<document>: own lines N of budget M → <address>` line each, while the bare `check` keeps the warning and exit 0 so no update road fails on a long document; the closing ritual `/end-chat-soft` runs the flag. The same epic judges the SKILL LANGUAGE MIX by the share of foreign-script prose tokens instead of a single occurrence of a script — fenced blocks and inline code spans are not prose, a body with not one token in the owner's script is ENGLISH as before, and a body that keeps the owner's script while at or above the named threshold of its tokens are foreign is a MIX, named with its percentage: a fully English skill carrying three stray localized words used to be invisible to both counts) · `version` · `report
 <ticket>` (2.5, epic SG: deliver a `bugs/KAIF/` ticket to the origin through `gh` under the KAIF
 owner's standing authorization — origin issue #15 — with an authorship trailer, and write the
 issue URL into its `Delivered upstream:` line; refusals named: `tracking: anonymous`, no `gh`,
-not a ticket, `gh` refused; a timeout is OUTCOME UNKNOWN, exit 3, never a refusal; `--dry-run`
+not a ticket, `gh` refused; a timeout of the CREATE call is OUTCOME UNKNOWN, exit 3, never a
+refusal — a hanging `gh auth status` is `not ready`, exit 2: nothing was sent, a repeat is safe
+(2.6 wording, court RL 2.5); the contract line is read as a PARAGRAPH — an issue in it (a
+`…/issues/N` URL, or `#NN` as the value itself or right after the word origin/issue) with no
+`not yet` is delivered (idempotent), `not yet` in any case with
+no issue is undelivered, both at once is ambiguous and refused, and a refusal names both legal
+forms with the exact edit (2.6, origin issue #40; since 2.7 one function reads it for `report` and
+`check`, and a URL that is not an issue no longer counts); `--dry-run`
 calls nothing; the `KAIF_GH` seam lets a polygon stand in for `gh`).
 
 ### 10.8 Predicting a pass
@@ -336,7 +410,14 @@ The cheapest *exact* prediction is a **sandbox copy**: export the tree (`git arc
 in the copy, run the REAL update or bootstrap there and read its diff. This is not a model of the
 pass but the pass itself — field-proven byte-identical to the subsequent live run. Recommended
 before the first-ever update and on heavily localized deployments; `diff --source` remains the
-lighter per-module preview.
+lighter per-module preview. The copy's receipt binds the live run on EITHER route (2.6): `update
+--rehearsal <receipt>` or `node KAIF-LOADER.mjs --lang <code> --rehearsal <receipt>` — the loader
+validates its flags BEFORE any download (`--lang --mode --agents --baseline --force --rehearsal`
+ride to `install`, `--channel --source` are its own; anything else is refused with nothing fetched
+and nothing written — origin issue #42 found three trees left with a new core under an old marker).
+On the bootstrap route the task renders module diffs with the OLD template texts (`−`/`+`, never
+`+` alone): the machinery fetches the previous release's own artifact for them, `--baseline
+<dir|url>` offline (2.6, origin issue #41).
 
 ## 11. Trust and provenance
 
@@ -445,14 +526,21 @@ Shipped to `.kaif/tools/`, active only when the project opts in:
 | `kaif-requirements-lint.mjs` | The stop-word dictionary of `REQUIREMENTS_FRAMEWORK.md` as an advisory grep guard over requirement sections (`check` / `selftest`); quotes, ❌ examples, code, and `(justified: …)` lines are legal by construction. |
 | `kaif-guard-lint.mjs` | The guard-declaration block of `TESTING_FRAMEWORK.md` gate 5 (second half, 2.5) as an advisory linter (`check` / `selftest`): every `@guard` carries `THREAT` · `PROVED-AGAINST` · `GAP` · `ON-REAL-PATH`, every `@forensic` carries `EXPLAINS` · `DURABLE-AT` (with `close` / `exit` / `trip-only` rejected), every `@fork` carries `OPTIONS` · `COST` · `RECON` · `DECIDED`; fires only on explicit markers, `SKIPPED=3` when a tree carries none. |
 | `kaif-scenario-lint.mjs` | The scenario form of an acceptance criterion (`REQUIREMENTS_FRAMEWORK.md` → "The scenario form", 2.5) as an advisory linter (`check` / `selftest`): a started four-line scenario — Situation · Action · Result · Check, keywords mirrored per language — keeps its shape under seven rules-as-data (order · one action · observable result · no implementation words · third person · a runnable Check · concrete values); an empty owner-written Check is a warning; never demands a scenario, `SKIPPED=3` when a tree carries none. |
+| `kaif-attribution-lint.mjs` | The authorship of a decision (`AGENT_GUIDE.md` → "Authorship of a decision", 2.7, epic AW; origin issue #55 — an agent's own choice recorded as "the owner's decision" held a run while the owner's machine died) as an advisory linter (`check [paths…] [--write-baseline]` / `selftest`): a line that attributes a decision or an order to the owner ("the owner's decision", "the owner decided", their RU forms) must carry a verbatim quote, an interview address or a decision number within ±2 lines, or be signed as the agent's own (`[AI]`, the localized pair) — otherwise it is DEBT, counted against a baseline that only shrinks (`.kaif/attribution-lint.baseline.json`); patterns are data per language; quote lines, fenced code, inline code and ❌ examples are invisible; `SKIPPED=3` on a tree with no markdown in scope. |
+| `kaif-testrun-lint.mjs` | The run report of `TESTING_FRAMEWORK.md` → "An executed run produces its report" (2.7, epic TR; origin issue #59 — the owner-QA's word "THERE WAS NO TESTING") as an advisory linter (`check [home]` / `selftest`): every report in `<testdocs>/reports/` is named `<YYYY-MM-DD>_<work>.md` (the date-first name is the index) and carries seven non-empty fields — Work · Contour · Runs (a moment and a command in a code span per run) · Checks (opening with two separate lines, `Hygiene:` and `Functional run:` — a Verdict `pass` whose Checks carry no functional run or say `NONE` reddens: hygiene alone is `partial`; 2.7, epic CL, origin issue #62) · Found (a list or an explicit "none") · Traces · Verdict (pass · fail · blocked · partial); rules as data, keywords per language, placeholders are not content; `SKIPPED=3` when the home has no `reports/` — an unwritten report is invisible to it, and the judge hunts the claim without one. |
+| `kaif-voice-lint.mjs` | The machine minute of the owner's voice portrait (`AUTHOR_STYLOMETRY.md` §7A/§8) — the machine half of the INDEPENDENT check that follows writing BY the portrait (`AGENT_GUIDE.md` → the fable loop's fourth KAIF obligation: written by the portrait → checked independently by it → fixed → only then written and brought to the owner; "Showing is an action"; 2.7, epic VC; origin issue #61 — a field agent rewrote a player sheet through seven rounds under the owner's eyes without opening the portrait once) as an advisory tool (`load [--sections <regex>]` / `check <files…> [--warn]` / `selftest`): `load` prints the portrait into the agent's working context BEFORE the first word and leaves the witness `.kaif/voice-marker.json` (the owner's word: write BY the stylometry, with it in the working cache); `check` refuses a text with no witness, with a witness for another portrait, last written before the first load or more than an hour after the last load ("written past the portrait" — never muted by `--warn`) and runs the stop-patterns and required positives of the portrait's §8 TABLE (pattern · class · hint · exception — `\|` is alternation, a bare pattern is case-sensitive, `/…/i` folds case, `\b`/`\w` are Unicode-aware) over the written text before it counts as written; every hit is printed with the portrait's own hint, a row's `/regex/` exception silences a hit on its line and prose is printed beside it; fenced code, inline code and HTML comments are invisible; `--warn` is the calibration mode; `SKIPPED=3` without a portrait, without a §8 table or with placeholder rows only — likeness is never judged, that verdict is the owner's; the portrait path may be named in `.kaif/kaif.json` → `voicePortrait`. |
+| `kaif-ranking-lint.mjs` | The fixed form of a `/what-next` answer (2.6, epic WN; origin issue #53 — a field agent quoted "the newest pain is not a priority claim" and broke it in the same answer) as an advisory linter (`check <draft.md>` / `selftest`): the answer opens with `METRIC:` and `MAIN PHASE:` read from the documents, ranks steps in a `| step | moves | closes | effort |` table where row 1 moves the metric or closes something, keeps the fresh words of the owner on a shelf "not ranked by the metric", and always carries the tech-debt line — seven rules-as-data, RU/EN anchors, SKIPPED (exit 3) on a document that never started an answer. |
+| `kaif-experience-lint.mjs` | The recurrence deadline of `EXPERIENCE.md` — "Two strikes → a mechanism, never a third reminder" (2.7, epic EL; origin issue #69 — a field audit of one project's whole journal: 7 of 120 failure entries mechanized, 14 of 15 failure classes recurred AFTER their lesson was written, five lessons written 6–17 times in different words) as an advisory linter (`check [journal] [--baseline <file>]` / `--shrink EXP-NNNN [journal] [--yes]` / `selftest`): the field `class: <slug>` on its own line under the entry heading is the UNIT of recurrence, and the SECOND failure entry (`❌` or `❌→✅`) of one class with no `mechanized:` is a finding that names the class and BOTH entries by id. Two fates clear it, both written: `mechanized: <the tool>` in the entry, or the price of the WHOLE class re-checked and declared beside the list — `<!-- class-ok: <slug> — <why it is not cheaply possible> -->` (an empty declaration is itself a finding; declared classes are printed on the summary line and that list only shrinks). It also carries the field rules of the origin's own guard (exactly one of `mechanized:` / `none-cheap: <why>` / `subject-lesson`; a trap by form may not answer `subject-lesson`) against an inherited-debt baseline the caller passes, warns when `mechanized:` names a command or path the project does not contain (a path the project IGNORES is not dangling, and addresses are not checked at all for a journal outside a project tree — said aloud) and when a slug is outside the journal's class list; `--shrink` collapses a MECHANIZED entry to its class line plus one pointer line (`Lesson → guard: … · repro … · full text: git log -p -S "<id>"`), showing by default and writing only with `--yes`; `SKIPPED=3` when not one entry carries `class:` — recurrence cannot be counted, and "not judged" never reads as "clean". Keywords are a per-language table; ids are not assumed numeric (a field journal writes `EXP-NEW-<slug>`). |
 
 A sibling optional module ships to `.kaif/hooks/` (2.2, epic O) — the **refresh-hooks module**:
 mechanical injections of the context-refresh canon (`AGENT_GUIDE.md` → Context refresh) for
-agent systems with lifecycle hooks. Three scripts speaking the Claude Code hook contract —
+agent systems with lifecycle hooks. Four scripts speaking the Claude Code hook contract —
 `session-start-refresh.mjs` (canon order after compaction/clear), `prompt-refresh-timer.mjs`
 (refresh-marker age over 60 minutes → refresh order; silent while fresh),
 `stop-status-guard.mjs` (work happened while `STATUS.md` went stale → one soft block per
-session) — plus `settings-fragment.json`, the ready sample config. Every hook carries a
+session), `prompt-resume-word.mjs` (2.7, epic RS: the prompt's FIRST word is `resume` or its Russian shorthand → the
+order to run `/resume` in full before the work; silent on every other message — Claude Code only,
+other systems' prompt field not verified) — plus `settings-fragment.json`, the ready sample config. Every hook carries a
 predicate and a cooldown; injections are orders to re-read, never document bodies. Activation
 is an explicit owner opt-in (`.kaif/hooks/README.md`): the machinery never edits the project's
 `settings.json`, and a deployment without hooks never reddens — the markdown ritual is the

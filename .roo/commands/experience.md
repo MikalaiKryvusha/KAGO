@@ -34,6 +34,7 @@ non-obvious gotcha). **Capture proactively — don't wait to be asked.**
 2. **Write one entry** at the **top** of the `## Entries` section, in the canonical format:
    ```
    ### EXP-NNNN · <ISO date> · <✅|❌|❌→✅> · #tag #area
+   class: <slug>
    **Context:** one line.
    **Tried / did:** briefly.
    **Result:** ✅/❌ — what happened.
@@ -53,6 +54,12 @@ non-obvious gotcha). **Capture proactively — don't wait to be asked.**
      `none-cheap: <why>`.
    ```
    - `EXP-NNNN` = next id (highest existing + 1, zero-padded).
+   - `class: <slug>` is the **unit of recurrence** — REQUIRED on its own line, right under the heading:
+     tags are free and overlap, so "the same class" was visible only to a human who read the whole
+     journal (origin issue #69: 14 of 15 failure classes recurred AFTER their lesson was written, five
+     lessons written 6–17 times in different words). Take the slug from the CLASS LIST in the journal's
+     header (`<!-- classes: … -->` or the "Lesson classes" section); a genuinely new class is legal —
+     add its slug to that list in the SAME write. Lowercase latin, digits, dashes.
    - Pick 1–3 short `#tags` **inline on the entry** (there is no central tag cloud) — reuse an existing tag
      where one fits (grep the file to see what's in use), so `grep '#tag'` collects related experiences.
    - Keep it SHORT and grep-friendly: stable id, ISO date, outcome marker, inline tags.
@@ -62,6 +69,17 @@ non-obvious gotcha). **Capture proactively — don't wait to be asked.**
    the entry's Mechanization field flips to `mechanized: <the tool>`. Two strikes → a mechanism, never
    a third reminder — that deadline stands; step 0 asks the question at the FIRST capture so the
    second burn stops being the price of asking.
+5. **Run the deadline, don't remember it:** `node .kaif/tools/kaif-experience-lint.mjs check` — a SECOND
+   failure entry of one `class:` with no `mechanized:` is a finding naming the class and both entries by
+   id. Two fates clear it, both WRITTEN: name the guard in the entry (`mechanized: <the tool>`), or
+   re-check the price once for the whole class and declare it —
+   `<!-- class-ok: <slug> — <why mechanizing it is not cheaply possible> -->` in the journal (an empty
+   declaration is itself a finding, and the declared classes are printed on the summary line: that list
+   only shrinks). A third record is never a fate;
+   it also warns when `mechanized:` names a command the project does not contain and when a slug is
+   outside the header's list. `--shrink EXP-NNNN` collapses a MECHANIZED entry to one line pointing at
+   its guard (shows by default; `--yes` writes — the text itself stays in the git history). A journal with
+   not one `class:` exits 3 = SKIPPED, said aloud: "not judged" is never "clean".
 
 ## Mode B — RECALL lessons ("recount your experience")
 

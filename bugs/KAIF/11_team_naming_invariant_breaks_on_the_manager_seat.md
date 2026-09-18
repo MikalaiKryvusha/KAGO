@@ -2,9 +2,15 @@
 
 kaif-fp: `team-deployment/references/team-constitution-template.md#1` :: invariant-contradicts-own-example :: v2.4
 
-**Delivered upstream:** not yet — rides the team-deployment field report collected by the origin
-for the 2.5 scope (owner's word, 2026-08-28); filing an issue awaits the owner's approval per
-tracking mode.
+**Delivered upstream:** #83
+
+> ✏️ Line rewritten 2026-09-18 (KAIF 2.7 update). It used to read: «not yet — rides the team-deployment field report collected by the origin for the 2.5 scope (owner's word, 2026-08-28); filing an issue awaits the owner's approval per tracking mode.».
+> This ticket was NEVER filed as an issue of its own (`gh issue list --repo MikalaiKryvusha/KAIF --state all` on
+> 2026-09-18: no matching title). #83 is this project's 2.7 field update report; it POINTS at this ticket
+> by number with one line of closure evidence (R3) — a pointer, not the full text.
+> It rode the 2.4 team-deployment report (commit a11a92d), whose Outbound line cites no owner word. The owner's «Оба отчёта заберёт исток» (2026-08-28) stands on the 2.4 UPDATE report's line «this report + bugs/KAIF/10», committed at 14:07 (d82ac8b); that «оба» included the team report is this agent's reading, `[AI]`, not a record.
+> Not filing it now is an `[AI]` decision, revisable: the release already carries the substance (five of the six tickets).
+> Six issues for shipped or removed work would be noise in the origin's tracker.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.4 · project KAGO · sphere `programming` ·
 language `ru` · tracking `origin` · agent claude-code (+4 mirrored) · Windows 11 Pro 10.0.26200 ·
@@ -69,3 +75,8 @@ letter, and the letter currently locks the manager out.
 `tools/team-board.mjs` and `tools/team-workplace.mjs` special-case the main copy as the manager;
 KAGO's `TEAM_CONSTITUTION.md` §1 keeps the upstream wording (reconciles trivially at the next
 update once upstream fixes the sentence).
+
+## ✅ STATUS: RESOLVED UPSTREAM (recorded 2026-09-18, the KAIF 2.7 update)
+
+Evidence, 2026-09-18 (each piece names its source): «Exception — the manager» is in the 2.5 `team-constitution-template.md` (-> 1).
+The file keeps its name (KAIF tickets in this project are not DONE-renamed); this section is the closure.

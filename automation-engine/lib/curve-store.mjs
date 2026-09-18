@@ -741,8 +741,10 @@ export function acceptanceProgress(doc, { profiles = [], snapshots = {} } = {}) 
   };
 }
 
-/** The delivery line itself — one string, the exact shape the canon orders a session to open and
- *  close with (`AGENT_GUIDE.md` → The critical path rule, rule 1). */
+/** The acceptance line itself — one string, the shape `npm run curve -- --progress` prints: the
+ *  owner's metric (`MASTER_PLAN.md` → «Метрика приёмки») that the moratorium reads (`AGENT_GUIDE.md`
+ *  → The critical path rule, rule 2). Until 2026-09-18 the canon also ordered every session to open
+ *  and close with it; that ritual is retired (rule 1) — the function and its output are unchanged. */
 export function renderDeliveryLine(p) {
   const e = p.edges;
   let line = `ПРИЁМКА: краёв ${e.total}/${p.total} (прожигом ${e.burned} · соседкой ${e.inherited} · выведено ${e.derived})`

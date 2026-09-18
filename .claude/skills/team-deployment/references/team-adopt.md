@@ -29,7 +29,7 @@ never wording — a local rule that says the same thing in the owner's words is 
 | Singletons, locks, capacity N | constitution § 7 | lock rows; seat ≠ slot |
 | Context budget | constitution § 8 | portions sized to one session |
 | Launch and stop incl. lock release | constitution § 9 | fresh `main` before the resume ritual; locks and waits cleared on stop |
-| Board: four states as roles · contract items 1–7 · lives outside git | board template | the states; `audit-waiting`; the `.gitignore` line or a named opt-out |
+| Board: four states as roles · contract items 1–8 · lives outside git | board template | the states; `audit-waiting`; the `.gitignore` line or a named opt-out |
 | Role contracts | roles library (contract form) | mission · decides alone / needs approval · escalates when — the load-bearing minimum |
 | Archetype fit | roles library | the nearest archetype; seats without independent work |
 

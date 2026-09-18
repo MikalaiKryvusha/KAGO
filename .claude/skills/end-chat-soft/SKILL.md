@@ -39,17 +39,37 @@ Update `STATUS.md`:
 
 Reconcile with the active bug docs in `bugs/` and reflect their status. If a reusable lesson
 emerged in this chat, capture it in `EXPERIENCE.md` (skill: `/experience`) before the handover is
-passed. If a previous `/end-chat-force` left a "ceremonies skipped" debt line in `STATUS.md` —
+passed — and then run `node .kaif/tools/kaif-experience-lint.mjs check`: a SECOND failure entry of one
+`class:` with no `mechanized:` is red and names the class and both entries by id (2.7, epic EL; origin
+issue #69 — 14 of 15 failure classes recurred AFTER their lesson was written). Fix it before the
+handover by naming the guard in the entry, or by re-checking the price once for the whole class and
+declaring it (`<!-- class-ok: <slug> — <why> -->`) — never by writing a third record; a journal with not
+one `class:` exits 3 = SKIPPED, and that is said aloud, never read as clean. If a previous `/end-chat-force` left a "ceremonies skipped" debt line in `STATUS.md` —
 this closure pays it: run what was skipped and remove the line.
 
-If the project keeps a **truth↔mirror pairs registry**, run its check commands before passing the
-handover — a handoff over a drifted pair hands the next session a lie.
+If the project keeps a **truth↔mirror pairs registry**, run its check commands before handing
+over — a handover across a drifted pair hands the next session a lie.
 
 **The bonsai trim (STATUS is a summary, not a chronicle):** entries that stopped being "now" —
 closed phases, finished sessions, shipped releases — move VERBATIM into `PROJECT_HISTORY.md`
 (newest on top; move, don't rewrite). Then re-read what remains of `STATUS.md` with the two tests
 from its header ("remove this line — will the next agent err?" · "readable in one sitting?"; soft
 target ~200 lines). Leave the file the way you'd want to find it.
+
+**Then the budget DOOR — after the trim, not instead of it:**
+
+```
+node .kaif/kaif-core.mjs check --gate-budgets
+```
+
+Exit 1 means a document of the re-read core is over its budget in the project's OWN lines (the lines
+you wrote; modules that arrived byte-equal to the template are not counted), and each line names the
+document, the two numbers and the ADDRESS its overflow moves to. Move the content there and run it
+again. Raising a budget is not the cure, and neither is committing past a red gate: the whole point of
+the flag is that the closing ritual STOPS here (2.7, epic CB; origin issue #71, the owner's own audit
+of one project — "three core documents above budget, the warning printed for weeks and acted on
+once"). Bare `check` keeps printing the same numbers as advice and exits 0, so nothing else in the
+update road fails on a long document.
 
 ### Step 2. Refresh README (when reality moved)
 
@@ -73,17 +93,25 @@ pushes), run it. Otherwise: git add -A && git commit -m "..." && git push.>`
 Message style (from `AGENT_GUIDE.md`): `feat:` / `fix:` / `docs:` / `refactor:` / `ci:` + one line.
 End the message with your standard co-author trailer, e.g.:
 ```
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ```
+(An EXAMPLE, never a string to paste: name the model that ACTUALLY did the work — read your own name
+from the session, `AGENT_GUIDE.md` → Commits.)
 
 ### Step 5. The farewell report
 
 Report to the human: what was recorded, what was built, the commit hash(es), what was pushed, and
-the handover in one paragraph — the main thing the NEXT chat should do first. The report OPENS with
-the forced delivery line — `DELIVERY: <the owner's metric> X → Y; moved by: <one line> | blocker:
-<named>` — the ONE acceptance metric named in `MASTER_PLAN.md`; a zero delta is legal only with a
-named blocker (`/fable-judge` hunts a farewell without the line — the delivery-line hunt). That's
-the goodbye.
+the handover in one paragraph — the main thing the NEXT chat should do first. That's the goodbye.
+
+One line of that report is asked BY NAME, because nothing else in the session asks it
+(`AGENT_GUIDE.md` → "a falsehood is corrected where it stands"): **which statement of this session
+turned out to be false, and where does it still stand?** Answer it in the report, verbatim:
+
+`Standing falsehood: none` — or `Standing falsehood: <the statement> → corrected in <place>, <place>`
+
+A statement you corrected only in the chat is still standing in the artifact the team reads, so run
+the five steps BEFORE the farewell, never after it — and if a place could not be corrected, name the
+place and its missing retraction command instead of answering `none`.
 
 ## Notes
 

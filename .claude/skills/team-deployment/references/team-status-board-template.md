@@ -26,9 +26,9 @@ of six once stood "busy" while standing still, and the "Waiting for" column obli
 
 | State | Meaning | Obligation of the seat | Obligation of the Manager |
 |---|---|---|---|
-| 🟢 free | no assignment in hand | report readiness; take the next assignment | give one, or say "wait" |
+| 🟢 free | no assignment in hand → **the row carries the REQUEST** | write what is done and which candidates you ask for, named from `STATUS.md`/the backlog ("done X; can take A / B / C") in the SAME write that sets `free`, and send the same one-line request to the Manager (constitution § 2 rule 6) | read a QUEUE, not a poll: answer with one of the named candidates, or "wait" |
 | 🔴 busy | working on a named assignment | "Doing" names it; row refreshed at every cut | do not interrupt (§ 2 rule 4) |
-| 🟡 blocked | cannot proceed | "Waiting for" names the ADDRESS and the matter; one message to the holder | react to `audit-waiting` (contract item 7) — a blocked seat is the Manager's queue |
+| 🟡 blocked | cannot proceed | "Waiting for" names the ADDRESS and the matter; one message to the holder | react to `audit-waiting` (contract item 8) — a blocked seat is the Manager's queue |
 | ⚫ offline | window closed / session gone | row cleared on stop (§ 9); locks released | clear a vanished seat's row and locks (Manager-only override) |
 
 ## Resource locks
@@ -84,7 +84,12 @@ Node.js. The tool MUST hold:
    itself — never remembered by the session.
 6. **Proven on a broken case before trusted** (project testing canon): a foreign-row edit is
    refused; an abandoned lock is recovered; two concurrent writers do not corrupt the table.
-7. **`audit-waiting` — the wait column obliges someone.** The tool lists every 🟡 blocked row and
+7. **`--free` carries the request, or it is not a free row.** Setting a row to `🟢 free` takes the
+   candidates the seat asks for — `--free --asking "<candidates>"` — and writes them into the row
+   (constitution § 2 rule 6, origin issue #68). A `--free` with nothing asked for is refused, or
+   at the very least named in `show`: a bare `free` row turns the Manager back into a poller, and
+   an idle seat that the owner has to notice is exactly the defect this contract closes.
+8. **`audit-waiting` — the wait column obliges someone.** The tool lists every 🟡 blocked row and
    judges it: the "Waiting for" cell must name a seat by its ADDRESS (matched on word boundaries
    that understand the project's script, not ASCII `\b`); a named seat that is not 🔴 busy means
    "nobody is working on what you wait for"; an unnamed addressee means "nothing to check". Any
@@ -95,6 +100,7 @@ Suggested command surface (adapt names to the project):
 
 ```
 <board-tool> set [--busy|--free|--blocked] [--doing "…"] [--waiting "<address>: …"]   # my row only
+<board-tool> set --free --asking "<candidates>"                   # freeing ASKS: the row carries the request
 <board-tool> lock <resource> | unlock <resource>                  # singleton locks (N slot rows for capacity N)
 <board-tool> show                                                 # print the board
 <board-tool> audit-waiting                                        # blocked rows judged; exit ≠ 0 on an alarm

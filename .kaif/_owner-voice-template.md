@@ -6,7 +6,11 @@
 > shipped to `.kaif/_owner-voice-template.md`: COPY it to the canonical name and fill the copy —
 > never fill the skeleton in place. The portrait is OPTIONAL: no portrait taken, no file, and
 > `check` never reddens for its absence. A deployment that keeps a different name RECORDS that name
-> in `KAIF_FRAMEWORK.md` — the machinery never renames an owner-class file.
+> in `KAIF_FRAMEWORK.md` (and, for the shipped linter, in `.kaif/kaif.json` → `voicePortrait`) — the
+> machinery never renames an owner-class file. **Load, do not consult:** before the first word of any
+> text the owner reads as his own, `node .kaif/tools/kaif-voice-lint.mjs load` prints the filled
+> portrait into the agent's working context and leaves a witness; `check` refuses a text written before
+> that load (the owner's word: write BY the stylometry, with it in the working cache).
 
 > **Status: a BINDING instruction** for any agent writing <the owner's target artifact>. It acts
 > together with the styleguide (if one exists): STRUCTURE lives in the styleguide, LANGUAGE lives
@@ -102,16 +106,38 @@ actually moves a model — descriptions alone do not.
 
 ## 7. The self-check checklist (layered)
 
-7A — the machine minute (greps of stop-patterns and required positives). 7B — the semantic pass.
-7C — the second register's pass. **≥3 layers; every item checkable by an action**, never by
-"does it sound like the owner".
+The checklist is the INDEPENDENT check that follows writing BY this portrait — the text is first written
+by §2/§2-C/§5/§6, then checked here, then fixed, and only then it counts as written and goes to the owner
+(`AGENT_GUIDE.md` → the fable loop's fourth KAIF obligation). 7A — the machine minute:
+`node .kaif/tools/kaif-voice-lint.mjs check <file…>` — the shipped module runs the §8 table (stop-patterns
+and required positives) over the artifact and prints every hit with the row's hint; `SKIPPED` is said in
+the report, never read as green. 7B — the semantic pass by a CLEAN instance (a subagent, or a fresh pass
+forbidden to see the writer's rationale) against the anti-portrait and the pairs. 7C — the second
+register's pass. **≥3 layers; every item checkable by an action**, never by "does it sound like the owner".
 
 ## 8. Machine heuristics
 
 **≥10 grep patterns** of stop-constructions and positive markers whose ABSENCE is itself a signal;
 each names its legal exceptions. For inflected languages the pattern covers word forms, or the
-grep stays silent. These graduate into a project guard once calibrated on the live artifact
-(warning mode first; noise above signal = no guard).
+grep stays silent. They live HERE, as the table below — the owner edits the patterns where he reads
+them, and the shipped linter reads THIS table (`node .kaif/tools/kaif-voice-lint.mjs check <file…>`):
+prose in this section is invisible to it, and a §8 without the table makes the linter say `SKIPPED`
+aloud rather than pass green. Calibrate on the live artifact first (`--warn` prints the hits without
+reddening); noise above signal = the row is narrowed or deleted, never the guard weakened.
+
+| pattern | class | hint | legal exception |
+|---|---|---|---|
+| `<regular expression in a code span — word forms spelled out; \| inside the cell is alternation; /…/i opts into case-folding; \b is Unicode-aware>` | `<stop / positive>` | `<what to write instead, in the owner's own words>` | `<a /regex/ that silences a hit on its line, or prose the reader weighs>` |
+| `<second example: \b(remember that\|note that)\b>` | `<stop>` | `<state the rule; the reader is not reminded>` | `<— (none)>` |
+
+Column contract: **pattern** — a regular expression (ripgrep habits work: `\|` is alternation inside
+the cell, a bare pattern is case-sensitive, `/…/i` folds case, `\b`, `\B`, `\w` and `\W` are
+Unicode-aware — except `\W` INSIDE a character class, which stays ASCII: write `[^\p{L}\p{N}_]` there);
+**class** — `stop` (a hit is a finding) or `positive` (a marker whose ABSENCE in the whole file is a
+warning); **hint** — printed with every hit, in the owner's own words; **exception** — a `/regex/`
+silences hits on a matching line, prose is printed beside the hit for the reader to weigh. A row whose
+pattern is a `<placeholder>` is not a rule; fenced code, inline code and HTML comments in the judged
+file are invisible. The linter judges these explicit patterns only — likeness stays the owner's verdict.
 
 ## 9. Portrait journal — how this document changed (append-only)
 

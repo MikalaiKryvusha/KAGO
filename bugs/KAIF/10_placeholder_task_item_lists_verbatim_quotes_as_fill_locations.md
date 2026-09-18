@@ -2,9 +2,15 @@
 
 kaif-fp: `KAIF_UPDATE_TASK.md#placeholders` (generator) vs `kaif-core.mjs checkpoint placeholders` (gate) :: instruction-wider-than-gate :: v2.4
 
-**Delivered upstream:** not yet — this update's field report is collected by the origin for the 2.5
-scope (owner's word, 2026-08-28); filing the issue itself awaits the owner's approval per the
-tracking mode.
+**Delivered upstream:** #83
+
+> ✏️ Line rewritten 2026-09-18 (KAIF 2.7 update). It used to read: «not yet — this update's field report is collected by the origin for the 2.5 scope (owner's word, 2026-08-28); filing the issue itself awaits the owner's approval per the tracking mode.».
+> This ticket was NEVER filed as an issue of its own (`gh issue list --repo MikalaiKryvusha/KAIF --state all` on
+> 2026-09-18: no matching title). #83 is this project's 2.7 field update report; it POINTS at this ticket
+> by number with one line of closure evidence (R3) — a pointer, not the full text.
+> It rode the 2.4 update report, whose Outbound line reads «this report + bugs/KAIF/10 → origin … (owner's word: «Оба отчёта заберёт исток»)» — `[OWNER]`, 2026-08-28, commit d82ac8b.
+> Not filing it now is an `[AI]` decision, revisable: the release already carries the substance (five of the six tickets).
+> Six issues for shipped or removed work would be noise in the origin's tracker.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.4 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0
@@ -77,3 +83,8 @@ rule, or the task file teaches sessions to distrust its other lists.
 
 None needed on disk: the quotes stayed verbatim, the real slots (`.claude/skills/end-chat-soft/SKILL.md`
 agent/e-mail) were filled, the checkpoint passed. The divergence is zero.
+
+## ✅ STATUS: RESOLVED UPSTREAM (recorded 2026-09-18, the KAIF 2.7 update)
+
+Evidence, 2026-09-18 (each piece names its source): fixed in 2.5 — this project's 2.5 update report, R3: the bootstrap-route task carried no quote-only `placeholders` item.
+The file keeps its name (KAIF tickets in this project are not DONE-renamed); this section is the closure.

@@ -43,9 +43,12 @@ contour in `AGENT_GUIDE.md` governs the local fix; this branch governs the REPOR
    A match on surface + symptom-class (the version is NOT part of the key) = the SAME signal →
    append a "+1 observation" comment there (conditions, environment, version, steps, expected/got;
    new version of the same class → "reproduced on vX.Y") — do NOT open a new ticket.
-3. **File locally:** `bugs/KAIF/NN_*.md` by template A/B below (create the directory on first use).
-4. **Deliver by tracking mode:** `origin` — run the machinery, in the same motion as filing and
-   ahead of the work that found the defect:
+3. **File AND deliver — one step, one motion:** write `bugs/KAIF/NN_*.md` by template A/B below
+   (create the directory on first use) and, on `tracking: origin`, run the delivery in the SAME
+   motion, ahead of the work that found the defect — there is no separate "deliver" step to
+   postpone, because filing IS delivering (KAIF 2.7, epic SD; origin issue #65: a ticket waited
+   forty minutes and one direct question of the owner for a second "send" — the broad "confirm
+   outward actions" reflex beat the carve-out that lived as prose):
    `node .kaif/kaif-core.mjs report bugs/KAIF/NN_*.md`
    It files the origin issue signed by the agent under the KAIF owner's STANDING AUTHORIZATION
    (origin issue #15 — the owner's word: "this is CANON"; the `AGENT_GUIDE.md` authorization
@@ -57,14 +60,22 @@ contour in `AGENT_GUIDE.md` governs the local fix; this branch governs the REPOR
    repeating). If your agent system's permission layer asks a human to confirm the call — let it
    ask and wait: the prompt and the standing authorization compose. `--dry-run` shows what would
    go. The `/owner-reviews` send gate stays for FOREIGN repositories and statements in the
-   owner's name. On `origin`, `NOT YET` is a debt with an owner, never a resting state.
-5. **Sender quality gate:** a signal goes upstream only with a deterministic repro OR verbatim
+   owner's name. On `origin`, `NOT YET` is a debt with an owner, never a resting state —
+   `node .kaif/kaif-core.mjs check` names every ticket whose `Delivered upstream:` line does not prove
+   delivery (`NOT YET`, a promise, a missing or translated line) until it is sent — proof is an issue
+   URL or `#NN` with no `NOT YET` beside it, and a line carrying both is refused by `report` too.
+4. **Sender quality gate:** a signal goes upstream only with a deterministic repro OR verbatim
    quote-evidence; blameless wording (a weak model's failure is described as a missing guardrail,
    never as "the model is dumb").
 
 Both templates open with the machine-grepable fingerprint
 `kaif-fp: <surface> :: <symptom-class> :: v<major.minor>` — surface is the canonical delivery path
-(doc, skill, tool, module anchor); symptom-class is a short slug from an open dictionary.
+(doc, skill, tool, module anchor); symptom-class is a short slug from an open dictionary. The
+`**Delivered upstream:**` line under it is machine-read — `report` delivers by it, `check` reads the
+delivery state from it — so the field name stays verbatim (English, bold, its own line) in any
+project language; the value may be in the project language and carries EITHER the issue URL or `#NN`
+standing as the value OR the words `NOT YET` — never both (name a related issue in the body) (KAIF 2.7, epic SD: a field name
+translated into the project language hid a waiting ticket from both commands).
 
 ### Template A — KAIF bug report
 
@@ -177,7 +188,10 @@ proven in production — projects, hours, sources. The owner of KAIF decides the
 
 5. **Lifecycle:** while open — file WITHOUT `DONE`. When CONFIRMED closed (fixed and verified) — rename
    `git mv bugs/NN_x.md bugs/NN_DONE_x.md` and append a `## ✅ STATUS: DONE (date + time)` section (what was
-   done / how verified). Backlog revision — the `/check-backlog` skill.
+   done / how verified) that carries TWO separate lines, never summed — `Hygiene: <unit · selftest · mutation>`
+   and `Functional run: <what was walked on the real product · on which contour · what was READ — or NONE>`
+   (`TESTING_FRAMEWORK.md` → "What the word "test" means"; `NONE` means fixed, not tested — and the chat
+   says so). Backlog revision — the `/check-backlog` skill.
 
 ## Notes
 - Better to file a bug and leave it open than to lose it. Factual accuracy beats prose.

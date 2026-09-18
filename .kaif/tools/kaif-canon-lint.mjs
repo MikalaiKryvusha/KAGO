@@ -43,7 +43,7 @@ if (!existsSync(RULES)) {
   console.log(`⊘ SKIPPED — ${RULES} not found: canon lint is not configured, nothing was proven (optional module; seed it — see this file's header for the format). Exit code 3 keeps an unconfigured guard from reading as a passed one (bug 34).`);
   process.exit(EXIT_SKIPPED);
 }
-const rules = JSON.parse(readFileSync(RULES, 'utf8').replace(/^﻿/, ''));
+const rules = JSON.parse(readFileSync(RULES, 'utf8').replace(/^\uFEFF/, ''));
 if (!(rules.forbidden || []).length && !(rules.required || []).length) {
   console.log(`⊘ SKIPPED — ${RULES} carries zero rules: nothing to prove (exit 3; add forbidden/required rules — the linter grows with every fix).`);
   process.exit(EXIT_SKIPPED);
@@ -66,7 +66,7 @@ const inScope = (p, files) => !files || ((files = files.replaceAll('\\', '/')).e
 // CRLF checkouts and PS5.1 Out-File BOMs are the documented Windows profile of real projects:
 // read EOL/BOM-normalized, or required lines false-redden and $-anchored forbidden patterns
 // false-GREEN (the worst failure direction).
-const readLines = (p) => readFileSync(p, 'utf8').replace(/^﻿/, '').split(/\r?\n/);
+const readLines = (p) => readFileSync(p, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/);
 // A broken regex must red the run with a clear message, not a raw stack trace.
 const compileRule = (r) => { try { return new RegExp(r.pattern); } catch (e) { console.error(`✖ invalid regex in forbidden rule: ${r.pattern} — ${e.message}`); return null; } };
 

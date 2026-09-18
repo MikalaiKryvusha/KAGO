@@ -2,7 +2,15 @@
 
 kaif-fp: `fable-judge` + loop skills + `STATUS.md` contract :: no-global-objective-function :: v2.3
 
-**Delivered upstream:** NOT YET — awaiting the owner's word (outward action).
+**Delivered upstream:** #83
+
+> ✏️ Line rewritten 2026-09-18 (KAIF 2.7 update). It used to read: «NOT YET — awaiting the owner's word (outward action).».
+> This ticket was NEVER filed as an issue of its own (`gh issue list --repo MikalaiKryvusha/KAIF --state all` on
+> 2026-09-18: no matching title). #83 is this project's 2.7 field update report; it POINTS at this ticket
+> by number with one line of closure evidence (R3) — a pointer, not the full text.
+> No delivery is on record: the audit that bore this ticket ends «готовы к отправке в origin — по вашему слову», and no such word is recorded. How its substance reached 2.5 is unknown to this agent.
+> Not filing it now is an `[AI]` decision, revisable: the request was shipped (2.5) and then removed (2.7) by the origin.
+> Six issues for shipped or removed work would be noise in the origin's tracker.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.3 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0
@@ -54,3 +62,8 @@ The framework rewards it: every local invariant is satisfied.
 KAGO adopts the delivery line and the ranking rule via the method audit
 (`reports/KAIF_AUDIT/2026-08-28_audit_03_method.md` §6, rule Р1; counter tool ticket `ideas/14`),
 pending the owner's approval of the AGENT_GUIDE insert (Appendix A there).
+
+## ☑️ STATUS: CLOSED — OVERTAKEN UPSTREAM (shipped 2.5, removed 2.7; recorded 2026-09-18, the KAIF 2.7 update)
+
+Evidence, 2026-09-18 (each piece names its source): the forced `DELIVERY:` line shipped in KAIF 2.5 (`grep -c "DELIVERY:"` over the 2.5 `AGENT_GUIDE.md` template -> 1) and was REMOVED in 2.7 (the update task: «DELIVERY ACCOUNTING IS REMOVED», with the origin owner's reason as it quotes it — `KAIF_UPDATE_TASK.md:76` of the 2.7 update) — the request is overtaken, not resolved.
+The file keeps its name (KAIF tickets in this project are not DONE-renamed); this section is the closure.

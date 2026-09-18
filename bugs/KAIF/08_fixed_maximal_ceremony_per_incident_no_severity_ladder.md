@@ -2,7 +2,15 @@
 
 kaif-fp: `BUG_FIXING_FRAMEWORK.md` + `TESTING_FRAMEWORK.md` guards contract :: no-proportional-response :: v2.3
 
-**Delivered upstream:** NOT YET — awaiting the owner's word (outward action).
+**Delivered upstream:** #83
+
+> ✏️ Line rewritten 2026-09-18 (KAIF 2.7 update). It used to read: «NOT YET — awaiting the owner's word (outward action).».
+> This ticket was NEVER filed as an issue of its own (`gh issue list --repo MikalaiKryvusha/KAIF --state all` on
+> 2026-09-18: no matching title). #83 is this project's 2.7 field update report; it POINTS at this ticket
+> by number with one line of closure evidence (R3) — a pointer, not the full text.
+> No delivery is on record: the audit that bore this ticket ends «готовы к отправке в origin — по вашему слову», and no such word is recorded. How its substance reached 2.5 is unknown to this agent.
+> Not filing it now is an `[AI]` decision, revisable: the release already carries the substance (five of the six tickets).
+> Six issues for shipped or removed work would be noise in the origin's tracker.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.3 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0
@@ -57,3 +65,8 @@ collapsed to one line + pointer (today both full texts persist and both are main
 
 KAGO adopts the ladder as rule Р2 of the method audit
 (`reports/KAIF_AUDIT/2026-08-28_audit_03_method.md` §6), pending the owner's approval.
+
+## ✅ STATUS: RESOLVED UPSTREAM (recorded 2026-09-18, the KAIF 2.7 update)
+
+Evidence, 2026-09-18 (each piece names its source): `## The severity ladder` is in the 2.5 `BUG_FIXING_FRAMEWORK.md` template (-> 1), carrying this project's own audit number «65 % of 68 bug documents» (-> 1).
+The file keeps its name (KAIF tickets in this project are not DONE-renamed); this section is the closure.

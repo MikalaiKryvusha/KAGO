@@ -122,7 +122,7 @@ document's header (`Severity: S1 | S2 | S3`):
 Two caps that keep the protection layer from becoming the project's main source of defects:
 
 - **An incident never opens an epic by itself.** An epic must additionally pass the delivery
-  test — does it move the owner's acceptance metric (the `DELIVERY:` line, `MASTER_PLAN.md`)? —
+  test — does it move the acceptance criteria of the main phase (`MASTER_PLAN.md`)? —
   otherwise the fix stays a fix. (Field: 65 % of 68 bug documents were defects OF the guards,
   watchdogs and hooks, and the guards consumed more of the owner's scarce live time than the
   code they guarded.)

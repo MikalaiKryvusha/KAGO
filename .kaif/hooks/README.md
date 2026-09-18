@@ -9,17 +9,22 @@ lacking them.
 
 ## What ships here
 
-| Script | Event (Claude Code) | Predicate (anti-noise) | Action |
-|---|---|---|---|
-| `session-start-refresh.mjs` | `SessionStart`, matcher `compact\|clear` | none — compaction is itself rare | injects the ORDER to re-read the re-read core + stamp the witness |
-| `prompt-refresh-timer.mjs` | `UserPromptSubmit` | marker age > 60 min (`--minutes N` to override) | injects the refresh order; silent while the marker is fresh |
-| `stop-status-guard.mjs` | `Stop` | session did work AND STATUS.md untouched > 3 h; **once per session** | soft block: update STATUS.md or say why nothing changed |
+| Script | Event (Claude Code) | Predicate (anti-noise) | Repeats? | Action |
+|---|---|---|---|---|
+| `session-start-refresh.mjs` | `SessionStart`, matcher `compact\|clear` | none — compaction is itself rare | one order per compaction or clear | injects the ORDER to re-read the re-read core + stamp the witness |
+| `prompt-refresh-timer.mjs` | `UserPromptSubmit` | marker age > 60 min (`--minutes N` to override) | on EVERY prompt until the marker is re-stamped — the marker is the only off switch | injects the refresh order; silent while the marker is fresh |
+| `stop-status-guard.mjs` | `Stop` | session did work AND STATUS.md untouched > 3 h | **once per session** — the only suppression window in the module | soft block: update STATUS.md or say why nothing changed |
+| `prompt-resume-word.mjs` (2.7, epic RS) | `UserPromptSubmit` | the prompt's FIRST word is `resume` / `/resume` / the Russian shorthand of it — the owner's leading word (`AGENT_GUIDE.md` → "A leading skill word is an order"); the same word mid-sentence is prose and never fires — and ANY first word from that family fires, including a file named `resume.log`, "Resume the deployment" or the Russian noun for a CV: one extra entry ritual is the named price | on every message that opens with the word — each one is a separate order | injects the ORDER to run `/resume` in full before the rest of the message; silent on every other prompt and on an event without a `prompt` field |
 
 Design rules baked in (they are canon requirements, not preferences): every hook carries a
-predicate and a cooldown; injections are ORDERS to re-read, never document bodies (the output
-cap is 10 000 characters, and pasting docs would spend the context the refresh restores);
-`Stop` is the only blocking hook, and even it fires at most once per session. A hook never
-breaks the session: on any internal error it exits 0 silently.
+predicate, or names why it needs none, and the table above says which; a suppression window
+exists where repeating would be noise (`Stop` fires at most once per session) and is absent ON
+PURPOSE where repeating is the point — a reminder that goes away unobeyed teaches that it can be
+ignored, so the timer repeats until the marker is re-stamped, and every message that opens with
+the resume word is a separate order; injections are ORDERS to re-read, never document bodies
+(the output cap is 10 000 characters, and pasting docs would spend the context the refresh
+restores); `Stop` is the only blocking hook. A hook never breaks the session: on any internal
+error it exits 0 silently.
 
 ## Opt-in — an explicit owner step
 
@@ -31,11 +36,33 @@ config. To enable:
 2. Merge that object into `.claude/settings.json` (shared with the team, committed) or
    `.claude/settings.local.json` (personal), with the owner's consent recorded where your
    project records decisions.
-3. Reload the session (hook configs are read at session start). Smoke: run
-   `node .kaif/hooks/prompt-refresh-timer.mjs < /dev/null` with no `.kaif/refresh-marker.json`
-   present — it must print a JSON order; stamp a fresh marker — it must print nothing. The
-   redirect matters: the hook reads its event JSON from stdin, so a hand-run without it waits on
-   the terminal forever (field: a two-minute timeout on the first try).
+3. Reload the session (hook configs are read at session start), then smoke the scripts by hand
+   from the project root, with no `.kaif/refresh-marker.json` present. Use the block of YOUR
+   shell — a redirect or a `printf` that one shell understands is a parse error in another.
+
+   POSIX shells (bash, zsh, sh — Git Bash on Windows too):
+
+   ```sh
+   node .kaif/hooks/prompt-refresh-timer.mjs < /dev/null
+   printf '{"prompt":"resume\\nplan the day"}' | node .kaif/hooks/prompt-resume-word.mjs
+   printf '{"prompt":"plan the day"}' | node .kaif/hooks/prompt-resume-word.mjs
+   ```
+
+   Windows PowerShell (5.1 and later):
+
+   ```powershell
+   '' | node .kaif/hooks/prompt-refresh-timer.mjs
+   '{"prompt":"resume\nplan the day"}' | node .kaif/hooks/prompt-resume-word.mjs
+   '{"prompt":"plan the day"}' | node .kaif/hooks/prompt-resume-word.mjs
+   ```
+
+   In either block the first line must print a JSON order (stamp a fresh marker and it must print
+   nothing), the second must print the order to run `/resume`, the third must print nothing. The
+   empty stdin on the first line matters: the hook reads its event JSON from stdin, so a hand-run
+   without it waits on the terminal forever (field: a two-minute timeout on the first try). If
+   the second line stays silent, the event did not parse — check that the JSON reached the script
+   intact (the byte-order mark PowerShell puts in front of a piped string is dropped by the
+   scripts themselves).
 
 To disable: remove the entries from your settings file. The markdown ritual keeps working
 either way.
@@ -64,6 +91,12 @@ APIs were still moving through beta across the industry when this table was writ
 | **Windsurf / Cascade** | *(not supported)* | ❌ | ❌ | ❌ hooks cannot inject context at all — exit codes only |
 | **Cline** | *(not supported)* | ❌ | ❌ | ❌ hooks are SDK plugins (TS/JS objects), not config-invoked commands |
 | **Zoo Code** | *(markdown ritual)* | — | — | — no hook mechanism |
+
+**The fourth hook — `prompt-resume-word.mjs` (2.7, epic RS) — is wired for Claude Code only.** It
+needs the prompt TEXT in the event (`prompt`), and only the Claude Code contract was read to carry
+it; the Codex, Cursor, Copilot and Antigravity samples do not wire it — whether their per-prompt
+event carries the text was not read in the vendor documentation: **prompt field not verified**.
+Wire it yourself only after reading that contract.
 
 Reading the table: a ❌ is a statement about that system's published contract, not about the
 module. Where a system carries one hook out of three, wire that one — a partial mechanical

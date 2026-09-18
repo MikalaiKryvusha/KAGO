@@ -132,7 +132,7 @@ function cmdCheck() {
   }
   let findings = 0;
   for (const f of files) {
-    const text = readFileSync(f, 'utf8').replace(/^﻿/, '');
+    const text = readFileSync(f, 'utf8').replace(/^\uFEFF/, '');
     for (const [no, raw] of scopedLines(text)) {
       if (isLegal(raw)) continue;
       const line = stripCodeSpans(raw);

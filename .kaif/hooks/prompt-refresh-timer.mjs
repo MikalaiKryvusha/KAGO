@@ -21,7 +21,10 @@
 // "…"}}. A hook must never break the session: any internal error → exit 0 silently.
 // [TESTED: 2026-08-07 · polygon s14: fresh marker → silent; missing marker → order ("no refresh
 //  witness"); marker older than the interval → order naming the age; MALFORMED marker → judged by
-//  the file's mtime instead, so malformed+fresh is SILENT and malformed+old speaks]
+//  the file's mtime instead, so malformed+fresh is SILENT and malformed+old speaks — the "old" half
+//  was claimed here before any assert fed it; s14 asserts it since 2026-09-18 (origin bug 121), along
+//  with a BOM-led event and a BOM-led marker reading exactly like their clean twins; report of those
+//  runs - testcases/reports/2026-09-18_hooks-optin-smoke.md (origin repository), runs 4, 5 and 9]
 //
 // PORTABILITY — `--emit <shape>` (epic O phase O5, contracts live-fetched 2026-08-07). The
 // timer is the hook systems disagree about MOST: only two of the surveyed systems let a
@@ -56,7 +59,9 @@ try {
 
   let cwd = process.cwd();
   try {
-    const input = JSON.parse(readFileSync(0, 'utf8') || '{}');
+    // A leading U+FEFF is dropped before the parse (Windows PowerShell 5.1 puts it in front of any
+    // string piped into a native command; RFC 8259 §8.1 lets a parser ignore it) — origin bug 119.
+    const input = JSON.parse(readFileSync(0, 'utf8').replace(/^\uFEFF/, '') || '{}');
     if (input.cwd) cwd = String(input.cwd);
   } catch { /* unreadable stdin — fall back to process.cwd() */ }
 
@@ -66,7 +71,9 @@ try {
   let ageMin = Infinity;
   try {
     let at = NaN;
-    try { at = Date.parse(JSON.parse(readFileSync(markerPath, 'utf8')).at); } catch { /* malformed JSON/at */ }
+    // (same BOM tolerance as stdin: a marker written by `Set-Content -Encoding UTF8` carries one, and a
+    // parse failure here would silently swap the marker's own `at` for the file mtime)
+    try { at = Date.parse(JSON.parse(readFileSync(markerPath, 'utf8').replace(/^\uFEFF/, '')).at); } catch { /* malformed JSON/at */ }
     if (Number.isNaN(at)) at = statSync(markerPath).mtimeMs;
     ageMin = (Date.now() - at) / 60000;
   } catch { /* no marker at all — stays Infinity */ }

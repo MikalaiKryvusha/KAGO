@@ -64,6 +64,9 @@ Output: a short analysis note (a plan or research doc per project convention). N
    → the owner decides BEFORE any change → apply only approved items around the owner's recorded
    words; two owner's words on one parameter → the project owner's wins, as a `FORK:`. Operation 3
    then applies ONLY the approved bring-to-canon items — never copy over a live constitution.
+   **Run `node .kaif/kaif-core.mjs check` at the START of the inventory:** every obligation of the
+   template it names as lost is a *bring-to-canon* candidate the owner has not yet been asked
+   about — and one the live constitution never had, rather than one it gave up.
 1. Pick the nearest **archetype** from `references/team-roles-library.md` (web-product-small ·
    web-product-medium · hardware-lab-small — the last whenever one physical singleton under test
    serializes the core work) and adapt: activate optional roles only when their condition holds
@@ -85,6 +88,12 @@ Output: a short analysis note (a plan or research doc per project convention). N
    fill the placeholders (team name, roles map, project resources, singleton locks); paste the
    role contracts of the chosen roles from the library; delete roles the design did not take.
    The nine invariant sections stay — they are the paid-for field lessons, not decoration.
+   🔴 **Then run `node .kaif/kaif-core.mjs check` and read its lines about the constitution** —
+   the generated document must retain EVERY obligation of the template it came from. Deleting a
+   *role* is legal; deleting a *rule* is loss, and a shorter document looks like editorial
+   tightening (origin issue #68: a generated constitution kept 5 of the template's 9 § 2 rules and
+   no gate said a word). The axis names each lost obligation; restore it, or declare the omission
+   beside the item with `<!-- constitution-ok: <why> -->` — the owner's decision, written down.
 2. **Status board.** Copy `references/team-status-board-template.md` → `TEAM_STATUS.md` (one row
    per role) **and add it to `.gitignore` in the same motion** — the board is session state, not
    history (template → "Where the board lives"; the named opt-out is the owner's). Build or adapt
@@ -163,11 +172,21 @@ this skill exists as distillation rather than theory:
    release; holding "just in case" is forbidden.
 7. **Merges only through the manager, only after the verifier's verdict.** Push rights may be
    locked for roles — then the manager reviews and pushes; two different doors, both stay.
+8. **A finished seat announces itself FREE, naming candidates** (constitution § 2 rule 6; origin
+   issue #68). A seat that has closed its task and has no next one is indistinguishable from a
+   working one — to itself: no error, no red gate, no debt line. So the announcement is an
+   obligation with an exit condition, not a courtesy, and the board row carries the same request;
+   an idle the OWNER had to end is a defect, and one idle seat in six is 17% of the team spent in
+   silence. The obligation is inverted relative to its cost until it is written down: a blocker is
+   felt by the agent, availability only by the dispatcher.
 
 ## Done when
 
 - The owner approved the team design (composition, reporting lines, ownership).
 - `TEAM_CONSTITUTION.md` and `TEAM_STATUS.md` exist, filled from the templates.
+- `node .kaif/kaif-core.mjs check` says nothing about `TEAM_CONSTITUTION.md` — every obligation of
+  the template survived generation, or the omission is declared beside the item with
+  `<!-- constitution-ok: <why> -->`; run it and READ the lines, never assume the copy was faithful.
 - Board and workplace tools exist to their contracts and are proven on a broken case
   (a foreign-row edit refused; a stale lock recovered).
 - Every seat has a workspace, a briefing, and a fresh-main start; `team-ci.yml` exists (or the

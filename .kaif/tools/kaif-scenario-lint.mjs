@@ -93,7 +93,7 @@ const START = new RegExp(`^(\\s*)- \\*{0,2}(${FIRST_KEYS.map((f) => f.key).join(
 const langOf = (firstKey) => FIRST_KEYS.find((f) => f.key === firstKey).lang;
 
 export function parseScenarios(src) {
-  const lines = src.replace(/^﻿/, '').split(/\r?\n/);
+  const lines = src.replace(/^\uFEFF/, '').split(/\r?\n/);
   const out = [];
   let fence = false;
   for (let i = 0; i < lines.length; i++) {

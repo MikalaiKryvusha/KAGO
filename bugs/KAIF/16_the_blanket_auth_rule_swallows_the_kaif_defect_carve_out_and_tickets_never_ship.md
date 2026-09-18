@@ -11,8 +11,13 @@ explicit order, given verbatim after finding two red tickets held for hours:
 > КАИФ НЕ ДЕКЛАРИРУЕТ, ЧТО ЕМУ БАГИ ОТПРАВЛЯТЬ БЕЗ ВСЯКИХ ОДОБРЕНИЙ, ТО ЗАВЕСТИ ЭТОТ БАГ! НИКАКИХ
 > ОДОБРЕНИЙ! АГЕНТ ВИДИТ БАГ В КАИФ — НЕМЕДЛЕННО ИДЁТ ЗАВОДИТЬ И ОТПРАВЛЯТЬ ЕГО В ОРИГИН!»*
 
-**Delivered upstream:** ✅ this issue — sent 2026-08-30 immediately on filing, per the rule this
-ticket asks to repair.
+**Delivered upstream:** https://github.com/MikalaiKryvusha/KAIF/issues/37
+
+> ✏️ Line corrected 2026-09-18 during the KAIF 2.7 update: it used to read «✅ this issue — sent
+> 2026-08-30 immediately on filing, per the rule this ticket asks to repair» — a delivery claimed in
+> words with no address, which the 2.7 `check` (origin issue #65) names as unreadable. The issue was
+> verified by its body (created 2026-08-30T20:47:37Z, same title). Fixed upstream in 2.5 and again,
+> after a recurrence, in 2.7 (the carve-out now stands in the AUTH gate's own line).
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.4 · project KAGO · sphere `programming` · language `ru` ·
 tracking `origin` · agent system claude-code (+4 mirrored) · OS Windows 11 Pro 10.0.26200 · Node v24.15.0

@@ -49,6 +49,7 @@
 >
 > ```
 > ### EXP-0001 · 2026-01-01 · ✅ · #tag #area
+> class: <slug from the class list below — the UNIT OF RECURRENCE>
 > **Context:** one line — what was being done.
 > **Tried / did:** the approach, briefly.
 > **Result:** ✅/❌ — what happened.
@@ -69,6 +70,49 @@
 > executable (a linter rule, a guard, a gate), and the entry gains the line
 > `mechanized: <the tool>`. Two strikes → a mechanism, never a third reminder.
 >
+> **The deadline is RUN, not remembered** (2.7, epic EL; origin issue #69 — a field audit of one
+> project's journal: 14 of 15 failure classes recurred AFTER their lesson was written, five lessons
+> written 6–17 times in different words, 5.8 % mechanized): `node .kaif/tools/kaif-experience-lint.mjs
+> check` reads the `class:` field as the UNIT of recurrence and reddens on the SECOND failure entry of
+> one class with no `mechanized:`, naming the class and both entries by id. Two fates clear it, both
+> WRITTEN: name the guard in the entry (`mechanized: <the tool>`), or re-check the price once for the
+> WHOLE class and declare it — `<!-- class-ok: <slug> — <why it is not cheaply possible> -->` (an empty
+> declaration is itself a finding; the declared classes are printed on the summary line and that list
+> only shrinks). A third record is never a fate. It also warns when
+> `mechanized:` names a command this project does not contain, and when a slug is outside the list
+> below; `--shrink EXP-NNNN` collapses a MECHANIZED entry to one line pointing at its guard (shows by
+> default, `--yes` writes — the text itself stays in the git history). The command belongs in the
+> closing ritual (`/end-chat-soft`). Entries written before KAIF 2.7 carry no `class:` and are outside
+> the field rules — the journal's history never stops the ritual.
+>
+> **The class list of this journal** — a CONTROLLED list, not a closed one: pick a slug from it, and
+> when a lesson genuinely brings a new class, add the slug here in the same write (the linter warns
+> about an unlisted slug, it never refuses). The starter list below is what a field audit had already
+> measured (origin issue #69) — replace and grow it with this project's own classes.
+>
+> <!-- classes: question-already-answered, guard-not-proven-against-threat, shown-as-link,
+>      claim-before-evidence, owner-decision-not-applied, text-in-agents-world,
+>      etalon-from-dirty-tree, shell-lied, escaping-layer, twins-missed,
+>      field-dropped-in-rebuild, agent-decision-worn-as-owner-word -->
+>
+> <!-- class-ok: agent-decision-worn-as-owner-word — price re-checked 2026-09-18 after three strikes in one evening (EXP-0284): the one shipped guard, kaif-attribution-lint, would be a NEW gate contour under the owner's moratorium (интервью 017, Q1 = A, until «краёв ≥ 195/389»), it is run by hand instead; and it cannot see the worst form — a real interview address that does not say what it is cited for. What caught the three strikes is a PROCESS, not a guard: `/interview` step 3d's «READ the hits» once, and a clean-context judge pass before commit twice. Re-check this declaration when the moratorium threshold is reached. -->
+>
+>
+> | Class slug | The failure it names |
+> |---|---|
+> | `question-already-answered` | the owner is asked what his own past word, the goal doc or a run already decided |
+> | `guard-not-proven-against-threat` | a guard shipped without being seen red on the threat it claims to stop |
+> | `shown-as-link` | showing replaced by a link or a path instead of the thing itself |
+> | `claim-before-evidence` | a claim written wider than the observation behind it |
+> | `owner-decision-not-applied` | a decision the owner gave is recorded and not carried into the artifact |
+> | `text-in-agents-world` | text written for the agent's own world instead of the owner's |
+> | `etalon-from-dirty-tree` | a reference/etalon captured from a tree that was not clean |
+> | `shell-lied` | the shell or the tool swallowed/rewrote what was passed to it |
+> | `escaping-layer` | one escaping level lost between the tool and the file |
+> | `twins-missed` | one of two layers/copies moved and the twin stayed behind |
+> | `field-dropped-in-rebuild` | a field or section silently lost when an artifact was regenerated |
+> | `agent-decision-worn-as-owner-word` | an agent's own choice, carrier or reading recorded under the owner's name or an interview address that does not say it (added 2026-09-18, EXP-0284; origin #55) |
+>
 > The `#tags` are **trigger-tags**: before a task, grep by the task's tags and QUOTE the relevant
 > lessons in your report (id + one line) — or state "no relevant lessons". An unquoted recall is
 > unverifiable; `/fable-judge` checks for this line.
@@ -76,6 +120,49 @@
 > Skill: `/experience` (capture a lesson · recall relevant lessons).
 
 ## Entries
+
+### EXP-0286 · 2026-09-18 · ❌→✅ · #a-judges-reading-is-a-claim-too #public-correction #open-the-lines #s2
+class: claim-before-evidence
+**Context / did / result:** correcting ticket 19 publicly (origin #74), I wrote three corrections into the ticket, the report, STATUS and public `correction:` comments; the first two each copied a judge's conclusion without re-running it myself, the third I re-ran first. №1 copied pass 2: «none of the four `GOAL.md` misses is an owner decision» — false: lines 9–10 are the owner's Q2 = B decision in capitals. №2 copied pass 3: «so the risk case WAS observed, one hidden prior answer» — also false: the same printed command still lists that decision at `interview_017…:52` (the option he chose) and `GOAL.md:12`; only a capitalized COPY was missed. №1's closing sentence («plausible … not observed») had been right. №3, re-run by me in both locales before writing, says exactly what was observed. I also told the owner in chat that the defect was «realer» — retracted in chat.
+**Lesson:** **a judge's reading is a claim like any other, and so is a judge's correction of it — before a classification enters MY text, and above all a public one, I re-run the observation myself. A correction is the text most likely to be trusted unread, so it gets the strictest check, not the lightest; and after being caught once, the reflex is to OVERcorrect — the second correction needs the check even more than the first.**
+none-cheap: no guard reads a sentence of prose against the lines it classifies. One strike of the class on record — no `class-ok` declared yet (a declaration on the first entry would exempt the whole class prematurely); if the class strikes again, re-check the price then.
+**Repro:** `grep -rniE "строк|достав|открыва|закрыва|сесси|оставля" interviews/ GOAL.md MASTER_PLAN.md plans/ | grep -E "^interviews/interview_017_five_method_forks.md:52:|^GOAL.md:(9|10|12):"` — default locale: `…017…:52`, `GOAL.md:12`; prefix `LC_ALL=C.UTF-8`: plus `GOAL.md:9`, `GOAL.md:10`.
+**Trigger:** writing any classification of lines/entries («none of them is X», «all are Y») that I did not read myself · any `correction:` on a public channel.
+→ link: `bugs/KAIF/19` (corrections №1–№3) · origin #74, three `correction:` comments · EXP-0284 · EXP-0285
+
+### EXP-0285 · 2026-09-18 · ❌→✅ · #grep #cyrillic #locale #false-negative #control-row #s3-one-line
+class: shell-lied
+**Context / did / result:** I published «`grep -rniE "строк[аиуе] доставки|DELIVERY" …` → 0 hits» as the evidence of a decision, in three documents. Same command under `LC_ALL=C.UTF-8` → 4 hits: in Git Bash a CYRILLIC BRACKET EXPRESSION silently matches nothing in the default locale (`locale` even prints `LC_CTYPE="C.UTF-8"`), and `git grep -E` with the same pattern returned nothing even WITH `LC_ALL=C.UTF-8`. The independent judge caught it; the conclusion survived, the evidence did not.
+**Lesson:** **a search that returns zero proves nothing until the same pattern has been seen to HIT a line known to contain it (the control row of EXP-0158, applied to grep). For non-ASCII patterns use the harness Grep tool (ripgrep, Unicode-aware) or spell the alternatives out without brackets; never a multibyte `[…]` in MSYS `grep` / `git grep`.**
+none-cheap: no guard can see a search the agent types into a shell and the «→ 0 hits» it then writes in prose; the cheap form is a habit — «control hit first» — and the harness Grep tool as the default searcher for Cyrillic. (The field is `none-cheap` on purpose, and this note avoids writing the other field's name followed by a colon ANYWHERE in the entry: `kaif-experience-lint` matches that token unanchored over the whole entry body and then treats the entry as guarded. A first draft said «<that field> NOT YET»; a second draft explained the trap by quoting the token — and was itself parsed as guarded. Both found by judges reading the linter's source, `FIELD_MECH` at `.kaif/tools/kaif-experience-lint.mjs:105`.)
+**Repro:** `cd <repo> && grep -c "строк[аи] доставки" ЗАКАЗ.md` → 0 · `LC_ALL=C.UTF-8 grep -c "строк[аи] доставки" ЗАКАЗ.md` → 1.
+**Trigger:** writing «→ 0 hits» / «no match» / «none found» about a pattern with non-ASCII characters · any archaeology attestation (`/interview` step 3d) in a non-English project.
+→ link: EXP-0284 · EXP-0158 (control row) · EXP-0238 (two readings that disagree) · `reports/KAIF_UPDATES/KAGO_KAIF_2.7_UPDATE_REPORT.md`
+
+### EXP-0284 · 2026-09-18 · ❌→✅ · #kaif-update #authorship #owner-word #archaeology-before-the-question #carrier-is-not-the-decision
+class: agent-decision-worn-as-owner-word
+**Context:** the KAIF 2.5 → 2.7 update. 2.7 retires the `DELIVERY:` line; this project's guide called the line «the carrier of Q1» of интервью 017. Deciding what to do with it, I first wrote «a HOUSE RULE — `[OWNER]` интервью 017, Q1 = A» into SIX places (AGENT_GUIDE rule 1, three loop skills, /end-chat-soft, MASTER_PLAN) and started an interview asking the owner to keep or drop «his» rule.
+**Tried / did:** the new `/interview` step 3d made me run the archaeology BEFORE the question — and READ the hit, not count it: Q1's option A, the one the owner clicked, is the MORATORIUM with a threshold and nothing else (the counter is named in the agent-written «Почему A» under the table, never a session ritual anywhere). The grep I recorded as «→ 0 hits» was a FALSE NEGATIVE, caught by the independent judge (EXP-0285); the corrected search gives 4 hits, all in the AGENT-authored `ideas/14` (criterion 4 — that is where the agent wrote its carrier down), and 0 in `GOAL.md` and `interviews/`. The line was the agent's own carrier (2026-08-28, EXP-0161), and the only owner word on record about it is the one that retired it upstream (2026-09-12).
+**Result:** ❌→✅ — a standing falsehood in six files, caught before the commit; enumerated by grep, corrected in each place, read back (0 hits of the false signature), named in the chat. The line is retired as an `[AI]` decision with the veto open; the metric, its command and the moratorium — the parts that ARE the owner's — stay.
+**Lesson:** **an interview ADDRESS beside a claim is not evidence that the interview SAYS it — «the carrier of the owner's decision» is an agent's artifact, and it inherits nothing of the decision's status. Before signing anything `[OWNER]`, open the addressed question and find the claimed thing INSIDE THE OPTION HE CHOSE.** This is the second strike of the class in this project (first: `bugs/KAIF/18` → origin #55, 2026-09-08), in the very update that ships the rule against it.
+**Strikes two and three, the same evening:** the independent judge (a separate agent, clean context) then refuted me twice more inside this one class — first the false grep evidence behind the decision (EXP-0285), then a sentence in the field report, verbatim: «never filed as issues, COLLECTED by the origin from this deployment's disk (owner's word 2026-08-28) and FIXED» (STATUS carried the same in Russian). The quote exists and is NARROWER: `[OWNER]` «Оба отчёта заберёт исток» was written on the 2.4 update report's Outbound line, «this report + `bugs/KAIF/10` → origin» (commit `d82ac8b`, 14:07); tickets 11–12 ride a report committed 18 minutes later that cites no owner word, and for 07–09 the record says the opposite («готовы к отправке в origin — по вашему слову», no such word recorded). I had widened an owner quote to cover what I wanted it to cover, and dropped the quotation marks while doing it — and my FIRST fix still widened it, to 10–12; the third pass narrowed it to 10. Knowing the rule did not help, three times in four hours; a second reader with no stake in the text did, every time.
+none-cheap: the shipped `node .kaif/tools/kaif-attribution-lint.mjs check` catches the quote-less form, but (a) adopting its baseline as a gate is a new guard contour under the owner's moratorium (интервью 017, Q1 = A — «новые контуры машинерии … не открываются»), so until the threshold it is run BY HAND before a commit that touches owner-facing text; (b) it missed strike three (a parenthesised «owner's word <date>») and cannot see strike one at all — any interview address is a legal form, right or wrong. What actually caught all three: `/interview` step 3d's «READ the hits» once, and the clean-context judge twice. Carried upstream by the 2.7 field report — origin #83 (R1, R10).
+**Repro:** `grep -n -A12 "^## Q1" interviews/interview_017_five_method_forks.md` — read option A and look for a session ritual in it; there is none.
+**Trigger:** writing `[OWNER]`, «решено владельцем», «the owner's decision» or an interview address next to ANY rule → open that question first · meeting «the carrier of Qn» in the canon → the carrier is `[AI]` until a quote says otherwise.
+**Not for:** the owner's verbatim words typed in the chat of the current session — those are the source, not a retelling.
+→ link: `AGENT_GUIDE.md` → «The critical path rule» rule 1 · «Authorship of a decision» · `reports/KAIF_UPDATES/KAGO_KAIF_2.7_UPDATE_REPORT.md` · `bugs/KAIF/18`
+
+### EXP-0283 · 2026-09-18 · ❌→✅ · #kaif-update #wholesale-take #language-pack #front-matter #line-endings #oracle
+class: field-dropped-in-rebuild
+**Context:** the KAIF 2.5 → 2.7 update. Four framework files carried exactly one local edit — the `baton → handover` rename that upstream adopted in 2.7 — so the right merge was «take the new template wholesale». I unpacked the release bundle into a directory and copied files from it.
+**Tried / did:** copied `end-chat-force/SKILL.md` from the RAW bundle template. The harness's skill listing immediately lost the skill's Russian trigger aliases: the core lays the language pack OVER the template (the `description:` line), so raw template ≠ deployed form. My repair script then copied the `description:` line from the sandbox copy — a CRLF checkout — and carried ONE `\r` into the front-matter; the harness stopped parsing the description at all and showed the H1 instead. `git diff` showed NOTHING (whitespace at EOL); `cmp` and `tr -cd '\r' | wc -c` showed it.
+**Result:** ❌→✅ — built the right oracle: a pristine `install --lang ru` of the same bundle into an empty scratch directory = byte-for-byte what the core deploys. `cmp` against it: `KAIF_REFERENCE.md`, the team constitution template and `stop-status-guard.mjs` byte-equal; `end-chat-force` replaced from the oracle; the core's own `diff` audit dropped all four from its diverged list.
+**Lesson:** **when a localized deployment wants a framework file «as upstream ships it», the source is a PRISTINE INSTALL of that release with the same `--lang`, never the raw bundle — and the acceptance check is `cmp`, never `git diff`.** A line-level transplant between a CRLF checkout and an LF tree moves an invisible byte; the second reading that disagrees (the harness listing) is the instrument to believe (EXP-0238, same class one floor up).
+none-cheap: there is no guard — the Repro below (one `install` + `cmp`) is a manual check, run when a file is taken wholesale; the real cure is upstream: the 2.7 field report carries the wish that the core offer `diff --against-pristine <path>`, so nobody unpacks the bundle by hand.
+**Repro:** `mkdir <scratch>/pristine && cd <scratch>/pristine && git init -q && node <repo>/.kaif/kaif-core.mjs install --bundle <repo>/.kaif/install/KAIF-CORE-BUNDLE.md --lang ru` → then `cmp <scratch>/pristine/<file> <repo>/<file>` for every file taken wholesale; `tr -cd '\r' < <file> | wc -c` must print 0.
+**Trigger:** any «take the template wholesale» during a framework update · any script that transplants LINES between two checkouts · a skill whose description in the harness listing suddenly changes shape.
+**Not for:** files with genuine local content (fills, house rules) — those are merged by hand against the template DELTA (old bundle → new bundle), not replaced.
+→ link: `reports/KAIF_UPDATES/KAGO_KAIF_2.7_UPDATE_REPORT.md` · EXP-0238 · EXP-0159
 
 ### EXP-0282 · 2026-09-14 · ❌→✅ · #fps-is-not-a-meter-under-a-busy-cpu #read-the-capture-record-before-the-number #owner-knew-the-cause
 **Context:** Q2RTX-замер эксперимента в Optimised. Первые два захвата дали 54,6 и 52,6 FPS против 57,6 на 01.09 — при частоте карты ВЫШЕ, чем 01.09.

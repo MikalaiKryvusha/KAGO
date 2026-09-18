@@ -2,9 +2,15 @@
 
 kaif-fp: `team-deployment/references/team-roles-library.md#team-archetypes` :: archetype-coverage-gap :: v2.4
 
-**Delivered upstream:** not yet — rides the team-deployment field report collected by the origin
-for the 2.5 scope (owner's word, 2026-08-28); filing an issue awaits the owner's approval per
-tracking mode.
+**Delivered upstream:** #83
+
+> ✏️ Line rewritten 2026-09-18 (KAIF 2.7 update). It used to read: «not yet — rides the team-deployment field report collected by the origin for the 2.5 scope (owner's word, 2026-08-28); filing an issue awaits the owner's approval per tracking mode.».
+> This ticket was NEVER filed as an issue of its own (`gh issue list --repo MikalaiKryvusha/KAIF --state all` on
+> 2026-09-18: no matching title). #83 is this project's 2.7 field update report; it POINTS at this ticket
+> by number with one line of closure evidence (R3) — a pointer, not the full text.
+> It rode the 2.4 team-deployment report (commit a11a92d), whose Outbound line cites no owner word. The owner's «Оба отчёта заберёт исток» (2026-08-28) stands on the 2.4 UPDATE report's line «this report + bugs/KAIF/10», committed at 14:07 (d82ac8b); that «оба» included the team report is this agent's reading, `[AI]`, not a record.
+> Not filing it now is an `[AI]` decision, revisable: the release already carries the substance (five of the six tickets).
+> Six issues for shipped or removed work would be noise in the origin's tracker.
 
 **Autocapture** (from `.kaif/kaif.json`): KAIF 2.4 · project KAGO · sphere `programming` ·
 language `ru` · tracking `origin` · agent claude-code (+4 mirrored) · Windows 11 Pro 10.0.26200 ·
@@ -71,3 +77,8 @@ include a GPU lab).
 
 None needed: KAGO's constitution §0, the `gpu-card` manager-only lock, and the negative
 engineer zone cover the gap locally; they are this ticket's donor material.
+
+## ✅ STATUS: RESOLVED UPSTREAM (recorded 2026-09-18, the KAIF 2.7 update)
+
+Evidence, 2026-09-18 (each piece names its source): the archetype `hardware-lab-small` is in the 2.5 `team-roles-library.md` (-> 2).
+The file keeps its name (KAIF tickets in this project are not DONE-renamed); this section is the closure.

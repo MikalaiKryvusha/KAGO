@@ -17,6 +17,11 @@ Update `STATUS.md`, tersely:
 - **The ceremonies debt line** — add verbatim:
   `⚠️ Force-closed <date+time>: ceremonies skipped (judge pass, bonsai trim, README, showcase
   linters) — the first /end-chat-soft pays this debt.`
+- **The standing falsehood line** — one phrase, verbatim: `Standing falsehood: none`, or
+  `Standing falsehood: <the statement> → still stands in <place>, <place>` (`AGENT_GUIDE.md` → "a
+  falsehood is corrected where it stands"). Force mode may skip a ceremony; it never drops a lie left
+  standing under the owner's name — a statement this session learned was false and corrected only in
+  the chat is named here with every place, and the next session's first move is the five steps.
 - Convert relative dates to absolute.
 
 Uncommitted work-in-progress that cannot land safely: name it in the handover (file, state, next
@@ -36,9 +41,7 @@ retry once, and if it still fails, tell the human: the commit exists locally, no
 ## Step 3. The one-line farewell
 
 One line to the human: the commit hash, the single most important thing for the next chat, and
-the reminder that the ceremonies debt is recorded in `STATUS.md` — prefixed by the delivery line
-`DELIVERY: <the owner's metric> X → Y; moved by: … | blocker: …` (the metric from
-`MASTER_PLAN.md`; force mode skips ceremonies, never the accounting). Goodbye.
+the reminder that the ceremonies debt is recorded in `STATUS.md`. Goodbye.
 
 ## What this skill refuses to skip
 

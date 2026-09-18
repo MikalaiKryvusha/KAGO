@@ -50,7 +50,10 @@ try {
 
   let source = 'compact';
   try {
-    const input = JSON.parse(readFileSync(0, 'utf8') || '{}');
+    // A leading U+FEFF is dropped before the parse (Windows PowerShell 5.1 puts it in front of any
+    // string piped into a native command; RFC 8259 §8.1 lets a parser ignore it). Unstripped, a
+    // `clear` event fell back to the default and ordered the WRONG trigger stamp — origin bug 119.
+    const input = JSON.parse(readFileSync(0, 'utf8').replace(/^\uFEFF/, '') || '{}');
     if (input.source) source = String(input.source);
   } catch { /* unreadable stdin — keep the default source label; the order still stands */ }
 

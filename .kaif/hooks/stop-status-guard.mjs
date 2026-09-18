@@ -31,7 +31,9 @@ try {
   let cwd = process.cwd();
   let sessionId = 'unknown-session';
   try {
-    const input = JSON.parse(readFileSync(0, 'utf8') || '{}');
+    // A leading U+FEFF is dropped before the parse (Windows PowerShell 5.1 puts it in front of any
+    // string piped into a native command; RFC 8259 §8.1 lets a parser ignore it) — origin bug 119.
+    const input = JSON.parse(readFileSync(0, 'utf8').replace(/^\uFEFF/, '') || '{}');
     if (input.cwd) cwd = String(input.cwd);
     if (input.session_id) sessionId = String(input.session_id);
   } catch { /* unreadable stdin — defaults keep the guard functional */ }

@@ -200,6 +200,13 @@ is worse than a missing one**. And what the AI *does* legitimately write into th
 visibly marked (`[AI]…[/AI]` provenance marks — `AGENT_GUIDE.md`) until the owner accepts it: AI text
 must never dissolve into the owner's text unnoticed.
 
+**And one door the owner opened himself (KAIF 2.6, origin issue #50): confusion is a research
+trigger, not a verdict.** The three doors are about the AGENT's gap. When the gap is in the OWNER's
+words — a proposal that seems to break a model, a rule or a test the agent holds — the first door is
+still search (what the owner most likely meant; the owner's own data), the second is the owner's
+answer, and the third — "your proposal breaks X", written without the first two — is the same
+forbidden invention wearing a verdict's clothes (`AGENT_GUIDE.md` → the confusion rule).
+
 **The fourth door — a fork is closed by recon of the domain's authorities, not by reasoning
 (KAIF 2.5).** The three doors are about a missing FACT. Between them and the owner's forks of vision (`/interview`)
 lies a class the canon used to hand to the agent silently: the ENGINEERING FORK — how to flush a

@@ -93,3 +93,5 @@ benches/cards/generated/*
 .kaif/loop-guard.out
 .kaif/guarded-loop.json
 .kaif/update-rehearsal.json
+.kaif/voice-marker.json
+.kaif/contour-window/

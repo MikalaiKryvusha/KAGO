@@ -35,7 +35,10 @@ what was skipped; a hole named is a decision, a hole unnamed is a future inciden
 ## 4. Cases
 
 Statuses: `pass` · `fail` · `blocked` · `skipped` — each with the observation named (what ran,
-what was seen). A single observation flips the marker of a single CASE, never of the feature.
+what was seen). A single observation flips the marker of a single CASE, never of the feature. Each
+case names the MACHINERY that walks it on the real product by the user's path and what that
+machinery READS — the screen, the lines, the logs (`TESTING_FRAMEWORK.md` → "What the word "test"
+means"): a case whose machinery returns only an exit code is hygiene, not a test case.
 
 | # | Case (steps → expected) | Technique | Status + evidence |
 |---|---|---|---|
