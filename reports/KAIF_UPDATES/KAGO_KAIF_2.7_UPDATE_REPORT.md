@@ -48,7 +48,7 @@ template») mixes the two and cannot tell a local edit from an upstream removal.
   seat's RE-READ CORE» (both found by the judge; `check` counts obligations by anchors and declares that gap).
   NOT whole: the judge's second pass lists six more template obligations absent since 2.5 — a named debt;
   the team is disbanded and the document dormant. `CLAUDE.md` / `AGENTS.md`: the one-line `resume` rule.
-- **NOT wired, on purpose:** the fourth hook (`prompt-resume-word.mjs`) — the fragment's own `_readme` asks for
+- **NOT wired at the send, on purpose (wired after it by the owner's word — §6):** the fourth hook (`prompt-resume-word.mjs`) — the fragment's own `_readme` asks for
   the owner's quoted consent, and this session has none for it; asked in the chat in one line.
 
 ## 2. Rakes
@@ -330,4 +330,5 @@ retracted in chat.
 - This report → origin issue **#83**: https://github.com/MikalaiKryvusha/KAIF/issues/83 (`gh issue create --body-file`, 2026-09-18; read back from the API: 29 848 chars = the local file, no BOM, em-dash bytes `342 200 224`, Cyrillic intact).
 - `bugs/KAIF/19` → origin issue **#74** (`kaif-core report`, the URL written into the ticket by the command), with three `correction:` comments: `…#issuecomment-5733338954`, `…#issuecomment-5733679961`, `…#issuecomment-5733866380` — each read back.
 - `bugs/KAIF/07`–`12` now carry `**Delivered upstream:** #83` — a pointer to R3 of this report, not their full text (R3 says why).
-- After the send, the same evening: the owner struck the last standing falsehood himself — `ЗАКАЗ.md` §9 «строка доставки открывает и закрывает сессию (Q1)» (his word in chat: «вычеркнуть выделенный кусок») — and ordered the fourth hook wired («хук - да, сделать»): `prompt-resume-word.mjs` is in `.claude/settings.json`, pipe-tested in PowerShell and Git Bash (`resume` / the Russian shorthand → the order; a plain prompt and the word mid-sentence → silence); not yet observed firing in a live session. `Standing falsehood: none`.
+- After the send, the same evening: the last standing falsehood was struck on the owner's order (the agent made the edit) — `ЗАКАЗ.md` §9 «строка доставки открывает и закрывает сессию (Q1)» (his word in chat: «вычеркнуть выделенный кусок») — and ordered the fourth hook wired («хук - да, сделать»): `prompt-resume-word.mjs` is in `.claude/settings.json`, pipe-tested in PowerShell and Git Bash (`resume` / the Russian shorthand → the order; a plain prompt and the word mid-sentence → silence); not yet observed firing in a live session. `Standing falsehood: none`.
+- The closure, same evening: the 2.7 budget gate (`check --gate-budgets`) went red on `STATUS.md` · `GOAL.md` · `MASTER_PLAN.md` after a real trim (STATUS 2068 → 1615, 453 lines moved verbatim to the chronicle); the closure was committed past it as a named `[AI]` decision, because the printed cure for `GOAL.md` contradicts the owner's archive decision (interview 017, Q3 = A) — `bugs/KAIF/20` → origin **#84**, with one `correction:` comment (the trim numbers).
