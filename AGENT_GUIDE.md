@@ -516,9 +516,10 @@ are canon, each citing its answer:
    locale; the independent judge caught it). Under `LC_ALL=C.UTF-8` the same command gives 4 hits,
    all in `ideas/14_DONE_acceptance_progress_counter.md` — a document whose header reads «Создано:
    2026-08-28 (агент…)»; `GOAL.md` and `interviews/` give 0 in both locales. So the conclusion
-   stands on the corrected evidence: no word of the OWNER orders the line. One retelling still
-   stands where the agent may not edit: `ЗАКАЗ.md:111` («строка доставки открывает и закрывает
-   сессию (Q1)») — that draft is changed only by the owner's word, so it is named to him instead.
+   stands on the corrected evidence: no word of the OWNER orders the line. The last retelling,
+   in the owner's draft `ЗАКАЗ.md` §9 («строка доставки открывает и закрывает сессию (Q1)»), which
+   the agent may not edit, was struck by the owner's own word the same evening — `[OWNER]`
+   «вычеркнуть выделенный кусок» · 2026-09-18, chat.
    **What did NOT go anywhere:** the metric itself — `[OWNER]` `GOAL.md` → «🏁 КРИТЕРИЙ ПРИЁМКИ
    ТЮНИНГА» (2026-08-24), «краёв X/389 · режимов Y/4» — lives in `MASTER_PLAN.md` → «Метрика
    приёмки»; `npm run curve -- --progress` (`ideas/14`) prints it, rule 2 reads it, and

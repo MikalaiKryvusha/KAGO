@@ -46,8 +46,8 @@ non-edge, guaranteed non-hanging) · (9) the standing method rules from инте
 threshold · ~~delivery line~~ · price on entry) as POINTERS to `AGENT_GUIDE.md`, not copies.
 <!-- 2026-09-18, KAIF 2.7 update: «delivery line» struck — it was never a rule of интервью 017 (Q1 = A
 is the moratorium); it was the agent's own carrier, retired — `AGENT_GUIDE.md` → «The critical path
-rule», rule 1. The draft `ЗАКАЗ.md` §9 still carries the phrase built from this step; that file is
-changed only by the owner's word and the line is named to him (STATUS, session 100). -->
+rule», rule 1. The draft `ЗАКАЗ.md` §9 carried the phrase built from this step; the owner struck it
+himself the same evening — `[OWNER]` «вычеркнуть выделенный кусок» · 2026-09-18, chat. -->
 
 ## Steps
 
