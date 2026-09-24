@@ -1,4 +1,4 @@
-# Bug 140 — 🔄 Stock Default (and the tray's Exit) reset the power limit and the clock lock, but NOT the V/F curve offsets
+# Bug 140 — 🔄 Stock Default resets the power limit and the clock lock, but NOT the V/F curve offsets
 
 **Status:** 🔴 OPEN — found by code reading + one observed function result; NOT yet observed on the card
 **Severity:** S1 — the owner's machine: a click on «Stock Default» after a tuned mode would leave the undervolt
@@ -8,7 +8,12 @@ how the mode check's stock smoke (Ш8) will apply `profiles/factory.json`
 
 ## Symptom (expected by the code, not yet observed)
 
-The Stock Default shortcut and the tray's Exit run the scheduled task `\KAGO\apply-factory`, whose action is
+✏️ *Corrected 02:1x after an independent skeptic pass: the first edition said «and the tray's Exit» — the tray HAS
+no Exit item (`automation-engine/tray.ps1:8` «no menu, no buttons, no click actions»; `lib/tray-autostart.mjs:205`
+«the Exit item of `plans/10` §4.5 is not built yet»); and the early return is at `profile-manager.mjs:700`, not
+:685. The skeptic CONFIRMED the chain for the shortcut and found no other path that zeroes the curve.*
+
+The Stock Default shortcut runs the scheduled task `\KAGO\apply-factory`, whose action is
 `profile-manager.mjs --apply factory` (`automation-engine/setup-desktop.mjs:277`). That path zeroes the power limit
 and releases the clock lock but — by the chain below — never zeroes the per-point V/F frequency offsets written by a
 previous mode. The card would stay undervolted under a «Stock Default» indicator until a reboot (volatility) or
@@ -16,7 +21,7 @@ previous mode. The card would stay undervolted under a «Stock Default» indicat
 
 ## Repro (deterministic, offline)
 
-1. `node --input-type=module -e "const pm=await import('./automation-engine/lib/profile-manager.mjs'); console.log(await pm.resolveProfileCurve(JSON.parse(require('fs').readFileSync('profiles/factory.json','utf8'))))"` → **`null`** (observed 02:1x; early return at `profile-manager.mjs:685`: `curveRaiseAndCapMhz`, `curveRef`, `curveSnapshot` all null).
+1. `node --input-type=module -e "const pm=await import('./automation-engine/lib/profile-manager.mjs'); console.log(await pm.resolveProfileCurve(JSON.parse(require('fs').readFileSync('profiles/factory.json','utf8'))))"` → **`null`** (observed 02:1x; early return at `profile-manager.mjs:700`: `curveRaiseAndCapMhz`, `curveRef`, `curveSnapshot` all null).
 2. CLI `--apply` (`profile-manager.mjs:3468-3473`): `needsCurve = effCurve !== null` → **false** → `curveBackend = null`.
 3. `apply()` (`:1176`): the step «кривая V/F: возврат к заводской (все смещения 0)» exists only under
    `else if (curveBackend && profile.settings.curveRaiseAndCapMhz === null)` → **skipped** without a backend.
@@ -29,6 +34,12 @@ previous mode. The card would stay undervolted under a «Stock Default» indicat
   non-factory state → 300.00 W twice»); P3-AC4 (14.08) predates the curve.
 - Since 18.09 the risk is dormant: `Optimised` is refused at every logon (driver 616.92, `bugs`-free line in STATUS),
   so no tuned curve reaches the card through the shell.
+
+- Same gap, harmless in practice (skeptic, 02:1x): boot restore of a remembered FACTORY state calls
+  `resetToFactory(b, { timing })` without a curve backend (`profile-manager.mjs:1612`) and logs «кривая V/F НЕ
+  трогалась» (`:1434`) — after a reboot the curve is factory anyway (volatile), so nothing is left behind.
+- Related stale text, not this bug: `engine.mjs:11374` prints advice about a tray Exit item that is not built;
+  STATUS «Решено владельцем» records the owner's 23.08 DECISION for Exit, not a built feature.
 
 ## Fix plan (card day, with the owner present — it changes what his shortcut does)
 
