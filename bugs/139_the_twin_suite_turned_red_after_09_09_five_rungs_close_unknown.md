@@ -36,6 +36,14 @@ Not investigated (moratorium, epic 101). Ranked, for whoever unfreezes the twin:
 reads from the live tree (a golden stamp, a profile, a snapshot) changed on 13–14.09; (2) the KAIF 2.7 update touched a
 module the twin imports; (3) date-dependent logic.
 
+**🔎 BISECTED 2026-09-25 01:50 +03:00 (session 102) — hypotheses 1–3 REFUTED; it is CODE.**
+`git bisect start HEAD 75c676d` · `git bisect run sh -c 'node automation-engine/lib/twin-assembly.mjs --selftest …'`
+(exit > 1 → skip) → **first bad commit `24b2c7d`** (2026-09-09 21:55, «fix(bugs/133, ярлык Optimised): ПОДРЕЗКА
+ПОРЯДКА — режим владельца снова применяется с рабочего стола») — the applier's order clamp against the worst-case
+reference. The twin drives the SAME applier (`curveWriteRefusal` / the vector builder are shared by design, R11–R13
+parity), and after the clamp its rungs close `unknown`. Next step when unfrozen: diff the twin's rung inputs at
+`24b2c7d^` vs `24b2c7d` — which refusal or clamp the twin's synthetic curve now meets. `git bisect reset` done; tree clean.
+
 ## Fix plan (when unfrozen)
 
 Bisect with the suite itself: `git bisect start HEAD <09.09 green commit>` · `git bisect run node automation-engine/lib/twin-assembly.mjs --selftest`.
