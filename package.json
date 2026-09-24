@@ -44,6 +44,7 @@
     "curve": "node automation-engine/lib/curve-store.mjs",
     "curvemap": "node automation-engine/lib/curve-map.mjs",
     "journal": "node automation-engine/lib/sweep-journal.mjs",
+    "validate": "node automation-engine/lib/mode-validate.mjs",
     "vgpu": "node automation-engine/lib/virtual-gpu.mjs",
     "traps": "node automation-engine/lib/trap-suite.mjs",
     "contract": "node automation-engine/lib/seam-contract.mjs",

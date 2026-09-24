@@ -21,8 +21,12 @@
 //   MV1 a pass lowers EVERY band, not only the visited ones   → «ПРОЙДЕННАЯ ПРОВЕРКА ОПУСКАЕТ ТОЛЬКО ПОСЕЩЁННЫЕ…»
 //   MV2 the ratchet raises but sets no floor                  → «СБОЙ ПОДНИМАЕТ ПОЛОСУ СБОЯ… И СТАВИТ ЕЙ ПОЛ»
 //   MV3 a death is attributed to the FIRST sample, not the last → «СМЕРТЬ — СБОЙ В ПОЛОСЕ ПОСЛЕДНЕЙ ДОЛГОВЕЧНОЙ ПРОБЫ»
+//   MV4 a pass of ANOTHER curve counts for the mode          → «МЕТРИКА: СЧИТАЕТСЯ ПРОЙДЕННАЯ ПРОВЕРКА ТОЙ КРИВОЙ…»
+//   MV5 the scaled mix loses its per-stage floor             → «ДЫМ НА МИНУТУ СОХРАНЯЕТ ПРОСТОЙ НА ОБОИХ КОНЦАХ…»
 //
-// [NOT-TESTED] at birth — the blocks of `selfTest()` flip it.
+// [NOT-TESTED] — hygiene only so far (25 blocks, MV1–MV5 each red on target, 2026-09-25). Functional runs:
+// the metric line read live from `npm run curve -- --progress` and `--plan` read live; the journal, the
+// verdict and the ratchet have never met a real check — that is the smoke of Ш8 and the evening of Ф2.
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -214,6 +218,49 @@ export function deathVerdicts(records, { readSamples = (p) => parseSamples(readF
 }
 
 // -------------------------------------------------------------------------------------------------
+// Ш4 (offline half) — the mix of loads as DATA, and its scaling to `--minutes`
+// -------------------------------------------------------------------------------------------------
+//
+// plans/102 «Схема прибора»: idle 60 s → Q2RTX 6 min → transitions 10×(5 s load / 5 s idle) → burn
+// levels 3→0, 4 min → Q2RTX 6 min → idle 60 s. The type of load is the agent's freedom (the owner,
+// 26.08: «мне плевать на тип нагрузки»); IDLE AND TRANSITIONS ARE NOT — the one proven death of 08.09
+// came at rest after a deep write (researches/36), and the industry catches instability exactly there
+// (researches/39 §2.2). So every scaled mix keeps both ends idle and at least two transition cycles.
+// The executor that maps a stage onto the card (graphics-load · stress-tester · hardware-mon) is the
+// other half of Ш4 and is not in this file yet.
+
+export const MIX_STAGE = Object.freeze({ IDLE: 'idle', GAME: 'game', TRANSITIONS: 'transitions', BURN: 'burn' });
+const MIN_STAGE_S = 5;           // [AI] a stage shorter than one sampler window beat pair says nothing
+const MIN_TRANSITION_CYCLES = 2; // [AI] one cycle is a step, two are a transition pattern
+
+export const CANONICAL_MIX = Object.freeze([
+  { kind: MIX_STAGE.IDLE, seconds: 60, label: 'простой после записи' },
+  { kind: MIX_STAGE.GAME, seconds: 360, label: 'Q2RTX, демо в цикле' },
+  { kind: MIX_STAGE.TRANSITIONS, cycles: 10, onS: 5, offS: 5, label: 'переходы нагрузка ↔ простой' },
+  { kind: MIX_STAGE.BURN, seconds: 60, level: 3, label: 'прожиг, уровень 3' },
+  { kind: MIX_STAGE.BURN, seconds: 60, level: 2, label: 'прожиг, уровень 2' },
+  { kind: MIX_STAGE.BURN, seconds: 60, level: 1, label: 'прожиг, уровень 1' },
+  { kind: MIX_STAGE.BURN, seconds: 60, level: 0, label: 'прожиг, уровень 0' },
+  { kind: MIX_STAGE.GAME, seconds: 360, label: 'Q2RTX, демо в цикле' },
+  { kind: MIX_STAGE.IDLE, seconds: 60, label: 'простой в конце' },
+].map(Object.freeze));
+
+export const stageSeconds = (s) => (s.kind === MIX_STAGE.TRANSITIONS ? s.cycles * (s.onS + s.offS) : s.seconds);
+
+/** The mix for a check of `minutes`: the canonical mix (~20 min) as is when no length is asked, else scaled,
+ *  every stage kind kept. */
+export function planMix({ minutes = null } = {}) {
+  const canon = CANONICAL_MIX.reduce((s, x) => s + stageSeconds(x), 0);
+  if (minutes === null) return { stages: CANONICAL_MIX.map((s) => ({ ...s })), totalS: canon, requestedS: canon };
+  if (!Number.isFinite(minutes) || minutes <= 0) throw new Error(`длительность проверки «${minutes}» — нужно число минут > 0`);
+  const k = (minutes * 60) / canon;
+  const stages = CANONICAL_MIX.map((s) => (s.kind === MIX_STAGE.TRANSITIONS
+    ? { ...s, cycles: Math.max(MIN_TRANSITION_CYCLES, Math.round(s.cycles * k)) }
+    : { ...s, seconds: Math.max(MIN_STAGE_S, Math.round(s.seconds * k)) }));
+  return { stages, totalS: stages.reduce((s, x) => s + stageSeconds(x), 0), requestedS: Math.round(minutes * 60) };
+}
+
+// -------------------------------------------------------------------------------------------------
 // Ш6 — the acceptance metric «режимов проверено Y/4» (ЗАКАЗ.md §2, MASTER_PLAN «Метрика приёмки»)
 // -------------------------------------------------------------------------------------------------
 
@@ -321,6 +368,17 @@ export function selfTest() {
     check('ЧУЖИЕ СТРОКИ (ЖУРНАЛ РАЗВЁРТКИ) НЕ СЧИТАЮТСЯ ПРОВЕРКОЙ', deathVerdicts([{ state: LINE.INTENT, seq: 1, frequencyMhz: 2842, voltageMv: 845 }]).length === 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 
+  // Ш4 offline half: the mix
+  const canon = planMix();
+  const kinds = (p) => p.stages.map((s) => s.kind);
+  check('СМЕСЬ 20 МИНУТ: ПРОСТОЙ В НАЧАЛЕ И В КОНЦЕ, 10 ПЕРЕХОДОВ, ПРОЖИГ 3→0', canon.totalS === 1180 && kinds(canon)[0] === MIX_STAGE.IDLE && kinds(canon).at(-1) === MIX_STAGE.IDLE
+    && canon.stages.find((s) => s.kind === MIX_STAGE.TRANSITIONS).cycles === 10 && canon.stages.filter((s) => s.kind === MIX_STAGE.BURN).map((s) => s.level).join() === '3,2,1,0', `${canon.totalS} с · ${kinds(canon).join(' → ')}`);
+  const smoke = planMix({ minutes: 1 });
+  check('ДЫМ НА МИНУТУ СОХРАНЯЕТ ПРОСТОЙ НА ОБОИХ КОНЦАХ И ПЕРЕХОДЫ', kinds(smoke).join() === kinds(canon).join() && kinds(smoke).at(-1) === MIX_STAGE.IDLE
+    && smoke.stages.find((s) => s.kind === MIX_STAGE.TRANSITIONS).cycles >= 2 && smoke.stages.every((s) => stageSeconds(s) >= 5), `${smoke.totalS} с · ${smoke.stages.map((s) => s.kind + ':' + stageSeconds(s)).join(' ')}`);
+  let mixRefused = null; try { planMix({ minutes: 0 }); } catch (e) { mixRefused = e.message; }
+  check('НУЛЕВАЯ ДЛИТЕЛЬНОСТЬ ОТКЛОНЯЕТСЯ ПО ИМЕНИ', /нужно число минут > 0/.test(mixRefused ?? ''), mixRefused ?? 'не отклонил');
+
   // P102-AC6: the metric
   const MODES = ['max-performance', 'optimised', 'silent-cold', 'stock-default'];
   const I = (seq, mode, snapshot, margins = null) => ({ state: LINE.INTENT, kind: CHECK_KIND, seq, mode, snapshot, margins });
@@ -349,7 +407,20 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     for (const x of r.results) console.log(`${x.ok ? '✅' : '❌'} ${x.what}${x.got ? ' — ' + x.got : ''}`);
     console.log(`\n${r.results.filter((x) => x.ok).length}/${r.results.length} зелёных`);
     process.exit(r.ok ? 0 : 1);
+  } else if (process.argv.includes('--plan')) {
+    const i = process.argv.indexOf('--minutes');
+    const minutes = i === -1 ? null : Number(process.argv[i + 1]);
+    let plan; try { plan = planMix({ minutes }); } catch (e) { console.error(`ОШИБКА: ${e.message}`); process.exit(2); }
+    console.log(`СМЕСЬ ПРОВЕРКИ РЕЖИМА — ${minutes === null ? 'каноническая' : minutes + ' мин заказано'}, ${Math.round(plan.totalS / 6) / 10} мин по плану (${plan.totalS} с); карта не трогается`);
+    let t = 0;
+    for (const s of plan.stages) {
+      const dur = stageSeconds(s);
+      const what = s.kind === MIX_STAGE.TRANSITIONS ? `${s.cycles} × (${s.onS} с нагрузка / ${s.offS} с простой)` : `${dur} с`;
+      console.log(`  ${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}  ${s.label} — ${what}`);
+      t += dur;
+    }
+    console.log('Исполнитель, который гоняет эту смесь на карте (Ш4, вторая половина), ещё не построен.');
   } else {
-    console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1); прибор, который гоняет карту, — Ш4');
+    console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1)\n  --plan [--minutes N] — смесь нагрузок проверки, без карты; исполнитель на карте (Ш4) ещё не построен');
   }
 }
