@@ -26,8 +26,11 @@
 //   MV6 the intent is written AFTER the sampler starts        → «ИСПОЛНИТЕЛЬ: НАМЕРЕНИЕ В ЖУРНАЛЕ И СЭМПЛЕР ИДУТ ДО ПРИМЕНЕНИЯ»
 //   MV7 the rollback leaves `finally`                        → the four executor blocks that demand «откат сделан»
 //   MV8 the candidate is born qualified                      → «КАНДИДАТ — ЧЕРНОВИК, ПРИНЯТЫЙ ФОРМАТОМ ПРОФИЛЯ…»
+//   MV9 the real apply seam drops the draft consent           → «НАСТОЯЩИЕ ШВЫ (НА ПОДДЕЛКЕ БИБЛИОТЕКИ)…»
+//   MV10 the real rollback forgets the applied clock lock     → the same block
 //
-// [NOT-TESTED] — hygiene only so far (33 blocks, MV1–MV8 each red on target, 2026-09-25). Functional runs:
+// [NOT-TESTED] on the card — hygiene (37 blocks, MV1–MV10 each red on target, 2026-09-25) and functional runs on
+// RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
 // the metric line read live from `npm run curve -- --progress` and `--plan` read live; the journal, the
 // verdict and the ratchet have never met a real check — that is the smoke of Ш8 and the evening of Ф2.
 
@@ -363,6 +366,106 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
     samples: { count: samples.length, periodMs, maxGapMs: maxGapMs(samples) }, driverEvents: events };
 }
 
+// -------------------------------------------------------------------------------------------------
+// The REAL seams — the card, wired through the project's own library (recon 2026-09-25, file:line in plans/102 Ш4)
+// -------------------------------------------------------------------------------------------------
+//
+// [NOT-TESTED] on the card. The WIRING is proved on fakes (`lib` is injected); the hardware behaviour is the
+// smoke of Ш8 with the owner present. Facts this wiring rests on (read, not run):
+//   apply()     THROWS (never returns {ok}); a snapshot curve must be resolved first (resolveProfileCurve →
+//               nvapiCurveBackend → apply(..., { card, curveBackend, curve, consent }) → close in finally);
+//               a draft needs `consent` — the check names itself, the owner's click is never simulated.
+//   rollback    resetToFactory(backend, { knownLockMhz: applied.lockedTo, curveBackend: FRESH nvapi backend }).
+//               The library does NOT touch the remembered boot state — a check never changes what boots.
+//   sampler     a SEPARATE process (`hardware-mon --seconds S --out F`, fsync per line): the burn's spawnSync
+//               freezes this process's event loop, an in-process sampler would record nothing.
+//   game        runTimedemo({ runs }) has no duration: one demo pass ≈ 11 s, so runs = ceil(seconds / 11).
+//   burn L      stressTest(runOptionsForShape(sweepBurnShape(L)[0], { seconds, sustain })); verdict null =
+//               the comparison did not happen (golden missing/stale) — NOT a failure of the mode.
+//   transitions stressTest({ transient: true }) runs the config duty 5 s / 5 s bounded by TIME.
+// Loaded lazily: nothing of this reaches `curve --progress` or the selftest's import graph.
+
+export const DEMO_PASS_S = 11;        // one Q2RTX demo pass, measured 10.6–14.2 s in runs/graphics/exp0914_*.json
+export const TRANSITIONS_LEVEL = 1;   // [AI] a mid furnace level for the load/idle steps (0 = strongest, 3 = weakest)
+const SAMPLER_PAD_S = 120;            // the sampler outlives the mix: a death after the last stage must still be sampled
+
+async function loadCardLib() {
+  const pm = await import('./profile-manager.mjs');
+  const ps = await import('./profile-store.mjs');
+  const gl = await import('./graphics-load.mjs');
+  const st = await import('./stress-tester.mjs');
+  const { spawn } = await import('node:child_process');
+  const { existsSync: exists } = await import('node:fs');
+  const MON = join(HERE, 'hardware-mon.mjs');
+  return {
+    spawnSampler: (path, seconds) => spawn(process.execPath, [MON, '--seconds', String(seconds), '--out', path], { windowsHide: true, stdio: 'ignore' }),
+    samplerReady: (path) => exists(path) && readFileSync(path, 'utf8').includes('\n'),
+    probeCard: ps.probeCard, resolveProfileCurve: pm.resolveProfileCurve, nvapiCurveBackend: pm.nvapiCurveBackend,
+    nvidiaSmiBackend: pm.nvidiaSmiBackend, apply: pm.apply, resetToFactory: pm.resetToFactory,
+    runTimedemo: gl.runTimedemo, stressTest: st.stressTest, runOptionsForShape: st.runOptionsForShape,
+    sweepBurnShape: st.sweepBurnShape, FURNACE_LADDER: st.FURNACE_LADDER,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)), nowMs: () => Date.now(),
+  };
+}
+
+/** The seams of `runCheck` over the real card. `lib` is injectable — the selftest drives it with fakes. */
+export async function makeCardSeams({ profile, totalS, consent = 'проверка режима (эпик 101 Ф1)', lib = null }) {
+  const L = lib ?? await loadCardLib();
+  let applied = null;
+  return {
+    startSampler(path) {
+      const child = L.spawnSampler(path, totalS + SAMPLER_PAD_S);
+      return { child, stop: () => { try { child.kill(); } catch { /* already gone */ } } };
+    },
+    async waitSampler(path, timeoutMs = 10_000) {
+      for (let t = 0; t < timeoutMs; t += 100) { if (L.samplerReady(path)) return true; await L.sleep(100); }
+      return false;
+    },
+    async apply() {
+      let cb = null;
+      try {
+        const card = await L.probeCard();
+        const curve = await L.resolveProfileCurve(profile);
+        cb = curve ? L.nvapiCurveBackend() : null;
+        applied = await L.apply(L.nvidiaSmiBackend(), profile, { card, curveBackend: cb, curve, consent });
+        return { ok: true, why: (applied.steps ?? []).join(' · ') };
+      } catch (e) {
+        return { ok: false, why: e?.message ?? String(e) };
+      } finally { try { cb?.close?.(); } catch { /* the rollback opens its own */ } }
+    },
+    async runStage(stage) {
+      try {
+        if (stage.kind === MIX_STAGE.IDLE) { await L.sleep(stage.seconds * 1000); return { ok: true, endedAtMs: L.nowMs() }; }
+        if (stage.kind === MIX_STAGE.GAME) {
+          const run = await L.runTimedemo({ runs: Math.max(1, Math.ceil(stage.seconds / DEMO_PASS_S)) });
+          const ok = run.exitCode === 0 && !run.timedOut;
+          return { ok, why: ok ? `FPS ${run.stats?.median ?? '—'}` : `игра: код ${run.exitCode}${run.timedOut ? ', таймаут' : ''}`, endedAtMs: L.nowMs(), fps: run.stats?.median ?? null };
+        }
+        const opts = stage.kind === MIX_STAGE.TRANSITIONS
+          ? { name: 'furnace', args: L.FURNACE_LADDER[TRANSITIONS_LEVEL].args, seconds: stageSeconds(stage), transient: true, sustain: stage.onS }
+          : L.runOptionsForShape(L.sweepBurnShape(stage.level)[0], { seconds: stage.seconds, sustain: stage.seconds });
+        const r = await L.stressTest(opts);
+        const ok = r.verdict !== 'CRASH' && r.verdict !== 'SDC';
+        return { ok, why: `прожиг: ${r.verdict ?? 'сравнение не состоялось'}${r.reason ? ' — ' + r.reason : ''}`, endedAtMs: L.nowMs() };
+      } catch (e) {
+        return { ok: false, why: `исключение: ${e?.message ?? e}`, endedAtMs: L.nowMs() };
+      }
+    },
+    async rollback() {
+      let cb = null;
+      try {
+        cb = L.nvapiCurveBackend();
+        const r = await L.resetToFactory(L.nvidiaSmiBackend(), { knownLockMhz: applied?.lockedTo ?? null, curveBackend: cb });
+        return { ok: true, why: (r.steps ?? []).join(' · ') };
+      } catch (e) {
+        return { ok: false, why: e?.message ?? String(e) };
+      } finally { try { cb?.close?.(); } catch { /* nothing left to close */ } }
+    },
+    readSamples: (path) => parseSamples(readFileSync(path, 'utf8')),
+    driverEvents: (fromMs, toMs) => realDriverEvents(fromMs, toMs),
+  };
+}
+
 /** Write the check's report next to its evidence: `<dir>/report.md` + `<dir>/result.json`. */
 export function writeCheckReport(dir, result) {
   mkdirSync(dir, { recursive: true });
@@ -614,6 +717,32 @@ export async function selfTest() {
     check('ОТЧЁТ ПРОВЕРКИ: ЧЕТЫРЕ ЧАСТИ НА КАЖДОМ ВЕРДИКТЕ, СБОЙ НАЗВАН С ПОЛОСОЙ', reps.every((t) => parts.every((p) => t.includes(p)))
       && reps[0].startsWith('# Проверка режима optimised — ПРОЙДЕНА') && reps[1].includes('полоса 2800–2900') && reps[2].includes('НЕИЗВЕСТНО') && reps[2].includes('НЕ ПРОЧИТАН'),
       reps.map((t) => t.split('\n')[0]).join(' | '));
+    // The REAL seams' wiring, on a fake library — which call gets which argument; no card anywhere
+    const log = [];
+    const fakeLib = {
+      spawnSampler: (p, s) => { log.push(`sampler ${s}s`); return { kill: () => log.push('sampler killed') }; },
+      samplerReady: () => true, probeCard: async () => ({ name: 'fake' }),
+      resolveProfileCurve: async (p) => ({ snapshot: p.settings.curveSnapshot }),
+      nvapiCurveBackend: () => ({ close: () => log.push('curve backend closed') }), nvidiaSmiBackend: () => ({}),
+      apply: async (be, p, o) => { log.push(`apply consent=${Boolean(o.consent)} curve=${o.curve?.snapshot}`); return { steps: ['кривая', 'лимит'], lockedTo: { min: 180, max: 3090 } }; },
+      resetToFactory: async (be, o) => { log.push(`reset lock=${o.knownLockMhz?.max} backend=${Boolean(o.curveBackend)}`); return { steps: ['сток'] }; },
+      runTimedemo: async ({ runs }) => { log.push(`timedemo runs=${runs}`); return { exitCode: 0, timedOut: false, stats: { median: 57 } }; },
+      stressTest: async (o) => { log.push(`stress ${o.transient ? 'transient' : 'level'} ${o.args ?? o.shape} ${o.seconds}s`); return { verdict: 'PASS' }; },
+      runOptionsForShape: (shape, o) => ({ name: 'furnace', args: shape, ...o }), sweepBurnShape: (l) => [`L${l}`],
+      FURNACE_LADDER: [{ args: 'A0' }, { args: 'A1' }, { args: 'A2' }, { args: 'A3' }], sleep: async () => {}, nowMs: () => 5000,
+    };
+    const cs = await makeCardSeams({ profile: { settings: { curveSnapshot: 'snapX' } }, totalS: 86, lib: fakeLib });
+    const smp = cs.startSampler('x.jsonl'); const ap = await cs.apply();
+    const st = [];
+    for (const s of planMix({ minutes: 1 }).stages) st.push(await cs.runStage(s));
+    const rb = await cs.rollback(); smp.stop();
+    check('НАСТОЯЩИЕ ШВЫ (НА ПОДДЕЛКЕ БИБЛИОТЕКИ): СОГЛАСИЕ, КРИВАЯ СНИМКА, ОТКАТ С ЗАМКОМ, ИГРА ПРОХОДАМИ, ПРОЖИГ ПО УРОВНЯМ',
+      ap.ok && rb.ok && st.every((x) => x.ok) && log.includes('sampler 206s') && log.includes('apply consent=true curve=snapX') && log.includes('reset lock=3090 backend=true')
+      && log.filter((x) => x === 'timedemo runs=2').length === 2 && log.includes('stress transient A1 20s') && ['L3', 'L2', 'L1', 'L0'].every((l) => log.includes(`stress level ${l} 5s`)) && log.at(-1) === 'sampler killed',
+      log.join(' | '));
+    const throwing = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, apply: async () => { throw new Error('отказ до записи: stamp.driver'); } } });
+    const ap2 = await throwing.apply();
+    check('НАСТОЯЩИЙ ШОВ ПРИМЕНЕНИЯ: ИСКЛЮЧЕНИЕ ПРИМЕНИТЕЛЯ → {ok:false} С ПРИЧИНОЙ, А НЕ ПАДЕНИЕ', ap2.ok === false && /stamp\.driver/.test(ap2.why), ap2.why);
     const e = await run({ rollbackThrows: true });
     check('ИСПОЛНИТЕЛЬ: УПАВШИЙ ОТКАТ НАЗВАН В ВЕРДИКТЕ', /ОТКАТ НЕ ПОДТВЕРЖДЁН/.test(readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1)?.why ?? ''), e.r.rollback?.why ?? '');
   } finally { rmSync(exDir, { recursive: true, force: true }); }

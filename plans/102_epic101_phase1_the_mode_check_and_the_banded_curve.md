@@ -117,6 +117,17 @@ flowchart TD
       `\KAGO\apply-<режим>` или `profile-manager.apply` с согласием, Q2RTX по `graphics-load`, прожиг по
       уровням `stress-tester`, сэмплер `hardware-mon` отдельным процессом, `driver-voice`, отчёт
       `runs/validate/<момент>/`) и `--dry-run` — первое дело карточного дня: без карты их нечем проверить.
+      🔌 **Настоящие швы, 01:46:** `makeCardSeams` — применение (`resolveProfileCurve` → `nvapiCurveBackend` →
+      `profile-manager.apply(..., { card, curveBackend, curve, consent })`, исключение → `{ok:false, why}`),
+      откат (`resetToFactory` со СВЕЖИМ бэкендом кривой и `knownLockMhz` применённого замка; запомненное
+      загрузочное состояние библиотека не трогает — проверка не меняет то, что грузится), сэмплер отдельным
+      процессом (`hardware-mon --seconds S+120 --out F`), игра (`runTimedemo({ runs: ⌈с/11⌉ })`), прожиг по
+      уровням (`runOptionsForShape(sweepBurnShape(L)[0])`), переходы (`stressTest({ transient })`, уровень 1
+      `[AI]`). Библиотека грузится лениво и внедряется; проводка доказана на подделке (2 блока, MV9 «без
+      согласия» и MV10 «откат без замка» красят свой), имена всех 11 функций сверены с экспортами.
+      🔴 **Предпосылка карточного дня:** эталоны прожига (`runs/baseline/furnace@…`) проштампованы 610.88 —
+      на 616.92 прожиг вернёт «сравнение не состоялось» (null, не сбой). Первым делом: `npm run stress --
+      --capture-baseline` на стоке, затем `--verify-baseline`.
       📄 **Отчёт и повтор, 01:41:** `renderCheckReport` / `writeCheckReport` — `report.md` + `result.json`, четыре
       части P102-AC5 (вердикт · карта посещений · телеметрия · голос драйвера) на любом вердикте, блок на
       ПРОЙДЕНА/СБОЙ/НЕИЗВЕСТНО. `npm run validate -- --replay <захват.json> [--stock <захваты>]` — вся
