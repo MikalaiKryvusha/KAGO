@@ -183,6 +183,9 @@ flowchart TD
       1. `npm run gpu:info` — подтвердить драйвер 616.92 (чтение).
       2. `npm run stress -- --capture-baseline` на стоке → `npm run stress -- --verify-baseline` — эталоны
          прожига сейчас на 610.88, без пересъёмки прожиг даст «сравнение не состоялось».
+      2б. `npm run curve -- --take-reference` (под нагрузкой, 240 с) → `npm run curve -- --reference` — опора
+         применения (`curves/reference-table.json`, 31.08) тоже проштампована 610.88, и `loadReferenceTable`
+         по R6 объявит её недействительной (`curve-store.mjs:1537`); сдвиги любого режима считаются от неё.
       3. AC4: `npm run profile -- --state` → `npm run validate -- --mode optimised --candidate <кандидат> --dry-run`
          → `npm run profile -- --state` — сдвигов изменено 0.
       4. **Ш8, с разрешения владельца:** `npm run validate -- --mode stock-default --candidate profiles/factory.json
