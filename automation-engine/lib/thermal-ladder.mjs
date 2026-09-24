@@ -22,7 +22,7 @@
 //
 //     clock ceiling  →  equilibrium temperature  →  equilibrium fan  →  the FPS it cost
 //
-// and `Silent Cold` reads off it as the HIGHEST rung whose equilibrium fan is ≤ 40 %
+// and `Silent Cold` reads off it as the HIGHEST rung whose equilibrium fan is ≤ `config.SILENT_COLD_FAN_CEILING_PCT` (50 % since 25.09)
 // (`readSilentCold`, below). That is «maximum performance under a temperature ceiling» with no
 // guesswork left in it.
 //
@@ -404,7 +404,8 @@ export function longestLoadedStretch(points) {
  *
  * His definition, verbatim: «целится на то, чтобы Silent Cold давал максимально возможную
  * производительность при температуре не выше, при которой вертушки вращаются на 40%». Written as an
- * optimization it is: maximize the clock ceiling SUBJECT TO fan(equilibrium) ≤ 40 %. On a monotone
+ * optimization it is: maximize the clock ceiling SUBJECT TO fan(equilibrium) ≤ the ceiling (40 % then; 50 % —
+ * «не более 50, желательно 40…50» — since the owner approved ЗАКАЗ.md, 2026-09-25). On a monotone
  * ladder the answer is simply the highest qualifying rung, and this function is that sentence.
  *
  * ONLY RUNGS THAT REACHED A PLATEAU ARE ELIGIBLE. A rung that never settled has no equilibrium fan, so
@@ -777,6 +778,8 @@ export function selfTest() {
   const sc = readSilentCold(table);
   ok('Silent Cold — САМАЯ ВЫСОКАЯ ступень под потолком', sc.pick.mhz, 2100);
   ok('потолок берётся из config, а не из головы', sc.fanCeilingPct, config.SILENT_COLD_FAN_CEILING_PCT);
+  // ЗАКАЗ 25.09: «не более 50, желательно 40…50» — a rung at 47 % is now the pick; at 40 it was refused
+  ok('ступень с 47 % оборотов проходит предел 50 % и выбирается как самая высокая', readSilentCold([settled(2400, 52, 68), settled(2250, 47, 65), settled(2100, 40, 62)]).pick.mhz, 2250);
   ok('ответ зажат сверху измеренной ступенью — это сказано', sc.bounded, true);
   const unbounded = readSilentCold([settled(2100, 40, 62), settled(1800, 33, 57)]);
   ok('без ступени выше выбранной ответ помечен НИЖНЕЙ ОЦЕНКОЙ', unbounded.bounded, false);
@@ -784,7 +787,8 @@ export function selfTest() {
   const withUnsettled = readSilentCold([{ mhz: 2700, fan: 20, plateau: { ok: false } }, settled(2100, 40, 62)]);
   ok('ступень без плато в выбор не попадает', withUnsettled.pick.mhz, 2100);
   ok('и пропущенные ступени сосчитаны', withUnsettled.skipped, 1);
-  const tooHot = readSilentCold([settled(2400, 52, 68), settled(2100, 47, 65)]);
+  // Fans ABOVE the ceiling, stated relative to it: the fixture held 47 % while the ceiling was 40 and went stale at 50 (25.09).
+  const tooHot = readSilentCold([settled(2400, config.SILENT_COLD_FAN_CEILING_PCT + 5, 68), settled(2100, config.SILENT_COLD_FAN_CEILING_PCT + 2, 65)]);
   ok('ни одна ступень не уложилась — режим не выдумывается', tooHot.ok, false);
   ok('и сказано, куда продолжать лестницу', /ВНИЗ/.test(tooHot.why), true);
   ok('таблица без плато вообще — читать нечего', readSilentCold([{ mhz: 2400, fan: 30, plateau: { ok: false } }]).ok, false);

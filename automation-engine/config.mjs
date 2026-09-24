@@ -1116,8 +1116,14 @@ export const PLATEAU_LOAD_UTILIZATION_PCT = 30;
  * the HIGHEST rung whose EQUILIBRIUM fan is ≤ this. Equilibrium is the load-bearing word: the same
  * fan level sat at 47 °C on a cooling card and 62-63 °C on a heating one (STATUS fact 33), so a
  * transient reading of this number decides nothing.
+ *
+ * ✏️ 40 → 50 ON 2026-09-25 — the owner's word that approved `ЗАКАЗ.md` (GOAL.md → «✅ `ЗАКАЗ.md` УТВЕРЖДЁН»,
+ * verbatim): *«❄️ Silent Cold 40…50 % оборотов -- не более 50, делательно оказаться в диапазоне 40...50»*
+ * (and 2026-09-01: *«чтобы вертушки работали в районе 40...50% - больше не очень хорошо»*). 50 is the LIMIT;
+ * the most performance under it (ЗАКАЗ.md §1) lands the pick in 40…50 whenever the ladder has such a rung.
+ * The value stood at 40 for 24 days after 01.09 — the owner-decision-not-applied class, caught 25.09.
  */
-export const SILENT_COLD_FAN_CEILING_PCT = 40;
+export const SILENT_COLD_FAN_CEILING_PCT = 50;
 
 // =============================================================================================
 // 9. Power limit — read from the card, never hard-coded
