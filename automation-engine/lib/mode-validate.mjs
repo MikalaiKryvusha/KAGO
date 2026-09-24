@@ -25,8 +25,9 @@
 //   MV5 the scaled mix loses its per-stage floor             → «ДЫМ НА МИНУТУ СОХРАНЯЕТ ПРОСТОЙ НА ОБОИХ КОНЦАХ…»
 //   MV6 the intent is written AFTER the sampler starts        → «ИСПОЛНИТЕЛЬ: НАМЕРЕНИЕ В ЖУРНАЛЕ И СЭМПЛЕР ИДУТ ДО ПРИМЕНЕНИЯ»
 //   MV7 the rollback leaves `finally`                        → the four executor blocks that demand «откат сделан»
+//   MV8 the candidate is born qualified                      → «КАНДИДАТ — ЧЕРНОВИК, ПРИНЯТЫЙ ФОРМАТОМ ПРОФИЛЯ…»
 //
-// [NOT-TESTED] — hygiene only so far (31 blocks, MV1–MV7 each red on target, 2026-09-25). Functional runs:
+// [NOT-TESTED] — hygiene only so far (33 blocks, MV1–MV8 each red on target, 2026-09-25). Functional runs:
 // the metric line read live from `npm run curve -- --progress` and `--plan` read live; the journal, the
 // verdict and the ratchet have never met a real check — that is the smoke of Ш8 and the evening of Ф2.
 
@@ -295,6 +296,27 @@ export function planMix({ minutes = null } = {}) {
 // wired on the first card day; until then this is [NOT-TESTED] on the card and proved on fakes only.
 
 /**
+ * THE CANDIDATE AS A PROFILE (plans/102 Ш2): the mode's own profile with ONE difference that matters —
+ * the curve is the candidate's battle snapshot — marked a draft (`qualified: false` + `draft`), stamped
+ * with the driver the check runs on. Written as `profiles/candidate-<mode>.local.json` (git-ignored); the
+ * mode's battle profile and its shortcut are not touched until the candidate is ACCEPTED. The applier
+ * refuses a draft without an explicit consent (profile-manager, «согласие черновика»), which the check
+ * gives — the owner's click is never simulated.
+ */
+export function candidateProfile(modeProfile, { snapshotId, stamp, takenAt, margins = null }) {
+  return {
+    name: `candidate-${modeProfile.mode}.local`, // = the file stem: profile-store refuses a name that differs from its file
+    title: `${modeProfile.title} — кандидат проверки`,
+    mode: modeProfile.mode,
+    qualified: false,
+    draft: { candidate: `снимок ${snapshotId}${margins ? ` · запас по полосам ${margins.map((m) => '+' + m).join('/')}` : ''}`, source: 'эпик 101 Ф1 Ш2 (plans/102); проверка целого режима' },
+    settings: { ...modeProfile.settings, curveRef: null, curveSnapshot: snapshotId },
+    stamp: { driver: stamp.driver, vbios: stamp.vbios, takenAt },
+    evidence: { 'КАНДИДАТ': `построен из профиля «${modeProfile.name}» заменой кривой на снимок ${snapshotId}; прожига нет — доказательство только проверка режима` },
+  };
+}
+
+/**
  * The REAL driver-voice seam: `nvlddmkm` events in [fromMs, toMs] from the Windows event log (read-only,
  * the OS — not the card), through the project's one reader (`driver-voice.driverEventsInWindow` over
  * `event-logger.queryFaults`, the same pair `engine.mjs` uses). `null` = the channel could not be read.
@@ -496,6 +518,17 @@ export async function selfTest() {
     const e = await run({ rollbackThrows: true });
     check('ИСПОЛНИТЕЛЬ: УПАВШИЙ ОТКАТ НАЗВАН В ВЕРДИКТЕ', /ОТКАТ НЕ ПОДТВЕРЖДЁН/.test(readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1)?.why ?? ''), e.r.rollback?.why ?? '');
   } finally { rmSync(exDir, { recursive: true, force: true }); }
+
+  // Ш2: the candidate profile passes the profile format's own validator (loaded lazily: profile-store →
+  // curve-store → this module would be an import cycle at load time)
+  const { validateProfile } = await import('./profile-store.mjs');
+  const base = { name: 'optimised', title: '⚖️ Optimised', mode: 'optimised', qualified: true,
+    settings: { powerLimitWatts: 250, graphicsClockLockMhz: { min: 180, max: 3090 }, curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: '2026-09-14T22-54-29', curveCapMhz: null },
+    stamp: { driver: '610.88', vbios: '98.03.58.40.8b', takenAt: '2026-08-15T00:45:00+03:00' }, evidence: { x: 'y' } };
+  const cand = candidateProfile(base, { snapshotId: '2026-09-25T02-00-00', stamp: { driver: '616.92', vbios: '98.03.58.40.8b' }, takenAt: '2026-09-25T02:00:00+03:00', margins: [30, 30, 30, 30, 30, 30, 30] });
+  const candRefusals = validateProfile(cand, { fileName: 'candidate-optimised.local.json' });
+  check('КАНДИДАТ — ЧЕРНОВИК, ПРИНЯТЫЙ ФОРМАТОМ ПРОФИЛЯ; БОЕВОЙ ПРОФИЛЬ НЕ ТРОНУТ', candRefusals.length === 0 && cand.qualified === false && cand.settings.curveSnapshot === '2026-09-25T02-00-00'
+    && cand.settings.powerLimitWatts === 250 && base.settings.curveSnapshot === '2026-09-14T22-54-29' && cand.stamp.driver === '616.92', candRefusals.map((r) => `${r.field}: ${r.why}`).join(' · ').slice(0, 300) || cand.draft.candidate);
 
   // P102-AC6: the metric
   const MODES =['max-performance', 'optimised', 'silent-cold', 'stock-default'];
