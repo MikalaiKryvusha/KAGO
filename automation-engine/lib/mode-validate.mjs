@@ -31,7 +31,7 @@
 // the metric line read live from `npm run curve -- --progress` and `--plan` read live; the journal, the
 // verdict and the ratchet have never met a real check — that is the smoke of Ш8 and the evening of Ф2.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -351,7 +351,7 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
   if (!applied?.ok) {
     const why = `режим не применён: ${applied?.why ?? 'нет ответа применителя'} — проверки не было`;
     writeCheckVerdict(journal, { seq: intent.seq, verdict: CHECK_VERDICT.UNKNOWN, at: atIso(), why });
-    return { seq: intent.seq, verdict: { verdict: CHECK_VERDICT.UNKNOWN, why, failure: null, failures: [] }, stages, rollback, hits: null };
+    return { seq: intent.seq, mode, candidate, snapshot, margins, fromMs: startedMs, toMs: endedMs, verdict: { verdict: CHECK_VERDICT.UNKNOWN, why, failure: null, failures: [] }, stages, rollback, hits: null, samples: null, driverEvents: null };
   }
   const { samples, periodMs } = seams.readSamples(telemetryPath);
   const events = seams.driverEvents(startedMs, endedMs);
@@ -359,8 +359,54 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
   const hits = hitMap(samples, { periodMs });
   const why = rollback?.ok === false ? `${v.why} · ⚠️ ОТКАТ НЕ ПОДТВЕРЖДЁН: ${rollback.why}` : v.why;
   writeCheckVerdict(journal, { seq: intent.seq, verdict: v.verdict, failure: v.failure, hits: hits.map((h) => ({ id: h.id, seconds: h.seconds })), at: atIso(), why });
-  return { seq: intent.seq, verdict: v, stages, rollback, hits };
+  return { seq: intent.seq, mode, candidate, snapshot, margins, fromMs: startedMs, toMs: endedMs, verdict: v, stages, rollback, hits,
+    samples: { count: samples.length, periodMs, maxGapMs: maxGapMs(samples) }, driverEvents: events };
 }
+
+/** Write the check's report next to its evidence: `<dir>/report.md` + `<dir>/result.json`. */
+export function writeCheckReport(dir, result) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'report.md'), renderCheckReport(result));
+  writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
+  return { report: join(dir, 'report.md'), result: join(dir, 'result.json') };
+}
+
+// -------------------------------------------------------------------------------------------------
+// The check's report — runs/validate/<moment>/report.md + result.json (P102-AC5: visit map · telemetry ·
+// the driver-voice window · verdict, all four present on every verdict, UNKNOWN included)
+// -------------------------------------------------------------------------------------------------
+
+const VERDICT_WORD = { [CHECK_VERDICT.PASSED]: 'ПРОЙДЕНА', [CHECK_VERDICT.FAILED]: 'СБОЙ', [CHECK_VERDICT.UNKNOWN]: 'НЕИЗВЕСТНО' };
+
+/** Render the report of one check. Pure: every number comes from `r`, nothing is looked up. */
+export function renderCheckReport(r) {
+  const band = (i) => (Number.isInteger(i) && i >= 0 ? MODE_BANDS[i].label : 'неизвестна');
+  const hms = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 19) + 'Z' : '—');
+  const L = [];
+  L.push(`# Проверка режима ${r.mode} — ${VERDICT_WORD[r.verdict.verdict] ?? r.verdict.verdict}`, '');
+  L.push(`Окно: ${hms(r.fromMs)} … ${hms(r.toMs)} · кандидат: ${r.candidate ?? '—'} · снимок: ${r.snapshot ?? '—'} · запас по полосам: ${r.margins ? r.margins.map((m) => '+' + m).join('/') : '—'}`, '');
+  L.push('## Вердикт', '', `**${VERDICT_WORD[r.verdict.verdict] ?? r.verdict.verdict}** — ${r.verdict.why}`);
+  if (r.verdict.failure) L.push('', `Первый сбой: ${r.verdict.failure.cls} · полоса ${band(r.verdict.failure.band)} · ${hms(r.verdict.failure.atMs)} · ${r.verdict.failure.why}`);
+  if (r.rollback) L.push('', `Откат: ${r.rollback.ok ? 'подтверждён' : '⚠️ НЕ ПОДТВЕРЖДЁН — ' + (r.rollback.why ?? '')}`);
+  L.push('', '## Карта посещений', '', '| полоса | секунд | доля | посещена |', '|---|---|---|---|');
+  const visited = new Set(r.hits ? visitedBands(r.hits) : []);
+  for (const [i, h] of (r.hits ?? []).entries()) L.push(`| ${h.label} | ${h.seconds} | ${Math.round(h.share * 100)} % | ${visited.has(i) ? 'да' : '—'} |`);
+  if (!r.hits) L.push('| — | — | — | телеметрии нет |');
+  L.push('', '## Телеметрия', '', `Проб ${r.samples?.count ?? 0} · период ${r.samples?.periodMs ?? '—'} мс · наибольший разрыв ${r.samples?.maxGapMs ?? '—'} мс (порог ${PULSE_STALL_MS})`);
+  L.push('', '## Голос драйвера', '', r.driverEvents === null ? 'Канал НЕ ПРОЧИТАН — молчание не выдаётся за «чисто».'
+    : `Событий \`nvlddmkm\` в окне: ${r.driverEvents.length}${r.driverEvents.length ? ' — ' + r.driverEvents.map((e) => `${e.id} в ${hms(e.atMs)}`).join(' · ') : ''}`);
+  L.push('', '## Ступени смеси', '', '| ступень | итог |', '|---|---|');
+  for (const s of r.stages ?? []) L.push(`| ${s.name} | ${s.ok ? 'норма' : '❌ ' + (s.why ?? '')} |`);
+  if (r.benefit) {
+    L.push('', '## Выгода против стока (медианы под нагрузкой)', '', '| величина | сток | режим | разница |', '|---|---|---|---|');
+    const f1 = (x) => (x === null || x === undefined ? '—' : String(Math.round(x * 10) / 10).replace('.', ','));
+    for (const b of r.benefit) L.push(`| ${b.label} | ${f1(b.stock)} | ${f1(b.mode)} | ${b.delta === null ? '—' : (b.delta > 0 ? '+' : '') + f1(b.delta)}${b.deltaPct === null ? '' : ` (${b.deltaPct > 0 ? '+' : ''}${f1(b.deltaPct)} %)`} |`);
+  }
+  return L.join('\n') + '\n';
+}
+
+/** Largest gap between consecutive samples, ms (null when fewer than two). */
+export const maxGapMs = (samples) => (samples.length < 2 ? null : Math.max(...samples.slice(1).map((s, i) => s.ms - samples[i].ms)));
 
 // -------------------------------------------------------------------------------------------------
 // The benefit table against stock (E101-AC2): frames · watts · degrees · fan · clock, loaded medians
@@ -378,6 +424,26 @@ export const BENEFIT_ROWS = Object.freeze([
   { key: 'fan.speed', label: 'обороты, %' },
   { key: 'clocks.gr', label: 'частота под нагрузкой, МГц' },
 ]);
+
+const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
+const listAfter = (flag) => { const i = process.argv.indexOf(flag); return i === -1 ? [] : String(process.argv[i + 1] ?? '').split(',').filter(Boolean); };
+
+/**
+ * A group of graphics capture records (runs/graphics/*.json) as one side of the table: their sampler files
+ * POOLED and split by the project's load threshold; FPS = the median of the records' own medians.
+ * `power-baseline` is loaded lazily (CLI only — this module stays light for `curve --progress`).
+ */
+export async function captureGroup(files) {
+  const { summarizeSamples } = await import('./power-baseline.mjs');
+  const recs = []; const fps = [];
+  for (const f of files) {
+    const cap = JSON.parse(readFileSync(f, 'utf8'));
+    if (Number.isFinite(cap?.fps?.median)) fps.push(cap.fps.median);
+    for (const line of readFileSync(join(dirname(f), cap.sampleFile), 'utf8').split('\n')) { try { const r = JSON.parse(line); if (r) recs.push(r); } catch { /* torn tail */ } }
+  }
+  const s = summarizeSamples(recs);
+  return { loaded: s.loaded, fps: median(fps), n: s.counts.loaded };
+}
 
 /** @param {{loaded: object, fps: number|null, fpsSpreadPct?: number|null}} stock  @param mode — the same shape */
 export function benefitRows({ stock, mode }) {
@@ -542,6 +608,12 @@ export async function selfTest() {
     check('ИСПОЛНИТЕЛЬ: ИСКЛЮЧЕНИЕ В НАГРУЗКЕ — СБОЙ, А НЕ ПАДЕНИЕ ПРИБОРА; ОТКАТ СДЕЛАН', c.r.verdict.verdict === CHECK_VERDICT.FAILED && c.calls.includes('rollback'), c.r.verdict.why);
     const d = await run({ applyOk: false });
     check('ИСПОЛНИТЕЛЬ: ОТКАЗ ПРИМЕНЕНИЯ — НЕИЗВЕСТНО, НИ ОДНОЙ СТУПЕНИ, ОТКАТ СДЕЛАН', d.r.verdict.verdict === CHECK_VERDICT.UNKNOWN && !d.calls.some((x) => x.startsWith('stage:')) && d.calls.includes('rollback'), d.r.verdict.why);
+    // P102-AC5: all four parts of the report on every verdict — passed, failed, unknown
+    const parts = ['## Вердикт', '## Карта посещений', '## Телеметрия', '## Голос драйвера'];
+    const reps = [a, b, d].map((x) => renderCheckReport(x.r));
+    check('ОТЧЁТ ПРОВЕРКИ: ЧЕТЫРЕ ЧАСТИ НА КАЖДОМ ВЕРДИКТЕ, СБОЙ НАЗВАН С ПОЛОСОЙ', reps.every((t) => parts.every((p) => t.includes(p)))
+      && reps[0].startsWith('# Проверка режима optimised — ПРОЙДЕНА') && reps[1].includes('полоса 2800–2900') && reps[2].includes('НЕИЗВЕСТНО') && reps[2].includes('НЕ ПРОЧИТАН'),
+      reps.map((t) => t.split('\n')[0]).join(' | '));
     const e = await run({ rollbackThrows: true });
     check('ИСПОЛНИТЕЛЬ: УПАВШИЙ ОТКАТ НАЗВАН В ВЕРДИКТЕ', /ОТКАТ НЕ ПОДТВЕРЖДЁН/.test(readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1)?.why ?? ''), e.r.rollback?.why ?? '');
   } finally { rmSync(exDir, { recursive: true, force: true }); }
@@ -604,26 +676,41 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       console.log(`${f.replace(/\\/g, '/')} — проб ${parsed.samples.length}, ${total} с; посещены (≥ ${MIN_BAND_DWELL_S} с): ${visitedBands(map).map((i) => map[i].label).join(' · ') || 'ни одна'}`);
       console.log('  ' + map.map((p) => `${p.label}: ${p.seconds} с (${Math.round(p.share * 100)} %)`).join(' · '));
     }
+  } else if (process.argv.includes('--replay')) {
+    // --replay <capture.json> [--stock <capture.json,…>] — the post-check half (verdict · the REAL driver voice
+    // from the Windows log for the recording's window · visit map · report) over a RECORDED game capture.
+    // Sandbox journal: a replay is not a check and never reaches runs/validate/journal.jsonl or the metric.
+    const capFile = process.argv[process.argv.indexOf('--replay') + 1];
+    if (!capFile || capFile.startsWith('--')) { console.error('ОШИБКА: --replay <захват.json>'); process.exit(2); }
+    const cap = JSON.parse(readFileSync(capFile, 'utf8'));
+    const tele = join(dirname(capFile), cap.sampleFile);
+    const { samples } = parseSamples(readFileSync(tele, 'utf8'));
+    if (samples.length === 0) { console.error(`ОШИБКА: в ${tele} нет проб`); process.exit(1); }
+    const times = [samples[0].ms, samples.at(-1).ms + 1000];
+    let call = 0;
+    const box = mkdtempSync(join(tmpdir(), 'kago-replay-'));
+    const result = await runCheck({
+      journal: openValidateJournal({ dir: box }), mode: `${cap.profile ?? 'запись'} (повтор ${cap.label})`, plan: { stages: [{ kind: MIX_STAGE.GAME, label: `Q2RTX, записанный захват ${cap.label}` }] },
+      telemetryPath: tele, nowMs: () => times[Math.min(call++, 1)],
+      seams: {
+        startSampler: () => ({ stop() {} }),
+        apply: async () => ({ ok: true, why: 'повтор записи — в карту ничего не применялось' }),
+        runStage: async () => ({ ok: cap.exitCode === 0 && cap.faultFree !== false, why: cap.reason ?? `код ${cap.exitCode}`, endedAtMs: samples.at(-1).ms }),
+        rollback: async () => ({ ok: true }),
+        readSamples: (p) => parseSamples(readFileSync(p, 'utf8')),
+        driverEvents: (fromMs, toMs) => realDriverEvents(fromMs, toMs),
+      },
+    });
+    const sf = listAfter('--stock');
+    if (sf.length) result.benefit = benefitRows({ stock: await captureGroup(sf), mode: await captureGroup([capFile]) });
+    const out = writeCheckReport(box, result);
+    process.stdout.write(renderCheckReport(result));
+    console.log(`\n(повтор; журнал и отчёт — в песочнице ${out.report.replace(/\\/g, '/')}; боевой журнал проверок не тронут)`);
   } else if (process.argv.includes('--compare')) {
-    // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json);
-    // each group's sampler files are POOLED, FPS is the median of the records' own medians.
-    const { summarizeSamples } = await import('./power-baseline.mjs');
-    const listAfter = (flag) => { const i = process.argv.indexOf(flag); return i === -1 ? [] : String(process.argv[i + 1] ?? '').split(',').filter(Boolean); };
-    const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
-    const group = (files) => {
-      const recs = []; const fps = [];
-      for (const f of files) {
-        const cap = JSON.parse(readFileSync(f, 'utf8'));
-        if (Number.isFinite(cap?.fps?.median)) fps.push(cap.fps.median);
-        const tele = join(dirname(f), cap.sampleFile);
-        for (const line of readFileSync(tele, 'utf8').split('\n')) { try { const r = JSON.parse(line); if (r) recs.push(r); } catch { /* torn tail */ } }
-      }
-      const s = summarizeSamples(recs);
-      return { loaded: s.loaded, fps: median(fps), n: s.counts.loaded };
-    };
+    // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json).
     const sf = listAfter('--stock'); const mf = listAfter('--mode');
     if (!sf.length || !mf.length) { console.error('ОШИБКА: --compare --stock <захват.json,…> --mode <захват.json,…>'); process.exit(2); }
-    const stock = group(sf); const mode = group(mf);
+    const stock = await captureGroup(sf); const mode = await captureGroup(mf);
     console.log(`ВЫГОДА ПРОТИВ СТОКА — медианы под нагрузкой (проб: сток ${stock.n} · режим ${mode.n}); карта не трогается`);
     console.log('величина · сток · режим · разница');
     const f1 = (x) => (x === null ? '—' : (Math.round(x * 10) / 10).toString().replace('.', ','));
