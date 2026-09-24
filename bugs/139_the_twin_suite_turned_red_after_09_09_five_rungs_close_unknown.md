@@ -36,14 +36,28 @@ Not investigated (moratorium, epic 101). Ranked, for whoever unfreezes the twin:
 reads from the live tree (a golden stamp, a profile, a snapshot) changed on 13–14.09; (2) the KAIF 2.7 update touched a
 module the twin imports; (3) date-dependent logic.
 
-**🔎 BISECTED 2026-09-25 01:50 +03:00 (session 102) — hypotheses 1–3 REFUTED; it is CODE.**
+**✅ ROOT CAUSE OBSERVED 2026-09-25 02:00 +03:00 — the DRIVER CHANGE, through the golden stamp (hypothesis 1 was
+RIGHT; the two paragraphs below overstated the bisect and are corrected here).** A probe copy of the suite printing
+the pinned rung's record (`automation-engine/lib/_probe-twin.mjs`, removed after the run) shows:
+`"why":"НЕИЗВЕСТНО на 2145 МГц / 790 мВ — оракул не вынес вердикта"`, and in `judged.preflight`: *«эталон снят на
+драйвере 610.88 / VBIOS 98.03.58.40.8b, а карта сейчас 616.92 / 98.03.58.40.8b — эталон недействителен до
+перепроверки (R6). Карту не грузили»*. The golden-stamp preflight compares the goldens with the LIVE card's driver;
+the machine moved to 616.92 on ≤ 18.09 (`runs/shell/boot-apply.jsonl`), so every twin rung that reaches the oracle
+is UNKNOWN. The bisect ran every commit TODAY on 616.92, so it found where the twin STARTED to reach that preflight
+with the live stamp (`24b2c7d`), not when the suite turned red (the driver change). **Cure: re-capture the goldens on
+616.92** (card day, `plans/102` Ш8 order, step 2) — then re-run the suite. **Second defect, named:** an «offline»
+twin whose verdict depends on the real card's driver is a sandbox leak (the class `profile-manager.mjs` calls «код
+тайком опирается на состояние машины», `bugs/18`); frozen by epic 101, recorded.
+
+**🔎 BISECTED 2026-09-25 01:50 +03:00 (session 102) — ✏️ the heading said «hypotheses 1–3 REFUTED; it is CODE»; wrong
+about hypothesis 1, see the paragraph above.**
 `git bisect start HEAD 75c676d` · `git bisect run sh -c 'node automation-engine/lib/twin-assembly.mjs --selftest …'`
 (exit > 1 → skip) → **first bad commit `24b2c7d`** (2026-09-09 21:55, «fix(bugs/133, ярлык Optimised): ПОДРЕЗКА
 ПОРЯДКА — режим владельца снова применяется с рабочего стола») — the applier's order clamp against the worst-case
 reference. The twin drives the SAME applier (`curveWriteRefusal` / the vector builder are shared by design, R11–R13
 parity), and after the clamp its rungs close `unknown`. Next step when unfrozen: diff the twin's rung inputs at
 `24b2c7d^` vs `24b2c7d` — which refusal or clamp the twin's synthetic curve now meets. `git bisect reset` done; tree clean.
-**Narrower hypothesis (NOT observed, a 10-minute read, 01:52):** the commit's message says «ПАРИТЕТ: двойник получил тот
+**✏️ REFUTED 02:00 by the probe above — kept for the record. Narrower hypothesis (NOT observed, a 10-minute read, 01:52):** the commit's message says «ПАРИТЕТ: двойник получил тот
 же провод» (`virtual-gpu.mjs`, 6 lines) and «ничего не заявлено → R12 отказывает». The twin's pinned rung
 (`twin-assembly.mjs:1089`, 2145 MHz / 790 mV through `engine.runRung` → `vf.runStep`) declares no intent — so it
 plausibly now meets R12 on the virtual card and closes `unknown`. Check first: print the rung record's refusal at
