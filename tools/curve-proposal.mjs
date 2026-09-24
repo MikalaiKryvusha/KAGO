@@ -30,7 +30,8 @@
 // plus the anchors with their evidence. Writes nothing else: not the card, not a profile, not
 // `measured.json`. The journal is read only through its pure readers.
 //
-// Usage: node tools/curve-proposal.mjs [--write] · --selftest
+// Usage: node tools/curve-proposal.mjs [--margin <mV> | --band-margins a,b,c,d,e,f,g] [--write] · --selftest
+//   (the margin keys — epic 101 Ф1 Ш1, section 3a below)
 //
 // [NOT-TESTED] at birth — the blocks in `selfTest()` flip it.
 
@@ -201,8 +202,12 @@ export function edgeFloorMv(anchor, grid) {
   return own ? anchor.workingMv : nextStep(grid, nextStep(grid, anchor.failMv));
 }
 
-export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) {
-  if (anchors.length === 0) return { rows: ladder.map((mhz) => ({ mhz, voltageMv: stockAt(mhz), stockVoltageMv: stockAt(mhz), origin: 'stock' })), monotoneRaises: 0, failRaises: 0, trend: null };
+/**
+ * The trend model alone — the ONE place the fit, the touching shift and the extrapolation rules live.
+ * `rawAt(mhz)` is the model's voltage BEFORE the card's grid (`v`) and where it came from (`origin`);
+ * `buildRows` (the trend proposal, margin 0) and `bandedCurve` (trend + a margin per band) both read it.
+ */
+export function trendModel({ stockAt, grid, anchors }) {
   const lo = anchors[0];
   const hi = anchors.at(-1);
   const pts = anchors.map((x) => ({ x: x.mhz, y: x.stockMv - edgeFloorMv(x, grid), floorMv: edgeFloorMv(x, grid), own: x.lastStableAt === x.mhz }));
@@ -210,7 +215,7 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
   const shift = Math.max(0, ...pts.map((p) => (fit.a + fit.b * p.x) - p.y));
   const depthAt = (f) => fit.a + fit.b * f - shift;
   const edge = new Set(anchors.map((x) => x.mhz));
-  const rows = ladder.filter((m) => m <= maxMhz).map((mhz) => {
+  const rawAt = (mhz) => {
     const stock = stockAt(mhz);
     let d = depthAt(mhz);
     let origin = edge.has(mhz) ? 'edge' : 'interpolated';
@@ -220,9 +225,13 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
       d = Math.min(d, hi.stockMv - edgeFloorMv(hi, grid)); origin = 'extrapolated-up';
       v = Math.max(stock - d, edgeFloorMv(hi, grid) + EXTRAPOLATION_FLOOR_MV);
     } else v = stock - d;
-    // Rounded before the grid: the touching edge lands on its floor exactly, not one step up by 1e-12.
-    return { mhz, voltageMv: Math.min(gridUp(grid, Math.round(v * 1e6) / 1e6), stock), stockVoltageMv: stock, origin };
-  });
+    return { v, origin };
+  };
+  return { fit, shift, rawAt };
+}
+
+/** Known failures stay failures: a row is never below «credible failure + two grid steps» at or below its frequency. */
+function raiseToFailures(rows, credible, grid) {
   let failRaises = 0;
   for (const r of rows) {
     for (const f of credible) {
@@ -230,10 +239,113 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
       if (f.mhz <= r.mhz && r.voltageMv < need && need <= r.stockVoltageMv) { r.voltageMv = need; failRaises++; }
     }
   }
+  return failRaises;
+}
+
+/** Vmin does not decrease with frequency: a row below the one before it is raised to it (never above stock). */
+function raiseToMonotone(rows) {
   let run = -Infinity; let monotoneRaises = 0;
   for (const r of rows) { if (r.voltageMv < run && run <= r.stockVoltageMv) { r.voltageMv = run; monotoneRaises++; } run = Math.max(run, r.voltageMv); }
+  return monotoneRaises;
+}
+
+// Rounded before the grid: the touching edge lands on its floor exactly, not one step up by 1e-12.
+const onGridUp = (grid, v) => gridUp(grid, Math.round(v * 1e6) / 1e6);
+
+export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) {
+  if (anchors.length === 0) return { rows: ladder.map((mhz) => ({ mhz, voltageMv: stockAt(mhz), stockVoltageMv: stockAt(mhz), origin: 'stock' })), monotoneRaises: 0, failRaises: 0, trend: null };
+  const { fit, shift, rawAt } = trendModel({ stockAt, grid, anchors });
+  const rows = ladder.filter((m) => m <= maxMhz).map((mhz) => {
+    const stock = stockAt(mhz);
+    const { v, origin } = rawAt(mhz);
+    return { mhz, voltageMv: Math.min(onGridUp(grid, v), stock), stockVoltageMv: stock, origin };
+  });
+  const failRaises = raiseToFailures(rows, credible, grid);
+  const monotoneRaises = raiseToMonotone(rows);
   const margins = anchors.map((x) => ({ mhz: x.mhz, floorMv: edgeFloorMv(x, grid), own: x.lastStableAt === x.mhz, marginMv: rows.find((r) => r.mhz === x.mhz).voltageMv - edgeFloorMv(x, grid) }));
   return { rows, monotoneRaises, failRaises, trend: { a: fit.a, b: fit.b, rmsMv: fit.rms, shiftMv: shift, margins } };
+}
+
+// -------------------------------------------------------------------------------------------------
+// 3a. The curve with a MARGIN PER BAND — epic 101 Ф1 Ш1 (`plans/102`)
+// -------------------------------------------------------------------------------------------------
+//
+// ANCHOR (plans/101 Ф1): «построитель кривой получает вектор запаса по полосам». The turnaround's curve is
+// «stock − trend + M[band]» (researches/39 §4 п. 2; ЗАКАЗ.md §2): the silicon model plus a margin that the
+// whole-mode check lowers band by band (descent, Ф2) and the ratchet raises in the band of a failure.
+//
+// WHAT «ТРЕНД» MEANS HERE — `[AI]`, revisable: the TOUCHING trend of `trendModel` (the least-squares line
+// shifted to touch the most demanding edge, with the extrapolation rules of R5). So margin 0 IS experiment
+// №2's curve, every known edge floor honoured and the worst one touched; +30 (Ф2's start) stands 30 mV
+// above that. Negative margins are refused: going under the model's most demanding edge is the Ф5 probe's
+// business (a new anchor), not a margin's.
+//
+// SEVEN BANDS — researches/39 §4 п. 2, `[AI]` boundaries to be refined by the visit map. Half-open
+// [loMhz, hiMhz): a boundary frequency belongs to the band ABOVE it. The first and the last are the bands
+// heavy load does not visit (below the lowest reachable cap 2157; above 2950) — their «увеличенный запас»
+// is the extrapolation rules of `trendModel` (not deeper than the extreme edge; top ≥ top edge + 25 mV)
+// plus whatever margin the vector gives them.
+//
+// INVARIANTS (P102-AC1), each a selftest block: never decreasing with frequency · never above stock ·
+// no frequency above the card's maximum (R13) · every voltage ON the card's grid and rounded UP (never
+// below «trend + margin») · never below a credible failure + two grid steps. The raises are COUNTED and
+// returned, never silent.
+//
+// [TESTED: 2026-09-25 · functional run on the real journal and curve document (`--margin 30`, read per band) +
+// 28 selftest blocks + mutations MB1–MB3 each red on target · report testcases/reports/2026-09-25_banded-curve-builder.md]
+// Not covered: the card has never been given this curve — that is Ф2's whole-mode check.
+
+export const BANDS = Object.freeze([
+  { id: 'B1', loMhz: -Infinity, hiMhz: 2157, label: 'ниже 2157' },
+  { id: 'B2', loMhz: 2157, hiMhz: 2500, label: '2157–2500' },
+  { id: 'B3', loMhz: 2500, hiMhz: 2700, label: '2500–2700' },
+  { id: 'B4', loMhz: 2700, hiMhz: 2800, label: '2700–2800' },
+  { id: 'B5', loMhz: 2800, hiMhz: 2900, label: '2800–2900' },
+  { id: 'B6', loMhz: 2900, hiMhz: 2950, label: '2900–2950' },
+  { id: 'B7', loMhz: 2950, hiMhz: Infinity, label: 'выше 2950' },
+].map(Object.freeze));
+
+/** Index of the band a frequency belongs to — the ONE mapping the curve, the visit map and the ratchet share. */
+export function bandOf(mhz, bands = BANDS) {
+  return bands.findIndex((b) => mhz >= b.loMhz && mhz < b.hiMhz);
+}
+
+/** Bands must tile the whole frequency axis — no hole, no overlap: a frequency without a band has no margin. */
+export function bandsRefusal(bands = BANDS) {
+  if (!Array.isArray(bands) || bands.length === 0) return 'полос нет';
+  if (bands[0].loMhz !== -Infinity || bands.at(-1).hiMhz !== Infinity) return 'полосы не покрывают ось от края до края';
+  const bad = bands.findIndex((b, i) => !(b.loMhz < b.hiMhz) || (i > 0 && b.loMhz !== bands[i - 1].hiMhz));
+  return bad === -1 ? null : `полоса ${bands[bad].label}: начало ${bands[bad].loMhz} не стыкуется с концом предыдущей ${bands[bad - 1]?.hiMhz ?? '—'}`;
+}
+
+/** A margin vector is one non-negative whole number of millivolts per band — anything else is refused by name. */
+export function marginRefusal(margins, bands = BANDS) {
+  if (!Array.isArray(margins)) return 'запас не задан вектором';
+  if (margins.length !== bands.length) return `запасов ${margins.length}, полос ${bands.length}`;
+  const bad = margins.findIndex((m) => !Number.isInteger(m) || m < 0);
+  return bad === -1 ? null : `полоса ${bands[bad].label}: запас «${margins[bad]}» — нужно целое число мВ ≥ 0`;
+}
+
+export function bandedCurve({ ladder, stockAt, grid, anchors, credible = [], maxMhz, margins, bands = BANDS }) {
+  const refusal = bandsRefusal(bands) ?? marginRefusal(margins, bands);
+  if (refusal) throw new Error(`кривая с запасом по полосам не строится: ${refusal}`);
+  if (anchors.length === 0) throw new Error('кривая с запасом по полосам не строится: нет ни одного края-опоры — модели не на чем стоять');
+  const { fit, shift, rawAt } = trendModel({ stockAt, grid, anchors });
+  const rows = ladder.filter((m) => m <= maxMhz).map((mhz) => {
+    const stock = stockAt(mhz);
+    const { v, origin } = rawAt(mhz);
+    const band = bandOf(mhz, bands);
+    const marginMv = margins[band];
+    return { mhz, voltageMv: Math.min(onGridUp(grid, v + marginMv), stock), stockVoltageMv: stock, origin, band: bands[band].id, marginMv, trendMv: Math.round(v * 10) / 10 };
+  });
+  const failRaises = raiseToFailures(rows, credible, grid);
+  const monotoneRaises = raiseToMonotone(rows);
+  const perBand = bands.map((b, i) => {
+    const in_ = rows.filter((r) => r.band === b.id);
+    const depth = in_.map((r) => r.stockVoltageMv - r.voltageMv);
+    return { id: b.id, label: b.label, marginMv: margins[i], rows: in_.length, atStock: in_.filter((r) => r.voltageMv === r.stockVoltageMv).length, depthMinMv: depth.length ? Math.min(...depth) : null, depthMaxMv: depth.length ? Math.max(...depth) : null };
+  });
+  return { rows, failRaises, monotoneRaises, perBand, trend: { a: fit.a, b: fit.b, rmsMv: fit.rms, shiftMv: shift } };
 }
 
 /** The longest run of consecutive frequencies on ONE voltage — the owner's «полка», as a number. */
@@ -337,6 +449,46 @@ export function selfTest() {
   ];
   const tp = trustedPasses(recs);
   check('ПРОЖИГ СТАРОГО ОРАКУЛА НЕ СЧИТАЕТСЯ ДОКАЗАТЕЛЬСТВОМ', tp.length === 1 && tp[0].mv === 860, JSON.stringify(tp));
+
+  // ---- P102-AC1: the curve with a margin per band (epic 101 Ф1 Ш1). Mutation addressees, named BEFORE the run:
+  //   MB1 drop the monotone clamp in bandedCurve        → «ЗАПАС ПО ПОЛОСАМ: КРИВАЯ НЕ УБЫВАЕТ…»
+  //   MB2 flip the margin's sign (v − marginMv)         → «ЗАПАС ПОДНИМАЕТ…»
+  //   MB3 shift one band boundary by one ladder step    → «ГРАНИЦА ПОЛОСЫ ПРИНАДЛЕЖИТ ПОЛОСЕ ВЫШЕ»
+  const bGrid = []; for (let v = 800; v <= 1100; v += 5) bGrid.push(v);
+  const bLadder = [2000, 2150, 2157, 2300, 2490, 2500, 2600, 2695, 2700, 2795, 2800, 2895, 2900, 2945, 2950, 3000, 3090, 3100];
+  const bArgs = { ladder: bLadder, stockAt, grid: bGrid, anchors, credible, maxMhz: 3090 };
+  const model = trendModel({ stockAt, grid: bGrid, anchors });
+  const boundaries = BANDS.slice(1).map((b) => b.loMhz);
+  const holed = BANDS.map((b, i) => (i === 1 ? { ...b, loMhz: BANDS[0].hiMhz + 7 } : b));
+  check('ПОЛОСЫ ПОКРЫВАЮТ ОСЬ БЕЗ ДЫР, ДЫРА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', bandsRefusal(BANDS) === null && /не стыкуется/.test(bandsRefusal(holed) ?? ''), bandsRefusal(holed) ?? 'дыра не замечена');
+  // The expected boundaries are written HERE, literally, from their source (researches/39 §4 п. 2) — deriving them
+  // from BANDS would compare the constant with itself (mutation MB3 proved that shape blind on 2026-09-25).
+  const EXPECTED_BOUNDARIES = [2157, 2500, 2700, 2800, 2900, 2950];
+  check('ГРАНИЦА ПОЛОСЫ ПРИНАДЛЕЖИТ ПОЛОСЕ ВЫШЕ', BANDS.length === 7 && boundaries.join() === EXPECTED_BOUNDARIES.join()
+    && EXPECTED_BOUNDARIES.every((f, i) => bandOf(f) === i + 1 && bandOf(f - 1) === i) && bandOf(180) === 0 && bandOf(3090) === 6,
+    EXPECTED_BOUNDARIES.map((f) => `${f}→${BANDS[bandOf(f)]?.id} · ${f - 1}→${BANDS[bandOf(f - 1)]?.id}`).join(' | '));
+  const steps = [5, 10, 15, 20, 25, 30, 35];
+  const bc = bandedCurve({ ...bArgs, margins: steps });
+  check('СТРОКА НЕСЁТ ЗАПАС СВОЕЙ ПОЛОСЫ', bc.rows.every((r) => r.band === BANDS[bandOf(r.mhz)].id && r.marginMv === steps[bandOf(r.mhz)]), bc.rows.map((r) => `${r.mhz}:${r.band}+${r.marginMv}`).join(' '));
+  check('ЗАПАС ПОДНИМАЕТ: КАЖДАЯ СТРОКА ≥ ТРЕНД + ЗАПАС ПОЛОСЫ (ИЛИ СТОК)', bc.rows.every((r) => r.voltageMv >= Math.min(r.stockVoltageMv, model.rawAt(r.mhz).v + r.marginMv - 1e-9)),
+    bc.rows.map((r) => `${r.mhz}: ${r.voltageMv} против ${(model.rawAt(r.mhz).v + r.marginMv).toFixed(1)}`).join(' · '));
+  check('НАПРЯЖЕНИЯ — С СЕТКИ КАРТЫ', bc.rows.every((r) => bGrid.includes(r.voltageMv)));
+  check('ЗАПАС ПО ПОЛОСАМ: НЕ ВЫШЕ СТОКА', bc.rows.every((r) => r.voltageMv <= r.stockVoltageMv)
+    && bandedCurve({ ...bArgs, margins: [300, 300, 300, 300, 300, 300, 300] }).rows.every((r) => r.voltageMv === r.stockVoltageMv));
+  check('ЗАПАС ПО ПОЛОСАМ: НИ ОДНОЙ ЧАСТОТЫ ВЫШЕ МАКСИМУМА КАРТЫ', bc.rows.length === bLadder.length - 1 && bc.rows.every((r) => r.mhz <= 3090), `строк ${bc.rows.length} из ${bLadder.length}`);
+  // A falling margin vector makes the raw curve drop at 2157: the clamp must be EXERCISED here, not merely unneeded.
+  const falling = bandedCurve({ ...bArgs, margins: [60, 0, 0, 0, 0, 0, 0] });
+  check('ЗАПАС ПО ПОЛОСАМ: КРИВАЯ НЕ УБЫВАЕТ С ЧАСТОТОЙ', falling.monotoneRaises > 0 && [bc, falling].every((c) => c.rows.every((r, i) => i === 0 || r.voltageMv >= c.rows[i - 1].voltageMv || r.voltageMv === r.stockVoltageMv)),
+    `подъёмов монотонности на падающем векторе ${falling.monotoneRaises} · ${falling.rows.map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
+  check('ЗАПАС ПО ПОЛОСАМ: НЕ НИЖЕ ИЗВЕСТНОГО ОТКАЗА + ДВА ШАГА', bandedCurve({ ...bArgs, margins: [0, 0, 0, 0, 0, 0, 0] }).rows.every((r) => credible.every((f) => f.mhz > r.mhz || r.voltageMv >= Math.min(r.stockVoltageMv, nextStep(bGrid, nextStep(bGrid, f.mv)))) ));
+  const zero = bandedCurve({ ...bArgs, margins: [0, 0, 0, 0, 0, 0, 0] }).rows.map((r) => r.voltageMv).join();
+  const trendOnly = buildRows(bArgs).rows.map((r) => r.voltageMv).join();
+  check('ЗАПАС 0 — ЭТО КРИВАЯ ТРЕНДА (ЭКСПЕРИМЕНТ №2), ОДНА МОДЕЛЬ НА ДВА ПОСТРОЕНИЯ', zero === trendOnly, `запас 0: ${zero} · тренд: ${trendOnly}`);
+  const up = bandedCurve({ ...bArgs, margins: [5, 10, 15, 30, 25, 30, 35] });
+  check('ХРАПОВИК ОДНОЙ ПОЛОСЫ НЕ ОПУСКАЕТ НИ ОДНОЙ СТРОКИ И НЕ ТРОГАЕТ ПОЛОСЫ НИЖЕ', up.rows.every((r, i) => r.voltageMv >= bc.rows[i].voltageMv && (bandOf(r.mhz) >= 3 || r.voltageMv === bc.rows[i].voltageMv)));
+  let threw = null; try { bandedCurve({ ...bArgs, margins: [30, 30, 30] }); } catch (e) { threw = e.message; }
+  check('ПЛОХОЙ ВЕКТОР ЗАПАСА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', marginRefusal([30, 30, 30, 30, 30, 30, -10]) !== null && marginRefusal([30, 30, 30, 30, 30, 30, 2.5]) !== null
+    && marginRefusal([30, 30, 30, 30, 30, 30, 30]) === null && /запасов 3, полос 7/.test(threw ?? ''), threw ?? 'не отклонил');
   return results;
 }
 
@@ -348,16 +500,25 @@ const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 if (isMain) {
   const argv = process.argv.slice(2);
   if (argv.includes('--help')) {
-    console.log('node tools/curve-proposal.mjs [--write]  — кривая агента из найденных краёв; --write пишет curves/proposals/<момент>.json\nnode tools/curve-proposal.mjs --selftest — проверки без файлов и карты');
+    console.log('node tools/curve-proposal.mjs [--write]  — кривая агента из найденных краёв; --write пишет curves/proposals/<момент>.json\nnode tools/curve-proposal.mjs --margin <мВ> | --band-margins a,b,c,d,e,f,g [--write] — кривая «тренд + запас по семи полосам» (эпик 101 Ф1)\nnode tools/curve-proposal.mjs --selftest — проверки без файлов и карты');
     process.exit(0);
   }
   if (argv.includes('--selftest')) {
-    const r = selfTest();
+    let r;
+    try { r = selfTest(); } catch (e) { r = [{ n: 'САМОПРОВЕРКА УПАЛА — исключение вместо красного блока', ok: false, why: e?.stack?.split('\n').slice(0, 2).join(' ') ?? String(e) }]; }
     for (const b of r) console.log(`${b.ok ? '🟢' : '🔴'} ${b.n}${b.why ? ' — ' + b.why : ''}`);
     const red = r.filter((b) => !b.ok).length;
     console.log(`\n${r.length - red}/${r.length} зелёных`);
     process.exit(red ? 1 : 0);
   }
+  // --margin N (one margin for every band) · --band-margins a,b,c,d,e,f,g (one per band, BANDS order)
+  const argAfter = (flag) => { const i = argv.indexOf(flag); return i === -1 ? null : (argv[i + 1] ?? ''); };
+  const oneMargin = argAfter('--margin');
+  const perBandArg = argAfter('--band-margins');
+  if (oneMargin !== null && perBandArg !== null) { console.error('ОШИБКА: --margin и --band-margins вместе не задаются — выберите одно'); process.exit(2); }
+  const margins = oneMargin !== null ? BANDS.map(() => Number(oneMargin))
+    : perBandArg !== null ? perBandArg.split(',').map((s) => Number(s.trim())) : null;
+  if (margins) { const why = marginRefusal(margins); if (why) { console.error(`ОШИБКА: ${why}`); process.exit(2); } }
   const p = propose();
   console.log(`доверенных прожигов (выданная частота, с ${ORACLE_DATE}): ${p.passes.length} · отказов: ${p.fails.length} · опровергнуто физикой: ${p.refuted.length} · краёв-опор: ${p.anchors.length}`);
   console.log('\nОПОРЫ (частота · отказ · последняя стабильная · рабочая точка · сток · глубина)');
@@ -373,6 +534,18 @@ if (isMain) {
   console.log('ЗАПАС НАД ГРАНИЦАМИ КРАЁВ (* — граница = отказ + 2 шага):', p.trend.margins.map((m) => `${m.mhz}${m.own ? '' : '*'}: ${m.marginMv >= 0 ? '+' : ''}${m.marginMv}`).join(' · '));
   console.log(`ТРЕНД: глубина = ${p.trend.a.toFixed(1)} + ${p.trend.b.toFixed(4)}·f · сдвиг ${p.trend.shiftMv.toFixed(1)} мВ · разброс краёв RMS ${p.trend.rmsMv.toFixed(1)} мВ`);
   console.log('\nУГЛЫ КРИВОЙ АГЕНТА:', p.corners.map((c) => `${c.mhz}@${c.mv}`).join(' '));
+  let banded = null;
+  if (margins) {
+    const ladder = p.facts.rows.map((r) => r.mhz);
+    const stock = new Map(p.facts.rows.map((r) => [r.mhz, r.stockVoltageMv]));
+    banded = bandedCurve({ ladder, stockAt: (m) => stock.get(m), grid: p.facts.grid, anchors: p.anchors, credible: p.credible, maxMhz: p.facts.card.maxGraphicsMhz ?? Math.max(...ladder), margins });
+    banded.corners = cornersFromRows(banded.rows, p.facts.grid);
+    console.log('\nКРИВАЯ «ТРЕНД + ЗАПАС ПО ПОЛОСАМ» (запас — над касающимся трендом; 0 = эксперимент №2)');
+    console.log('полоса · запас, мВ · частот · из них на стоке · глубина под стоком, мВ');
+    for (const b of banded.perBand) console.log(`${b.label} · +${b.marginMv} · ${b.rows} · ${b.atStock} · ${b.depthMinMv ?? '—'}…${b.depthMaxMv ?? '—'}`);
+    console.log(`подъёмы: к известным отказам ${banded.failRaises} · монотонность ${banded.monotoneRaises}`);
+    console.log('УГЛЫ КРИВОЙ С ЗАПАСОМ:', banded.corners.map((c) => `${c.mhz}@${c.mv}`).join(' '));
+  }
   if (argv.includes('--write')) {
     const now = new Date(); const off = -now.getTimezoneOffset();
     const local = new Date(now.getTime() + off * 60000).toISOString().slice(0, 19);
@@ -387,9 +560,10 @@ if (isMain) {
         'R4 GOAL «КРИТЕРИЙ ПРИЁМКИ» §2: рабочая точка = последняя стабильная + шаг сетки', PROPOSAL_R5,
         'R6 кривая не убывает с частотой, не выше стока и 3090 МГц'],
       anchors: p.anchors, refuted: p.refuted.map((f) => ({ mhz: f.mhz, mv: f.mv, kind: f.kind, seq: f.seq, refutedBy: f.refutedBy })),
-      method: PROPOSAL_METHOD,
+      method: banded ? `${PROPOSAL_METHOD}; поверх — запас по полосам (эпик 101 Ф1): ${banded.perBand.map((b) => `${b.label} +${b.marginMv}`).join(' · ')}` : PROPOSAL_METHOD,
       trend: p.trend,
-      corners: p.corners, frequencies: p.rows,
+      ...(banded ? { bands: BANDS.map((b) => ({ id: b.id, label: b.label, loMhz: Number.isFinite(b.loMhz) ? b.loMhz : null, hiMhz: Number.isFinite(b.hiMhz) ? b.hiMhz : null })), margins, perBand: banded.perBand } : {}),
+      corners: banded ? banded.corners : p.corners, frequencies: banded ? banded.rows : p.rows,
     }, null, 1) + '\n');
     console.log(`\nзаписано: ${file.replace(/\\/g, '/')}`);
   }
