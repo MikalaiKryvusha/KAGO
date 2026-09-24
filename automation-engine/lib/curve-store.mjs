@@ -50,7 +50,7 @@ import path from 'node:path';
 
 import { CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ, CURVE_GRAPHICS_POINT_COUNT } from '../config.mjs';
 import { CURVES_DIR, writeJsonAtomic, loadGrid, localIso, buildGrids, writeGrids, validateGrid, probeGpuInfo, factoryBaseFrom } from './card-grids.mjs';
-import { openValidateJournal, modesValidated, renderValidatedLine } from './mode-validate.mjs';
+import { openValidateJournal, modesValidated, renderValidatedLine, lastBootLine } from './mode-validate.mjs';
 import { readJournal } from './sweep-journal.mjs';
 
 export { CURVES_DIR };
@@ -2099,6 +2099,9 @@ function cmdProgress({ json = false } = {}) {
   const validated = modesValidated(checkLines, { profiles, modes: ACCEPTANCE_MODES });
   if (json) { console.log(JSON.stringify({ validated, ...p, brokenProfileFiles: broken }, null, 2)); return 0; }
   console.log(renderValidatedLine(validated));
+  // EXP-0290: what the card got at the last logon — a file, the card is not read
+  const bootLog = path.join(CURVES_DIR, '..', 'runs', 'shell', 'boot-apply.jsonl');
+  console.log(lastBootLine(existsSync(bootLog) ? readFileSync(bootLog, 'utf8') : ''));
   console.log(`справочно — ${renderDeliveryLine(p)}`);
   if (broken.length > 0) console.log(`⚠️ профили не прочитались и отгруженными не считаются: ${broken.join(', ')}`);
   return 0;

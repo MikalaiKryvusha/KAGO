@@ -135,7 +135,7 @@ none-cheap: the byte half is closed by form (`.gitattributes curves/** -text`, `
 class: claim-before-evidence
 **Context / did / result:** STATUS said «Карта: в `Optimised` — эксперимент №1 … С 18.09 карта не перечитывалась» for a week. A read-only `curve --verify` in session 102 printed driver **616.92** against the 610.88 stamped on every curve and profile; `runs/shell/boot-apply.jsonl` — a FILE, no card needed — had `degraded-to-factory` at 18.09 23:01 and 19.09 22:39: the stamp gate (R6) refused the mode at every logon, zero writes, and nobody told the owner. The line «по последней записи» was true of the write and false of the machine.
 **Lesson:** **a machine-state line in STATUS decays the moment the machine changes without us; the cheapest observation of the owner's mode is the tail of `runs/shell/boot-apply.jsonl` — read it at session entry before repeating the line.** A gate that refuses correctly and silently is half a guard: the refusal is right, the silence is the defect (`plans/100`).
-none-cheap: the product fix — the owner sees a refused mode — is `plans/100`, queued after Ф3 (moratorium); until then the habit: `tail -3 runs/shell/boot-apply.jsonl` at `/resume`.
+mechanized: `npm run curve -- --progress` prints «⚠️ ПРИ ВХОДЕ <момент>: «режим» ОТВЕРГНУТ …» from `runs/shell/boot-apply.jsonl` (2026-09-25, `mode-validate.lastBootLine`, a selftest block red on «first record instead of last»). The OWNER-facing fix — he sees a refused mode himself — is still `plans/100`, after Ф3.
 **Trigger:** writing or repeating any «карта в режиме X» · a driver/VBIOS mismatch anywhere · `degraded-to-factory` in the boot log.
 → link: `interviews/interview_031` · `STATUS.md` → Состояние машины · `plans/100`
 

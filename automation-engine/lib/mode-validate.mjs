@@ -587,6 +587,21 @@ export function modesValidated(records, { profiles = [], modes }) {
   return { passed, total: modes.length, last, open: orphanIntents(checks).length };
 }
 
+/**
+ * WHAT THE CARD GOT AT THE LAST LOGON — from `runs/shell/boot-apply.jsonl` (a file; the card is not read). EXP-0290:
+ * `Optimised` was refused at every logon for a week after a driver update and no line anywhere said so; this line
+ * turns «tail the boot log at /resume» from a habit into something `--progress` prints.
+ */
+export function lastBootLine(text) {
+  const recs = String(text ?? '').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.verdict && r.verdict !== 'disks-disarmed');
+  const last = recs.at(-1);
+  if (!last) return 'ПРИ ВХОДЕ: записей восстановления нет';
+  const when = String(last.at ?? '').replace('T', ' ').slice(0, 16);
+  if (last.verdict === 'applied') return `ПРИ ВХОДЕ ${when}: «${last.remembered}» применён`;
+  if (last.verdict === 'degraded-to-factory') return `⚠️ ПРИ ВХОДЕ ${when}: «${last.remembered}» ОТВЕРГНУТ, стоит заводское — ${String(last.detail ?? '').replace(/^.*?заводское стоит:\s*/, '').slice(0, 140)}`;
+  return `ПРИ ВХОДЕ ${when}: ${last.verdict}${last.remembered ? ` («${last.remembered}»)` : ''}`;
+}
+
 /** The metric line — first line of `npm run curve -- --progress`. */
 export function renderValidatedLine(v) {
   const margins = Object.entries(v.last).filter(([, x]) => Array.isArray(x.margins))
@@ -787,6 +802,16 @@ export async function selfTest() {
   const row = (k) => bt.find((r) => r.key === k);
   check('ТАБЛИЦА ВЫГОДЫ: РАЗНИЦА = РЕЖИМ − СТОК, ПРОПУСК — ПРОЧЕРК, А НЕ НОЛЬ', Math.abs(row('power.draw.instant').delta + 49.9) < 1e-9 && Math.abs(row('temperature.gpu').delta + 8) < 1e-9
     && row('fps').delta > 0 && row('clocks.gr').mode === null && row('clocks.gr').delta === null, bt.map((r) => `${r.key}: ${r.delta}`).join(' · '));
+
+  // EXP-0290: the logon line
+  const boot = [
+    '{"at":"2026-09-15T08:49:21+03:00","verdict":"applied","remembered":"optimised"}',
+    '{"at":"2026-09-19T22:39:22+03:00","verdict":"disks-disarmed","remembered":null}',
+    '{"at":"2026-09-19T22:39:23+03:00","verdict":"degraded-to-factory","remembered":"optimised","detail":"запомненный профиль отвергнут теми же воротами, записей ноль, заводское стоит: stamp.driver — профиль доказан на 610.88, карта сейчас 616.92"}',
+    '{"torn',
+  ].join('\n');
+  check('СТРОКА ВХОДА: ПОСЛЕДНИЙ ОТКАЗ ВИДЕН ПЕРВОЙ КОМАНДОЙ, СЛУЖЕБНЫЕ СТРОКИ И РВАНЫЙ ХВОСТ НЕ МЕШАЮТ', /^⚠️ ПРИ ВХОДЕ 2026-09-19 22:39: «optimised» ОТВЕРГНУТ/.test(lastBootLine(boot)) && /stamp\.driver/.test(lastBootLine(boot))
+    && /применён$/.test(lastBootLine(boot.split('\n')[0])) && lastBootLine('') === 'ПРИ ВХОДЕ: записей восстановления нет', lastBootLine(boot));
 
   // P102-AC6: the metric
   const MODES =['max-performance', 'optimised', 'silent-cold', 'stock-default'];
