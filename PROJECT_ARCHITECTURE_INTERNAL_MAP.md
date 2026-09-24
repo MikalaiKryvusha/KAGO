@@ -161,6 +161,9 @@ shortcut.
 > 🆕 **AMENDED 2026-08-23 ~15:3x +03:00 BY THE OWNER, AND THE AMENDMENT SPLITS THE CASE IN TWO.**
 > His words: *«пункт Exit в контекстном меню KAGO должен сбрасывать карту до завода, и закрывать
 > трей-приложение KAGO»*. So the tray gains ONE state-changing action, and only one.
+> ⚠️ **NOT BUILT as of 2026-09-25** (`automation-engine/tray.ps1:8` «no menu, no buttons, no click actions»;
+> `lib/tray-autostart.mjs:205` «the Exit item … is not built yet») — this section is the DESIGN. And the task it
+> would call, `\KAGO\apply-factory`, does not zero the V/F curve today (`bugs/140`).
 >
 > | how the tray ends | resets the card? | why |
 > |---|---|---|
