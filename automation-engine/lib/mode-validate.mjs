@@ -431,7 +431,9 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
       try {
         const card = await L.probeCard();
         const curve = await L.resolveProfileCurve(profile);
-        cb = curve ? L.nvapiCurveBackend() : null;
+        // ALWAYS a curve backend: for the factory profile `apply()` zeroes the curve only when handed one — the
+        // CLI hands none (bugs/140), and a stock check on a card still carrying offsets would not be a stock check.
+        cb = L.nvapiCurveBackend();
         applied = await L.apply(L.nvidiaSmiBackend(), profile, { card, curveBackend: cb, curve, consent });
         return { ok: true, why: (applied.steps ?? []).join(' · ') };
       } catch (e) {
@@ -762,6 +764,10 @@ export async function selfTest() {
       && log.filter((x) => x === 'timedemo runs=2').length === 2 && log.includes('stress transient A1 20s') && ['L3', 'L2', 'L1', 'L0'].every((l) => log.includes(`stress level ${l} 5s`)) && log.at(-1) === 'sampler killed',
       log.join(' | '));
     const throwing = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, apply: async () => { throw new Error('отказ до записи: stamp.driver'); } } });
+    const factorySeams = await makeCardSeams({ profile: { settings: { curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null } }, totalS: 10,
+      lib: { ...fakeLib, resolveProfileCurve: async () => null, apply: async (be, p, o) => { log.push(`factory apply backend=${Boolean(o.curveBackend)}`); return { steps: [] }; } } });
+    await factorySeams.apply();
+    check('ШОВ ПРИМЕНЕНИЯ ДАЁТ БЭКЕНД КРИВОЙ И ЗАВОДСКОМУ ПРОФИЛЮ — ИНАЧЕ apply() НЕ ОБНУЛИТ КРИВУЮ (bugs/140)', log.includes('factory apply backend=true'), log.filter((x) => x.startsWith('factory')).join(' | '));
     const ap2 = await throwing.apply();
     check('НАСТОЯЩИЙ ШОВ ПРИМЕНЕНИЯ: ИСКЛЮЧЕНИЕ ПРИМЕНИТЕЛЯ → {ok:false} С ПРИЧИНОЙ, А НЕ ПАДЕНИЕ', ap2.ok === false && /stamp\.driver/.test(ap2.why), ap2.why);
     const dead = await run({ samplerDead: true });
