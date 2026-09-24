@@ -121,6 +121,13 @@
 
 ## Entries
 
+### EXP-0287 · 2026-09-25 · ❌→✅ · #audit #method #reachability #edge-search #scope #s1
+class: owner-decision-not-applied
+**Context / did / result:** three audits (21.08 ×2, 28.08) prescribed «product, not scaffolding» and re-ranked work INSIDE the per-frequency edge search; four weeks later edges 11 → 5 of 389, 19 machine deaths, 5.4 h of real burn in ~100 sessions. The fourth audit counted the method itself: every edge costs a reboot, the working band needs ~60 of them — unreachable by arithmetic; meanwhile 14 known edges fit one line (RMS 4.9 mV), and the owner's own 10.08 design (whole-curve test + ratchet) was recorded in canon and never executed.
+**Lesson:** **before re-ranking a backlog, check that the METHOD can reach the acceptance number at all — count its price per unit (here: one reboot per edge) against the target. A method that manufactures incidents turns every moratorium into a list of "blockers of the next run".** And re-read the owner's EARLIEST design: here it was the industry method, overwritten by the agents' own elaboration.
+**Trigger:** a third report of the same «too slow» · a metric that has not moved for a week · any plan whose unit of progress costs a crash.
+→ link: `reports/KAIF_AUDIT/2026-09-25_audit_04_change_the_method.md` · `interviews/interview_030…` · EXP-0161
+
 ### EXP-0286 · 2026-09-18 · ❌→✅ · #a-judges-reading-is-a-claim-too #public-correction #open-the-lines #s2
 class: claim-before-evidence
 **Context / did / result:** correcting ticket 19 publicly (origin #74), I wrote three corrections into the ticket, the report, STATUS and public `correction:` comments; the first two each copied a judge's conclusion without re-running it myself, the third I re-ran first. №1 copied pass 2: «none of the four `GOAL.md` misses is an owner decision» — false: lines 9–10 are the owner's Q2 = B decision in capitals. №2 copied pass 3: «so the risk case WAS observed, one hidden prior answer» — also false: the same printed command still lists that decision at `interview_017…:52` (the option he chose) and `GOAL.md:12`; only a capitalized COPY was missed. №1's closing sentence («plausible … not observed») had been right. №3, re-run by me in both locales before writing, says exactly what was observed. I also told the owner in chat that the defect was «realer» — retracted in chat.
