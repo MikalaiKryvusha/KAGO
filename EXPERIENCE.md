@@ -123,6 +123,14 @@
 
 ## Entries
 
+### EXP-0291 · 2026-09-25 · ❌→✅ · #bisect #good-end #autocrlf #side-effects #root-cause #s2
+class: claim-before-evidence
+**Context / did / result:** a red twin suite; I ran `git bisect` between `75c676d` («green» — taken from the 09.09 battery record, NOT re-run) and HEAD, got «first bad commit `24b2c7d`» and wrote «hypotheses refuted, it is CODE» plus a narrower theory on top. A probe then printed the real cause — the goldens' driver stamp (610.88) against the live card (616.92) — and the independent judge showed the bisect proved nothing: `75c676d` is red TODAY with the same lines, and `24b2c7d` is its only child. The bisect also rewrote ~227 files with CRLF (`autocrlf=true`): the prayer guard went red and a battle snapshot's recorded source hash broke. Two corrections of my own text in one hour.
+**Lesson:** **a bisect's «good» end must be re-run on TODAY's machine before the run — a good end taken from a record measures yesterday's world, and every commit is judged against today's (driver, data, files). And in this repo a bisect is not side-effect-free: check `npm run check` and the curves' bytes after `git bisect reset`, not only `git status`.** When a suite reddens without a code change, print the failing record first (one probe) — it names the cause cheaper than a bisect.
+none-cheap: the byte half is closed by form (`.gitattributes curves/** -text`, `tools/prayer.mjs` EOL-insensitive); the good-end half is a habit — run the suite at the good end first.
+**Trigger:** reaching for `git bisect` · a suite red «since some date» · any claim «it is code, not state».
+→ link: `bugs/139` · `30a35b7` · `8dacf8d` · EXP-0290
+
 ### EXP-0290 · 2026-09-25 · ❌→✅ · #machine-state #driver-update #stamp #silent-refusal #status-decays #s1
 class: claim-before-evidence
 **Context / did / result:** STATUS said «Карта: в `Optimised` — эксперимент №1 … С 18.09 карта не перечитывалась» for a week. A read-only `curve --verify` in session 102 printed driver **616.92** against the 610.88 stamped on every curve and profile; `runs/shell/boot-apply.jsonl` — a FILE, no card needed — had `degraded-to-factory` at 18.09 23:01 and 19.09 22:39: the stamp gate (R6) refused the mode at every logon, zero writes, and nobody told the owner. The line «по последней записи» was true of the write and false of the machine.
