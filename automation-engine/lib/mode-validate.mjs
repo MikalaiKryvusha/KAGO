@@ -28,8 +28,9 @@
 //   MV8 the candidate is born qualified                      → «КАНДИДАТ — ЧЕРНОВИК, ПРИНЯТЫЙ ФОРМАТОМ ПРОФИЛЯ…»
 //   MV9 the real apply seam drops the draft consent           → «НАСТОЯЩИЕ ШВЫ (НА ПОДДЕЛКЕ БИБЛИОТЕКИ)…»
 //   MV10 the real rollback forgets the applied clock lock     → the same block
+//   MV11 the card is touched although the sampler never came up → «ИСПОЛНИТЕЛЬ: СЭМПЛЕР НЕ ПОДНЯЛСЯ…»
 //
-// [NOT-TESTED] on the card — hygiene (37 blocks, MV1–MV10 each red on target, 2026-09-25) and functional runs on
+// [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
 // the metric line read live from `npm run curve -- --progress` and `--plan` read live; the journal, the
 // verdict and the ratchet have never met a real check — that is the smoke of Ш8 and the evening of Ф2.
@@ -332,12 +333,16 @@ export function realDriverEvents(fromMs, toMs, queryFn = queryFaults) {
 export async function runCheck({ journal, mode, candidate = null, snapshot = null, margins = null, plan, telemetryPath, seams, nowMs = () => Date.now(), atIso = () => new Date().toISOString() }) {
   const intent = writeCheckIntent(journal, { mode, candidate, snapshot, margins, telemetryPath, at: atIso() });
   const startedMs = nowMs();
-  const sampler = seams.startSampler(telemetryPath);
+  const sampler = await seams.startSampler(telemetryPath);
   const stages = [];
   let applied = null;
   let rollback = null;
+  let attempted = false;
   try {
-    applied = await seams.apply();
+    // The sampler is the death's only witness: no header within its window → the card is NOT touched.
+    const ready = seams.waitSampler ? await seams.waitSampler(telemetryPath) : true;
+    if (!ready) applied = { ok: false, why: 'сэмплер не поднялся — карта не тронута' };
+    else { attempted = true; applied = await seams.apply(); }
     if (applied?.ok) {
       for (const stage of plan.stages) {
         let r;
@@ -347,7 +352,7 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
       }
     }
   } finally {
-    try { rollback = await seams.rollback(); } catch (e) { rollback = { ok: false, why: `откат бросил: ${e?.message ?? e}` }; }
+    if (attempted) { try { rollback = await seams.rollback(); } catch (e) { rollback = { ok: false, why: `откат бросил: ${e?.message ?? e}` }; } }
     try { sampler?.stop?.(); } catch { /* the sampler's file is already durable line by line */ }
   }
   const endedMs = nowMs();
@@ -691,6 +696,7 @@ export async function selfTest() {
       const calls = [];
       const seams = {
         startSampler: () => { calls.push(`sampler@${linesNow()}`); return { stop: () => calls.push('stop') }; },
+        waitSampler: async () => opts.samplerDead !== true,
         apply: async () => { calls.push(`apply@${linesNow()}`); return opts.applyOk === false ? { ok: false, why: 'штамп профиля не совпал (R6)' } : { ok: true }; },
         runStage: async (s) => { calls.push(`stage:${s.kind}`); if (s.kind === opts.throwAt) throw new Error('нагрузка упала'); return { ok: s.kind !== opts.failAt, why: 'код 3', endedAtMs: 10000 }; },
         rollback: async () => { calls.push('rollback'); if (opts.rollbackThrows) throw new Error('нет ответа'); return { ok: true }; },
@@ -743,6 +749,9 @@ export async function selfTest() {
     const throwing = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, apply: async () => { throw new Error('отказ до записи: stamp.driver'); } } });
     const ap2 = await throwing.apply();
     check('НАСТОЯЩИЙ ШОВ ПРИМЕНЕНИЯ: ИСКЛЮЧЕНИЕ ПРИМЕНИТЕЛЯ → {ok:false} С ПРИЧИНОЙ, А НЕ ПАДЕНИЕ', ap2.ok === false && /stamp\.driver/.test(ap2.why), ap2.why);
+    const dead = await run({ samplerDead: true });
+    check('ИСПОЛНИТЕЛЬ: СЭМПЛЕР НЕ ПОДНЯЛСЯ — КАРТУ НЕ ТРОГАЕМ: НИ ПРИМЕНЕНИЯ, НИ ОТКАТА, НЕИЗВЕСТНО', dead.r.verdict.verdict === CHECK_VERDICT.UNKNOWN
+      && !dead.calls.some((x) => x.startsWith('apply') || x === 'rollback' || x.startsWith('stage:')), `${dead.r.verdict.why} · ${dead.calls.join(' ')}`);
     const e = await run({ rollbackThrows: true });
     check('ИСПОЛНИТЕЛЬ: УПАВШИЙ ОТКАТ НАЗВАН В ВЕРДИКТЕ', /ОТКАТ НЕ ПОДТВЕРЖДЁН/.test(readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1)?.why ?? ''), e.r.rollback?.why ?? '');
   } finally { rmSync(exDir, { recursive: true, force: true }); }
@@ -805,6 +814,42 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       console.log(`${f.replace(/\\/g, '/')} — проб ${parsed.samples.length}, ${total} с; посещены (≥ ${MIN_BAND_DWELL_S} с): ${visitedBands(map).map((i) => map[i].label).join(' · ') || 'ни одна'}`);
       console.log('  ' + map.map((p) => `${p.label}: ${p.seconds} с (${Math.round(p.share * 100)} %)`).join(' · '));
     }
+  } else if (process.argv.includes('--mode')) {
+    // THE CHECK. npm run validate -- --mode <mode> --candidate <profile.json> [--minutes N] [--dry-run]
+    // Order (plans/102 «Схема прибора»): an unclosed intent in the check journal is closed FIRST as a death,
+    // and the launch stops there; else intent → sampler → apply → mix → rollback → verdict → report.
+    const arg = (f) => { const i = process.argv.indexOf(f); return i === -1 ? null : process.argv[i + 1]; };
+    const mode = arg('--mode'); const candFile = arg('--candidate'); const dry = process.argv.includes('--dry-run');
+    const minutesArg = arg('--minutes');
+    if (!mode || !candFile) { console.error('ОШИБКА: --mode <режим> --candidate <profiles/…json> [--minutes N] [--dry-run]'); process.exit(2); }
+    const profile = JSON.parse(readFileSync(candFile, 'utf8'));
+    if (profile.mode !== mode) { console.error(`ОТКАЗ: кандидат «${profile.name}» — режима «${profile.mode}», а заказан «${mode}»`); process.exit(2); }
+    let plan; try { plan = planMix({ minutes: minutesArg === null ? null : Number(minutesArg) }); } catch (e) { console.error(`ОШИБКА: ${e.message}`); process.exit(2); }
+    const journal = openValidateJournal();
+    const deaths = deathVerdicts(readJournal(journal).records);
+    if (deaths.length) {
+      for (const d of deaths) {
+        console.log(`🔴 НЕЗАКРЫТОЕ НАМЕРЕНИЕ seq ${d.seq} (${d.mode}) — это СМЕРТЬ машины во время проверки: ${d.failure.why}; полоса ${d.failure.band === null ? 'неизвестна' : MODE_BANDS[d.failure.band].label}`);
+        if (!dry) writeCheckVerdict(journal, { seq: d.seq, verdict: d.verdict, failure: d.failure, at: new Date().toISOString(), why: `закрыто при следующем запуске: ${d.failure.why}` });
+      }
+      console.log(dry ? '(сухой прогон: журнал не тронут)' : 'Намерения закрыты. Храповик — в отчёте запуска; новую проверку начинать ПОСЛЕ разбора.');
+      process.exit(dry ? 0 : 1);
+    }
+    // The owner's local clock, never UTC (EXP-0012) — the same form curve-proposal gives its files.
+    const now = new Date(); const moment = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace(/:/g, '-');
+    const dir = join(VALIDATE_DIR, moment);
+    const telemetryPath = join(dir, 'mon.jsonl');
+    console.log(`ПРОВЕРКА РЕЖИМА ${mode} · кандидат ${profile.name} · снимок ${profile.settings?.curveSnapshot ?? '—'} · штамп ${profile.stamp?.driver ?? '—'} · ${Math.round(plan.totalS / 6) / 10} мин`);
+    for (const s of plan.stages) console.log(`  · ${s.label} — ${s.kind === MIX_STAGE.GAME ? `проходов демо: ${Math.max(1, Math.ceil(s.seconds / DEMO_PASS_S))}` : s.kind === MIX_STAGE.TRANSITIONS ? `${s.cycles} × (${s.onS}/${s.offS} с), уровень ${TRANSITIONS_LEVEL}` : `${s.seconds} с`}`);
+    console.log(`  телеметрия → ${telemetryPath.replace(/\\/g, '/')} · журнал → ${journal.path.replace(/\\/g, '/')}`);
+    if (dry) { console.log('СУХОЙ ПРОГОН: карта, журнал и файлы не тронуты. (P102-AC4 на живой карте добавляет чтение сдвигов до и после — карточный день.)'); process.exit(0); }
+    mkdirSync(dir, { recursive: true });
+    const seams = await makeCardSeams({ profile, totalS: plan.totalS });
+    const result = await runCheck({ journal, mode, candidate: profile.name, snapshot: profile.settings?.curveSnapshot ?? null, plan, telemetryPath, seams, atIso: () => new Date().toISOString() });
+    const out = writeCheckReport(dir, result);
+    console.log(renderCheckReport(result));
+    console.log(`отчёт: ${out.report.replace(/\\/g, '/')}`);
+    process.exit(result.verdict.verdict === CHECK_VERDICT.PASSED ? 0 : 1);
   } else if (process.argv.includes('--replay')) {
     // --replay <capture.json> [--stock <capture.json,…>] — the post-check half (verdict · the REAL driver voice
     // from the Windows log for the recording's window · visit map · report) over a RECORDED game capture.
