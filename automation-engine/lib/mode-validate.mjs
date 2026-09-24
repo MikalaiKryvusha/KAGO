@@ -363,6 +363,33 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
 }
 
 // -------------------------------------------------------------------------------------------------
+// The benefit table against stock (E101-AC2): frames · watts · degrees · fan · clock, loaded medians
+// -------------------------------------------------------------------------------------------------
+//
+// «Loaded» is the project's one threshold (`config.LOAD_PHASE_UTILIZATION_PCT`, via
+// `power-baseline.summarizeSamples`, the same split the graphics capture prints) — no second number here.
+// A difference thinner than the instrument's own spread is not an effect (the owner, 2026-08-10): the FPS
+// row therefore carries the spread of both sides when the caller has it.
+
+export const BENEFIT_ROWS = Object.freeze([
+  { key: 'fps', label: 'кадры, FPS' },
+  { key: 'power.draw.instant', label: 'мощность, Вт' },
+  { key: 'temperature.gpu', label: 'температура, °C' },
+  { key: 'fan.speed', label: 'обороты, %' },
+  { key: 'clocks.gr', label: 'частота под нагрузкой, МГц' },
+]);
+
+/** @param {{loaded: object, fps: number|null, fpsSpreadPct?: number|null}} stock  @param mode — the same shape */
+export function benefitRows({ stock, mode }) {
+  const val = (side, key) => (key === 'fps' ? side.fps ?? null : side.loaded?.[key]?.median ?? null);
+  return BENEFIT_ROWS.map(({ key, label }) => {
+    const s = val(stock, key); const m = val(mode, key);
+    const delta = s !== null && m !== null ? m - s : null;
+    return { key, label, stock: s, mode: m, delta, deltaPct: delta !== null && s ? (delta / s) * 100 : null };
+  });
+}
+
+// -------------------------------------------------------------------------------------------------
 // Ш6 — the acceptance metric «режимов проверено Y/4» (ЗАКАЗ.md §2, MASTER_PLAN «Метрика приёмки»)
 // -------------------------------------------------------------------------------------------------
 
@@ -530,6 +557,13 @@ export async function selfTest() {
   check('КАНДИДАТ — ЧЕРНОВИК, ПРИНЯТЫЙ ФОРМАТОМ ПРОФИЛЯ; БОЕВОЙ ПРОФИЛЬ НЕ ТРОНУТ', candRefusals.length === 0 && cand.qualified === false && cand.settings.curveSnapshot === '2026-09-25T02-00-00'
     && cand.settings.powerLimitWatts === 250 && base.settings.curveSnapshot === '2026-09-14T22-54-29' && cand.stamp.driver === '616.92', candRefusals.map((r) => `${r.field}: ${r.why}`).join(' · ').slice(0, 300) || cand.draft.candidate);
 
+  // E101-AC2: the benefit table's arithmetic
+  const bt = benefitRows({ stock: { fps: 54.75, loaded: { 'power.draw.instant': { median: 300.1 }, 'temperature.gpu': { median: 81.5 }, 'fan.speed': { median: 86 }, 'clocks.gr': { median: 2729 } } },
+    mode: { fps: 55.49, loaded: { 'power.draw.instant': { median: 250.2 }, 'temperature.gpu': { median: 73.5 }, 'fan.speed': { median: 67 } } } });
+  const row = (k) => bt.find((r) => r.key === k);
+  check('ТАБЛИЦА ВЫГОДЫ: РАЗНИЦА = РЕЖИМ − СТОК, ПРОПУСК — ПРОЧЕРК, А НЕ НОЛЬ', Math.abs(row('power.draw.instant').delta + 49.9) < 1e-9 && Math.abs(row('temperature.gpu').delta + 8) < 1e-9
+    && row('fps').delta > 0 && row('clocks.gr').mode === null && row('clocks.gr').delta === null, bt.map((r) => `${r.key}: ${r.delta}`).join(' · '));
+
   // P102-AC6: the metric
   const MODES =['max-performance', 'optimised', 'silent-cold', 'stock-default'];
   const I = (seq, mode, snapshot, margins = null) => ({ state: LINE.INTENT, kind: CHECK_KIND, seq, mode, snapshot, margins });
@@ -570,6 +604,30 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       console.log(`${f.replace(/\\/g, '/')} — проб ${parsed.samples.length}, ${total} с; посещены (≥ ${MIN_BAND_DWELL_S} с): ${visitedBands(map).map((i) => map[i].label).join(' · ') || 'ни одна'}`);
       console.log('  ' + map.map((p) => `${p.label}: ${p.seconds} с (${Math.round(p.share * 100)} %)`).join(' · '));
     }
+  } else if (process.argv.includes('--compare')) {
+    // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json);
+    // each group's sampler files are POOLED, FPS is the median of the records' own medians.
+    const { summarizeSamples } = await import('./power-baseline.mjs');
+    const listAfter = (flag) => { const i = process.argv.indexOf(flag); return i === -1 ? [] : String(process.argv[i + 1] ?? '').split(',').filter(Boolean); };
+    const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
+    const group = (files) => {
+      const recs = []; const fps = [];
+      for (const f of files) {
+        const cap = JSON.parse(readFileSync(f, 'utf8'));
+        if (Number.isFinite(cap?.fps?.median)) fps.push(cap.fps.median);
+        const tele = join(dirname(f), cap.sampleFile);
+        for (const line of readFileSync(tele, 'utf8').split('\n')) { try { const r = JSON.parse(line); if (r) recs.push(r); } catch { /* torn tail */ } }
+      }
+      const s = summarizeSamples(recs);
+      return { loaded: s.loaded, fps: median(fps), n: s.counts.loaded };
+    };
+    const sf = listAfter('--stock'); const mf = listAfter('--mode');
+    if (!sf.length || !mf.length) { console.error('ОШИБКА: --compare --stock <захват.json,…> --mode <захват.json,…>'); process.exit(2); }
+    const stock = group(sf); const mode = group(mf);
+    console.log(`ВЫГОДА ПРОТИВ СТОКА — медианы под нагрузкой (проб: сток ${stock.n} · режим ${mode.n}); карта не трогается`);
+    console.log('величина · сток · режим · разница');
+    const f1 = (x) => (x === null ? '—' : (Math.round(x * 10) / 10).toString().replace('.', ','));
+    for (const r of benefitRows({ stock, mode })) console.log(`${r.label} · ${f1(r.stock)} · ${f1(r.mode)} · ${r.delta === null ? '—' : (r.delta > 0 ? '+' : '') + f1(r.delta)}${r.deltaPct === null ? '' : ` (${r.deltaPct > 0 ? '+' : ''}${f1(r.deltaPct)} %)`}`);
   } else if (process.argv.includes('--plan')) {
     const i = process.argv.indexOf('--minutes');
     const minutes = i === -1 ? null : Number(process.argv[i + 1]);
