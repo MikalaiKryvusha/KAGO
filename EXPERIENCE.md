@@ -97,6 +97,8 @@
 >
 > <!-- class-ok: agent-decision-worn-as-owner-word — price re-checked 2026-09-18 after three strikes in one evening (EXP-0284): the one shipped guard, kaif-attribution-lint, would be a NEW gate contour under the owner's moratorium (интервью 017, Q1 = A, until «краёв ≥ 195/389»), it is run by hand instead; and it cannot see the worst form — a real interview address that does not say what it is cited for. What caught the three strikes is a PROCESS, not a guard: `/interview` step 3d's «READ the hits» once, and a clean-context judge pass before commit twice. Re-check this declaration when the moratorium threshold is reached. -->
 >
+> <!-- class-ok: claim-before-evidence — price re-checked 2026-09-25 at the second strike (EXP-0286 a judge's reading copied unchecked; EXP-0290 a machine-state line repeated for a week after the machine changed): no guard reads a present-tense claim against the world it describes. The narrow, mechanizable form — the owner not seeing that his mode was refused — is a PRODUCT fix, `plans/100`, queued after Ф3 under the owner's moratorium (ЗАКАЗ.md §9); the habit meanwhile is one command at `/resume`: `tail -3 runs/shell/boot-apply.jsonl`. Re-check when `plans/100` ships. -->
+>
 >
 > | Class slug | The failure it names |
 > |---|---|
@@ -120,6 +122,30 @@
 > Skill: `/experience` (capture a lesson · recall relevant lessons).
 
 ## Entries
+
+### EXP-0290 · 2026-09-25 · ❌→✅ · #machine-state #driver-update #stamp #silent-refusal #status-decays #s1
+class: claim-before-evidence
+**Context / did / result:** STATUS said «Карта: в `Optimised` — эксперимент №1 … С 18.09 карта не перечитывалась» for a week. A read-only `curve --verify` in session 102 printed driver **616.92** against the 610.88 stamped on every curve and profile; `runs/shell/boot-apply.jsonl` — a FILE, no card needed — had `degraded-to-factory` at 18.09 23:01 and 19.09 22:39: the stamp gate (R6) refused the mode at every logon, zero writes, and nobody told the owner. The line «по последней записи» was true of the write and false of the machine.
+**Lesson:** **a machine-state line in STATUS decays the moment the machine changes without us; the cheapest observation of the owner's mode is the tail of `runs/shell/boot-apply.jsonl` — read it at session entry before repeating the line.** A gate that refuses correctly and silently is half a guard: the refusal is right, the silence is the defect (`plans/100`).
+none-cheap: the product fix — the owner sees a refused mode — is `plans/100`, queued after Ф3 (moratorium); until then the habit: `tail -3 runs/shell/boot-apply.jsonl` at `/resume`.
+**Trigger:** writing or repeating any «карта в режиме X» · a driver/VBIOS mismatch anywhere · `degraded-to-factory` in the boot log.
+→ link: `interviews/interview_031` · `STATUS.md` → Состояние машины · `plans/100`
+
+### EXP-0289 · 2026-09-25 · ❌→✅ · #mutation #self-referential-check #control-row #harness #s3-one-line
+class: guard-not-proven-against-threat
+**Context / did / result:** two blind checks in one session, both caught by running the mutant: (1) the band-boundary block derived its EXPECTED boundaries from the very constant it checked, so moving a boundary (MB3) stayed green — expectations now written literally from `researches/39`; (2) the scratch mutation harness printed «red: NONE» for mutants that never LOADED (new relative imports) — it now runs the unmutated copies first (control rows) and says «DID NOT RUN» apart from «SURVIVED».
+**Lesson:** **an expectation computed from the thing under test is a mirror, not a check; and a mutation run needs a control row — a mutant that did not run is not a survivor, and without the control you cannot tell them apart.**
+none-cheap: harness is session scratch (moratorium on new suites); the habit is the control row (EXP-0158) applied to mutation runs.
+**Trigger:** writing an «expected» value inside a selftest · any mutation run whose report can say «NONE».
+→ link: `tools/curve-proposal.mjs` block «ГРАНИЦА ПОЛОСЫ…» · EXP-0158 · EXP-0077
+
+### EXP-0288 · 2026-09-25 · ❌ · #shell #sed #text-through-files #escaping #s3-one-line
+class: escaping-layer
+**Context / did / result:** three times in one session a `sed` / heredoc edit of SOURCE text turned a `\n` inside a replacement into a real newline inside a string literal (the mutation script twice, `mode-validate.mjs` usage text once); the build gate and a syntax error caught each before a commit. The rule was already in STATUS («текст правится файловыми инструментами»).
+**Lesson:** **a text edit goes through the Edit/Write tools, never through `sed -i` with an escape in the replacement — knowing the rule did not stop three strikes; the reflex «a one-line sed is faster» is the trap itself.**
+none-cheap: no guard sees a command before it runs; `npm run check` catches the JS face after the fact (it did, three times).
+**Trigger:** reaching for `sed -i "s/…\\n…/"` or a heredoc to change a line in a tracked file.
+→ link: `AGENT_GUIDE.md` → Document & text hygiene (TEXT TRAVELS THROUGH FILES) · EXP-0122
 
 ### EXP-0287 · 2026-09-25 · ❌→✅ · #audit #method #reachability #edge-search #scope #s1
 class: owner-decision-not-applied
