@@ -86,6 +86,14 @@ else's numbers.
 
 ## 2. Where the project actually is
 
+> **2026-09-25 — the method was turned around.** Searching the voltage edge of every frequency through
+> a machine failure yielded 5 edges of 389 in six weeks. By the owner's decision the project is done
+> when the four modes are validated WHOLE — a curve from a model of this chip (the trend of the known
+> edges) plus a margin per frequency band, checked under a mixed load and a week of real use — while
+> deeper undervolting stays available step by step. Plan: [`MASTER_PLAN.md`](MASTER_PLAN.md), epic
+> [`plans/101`](plans/101_EPIC_turnaround_silicon_model_and_whole_mode_validation.md). The text below
+> describes the state before the turn.
+
 Four phases of six are closed, and the card has been measured. The research base, the architecture,
 **the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
 back on command. **The owner-facing shell is on the desktop too:** four shortcuts apply through
@@ -390,6 +398,14 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 <a id="2-где-проект-находится-на-самом-деле"></a>
 
 ## 2. Где проект находится на самом деле
+
+> **2026-09-25 — метод развёрнут.** Поиск края напряжения каждой частоты через отказ машины за шесть
+> недель дал 5 краёв из 389. По решению владельца работа окончена, когда четыре режима проверены
+> ЦЕЛИКОМ: кривая по модели этого кристалла (тренд известных краёв) плюс запас по полосам частот,
+> проверенная смесью нагрузок и неделей обычного пользования; углубление андервольта остаётся
+> доступным шаг за шагом. План — [`MASTER_PLAN.md`](MASTER_PLAN.md), эпик
+> [`plans/101`](plans/101_EPIC_turnaround_silicon_model_and_whole_mode_validation.md). Текст ниже
+> описывает состояние до разворота.
 
 Закрыты четыре фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
 **собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по

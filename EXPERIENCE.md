@@ -123,6 +123,7 @@
 
 ### EXP-0287 · 2026-09-25 · ❌→✅ · #audit #method #reachability #edge-search #scope #s1
 class: owner-decision-not-applied
+none-cheap: no guard can judge whether a METHOD reaches its target — that is arithmetic done by a reader. The carriers are the metric printed by a command (`npm run curve -- --progress`, the new «режимов проверено Y/4» line — `plans/102` Ш6) and the moratorium re-expressed on it (`AGENT_GUIDE.md` → The critical path rule, rule 2).
 **Context / did / result:** three audits (21.08 ×2, 28.08) prescribed «product, not scaffolding» and re-ranked work INSIDE the per-frequency edge search; four weeks later edges 11 → 5 of 389, 19 machine deaths, 5.4 h of real burn in ~100 sessions. The fourth audit counted the method itself: every edge costs a reboot, the working band needs ~60 of them — unreachable by arithmetic; meanwhile 14 known edges fit one line (RMS 4.9 mV), and the owner's own 10.08 design (whole-curve test + ratchet) was recorded in canon and never executed.
 **Lesson:** **before re-ranking a backlog, check that the METHOD can reach the acceptance number at all — count its price per unit (here: one reboot per edge) against the target. A method that manufactures incidents turns every moratorium into a list of "blockers of the next run".** And re-read the owner's EARLIEST design: here it was the industry method, overwritten by the agents' own elaboration.
 **Trigger:** a third report of the same «too slow» · a metric that has not moved for a week · any plan whose unit of progress costs a crash.

@@ -549,8 +549,10 @@ are canon, each citing its answer:
    decides with the price in hand. Absorbing scope silently is the defect, not the courtesy.
 
 The prayer's cadence changed by the same interview (Q2 = B) and lives in the prayer block itself.
-The GOAL split (Q3 = A) is a standing work item: «ЗАКАЗ» — the operative digest of current-force
-definitions the owner approves — over `GOAL.md` as the verbatim append-only archive.
+The GOAL split (Q3 = A) is DONE: `ЗАКАЗ.md` — the operative digest of current-force definitions —
+was APPROVED by the owner 2026-09-25 (`[OWNER]` «ЗАКАЗ принят», chat); work runs FROM it, and
+`GOAL.md` is the verbatim append-only archive. Taking `GOAL.md` out of the re-read ritual is epic 101
+Ф4 (origin ticket #84).
 
 ### Planning discipline — the task ladder (`/plan-task` · `/plan-epic`)
 
