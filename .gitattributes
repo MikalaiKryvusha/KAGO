@@ -1,0 +1,5 @@
+# curves/ holds documents whose BYTES are hashed (a battle snapshot records the sha256 of its source's
+# bytes — curve-store buildSnapshot). With core.autocrlf=true every checkout rewrote them with CRLF, and
+# a git bisect on 2026-09-25 did exactly that: the recorded provenance hash stopped matching its source.
+# -text: git stores and checks out these files byte for byte, no line-ending conversion.
+curves/** -text
