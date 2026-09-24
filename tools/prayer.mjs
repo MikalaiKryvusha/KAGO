@@ -87,6 +87,10 @@ export function place(text, block) {
   return lines.join('\n');
 }
 
+/** Концы строк не текст молитвы: `autocrlf` выкладывает изменённые файлы с CRLF (любой checkout, `git bisect`), и
+ *  побайтовое сравнение краснело на одинаковом тексте — поймано 2026-09-25 после бисекции (сессия 102). */
+const eol = (s) => s.replace(/\r\n/g, '\n');
+
 /** Сверить все копии с источником. @returns {{ok:boolean, source:string|null, drifted:string[], missing:string[]}} */
 export function check({ root = ROOT, read = (p) => readFileSync(p, 'utf8'), exists = existsSync } = {}) {
   const srcPath = join(root, SOURCE);
@@ -100,7 +104,7 @@ export function check({ root = ROOT, read = (p) => readFileSync(p, 'utf8'), exis
     if (!exists(p)) { missing.push(name); continue; }
     const got = extract(read(p));
     if (got === null) missing.push(name);
-    else if (got !== source) drifted.push(name);
+    else if (eol(got) !== eol(source)) drifted.push(name);
   }
   return { ok: drifted.length === 0 && missing.length === 0, source, drifted, missing };
 }
@@ -153,6 +157,13 @@ export function selfTest() {
   ok('совпавшие копии дают ЗЕЛЁНЫЙ — сторож различает, а не краснеет всегда',
     check({ ...only3 }).drifted, []);
   ok('и список канона не пуст — пустой скан зеленел бы по построению', saved.length > 0, true);
+  // — концы строк не текст: копия с CRLF (так её выкладывает autocrlf при checkout) — НЕ расхождение,
+  //   а одно изменённое слово в той же CRLF-копии — расхождение (2026-09-25, после git bisect)
+  files['AGENT_GUIDE.md'] = `# А\r\n${block.replace(/\n/g, '\r\n')}\r\n`;
+  const crlfSame = check({ ...only3 }).drifted;
+  files['AGENT_GUIDE.md'] = `# А\r\n${BEGIN}\r\nмолитвы\r\n${END}\r\n`;
+  ok('копия с CRLF и тем же текстом — не расхождение; другое слово в CRLF-копии — расхождение',
+    [crlfSame, check({ ...only3 }).drifted], [[], ['AGENT_GUIDE.md']]);
 
   return { ok: results.every((x) => x.ok), results };
 }
