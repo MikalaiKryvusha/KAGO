@@ -580,7 +580,13 @@ if (isMain) {
     const now = new Date(); const off = -now.getTimezoneOffset();
     const local = new Date(now.getTime() + off * 60000).toISOString().slice(0, 19);
     const takenAt = `${local}${off >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`;
-    const doc = curveDocFromRows({ rows: banded.rows, name: docName, card: p.facts.card, grid: p.facts.grid, stamp: p.facts.stamp, takenAt });
+    // --stamp-driver <ver>: the driver the candidate will be CHECKED on (plans/102 Ш2, [AI]) — the whole-mode check on
+    // that driver IS the re-validation R6 demands. Default: the data's own stamp. A typo cannot pass: R6 compares with the live card.
+    const stampDriver = argAfter('--stamp-driver');
+    if (stampDriver !== null && !/^\d+\.\d+$/.test(stampDriver)) { console.error(`ОШИБКА: --stamp-driver «${stampDriver}» — ожидалась версия вида 616.92`); process.exit(2); }
+    const stamp = stampDriver !== null ? { ...p.facts.stamp, driver: stampDriver } : p.facts.stamp;
+    if (stampDriver !== null) console.log(`штамп документа: драйвер ${stampDriver} (данные сняты на ${p.facts.stamp.driver})`);
+    const doc = curveDocFromRows({ rows: banded.rows, name: docName, card: p.facts.card, grid: p.facts.grid, stamp, takenAt });
     const refusals = validateCurveDoc(doc, { card: doc.card, frequencyGrid: loadGrid('frequency') }); // curve-store's own form (cmdVerify)
     if (refusals.length) { console.error(`ОТКАЗ: документ не прошёл валидатор — ${refusals.slice(0, 5).map((r) => `${r.field}: ${r.why}`).join(' · ')}`); process.exit(1); }
     saveCurveDoc(doc, { name: docName });
