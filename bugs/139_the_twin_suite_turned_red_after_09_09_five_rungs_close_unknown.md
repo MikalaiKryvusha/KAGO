@@ -43,6 +43,11 @@ module the twin imports; (3) date-dependent logic.
 reference. The twin drives the SAME applier (`curveWriteRefusal` / the vector builder are shared by design, R11–R13
 parity), and after the clamp its rungs close `unknown`. Next step when unfrozen: diff the twin's rung inputs at
 `24b2c7d^` vs `24b2c7d` — which refusal or clamp the twin's synthetic curve now meets. `git bisect reset` done; tree clean.
+**Narrower hypothesis (NOT observed, a 10-minute read, 01:52):** the commit's message says «ПАРИТЕТ: двойник получил тот
+же провод» (`virtual-gpu.mjs`, 6 lines) and «ничего не заявлено → R12 отказывает». The twin's pinned rung
+(`twin-assembly.mjs:1089`, 2145 MHz / 790 mV through `engine.runRung` → `vf.runStep`) declares no intent — so it
+plausibly now meets R12 on the virtual card and closes `unknown`. Check first: print the rung record's refusal at
+`24b2c7d` for that block.
 
 ## Fix plan (when unfrozen)
 
