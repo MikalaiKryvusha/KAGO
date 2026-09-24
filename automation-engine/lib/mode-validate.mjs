@@ -767,6 +767,20 @@ export async function selfTest() {
   check('КАНДИДАТ — ЧЕРНОВИК, ПРИНЯТЫЙ ФОРМАТОМ ПРОФИЛЯ; БОЕВОЙ ПРОФИЛЬ НЕ ТРОНУТ', candRefusals.length === 0 && cand.qualified === false && cand.settings.curveSnapshot === '2026-09-25T02-00-00'
     && cand.settings.powerLimitWatts === 250 && base.settings.curveSnapshot === '2026-09-14T22-54-29' && cand.stamp.driver === '616.92', candRefusals.map((r) => `${r.field}: ${r.why}`).join(' · ').slice(0, 300) || cand.draft.candidate);
 
+  // The CLI's branch order, as a RUN: `--compare` carries its own `--mode` flag and must reach the table, not the
+  // check (session-102 judge, defect A: the `--mode` branch swallowed it). Tiny capture fixtures in a sandbox.
+  const cliDir = mkdtempSync(join(tmpdir(), 'kago-cli-'));
+  try {
+    const line = (i, w) => JSON.stringify({ i, t: `2026/09/25 02:00:${String(i).padStart(2, '0')}.000`, sample: { 'utilization.gpu': 99, 'power.draw.instant': w, 'temperature.gpu': 70, 'fan.speed': 60, 'clocks.gr': 2800 } });
+    for (const [name, w] of [['s', 300], ['m', 250]]) {
+      writeFileSync(join(cliDir, `${name}.jsonl`), [JSON.stringify({ i: -1, meta: { period_ms: 1000 } }), line(1, w), line(2, w), line(3, w)].join('\n'));
+      writeFileSync(join(cliDir, `${name}.json`), JSON.stringify({ fps: { median: 55 }, sampleFile: `${name}.jsonl` }));
+    }
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--compare', '--stock', join(cliDir, 's.json'), '--mode', join(cliDir, 'm.json')], { encoding: 'utf8' });
+    check('КОМАНДА --compare ДОХОДИТ ДО ТАБЛИЦЫ, А НЕ УХОДИТ В ПРОВЕРКУ РЕЖИМА', r.status === 0 && /ВЫГОДА ПРОТИВ СТОКА/.test(r.stdout) && /мощность, Вт · 300 · 250 · -50/.test(r.stdout), (r.stdout || r.stderr).split('\n').slice(0, 4).join(' | '));
+  } finally { rmSync(cliDir, { recursive: true, force: true }); }
+
   // E101-AC2: the benefit table's arithmetic
   const bt = benefitRows({ stock: { fps: 54.75, loaded: { 'power.draw.instant': { median: 300.1 }, 'temperature.gpu': { median: 81.5 }, 'fan.speed': { median: 86 }, 'clocks.gr': { median: 2729 } } },
     mode: { fps: 55.49, loaded: { 'power.draw.instant': { median: 250.2 }, 'temperature.gpu': { median: 73.5 }, 'fan.speed': { median: 67 } } } });
@@ -796,7 +810,19 @@ export async function runSelfTest() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  if (process.argv.includes('--help')) { console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1); карту не трогает'); process.exit(0); }
+  if (process.argv.includes('--help')) {
+    console.log([
+      'npm run validate -- …  (automation-engine/lib/mode-validate.mjs) — проверка целого режима, эпик 101 Ф1',
+      '  --mode <режим> --candidate <профиль.json> [--minutes N]   ⚠️ ПИШЕТ В КАРТУ: применяет кандидата, гоняет смесь, откатывает к заводскому',
+      '  --mode <режим> --candidate <профиль.json> --dry-run        план проверки; карта, журнал и файлы не трогаются',
+      '  --plan [--minutes N]                                      смесь нагрузок, без карты',
+      '  --hits <сэмплер.jsonl> […]                                карта посещений по записанной телеметрии, без карты',
+      '  --compare --stock <захваты.json,…> --mode <захваты.json,…>  таблица выгоды по записанным захватам, без карты',
+      '  --replay <захват.json> [--stock …]                        послепроверочная половина над записью; журнал в песочнице',
+      '  --selftest                                                самопроверка, без карты',
+    ].join('\n'));
+    process.exit(0);
+  }
   if (process.argv.includes('--selftest')) {
     const r = await runSelfTest();
     for (const x of r.results) console.log(`${x.ok ? '✅' : '❌'} ${x.what}${x.got ? ' — ' + x.got : ''}`);
@@ -814,7 +840,9 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       console.log(`${f.replace(/\\/g, '/')} — проб ${parsed.samples.length}, ${total} с; посещены (≥ ${MIN_BAND_DWELL_S} с): ${visitedBands(map).map((i) => map[i].label).join(' · ') || 'ни одна'}`);
       console.log('  ' + map.map((p) => `${p.label}: ${p.seconds} с (${Math.round(p.share * 100)} %)`).join(' · '));
     }
-  } else if (process.argv.includes('--mode')) {
+  } else if (process.argv.includes('--mode') && !process.argv.includes('--compare')) {
+    // `--compare` has its own `--mode` flag (the mode's captures) — found by the session-102 judge: this branch,
+    // placed first, swallowed every `--compare` call (128f6bf). The check path is taken only without it.
     // THE CHECK. npm run validate -- --mode <mode> --candidate <profile.json> [--minutes N] [--dry-run]
     // Order (plans/102 «Схема прибора»): an unclosed intent in the check journal is closed FIRST as a death,
     // and the launch stops there; else intent → sampler → apply → mix → rollback → verdict → report.
@@ -842,6 +870,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     console.log(`ПРОВЕРКА РЕЖИМА ${mode} · кандидат ${profile.name} · снимок ${profile.settings?.curveSnapshot ?? '—'} · штамп ${profile.stamp?.driver ?? '—'} · ${Math.round(plan.totalS / 6) / 10} мин`);
     for (const s of plan.stages) console.log(`  · ${s.label} — ${s.kind === MIX_STAGE.GAME ? `проходов демо: ${Math.max(1, Math.ceil(s.seconds / DEMO_PASS_S))}` : s.kind === MIX_STAGE.TRANSITIONS ? `${s.cycles} × (${s.onS}/${s.offS} с), уровень ${TRANSITIONS_LEVEL}` : `${s.seconds} с`}`);
     console.log(`  телеметрия → ${telemetryPath.replace(/\\/g, '/')} · журнал → ${journal.path.replace(/\\/g, '/')}`);
+    if (profile.stamp?.driver) console.log(`  ⚠️ штамп кандидата — драйвер ${profile.stamp.driver}: при применении сверится с живой картой (R6); не совпал — отказ до записи, вердикт НЕИЗВЕСТНО`);
     if (dry) { console.log('СУХОЙ ПРОГОН: карта, журнал и файлы не тронуты. (P102-AC4 на живой карте добавляет чтение сдвигов до и после — карточный день.)'); process.exit(0); }
     mkdirSync(dir, { recursive: true });
     const seams = await makeCardSeams({ profile, totalS: plan.totalS });
@@ -877,9 +906,12 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     });
     const sf = listAfter('--stock');
     if (sf.length) result.benefit = benefitRows({ stock: await captureGroup(sf), mode: await captureGroup([capFile]) });
-    const out = writeCheckReport(box, result);
     process.stdout.write(renderCheckReport(result));
-    console.log(`\n(повтор; журнал и отчёт — в песочнице ${out.report.replace(/\\/g, '/')}; боевой журнал проверок не тронут)`);
+    // The sandbox is removed (judge, session 102: replays left %TEMP%/kago-replay-*); `--out <dir>` keeps the report.
+    const outDir = (() => { const i = process.argv.indexOf('--out'); return i === -1 ? null : process.argv[i + 1]; })();
+    if (outDir) { const out = writeCheckReport(outDir, result); console.log(`\n(повтор; отчёт — ${out.report.replace(/\\/g, '/')}; боевой журнал проверок не тронут)`); }
+    else console.log('\n(повтор; боевой журнал проверок не тронут; песочница удалена — `--out <папка>` сохранит отчёт)');
+    rmSync(box, { recursive: true, force: true });
   } else if (process.argv.includes('--compare')) {
     // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json).
     const sf = listAfter('--stock'); const mf = listAfter('--mode');
@@ -901,8 +933,8 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       console.log(`  ${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}  ${s.label} — ${what}`);
       t += dur;
     }
-    console.log('Исполнитель, который гоняет эту смесь на карте (Ш4, вторая половина), ещё не построен.');
+    console.log('На карте эту смесь гоняет `--mode <режим> --candidate <профиль>` — ни разу ещё не запускался вживую (дым Ш8).');
   } else {
-    console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1)\n  --plan [--minutes N] — смесь нагрузок проверки, без карты; исполнитель на карте (Ш4) ещё не построен\n  --hits <файл сэмплера> [...] — карта посещений полос по записанной телеметрии, без карты');
+    console.log('npm run validate -- --help — все команды проверки режима; без ключей ничего не делает');
   }
 }
