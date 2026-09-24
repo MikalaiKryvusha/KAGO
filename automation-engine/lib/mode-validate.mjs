@@ -36,6 +36,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openJournal, appendLine, readJournal, orphanIntents, LINE } from './sweep-journal.mjs';
 import { parseSampleTime } from './hardware-mon.mjs';
+import { driverEventsInWindow, momentOf } from './driver-voice.mjs';
+import { queryFaults } from './event-logger.mjs';
 import { MODE_BANDS, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS } from '../config.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -116,16 +118,27 @@ export function bandAt(samples, atMs, bands = MODE_BANDS) {
  * @param {{atMs:number}[]} driverEvents        `nvlddmkm` events inside the window
  * @param {{name:string, ok:boolean, endedAtMs:number, why?:string}[]} stages
  */
+//
+// FORK: options <any driver event fails the check | the series rule of researches/30 (≥ 2 in 120 s) | any event
+//   fails only after a stock baseline showed none> · price of error <a false FAILED costs one ratchet step
+//   (+2 grid steps in one band); a false PASSED accepts an unstable mode onto the owner's shortcut> ·
+//   consulted <researches/39 §2.2 — stability tests (OCCT class) fail on ANY driver reset; researches/30
+//   answers a DIFFERENT question — «is a death imminent, stop the rung» — where a single event is benign>.
+//   Chosen: ANY event fails; `null` (the channel could not be read, driver-voice's contract) is UNKNOWN,
+//   never PASSED. The owner's machine shows 1–3 events on quiet days, so Ф2's first act — the 20-minute
+//   STOCK check — measures that background under the same mix: a stock check with events means this rule
+//   is revisited BEFORE any descent. `[AI]`, revisable.
 export function verdictOf({ samples = [], driverEvents = [], stages = [], stallMs = PULSE_STALL_MS, bands = MODE_BANDS } = {}) {
   if (samples.length === 0) return { verdict: CHECK_VERDICT.UNKNOWN, why: 'телеметрии нет — проверка не наблюдалась', failures: [], failure: null };
   const failures = [];
-  for (const e of driverEvents) failures.push({ cls: FAILURE_CLASS.DRIVER, atMs: e.atMs, why: `событие драйвера ${e.id ?? ''}`.trim() });
+  for (const e of driverEvents ?? []) failures.push({ cls: FAILURE_CLASS.DRIVER, atMs: e.atMs, why: `событие драйвера ${e.id ?? ''}`.trim() });
   for (const st of stages) if (!st.ok) failures.push({ cls: FAILURE_CLASS.LOAD, atMs: st.endedAtMs, why: `${st.name}: ${st.why ?? 'нагрузка кончилась ненормально'}` });
   for (let i = 1; i < samples.length; i++) {
     const gap = samples[i].ms - samples[i - 1].ms;
     if (gap > stallMs) failures.push({ cls: FAILURE_CLASS.TELEMETRY_GAP, atMs: samples[i - 1].ms, why: `сэмплер молчал ${gap} мс (порог ${stallMs})` });
   }
   failures.sort((a, b) => a.atMs - b.atMs);
+  if (failures.length === 0 && driverEvents === null) return { verdict: CHECK_VERDICT.UNKNOWN, why: 'голос драйвера не прочитан — пройденной проверку назвать нельзя', failures, failure: null };
   if (failures.length === 0) return { verdict: CHECK_VERDICT.PASSED, why: 'драйвер молчал, нагрузки живы, телеметрия без разрывов', failures, failure: null };
   const first = failures[0];
   return { verdict: CHECK_VERDICT.FAILED, why: first.why, failures, failure: { ...first, band: bandAt(samples, first.atMs, bands) } };
@@ -281,6 +294,16 @@ export function planMix({ minutes = null } = {}) {
 // The real seams (the shortcut's apply path, graphics-load, stress-tester, hardware-mon, driver-voice) are
 // wired on the first card day; until then this is [NOT-TESTED] on the card and proved on fakes only.
 
+/**
+ * The REAL driver-voice seam: `nvlddmkm` events in [fromMs, toMs] from the Windows event log (read-only,
+ * the OS — not the card), through the project's one reader (`driver-voice.driverEventsInWindow` over
+ * `event-logger.queryFaults`, the same pair `engine.mjs` uses). `null` = the channel could not be read.
+ */
+export function realDriverEvents(fromMs, toMs, queryFn = queryFaults) {
+  const events = driverEventsInWindow({ fromMs, toMs }, queryFn);
+  return events === null ? null : events.map((e) => ({ atMs: momentOf(e), id: e.id ?? e.eventId ?? null }));
+}
+
 export async function runCheck({ journal, mode, candidate = null, snapshot = null, margins = null, plan, telemetryPath, seams, nowMs = () => Date.now(), atIso = () => new Date().toISOString() }) {
   const intent = writeCheckIntent(journal, { mode, candidate, snapshot, margins, telemetryPath, at: atIso() });
   const startedMs = nowMs();
@@ -383,6 +406,9 @@ export async function selfTest() {
   const v4 = verdictOf({ samples: [], driverEvents: [{ atMs: 1 }] });
   check('БЕЗ ТЕЛЕМЕТРИИ — НЕИЗВЕСТНО, НЕ ПРОЙДЕНА И НЕ СБОЙ', v4.verdict === CHECK_VERDICT.UNKNOWN, v4.why);
   const v5 = verdictOf({ samples: clean, driverEvents: [{ atMs: 12500, id: 14 }], stages: [{ name: 'Q2RTX', ok: false, endedAtMs: 3000 }] });
+  const v6 = verdictOf({ samples: clean, driverEvents: null });
+  const v7 = verdictOf({ samples: gapped, driverEvents: null });
+  check('ГОЛОС ДРАЙВЕРА НЕ ПРОЧИТАН — НЕИЗВЕСТНО, НО НАСТОЯЩИЙ СБОЙ ВСЁ РАВНО СБОЙ', v6.verdict === CHECK_VERDICT.UNKNOWN && v7.verdict === CHECK_VERDICT.FAILED, `${v6.why} · ${v7.verdict}`);
   check('СБОЙ ПРИПИСАН САМОМУ РАННЕМУ МОМЕНТУ', v5.failure.cls === FAILURE_CLASS.LOAD && v5.failures.length === 2, JSON.stringify(v5.failure));
 
   // P102-AC2: descent and ratchet
