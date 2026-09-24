@@ -820,7 +820,7 @@ anything an outsider reads as a *name*. Not covered: internal engineering identi
 names, functions, fields, a `v0.9` tag), which the agent picks freely.
 
 **The boundary runs along the READER, not the format.** The moment an internal name is put on the
-shopfront it becomes a brand and needs the owner's word. That is exactly the line that was crossed:
+shopfront it becomes a brand and needs the owner's word. That is exactly the line that was crossed: <!-- owner-review:allow because=canon prose stating the naming rule; no question to the owner -->
 `workloads/furnace.cu` was legitimate, `KAGO 0.9 — Furnace` was not.
 
 **When a name is needed:** ship WITHOUT one — a version number is self-sufficient — or file an
