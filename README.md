@@ -267,8 +267,9 @@ from a rendered comparison: Microsoft's Fluent Emoji 3D (MIT), shipped in `asset
 
 The shortcuts already sit on the desktop, and the shell around them is proven: every click ends in
 a verified state — applied and re-read to agreement, or refused with nothing written. **`Optimised`
-is qualified and lives on the owner's card**; its numbers are the ones in the image above, measured
-by two alternated runs per state. **`Max Perfomance` and `Silent Cold` still ship as refusing
+was qualified on the previous graphics driver**; its numbers are the ones in the image above, measured
+by two alternated runs per state. After the driver update it waits for a new check and stays off until
+then: a write proven on one driver is not applied on another. **`Max Perfomance` and `Silent Cold` still ship as refusing
 drafts** — `Max Perfomance` has now been measured (the image above) but its acceptance is not
 closed, and `Silent Cold` has no ceiling yet: its clock cap is being chosen by the fan speed it
 lands on (target 40–50 %), which is a measurement nobody has taken on top of the tuned curve.
@@ -681,8 +682,9 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 Ярлыки уже лежат на рабочем столе, и оболочка вокруг них доказана: каждый клик заканчивается
 проверенным состоянием — применено и перечитано до совпадения, либо отказано, не записав ничего.
-**`Optimised` прошёл приёмку и стоит на карте владельца** — его числа те, что на картинке выше,
-сняты двумя чередующимися замерами на каждое состояние. **`Max Perfomance` и `Silent Cold`
+**`Optimised` прошёл приёмку на прежнем драйвере видеокарты** — его числа те, что на картинке выше,
+сняты двумя чередующимися замерами на каждое состояние. После обновления драйвера режим ждёт новой
+проверки и до неё не включается: запись, доказанная на одном драйвере, на другом не применяется. **`Max Perfomance` и `Silent Cold`
 по-прежнему отгружены честными черновиками:** `Max Perfomance` теперь измерен (та же картинка), но
 приёмка его не закрыта, а у `Silent Cold` ещё нет потолка — его подбирают по оборотам вентилятора, на
 которые режим садится (цель 40…50 %), и этого замера поверх тюнинг-кривой ещё никто не делал.
