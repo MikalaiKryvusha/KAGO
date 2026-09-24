@@ -3491,7 +3491,7 @@ async function main(argv) {
         console.log('        на точке, обслуживавшей потолок, а выше её обслуживают другие точки.');
       }
     }
-    console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (то же, что третий ярлык владельца).');
+    console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (полный сброс, включая кривую; ярлык Stock Default кривую пока не обнуляет — bugs/140).');
 
     let r;
     try {

@@ -595,10 +595,15 @@ export function modesValidated(records, { profiles = [], modes }) {
  * turns «tail the boot log at /resume» from a habit into something `--progress` prints.
  */
 export function lastBootLine(text) {
-  const recs = String(text ?? '').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.verdict && r.verdict !== 'disks-disarmed');
+  // Intents count too (second judge, session 102): a restore that died mid-way leaves an intent with no verdict after it,
+  // and skipping intents would print the PREVIOUS logon's verdict over a death. Housekeeping lines stay out.
+  const recs = String(text ?? '').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((r) => r && ((r.verdict && r.verdict !== 'disks-disarmed') || r.state === 'intent'));
   const last = recs.at(-1);
   if (!last) return 'ПРИ ВХОДЕ: записей восстановления нет';
   const when = String(last.at ?? '').replace('T', ' ').slice(0, 16);
+  if (!last.verdict) return `⚠️ ПРИ ВХОДЕ ${when}: восстановление «${last.remembered ?? '?'}» НЕ ЗАКРЫЛОСЬ — намерение без итога (возможна смерть машины при восстановлении)`;
+  if (last.verdict === 'owner-cleared') return `ВРУЧНУЮ ${when}: владелец сбросил запомненный режим («${last.remembered ?? '—'}»)`;
   if (last.verdict === 'applied') return `ПРИ ВХОДЕ ${when}: «${last.remembered}» применён`;
   if (last.verdict === 'degraded-to-factory') return `⚠️ ПРИ ВХОДЕ ${when}: «${last.remembered}» ОТВЕРГНУТ, стоит заводское — ${String(last.detail ?? '').replace(/^.*?заводское стоит:\s*/, '').slice(0, 140)}`;
   return `ПРИ ВХОДЕ ${when}: ${last.verdict}${last.remembered ? ` («${last.remembered}»)` : ''}`;
@@ -818,6 +823,10 @@ export async function selfTest() {
   ].join('\n');
   check('СТРОКА ВХОДА: ПОСЛЕДНИЙ ОТКАЗ ВИДЕН ПЕРВОЙ КОМАНДОЙ, СЛУЖЕБНЫЕ СТРОКИ И РВАНЫЙ ХВОСТ НЕ МЕШАЮТ', /^⚠️ ПРИ ВХОДЕ 2026-09-19 22:39: «optimised» ОТВЕРГНУТ/.test(lastBootLine(boot)) && /stamp\.driver/.test(lastBootLine(boot))
     && /применён$/.test(lastBootLine(boot.split('\n')[0])) && lastBootLine('') === 'ПРИ ВХОДЕ: записей восстановления нет', lastBootLine(boot));
+  const dying = boot + '\n{"at":"2026-09-26T09:00:00+03:00","state":"intent","remembered":"optimised"}';
+  const cleared = boot + '\n{"at":"2026-09-26T09:05:00+03:00","verdict":"owner-cleared","remembered":null}';
+  check('СТРОКА ВХОДА: НЕЗАКРЫТОЕ НАМЕРЕНИЕ НЕ ПРЯЧЕТСЯ ЗА ПРЕЖНИЙ ИТОГ; РУЧНОЙ СБРОС НЕ НАЗЫВАЕТСЯ ВХОДОМ',
+    /НЕ ЗАКРЫЛОСЬ/.test(lastBootLine(dying)) && /^ВРУЧНУЮ 2026-09-26 09:05/.test(lastBootLine(cleared)), `${lastBootLine(dying)} | ${lastBootLine(cleared)}`);
 
   // P102-AC6: the metric
   const MODES =['max-performance', 'optimised', 'silent-cold', 'stock-default'];
@@ -923,6 +932,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     const times = [samples[0].ms, samples.at(-1).ms + 1000];
     let call = 0;
     const box = mkdtempSync(join(tmpdir(), 'kago-replay-'));
+    try { // the sandbox goes away whatever throws (second judge, session 102)
     const result = await runCheck({
       journal: openValidateJournal({ dir: box }), mode: `${cap.profile ?? 'запись'} (повтор ${cap.label})`, plan: { stages: [{ kind: MIX_STAGE.GAME, label: `Q2RTX, записанный захват ${cap.label}` }] },
       telemetryPath: tele, nowMs: () => times[Math.min(call++, 1)],
@@ -942,7 +952,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     const outDir = (() => { const i = process.argv.indexOf('--out'); return i === -1 ? null : process.argv[i + 1]; })();
     if (outDir) { const out = writeCheckReport(outDir, result); console.log(`\n(повтор; отчёт — ${out.report.replace(/\\/g, '/')}; боевой журнал проверок не тронут)`); }
     else console.log('\n(повтор; боевой журнал проверок не тронут; песочница удалена — `--out <папка>` сохранит отчёт)');
-    rmSync(box, { recursive: true, force: true });
+    } finally { rmSync(box, { recursive: true, force: true }); }
   } else if (process.argv.includes('--compare')) {
     // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json).
     const sf = listAfter('--stock'); const mf = listAfter('--mode');

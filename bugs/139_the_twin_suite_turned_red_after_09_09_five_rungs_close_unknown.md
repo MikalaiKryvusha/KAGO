@@ -1,6 +1,7 @@
 # Bug 139 — the digital twin's suite turned red after 2026-09-09: five blocks, its rungs close `unknown` instead of reaching a verdict
 
-**Status:** 🧊 FROZEN by epic 101 (the twin is frozen machinery — `plans/101` «Что эпик замораживает»); recorded, not investigated
+**Status:** 🧊 FROZEN by epic 101 (the twin is frozen machinery — `plans/101` «Что эпик замораживает»); one probe run
+(02:00, see Root cause) — cause observed for ONE of the five reds; expected cure — re-capture the goldens on 616.92
 **Severity:** S2 — no card, no data touched; the cost is a red battery line that hides the next real red
 **Version/build:** HEAD `e4e580b` (2026-09-25) · **When/context:** found 2026-09-25 01:16 +03:00, session 102, by the full offline battery run while closing Ф1 Ш3/Ш5 (`npm run selftest:all`: 55 suites, **1 red — `twin`**, 2789 green blocks)
 
@@ -32,46 +33,37 @@ closes `unknown` (no verdict) where the block expects `passed` / `hung`:
 
 ## Root cause / Hypotheses
 
-Not investigated (moratorium, epic 101). Ranked, for whoever unfreezes the twin: (1) a data/state dependency the twin
-reads from the live tree (a golden stamp, a profile, a snapshot) changed on 13–14.09; (2) the KAIF 2.7 update touched a
-module the twin imports; (3) date-dependent logic.
+**Observed 2026-09-25 02:00 +03:00, for ONE red (the pinned rung, «ЗАКРЕПЛЕНИЕ»):** a probe copy of the suite printed
+that rung's record (`automation-engine/lib/_probe-twin.mjs`, deleted after the run): `"why":"НЕИЗВЕСТНО на 2145 МГц /
+790 мВ — оракул не вынес вердикта"`, and in `judged.preflight`: *«эталон снят на драйвере 610.88 / VBIOS
+98.03.58.40.8b, а карта сейчас 616.92 / 98.03.58.40.8b — эталон недействителен до перепроверки (R6). Карту не
+грузили»*. The golden-stamp preflight compares the goldens with the LIVE card's driver, and the machine moved to 616.92
+on ≤ 18.09 (`runs/shell/boot-apply.jsonl`). That was hypothesis (1) of the first edition — a state dependency (the
+golden stamp) — with the DRIVER, not the data, as what changed.
 
-**✅ ROOT CAUSE OBSERVED 2026-09-25 02:00 +03:00 — the DRIVER CHANGE, through the golden stamp (hypothesis 1 was
-RIGHT; the two paragraphs below overstated the bisect and are corrected here).** A probe copy of the suite printing
-the pinned rung's record (`automation-engine/lib/_probe-twin.mjs`, removed after the run) shows:
-`"why":"НЕИЗВЕСТНО на 2145 МГц / 790 мВ — оракул не вынес вердикта"`, and in `judged.preflight`: *«эталон снят на
-драйвере 610.88 / VBIOS 98.03.58.40.8b, а карта сейчас 616.92 / 98.03.58.40.8b — эталон недействителен до
-перепроверки (R6). Карту не грузили»*. The golden-stamp preflight compares the goldens with the LIVE card's driver;
-the machine moved to 616.92 on ≤ 18.09 (`runs/shell/boot-apply.jsonl`), so every twin rung that reaches the oracle
-is UNKNOWN. ✏️ **The bisect proved NOTHING** (independent judge, 02:0x, re-run from `git archive` snapshots, no GPU):
-its «good» end `75c676d` was taken from the 09.09 battery record and not re-run — TODAY it is red with the same six
-lines as `24b2c7d` and HEAD; and `24b2c7d` is `75c676d`'s ONLY child, so `bisect run` could name nothing else. An
-earlier edition of this paragraph said the bisect «found where the twin STARTED to reach that preflight» — also
-wrong, withdrawn. The cause stands on the probe alone: the driver change, through the golden stamp. **Cure: re-capture the goldens on
-616.92** (card day, `plans/102` Ш8 order, step 2) — then re-run the suite. **Second defect, named:** an «offline»
-twin whose verdict depends on the real card's driver is a sandbox leak (the class `profile-manager.mjs` calls «код
-тайком опирается на состояние машины», `bugs/18`); frozen by epic 101, recorded.
+**Not observed:** the other four reds. Three more close `unknown` the same way and plausibly share the cause; the
+PULSE red (`[false,true,…]`) was not shown to come from the stamp. So the cure below is EXPECTED, not proven.
 
-**🔎 BISECTED 2026-09-25 01:50 +03:00 (session 102) — ✏️ the heading said «hypotheses 1–3 REFUTED; it is CODE»; wrong
-about hypothesis 1, see the paragraph above.**
-`git bisect start HEAD 75c676d` · `git bisect run sh -c 'node automation-engine/lib/twin-assembly.mjs --selftest …'`
-(exit > 1 → skip) → **first bad commit `24b2c7d`** (2026-09-09 21:55, «fix(bugs/133, ярлык Optimised): ПОДРЕЗКА
-ПОРЯДКА — режим владельца снова применяется с рабочего стола») — the applier's order clamp against the worst-case
-reference. The twin drives the SAME applier (`curveWriteRefusal` / the vector builder are shared by design, R11–R13
-parity), and after the clamp its rungs close `unknown`. Next step when unfrozen: diff the twin's rung inputs at
-`24b2c7d^` vs `24b2c7d` — which refusal or clamp the twin's synthetic curve now meets. `git bisect reset` done; ✏️ «tree clean» was wider than the observation: `git status` was clean, but with
-`core.autocrlf=true` the checkouts had rewritten ~227 files with CRLF — `npm run check` went red on the prayer guard
-(fixed by form, `30a35b7`) and the battle snapshot's recorded source hash stopped matching (restored and fixed by form,
-`.gitattributes curves/** -text`, `8dacf8d`). A bisect in this repository is not side-effect-free.
-**✏️ REFUTED 02:00 by the probe above — kept for the record. Narrower hypothesis (NOT observed, a 10-minute read, 01:52):** the commit's message says «ПАРИТЕТ: двойник получил тот
-же провод» (`virtual-gpu.mjs`, 6 lines) and «ничего не заявлено → R12 отказывает». The twin's pinned rung
-(`twin-assembly.mjs:1089`, 2145 MHz / 790 mV through `engine.runRung` → `vf.runStep`) declares no intent — so it
-plausibly now meets R12 on the virtual card and closes `unknown`. Check first: print the rung record's refusal at
-`24b2c7d` for that block.
+**Second defect, named:** an «offline» twin whose verdict depends on the real card's driver is a sandbox leak (the class
+`profile-manager.mjs` calls «код тайком опирается на состояние машины», `bugs/18`); frozen by epic 101, recorded.
 
-## Fix plan (when unfrozen)
+**Withdrawn — a bisect (01:50) proved nothing.** `git bisect start HEAD 75c676d` + `bisect run` with the suite named
+`24b2c7d` as «first bad», and the first edition built «it is CODE» and a narrower R12 theory on it. The independent
+judge (02:0x, re-run from `git archive` snapshots, no GPU) showed: the «good» end `75c676d` was taken from the 09.09
+battery record and not re-run — TODAY it is red with the same FIVE lines as `24b2c7d` and HEAD — and `24b2c7d` is
+`75c676d`'s only child, so the bisect could name nothing else. Both the «code» claim and the R12 theory are withdrawn
+(corrections also in commits `c3c148e`, `b442d38`). The bisect had side effects: with `core.autocrlf=true` it rewrote
+~227 files with CRLF — `npm run check` went red on the prayer guard (fixed by form, `30a35b7`) and a battle snapshot's
+recorded source hash stopped matching (restored; fixed by form, `.gitattributes curves/** -text`, `8dacf8d`). Lesson —
+EXP-0291.
 
-Bisect with the suite itself: `git bisect start HEAD <09.09 green commit>` · `git bisect run node automation-engine/lib/twin-assembly.mjs --selftest`.
+## Fix plan (card day)
+
+1. Re-capture the goldens on 616.92 at stock: `npm run stress -- --capture-baseline` → `--verify-baseline`
+   (`plans/102` Ш8, step 2).
+2. Re-run `node automation-engine/lib/twin-assembly.mjs --selftest` — expect 0 red. Any red left (the PULSE block
+   above all) is a separate cause: print its record the same way before any theory.
+3. Unfrozen later: stop the twin reading the live card's driver (the sandbox leak).
 
 ## Decisions made without the owner
 

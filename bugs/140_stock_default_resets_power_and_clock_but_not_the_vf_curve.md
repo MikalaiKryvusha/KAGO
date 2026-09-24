@@ -21,7 +21,8 @@ previous mode. The card would stay undervolted under a «Stock Default» indicat
 
 ## Repro (deterministic, offline)
 
-1. `node --input-type=module -e "const pm=await import('./automation-engine/lib/profile-manager.mjs'); console.log(await pm.resolveProfileCurve(JSON.parse(require('fs').readFileSync('profiles/factory.json','utf8'))))"` → **`null`** (observed 02:1x; early return at `profile-manager.mjs:700`: `curveRaiseAndCapMhz`, `curveRef`, `curveSnapshot` all null).
+1. `node --input-type=module -e "const pm=await import('./automation-engine/lib/profile-manager.mjs'); const fs=await import('node:fs'); console.log(await pm.resolveProfileCurve(JSON.parse(fs.readFileSync('profiles/factory.json','utf8'))))"` → **`null`** (observed 02:1x and re-run 02:26 with this exact command; the first edition's command mixed `require` with top-level await and did not run — caught by the second judge; early return at `profile-manager.mjs:700`: `curveRaiseAndCapMhz`, `curveRef`, `curveSnapshot` all null).
+   ⚠️ Not inspected: the INSTALLED task on the machine — the chain reads the installer (`setup-desktop.mjs:277`). Card day, read-only: `schtasks /query /tn "\KAGO\apply-factory" /xml` (from PowerShell).
 2. CLI `--apply` (`profile-manager.mjs:3468-3473`): `needsCurve = effCurve !== null` → **false** → `curveBackend = null`.
 3. `apply()` (`:1176`): the step «кривая V/F: возврат к заводской (все смещения 0)» exists only under
    `else if (curveBackend && profile.settings.curveRaiseAndCapMhz === null)` → **skipped** without a backend.
@@ -40,6 +41,10 @@ previous mode. The card would stay undervolted under a «Stock Default» indicat
   трогалась» (`:1434`) — after a reboot the curve is factory anyway (volatile), so nothing is left behind.
 - Related stale text, not this bug: `engine.mjs:11374` prints advice about a tray Exit item that is not built;
   STATUS «Решено владельцем» records the owner's 23.08 DECISION for Exit, not a built feature.
+
+TWINS: searched printed advice (`console.log|error` with «Stock Default» / `apply-factory`) and the docs that call the
+shortcut a full reset — fixed: `engine.mjs:11374` (`0bb9d2b`), `profile-manager.mjs:3494`, `MASTER_PLAN.md` row,
+`profiles/README.md`, `README.md` (both languages) — session 102, after the second judge pass.
 
 ## Fix plan (card day, with the owner present — it changes what his shortcut does)
 

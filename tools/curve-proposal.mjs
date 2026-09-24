@@ -391,7 +391,7 @@ export function propose() {
 export function curveDocFromRows({ rows, name, card, grid, stamp, takenAt }) {
   return {
     kind: 'tuning-curve', name, card, voltageGridMv: [...grid],
-    stamp: { driver: stamp.driver, vbios: stamp.vbios, takenAt },
+    stamp: { driver: stamp.driver, vbios: stamp.vbios, takenAt, ...(stamp.dataDriver ? { dataDriver: stamp.dataDriver } : {}) },
     // The document's table runs TOP-DOWN in frequency (the validator refuses any other order); the builder's rows run up.
     frequencies: [...rows].sort((a, b) => b.mhz - a.mhz).map((r) => ({
       mhz: r.mhz, voltageMv: r.voltageMv, stockVoltageMv: r.stockVoltageMv,
@@ -507,6 +507,8 @@ export function selfTest() {
   const doc = curveDocFromRows({ rows: bc.rows, name: 'model-selftest', card: { name: 'fixture' }, grid: bGrid, stamp: { driver: '610.88', vbios: '98.03.58.40.8b' }, takenAt: '2026-09-25T01:30:00+03:00' });
   const refusals = validateCurveDoc(doc);
   check('ДОКУМЕНТ КРИВОЙ С ЗАПАСОМ ПРОХОДИТ ВАЛИДАТОР ДОКУМЕНТА', refusals.length === 0, refusals.map((r) => `${r.field}: ${r.why}`).join(' · ').slice(0, 300));
+  const restamped = curveDocFromRows({ rows: bc.rows, name: 'model-selftest', card: { name: 'fixture' }, grid: bGrid, stamp: { driver: '616.92', vbios: '98.03.58.40.8b', dataDriver: '610.88' }, takenAt: '2026-09-25T01:30:00+03:00' });
+  check('ПЕРЕШТАМПОВАННЫЙ ДОКУМЕНТ НЕ ПРЯЧЕТ ДРАЙВЕР ДАННЫХ И ПРОХОДИТ ВАЛИДАТОР', restamped.stamp.driver === '616.92' && restamped.stamp.dataDriver === '610.88' && validateCurveDoc(restamped).length === 0, JSON.stringify(restamped.stamp));
   check('СТРОКА НА СТОКЕ — «НЕ ТРОНУТА», ОСТАЛЬНЫЕ — «МОДЕЛЬ», ЛИШНИХ ПОЛЕЙ НЕТ', doc.frequencies.length === bc.rows.length && doc.frequencies.every((r) => r.tags.join() === (r.voltageMv === r.stockVoltageMv ? 'stop:untouched' : 'origin:model')
     && bc.rows.some((b) => b.mhz === r.mhz && b.voltageMv === r.voltageMv)
     && Object.keys(r).sort().join() === 'editedAt,mhz,provenBy,stockVoltageMv,tags,voltageMv'), doc.frequencies.map((r) => r.mhz + ':' + r.tags).join(' '));
@@ -580,11 +582,16 @@ if (isMain) {
     const now = new Date(); const off = -now.getTimezoneOffset();
     const local = new Date(now.getTime() + off * 60000).toISOString().slice(0, 19);
     const takenAt = `${local}${off >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`;
-    // --stamp-driver <ver>: the driver the candidate will be CHECKED on (plans/102 Ш2, [AI]) — the whole-mode check on
-    // that driver IS the re-validation R6 demands. Default: the data's own stamp. A typo cannot pass: R6 compares with the live card.
+    // --stamp-driver <ver>: the driver the candidate will be CHECKED on (plans/102 Ш2).
+    // FORK: options <stamp the data's driver (R6 refuses the candidate on a new driver) | stamp the check's driver and keep
+    //   the data's driver beside it | re-measure every edge on the new driver first> · price of error <a stamp claiming the
+    //   curve was proven on a driver it never met; or a card day spent re-finding edges the model does not need> ·
+    //   consulted <ЗАКАЗ.md §2/§6 — the proof of a mode is the whole-mode check, not the rows; R6 (a driver change
+    //   invalidates records «until re-checked») — the check on the new driver IS that re-check>. Chosen: option 2, `[AI]`.
+    //   The data's own driver travels as `stamp.dataDriver`, so the file never hides where its rows came from.
     const stampDriver = argAfter('--stamp-driver');
     if (stampDriver !== null && !/^\d+\.\d+$/.test(stampDriver)) { console.error(`ОШИБКА: --stamp-driver «${stampDriver}» — ожидалась версия вида 616.92`); process.exit(2); }
-    const stamp = stampDriver !== null ? { ...p.facts.stamp, driver: stampDriver } : p.facts.stamp;
+    const stamp = stampDriver !== null ? { ...p.facts.stamp, driver: stampDriver, dataDriver: p.facts.stamp.driver } : p.facts.stamp;
     if (stampDriver !== null) console.log(`штамп документа: драйвер ${stampDriver} (данные сняты на ${p.facts.stamp.driver})`);
     const doc = curveDocFromRows({ rows: banded.rows, name: docName, card: p.facts.card, grid: p.facts.grid, stamp, takenAt });
     const refusals = validateCurveDoc(doc, { card: doc.card, frequencyGrid: loadGrid('frequency') }); // curve-store's own form (cmdVerify)

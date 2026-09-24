@@ -248,7 +248,7 @@ handle. Max Perfomance and Optimised are near twins: they differ by the power li
 | 🚀 **Max Perfomance** | everything into speed; temperature is not a goal, fans may spin as fast as they like | the same | **300 W** | none beyond the card's own maximum |
 | ⚖️ **Optimised** | *"almost the same as Max Perfomance"* — but quiet (fans ≤ 60 %, ≈ 71 °C) and relatively cold, at FPS within 5 % | the same | **250 W** | none beyond the card's own maximum |
 | ❄️ **Silent Cold** | the MOST performance that fits under the temperature fans hold at 40 % — **59 °C, measured** | the same | 250 W | **yes, ~2800 MHz** |
-| 🔄 **Stock Default** | factory state, always one click away | factory | factory | — |
+| 🔄 **Stock Default** | factory power limit and clocks in one click; the curve reset in this shortcut is being fixed | factory | factory | — |
 
 Two iron rules the owner set: **never drive the card above its own maximum** (this die: 3090 MHz —
 the vendor's 2452 MHz boost figure is a floor, not a ceiling), and **a profile is a vector of
@@ -663,7 +663,7 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 | 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе, вертушки крутятся сколько угодно | тот же | **300 Вт** | нет, кроме железного максимума карты |
 | ⚖️ **Optimised** | *«почти то же самое, что Max Perfomance»* — но тихо (вентиляторы ≤ 60 %, ≈ 71 °C) и относительно холодно, при FPS не ниже 95 % | тот же | **250 Вт** | нет, кроме железного максимума карты |
 | ❄️ **Silent Cold** | МАКСИМУМ производительности, помещающийся под температуру, которую держат вентиляторы на 40 % — **59 °C, замерено** | тот же | 250 Вт | **есть, ~2800 МГц** |
-| 🔄 **Stock Default** | заводское состояние, всегда в одном клике | заводской | заводской | — |
+| 🔄 **Stock Default** | заводские мощность и частота в одном клике; сброс кривой в этом ярлыке — в починке | заводской | заводской | — |
 
 Два железных правила владельца: **никогда не гнать карту выше её собственного максимума** (у этого
 экземпляра 3090 МГц — паспортные 2452 МГц это нижняя граница, а не потолок) и **профиль это вектор
