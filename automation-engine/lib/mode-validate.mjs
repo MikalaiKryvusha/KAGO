@@ -499,6 +499,18 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     for (const x of r.results) console.log(`${x.ok ? '✅' : '❌'} ${x.what}${x.got ? ' — ' + x.got : ''}`);
     console.log(`\n${r.results.filter((x) => x.ok).length}/${r.results.length} зелёных`);
     process.exit(r.ok ? 0 : 1);
+  } else if (process.argv.includes('--hits')) {
+    // The visit map of a RECORDED sampler file — offline; the band boundaries are `[AI]` and this is how
+    // they get refined (researches/39 §4 п. 2): what a real load actually visited.
+    const files = process.argv.slice(process.argv.indexOf('--hits') + 1).filter((a) => !a.startsWith('--'));
+    if (files.length === 0) { console.error('ОШИБКА: --hits <файл сэмплера> [ещё файлы]'); process.exit(2); }
+    for (const f of files) {
+      let parsed; try { parsed = parseSamples(readFileSync(f, 'utf8')); } catch (e) { console.log(`${f}: не прочитан — ${e.message}`); continue; }
+      const map = hitMap(parsed.samples, { periodMs: parsed.periodMs });
+      const total = map.reduce((s, p) => s + p.seconds, 0);
+      console.log(`${f.replace(/\\/g, '/')} — проб ${parsed.samples.length}, ${total} с; посещены (≥ ${MIN_BAND_DWELL_S} с): ${visitedBands(map).map((i) => map[i].label).join(' · ') || 'ни одна'}`);
+      console.log('  ' + map.map((p) => `${p.label}: ${p.seconds} с (${Math.round(p.share * 100)} %)`).join(' · '));
+    }
   } else if (process.argv.includes('--plan')) {
     const i = process.argv.indexOf('--minutes');
     const minutes = i === -1 ? null : Number(process.argv[i + 1]);
@@ -513,6 +525,6 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     }
     console.log('Исполнитель, который гоняет эту смесь на карте (Ш4, вторая половина), ещё не построен.');
   } else {
-    console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1)\n  --plan [--minutes N] — смесь нагрузок проверки, без карты; исполнитель на карте (Ш4) ещё не построен');
+    console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1)\n  --plan [--minutes N] — смесь нагрузок проверки, без карты; исполнитель на карте (Ш4) ещё не построен\n  --hits <файл сэмплера> [...] — карта посещений полос по записанной телеметрии, без карты');
   }
 }

@@ -286,9 +286,10 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
 //
 // SEVEN BANDS — researches/39 §4 п. 2, `[AI]` boundaries to be refined by the visit map. Half-open
 // [loMhz, hiMhz): a boundary frequency belongs to the band ABOVE it. The first and the last are the bands
-// heavy load does not visit (below the lowest reachable cap 2157; above 2950) — their «увеличенный запас»
-// is the extrapolation rules of `trendModel` (not deeper than the extreme edge; top ≥ top edge + 25 mV)
-// plus whatever margin the vector gives them.
+// a 250 W mode's heavy load does not visit (below the lowest reachable cap 2157; above 2950) — ⚠️ but
+// `Max Perfomance` at 300 W spends 20 % of a Q2RTX run above 2950 (measured 25.09, config.mjs §10). Their
+// «увеличенный запас» is the extrapolation rules of `trendModel` (not deeper than the extreme edge; top ≥
+// top edge + 25 mV) plus whatever margin the vector gives them.
 //
 // INVARIANTS (P102-AC1), each a selftest block: never decreasing with frequency · never above stock ·
 // no frequency above the card's maximum (R13) · every voltage ON the card's grid and rounded UP (never

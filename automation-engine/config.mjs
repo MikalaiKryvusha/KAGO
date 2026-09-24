@@ -1206,8 +1206,11 @@ export function guardbandMillivolts(gridStepMv = VOLTAGE_GRID_STEP_MV) {
  * THE SEVEN FREQUENCY BANDS the margin vector, the visit map and the ratchet share — `[AI]`, from
  * researches/39 §4 п. 2, boundaries to be refined by the visit map. Half-open [loMhz, hiMhz): a
  * boundary frequency belongs to the band ABOVE it. B1 — below the lowest cap the curve can hold
- * (2157 MHz, R11) — and B7 — above 2950, where heavy load does not go — are the bands the whole-mode
- * check visits least. Used by `tools/curve-proposal.mjs` (the curve) and `lib/mode-validate.mjs`.
+ * (2157 MHz, R11) — and B7 — above 2950 — are the bands a 250 W mode's check visits least. MEASURED
+ * 2026-09-25 on recorded Q2RTX telemetry (`npm run validate -- --hits`): at 250 W the game lives in
+ * 2700–2900 (B4/B5) and B7 gets 0…1 %; at 300 W (`Max Perfomance`) B6 57 % and **B7 20 %** — so B7 is
+ * NOT unvisited for that mode, and it is where the 08–13.09 deaths were. B2 (2157–2500): 0 % in all four.
+ * Used by `tools/curve-proposal.mjs` (the curve) and `lib/mode-validate.mjs`.
  */
 export const MODE_BANDS = Object.freeze([
   { id: 'B1', loMhz: -Infinity, hiMhz: 2157, label: 'ниже 2157' },
