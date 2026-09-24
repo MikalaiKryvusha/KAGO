@@ -110,7 +110,7 @@ committed 18 minutes later (`a11a92d`), whose Outbound line cites no owner word;
 included it is MY reading, `[AI]` — plausible, not recorded (a second judge pass read it the same way; the
 third did not). For 07–09 the record says the OPPOSITE of delivered: the audit that bore them closes with
 «Тикеты фреймворку (`bugs/KAIF/07–09`) готовы к отправке в origin — по вашему слову», their lines still read
-«NOT YET — awaiting the owner's word», and no such word is recorded. How their substance reached 2.5 I cannot
+«NOT YET — awaiting the owner's word», and no such word is recorded. How their substance reached 2.5 I cannot <!-- owner-review:allow because=отчёт ЦИТИРУЕТ историческую пометку тикетов, вопроса владельцу здесь нет -->
 observe (the origin's owner is this project's owner).
 
 **Decision, `[AI]`, revisable:** the six are NOT filed as new issues now — my judgment, not a rule: the
