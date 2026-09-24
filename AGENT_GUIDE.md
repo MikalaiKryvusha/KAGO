@@ -525,15 +525,25 @@ are canon, each citing its answer:
    приёмки»; `npm run curve -- --progress` (`ideas/14`) prints it, rule 2 reads it, and
    `/what-next` opens with it (`METRIC:`). A session that moves nothing toward it and unblocks no
    upcoming live run still names why, in one line, out loud — that sentence was never the line's.
-2. **The moratorium (интервью 017, Q1 = A).** Until «краёв ≥ 195/389 (50 %)», new machinery
-   contours (guards, benches, suites, windows, canon sections) are NOT opened. One exception: a
-   blocker of the NEAREST live run. Epic 51 (the death watch) is such a blocker and proceeds.
+   🔄 **2026-09-25 — THE METRIC ITSELF CHANGED by the owner's word** (`interviews/interview_030`,
+   option A + «сохранить возможность» deepening; `GOAL.md` → «🔄 РАЗВОРОТ ПРОЕКТА ПО АУДИТУ 4»):
+   acceptance is now **`режимов проверено Y/4 · запас по полосам · выгода против стока`** — four
+   modes each validated WHOLE (`ЗАКАЗ.md` §2); «краёв X/389» survives as a reference line only.
+   `npm run curve -- --progress` learns the new line in epic 101 Ф1 (`plans/102` Ш6).
+2. **The moratorium (интервью 017, Q1 = A; threshold re-expressed 2026-09-25 with the metric).**
+   Until «режимов проверено 4/4», new machinery contours (guards, benches, suites, windows, canon
+   sections) are NOT opened — the one exception is the owner's explicit word WITH a price (rule 4).
+   The former «blocker of the nearest live run» exception is CLOSED: under the old method every
+   death qualified, and ~40 machinery plans passed through it (audit 4, §3). Epic 101 FREEZES the
+   protection machinery (fuse, canary, twin, polygon, traps, the watch window as a run precondition):
+   it stays on disk and in the battery, receives no new work, and gates nothing on the new path.
 3. **Live-run autonomy (интервью 017, Q4 — the owner's own variant, verbatim in the interview).**
-   Edge-seeking runs happen ONLY with a human at the machine — the machine still hangs and the
-   oracle is weak; the named cure is the high-frequency telemetry-lag edge predictor (epic 51,
-   `plans/52`). Unattended live runs are allowed ONLY for work that does NOT seek the edge and is
-   guaranteed not to hang; what qualifies as «guaranteed» is decided per plan, conservatively,
-   and named out loud.
+   Work that brings the card toward its edge (margin descent, deepening, the edge probe) happens ONLY
+   with a human at the machine. Unattended live runs are allowed ONLY for work that does NOT seek the
+   edge and is guaranteed not to hang — under epic 101 that is a RE-validation of an already
+   accepted mode; anything else is decided per plan, conservatively, and named out loud. (The former
+   «named cure» — the telemetry-lag predictor of epic 51 — is frozen by epic 101: the cure is a
+   method that approaches the edge by one margin from the safe side, not a faster in-machine guard.)
 4. **The price tag on entry (интервью 017, Q5 = A).** Every new owner wish is answered with the
    work AND its price line — «стоит ~N вечеров/сессий, подвинет в очереди Z» — so the owner
    decides with the price in hand. Absorbing scope silently is the defect, not the courtesy.
