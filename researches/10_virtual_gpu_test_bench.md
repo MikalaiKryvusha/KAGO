@@ -353,6 +353,7 @@ per band, in minutes. An estimate that is never checked is a number that drifts.
 
 ---
 
+<!-- owner-review:allow because=the section's body is «None» — no fork is asked here -->
 ## 5. Open forks for the owner
 
 **None.** `ideas/04` reserved exactly one decision — the failure model's depth — and instructed the
