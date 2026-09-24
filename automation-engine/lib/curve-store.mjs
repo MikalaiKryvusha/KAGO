@@ -318,6 +318,17 @@ export const CURVE_TAGS = Object.freeze({
    *
    *  [NOT-TESTED] at birth — the experiment document's validation is the first observation. */
   ORIGIN_EXPERIMENT: 'origin:experiment',
+  /** НАПРЯЖЕНИЕ ЗАДАНО МОДЕЛЬЮ КРЕМНИЯ — эпик 101 (разворот): касающийся тренд краёв + запас полосы
+   *  (`tools/curve-proposal.mjs` → `bandedCurve`). Прожига на строке нет; доказательство такой кривой —
+   *  только проверка ЦЕЛОГО режима (ЗАКАЗ.md §6), а не строка документа.
+   *
+   *  ⚠️ **WHY NOT `origin:experiment`.** That value records the OWNER's experiment of 2026-09-14 by his
+   *  word («ЭТО ЭКСПЕРИМЕНТ»); a candidate the agent builds from the model for the mode check is a
+   *  different fact with a different author. Same guarantees otherwise: not in `PROVEN_TAGS`, not
+   *  `stop:*`, never counted as an edge, `isUnmeasured` false.
+   *
+   *  [NOT-TESTED] at birth — `curve-proposal --selftest` validates a document carrying it. */
+  ORIGIN_MODEL: 'origin:model',
 });
 
 const TAG_VALUES = Object.freeze(Object.values(CURVE_TAGS));

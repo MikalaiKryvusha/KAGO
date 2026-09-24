@@ -35,7 +35,7 @@
 //
 // [NOT-TESTED] at birth — the blocks in `selfTest()` flip it.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -45,6 +45,8 @@ import { ORACLE_DATE, FUSE_OFF_POST_MHZ } from './mark-unwatched-rows.mjs';
 import { cornersOf } from './curve-editor.mjs';
 import { MODE_BANDS } from '../automation-engine/config.mjs';
 import { bandOf } from '../automation-engine/lib/mode-validate.mjs';
+import { CURVE_TAGS, validateCurveDoc, saveCurveDoc, curvePath } from '../automation-engine/lib/curve-store.mjs';
+import { loadGrid } from '../automation-engine/lib/card-grids.mjs';
 
 export const PROPOSALS_DIR = join('curves', 'proposals');
 const EXTRAPOLATION_FLOOR_MV = 25; // plans/25 «решено владельцем» item 2 — not the agent's number
@@ -378,6 +380,26 @@ export function propose() {
   return { facts, records, passes, fails, anchors, credible, refuted, rows, monotoneRaises, failRaises, trend, corners: cornersFromRows(rows, facts.grid), current: cornersOf(effectiveCurve(facts)) };
 }
 
+/**
+ * The banded curve as a TUNING-CURVE DOCUMENT (plans/102 Ш2) — the input `npm run curve -- --snapshot
+ * --from <name>` freezes into a battle snapshot, which a candidate profile then points at. On 2026-09-14
+ * this step was done by hand; now it is one function. A row at its stock voltage claims nothing
+ * (`stop:untouched`); every other row is `origin:model` — no burn, proof only by the whole-mode check.
+ * Only the document's own row keys travel (curve-store's ROW_KEYS is an exact-match list).
+ */
+export function curveDocFromRows({ rows, name, card, grid, stamp, takenAt }) {
+  return {
+    kind: 'tuning-curve', name, card, voltageGridMv: [...grid],
+    stamp: { driver: stamp.driver, vbios: stamp.vbios, takenAt },
+    // The document's table runs TOP-DOWN in frequency (the validator refuses any other order); the builder's rows run up.
+    frequencies: [...rows].sort((a, b) => b.mhz - a.mhz).map((r) => ({
+      mhz: r.mhz, voltageMv: r.voltageMv, stockVoltageMv: r.stockVoltageMv,
+      tags: [r.voltageMv === r.stockVoltageMv ? CURVE_TAGS.STOP_UNTOUCHED : CURVE_TAGS.ORIGIN_MODEL],
+      provenBy: null, editedAt: takenAt,
+    })),
+  };
+}
+
 // -------------------------------------------------------------------------------------------------
 // 4. Selftest — fixtures in memory, no files, no card
 // -------------------------------------------------------------------------------------------------
@@ -480,6 +502,13 @@ export function selfTest() {
   const up = bandedCurve({ ...bArgs, margins: [5, 10, 15, 30, 25, 30, 35] });
   check('ХРАПОВИК ОДНОЙ ПОЛОСЫ НЕ ОПУСКАЕТ НИ ОДНОЙ СТРОКИ И НЕ ТРОГАЕТ ПОЛОСЫ НИЖЕ', up.rows.every((r, i) => r.voltageMv >= bc.rows[i].voltageMv && (bandOf(r.mhz) >= 3 || r.voltageMv === bc.rows[i].voltageMv)));
   let threw = null; try { bandedCurve({ ...bArgs, margins: [30, 30, 30] }); } catch (e) { threw = e.message; }
+  // Ш2: the banded curve as a document the snapshot command accepts
+  const doc = curveDocFromRows({ rows: bc.rows, name: 'model-selftest', card: { name: 'fixture' }, grid: bGrid, stamp: { driver: '610.88', vbios: '98.03.58.40.8b' }, takenAt: '2026-09-25T01:30:00+03:00' });
+  const refusals = validateCurveDoc(doc);
+  check('ДОКУМЕНТ КРИВОЙ С ЗАПАСОМ ПРОХОДИТ ВАЛИДАТОР ДОКУМЕНТА', refusals.length === 0, refusals.map((r) => `${r.field}: ${r.why}`).join(' · ').slice(0, 300));
+  check('СТРОКА НА СТОКЕ — «НЕ ТРОНУТА», ОСТАЛЬНЫЕ — «МОДЕЛЬ», ЛИШНИХ ПОЛЕЙ НЕТ', doc.frequencies.length === bc.rows.length && doc.frequencies.every((r) => r.tags.join() === (r.voltageMv === r.stockVoltageMv ? 'stop:untouched' : 'origin:model')
+    && bc.rows.some((b) => b.mhz === r.mhz && b.voltageMv === r.voltageMv)
+    && Object.keys(r).sort().join() === 'editedAt,mhz,provenBy,stockVoltageMv,tags,voltageMv'), doc.frequencies.map((r) => r.mhz + ':' + r.tags).join(' '));
   check('ПЛОХОЙ ВЕКТОР ЗАПАСА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', marginRefusal([30, 30, 30, 30, 30, 30, -10]) !== null && marginRefusal([30, 30, 30, 30, 30, 30, 2.5]) !== null
     && marginRefusal([30, 30, 30, 30, 30, 30, 30]) === null && /запасов 3, полос 7/.test(threw ?? ''), threw ?? 'не отклонил');
   return results;
@@ -538,6 +567,23 @@ if (isMain) {
     for (const b of banded.perBand) console.log(`${b.label} · +${b.marginMv} · ${b.rows} · ${b.atStock} · ${b.depthMinMv ?? '—'}…${b.depthMaxMv ?? '—'}`);
     console.log(`подъёмы: к известным отказам ${banded.failRaises} · монотонность ${banded.monotoneRaises}`);
     console.log('УГЛЫ КРИВОЙ С ЗАПАСОМ:', banded.corners.map((c) => `${c.mhz}@${c.mv}`).join(' '));
+  }
+  // --write-doc <name>: the banded curve as curves/<name>.json — never over an existing file; the snapshot
+  // (`npm run curve -- --snapshot --from <name>`) and the candidate profile are the NEXT, separate acts.
+  const docName = argAfter('--write-doc');
+  if (docName !== null) {
+    if (!banded) { console.error('ОШИБКА: --write-doc пишет кривую с запасом — нужен --margin или --band-margins'); process.exit(2); }
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(docName)) { console.error(`ОШИБКА: имя документа «${docName}» — только строчные латинские буквы, цифры и дефис`); process.exit(2); }
+    const target = curvePath(docName);
+    if (existsSync(target)) { console.error(`ОТКАЗ: ${target.replace(/\\/g, '/')} уже существует — документ не перезаписывается`); process.exit(1); }
+    const now = new Date(); const off = -now.getTimezoneOffset();
+    const local = new Date(now.getTime() + off * 60000).toISOString().slice(0, 19);
+    const takenAt = `${local}${off >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`;
+    const doc = curveDocFromRows({ rows: banded.rows, name: docName, card: p.facts.card, grid: p.facts.grid, stamp: p.facts.stamp, takenAt });
+    const refusals = validateCurveDoc(doc, { card: doc.card, frequencyGrid: loadGrid('frequency') }); // curve-store's own form (cmdVerify)
+    if (refusals.length) { console.error(`ОТКАЗ: документ не прошёл валидатор — ${refusals.slice(0, 5).map((r) => `${r.field}: ${r.why}`).join(' · ')}`); process.exit(1); }
+    saveCurveDoc(doc, { name: docName });
+    console.log(`\nзаписан документ кривой: ${target.replace(/\\/g, '/')} (${doc.frequencies.length} строк: модель ${doc.frequencies.filter((r) => r.tags[0] === CURVE_TAGS.ORIGIN_MODEL).length} · на стоке ${doc.frequencies.filter((r) => r.tags[0] === CURVE_TAGS.STOP_UNTOUCHED).length}) — следующий акт: npm run curve -- --snapshot --from ${docName}`);
   }
   if (argv.includes('--write')) {
     const now = new Date(); const off = -now.getTimezoneOffset();
