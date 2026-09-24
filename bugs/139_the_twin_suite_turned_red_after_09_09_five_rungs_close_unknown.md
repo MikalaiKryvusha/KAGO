@@ -43,8 +43,11 @@ the pinned rung's record (`automation-engine/lib/_probe-twin.mjs`, removed after
 драйвере 610.88 / VBIOS 98.03.58.40.8b, а карта сейчас 616.92 / 98.03.58.40.8b — эталон недействителен до
 перепроверки (R6). Карту не грузили»*. The golden-stamp preflight compares the goldens with the LIVE card's driver;
 the machine moved to 616.92 on ≤ 18.09 (`runs/shell/boot-apply.jsonl`), so every twin rung that reaches the oracle
-is UNKNOWN. The bisect ran every commit TODAY on 616.92, so it found where the twin STARTED to reach that preflight
-with the live stamp (`24b2c7d`), not when the suite turned red (the driver change). **Cure: re-capture the goldens on
+is UNKNOWN. ✏️ **The bisect proved NOTHING** (independent judge, 02:0x, re-run from `git archive` snapshots, no GPU):
+its «good» end `75c676d` was taken from the 09.09 battery record and not re-run — TODAY it is red with the same six
+lines as `24b2c7d` and HEAD; and `24b2c7d` is `75c676d`'s ONLY child, so `bisect run` could name nothing else. An
+earlier edition of this paragraph said the bisect «found where the twin STARTED to reach that preflight» — also
+wrong, withdrawn. The cause stands on the probe alone: the driver change, through the golden stamp. **Cure: re-capture the goldens on
 616.92** (card day, `plans/102` Ш8 order, step 2) — then re-run the suite. **Second defect, named:** an «offline»
 twin whose verdict depends on the real card's driver is a sandbox leak (the class `profile-manager.mjs` calls «код
 тайком опирается на состояние машины», `bugs/18`); frozen by epic 101, recorded.
@@ -56,7 +59,10 @@ about hypothesis 1, see the paragraph above.**
 ПОРЯДКА — режим владельца снова применяется с рабочего стола») — the applier's order clamp against the worst-case
 reference. The twin drives the SAME applier (`curveWriteRefusal` / the vector builder are shared by design, R11–R13
 parity), and after the clamp its rungs close `unknown`. Next step when unfrozen: diff the twin's rung inputs at
-`24b2c7d^` vs `24b2c7d` — which refusal or clamp the twin's synthetic curve now meets. `git bisect reset` done; tree clean.
+`24b2c7d^` vs `24b2c7d` — which refusal or clamp the twin's synthetic curve now meets. `git bisect reset` done; ✏️ «tree clean» was wider than the observation: `git status` was clean, but with
+`core.autocrlf=true` the checkouts had rewritten ~227 files with CRLF — `npm run check` went red on the prayer guard
+(fixed by form, `30a35b7`) and the battle snapshot's recorded source hash stopped matching (restored and fixed by form,
+`.gitattributes curves/** -text`, `8dacf8d`). A bisect in this repository is not side-effect-free.
 **✏️ REFUTED 02:00 by the probe above — kept for the record. Narrower hypothesis (NOT observed, a 10-minute read, 01:52):** the commit's message says «ПАРИТЕТ: двойник получил тот
 же провод» (`virtual-gpu.mjs`, 6 lines) and «ничего не заявлено → R12 отказывает». The twin's pinned rung
 (`twin-assembly.mjs:1089`, 2145 MHz / 790 mV through `engine.runRung` → `vf.runStep`) declares no intent — so it
