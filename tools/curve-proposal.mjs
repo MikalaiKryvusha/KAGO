@@ -43,6 +43,8 @@ import { readJournal, harvestFromJournal, orphanIntents, corrections, LINE, RUNG
 import { loadFacts, effectiveCurve, CURVE_PATH, JOURNAL_PATH } from '../automation-engine/lib/curve-map.mjs';
 import { ORACLE_DATE, FUSE_OFF_POST_MHZ } from './mark-unwatched-rows.mjs';
 import { cornersOf } from './curve-editor.mjs';
+import { MODE_BANDS } from '../automation-engine/config.mjs';
+import { bandOf } from '../automation-engine/lib/mode-validate.mjs';
 
 export const PROPOSALS_DIR = join('curves', 'proposals');
 const EXTRAPOLATION_FLOOR_MV = 25; // plans/25 «решено владельцем» item 2 — not the agent's number
@@ -295,20 +297,11 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
 // 28 selftest blocks + mutations MB1–MB3 each red on target · report testcases/reports/2026-09-25_banded-curve-builder.md]
 // Not covered: the card has never been given this curve — that is Ф2's whole-mode check.
 
-export const BANDS = Object.freeze([
-  { id: 'B1', loMhz: -Infinity, hiMhz: 2157, label: 'ниже 2157' },
-  { id: 'B2', loMhz: 2157, hiMhz: 2500, label: '2157–2500' },
-  { id: 'B3', loMhz: 2500, hiMhz: 2700, label: '2500–2700' },
-  { id: 'B4', loMhz: 2700, hiMhz: 2800, label: '2700–2800' },
-  { id: 'B5', loMhz: 2800, hiMhz: 2900, label: '2800–2900' },
-  { id: 'B6', loMhz: 2900, hiMhz: 2950, label: '2900–2950' },
-  { id: 'B7', loMhz: 2950, hiMhz: Infinity, label: 'выше 2950' },
-].map(Object.freeze));
+// The bands live in config.mjs (R3: every safety number in one place) — this is the SAME constant, not a copy.
+export const BANDS = MODE_BANDS;
 
-/** Index of the band a frequency belongs to — the ONE mapping the curve, the visit map and the ratchet share. */
-export function bandOf(mhz, bands = BANDS) {
-  return bands.findIndex((b) => mhz >= b.loMhz && mhz < b.hiMhz);
-}
+// `bandOf` — the ONE mapping the curve, the visit map and the ratchet share — lives in lib/mode-validate.mjs.
+export { bandOf };
 
 /** Bands must tile the whole frequency axis — no hole, no overlap: a frequency without a band has no margin. */
 export function bandsRefusal(bands = BANDS) {
@@ -506,7 +499,7 @@ if (isMain) {
   if (argv.includes('--selftest')) {
     let r;
     try { r = selfTest(); } catch (e) { r = [{ n: 'САМОПРОВЕРКА УПАЛА — исключение вместо красного блока', ok: false, why: e?.stack?.split('\n').slice(0, 2).join(' ') ?? String(e) }]; }
-    for (const b of r) console.log(`${b.ok ? '🟢' : '🔴'} ${b.n}${b.why ? ' — ' + b.why : ''}`);
+    for (const b of r) console.log(`${b.ok ? '✅' : '❌'} ${b.n}${b.why ? ' — ' + b.why : ''}`);
     const red = r.filter((b) => !b.ok).length;
     console.log(`\n${r.length - red}/${r.length} зелёных`);
     process.exit(red ? 1 : 0);

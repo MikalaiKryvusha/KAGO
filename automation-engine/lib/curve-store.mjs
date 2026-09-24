@@ -50,6 +50,8 @@ import path from 'node:path';
 
 import { CLOCK_OFFSET_MIN_MHZ, CLOCK_OFFSET_MAX_MHZ, CURVE_GRAPHICS_POINT_COUNT } from '../config.mjs';
 import { CURVES_DIR, writeJsonAtomic, loadGrid, localIso, buildGrids, writeGrids, validateGrid, probeGpuInfo, factoryBaseFrom } from './card-grids.mjs';
+import { openValidateJournal, modesValidated, renderValidatedLine } from './mode-validate.mjs';
+import { readJournal } from './sweep-journal.mjs';
 
 export { CURVES_DIR };
 
@@ -2080,8 +2082,13 @@ function cmdProgress({ json = false } = {}) {
     try { const s = loadSnapshot({ id }); if (s) snapshots[id] = s; } catch { /* named by the line as unread */ }
   }
   const p = acceptanceProgress(doc, { profiles, snapshots });
-  if (json) { console.log(JSON.stringify({ ...p, brokenProfileFiles: broken }, null, 2)); return 0; }
-  console.log(renderDeliveryLine(p));
+  // Epic 101 (ЗАКАЗ.md §2): the acceptance metric is now «режимов проверено Y/4», read from the mode
+  // check's journal; the edge count below it stays as the REFERENCE line (plans/102 Ш6, P102-AC6).
+  const { records: checkLines } = readJournal(openValidateJournal());
+  const validated = modesValidated(checkLines, { profiles, modes: ACCEPTANCE_MODES });
+  if (json) { console.log(JSON.stringify({ validated, ...p, brokenProfileFiles: broken }, null, 2)); return 0; }
+  console.log(renderValidatedLine(validated));
+  console.log(`справочно — ${renderDeliveryLine(p)}`);
   if (broken.length > 0) console.log(`⚠️ профили не прочитались и отгруженными не считаются: ${broken.join(', ')}`);
   return 0;
 }

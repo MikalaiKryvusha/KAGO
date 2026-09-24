@@ -1198,6 +1198,45 @@ export function guardbandMillivolts(gridStepMv = VOLTAGE_GRID_STEP_MV) {
   };
 }
 
+// =============================================================================================
+// 10. The mode check — epic 101 (the turnaround): bands, margin descent, ratchet, dwell
+// =============================================================================================
+
+/**
+ * THE SEVEN FREQUENCY BANDS the margin vector, the visit map and the ratchet share — `[AI]`, from
+ * researches/39 §4 п. 2, boundaries to be refined by the visit map. Half-open [loMhz, hiMhz): a
+ * boundary frequency belongs to the band ABOVE it. B1 — below the lowest cap the curve can hold
+ * (2157 MHz, R11) — and B7 — above 2950, where heavy load does not go — are the bands the whole-mode
+ * check visits least. Used by `tools/curve-proposal.mjs` (the curve) and `lib/mode-validate.mjs`.
+ */
+export const MODE_BANDS = Object.freeze([
+  { id: 'B1', loMhz: -Infinity, hiMhz: 2157, label: 'ниже 2157' },
+  { id: 'B2', loMhz: 2157, hiMhz: 2500, label: '2157–2500' },
+  { id: 'B3', loMhz: 2500, hiMhz: 2700, label: '2500–2700' },
+  { id: 'B4', loMhz: 2700, hiMhz: 2800, label: '2700–2800' },
+  { id: 'B5', loMhz: 2800, hiMhz: 2900, label: '2800–2900' },
+  { id: 'B6', loMhz: 2900, hiMhz: 2950, label: '2900–2950' },
+  { id: 'B7', loMhz: 2950, hiMhz: Infinity, label: 'выше 2950' },
+].map(Object.freeze));
+
+/** One step of the margin descent after a passed check, mV — `[AI]`, researches/39 §6 («шаг спуска запаса 10 мВ»). */
+export const MARGIN_DESCENT_STEP_MV = 10;
+
+/**
+ * The ratchet: a failed check raises its band's margin by this many steps of the card's voltage grid
+ * AT THAT BAND'S VOLTAGES and floors the band there — `[AI]`, researches/39 §6 («храповик +2 шага
+ * сетки»); the owner's 10.08 design: «повышаем напряжение на один минимальный шаг вверх, и вновь
+ * тестируем всю кривую», and a band that failed is never lowered again (ЗАКАЗ.md §3).
+ */
+export const RATCHET_GRID_STEPS = 2;
+
+/**
+ * A band counts as VISITED by a check — and so may descend after a pass — only when the card spent at
+ * least this long in it. `[AI]`: a band crossed for a few seconds of transition has not been PROVEN by
+ * the check; 30 s is 2.5 % of the ~20-minute mix. Revisable by the visit maps of Ф2.
+ */
+export const MIN_BAND_DWELL_S = 30;
+
 /** Every constant in one object — what the phase-1 step 3.1 verification prints and audits. */
 export default Object.freeze({
   GUARDBAND_MIN_GRID_STEPS,
@@ -1276,4 +1315,8 @@ export default Object.freeze({
   PLATEAU_TIMEOUT_SECONDS,
   PLATEAU_LOAD_UTILIZATION_PCT,
   SILENT_COLD_FAN_CEILING_PCT,
+  MODE_BANDS,
+  MARGIN_DESCENT_STEP_MV,
+  RATCHET_GRID_STEPS,
+  MIN_BAND_DWELL_S,
 });

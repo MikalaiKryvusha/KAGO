@@ -265,6 +265,12 @@ const SUITES = [
   // ни боевой журнал не читаются и не пишутся.
   { id: 'curvemap', npm: 'npm run curvemap -- --selftest', argv: ['automation-engine/lib/curve-map.mjs', '--selftest'],
     what: 'карта кривой: факты журнала от одного автора, эффективная линия, маркер ступени, геометрия (plans/85)', done: /^САМОПРОВЕРКА КАРТЫ КРИВОЙ:/mu },
+  // Epic 101 Ф1 (plans/102 Ш7). Both offline: fixtures in memory; mode-validate's journal lives in a
+  // mkdtemp sandbox and is removed; neither reads the card, `curves/` or the sweep journal.
+  { id: 'proposal', npm: 'node tools/curve-proposal.mjs --selftest', argv: ['tools/curve-proposal.mjs', '--selftest'],
+    what: 'кривая агента: тренд краёв и «тренд + запас по семи полосам» (эпик 101 Ф1 Ш1)', done: /^\d+\/\d+ зелёных/mu },
+  { id: 'validate', npm: 'node automation-engine/lib/mode-validate.mjs --selftest', argv: ['automation-engine/lib/mode-validate.mjs', '--selftest'],
+    what: 'проверка режима: журнал, вердикт, карта посещений, храповик (эпик 101 Ф1 Ш3, Ш5)', done: /^\d+\/\d+ зелёных/mu },
   { id: 'fanladder', npm: 'npm run fanladder -- --selftest', argv: ['tools/fan-ladder.mjs', '--selftest'],
     what: 'акустическая лестница: план уровней и разбор замера', done: /^САМОПРОВЕРКА:/mu },
   { id: 'bench', npm: 'npm run bench -- --selftest', argv: ['automation-engine/lib/bench-run.mjs', '--selftest'],
