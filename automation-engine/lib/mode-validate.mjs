@@ -23,8 +23,10 @@
 //   MV3 a death is attributed to the FIRST sample, not the last → «СМЕРТЬ — СБОЙ В ПОЛОСЕ ПОСЛЕДНЕЙ ДОЛГОВЕЧНОЙ ПРОБЫ»
 //   MV4 a pass of ANOTHER curve counts for the mode          → «МЕТРИКА: СЧИТАЕТСЯ ПРОЙДЕННАЯ ПРОВЕРКА ТОЙ КРИВОЙ…»
 //   MV5 the scaled mix loses its per-stage floor             → «ДЫМ НА МИНУТУ СОХРАНЯЕТ ПРОСТОЙ НА ОБОИХ КОНЦАХ…»
+//   MV6 the intent is written AFTER the sampler starts        → «ИСПОЛНИТЕЛЬ: НАМЕРЕНИЕ В ЖУРНАЛЕ И СЭМПЛЕР ИДУТ ДО ПРИМЕНЕНИЯ»
+//   MV7 the rollback leaves `finally`                        → the four executor blocks that demand «откат сделан»
 //
-// [NOT-TESTED] — hygiene only so far (25 blocks, MV1–MV5 each red on target, 2026-09-25). Functional runs:
+// [NOT-TESTED] — hygiene only so far (31 blocks, MV1–MV7 each red on target, 2026-09-25). Functional runs:
 // the metric line read live from `npm run curve -- --progress` and `--plan` read live; the journal, the
 // verdict and the ratchet have never met a real check — that is the smoke of Ш8 and the evening of Ф2.
 
@@ -261,6 +263,61 @@ export function planMix({ minutes = null } = {}) {
 }
 
 // -------------------------------------------------------------------------------------------------
+// Ш4 (the executor's SHAPE) — one check, driven through injected seams
+// -------------------------------------------------------------------------------------------------
+//
+// The ORDER is the whole safety of the check, and it is fixed here, where it can be proved without a card:
+//   1. the intent is fsync'ed BEFORE the card is touched (ЗАКАЗ.md §3: «журнал намерений с fsync до
+//      записи в карту») — a death after the write must find it;
+//   2. the sampler starts BEFORE the apply — the one proven death of 08.09 came 10 s after a write, at
+//      rest (researches/36): a sampler started later would have nothing to attribute it to;
+//   3. the mix stops at the first failing stage — a failed mode is not driven further;
+//   4. the rollback runs in `finally`, whatever threw (ЗАКАЗ.md §3: «откат в finally»);
+//   5. the verdict closes the intent — a clean return leaves no orphan.
+// A refused apply is UNKNOWN (the check did not happen), never PASSED and never a failure of the silicon.
+//
+// seams = { startSampler(path) → { stop() }, apply() → { ok, why }, runStage(stage) → { ok, why, endedAtMs },
+//           rollback() → { ok, why }, readSamples(path) → { samples, periodMs }, driverEvents(fromMs, toMs) → [...] }
+// The real seams (the shortcut's apply path, graphics-load, stress-tester, hardware-mon, driver-voice) are
+// wired on the first card day; until then this is [NOT-TESTED] on the card and proved on fakes only.
+
+export async function runCheck({ journal, mode, candidate = null, snapshot = null, margins = null, plan, telemetryPath, seams, nowMs = () => Date.now(), atIso = () => new Date().toISOString() }) {
+  const intent = writeCheckIntent(journal, { mode, candidate, snapshot, margins, telemetryPath, at: atIso() });
+  const startedMs = nowMs();
+  const sampler = seams.startSampler(telemetryPath);
+  const stages = [];
+  let applied = null;
+  let rollback = null;
+  try {
+    applied = await seams.apply();
+    if (applied?.ok) {
+      for (const stage of plan.stages) {
+        let r;
+        try { r = await seams.runStage(stage); } catch (e) { r = { ok: false, why: `исключение: ${e?.message ?? e}`, endedAtMs: nowMs() }; }
+        stages.push({ name: stage.label, kind: stage.kind, ...r });
+        if (!r.ok) break;
+      }
+    }
+  } finally {
+    try { rollback = await seams.rollback(); } catch (e) { rollback = { ok: false, why: `откат бросил: ${e?.message ?? e}` }; }
+    try { sampler?.stop?.(); } catch { /* the sampler's file is already durable line by line */ }
+  }
+  const endedMs = nowMs();
+  if (!applied?.ok) {
+    const why = `режим не применён: ${applied?.why ?? 'нет ответа применителя'} — проверки не было`;
+    writeCheckVerdict(journal, { seq: intent.seq, verdict: CHECK_VERDICT.UNKNOWN, at: atIso(), why });
+    return { seq: intent.seq, verdict: { verdict: CHECK_VERDICT.UNKNOWN, why, failure: null, failures: [] }, stages, rollback, hits: null };
+  }
+  const { samples, periodMs } = seams.readSamples(telemetryPath);
+  const events = seams.driverEvents(startedMs, endedMs);
+  const v = verdictOf({ samples, driverEvents: events, stages: stages.map((s) => ({ ...s, name: s.name })) });
+  const hits = hitMap(samples, { periodMs });
+  const why = rollback?.ok === false ? `${v.why} · ⚠️ ОТКАТ НЕ ПОДТВЕРЖДЁН: ${rollback.why}` : v.why;
+  writeCheckVerdict(journal, { seq: intent.seq, verdict: v.verdict, failure: v.failure, hits: hits.map((h) => ({ id: h.id, seconds: h.seconds })), at: atIso(), why });
+  return { seq: intent.seq, verdict: v, stages, rollback, hits };
+}
+
+// -------------------------------------------------------------------------------------------------
 // Ш6 — the acceptance metric «режимов проверено Y/4» (ЗАКАЗ.md §2, MASTER_PLAN «Метрика приёмки»)
 // -------------------------------------------------------------------------------------------------
 
@@ -298,7 +355,7 @@ export function renderValidatedLine(v) {
 // Selftest — fixtures in memory and in a temp sandbox; no card, no production journal
 // -------------------------------------------------------------------------------------------------
 
-export function selfTest() {
+export async function selfTest() {
   const results = [];
   const check = (what, ok, got = '') => results.push({ what, ok: !!ok, got });
   const S = (ms, mhz) => ({ ms, mhz });
@@ -379,8 +436,43 @@ export function selfTest() {
   let mixRefused = null; try { planMix({ minutes: 0 }); } catch (e) { mixRefused = e.message; }
   check('НУЛЕВАЯ ДЛИТЕЛЬНОСТЬ ОТКЛОНЯЕТСЯ ПО ИМЕНИ', /нужно число минут > 0/.test(mixRefused ?? ''), mixRefused ?? 'не отклонил');
 
+  // Ш4: the executor's shape, on fakes, in a sandbox journal
+  const exDir = mkdtempSync(join(tmpdir(), 'kago-runcheck-'));
+  try {
+    const j = openValidateJournal({ dir: exDir });
+    const linesNow = () => readJournal(j).records.length;
+    const smokePlan = planMix({ minutes: 1 });
+    const samples20 = [...Array(20)].map((_, i) => S(i * 1000, 2850));
+    const run = async (opts) => {
+      const calls = [];
+      const seams = {
+        startSampler: () => { calls.push(`sampler@${linesNow()}`); return { stop: () => calls.push('stop') }; },
+        apply: async () => { calls.push(`apply@${linesNow()}`); return opts.applyOk === false ? { ok: false, why: 'штамп профиля не совпал (R6)' } : { ok: true }; },
+        runStage: async (s) => { calls.push(`stage:${s.kind}`); if (s.kind === opts.throwAt) throw new Error('нагрузка упала'); return { ok: s.kind !== opts.failAt, why: 'код 3', endedAtMs: 10000 }; },
+        rollback: async () => { calls.push('rollback'); if (opts.rollbackThrows) throw new Error('нет ответа'); return { ok: true }; },
+        readSamples: () => ({ samples: samples20, periodMs: 1000 }),
+        driverEvents: () => [],
+      };
+      const r = await runCheck({ journal: j, mode: 'optimised', plan: smokePlan, telemetryPath: join(exDir, 'mon.jsonl'), seams, atIso: () => '2026-09-25T01:40:00+03:00' });
+      return { r, calls };
+    };
+    const a = await run({});
+    check('ИСПОЛНИТЕЛЬ: НАМЕРЕНИЕ В ЖУРНАЛЕ И СЭМПЛЕР ИДУТ ДО ПРИМЕНЕНИЯ', a.calls[0] === 'sampler@1' && a.calls[1] === 'apply@1', a.calls.slice(0, 3).join(' → '));
+    check('ИСПОЛНИТЕЛЬ: ЧИСТАЯ СМЕСЬ — ПРОЙДЕНА, ОТКАТ СДЕЛАН, НАМЕРЕНИЕ ЗАКРЫТО', a.r.verdict.verdict === CHECK_VERDICT.PASSED && a.calls.includes('rollback') && orphanIntents(readJournal(j).records).length === 0
+      && a.calls.filter((c) => c.startsWith('stage:')).length === smokePlan.stages.length, `${a.r.verdict.verdict} · ${a.calls.join(' ')}`);
+    const b = await run({ failAt: MIX_STAGE.TRANSITIONS });
+    check('ИСПОЛНИТЕЛЬ: СМЕСЬ ВСТАЁТ НА ПЕРВОЙ ПАДАЮЩЕЙ СТУПЕНИ, ОТКАТ ВСЁ РАВНО', b.r.verdict.verdict === CHECK_VERDICT.FAILED && b.r.verdict.failure.cls === FAILURE_CLASS.LOAD
+      && !b.calls.includes('stage:burn') && b.calls.at(-2) === 'rollback', b.calls.join(' '));
+    const c = await run({ throwAt: MIX_STAGE.GAME });
+    check('ИСПОЛНИТЕЛЬ: ИСКЛЮЧЕНИЕ В НАГРУЗКЕ — СБОЙ, А НЕ ПАДЕНИЕ ПРИБОРА; ОТКАТ СДЕЛАН', c.r.verdict.verdict === CHECK_VERDICT.FAILED && c.calls.includes('rollback'), c.r.verdict.why);
+    const d = await run({ applyOk: false });
+    check('ИСПОЛНИТЕЛЬ: ОТКАЗ ПРИМЕНЕНИЯ — НЕИЗВЕСТНО, НИ ОДНОЙ СТУПЕНИ, ОТКАТ СДЕЛАН', d.r.verdict.verdict === CHECK_VERDICT.UNKNOWN && !d.calls.some((x) => x.startsWith('stage:')) && d.calls.includes('rollback'), d.r.verdict.why);
+    const e = await run({ rollbackThrows: true });
+    check('ИСПОЛНИТЕЛЬ: УПАВШИЙ ОТКАТ НАЗВАН В ВЕРДИКТЕ', /ОТКАТ НЕ ПОДТВЕРЖДЁН/.test(readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1)?.why ?? ''), e.r.rollback?.why ?? '');
+  } finally { rmSync(exDir, { recursive: true, force: true }); }
+
   // P102-AC6: the metric
-  const MODES = ['max-performance', 'optimised', 'silent-cold', 'stock-default'];
+  const MODES =['max-performance', 'optimised', 'silent-cold', 'stock-default'];
   const I = (seq, mode, snapshot, margins = null) => ({ state: LINE.INTENT, kind: CHECK_KIND, seq, mode, snapshot, margins });
   const V = (seq, verdict) => ({ state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict });
   const profs = [{ mode: 'optimised', settings: { curveSnapshot: 'snapB' } }, { mode: 'stock-default', settings: {} }];
@@ -394,8 +486,8 @@ export function selfTest() {
   return { ok: results.every((r) => r.ok), results };
 }
 
-export function runSelfTest() {
-  try { return selfTest(); } catch (e) {
+export async function runSelfTest() {
+  try { return await selfTest(); } catch (e) {
     return { ok: false, results: [{ ok: false, what: 'НАБОР УПАЛ, НЕ ДОЙДЯ ДО КОНЦА — это красный блок', got: `${e.name}: ${e.message}` }] };
   }
 }
@@ -403,7 +495,7 @@ export function runSelfTest() {
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   if (process.argv.includes('--help')) { console.log('node automation-engine/lib/mode-validate.mjs --selftest — журнал, вердикт, карта посещений и храповик проверки режима (эпик 101 Ф1); карту не трогает'); process.exit(0); }
   if (process.argv.includes('--selftest')) {
-    const r = runSelfTest();
+    const r = await runSelfTest();
     for (const x of r.results) console.log(`${x.ok ? '✅' : '❌'} ${x.what}${x.got ? ' — ' + x.got : ''}`);
     console.log(`\n${r.results.filter((x) => x.ok).length}/${r.results.length} зелёных`);
     process.exit(r.ok ? 0 : 1);
