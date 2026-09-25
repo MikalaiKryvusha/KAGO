@@ -11371,10 +11371,10 @@ async function mainSweep(argv, arg) {
       }
       console.error('');
       console.error('       ЧТО СДЕЛАТЬ — снять профиль, и это ВАШЕ решение, не моё:');
-      // 2026-09-25 (bugs/140): the shortcut resets power and clocks but NOT the curve, and the tray has no Exit item —
-      // the full reset is `--reset` (resetToFactory zeroes the curve with its own backend).
+      // 2026-09-25 (bugs/140): the shortcut zeroes the curve since the fix of that morning (`applyNeedsCurveBackend`);
+      // until its live witness `--reset` stays the first advice (resetToFactory zeroes with its own backend). No tray Exit.
       console.error('         npm run profile -- --reset   (полный сброс, включая кривую V/F)');
-      console.error('         ярлык 🔄 Stock Default сейчас сбрасывает мощность и частоту, но НЕ кривую (bugs/140)');
+      console.error('         или ярлык 🔄 Stock Default (обнуляет кривую с починки bugs/140; на карте ещё не проверено)');
       console.error('       Развёртка карту сама не сбрасывает: применённый профиль — состояние вашей');
       console.error('       машины, и снимать его решаете вы (правило машины владельца).');
       console.error('');

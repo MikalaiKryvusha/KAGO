@@ -951,6 +951,25 @@ export async function resolveProfileCurve(profile, {
   return resolved;
 }
 
+/**
+ * DOES THE CALLER OF `apply()` HAVE TO OPEN A CURVE BACKEND? — `bugs/140`.
+ *
+ * `apply()` zeroes the curve of a profile whose `curveRaiseAndCapMhz` is `null` ONLY when it is handed a
+ * backend (`profiles/README.md`: `null` = «обнулить все смещения кривой»). The CLI used to open one only
+ * when the profile RAISED the curve (`effCurve !== null`), so `--apply factory` — the action of the
+ * `\KAGO\apply-factory` task behind the 🔄 Stock Default shortcut — reset the power limit and the clock
+ * lock and left the previous mode's offsets on the card. The answer is the format's rule: a backend for
+ * a profile that sets a curve AND for one whose curve is factory.
+ *
+ * `effCurve` is `resolveProfileCurve(profile)`'s answer, handed over rather than recomputed (`bugs/18`).
+ *
+ * [NOT-TESTED] at birth — block «ЗАВОДСКОЙ ПРОФИЛЬ ПОЛУЧАЕТ БЭКЕНД КРИВОЙ» in `profile --selftest`
+ * (mutation MB140); the live witness (click → 0 non-zero offsets of 127) is the card day's, with the owner.
+ */
+export function applyNeedsCurveBackend(profile, effCurve) {
+  return effCurve !== null || profile?.settings?.curveRaiseAndCapMhz === null;
+}
+
 export async function apply(backend, profile, {
   card, timing = {}, verifyLock = 'idle', curveBackend = null,
   // THE ONE NAMED WAY PAST THE QUALIFICATION GATE (`plans/11` §4.4, P6-AC4), and it is a PARAMETER
@@ -2466,6 +2485,30 @@ async function cmdSelftest() {
     }
   });
 
+  // `bugs/140` — the 🔄 Stock Default shortcut runs `--apply factory`, and the CLI decided «no curve
+  // backend» for it, so `apply()` skipped its zeroing step and the previous mode's offsets stayed on
+  // the card. The block reads the REAL `profiles/factory.json` (the file the shortcut applies, not a
+  // fixture) and walks the CLI's own decision into `apply()`. Mutation addressee, named before the run:
+  //   MB140. `applyNeedsCurveBackend` → `effCurve !== null`  → this block, and only this block.
+  block('ЗАВОДСКОЙ ПРОФИЛЬ ПОЛУЧАЕТ БЭКЕНД КРИВОЙ У --apply, И СДВИГИ ПРЕЖНЕГО РЕЖИМА ОБНУЛЯЮТСЯ (bugs/140)', async () => {
+    const { profile: fac, refusals } = loadProfileFile(profilePath('factory'));
+    if (!fac) return `profiles/factory.json не загрузился: ${refusals.map((r) => `${r.field} — ${r.why}`).join('; ')}`;
+    const eff = await resolveProfileCurve(fac);
+    if (eff !== null) return `заводской профиль вдруг задаёт кривую: ${JSON.stringify(eff)}`;
+    if (!applyNeedsCurveBackend(fac, eff)) return 'для factory.json бэкенд кривой не открывается — ярлык 🔄 Stock Default оставит сдвиги прежнего режима на карте';
+    // The card as the previous mode left it: offsets on the upper points.
+    const cb = fakeCurve();
+    cb.state.offsets = Array.from({ length: 128 }, (_, i) => (i >= 60 && i < 127 ? 120 : 0));
+    const r = await apply(fakeBackend(), fac, { card: SELFTEST_CARD, timing: FAST, curve: eff, curveBackend: applyNeedsCurveBackend(fac, eff) ? cb : null });
+    if (!r.applied) return 'заводской профиль не применился';
+    const left = cb.state.offsets.filter((v) => v !== 0).length;
+    if (left !== 0) return `после заводского применения ненулевых сдвигов ${left} из 128`;
+    if (!r.steps.some((s) => /возврат к заводской \(все смещения 0\)/u.test(s))) return `шаг обнуления не назван в отчёте: ${r.steps.join(' | ')}`;
+    // Control row: a profile that RAISES the curve still gets the backend (the old half of the rule).
+    if (!applyNeedsCurveBackend(curveProfile(), { deltaMhz: 592, capMhz: 2130 })) return 'профиль с кривой лишился бэкенда';
+    return null;
+  });
+
   // --- ВЕКТОР (`plans/12` §4.4). МУТАЦИОННЫЕ АДРЕСАТЫ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
   //   H. `raise` всегда берёт `deltaMhz`      → «ВЕКТОР: своё смещение на каждую точку доезжает до карты»
   //   I. строка шага всегда «подъём +N»       → «ВЕКТОР: шаг НАЗЫВАЕТ форму записи»
@@ -3458,8 +3501,9 @@ async function main(argv) {
     // shortcut path still meets the refusal (its own selftest block proves that).
     const witness = argv.includes('--witness');
     const isDraft = profile.qualified !== true && profile.mode !== undefined;
-    // The curve backend is opened only when the profile actually asks for a curve — a profile that
-    // sets no curve must not load nvapi64.dll for nothing.
+    // The curve backend is opened by the FORMAT's rule, not by «does the profile raise the curve»:
+    // `curveRaiseAndCapMhz: null` orders «zero every offset», so the factory profile needs it too
+    // (`applyNeedsCurveBackend`, `bugs/140`).
     // The referenced document is loaded HERE, in the CLI, because only the CLI may `await import` the
     // store (which transitively pulls the card probes). Everything below sees one resolved shape.
     // `--clamp-at-basis` — репетиционный путь `plans/84`: подрезка против ОПОРЫ, «никогда выше» держит
@@ -3469,7 +3513,7 @@ async function main(argv) {
       ? { clampAtBasis: true, envelopeMhz: readState(backend).clockMaxMhz }
       : {});
     if (clampAtBasis) console.log('⚠️  ПОДРЕЗКА ПРОТИВ ОПОРЫ (--clamp-at-basis, plans/84): замок-граница ставится ПЕРВЫМ, предложение момента может стоять выше максимума — держит замок.');
-    const needsCurve = effCurve !== null;
+    const needsCurve = applyNeedsCurveBackend(profile, effCurve);
     const curveBackend = needsCurve ? nvapiCurveBackend() : null;
 
     console.log(`ПРИМЕНЕНИЕ «${profile.name}» — «${profile.title}»`);
@@ -3478,7 +3522,10 @@ async function main(argv) {
       console.log('    Он применяется, чтобы вы его СУДИЛИ, и НЕ запоминается для автозагрузки.');
       console.log('    Ярлык на столе этот профиль по-прежнему отвергает.');
     }
-    if (needsCurve) {
+    if (effCurve === null && needsCurve) {
+      console.log('    кривая V/F: вернуть к заводской — все смещения 0, с перечитыванием (пишется через NVAPI)');
+    }
+    if (effCurve !== null) {
       const c = effCurve;
       const shape = c.__fromSnapshot
         ? `вектор из боевого снимка «${c.__fromSnapshot}» на ${c.deltaByPointMhz.length} точек (запись прогона его не меняет)`
@@ -3491,7 +3538,7 @@ async function main(argv) {
         console.log('        на точке, обслуживавшей потолок, а выше её обслуживают другие точки.');
       }
     }
-    console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (полный сброс, включая кривую; ярлык Stock Default кривую пока не обнуляет — bugs/140).');
+    console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (полный сброс, включая кривую) или ярлык 🔄 Stock Default (кривую обнуляет с bugs/140).');
 
     let r;
     try {

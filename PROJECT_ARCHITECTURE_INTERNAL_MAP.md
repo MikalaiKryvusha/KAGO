@@ -163,7 +163,8 @@ shortcut.
 > трей-приложение KAGO»*. So the tray gains ONE state-changing action, and only one.
 > ⚠️ **NOT BUILT as of 2026-09-25** (`automation-engine/tray.ps1:8` «no menu, no buttons, no click actions»;
 > `lib/tray-autostart.mjs:205` «the Exit item … is not built yet») — this section is the DESIGN. And the task it
-> would call, `\KAGO\apply-factory`, does not zero the V/F curve today (`bugs/140`).
+> would call, `\KAGO\apply-factory`, did not zero the V/F curve until 2026-09-25 (`bugs/140`: fixed in code that
+> morning — `applyNeedsCurveBackend`; live witness pending).
 >
 > | how the tray ends | resets the card? | why |
 > |---|---|---|

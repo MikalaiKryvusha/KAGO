@@ -431,8 +431,9 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
       try {
         const card = await L.probeCard();
         const curve = await L.resolveProfileCurve(profile);
-        // ALWAYS a curve backend: for the factory profile `apply()` zeroes the curve only when handed one — the
-        // CLI hands none (bugs/140), and a stock check on a card still carrying offsets would not be a stock check.
+        // ALWAYS a curve backend: for the factory profile `apply()` zeroes the curve only when handed one (the CLI
+        // hands one since bugs/140 — `applyNeedsCurveBackend`), and a stock check on a card still carrying offsets
+        // would not be a stock check.
         cb = L.nvapiCurveBackend();
         applied = await L.apply(L.nvidiaSmiBackend(), profile, { card, curveBackend: cb, curve, consent });
         return { ok: true, why: (applied.steps ?? []).join(' · ') };
