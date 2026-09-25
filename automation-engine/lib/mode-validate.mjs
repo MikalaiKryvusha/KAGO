@@ -604,7 +604,10 @@ export function lastBootLine(text) {
   if (!last) return 'ПРИ ВХОДЕ: записей восстановления нет';
   const when = String(last.at ?? '').replace('T', ' ').slice(0, 16);
   if (!last.verdict) return `⚠️ ПРИ ВХОДЕ ${when}: восстановление «${last.remembered ?? '?'}» НЕ ЗАКРЫЛОСЬ — намерение без итога (возможна смерть машины при восстановлении)`;
-  if (last.verdict === 'owner-cleared') return `ВРУЧНУЮ ${when}: владелец сбросил запомненный режим («${last.remembered ?? '—'}»)`;
+  // `owner-cleared` is written by ANY manual `profile --apply` (profile-manager.mjs, the boot-loop breaker's release) — by
+  // the owner or by the agent; the record does not say who. The line said «владелец сбросил» and was false on 2026-09-25
+  // (the agent's apply of a candidate at 19:10) — the judge of session 104 caught it.
+  if (last.verdict === 'owner-cleared') return `ВРУЧНУЮ ${when}: режим «${last.remembered ?? '—'}» применён командой --apply (кем — запись не говорит); это не вход в систему`;
   if (last.verdict === 'applied') return `ПРИ ВХОДЕ ${when}: «${last.remembered}» применён`;
   if (last.verdict === 'degraded-to-factory') return `⚠️ ПРИ ВХОДЕ ${when}: «${last.remembered}» ОТВЕРГНУТ, стоит заводское — ${String(last.detail ?? '').replace(/^.*?заводское стоит:\s*/, '').slice(0, 140)}`;
   return `ПРИ ВХОДЕ ${when}: ${last.verdict}${last.remembered ? ` («${last.remembered}»)` : ''}`;

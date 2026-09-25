@@ -8,16 +8,23 @@
 
 1. **The stale reference is USED, not rejected.** Every apply of a snapshot mode that evening printed
    «ОПОРА: артефакт худшего случая (снята 2026-08-31T23:13:42+03:00 при 68 °C …) · опора ↔ карта сейчас: расходится
-   67 точек из 127». The reference `curves/reference-table.json` is stamped 610.88; the card is 616.92. R6 says a driver
-   change invalidates it (`curve-store.referenceUsableFor` does check the stamp) — but `profile-manager` calls it with
-   `{ card: cardStamp }`, and `cardStamp` defaults to `null` (`profile-manager.mjs:683`); no production caller passes it
-   (grep: only selftests at `:2878 :3006 :3039 :3217`). So the stamp half of the gate is never asked.
+   N точек из 127» (N = 72 at the 19:10 CLI apply, 67 later — the count follows the card's state). The reference
+   `curves/reference-table.json` is stamped 610.88; the card is 616.92. R6 says a driver change invalidates it
+   (`curve-store.referenceUsableFor` does check the stamp) — but `profile-manager` calls it with `{ card: cardStamp }`, and
+   `cardStamp` defaults to `null` (`profile-manager.mjs:683`); no production caller passes it (grep at `40e2c86`: only
+   selftests at `:2883 :3011 :3044 :3222`). So the stamp half of the gate is never asked.
 2. **Retaking it fails.** `npm run curve -- --take-reference` twice (19:01, 19:26): «таблица не прочитана: таблица кривой не
    устоялась за 12 проб» (`nvapi.readVfCurveStable`, `curve-store.mjs:3405`) — under steady `furnace` load the table
    slides with heating and two consecutive identical reads never come within 12 samples. Zero writes to the card.
+   ⚠️ **Found by the judge, not by me:** each failure coincides with the ONLY two `nvlddmkm` events since 18.09 — id 153
+   «Error occurred on GPUID: 100» at **19:01:08** and **19:27:07** (Windows System log). The driver's own error channel
+   spoke exactly when the reference reading ended; whether the loaded-table reads cause it or the failure path does is
+   unknown — investigate BEFORE a third attempt (`npm run drivervoice`, `npm run events -- --since 2026-09-25`).
 3. Consequence seen: the vector computed against this reference, judged against the COLD live table, inverted the
-   curve order (R12 refused +30/+20/+10 at 41–42 °C, passed warm). Since `40e2c86` the order is clamped downward
-   instead of refused — the symptom is gone; the stale base is not.
+   curve order. Refusals on disk (journal): seq 6 (band margins), seq 8 (+10), seq 9 (+20) at 42–43 °C; +20 had passed a
+   smoke warm (seq 7). The +30 refusal at 41 °C was seen once by a seam probe at 19:27:55 — its output lives only in the
+   session, not on disk. Since `40e2c86` the order is clamped downward instead of refused — the symptom is gone; the
+   stale base is not.
 
 ## Fix plan (offline first)
 

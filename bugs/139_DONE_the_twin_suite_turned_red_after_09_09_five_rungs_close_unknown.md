@@ -79,7 +79,8 @@ EXP-0291.
 Hygiene: `npm run selftest:all` — 55 suites, 0 red, 2824 green blocks; `twin` 30/30 (log
 `runs/selftest-all-2026-09-25-evening2.log`).
 Functional run: the cure was a live act — `npm run stress -- --capture-baseline` plus the four `furnace` intensity levels
-(`--workload furnace --arg 2400 --arg 8192 --arg 256 --arg 64|48|32|20`) on the card at 616.92, 18:57–18:59; checksums
-byte-identical to the 610.88 ones, only the stamps changed; `--verify-baseline` — 8 of 8.
+(`--workload furnace --arg 2400 --arg 8192 --arg 256 --arg 64|48|32|20`) on the card at 616.92, 18:57–18:59; the 6
+goldens that existed on 610.88 came back byte-identical in checksum (only the stamps changed); `canary.json` and the
+default `furnace.json` are new (no 610.88 copy — ✏️ corrected after the judge); `--verify-baseline` — 8 of 8.
 Root cause confirmed by the cure: all five reds were the stamp gate (R6) on 610.88 goldens against the 616.92 driver —
 the one proved at 02:00 and the four it predicted.
