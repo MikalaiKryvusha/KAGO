@@ -85,6 +85,21 @@ flowchart TD
    restored → 0 red.
 3. ⏳ Live witness: apply a tuned candidate → click 🔄 Stock Default → `node tools/probe-offer.mjs` → non-zero offsets
    **0** of 127 (+ `npm run profile -- --state` for power and clock).
+   **Run sheet for the card evening 2026-09-25 ~19:00 (owner at the machine), prepared offline:**
+   - the installed task, read ≈08:47 from Task Scheduler (read-only): `\KAGO\apply-factory` → `wscript … run-hidden.js
+     node.exe D:\work\ai_sandbox\KAGO\automation-engine\lib\profile-manager.mjs --apply factory`, RunLevel
+     HighestAvailable — it runs the REPO file, so the fix reaches the shortcut without re-installing anything;
+   - the tuned state is `profiles/witness-140.local.json` (gitignored): `deltaMhz 0 · capMhz 3090`, stamp 616.92 —
+     ZERO raised points, only the factory table's points offering above 3090 get NEGATIVE offsets (more voltage for
+     the same frequency). Predicted on the stored reference: 6 points, −7…−45 MHz; R12 no new inversion, R13 nothing
+     raised. Format and stamp checked offline against a 616.92 card shape: 0 refusals;
+   1. `node tools/probe-offer.mjs` → non-zero **0** (factory since boot) · `npm run profile -- --state` → 300 W;
+   2. `npm run profile -- --apply witness-140.local` → the curve step reads back; power untouched;
+   3. `node tools/probe-offer.mjs` → non-zero **N > 0** — the control: the state the shortcut must clear;
+   4. the owner double-clicks 🔄 Stock Default on the desktop (the real path);
+   5. `node tools/probe-offer.mjs` → non-zero **0** · `npm run profile -- --state` → 300 W · remembered state = factory.
+   Rollback at any step: `npm run profile -- --reset`, or a reboot. Step 5 showing N > 0 = the fix did not reach the
+   task → stop, read why (the task's console is hidden: re-run the same command line from an elevated shell).
    ✏️ *Corrected 08:4x (session 103): this line named `npm run profile -- --state` as the offset reader — it prints power,
    clock, driver and VBIOS only (`printState`) and never reads the curve; `probe-offer` reads the offset vector
    (`сдвигов ненулевых: N из M`).* If the curve backend cannot open inside the scheduled task, the click must still reset power and

@@ -123,6 +123,21 @@
 
 ## Entries
 
+### EXP-0293 · 2026-09-25 · ❌→✅ · #instrument-named-for-a-check-it-does-not-do #read-the-printer #s3-one-line
+class: claim-wider-than-observation
+**Context / did / result:** `bugs/140` step 3, `plans/102` AC4 and the card-day order all named `npm run profile -- --state` as the reader of «non-zero curve offsets»; preparing the live witness I opened `printState` — it prints power, clock, driver and VBIOS and never touches the curve. The AC4 «сдвигов изменено 0» would have been «checked» by an instrument blind to it. The reader is `node tools/probe-offer.mjs` («сдвигов ненулевых: N из M»).
+**Lesson:** **before a plan names a command as the meter of X, open the function that PRINTS its output and find X in it** — a command's name («state») is not its field list.
+none-cheap: corrected in the four places it stood (commit `26f4752`); the habit is «read the printer».
+**Trigger:** writing «command → expect N» into a plan or acceptance row.
+
+### EXP-0292 · 2026-09-25 · ❌ · #stamps #clock #written-from-the-head #s3-one-line
+class: claim-before-evidence
+**Context / did / result:** in one morning I wrote three moment stamps AHEAD of the clock — «08:5x» for a commit made at 08:43:33, «09:0x»/«09:00» at 08:4x, «≈08:55» at 08:50 — each from a felt sense of elapsed time; each found only because a later `date` disagreed. One reached a pushed commit's documents. Same class as EXP-0019, and it recurred with the lesson on disk.
+**Lesson:** **a stamp is a measurement: run `date` (or read `git log -1 --format=%ci`) in the SAME step that writes it** — felt time runs ahead during dense tool work.
+none-cheap: a guard would need to know when the text was written; the carrier is the habit — `date` before every stamp.
+**Trigger:** typing `HH:MM`, `≈HH:MM`, `HH:Mx` or a `takenAt` into any file.
+→ link: EXP-0019
+
 ### EXP-0291 · 2026-09-25 · ❌→✅ · #bisect #good-end #autocrlf #side-effects #root-cause #s2
 class: claim-before-evidence
 **Context / did / result:** a red twin suite; I ran `git bisect` between `75c676d` («green» — taken from the 09.09 battery record, NOT re-run) and HEAD, got «first bad commit `24b2c7d`» and wrote «hypotheses refuted, it is CODE» plus a narrower theory on top. A probe then printed the real cause — the goldens' driver stamp (610.88) against the live card (616.92) — and the independent judge showed the bisect proved nothing: `75c676d` is red TODAY with the same lines, and `24b2c7d` is its only child. The bisect also rewrote ~227 files with CRLF (`autocrlf=true`): the prayer guard went red and a battle snapshot's recorded source hash broke. Two corrections of my own text in one hour.
