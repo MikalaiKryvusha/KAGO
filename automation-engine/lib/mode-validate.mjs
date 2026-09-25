@@ -808,6 +808,18 @@ export async function selfTest() {
     check('КОМАНДА --compare ДОХОДИТ ДО ТАБЛИЦЫ, А НЕ УХОДИТ В ПРОВЕРКУ РЕЖИМА', r.status === 0 && /ВЫГОДА ПРОТИВ СТОКА/.test(r.stdout) && /мощность, Вт · 300 · 250 · -50/.test(r.stdout), (r.stdout || r.stderr).split('\n').slice(0, 4).join(' | '));
   } finally { rmSync(cliDir, { recursive: true, force: true }); }
 
+  // bugs/141: THIS MODULE AS THE ENTRY, and from inside its CLI the very import the card path makes —
+  // `await import('./curve-store.mjs')`, which imports this module back. With the CLI as top-level await the
+  // child dies «unsettled top-level await» (exit 13) or, with a live child process, hangs; the function form
+  // prints the marker. Mutation MV141: turn the CLI back into top-level await → this block red (exit 13).
+  {
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--probe-import-cycle'], { encoding: 'utf8', timeout: 30_000 });
+    check('ЦИКЛ ИМПОРТА НЕ ВЕШАЕТ КОМАНДУ: главный модуль доходит до curve-store (bugs/141)',
+      r.status === 0 && /ЦИКЛ ИМПОРТА: ПРОЙДЕН/.test(r.stdout ?? ''),
+      `код ${r.status}${r.signal ? ` · сигнал ${r.signal}` : ''} · ${(r.stdout || r.stderr || '').trim().slice(0, 160)}`);
+  }
+
   // E101-AC2: the benefit table's arithmetic
   const bt = benefitRows({ stock: { fps: 54.75, loaded: { 'power.draw.instant': { median: 300.1 }, 'temperature.gpu': { median: 81.5 }, 'fan.speed': { median: 86 }, 'clocks.gr': { median: 2729 } } },
     mode: { fps: 55.49, loaded: { 'power.draw.instant': { median: 250.2 }, 'temperature.gpu': { median: 73.5 }, 'fan.speed': { median: 67 } } } });
@@ -850,7 +862,13 @@ export async function runSelfTest() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+// 🔴 `bugs/141`: THE CLI RUNS INSIDE AN ASYNC FUNCTION, NEVER AS TOP-LEVEL `await`. `curve-store.mjs` imports this
+// module statically, and applying a snapshot reaches `await import('./curve-store.mjs')` (profile-manager); with the
+// CLI body as top-level await of the ENTRY module, that import waits for this module's evaluation, which waits for the
+// import — an ESM cycle deadlock (Node: «unsettled top-level await»; here the live sampler kept the process alive, so
+// it hung instead of exiting 13). Three live checks hung 2026-09-25; the stock smoke passed only because a null curve
+// never imports curve-store. The function form lets this module finish evaluating before any card seam runs.
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) (async () => {
   if (process.argv.includes('--help')) {
     console.log([
       'npm run validate -- …  (automation-engine/lib/mode-validate.mjs) — проверка целого режима, эпик 101 Ф1',
@@ -963,6 +981,10 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     console.log('величина · сток · режим · разница');
     const f1 = (x) => (x === null ? '—' : (Math.round(x * 10) / 10).toString().replace('.', ','));
     for (const r of benefitRows({ stock, mode })) console.log(`${r.label} · ${f1(r.stock)} · ${f1(r.mode)} · ${r.delta === null ? '—' : (r.delta > 0 ? '+' : '') + f1(r.delta)}${r.deltaPct === null ? '' : ` (${r.deltaPct > 0 ? '+' : ''}${f1(r.deltaPct)} %)`}`);
+  } else if (process.argv.includes('--probe-import-cycle')) {
+    // bugs/141 — the selftest's probe: the card path's import of curve-store, made from inside this CLI.
+    const cs = await import('./curve-store.mjs');
+    console.log(typeof cs.loadReferenceTable === 'function' ? 'ЦИКЛ ИМПОРТА: ПРОЙДЕН' : 'ЦИКЛ ИМПОРТА: модуль без loadReferenceTable');
   } else if (process.argv.includes('--plan')) {
     const i = process.argv.indexOf('--minutes');
     const minutes = i === -1 ? null : Number(process.argv[i + 1]);
@@ -979,4 +1001,4 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   } else {
     console.log('npm run validate -- --help — все команды проверки режима; без ключей ничего не делает');
   }
-}
+})().catch((e) => { console.error(`ОШИБКА: ${e?.stack ?? e}`); process.exit(1); });
