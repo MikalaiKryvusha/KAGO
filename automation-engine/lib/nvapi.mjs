@@ -698,12 +698,18 @@ export function buildRaiseAndCapVector(points, deltaMhz, {
   // заявление читается только как настоящее булево, иначе «не заявлено» когда-нибудь превратится в
   // «заявлено». Тот же урок, что оплатил `typeof` у `intentTopMhz` этажом выше.
   const orderDeclared = intentMonotone === true || intentMonotone === false ? intentMonotone : null;
+  // 🔓 2026-09-25 19:3x, СЛОВО ВЛАДЕЛЬЦА: «сними эти тупорылые запреты, которые мы сами сочинили» · «А. Снимаем
+  // запрет… РАЗРЕШАЮ» — сказано, когда R12 отказал режимам +30/+20/+10 на холодной карте (опора 610.88 сама
+  // немонотонна, `bugs/136`, поэтому заявление ложилось в «нет» и вместо подрезки шёл отказ). Подрезка теперь
+  // разрешена ВСЕГДА: она только ОПУСКАЕТ предложение точки (больше напряжения), нового утверждения о кремнии
+  // не выдаёт, и барьер `ЗАКАЗ.md` §3 «кривая не убывает с частотой» держится подрезкой, а не отказом.
+  // Заявление (`declared`) остаётся в отчёте — как сведение о векторе, а не как ворота.
   const orderClamp = {
     declared: orderDeclared,
-    allowed: orderDeclared === true,
-    why: orderDeclared === null ? 'монотонность вектора против опоры не заявлена — подрезка порядка запрещена, судит R12'
-      : orderDeclared === false ? 'вектор немонотонен УЖЕ против опоры — это дефект вектора, а не разница таблиц; подрезка запрещена, судит R12'
-        : null,
+    allowed: true,
+    why: orderDeclared === true ? null
+      : orderDeclared === false ? 'вектор немонотонен против своей опоры (опора `bugs/136`) — подрезка вниз применяется всё равно'
+        : 'монотонность вектора против опоры не заявлена — подрезка вниз применяется всё равно',
     points: 0, totalMhz: 0, maxMhz: 0, rows: [],
   };
   if (orderClamp.allowed) {
@@ -1859,8 +1865,12 @@ export function selftestShape() {
     const asked = ENV + 20 - base;    // подъём, дающий предложение ENV+20 против ЭТОЙ таблицы
     const legit = buildRaiseAndCapVector(points, Array.from({ length: 127 }, (_, i) => (i === idx ? asked : 0)),
       { envelopeMhz: ENV, intentTopMhz: ENV });
+    // ✏️ 2026-09-25: подрезка порядка (`bugs/133`) теперь идёт ВСЕГДА (слово владельца), и эта фикстура
+    // поднимает одну точку над соседкой сверху — порядок опускает её ещё ниже. Конверт поэтому судится своей
+    // строкой отчёта («стало» ровно ENV), а итог — не выше конверта.
     check('B99: намерение ВНУТРИ конверта — подъём подрезан ровно до конверта, ни мегагерцем ниже',
-      legit.ok && base + legit.offsets[idx] === ENV, `предложение ${base + legit.offsets[idx]} при конверте ${ENV}`);
+      legit.ok && base + (legit.envelopeClamp.rows[0]?.now ?? NaN) === ENV && base + legit.offsets[idx] <= ENV,
+      `конверт: ${JSON.stringify(legit.envelopeClamp.rows[0])} · итог ${base + legit.offsets[idx]} при конверте ${ENV}`);
     check('B99: цена подрезки НАЗВАНА числом — точки, сумма и максимум на точке',
       legit.envelopeClamp.points === 1 && legit.envelopeClamp.totalMhz === 20 && legit.envelopeClamp.maxMhz === 20,
       JSON.stringify(legit.envelopeClamp));
@@ -1871,9 +1881,11 @@ export function selftestShape() {
     // 🔴 РАЗЛИЧЕНИЕ 1: НАМЕРЕНИЕ НЕ ЗАЯВЛЕНО — подрезки НЕТ ВОВСЕ, судит R13.
     const silent = buildRaiseAndCapVector(points, Array.from({ length: 127 }, (_, i) => (i === idx ? asked : 0)),
       { envelopeMhz: ENV });
-    check('B99: намерение НЕ ЗАЯВЛЕНО — ни одной подрезанной точки, вектор идёт к сторожу как был',
+    // ✏️ 2026-09-25: «как был» теперь неверно по построению — подрезка ПОРЯДКА идёт всегда и только вниз
+    // (слово владельца); этот блок судит конверт: он не подрезал ни одной точки.
+    check('B99: намерение НЕ ЗАЯВЛЕНО — конверт не подрезал ни одной точки (подрезка порядка — своя, только вниз)',
       silent.envelopeClamp.points === 0 && silent.envelopeClamp.allowed === false
-        && silent.offsets[idx] === asked && base + silent.offsets[idx] === ENV + 20,
+        && base + silent.offsets[idx] <= ENV + 20,
       JSON.stringify({ clamp: silent.envelopeClamp, offer: base + silent.offsets[idx] }));
     // ⚠️ Блок, оплаченный ошибкой: `Number(null)` даёт 0, и «намерения нет» читалось как «намерение 0».
     check('B99: и причина отказа от подрезки НАЗВАНА, а не пуста — «не заявлено» ≠ «не понадобилась»',
@@ -1915,9 +1927,13 @@ export function selftestShape() {
   // получить ОТКАЗ, а не тихую правку (EXP-0225, и ровно этим первая редакция подрезки конверта
   // пропустила бомбу `bugs/11`).
   //
+  // 🔓 2026-09-25, СЛОВО ВЛАДЕЛЬЦА («сними эти тупорылые запреты… РАЗРЕШАЮ»): привратник снят — подрезка
+  // вниз идёт при любом заявлении. Прежний адресат M1 («снять привратник») стал поведением; блоки
+  // «не заявлено» и «немонотонен» переписаны: теперь они судят, что подрезка ИДЁТ и называет причину.
+  //
   // АДРЕСАТЫ МУТАЦИЙ, названные ДО прогона (EXP-0016):
-  //   M1 — снять привратник (`allowed: true` всегда) → краснеют блоки «не заявлено» и «немонотонен»;
-  //   M2 — читать заявление истинностью (`!!intentMonotone`) → краснеет блок про не-булево;
+  //   M1 — вернуть привратник (`allowed: orderDeclared === true`) → краснеют блоки «не заявлено» и «немонотонен»;
+  //   M2 — читать заявление истинностью (`!!intentMonotone`) → краснеет блок про не-булево (declared);
   //   M3 — подрезать ВВЕРХ (поднимать соседку вместо опускания) → краснеет блок про направление;
   //   M4 — не считать цену (оставить `points: 0`) → краснеет блок про число;
   //   M5 — убрать пол подрезки `Math.max(p.mhz, ...)` → краснеет блок про заводской пол.
@@ -1936,8 +1952,8 @@ export function selftestShape() {
     const OFFER_PREV = t[DIP - 1].mhz + 100;  // 2690 — выше соседки СВЕРХУ, то есть инверсия
 
     const bare = buildRaiseAndCapVector(t, vec, {});
-    check('B133: без заявления вектор идёт к сторожу КАК БЫЛ — инверсия цела, подрезки нет',
-      bare.introducesInversion === true && bare.orderClamp.points === 0 && bare.orderClamp.allowed === false,
+    check('B133: без заявления подрезка ВСЁ РАВНО идёт (слово владельца 25.09) — инверсия снята одной точкой',
+      bare.introducesInversion === false && bare.orderClamp.points === 1 && bare.orderClamp.allowed === true,
       JSON.stringify({ inv: bare.introducesInversion, clamp: bare.orderClamp.points, allowed: bare.orderClamp.allowed }));
     check('B133: и причина названа СВОИМИ словами — «не заявлено» ≠ «не понадобилась»',
       /не заявлена/u.test(bare.orderClamp.why ?? ''), bare.orderClamp.why ?? '(пусто)');
@@ -1960,17 +1976,18 @@ export function selftestShape() {
 
     // 🔴 РАЗЛИЧЕНИЕ: вектор, немонотонный УЖЕ против опоры, — дефект вектора, а не разница таблиц.
     const broken = buildRaiseAndCapVector(t, vec, { intentMonotone: false });
-    check('B133: заявлено «немонотонен против опоры» — подрезки нет, инверсия доезжает до R12',
-      broken.orderClamp.allowed === false && broken.introducesInversion === true,
-      JSON.stringify({ allowed: broken.orderClamp.allowed, inv: broken.introducesInversion }));
+    check('B133: заявлено «немонотонен против опоры» — подрезка вниз всё равно идёт, до R12 инверсия не доезжает',
+      broken.orderClamp.allowed === true && broken.introducesInversion === false && broken.orderClamp.points === 1,
+      JSON.stringify({ allowed: broken.orderClamp.allowed, inv: broken.introducesInversion, points: broken.orderClamp.points }));
     check('B133: и ЭТА причина отличима от «не заявлено» — вызывающему они говорят разное',
-      /немонотонен УЖЕ против опоры/u.test(broken.orderClamp.why ?? ''), broken.orderClamp.why ?? '(пусто)');
+      /немонотонен против своей опоры/u.test(broken.orderClamp.why ?? '') && broken.orderClamp.why !== bare.orderClamp.why,
+      broken.orderClamp.why ?? '(пусто)');
 
     // ⚠️ Блок класса, оплаченного соседом: у конверта `Number(null) === 0` превратил «не заявлено» в
     // «заявлено 0». Здесь тот же капкан носит вид истинности строки.
     const notBool = buildRaiseAndCapVector(t, vec, { intentMonotone: 'да' });
-    check('B133: НЕ-БУЛЕВО заявление не читается как «да» — подрезки нет',
-      notBool.orderClamp.allowed === false && notBool.orderClamp.declared === null,
+    check('B133: НЕ-БУЛЕВО заявление не читается как «да» — в отчёте оно «не заявлено»',
+      notBool.orderClamp.declared === null && notBool.orderClamp.why === bare.orderClamp.why,
       JSON.stringify({ allowed: notBool.orderClamp.allowed, declared: notBool.orderClamp.declared }));
 
     // Пол подрезки — ЗАВОДСКОЕ предложение точки: инверсия самой карты не наша, и опускать ниже
@@ -2096,12 +2113,13 @@ export function selftestShape() {
   // its neighbour's raise, which puts a LOWER-voltage point above a higher-voltage one.
   const inverting = Array.from({ length: 127 }, (_, i) => (i === 61 ? 900 : 0));
   const iv = buildRaiseAndCapVector(points, inverting);
-  check('ИНВЕРСИЯ НАЙДЕНА и названа парой точек — монотонность у вектора уже не доказательство, а замер',
-    iv.ok && iv.monotone === false && iv.firstInversionAt?.at === 62 && iv.firstInversionAt?.previous === 61,
-    `монотонна ${iv.monotone}, первая инверсия: точка ${iv.firstInversionAt?.at} (${iv.firstInversionAt?.mhz} МГц) `
-    + `после точки ${iv.firstInversionAt?.previous} (${iv.firstInversionAt?.previousMhz} МГц)`);
-  check('и она отмечена как ВНЕСЁННАЯ НАМИ: сток был монотонен, стал нет',
-    iv.stockMonotone === true && iv.introducesInversion === true);
+  // ✏️ 2026-09-25: подрезка порядка идёт всегда (слово владельца), поэтому внесённая вектором инверсия
+  // теперь НАХОДИТСЯ и НАЗЫВАЕТСЯ в отчёте подрезки (точка 61 опущена до соседки), а итог монотонен.
+  check('ИНВЕРСИЯ НАЙДЕНА и названа точкой — в отчёте подрезки порядка, опущена вниз до соседки',
+    iv.ok && iv.orderClamp.points >= 1 && iv.orderClamp.rows.some((r) => r.point === 61 && r.now < r.was),
+    JSON.stringify(iv.orderClamp.rows));
+  check('и снята: сток был монотонен, итог монотонен — R12 судить нечего',
+    iv.stockMonotone === true && iv.monotone === true && iv.introducesInversion === false);
   check('равномерный подъём инверсий не вносит — старое доказательство продолжает держаться',
     v.monotone === true && v.introducesInversion === false && c.monotone === true && c.introducesInversion === false);
   // The stock-curve guard: an inversion the CARD already had must not be blamed on our vector, or the

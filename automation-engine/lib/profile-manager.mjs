@@ -2512,7 +2512,8 @@ async function cmdSelftest() {
   // --- ВЕКТОР (`plans/12` §4.4). МУТАЦИОННЫЕ АДРЕСАТЫ, НАЗВАННЫЕ ДО ПРОГОНА (EXP-0016):
   //   H. `raise` всегда берёт `deltaMhz`      → «ВЕКТОР: своё смещение на каждую точку доезжает до карты»
   //   I. строка шага всегда «подъём +N»       → «ВЕКТОР: шаг НАЗЫВАЕТ форму записи»
-  //   J. снят отказ по introducesInversion    → «ВЕКТОР: инверсия ОТВЕРГНУТА последней строкой перед записью»
+  //   J. вернуть привратник подрезки порядка (`allowed: orderDeclared === true` в nvapi) → «ВЕКТОР: инверсия
+  //      ПОДРЕЗАНА вниз перед записью…» (до 2026-09-25 здесь был отказ; снят словом владельца)
   const vectorProfile = () => {
     const p = curveProfile();
     // Bottom of the curve raised little, top raised much — the shape the band sweep will produce,
@@ -2696,7 +2697,7 @@ async function cmdSelftest() {
     return null;
   });
 
-  block('ВЕКТОР: инверсия ОТВЕРГНУТА последней строкой перед записью, и ни одна точка не записана', async () => {
+  block('ВЕКТОР: инверсия ПОДРЕЗАНА вниз перед записью — точка названа, записанная кривая монотонна', async () => {
     // This one drives the REAL `nvapiCurveBackend` with an injected nvapi module, because the refusal
     // lives there — in the last line before the device write (P6-AC10). A block that checked it on the
     // fake backend would prove nothing about the path that actually writes.
@@ -2723,11 +2724,15 @@ async function cmdSelftest() {
     // the well-ordered vector below reaches 3472): this block is about ORDER, and it must not be
     // pre-empted by R13's envelope refusal. R13 has its own block, on its own numbers.
     const ROOMY = { cardMaxClockMhz: 3600 };
+    // ✏️ 2026-09-25, слово владельца («сними эти тупорылые запреты… РАЗРЕШАЮ»): подрезка порядка идёт
+    // ВСЕГДА и только вниз, поэтому инвертирующий вектор больше не отвергается, а пишется ПОДРЕЗАННЫМ:
+    // точка 61 опущена до соседки сверху, названа в отчёте, записанная кривая монотонна.
     const bad = await cb.writeRaiseAndCap(inverting, null, ROOMY);
-    if (bad.ok !== false) return 'инвертирующий вектор ПРОШЁЛ в карту';
-    if (!/ЛОМАЕТ ПОРЯДОК/u.test(bad.why ?? '')) return `отказ не про порядок кривой: ${bad.why}`;
-    if (!/точка 62/u.test(bad.why ?? '') || !/точки 61/u.test(bad.why ?? '')) return `отказ не назвал пару точек: ${bad.why}`;
-    if (writes !== 0) return `отказ произошёл ПОСЛЕ записи: записей ${writes}`;
+    if (bad.ok !== true) return `инвертирующий вектор не подрезан, а отвергнут: ${bad.why}`;
+    if (!bad.orderClamp?.rows?.some((r) => r.point === 61 && r.now < r.was)) return `подрезка не назвала точку 61: ${JSON.stringify(bad.orderClamp)}`;
+    const offer = (i) => points[i].mhz + bad.vector[i];
+    for (let i = 1; i < 127; i++) if (offer(i) < offer(i - 1)) return `записанная кривая немонотонна: точка ${i} ${offer(i)} после ${offer(i - 1)}`;
+    if (writes !== 1) return `подрезанный вектор записан ${writes} раз(а) вместо одного`;
     // …and the same backend accepts a well-ordered vector, or the block above is green because
     // nothing ever passes.
     const good = await cb.writeRaiseAndCap(Array.from({ length: 127 }, (_, i) => (i < 60 ? 40 : 300)), null, ROOMY);
