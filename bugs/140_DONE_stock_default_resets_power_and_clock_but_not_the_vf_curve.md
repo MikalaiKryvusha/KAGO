@@ -1,7 +1,8 @@
 # Bug 140 — 🔄 Stock Default resets the power limit and the clock lock, but NOT the V/F curve offsets
 
-**Status:** 🔧 FIX PENDING LIVE WITNESS — code fixed 2026-09-25 08:43 +03:00 (session 103: `applyNeedsCurveBackend`,
-guard block + mutation MB140); the defect itself was never observed on the card, and neither is the fix yet (step 3)
+**Status:** ✅ DONE 2026-09-25 18:57 +03:00 — live witness on the owner's real path passed (step 3): offsets 9 → 0 of
+128 by the owner's double-click on 🔄 Stock Default; code fixed 08:43 (session 103: `applyNeedsCurveBackend`, guard
+block + mutation MB140). The ORIGINAL defect was never observed on the card — only the fix was (see closing section)
 **Severity:** S1 — the owner's machine: a click on «Stock Default» after a tuned mode would leave the undervolt
 offsets on the card while the shell reports the factory mode
 **Version/build:** HEAD 2026-09-25 (`c20980a`) · **When/context:** session 102, 02:1x +03:00, while checking offline
@@ -89,8 +90,15 @@ flowchart TD
    written at the CLI line itself (`profile-manager.mjs` `--apply` branch), stays **89/89 green** (judge's run). The
    commit c521b3a's wording «проводит решение команды в `apply()`» is wider than that: it walks the decision
    FUNCTION into `apply()`. The wiring — the line the shortcut actually runs — is held only by the live witness (step 3).
-3. ⏳ Live witness: apply a tuned candidate → click 🔄 Stock Default → `node tools/probe-offer.mjs` → non-zero offsets
-   **0** of 127 (+ `npm run profile -- --state` for power and clock).
+3. ✅ Live witness (2026-09-25 18:56–18:57, session 104, the owner at the machine): apply a tuned candidate → click
+   🔄 Stock Default → `node tools/probe-offer.mjs` → non-zero offsets **0** of 128 (+ `npm run profile -- --state`).
+   **Observed, in order:** 18:56:24 before — `сдвигов ненулевых: 0 из 128`, 300 W, driver 616.92 · 18:56:30
+   `npm run profile -- --apply witness-140.local` exit 0 (power untouched, «ЗАПОМНЕНО … witness-140.local») · 18:56:41
+   control — `сдвигов ненулевых: 9 из 128 · поднятых нами: 0` (1190…1240 mV, −7…−82 MHz, every offer ≤ 3090) · the owner
+   double-clicked 🔄 Stock Default («сделал») · 18:57:25 after — `сдвигов ненулевых: 0 из 128`, top offer back to the
+   factory 3172 MHz, 300 W, `runs/shell/remembered-state.json` → `"profile": "factory"`, `writtenAt 18:57:11` (written by
+   the shortcut's task — the click reached the repo code). The Murphy risk below (curve backend failing inside the
+   task) did NOT fire. The table has 128 entries on this read, not 127 as the plan line said.
    **Run sheet for the card evening 2026-09-25 ~19:00 (owner at the machine), prepared offline:**
    - the installed task, read ≈08:47 from Task Scheduler (read-only): `\KAGO\apply-factory` → `wscript … run-hidden.js
      node.exe D:\work\ai_sandbox\KAGO\automation-engine\lib\profile-manager.mjs --apply factory`, RunLevel
@@ -131,6 +139,21 @@ flowchart TD
 - `[AI]` The rule is the format's, so it reaches every `null`-curve profile, not only `factory.json`: `--apply` of
   `test-pl250`, `bound-proof.local` and `roundtrip-probe.local` now also opens NVAPI and zeroes the curve (their files
   say `curveRaiseAndCapMhz: null` = «обнулить», `profiles/README.md`). No block covers those three (judge's note).
+
+- `[AI]` (session 104, 25.09 18:5x) Closed on ONE live witness of the shortcut path. The «must still reset power when
+  the curve backend fails» contingency stays unbuilt — the failure it answers did not occur.
+
+## ✅ STATUS: DONE (2026-09-25 18:57 +03:00)
+
+Hygiene: `profile --selftest` block «factory apply backend=true» + mutation MB140 (session 103, 89/89; the block holds
+the decision RULE, not the CLI wiring — judge 25.09).
+Functional run: the owner's real path — the desktop shortcut 🔄 Stock Default → `\KAGO\apply-factory` → repo
+`profile-manager.mjs --apply factory` — walked on the live card with a NON-zero control state (9 of 128 offsets),
+result read by `node tools/probe-offer.mjs`: 0 of 128 · power 300 W · remembered state `factory` (step 3 above).
+REAL WORLD: accumulated — the owner's installed scheduled task and desktop shortcut from 14.08, untouched; data and
+machine — his card on driver 616.92; path — his double-click. Verified on the real world.
+Not observed, named: the ORIGINAL defect (a click that leaves offsets) was proved by code reading and a skeptic, never
+seen on the card; the tray's Exit item is still not built (`plans/10`).
 
 ## Links
 
