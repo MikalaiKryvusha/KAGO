@@ -189,7 +189,7 @@ flowchart TD
          откат — `resetToFactory` (обнуляет), а дым на стоке применяет `factory.json` через `apply()` — шов проверки
          с `3e5c10e` всегда даёт бэкенд кривой, поэтому ОБНУЛЯЕТ (блок «factory apply backend=true»); без бэкенда,
          как у ярлыка до починки, `apply()` кривую не трогает.
-         🔧 **Код починен 2026-09-25 08:5x (сессия 103):** `applyNeedsCurveBackend` — бэкенд открывается и для профиля с
+         🔧 **Код починен 2026-09-25 08:43 (сессия 103):** `applyNeedsCurveBackend` — бэкенд открывается и для профиля с
          `null` у кривой; блок + мутация MB140 (краснеет ровно он, 1 из 89). Осталось — живой свидетель (шаг 3 `bugs/140`).
       1. `npm run gpu:info` — подтвердить драйвер 616.92 (чтение).
       2. `npm run stress -- --capture-baseline` на стоке → `npm run stress -- --verify-baseline` — эталоны
@@ -199,11 +199,14 @@ flowchart TD
       2б. `npm run curve -- --take-reference` (под нагрузкой, 240 с) → `npm run curve -- --reference` — опора
          применения (`curves/reference-table.json`, 31.08) тоже проштампована 610.88, и `loadReferenceTable`
          по R6 объявит её недействительной (`curve-store.mjs:1537`); сдвиги любого режима считаются от неё.
-      3. AC4: `npm run profile -- --state` → `npm run validate -- --mode optimised --candidate <кандидат> --dry-run`
-         → `npm run profile -- --state` — сдвигов изменено 0.
+      3. AC4: `node tools/probe-offer.mjs` → `npm run validate -- --mode optimised --candidate <кандидат> --dry-run`
+         → `node tools/probe-offer.mjs` — сдвигов изменено 0 (строка «сдвигов ненулевых: N из M»). ✏️ *Поправка
+         2026-09-25 08:4x (сессия 103): здесь стояло `npm run profile -- --state` — он читает мощность, частоту,
+         драйвер и VBIOS и НЕ читает сдвиги кривой (`printState`); проверка «сдвигов изменено 0» им не делалась бы.*
       4. **Ш8, с разрешения владельца:** `npm run validate -- --mode stock-default --candidate profiles/factory.json
          --minutes 1` (сухо проверено 01:51: 86 с, 9 ступеней) → отчёт `runs/validate/<момент>/report.md` с
-         четырьмя частями, ≥ 55 проб; затем `npm run profile -- --state` — заводская.
+         четырьмя частями, ≥ 55 проб; затем `npm run profile -- --state` (мощность, частота) и
+         `node tools/probe-offer.mjs` (сдвиги кривой — 0) — заводская по обеим осям.
       5. Ш9: судья по Ф1 → оперплан Ф2. Первые акты Ф2: проверка стока 20 мин (база таблицы и ФОН голоса
          драйвера — события на стоке = пересмотр правила «любое событие = сбой», FORK у `verdictOf`) →
          документ кандидата со штампом ЖИВОГО драйвера — уже записан: `curves/model-trend-plus-30-d616-92.json`

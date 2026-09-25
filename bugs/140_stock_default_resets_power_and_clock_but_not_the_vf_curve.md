@@ -1,6 +1,6 @@
 # Bug 140 — 🔄 Stock Default resets the power limit and the clock lock, but NOT the V/F curve offsets
 
-**Status:** 🔧 FIX PENDING LIVE WITNESS — code fixed 2026-09-25 08:5x +03:00 (session 103: `applyNeedsCurveBackend`,
+**Status:** 🔧 FIX PENDING LIVE WITNESS — code fixed 2026-09-25 08:43 +03:00 (session 103: `applyNeedsCurveBackend`,
 guard block + mutation MB140); the defect itself was never observed on the card, and neither is the fix yet (step 3)
 **Severity:** S1 — the owner's machine: a click on «Stock Default» after a tuned mode would leave the undervolt
 offsets on the card while the shell reports the factory mode
@@ -72,7 +72,7 @@ flowchart TD
 1. ✅ `--apply`: open a curve backend also when the profile's curve means «factory» (`curveRaiseAndCapMhz === null` and
    no ref/snapshot), so `apply()` runs its zero-and-read-back step. Smallest form: `needsCurve = effCurve !== null ||
    isFactoryCurve(profile)`.
-   **Done 2026-09-25 08:5x (session 103)** as the exported pure `applyNeedsCurveBackend(profile, effCurve)` =
+   **Done 2026-09-25 08:43 (session 103)** as the exported pure `applyNeedsCurveBackend(profile, effCurve)` =
    `effCurve !== null || settings.curveRaiseAndCapMhz === null` — the format's own rule (`profiles/README.md`: `null` =
    «обнулить все смещения кривой»), so it holds for every null-curve profile, not a factory special case. The CLI
    prints the zeroing as a planned step before the write.
@@ -83,12 +83,15 @@ flowchart TD
    demands 0 non-zero after, the zeroing step named in the report, and a control row (a raising profile still gets the
    backend). Suite 88 → **89/89**. Mutation MB140 (`return effCurve !== null;`) → **exactly this block red, 1 of 89**;
    restored → 0 red.
-3. ⏳ Live witness: apply a tuned candidate → click 🔄 Stock Default → `npm run profile -- --state` → non-zero offsets
-   **0** of 127. If the curve backend cannot open inside the scheduled task, the click must still reset power and
+3. ⏳ Live witness: apply a tuned candidate → click 🔄 Stock Default → `node tools/probe-offer.mjs` → non-zero offsets
+   **0** of 127 (+ `npm run profile -- --state` for power and clock).
+   ✏️ *Corrected 08:4x (session 103): this line named `npm run profile -- --state` as the offset reader — it prints power,
+   clock, driver and VBIOS only (`printState`) and never reads the curve; `probe-offer` reads the offset vector
+   (`сдвигов ненулевых: N из M`).* If the curve backend cannot open inside the scheduled task, the click must still reset power and
    clocks and SAY the curve was not reset (never a silent partial reset).
    *Risk named before the click (Murphy, tier b):* with the fix, a curve backend that fails inside the task makes the
    whole click fail (the curve step runs FIRST, nothing else is written) — where the old code at least reset the
-   power. Evidence against the risk, read 08:5x: the elevated logon task (`\KAGO\boot-apply`, the same hidden runner)
+   power. Evidence against the risk, read ≈08:40: the elevated logon task (`\KAGO\boot-apply`, the same hidden runner)
    applied `Optimised` — a snapshot curve, i.e. through NVAPI — once, 2026-09-15 08:49:21 (`runs/shell/boot-apply.jsonl`:
    `applied … 250 Вт / 2535 МГц`); the next logons (18.09, 19.09) were refused by the stamp. One observation, and it is
    of the logon task, not of `\KAGO\apply-factory` itself. Contingency if the witness shows the failure: make the
