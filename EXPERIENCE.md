@@ -123,6 +123,44 @@
 
 ## Entries
 
+### EXP-0296 · 2026-09-25 · ❌ · #owner-at-the-machine #duration-from-the-plan #live-run-cadence #s3-one-line
+**Context / did / result:** card evening, the owner at the machine: I launched a 20-minute mode check because the plan
+said «~20 min» (no measurement behind the number) — the owner stopped it in 24 s («никаких 20 минут… максимум 5»); later I
+ended my turn on a 5-minute run and waited for the harness notification — the owner saw the game end and wrote «прогон
+завершился, а ты стоишь». Both cost his live time, the scarcest resource of the project.
+**Lesson:** **with the owner at the machine, every duration is justified by a measurement or cut to the minimum that
+answers the question, and a short live run is watched IN the turn to its end, reported the same minute.**
+none-cheap: the durations are now in `ЗАКАЗ.md` §8 (≤ 5 min, smoke 30 s); the watching habit is in the memory note.
+**Trigger:** choosing a run length from a plan line · ending a turn while a live run the owner watches is in flight.
+
+### EXP-0295 · 2026-09-25 · ❌→🔧 · #gate-parameter-defaults-off #stamp #reference #r6 #s2
+class: guard-not-proven-against-threat
+<!-- class-ok: guard-not-proven-against-threat — the class-level carrier exists (tools/guard-lint.mjs judges ON-REAL-PATH of every @guard block, run by npm run check); both instances (EXP-0289, EXP-0295) are checks never DECLARED as @guard, and forcing a declaration on every check is a new machinery contour under the moratorium (ЗАКАЗ §9) — price re-checked 2026-09-25, session 104 -->
+
+**Context / did / result:** R6 says a driver change invalidates the apply reference, and `curve-store.referenceUsableFor`
+checks the stamp — but only when handed `{ card }`; `profile-manager` passes `cardStamp`, which defaults to `null`, and no
+production caller sets it. So on driver 616.92 every apply silently used the 610.88 reference; I even told the owner the
+opposite («применитель отвергнет и пойдёт по вычитанию») from reading the gate's body, not its callers.
+**Lesson:** **a gate whose check activates only on an optional argument is proved on the path only by grepping every
+production caller for that argument — the gate's body proves nothing about whether it is ever armed.**
+none-cheap: the fix is `bugs/142` (a 616.92 reference first, then pass the stamp); the habit is «grep the callers».
+**Trigger:** stating «X will be rejected by gate G» · any gate function with an optional `card`/`stamp`/`ctx` argument.
+→ link: `bugs/142` · EXP-0290
+
+### EXP-0294 · 2026-09-25 · ❌→✅ · #esm #top-level-await #import-cycle #hang-without-signal #diagnosis-by-inspector #s2
+**Context / did / result:** the mode check hung before its first write, 3/3, CPU 0; the same functions imported by a
+script ran clean. Two cheap observations named the class: `process._debugProcess(pid)` + CDP `Runtime.evaluate` answered
+(main thread free) and `process.getActiveResourcesInfo()` = `["ProcessWrap"]` (only the sampler child — nothing backs
+the pending promise). Cause: `curve-store.mjs` imports `mode-validate.mjs`, whose CLI ran as top-level await of the ENTRY
+module and reached `await import('./curve-store.mjs')` → ESM cycle deadlock (alone Node exits 13 «unsettled top-level
+await»; a live child process turns it into a silent hang).
+**Lesson:** **a CLI in a module that other modules import runs inside an async function, never as top-level await; and a
+hang with CPU 0 is diagnosed by asking the process (inspector: is the loop free? which resources are alive?) before
+theorizing.**
+mechanized: `validate --selftest` block «ЦИКЛ ИМПОРТА НЕ ВЕШАЕТ КОМАНДУ» (spawns the module as entry, mutation MV141 red).
+**Trigger:** a module with `if (entry) { … await … }` that is imported elsewhere · a process «stuck» with CPU 0.
+→ link: `bugs/141`
+
 ### EXP-0293 · 2026-09-25 · ❌→✅ · #instrument-named-for-a-check-it-does-not-do #read-the-printer #s3-one-line
 class: claim-before-evidence
 **Context / did / result:** `bugs/140` step 3, `plans/102` AC4 and the card-day order all named `npm run profile -- --state` as the reader of «non-zero curve offsets»; preparing the live witness I opened `printState` — it prints power, clock, driver and VBIOS and never touches the curve. The AC4 «сдвигов изменено 0» would have been «checked» by an instrument blind to it. The reader is `node tools/probe-offer.mjs` («сдвигов ненулевых: N из M»).

@@ -1,7 +1,7 @@
 # Bug 139 — the digital twin's suite turned red after 2026-09-09: five blocks, its rungs close `unknown` instead of reaching a verdict
 
-**Status:** 🧊 FROZEN by epic 101 (the twin is frozen machinery — `plans/101` «Что эпик замораживает»); one probe run
-(02:00, see Root cause) — cause observed for ONE of the five reds; expected cure — re-capture the goldens on 616.92
+**Status:** ✅ DONE 2026-09-25 20:1x +03:00 — the expected cure worked: goldens re-captured on 616.92 at 18:57–18:59
+(session 104), and the full battery at 20:1x ran `twin` GREEN (30 blocks) — 55 suites, 0 red, 2824 blocks
 **Severity:** S2 — no card, no data touched; the cost is a red battery line that hides the next real red
 **Version/build:** HEAD `e4e580b` (2026-09-25) · **When/context:** found 2026-09-25 01:16 +03:00, session 102, by the full offline battery run while closing Ф1 Ш3/Ш5 (`npm run selftest:all`: 55 suites, **1 red — `twin`**, 2789 green blocks)
 
@@ -73,3 +73,13 @@ EXP-0291.
 ## Links
 
 `plans/101` (the freeze) · `bugs/88` · `bugs/89` · `tools/selftest-all.mjs`
+
+## ✅ STATUS: DONE (2026-09-25 20:1x +03:00)
+
+Hygiene: `npm run selftest:all` — 55 suites, 0 red, 2824 green blocks; `twin` 30/30 (log
+`runs/selftest-all-2026-09-25-evening2.log`).
+Functional run: the cure was a live act — `npm run stress -- --capture-baseline` plus the four `furnace` intensity levels
+(`--workload furnace --arg 2400 --arg 8192 --arg 256 --arg 64|48|32|20`) on the card at 616.92, 18:57–18:59; checksums
+byte-identical to the 610.88 ones, only the stamps changed; `--verify-baseline` — 8 of 8.
+Root cause confirmed by the cure: all five reds were the stamp gate (R6) on 610.88 goldens against the 616.92 driver —
+the one proved at 02:00 and the four it predicted.

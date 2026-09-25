@@ -2937,9 +2937,12 @@ export async function selfTest() {
   const invVec = buildRaiseAndCapVector(points, invVector, { capMhz: null });
   const invLive = curveWriteRefusal(invVec, { capMhz: null, cardMaxClockMhz: CARD.card.maxGraphicsMhz });
   const invVirt = await parityCard.curveBackend.writeRaiseAndCap(invVector, null, { cardMaxClockMhz: CARD.card.maxGraphicsMhz });
-  check('ПАРИТЕТ: инверсия отвергается обоими (R12)',
-    invLive?.rule === 'R12' && invVirt.ok === false && invVirt.rule === 'R12',
-    `живое ${invLive?.rule}, виртуальное ${invVirt.rule}`);
+  // ✏️ 2026-09-25, слово владельца («сними эти тупорылые запреты… РАЗРЕШАЮ», `40e2c86`): отказ R12 по порядку
+  // заменён подрезкой вниз. Паритет прежний по смыслу — оба бэкенда ведут себя ОДИНАКОВО: инверсия подрезана,
+  // отказа нет ни у живого, ни у виртуального. Мутация «вернуть привратник» краснит этот блок.
+  check('ПАРИТЕТ: инверсия подрезается обоими одинаково — отказа R12 нет ни у кого',
+    invVec.orderClamp?.points >= 1 && invLive === null && invVirt.ok === true,
+    `подрезано ${invVec.orderClamp?.points} · живое ${invLive?.rule ?? 'без отказа'} · виртуальное ${invVirt.ok ? 'записано' : invVirt.rule}`);
 
   // ---- 8. the curve round-trip on the virtual card
   const rt = virtualCard(CARD, { settleSamples: 0 });
