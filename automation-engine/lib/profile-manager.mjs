@@ -3538,7 +3538,7 @@ async function main(argv) {
         console.log('        на точке, обслуживавшей потолок, а выше её обслуживают другие точки.');
       }
     }
-    console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (полный сброс, включая кривую) или ярлык 🔄 Stock Default (кривую обнуляет с bugs/140).');
+    console.log('ОТКАТ НАЗВАН ДО ЗАПИСИ: npm run profile -- --reset (полный сброс, включая кривую) или ярлык 🔄 Stock Default (кривую обнуляет с bugs/140; на карте ещё не проверено).');
 
     let r;
     try {

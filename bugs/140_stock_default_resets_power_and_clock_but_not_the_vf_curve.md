@@ -23,9 +23,10 @@ previous mode. The card would stay undervolted under a «Stock Default» indicat
 ## Repro (deterministic, offline)
 
 1. `node --input-type=module -e "const pm=await import('./automation-engine/lib/profile-manager.mjs'); const fs=await import('node:fs'); console.log(await pm.resolveProfileCurve(JSON.parse(fs.readFileSync('profiles/factory.json','utf8'))))"` → **`null`** (observed 02:1x and re-run 02:26 with this exact command; the first edition's command mixed `require` with top-level await and did not run — caught by the second judge; early return at `profile-manager.mjs:700`: `curveRaiseAndCapMhz`, `curveRef`, `curveSnapshot` all null).
-   ⚠️ Not inspected: the INSTALLED task on the machine — the chain reads the installer (`setup-desktop.mjs:277`). Card day, read-only: `schtasks /query /tn "\KAGO\apply-factory" /xml` (from PowerShell).
-2. CLI `--apply` (`profile-manager.mjs:3468-3473`): `needsCurve = effCurve !== null` → **false** → `curveBackend = null`.
-3. `apply()` (`:1176`): the step «кривая V/F: возврат к заводской (все смещения 0)» exists only under
+   ✅ The INSTALLED task was read ≈08:47 on 25.09 (session 103, read-only, Task Scheduler — no card): it runs the repo's
+   `profile-manager.mjs --apply factory` through the hidden runner, RunLevel HighestAvailable (details in step 3 below).
+2. *Before c521b3a:* CLI `--apply` (`profile-manager.mjs:3468-3473` then): `needsCurve = effCurve !== null` → **false** → `curveBackend = null`.
+3. *Before c521b3a:* `apply()` (`:1176` then): the step «кривая V/F: возврат к заводской (все смещения 0)» exists only under
    `else if (curveBackend && profile.settings.curveRaiseAndCapMhz === null)` → **skipped** without a backend.
    The comment above it says this step «is what makes `factory.json` a reset of ALL state» — the CLI never feeds it.
 
@@ -83,6 +84,11 @@ flowchart TD
    demands 0 non-zero after, the zeroing step named in the report, and a control row (a raising profile still gets the
    backend). Suite 88 → **89/89**. Mutation MB140 (`return effCurve !== null;`) → **exactly this block red, 1 of 89**;
    restored → 0 red.
+   ✏️ *Scope of the guard, corrected after the independent judge (25.09, session 103 closure):* the block holds the RULE
+   (the decision function), NOT the CLI's wiring — the planned mutation of THIS step, `needsCurve = effCurve !== null`
+   written at the CLI line itself (`profile-manager.mjs` `--apply` branch), stays **89/89 green** (judge's run). The
+   commit c521b3a's wording «проводит решение команды в `apply()`» is wider than that: it walks the decision
+   FUNCTION into `apply()`. The wiring — the line the shortcut actually runs — is held only by the live witness (step 3).
 3. ⏳ Live witness: apply a tuned candidate → click 🔄 Stock Default → `node tools/probe-offer.mjs` → non-zero offsets
    **0** of 127 (+ `npm run profile -- --state` for power and clock).
    **Run sheet for the card evening 2026-09-25 ~19:00 (owner at the machine), prepared offline:**
@@ -116,6 +122,15 @@ flowchart TD
 
 - `[AI]` Not fixed tonight: the fix changes the owner's shortcut on the machine he lives on and needs a live witness;
   filed and put first in the card-day order (`plans/102` Ш8).
+- `[AI]` (session 103, 25.09 08:43) **Fixed in code BEFORE the live witness**, and since the task runs the repo file the
+  fix is live in the owner's shortcut from that commit. Why acceptable: the card stays on factory until the evening
+  (the owner's answer A to `interviews/interview_031`), so a Stock Default click has nothing to zero today; the named
+  risk (a curve backend failing inside the task now fails the whole click, where the old code still reset the power)
+  is checked by the witness tonight, with `npm run profile -- --reset` as the fallback. Step 3's «must still reset
+  power» contingency is NOT built — it is built if the witness shows the failure.
+- `[AI]` The rule is the format's, so it reaches every `null`-curve profile, not only `factory.json`: `--apply` of
+  `test-pl250`, `bound-proof.local` and `roundtrip-probe.local` now also opens NVAPI and zeroes the curve (their files
+  say `curveRaiseAndCapMhz: null` = «обнулить», `profiles/README.md`). No block covers those three (judge's note).
 
 ## Links
 

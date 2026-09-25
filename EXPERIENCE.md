@@ -124,7 +124,7 @@
 ## Entries
 
 ### EXP-0293 · 2026-09-25 · ❌→✅ · #instrument-named-for-a-check-it-does-not-do #read-the-printer #s3-one-line
-class: claim-wider-than-observation
+class: claim-before-evidence
 **Context / did / result:** `bugs/140` step 3, `plans/102` AC4 and the card-day order all named `npm run profile -- --state` as the reader of «non-zero curve offsets»; preparing the live witness I opened `printState` — it prints power, clock, driver and VBIOS and never touches the curve. The AC4 «сдвигов изменено 0» would have been «checked» by an instrument blind to it. The reader is `node tools/probe-offer.mjs` («сдвигов ненулевых: N из M»).
 **Lesson:** **before a plan names a command as the meter of X, open the function that PRINTS its output and find X in it** — a command's name («state») is not its field list.
 none-cheap: corrected in the four places it stood (commit `26f4752`); the habit is «read the printer».
