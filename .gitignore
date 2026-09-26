@@ -95,3 +95,4 @@ benches/cards/generated/*
 .kaif/update-rehearsal.json
 .kaif/voice-marker.json
 .kaif/contour-window/
+.kaif/.contour-tmp/
