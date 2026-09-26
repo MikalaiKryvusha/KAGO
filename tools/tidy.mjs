@@ -55,33 +55,51 @@ function run(exe, args) {
 }
 
 /**
- * Процессы по имени: pid, командная строка, родитель. `wmic` вместо PowerShell — по причине из
- * шапки файла. Формат CSV: `Node,CommandLine,ParentProcessId,ProcessId`, поля идут по алфавиту.
+ * Процессы по фильтру CIM: pid, командная строка, родитель. `bugs/143`: `wmic` в этой Windows (11 Pro 26200) УДАЛЁН —
+ * `Get-Command wmic` → нет, — и прежний список через него молча приходил ПУСТЫМ; уборка читала пустоту как «ничего не
+ * идёт» и на конце каждого хода закрывала окно вычитки владельца (2026-09-26 16:16, страница interview_032 — `bugs/64`
+ * снова). Теперь — `Get-CimInstance` через PowerShell (скрытым окном, как `closeWindow` в run-dashboard), а НЕУДАЧА
+ * получить список — это `null`, «не вижу», и вызывающий обязан ничего не трогать: пустота и слепота — разные ответы.
+ * [TESTED: 2026-09-26 · живой список node.exe на этой машине; блок «список не получен → занято»; мутация — null как [] → красный]
+ * @returns {{pid:number, ppid:number, cmd:string}[] | null}
  */
-function processesNamed(name) {
-  const raw = run('wmic', ['process', 'where', `name='${name}'`, 'get', 'CommandLine,ParentProcessId,ProcessId', '/format:csv']);
-  return raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('Node,'))
-    // ⚠️ СТРОГАЯ ФОРМА, А НЕ «отфильтруем что получится». `wmic` печатает и человеческие сообщения
-    // («отсутствуют экземпляры»), и они попадали в разбор: инструмент показал ОКНО pid 30464, когда
-    // в системе не было ни одного WindowsTerminal. Ложное срабатывание в команде, которая УБИВАЕТ
-    // процессы, — дефект куда хуже неубранного окна, поэтому строка обязана целиком совпасть с
-    // формой «…,<число>,<число>».
-    .map((line) => {
-      const m = /^(.*),(\d+),(\d+)$/.exec(line);
-      if (!m) return null;
-      const head = m[1].split(',');
-      head.shift();                                   // имя машины
-      return { pid: Number(m[3]), ppid: Number(m[2]), cmd: head.join(',') };
-    })
-    .filter((p) => p && Number.isFinite(p.pid) && p.pid > 0);
+function listProcesses(filter) {
+  let raw;
+  try {
+    raw = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+      + `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter "${filter}" | `
+      + 'Select-Object ProcessId,ParentProcessId,CommandLine)'],
+    { encoding: 'utf8', windowsHide: true, timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch { return null; }
+  let data;
+  try { data = JSON.parse(String(raw).trim() || 'null'); } catch { return null; }
+  if (data === null) return null;
+  return (Array.isArray(data) ? data : [data])
+    .map((p) => ({ pid: Number(p.ProcessId), ppid: Number(p.ParentProcessId), cmd: String(p.CommandLine ?? '') }))
+    .filter((p) => Number.isFinite(p.pid) && p.pid > 0);
 }
 
-/** Сколько процессов имеет этого родителем — «внутри окна работают или оно брошено». */
+/**
+ * Брошено ли окно терминала. Брошенным считается только ОКНО без единого процесса внутри (`bugs/17`). Не брошены:
+ * `kids === null` — не видно (`bugs/143`); `OpenConsole.exe --headless` — сервер псевдоконсоли, которым VS Code (node-pty)
+ * держит СВОЙ встроенный терминал: своего окна у него нет, оболочка висит не на нём, а на процессе IDE, поэтому «0 внутри»
+ * у него ничего не значит (2026-09-26: после починки списка осмотр назвал такой хост брошенным — `--apply` убил бы терминал
+ * VS Code владельца).
+ */
+export function isAbandonedTerminal(cmd, kids) {
+  if (kids === null || kids === undefined) return false;
+  if (/--headless/i.test(cmd ?? '')) return false;
+  return kids === 0;
+}
+
+/** Процессы по имени образа; `null` — список не получен (см. `listProcesses`). */
+function processesNamed(name) { return listProcesses(`Name='${name}'`); }
+
+/** Сколько процессов имеет этого родителем — «внутри окна работают или оно брошено»; `null` — не видно. */
 function childCount(pid) {
-  const raw = run('wmic', ['process', 'where', `ParentProcessId=${pid}`, 'get', 'ProcessId', '/format:csv']);
-  // Та же строгость: считаем только строки вида «<машина>,<число>», а не всё непустое.
-  return raw.split(/\r?\n/).map((l) => l.trim())
-    .filter((l) => /^[^,]+,\d+$/.test(l) && !l.startsWith('Node,')).length;
+  const kids = listProcesses(`ParentProcessId=${pid}`);
+  return kids === null ? null : kids.length;
 }
 
 function kill(pid) { run('taskkill', ['/PID', String(pid), '/T', '/F']); }
@@ -114,6 +132,8 @@ function kill(pid) { run('taskkill', ['/PID', String(pid), '/T', '/F']); }
  * @returns {{busy:boolean, why:string}}
  */
 export function runInFlight(nodeProcs, armed, isAlive) {
+  // `bugs/143`: список процессов НЕ ПОЛУЧЕН — это слепота, а не «ничего не идёт». Уборка, которая не видит, не трогает.
+  if (nodeProcs === null) return { busy: true, why: 'список процессов не получен — не вижу, идёт ли прогон или страница владельца' };
   // Всё, что ДОЛГО ЖИВЁТ и/или ПИШЕТ В КАРТУ. Список положительный и полный: забытая здесь команда
   // — это команда, которую уборка однажды убьёт посреди записи в GPU.
   const MARKERS = [
@@ -200,13 +220,13 @@ async function main(argv) {
     console.log(gone.closed.length ? `   окно: закрыто (${gone.closed.join(', ')})` : '   окно: закрывать было нечего');
   }
 
-  const samplers = processesNamed('node.exe').filter((p) => /hardware-mon/.test(p.cmd));
+  const samplers = (processesNamed('node.exe') ?? []).filter((p) => /hardware-mon/.test(p.cmd));
   console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
   if (APPLY) for (const s of samplers) { kill(s.pid); console.log(`   снят ${s.pid}`); }
 
   // ---- 2. БРОШЕННЫЕ ОКНА ТЕРМИНАЛА — те, что подняты системой через DCOM и опустели.
   console.log('');
-  const terms = [...processesNamed('WindowsTerminal.exe'), ...processesNamed('OpenConsole.exe')];
+  const terms = [...(processesNamed('WindowsTerminal.exe') ?? []), ...(processesNamed('OpenConsole.exe') ?? [])];
   if (terms.length === 0) {
     console.log('ОКНА ТЕРМИНАЛА: ни одного — чисто');
   } else {
@@ -218,10 +238,11 @@ async function main(argv) {
       // проще и безопаснее: **в терминале не работает НИ ОДНОГО процесса**. Терминал, в котором
       // владелец что-то делает, всегда держит внутри хотя бы оболочку — он не будет тронут никогда;
       // терминал без единого процесса внутри не используется никем по определению.
-      const abandoned = kids === 0;
-      const origin = /-Embedding/i.test(t.cmd) ? 'поднят системой' : 'запущен пользователем';
-      console.log(`ОКНО ТЕРМИНАЛА: pid ${t.pid} · ${origin} · процессов внутри ${kids}`
-        + (abandoned ? '  → БРОШЕНО, закрываю' : '  → в нём работают, НЕ ТРОГАЮ'));
+      const abandoned = isAbandonedTerminal(t.cmd, kids);
+      const origin = /--headless/i.test(t.cmd) ? 'хост терминала IDE (--headless, своего окна нет)'
+        : /-Embedding/i.test(t.cmd) ? 'поднят системой' : 'запущен пользователем';
+      console.log(`ОКНО ТЕРМИНАЛА: pid ${t.pid} · ${origin} · процессов внутри ${kids ?? 'не видно'}`
+        + (abandoned ? '  → БРОШЕНО, закрываю' : '  → НЕ ТРОГАЮ'));
       if (APPLY && abandoned) { kill(t.pid); console.log('   закрыто'); }
     }
   }
@@ -291,6 +312,17 @@ async function selfTest() {
     ['node tools/ask.mjs --selftest', 'node tools/ask.mjs --call "x" --dry-run', 'node tools/ask.mjs --queue --list',
       'node .kaif/tools/contour/review.mjs --search "x"', 'node tools/ask.mjs --help']
       .every((cmd, i) => runInFlight([P(20 + i, cmd)], null, alive).busy === false));
+
+  // bugs/143: `wmic` удалён из Windows — список процессов приходил пустым, и уборка закрыла страницу владельца.
+  const blind = runInFlight(null, null, alive);
+  check('bugs/143: список процессов НЕ ПОЛУЧЕН (null) — это слепота, машина считается занятой, уборка ничего не трогает',
+    blind.busy === true && /не получен/u.test(blind.why), blind.why);
+
+  check('терминал: хост IDE (OpenConsole --headless) без детей НЕ брошен; невидимое (null) НЕ брошено; пустое окно — брошено',
+    isAbandonedTerminal('"C:\\...\\node-pty\\build\\Release\\conpty\\OpenConsole.exe" --headless --width 80', 0) === false
+    && isAbandonedTerminal('OpenConsole.exe -Embedding', null) === false
+    && isAbandonedTerminal('"C:\\Windows\\System32\\OpenConsole.exe" -Embedding', 0) === true
+    && isAbandonedTerminal('WindowsTerminal.exe', 2) === false);
 
   check('посторонний node не делает машину занятой',
     runInFlight([P(2, 'node some/other/thing.mjs')], null, alive).busy === false);

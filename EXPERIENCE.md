@@ -93,7 +93,7 @@
 > <!-- classes: question-already-answered, guard-not-proven-against-threat, shown-as-link,
 >      claim-before-evidence, owner-decision-not-applied, text-in-agents-world,
 >      etalon-from-dirty-tree, shell-lied, escaping-layer, twins-missed,
->      field-dropped-in-rebuild, agent-decision-worn-as-owner-word -->
+>      field-dropped-in-rebuild, agent-decision-worn-as-owner-word, blind-read-as-empty -->
 >
 > <!-- class-ok: agent-decision-worn-as-owner-word — price re-checked 2026-09-18 after three strikes in one evening (EXP-0284): the one shipped guard, kaif-attribution-lint, would be a NEW gate contour under the owner's moratorium (интервью 017, Q1 = A, until «краёв ≥ 195/389»), it is run by hand instead; and it cannot see the worst form — a real interview address that does not say what it is cited for. What caught the three strikes is a PROCESS, not a guard: `/interview` step 3d's «READ the hits» once, and a clean-context judge pass before commit twice. Re-check this declaration when the moratorium threshold is reached. -->
 >
@@ -116,6 +116,7 @@
 > | `twins-missed` | one of two layers/copies moved and the twin stayed behind |
 > | `field-dropped-in-rebuild` | a field or section silently lost when an artifact was regenerated |
 > | `agent-decision-worn-as-owner-word` | an agent's own choice, carrier or reading recorded under the owner's name or an interview address that does not say it (added 2026-09-18, EXP-0284; origin #55) |
+> | `blind-read-as-empty` | a data source that FAILED (a missing tool, a refused query) is read as «nothing there», and a guard built on it lets everything through (added 2026-09-26, EXP-0300; `bugs/143`) |
 >
 > The `#tags` are **trigger-tags**: before a task, grep by the task's tags and QUOTE the relevant
 > lessons in your report (id + one line) — or state "no relevant lessons". An unquoted recall is
@@ -124,6 +125,21 @@
 > Skill: `/experience` (capture a lesson · recall relevant lessons).
 
 ## Entries
+
+### EXP-0300 · 2026-09-26 · ❌→✅ · #tidy #wmic #fail-open #guard-sees-nothing #owner-page #s2
+class: blind-read-as-empty
+**Context / did / result:** the Stop-hook `tools/tidy.mjs` listed processes only through `wmic`; Windows 11 26200 no longer ships it, the
+tool's `run()` swallows a failure into an empty string, and `runInFlight([])` said «nothing runs» — so at the end of my turn it closed
+every window with «KAGO» in its title, the owner's new question page among them, 16 seconds after it came up (`bugs/143`). The
+`bugs/64` guard was intact in code and dead in effect. Fixed with CIM through PowerShell AND a `null` for «could not see» that makes
+the guard say busy; the fix exposed a second hole at once (a VS Code `OpenConsole --headless` host named «abandoned»), caught by
+reading the inspection before `--apply` ran.
+**Lesson:** **a guard that decides «safe to act» from a list must tell «the list is empty» from «the list could not be read» — the
+second is a stop, never a go; and when a blind guard gets its eyes back, read its first report before letting it act.**
+mechanized: `node tools/tidy.mjs --selftest` — block «bugs/143: список процессов НЕ ПОЛУЧЕН (null)» (mutant: `null` read as `[]` → red)
+and block «терминал: хост IDE (OpenConsole --headless) … НЕ брошен» (mutant: the `--headless` check removed → red).
+**Trigger:** a tool that kills, closes or deletes on the strength of a process/file list · a Windows CLI dependency (`wmic`, …).
+→ link: `bugs/143` · `bugs/64` · `bugs/21` · `plans/104`
 
 ### EXP-0299 · 2026-09-26 · ❌→✅ · #grep #multibyte-bracket #git-grep #false-negative #recurrence #s3-one-line
 class: shell-lied

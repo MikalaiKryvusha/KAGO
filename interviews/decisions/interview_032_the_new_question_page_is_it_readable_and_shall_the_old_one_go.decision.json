@@ -1,0 +1,23 @@
+{
+  "kind": "interview",
+  "document": "interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md",
+  "by": "Mikalai Kryvusha",
+  "at": "2026-09-26T13:21:31.451Z",
+  "atHuman": "26 сентября 2026, 16:21 (+03:00)",
+  "comment": "тест ответа комментарием по всему документу. Не снимаются радиокнопки повторным тапом - баг в КАИФ и у тебя",
+  "answers": {
+    "Q1": {
+      "choice": "A",
+      "text": "",
+      "comment": ""
+    },
+    "Q2": {
+      "choice": "A",
+      "text": "тест ответа телом. Не снимаются радиокнопки повторным тапом - баг в КАИФ и у тебя",
+      "comment": "тест ответа комментарием. Не снимаются радиокнопки повторным тапом - баг в КАИФ и у тебя"
+    }
+  },
+  "rev": "2e2819bb6d19906ce5b8595019bd3820709484eda7010d6cbe77f64998311407",
+  "revAfter": "17c5776fca4a49bf0d2a10def64f6d68c2e378e41f160d26152e26466b3e7d6e",
+  "records": 2
+}

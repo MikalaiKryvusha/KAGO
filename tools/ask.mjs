@@ -11,12 +11,14 @@
 // OPTIONS:  port the six 2.8 changes into our own tools/review.mjs · move to the shipped contour · keep both side by side
 // COST:     the owner's answers — a save lost or a page closed while he types (bugs/64, origin #66)
 // RECON:    researches/40 — KAIF's own /owner-reviews says «shipped generator; do not build a contour»; its self-test is 111 green here
-// DECIDED:  single documents and the call go to the shipped contour; the old one stays as `npm run ask:legacy` until seen working
+// DECIDED:  the page, the queue and the call go to the shipped contour; the old page retired by the owner's word after he saw the
+//           new one (interviews/interview_032, Q2 = A, 2026-09-26 16:2x: «Убрать сразу — новая подошла»)
 //
 // Usage: node tools/ask.mjs <everything the shipped contour takes>   e.g. `<doc.md>` · `--wait <doc.md>` · `--call "<what>"`
 //        node tools/ask.mjs --help
 //
-// [NOT-TESTED] — until plans/104 Ш7 (the owner at the machine hears the call and answers a page).
+// [TESTED: 2026-09-26 16:16–16:2x · plans/104 Ш7 with the owner at the machine: the page called in the voice «eugene», Q1 saved
+//  alone («Questions left: 1 — the page STAYS open», the waiter exit 0), Q2 saved later, the page ended itself with exit 0]
 
 import { spawn } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
@@ -42,9 +44,10 @@ const HELP = [
   '  node tools/ask.mjs --wait <документ.md>       сторож: код 0 на каждую запись ответа, 2 — контур кончился без ответа',
   '  node tools/ask.mjs --call "<что нужно>"      зов владельцу: гудки → баннер → голос (--dry-run — без звука)',
   '  node tools/ask.mjs --search "<вопрос>"       поиск прошлого ответа перед вопросом владельцу',
+  '  node tools/ask.mjs --queue                    одна страница «накопилось N» по всем ждущим документам (npm run ask:batch)',
   '  node tools/ask.mjs --selftest                 самопроверка поставляемого контура (без браузера)',
   '',
-  'Старый контур проекта — npm run ask:legacy (tools/review.mjs), до приёмки нового.',
+  'Старая страница проекта (tools/review.mjs) снята словом владельца 2026-09-26 — interviews/interview_032, Q2 = A.',
 ].join('\n');
 
 function main(argv) {
