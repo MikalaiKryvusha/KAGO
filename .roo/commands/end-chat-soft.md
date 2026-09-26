@@ -43,7 +43,10 @@ passed — and then run `node .kaif/tools/kaif-experience-lint.mjs check`: a SEC
 issue #69 — 14 of 15 failure classes recurred AFTER their lesson was written). Fix it before the
 handover by naming the guard in the entry, or by re-checking the price once for the whole class and
 declaring it (`<!-- class-ok: <slug> — <why> -->`) — never by writing a third record; a journal with not
-one `class:` exits 3 = SKIPPED, and that is said aloud, never read as clean. If a previous `/end-chat-force` left a "ceremonies skipped" debt line in `STATUS.md` —
+one `class:` exits 3 = SKIPPED, and that is said aloud, never read as clean. A journal that arrived from
+before the fields existed prints its old entries as warnings on every closing: record that inherited debt ONCE —
+`node .kaif/tools/kaif-experience-lint.mjs check --write-baseline` writes `.kaif/experience-lint.baseline.json`, which every
+later `check` reads; commit it (a later write only shrinks it, and a new entry is never adopted — origin issue #80). If a previous `/end-chat-force` left a "ceremonies skipped" debt line in `STATUS.md` —
 this closure pays it: run what was skipped and remove the line.
 
 If the project keeps a **truth↔mirror pairs registry**, run its check commands before handing
@@ -54,6 +57,17 @@ closed phases, finished sessions, shipped releases — move VERBATIM into `PROJE
 (newest on top; move, don't rewrite). Then re-read what remains of `STATUS.md` with the two tests
 from its header ("remove this line — will the next agent err?" · "readable in one sitting?"; soft
 target ~200 lines). Leave the file the way you'd want to find it.
+
+The trim writes NEW prose — the pointer lines that stay behind ("moved to …", "decided by the owner") — so where the
+attribution module is deployed, run it after the trim, before the commit: `node .kaif/tools/kaif-attribution-lint.mjs check`.
+A pointer that says "by the owner's word" without his words is a new finding; fix it with the quote or its address. The lint's
+default scope is the seven knowledge directories plus the root `*.md`: if the trim moved text into a directory outside it, name
+that directory — `node .kaif/tools/kaif-attribution-lint.mjs check <dir>` — or the moved text is never read (2.8, epic CK; a field
+report: the trim of one STATUS added one such pointer, and the dossier it created lay outside the default scope).
+A deployment that never recorded the lint's baseline stops here on its INHERITED findings at its first closing (the update task's
+`closing-gates` item names them): record that debt ONCE — `node .kaif/tools/kaif-attribution-lint.mjs check --write-baseline` writes
+`.kaif/attribution-lint.baseline.json`; commit it. From then on only NEW findings stop the closing, and the baseline only shrinks
+(2.8, epic CK; measured on four field deployments: 11 to 151 inherited findings each).
 
 **Then the budget DOOR — after the trim, not instead of it:**
 
@@ -69,6 +83,14 @@ the flag is that the closing ritual STOPS here (2.7, epic CB; origin issue #71, 
 of one project — "three core documents above budget, the warning printed for weeks and acted on
 once"). Bare `check` keeps printing the same numbers as advice and exits 0, so nothing else in the
 update road fails on a long document.
+
+Since 2.8 the door is a RATCHET over `.kaif/budget-baseline.json`, which it rewrites on every run —
+commit that file with the closing. The first run of a version records the debt above budget and
+passes (`↳ … debt recorded`); after that a document above budget passes only while its own lines
+SHRINK (`↳ … shrinking A → B`), and growth, a standstill or a new overflow stop the closing (`✖`).
+Move at least one line out per closing until the document is under budget; it then leaves the file.
+An unreadable base stops the door too — restore it from git. A verbatim document the owner declared
+his archive (`.kaif/kaif.json` → `archives`) is judged by its digest; never declare one on your own.
 
 ### Step 2. Refresh README (when reality moved)
 
@@ -101,10 +123,13 @@ from the session, `AGENT_GUIDE.md` → Commits.)
 
 Report to the human: what was recorded, what was built, the commit hash(es), what was pushed, and
 the handover in one paragraph — the main thing the NEXT chat should do first. That's the goodbye.
+It carries the ENTRY COST line `node .kaif/kaif-core.mjs check` printed (`ℹ entry cost: /resume reads … ~ Nk tokens — X % of …`),
+said in the owner's language: the price of entering the next chat is the owner's to see at every closing (2.8, origin issue #99).
 
 One line of that report is asked BY NAME, because nothing else in the session asks it
 (`AGENT_GUIDE.md` → "a falsehood is corrected where it stands"): **which statement of this session
-turned out to be false, and where does it still stand?** Answer it in the report, verbatim:
+turned out to be false, and where does it still stand?** Answer it in the report, in the owner's language (`.kaif/kaif.json` →
+`language`; 2.8, origin issue #97 — the owner reads this line, no machine does); the English form is:
 
 `Standing falsehood: none` — or `Standing falsehood: <the statement> → corrected in <place>, <place>`
 
@@ -118,7 +143,9 @@ place and its missing retraction command instead of answering `none`.
   then say goodbye; /end-chat-force — capture the essentials and say goodbye right now.**
 - This skill is also the closing move of timed autonomous runs: a named end time means "START
   /end-chat-soft at that time" (`AGENT_GUIDE.md` → Working until a named time) — never an early
-  finish out of deadline fear.
+  finish out of deadline fear. When a named time started this closing, the report opens with
+  `BOUNDARY: now <ISO of a date probe in the same call> · named <ISO> · pool <empty | N items>` — the clock decides, never the
+  agent's estimate (origin issue #96: "did not make it by 12:00" said at 11:50).
 - If a push is rejected (non-fast-forward) — `git pull --rebase`, retry the push, then tell the
   human about the divergence.
 - Generated artifacts that are gitignored (e.g. build outputs) won't be committed — that's fine.

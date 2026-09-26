@@ -15,10 +15,10 @@ Update `STATUS.md`, tersely:
 - **What was done in this chat** — the facts a stranger cannot recover from git alone.
 - **Where we are** — what works, what is mid-flight and in what state.
 - **What the next session does FIRST** — commands, paths, open questions with owners.
-- **The ceremonies debt line** — add verbatim:
+- **The ceremonies debt line** — in the owner's language (origin issue #97; the English form below):
   `⚠️ Force-closed <date+time>: ceremonies skipped (judge pass, bonsai trim, README, showcase
   linters) — the first /end-chat-soft pays this debt.`
-- **The standing falsehood line** — one phrase, verbatim: `Standing falsehood: none`, or
+- **The standing falsehood line** — one phrase, in the owner's language (the English form): `Standing falsehood: none`, or
   `Standing falsehood: <the statement> → still stands in <place>, <place>` (`AGENT_GUIDE.md` → "a
   falsehood is corrected where it stands"). Force mode may skip a ceremony; it never drops a lie left
   standing under the owner's name — a statement this session learned was false and corrected only in

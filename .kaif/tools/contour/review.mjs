@@ -47,6 +47,11 @@ import {
   loadContourConfig, normalize, bodyHash, provenance, inQuietHours, parseMetaBlock, parseQuestions,
   docStatus, renderMd, splitParagraphs, recordDecision, preflight, checkForm, escapeHtml, tmpDirOf, TMP_DIR,
   headerDate, ARCHAEOLOGY_PATHS, // AQ (2.7, #70): the archaeology axis of the same door
+  decisionPaths, // OW3 (2.8, #86): the age of an answer is read from its decision record
+  statusBlockAwaitsApplication, // OW3 (2.8, #86): the field's form — the status block says «awaiting application»
+  archaeologyWords, archaeologySearch, // OW5 (2.8, #74 · #82): the door searches itself — also for a question in the chat
+  sessionName, // OW4 (2.8, #95 · #98): the calling session's name
+  readDecision, // OW6 (2.8): a repeated save is recognised against the decision it already made
 } from './core.mjs';
 import { texts, PARSER } from './texts.mjs';
 
@@ -56,6 +61,16 @@ const AUTOCLOSE_DELAY_MS = 2000;      // DEF2: window.close() attempt after the 
 const AUTOCLOSE_RESERVE_MS = 2000;    // DEF2: reserve for a refused close → an honest request
 const SERVER_DEATH_MS = 2500;         // DEF3: server death after the save (the window has time to go)
 const BEACON_RELOAD_GRACE_MS = 3000;  // DEF6/T3: ~3 s after the beacon — reload vs close
+const WAIT_POLL_MS = 2000;            // OW6 (2.8): the waiter polls the decision file(s) — the field device the KAIF owner pointed to polls every 2 s
+const WAIT_NO_CONTOUR_MS = 60000;     // B-F1 (2.8): no live contour seen within a minute → exit 2 (a page comes up in seconds; the ritual starts the waiter first)
+const QH_LEN = 12;                    // OW6: hex chars of a question's fingerprint in a draft key (title + body of the question)
+// 2.8, origin issue #106 (a field owner's explicit word, three requests in one evening): owner-facing pages render at 1.7x the browser
+// base — the WHOLE page through CSS zoom, as Ctrl+Plus does (raising font-size alone turned the fixed radio circles into dots and slid
+// the title under the button) — and the primary Save button at 1.5x (its own zoom SAVE_SCALE / PAGE_SCALE). Media queries measure the
+// viewport, which CSS zoom does not change, so a width breakpoint travels multiplied by PAGE_SCALE: the two constants move together.
+export const PAGE_SCALE = 1.7;
+export const SAVE_SCALE = 1.5;
+const NARROW_PX = 560;                // the narrow-window breakpoint at scale 1 (rendered as NARROW_PX * PAGE_SCALE)
 // Silence-watch thresholds may be TIGHTENED by the environment — and only tightened.
 const stricterMs = (envName, canon) => {
   const v = Number(process.env[envName]);
@@ -99,8 +114,8 @@ const IS_WIN = platform() === 'win32', IS_MAC = platform() === 'darwin';
 const CLI_NAME = 'node .kaif/tools/contour/review.mjs'; // how the rituals call it
 // LP (2.7): every flag the CLI knows. An unknown flag REFUSES before any page, sound or call (the core's bug-33 rule):
 // the 2.6 generator passed `--close` through to the show and raised the page — with the owner's voice call behind it.
-const KNOWN_FLAGS = ['--no-serve', '--no-open', '--silent', '--timeout', '--check', '--notice', '--proofread', '--mockup',
-  '--queue', '--list', '--include-stale', '--enqueue', '--selftest', '--mark-shown', '--transport', '--mark-implemented',
+const KNOWN_FLAGS = ['--search', '--wait', '--call', '--dry-run', '--no-serve', '--no-open', '--silent', '--timeout', '--check', '--notice', '--proofread', '--mockup',
+  '--queue', '--list', '--include-stale', '--enqueue', '--selftest', '--mark-shown', '--transport', '--mark-implemented', '--mark-withdrawn', '--why',
   '--where', '--close', '--force', '--owner-word'];
 const EXIT_UNKNOWN_FLAG = 1;          // same code as the core and the loader (bugs/33): a usage error, never a show
 
@@ -118,8 +133,39 @@ const relDoc = (root, docPath) => relative(root, resolve(root, docPath)).replace
 const decisionsAbs = (root, cfg = cfgOf(root)) => resolve(root, cfg.decisionsDir);
 const esc = (s) => String(s).replace(/</g, '&lt;');
 
+// OW4 (2.8, #98): the session's name as the voice says it — the language pack's words and numbers ("dev2" → "dev two"; the Russian
+// pack has its own word for "dev" and "main"); an unknown word stays as written
+export function spokenSession(name, cfg) {
+  const sp = T(cfg).spoken || {}, ones = sp.ones || [], tens = sp.tens || [], words = new Map(sp.words || []);
+  const num = (n) => (n < 20 && ones[n] ? ones[n]
+    : n < 100 && tens[Math.floor(n / 10)] ? tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '')
+      : String(n).split('').map((d) => ones[Number(d)] || d).join(' '));
+  return String(name).split(/[-_\s.]+/u).filter(Boolean).flatMap((part) => part.match(/\d+|\D+/gu) || [])
+    .map((tok) => (/^\d+$/u.test(tok) ? num(Number(tok)) : (words.get(tok.toLowerCase()) || tok))).join(' ');
+}
+// OW4 (2.8, #98): «<owner>, this is <session>. …» — the calling session right after the owner's name, in every call; no session, no change
+// [TESTED: 2026-09-25 20:15–20:24 · selftest «this is dev two»; the origin's dry run named «main» in the Russian pack's words; s22 F — «dev two» /
+//  «main» in the Russian pack on two deployed workspaces; mutant «the name removed» red exactly on its case; report testcases/reports/2026-09-25_ow4-call-names-session.md]
+export function introduce(phrase, cfg) {
+  if (!cfg.session) return phrase;
+  const intro = T(cfg).call.from(spokenSession(cfg.session, cfg)), head = cfg.callName + ', ';
+  if (!phrase.startsWith(head)) return intro + '. ' + phrase;
+  const rest = phrase.slice(head.length);
+  return head + intro + '. ' + rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+// OW4 (2.8, #95): the owner's hands or a quick answer outside a page — the CALL, never a line left in the chat he does not watch while the
+// agent works; `dryRun` prints the phrase and the banner and makes no sound
+export function callDoor(root, text, { dryRun = false, log = console.log } = {}) {
+  const cfg = cfgOf(root);
+  const phrase = introduce(cfg.callName + ', ' + String(text).trim(), cfg);
+  if (dryRun) { log('CALL' + (cfg.session ? ' · ' + cfg.session : '') + ' (dry run, no sound): ' + phrase); return phrase; }
+  signalCall(root, phrase, { log });
+  return phrase;
+}
+
 // ── The call phrase — a PURE function (its content is judged by the selftest, not by ear) ─────
-export function callPhrase(ctx, cfg) {
+export function callPhrase(ctx, cfg) { return introduce(callPhraseBare(ctx, cfg), cfg); } // OW4: the session named in every call
+function callPhraseBare(ctx, cfg) {
   const t = T(cfg), o = cfg.callName, p = cfg.spokenProjectName; // the voice says the spoken form
   if (ctx.notice) return t.call.notice(o, p, ctx.title);
   if (ctx.batch) {
@@ -140,7 +186,7 @@ export function callPhrase(ctx, cfg) {
 export function signalCall(root, rawPhrase, { quiet = null, log = console.log } = {}) {
   const cfg = cfgOf(root);
   const isQuiet = quiet === null ? inQuietHours(new Date(), cfg.quietFrom, cfg.quietTo) : quiet;
-  log('CALL: ' + rawPhrase); // C8: plain text to the console — an exit code does not prove a human heard it
+  log('CALL' + (cfg.session ? ' · ' + cfg.session : '') + ': ' + rawPhrase); // C8: plain text to the console — an exit code does not prove a human heard it; OW4: the session
   const phrase = rawPhrase.replace(/[*_`#>[\]()«»"]/g, ' ').replace(/\s{2,}/g, ' ').trim(); // no markup in speech
   if (isQuiet) { log('Quiet hours (I6) — beeps and voice suppressed; the page is up silently.'); return; }
   const voice = () => {
@@ -198,8 +244,21 @@ export function signalCall(root, rawPhrase, { quiet = null, log = console.log } 
 }
 
 // ── The queue (I7): a state file; living documents stay where they are ───────────────────────
-export function readQueue(root, cfg = cfgOf(root)) { return readJsonOr(join(decisionsAbs(root, cfg), QUEUE_FILE), []); }
+// OW7 (2.8, epic OW; origin issue #100): the queue file of ANOTHER shape — a project's own, earlier contour keeps `{ items: [...] }` under
+// the same name — reads as no items of THIS contour (the living documents are still scanned in interviews/), is announced in one line, and
+// is NEVER written: "foreign reads as empty" alone would turn --enqueue and the notice mark into an overwrite of the project's queue.
+// [TESTED: 2026-09-25 18:26 +03:00 · selftest and s22 (`{"items":[]}` → the one line, exit not 1; --enqueue refused, the file byte for byte), red on the 2.7
+//  core, mutants «read without the shape check» · «write over a foreign queue»; on a clone of the #86 field deployment: exit 0, the line,
+//  no trace (was: TypeError); report testcases/reports/2026-09-25_ow3-ow7-owner-debt-foreign-queue.md]
+export function queueShape(root, cfg = cfgOf(root)) {
+  const p = join(decisionsAbs(root, cfg), QUEUE_FILE);
+  if (!existsSync(p)) return 'none';
+  return Array.isArray(readJsonOr(p, undefined)) ? 'ours' : 'foreign';   // unreadable JSON is foreign too: never overwritten
+}
+export class ForeignQueueError extends Error {}
+export function readQueue(root, cfg = cfgOf(root)) { const v = readJsonOr(join(decisionsAbs(root, cfg), QUEUE_FILE), []); return Array.isArray(v) ? v : []; }
 export function writeQueue(root, items, cfg = cfgOf(root)) {
+  if (queueShape(root, cfg) === 'foreign') throw new ForeignQueueError(T(cfg).list.foreignWrite(cfg.decisionsDir + '/' + QUEUE_FILE));
   mkdirSync(decisionsAbs(root, cfg), { recursive: true });
   writeFileSync(join(decisionsAbs(root, cfg), QUEUE_FILE), JSON.stringify(items, null, 2) + '\n', 'utf8');
 }
@@ -235,6 +294,13 @@ export function pendingNotices(root) {
   return readQueue(root)
     .filter((i) => isNoticeItem(i) && !i.readAt && existsSync(resolve(root, i.doc)))
     .map((i) => ({ doc: i.doc, addedAt: i.addedAt }));
+}
+
+// bugs/125 (2.8): the revision of the QUEUE — what the entry page shows (documents with their unanswered counts, notices). The entry page
+// asks for it on focus and reloads only when it changed: a reload that finds the same revision cannot start another one (the page used
+// to reload on EVERY focus, and a focused tab fires focus after each load — an endless reload that ended the contour as "page closed").
+export function queueRev(docs, notices) {
+  return bodyHash(JSON.stringify([docs.map((d) => [d.doc, d.unanswered]), notices.map((n) => n.doc)]));
 }
 
 // Every document with unanswered QUESTIONS: a scan of interviews/ (living documents in place) + the queue.
@@ -298,11 +364,16 @@ export function recordShown(root, rels, transport, now = new Date()) {
 // The fact is written by the agent's hand at the moment the decision lands (never inferred); a document whose
 // every open question is implemented is never raised — the queue says so out loud and exits 2 until the status closes.
 export function readImplemented(root, cfg = cfgOf(root)) { return readJsonOr(join(decisionsAbs(root, cfg), IMPLEMENTED_FILE), {}); }
-export function recordImplemented(root, rel, qid, where, now = new Date()) {
+// judge CH5 F10: a machine receipt is LOCAL ISO with its offset (the stamp canon) — toISOString() wrote UTC and the page's date slice
+// showed yesterday after midnight
+const localIso = (d) => { const p = (n) => String(n).padStart(2, '0'); const o = -d.getTimezoneOffset();
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+    + (o >= 0 ? '+' : '-') + p(Math.floor(Math.abs(o) / 60)) + ':' + p(Math.abs(o) % 60); };
+export function recordImplemented(root, rel, qid, where, now = new Date(), extra = {}) {
   const map = readImplemented(root);
   const key = String(rel).replace(/\\/g, '/');
   map[key] = map[key] || {};
-  map[key][qid] = { at: now.toISOString(), where };
+  map[key][qid] = { at: localIso(now), where, ...extra };   // extra: { withdrawn: true, why } — 2.8, epic CH
   mkdirSync(decisionsAbs(root), { recursive: true });
   writeFileSync(join(decisionsAbs(root), IMPLEMENTED_FILE), JSON.stringify(map, null, 2) + '\n', 'utf8');
   return map;
@@ -312,10 +383,54 @@ export function implStateOf(rel, qs, implAll) {
   const open = qs.filter((q) => !q.answered);
   return { open: open.length, unanswered: open.filter((q) => !impl[q.id]).length, implementedOpen: open.filter((q) => impl[q.id]).map((q) => q.id) };
 }
+// 2.8, epic CH (criterion 13; finding K13): a question a withdrawal made moot is WITHDRAWN by the agent with its reason — the implemented
+// fact with withdrawn: true (the queue then never raises it, the page says «withdrawn — <reason>»); an ANSWERED question is the owner's
+// word and is refused (exit 1, nothing recorded): a withdrawal is never an answer on the owner's behalf.
+export function markWithdrawn(root, doc, qid, why, cfg = cfgOf(root)) {
+  const qs = parseQuestions(readFileSync(resolve(root, doc), 'utf8'));
+  const q = qs.find((x) => x.id === qid);
+  if (!q) return { code: 1, line: T(cfg).impl.noSuch(doc, qid, qs.map((x) => x.id)) };
+  if (q.answered) return { code: 1, line: T(cfg).impl.answeredNotWithdrawn(doc, qid) };
+  recordImplemented(root, relDoc(root, doc), qid, 'withdrawn — ' + why, new Date(), { withdrawn: true, why });
+  return { code: 0, line: T(cfg).impl.withdrawn(doc, qid, why, cfg.decisionsDir + '/' + IMPLEMENTED_FILE) };
+}
 // Lines of the gate: documents whose EVERY open question is implemented (I45) — printed by the queue and the show.
 export function implementedGate(root) {
   const t = T(cfgOf(root));
   return pendingDocs(root).filter((d) => d.implementedOpen.length > 0 && d.unanswered === 0).map((d) => ({ doc: d.doc, line: t.impl.gate(d.doc, d.implementedOpen) }));
+}
+
+// OW3 (2.8, epic OW; origin issue #86, S1): the AGENT's debt — a document whose every question is answered while its status is not
+// closed (the /interview canon closes the status LAST, after the propagation, so this state IS "answered, not applied"). A field owner
+// found an 11-day-old decision of his unapplied himself: a view folded old answers into one counter behind a date. Here it is named,
+// with the days since the answer, with NO date cutoff — and first in the list, ahead of the owner's queue.
+// [TESTED: 2026-09-25 18:26 +03:00 · selftest (debt named first with the age since the answer; a stale document named), s22 on the deployed copy, red on the
+//  2.7 core, mutants «canonical matcher finds nothing» · «stale silent again» · «status-block words ignored»; corrected 2026-09-25 18:52 +03:00: the first
+//  edition was blind to the #86 field's form (a ticked status, «awaiting application» on a continuation line) — after the FORK B finish the
+//  field clone at its S1-era state names the #86 decision «answered 17 d ago»; report testcases/reports/2026-09-25_ow3-ow7-owner-debt-foreign-queue.md]
+export function answeredAgeDays(root, rel, now = new Date()) {
+  let at = NaN;
+  try { at = Date.parse(JSON.parse(readFileSync(decisionPaths(root, rel).decision, 'utf8')).at); } catch { at = NaN; }
+  return Number.isNaN(at) ? queueDocAgeDays(root, rel, now) : Math.max(0, Math.floor((now.getTime() - at) / DAY_MS));
+}
+export function awaitingApplication(root, now = new Date()) {
+  const canon = pendingDocs(root).filter((d) => d.questions > 0 && d.unanswered === 0 && d.implementedOpen.length === 0).map((d) => d.doc);
+  // the field's form (FORK B of plans/119 OW3): the status block itself says the answers await application — read from each interview
+  const ivDir = resolve(root, 'interviews');
+  const said = existsSync(ivDir) ? readdirSync(ivDir).filter((x) => /^interview_\d+.*\.md$/.test(x)).map((f) => 'interviews/' + f)
+    .filter((rel) => statusBlockAwaitsApplication(readFileSync(resolve(root, rel), 'utf8'))) : [];
+  return [...new Set([...canon, ...said])].map((doc) => ({ doc, days: answeredAgeDays(root, doc, now) }))
+    .sort((a, b) => b.days - a.days || a.doc.localeCompare(b.doc));
+}
+
+// The LOCAL calendar day of a stored moment — receipts keep UTC ISO; a badge is read by a person in his own zone, and the first ten
+// characters of a UTC moment are YESTERDAY between midnight and the zone's offset (the shown and applied badges read a night answer as
+// the day before — probe tools/sandbox/probes/contour-badge-date.mjs, 2.8). An unparsable value keeps its old form.
+export function localDay(at) {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return String(at).slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 
 export function listQueue(root, { now = new Date(), includeStale = false } = {}) {
@@ -329,7 +444,7 @@ export function listQueue(root, { now = new Date(), includeStale = false } = {})
   docs.sort((a, b) => (a.shown ? 1 : 0) - (b.shown ? 1 : 0) || (b.shownDays ?? 0) - (a.shownDays ?? 0) || a.doc.localeCompare(b.doc));
   const never = docs.filter((d) => !d.shown);
   const lines = docs.map((d) => (d.shown ? '🟡 ' : '⛔ ') + d.doc + ' — ' + t.list.waits(d.waitDays) +
-    (d.shown ? ' · ' + t.list.shown(d.shown.at.slice(0, 10), d.shownDays, d.shown.transport) : ' · ' + t.list.never));
+    (d.shown ? ' · ' + t.list.shown(localDay(d.shown.at), d.shownDays, d.shown.transport) : ' · ' + t.list.never));
   if (!docs.length) lines.push(t.list.empty);
   if (never.length) {
     lines.push('🔴 ' + t.list.gate(never.length));
@@ -338,7 +453,13 @@ export function listQueue(root, { now = new Date(), includeStale = false } = {})
   }
   const implGate = implementedGate(root); // I45: implemented-but-open is a gate of the same class as never-shown
   for (const g of implGate) lines.push('🔴 ' + g.line);
-  return { docs, never, lines, implGate, exitCode: never.length || implGate.length ? EXIT_NEVER_SHOWN : 0 };
+  // #86: a stale queue document is NAMED — it left the owner's showcase (I39), it never leaves the agent's sight
+  const stale = includeStale ? [] : staleQueueDocs(root, ownerDocs(root, { includeStale: true, now }), now);
+  for (const d of stale) lines.push('! ' + t.list.stale(d.doc, d.days, STALE_QUEUE_DAYS, CLI_NAME));
+  if (queueShape(root) === 'foreign') lines.push('ℹ ' + t.list.foreign(cfgOf(root).decisionsDir + '/' + QUEUE_FILE)); // OW7 (#100): one line, no trace
+  const awaiting = awaitingApplication(root, now); // #86: the agent's debt — FIRST, by name, no date cutoff
+  const head = awaiting.length ? ['🔴 ' + t.list.awaiting(awaiting.length), ...awaiting.map((a) => '   ' + a.doc + ' — ' + t.list.answered(a.days))] : [];
+  return { docs, never, lines: [...head, ...lines], implGate, awaiting, stale, exitCode: never.length || implGate.length ? EXIT_NEVER_SHOWN : 0 };
 }
 
 // ── Building pages (I1: only from documents) ──────────────────────────────────────────────────
@@ -380,10 +501,12 @@ export function buildPage(root, docPath) {
   };
   const questions = parsed.map((q) => ({
     doc: rel, id: q.id, title: q.title, answered: q.answered || Boolean(implMap[q.id]), target: q.target,
+    qh: bodyHash(q.title + '\n' + (q.body || []).join('\n')).slice(0, QH_LEN), // OW6: the draft key's fingerprint of THIS question
     bodyHtml: proseOf(q), recommended: q.recommended,
     options: q.options.map((o) => ({ letter: o.letter, html: renderMd(o.text), recommended: o.letter === q.recommended })),
     existing: [...q.answers.filter((a) => a.text).map((a) => a.text.replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean),
-      ...(implMap[q.id] ? [t.impl.badge(implMap[q.id].where, String(implMap[q.id].at).slice(0, 10))] : [])],
+      ...(implMap[q.id] ? [implMap[q.id].withdrawn ? t.impl.withdrawnBadge(implMap[q.id].why, localDay(implMap[q.id].at))
+        : t.impl.badge(implMap[q.id].where, localDay(implMap[q.id].at))] : [])],
   }));
   const docHash = bodyHash(md);
   // question blocks are CUT from the prose render — the cards below are the only form of questions
@@ -431,7 +554,7 @@ export function buildPage(root, docPath) {
   const html = pageShell(cfg, {
     title, kind, heading: '<span class="kind">' + esc(kind) + '</span><span>' + esc(title) + '</span>' + summary + formNote,
     main: mainHtml,
-    questions, artifacts, face: 'interview',
+    questions, artifacts, face: 'interview', rev: docHash,
   });
   return { html, questions, artifacts, docHash, kind, title, rel, face: 'interview' };
 }
@@ -446,7 +569,7 @@ export function buildNoticePage(root, docPath) {
     title, kind: t.kind.notice,
     heading: '<span class="kind">' + t.kind.notice + '</span><span>' + esc(title) + '</span> <span class="tag notice">' + t.tag.noAnswerNote + '</span>',
     main: '<div class="doc">' + renderMd(md) + '</div>' + noticeCommentBlock(rel, t),
-    questions: [], notices: [rel], noticeDoc: rel, face: 'notice',
+    questions: [], notices: [rel], noticeDoc: rel, face: 'notice', rev: bodyHash(md),
   });
   return { html, questions: [], docHash: bodyHash(md), kind: t.kind.notice, title, rel, face: 'notice' };
 }
@@ -466,7 +589,7 @@ export function buildProofreadPage(root, docPath) {
     title, kind: t.kind.proofread,
     heading: '<span class="kind">' + t.kind.proofread + '</span><span>' + esc(title) + '</span> <span class="tag you">' + t.tag.you + '</span>',
     main: '<h2>' + t.head.paragraphs + ' (' + paras.length + ')</h2>' + cards + docCommentBlock(rel, t) + '<p class="muted">' + esc(t.ph.noRemarks) + '</p>',
-    questions: [], face: 'proofread', faceDoc: rel, paragraphs: paras.map((p) => p.id),
+    questions: [], face: 'proofread', faceDoc: rel, paragraphs: paras.map((p) => p.id), rev: bodyHash(md),
   });
   return { html, questions: [], docHash: bodyHash(md), kind: t.kind.proofread, title, rel, paragraphs: paras.length, face: 'proofread' };
 }
@@ -487,7 +610,7 @@ export function buildMockupPage(root, imagePath) {
     heading: '<span class="kind">' + t.kind.mockup + '</span><span>' + esc(title) + '</span> <span class="tag you">' + t.tag.you + '</span>',
     main: '<h2>' + t.head.mockup + '</h2><div class="mock"><img src="' + src + '" alt="' + esc(title) + '"></div>' +
       '<p><textarea data-draft data-doc="' + esc(rel) + '" name="doccomment:' + esc(rel) + '" rows="5" placeholder="' + esc(t.ph.mockup) + '"></textarea></p>' + '<p class="muted">' + esc(t.ph.noRemarks) + '</p>',
-    questions: [], face: 'mockup', faceDoc: rel,
+    questions: [], face: 'mockup', faceDoc: rel, rev: bodyHash(data.toString('base64')),
   });
   return { html, questions: [], docHash: bodyHash(data.toString('base64')), kind: t.kind.mockup, title, rel, face: 'mockup' };
 }
@@ -542,7 +665,7 @@ export function buildIndexPage(root, docs, notices = []) {
   const html = pageShell(cfg, {
     title: t.head.accumulated + ': ' + counts, kind: t.kind.queue,
     heading: '<span class="kind">' + t.kind.queue + '</span><span>' + t.head.accumulated + ': ' + esc(counts) + '</span>',
-    main, questions: [], index: true, face: 'interview',
+    main, questions: [], index: true, face: 'interview', qrev: queueRev(docs, notices), // bugs/125: what this list was built from
   });
   return { html, questions: [], total, notices: notices.length };
 }
@@ -609,19 +732,22 @@ function aCard(a, t) {
 }
 
 function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [], batch = false, notices = [], noticeDoc = null,
-  index = false, face = 'interview', faceDoc = null, paragraphs = [] }) {
+  index = false, face = 'interview', faceDoc = null, paragraphs = [], rev = null, qrev = null }) {
   const t = T(cfg);
   const qjson = JSON.stringify(questions).replace(/</g, '\\u003c');
   const singleDoc = batch ? null : ((questions[0] && questions[0].doc) || (artifacts[0] && artifacts[0].doc) || noticeDoc || faceDoc || null);
   const cfgJson = JSON.stringify({
     batch, index, face, aliveMs: ALIVE_INTERVAL_MS, closeMs: AUTOCLOSE_DELAY_MS, reserveMs: AUTOCLOSE_RESERVE_MS,
+    rev, doc: singleDoc, // OW6 (2.8): the revision this page was built from — every save carries it, the pulse compares it
+    qrev, // bugs/125 (2.8): the queue revision the ENTRY page was built from — on focus it reloads only when the pulse names another
     notices, paragraphs,
     artifacts: artifacts.map((a) => ({ doc: a.doc, id: a.id, exists: a.exists, sha256: a.sha256 })),
     expectRadioGroups: questions.filter((q) => q.options && q.options.length > 0).length, // spec §2 self-check
     draftKey: 'owner-review:' + (singleDoc || (index ? 'index' : title)), // per DOCUMENT, never per batch
     txt: { draft: t.st.draft(0).replace('0', '{n}'), saving: t.st.saving, saved: t.st.saved('{w}'), nothing: t.st.nothing,
       needArt: t.st.needArt, err: t.st.err('{m}'), serverGone: t.st.serverGone, serverGoneLocal: t.st.serverGoneLocal, savedLocally: t.st.savedLocally, closeYourself: t.st.closeYourself,
-      copied: t.st.copied, copyManually: t.st.copyManually, selfcheck: t.st.selfcheck('{r}', '{q}'), tabnote: t.st.tabnote },
+      copied: t.st.copied, copyManually: t.st.copyManually, selfcheck: t.st.selfcheck('{r}', '{q}'), tabnote: t.st.tabnote,
+      left: t.st.left('{n}'), stale: t.st.stale, rewritten: t.st.rewritten, orphan: t.st.orphan, reloadRev: t.btn.reloadRev }, // OW6
   }).replace(/</g, '\\u003c');
   // P5: both themes via prefers-color-scheme; colours are variables; contrast is built into the pairs.
   const css = `
@@ -632,6 +758,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     :root { --bg:#17171a; --card:#212126; --ink:#ececf0; --muted:#a0a0a8; --line:#3a3a42;
       --wait:#f59e0b; --done:#22c55e; --you:#60a5fa; --danger:#f87171; --accent:#60a5fa;
       --tagink:#0b1020; --tagwait:#f59e0b; --tagdone:#22c55e; --tagyou:#60a5fa; } }
+  html { zoom:${PAGE_SCALE} } /* #106: the whole page at PAGE_SCALE, like Ctrl+Plus */
   * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui, "Segoe UI", sans-serif; }
   /* The header SCROLLS WITH THE PAGE — the owner's word (2026-09-05): not sticky. Only the emergency banner may pin. */
   header { position:static; background:var(--card); border-bottom:1px solid var(--line); padding:10px 230px 10px 20px; display:flex; gap:12px; align-items:baseline; z-index:5; flex-wrap:wrap }
@@ -674,14 +801,15 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
      height; the status is a pill under it on its own background, gone when empty. A bottom bar is FORBIDDEN (spec §4). */
   .fab { position:fixed; top:12px; right:16px; z-index:50; display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:60vw }
   .fab button { border-radius:999px; box-shadow:0 4px 14px rgba(0,0,0,.28); padding:10px 20px }
+  .fab #save { zoom:${+(SAVE_SCALE / PAGE_SCALE).toFixed(3)} } /* #106: the primary Save button renders at SAVE_SCALE of the base */
   .fab #status { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:4px 12px; font-size:13px; text-align:right } .fab #status:empty { display:none }
-  @media (max-width:560px) { .fab { top:8px; right:8px } .fab button { padding:8px 14px } header { padding-right:170px } }
+  @media (max-width:${Math.round(NARROW_PX * PAGE_SCALE)}px) { .fab { top:8px; right:8px } .fab button { padding:8px 14px } header, #banner { padding-right:170px } }
   .muted{opacity:.7;font-size:.95em;margin:4px 0 0} /* bugs/113: the no-remarks hint under the field */
   button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 18px; font:inherit; cursor:pointer } button:disabled { opacity:.5; cursor:default }
   button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent) }
   .err { color:var(--danger); font-weight:600 } .okmsg { color:var(--done); font-weight:600 }
   #rescue { display:none; border:2px solid var(--danger); border-radius:10px; padding:12px; margin:14px 0 }
-  #banner { display:none; position:sticky; top:0; background:var(--danger); color:#fff; padding:8px 20px; font-weight:600; z-index:6 }
+  #banner { display:none; position:sticky; top:0; background:var(--danger); color:#fff; padding:8px 230px 8px 20px; font-weight:600; z-index:6 } /* OW6: room for the floating Save button, as the header has */
   /* I26 (#64): the page found itself in a TAB, not in the contour's own window — a yellow note, never the red banner:
      the answer still goes through; what is at risk is the draft (it lives in this tab) and the auto-close. */
   #tabnote { display:none; background:#fde68a; color:#1d1d1f; padding:8px 20px; font-weight:600; border-bottom:1px solid #f59e0b }`;
@@ -694,11 +822,20 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     "function status(msg,cls){var s=$('#status');s.textContent=msg;s.className=cls||''}",
     // I12: the browser draft — every field in localStorage, restored with a note
     "var DK=CFG.draftKey+':';",
-    "function saveDraft(el){try{localStorage.setItem(DK+el.name,el.type==='radio'?(el.checked?el.value:''):el.value)}catch(e){}}",
+    // OW6 (2.8): a draft key carries the FINGERPRINT of its question — in a new revision of the document a draft comes back only onto
+    // the same question; a draft of a changed or removed question (or of a page before 2.8) is shown as «draft of a previous revision»
+    "function qhOf(n){var p=n.split(':');if(p.length<3)return'';var id=p[p.length-1],d=p.slice(1,p.length-1).join(':');for(var i=0;i<QS.length;i++)if(QS[i].doc===d&&QS[i].id===id)return QS[i].qh||'';return''}",
+    "function dkey(n){var h=qhOf(n);return DK+n+(h?'#'+h:'')}",
+    "function saveDraft(el){try{localStorage.setItem(dkey(el.name),el.type==='radio'?(el.checked?el.value:''):el.value)}catch(e){}}",
     "function restoreDraft(){var n=0;var els=document.querySelectorAll('[data-draft]');",
-    " for(var i=0;i<els.length;i++){var el=els[i];var v=null;try{v=localStorage.getItem(DK+el.name)}catch(e){}",
+    " for(var i=0;i<els.length;i++){var el=els[i];var v=null;try{v=localStorage.getItem(dkey(el.name))}catch(e){}",
     "  if(v===null||v==='')continue;",
     "  if(el.type==='radio'){if(el.value===v&&!el.checked){el.checked=true;n++}}else if(!el.value){el.value=v;n++}}",
+    " var orph=[];try{for(var j=0;j<localStorage.length;j++){var k=localStorage.key(j);if(k.indexOf(DK)!==0)continue;var nm=k.slice(DK.length).split('#')[0];",
+    "  if(nm.indexOf('__')===0)continue;var ov=localStorage.getItem(k);if(ov&&k!==dkey(nm))orph.push(nm+': '+ov)}}catch(e){}",
+    " if(orph.length){var od=document.createElement('section');od.className='qcard danger';var op=document.createElement('p');op.className='err';op.textContent=TX.orphan;",
+    "  var ot=document.createElement('textarea');ot.rows=Math.min(12,orph.length*2+1);ot.value=orph.join(String.fromCharCode(10));od.appendChild(op);od.appendChild(ot);",
+    "  var mn=document.querySelector('main');if(mn)mn.insertBefore(od,mn.firstChild)}",
     " if(n>0)status(fmt(TX.draft,{n:n}),'okmsg')}",
     // P3: a radio cleared by a second click; activation taken over on pointerdown (no native double click)
     "document.addEventListener('pointerdown',function(e){var lab=e.target&&e.target.closest?e.target.closest('label.opt'):null;",
@@ -734,7 +871,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     "function rescue(payload,msg){status(fmt(TX.err,{m:msg}),'err');var r=$('#rescue');r.style.display='block';",
     " $('#rescuetext').value=JSON.stringify(payload,null,2);enableButtons(true)}",
     "function enableButtons(on){var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].disabled=!on}",
-    "var saved=false,closeTimer=null,lastPayload=null;",
+    "var saved=false,closeTimer=null,lastPayload=null,saving=false;",
     // LP (#66): input state for the pulse (`--close` reads it from the lock) and the local save when the server is gone
     "var lastInput=0,lsOk=true,submittedLocally=false;try{localStorage.setItem(DK+'__probe','1');localStorage.removeItem(DK+'__probe')}catch(e){lsOk=false}",
     // RL D-F2 (2.7, court of the version): the answer survives a dead server ONLY in the contour's own --app window — it runs
@@ -756,23 +893,37 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     "function isNotice(doc){var n=CFG.notices||[];for(var i=0;i<n.length;i++)if(n[i]===doc)return true;return false}",
     "function hasArtifacts(doc){var A=CFG.artifacts||[];for(var i=0;i<A.length;i++)if(A[i].doc===doc&&A[i].exists)return true;return false}",
     "function hasComments(p){for(var k in (p.comments||{}))return true;return false}",
-    "function doSave(doc){var p=collect(doc);if(isNotice(doc))p.read=true;lastPayload=p;",
+    // OW6 (2.8): after a partial save the drafts of the SAVED questions go (the others stay); a save against another revision, or a
+    // pulse that sees one, turns saving off and offers the new revision — the owner's text stays on the page
+    "function clearSaved(p){var ids=Object.keys(p.answers||{});try{var ks=[];for(var i=0;i<localStorage.length;i++)ks.push(localStorage.key(i));",
+    " for(var k=0;k<ks.length;k++){if(ks[k].indexOf(DK)!==0)continue;var nm=ks[k].slice(DK.length).split('#')[0];",
+    "  if(p.comment&&nm==='doccomment:'+p.doc)localStorage.removeItem(ks[k]);",
+    "  for(var j=0;j<ids.length;j++)if(nm==='choice:'+p.doc+':'+ids[j]||nm==='text:'+p.doc+':'+ids[j]||nm==='comment:'+p.doc+':'+ids[j])localStorage.removeItem(ks[k])}}catch(e){}}",
+    "function newRevision(msg){var b=$('#banner');b.style.display='block';b.textContent='';var bt=document.createElement('button');bt.type='button';",
+    " bt.style.background='#fff';bt.style.color='#1d1d1f';bt.style.marginRight='10px';bt.textContent=TX.reloadRev;bt.onclick=function(){location.reload()};b.appendChild(bt);b.appendChild(document.createTextNode(msg));",
+    " var sv=document.querySelectorAll('#save,.savedoc,#retry');for(var i=0;i<sv.length;i++)sv[i].disabled=true}",
+    "function staleSave(p){rescue(p,TX.stale);status('','');newRevision(TX.stale)}", // the banner and the ring carry the message — the pill never covers the button
+    "function doSave(doc){var p=collect(doc);if(isNotice(doc))p.read=true;p.rev=CFG.rev;lastPayload=p;",
     // bugs/113: on the proofreading and mockup faces "Done" with empty fields is a LEGAL outcome — "looked, no remarks"
     // (the most frequent verdict on an artifact); only the interview face still needs an answer or a comment.
     " var quiet=CFG.face==='proofread'||CFG.face==='mockup';",
     " if(quiet&&!(p.comment||'').trim()&&!hasComments(p))p.noRemarks=true;",
     " if(!p.read&&!quiet&&Object.keys(p.answers).length===0&&!(p.comment||'').trim()&&!p.artifacts&&!hasComments(p)){",
     "  status(hasArtifacts(doc)?TX.needArt:TX.nothing,'err');return}",
-    " enableButtons(false);status(TX.saving);",
+    " enableButtons(false);status(TX.saving);saving=true;",
     " fetch('/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})",
-    " .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})",
-    " .then(function(res){if(!res.ok||!res.j.ok){rescue(p,res.j.reason||'server refused');return}",
+    " .then(function(r){return r.json().then(function(j){return{ok:r.ok,st:r.status,j:j}})})",
+    " .then(function(res){saving=false;if(res.st===409){staleSave(p);return}if(!res.ok||!res.j.ok){rescue(p,res.j.reason||'server refused');return}",
+    // OW6 (2.8): questions left → the page STAYS: the saved answers' drafts go, the page re-reads itself (a fresh build, I1 — the answered
+    // question moves to the settled fold, the other drafts come back) and says how many are left
+    "  if(res.j.rev)CFG.rev=res.j.rev;",
+    "  if(CFG.face==='interview'&&res.j.left>0){clearSaved(p);try{sessionStorage.setItem(DK+'__left',String(res.j.left))}catch(e){}location.reload();return}",
     "  saved=true;status(fmt(TX.saved,{w:res.j.written}),'okmsg');",
     "  try{var ks=[];for(var i=0;i<localStorage.length;i++)ks.push(localStorage.key(i));",
     "   for(var k=0;k<ks.length;k++)if(ks[k].indexOf(DK)===0)localStorage.removeItem(ks[k])}catch(e){}",
     // I27/DEF2: auto-close is an ATTEMPT; a refusal → an honest request; cancelled by pagehide
     "  setTimeout(function(){window.close();closeTimer=setTimeout(function(){status(TX.closeYourself,'err')},CFG.reserveMs)},CFG.closeMs)})",
-    " .catch(function(e){if(inApp)saveLocally(p,e);else rescue(p,TX.serverGone)})}", // LP (#66): the server is gone → in the app window the answer is saved on this computer, no dialog; in a tab — the rescue ring (RL D-F2)
+    " .catch(function(e){saving=false;if(inApp)saveLocally(p,e);else rescue(p,TX.serverGone)})}", // LP (#66): the server is gone → in the app window the answer is saved on this computer, no dialog; in a tab — the rescue ring (RL D-F2)
     "document.addEventListener('click',function(e){var t=e.target;",
     " if(t&&t.classList&&t.classList.contains('savedoc'))doSave(t.getAttribute('data-doc'));",
     " if(t&&t.id==='retry'&&lastPayload)doSave(lastPayload.doc)});",
@@ -781,7 +932,11 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     " try{document.execCommand('copy');status(TX.copied,'okmsg')}catch(e){status(TX.copyManually,'err')}});",
     // I13/DEF4: page→server pulse — the human learns of a dead server AT ONCE and out loud
     // LP (#66): the pulse carries the input state — i: ms since the last keystroke (-1 = none), d: draft fields, s: saved
-    "function pulse(){fetch('/alive?i='+(lastInput?Date.now()-lastInput:-1)+'&d='+draftCount()+'&s='+(saved?1:0)).then(function(r){if(!r.ok)throw 0;if(!selfBroken&&!submittedLocally)$('#banner').style.display='none'})",
+    "function pulse(){fetch('/alive?i='+(lastInput?Date.now()-lastInput:-1)+'&d='+draftCount()+'&s='+(saved?1:0)+'&doc='+encodeURIComponent(CFG.doc||'')).then(function(r){if(!r.ok)throw 0;if(!selfBroken&&!submittedLocally)$('#banner').style.display='none';return r.json().catch(function(){return null})})",
+    // OW6 (2.8): the pulse names the document's revision on disk — another one than this page was built from → saving off, the new revision offered
+    // bugs/125 (2.8): the entry page rebuilds itself only when the QUEUE changed (a document answered in another window) — never on focus alone
+    " .then(function(j){if(CFG.index&&j&&j.qrev&&CFG.qrev&&j.qrev!==CFG.qrev){location.reload();return}",
+    "  if(j&&j.rev&&CFG.rev&&j.rev!==CFG.rev&&!saving&&!saved)newRevision(TX.rewritten)})",
     " .catch(function(){var b=$('#banner');if(submittedLocally){b.style.display='none';return}b.style.display='block';b.textContent=(lsOk&&inApp)?TX.serverGoneLocal:TX.serverGone;",
     "  if(!(lsOk&&inApp)){var r=$('#rescue');r.style.display='block';if(lastPayload)$('#rescuetext').value=JSON.stringify(lastPayload,null,2)}",
     "  if(!submittedLocally)enableButtons(true)})}",
@@ -789,7 +944,8 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     // I14/DEF6: closing the page is an EVENT for the server (fast path — the beacon names the window role)
     "window.addEventListener('pagehide',function(){if(closeTimer)clearTimeout(closeTimer);",
     " try{navigator.sendBeacon('/closed',(CFG.index?'index':'doc')+':'+(saved?'saved':'unsaved'))}catch(e){}});",
-    "if(CFG.index)window.addEventListener('focus',function(){location.reload()});",
+    // bugs/125 (2.8): focus asks the pulse (above) — a reload on EVERY focus looped in a tab, which fires focus after each load
+    "if(CFG.index)window.addEventListener('focus',pulse);",
     // spec §2: the page SELF-CHECK — radio groups == questions with options; a mismatch is LOUD, never silent
     "var selfBroken=false;(function(){if(CFG.face!=='interview'||CFG.index)return;var rs=document.querySelectorAll('input[type=radio]');var names={};",
     " for(var i=0;i<rs.length;i++)if(rs[i].name.indexOf('choice:')===0)names[rs[i].name]=1;var n=Object.keys(names).length;",
@@ -801,6 +957,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     "(function(){if(inApp)return;var tn=$('#tabnote');if(tn){tn.style.display='block';tn.textContent=TX.tabnote}",
     " try{fetch('/tab',{method:'POST'})}catch(e){}})();",
     "restoreDraft();",
+    "try{var lf=sessionStorage.getItem(DK+'__left');if(lf!==null){sessionStorage.removeItem(DK+'__left');status(fmt(TX.left,{n:lf}),'okmsg')}}catch(e){}", // OW6
   ].join('\n');
 
   const saveLabel = face === 'proofread' || face === 'mockup' ? t.btn.done : t.btn.save;
@@ -812,7 +969,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
   const langNote = t.fallbackFrom ? '<span class="langnote">' + esc(t.head.langFallback(t.fallbackFrom)) + '</span>' : '';
 
   return '<!doctype html>\n<html lang="' + esc(cfg.language) + '"><head><meta charset="utf-8">' +
-    '<title>' + esc(cfg.projectName) + ' · ' + esc(title) + '</title>' +
+    '<title>' + esc(cfg.projectName) + ' · ' + esc(title) + (cfg.session ? ' · ' + esc(cfg.session) : '') + '</title>' + // OW4: which workspace's window
     '<link rel="icon" href="data:,"><style>' + css + '</style></head><body>' +
     '<header><span class="project">' + esc(cfg.projectName) + '</span>' + heading + langNote + '</header>' + // P9
     '<div id="banner"></div><div id="tabnote"></div><main>' + main +
@@ -887,6 +1044,72 @@ function checkLock(root, key) {
 }
 
 // ── The server: raise → show → call → wait → record → die (I8) ───────────────────────────────
+// OW6 (2.8): the revision of a document — the hash its page is built from (the text; the base64 of an image)
+function docRev(root, rel) {
+  const abs = resolve(root, rel);
+  if (!existsSync(abs)) return null;
+  return IMAGE_MIME[extname(abs).toLowerCase()] ? bodyHash(readFileSync(abs).toString('base64')) : bodyHash(readFileSync(abs, 'utf8'));
+}
+// OW6: how many questions of a document are still unanswered (0 for anything that is not markdown)
+function leftIn(root, rel) {
+  const abs = resolve(root, rel);
+  if (!/\.md$/i.test(abs) || !existsSync(abs)) return 0;
+  return parseQuestions(readFileSync(abs, 'utf8')).filter((q) => !q.answered).length;
+}
+// OW6 (2.8; the KAIF owner's word — answers are saved one at a time in every project; the field device he pointed to wakes its agent
+// by a separate waiter): the WAITER — the process the agent starts to be woken by the next recorded answer while the page stays open
+// (I8: the agent learns of an event by the END of a process it started). Exit 0 on a new record — it names the document, the answers
+// so far and the questions left; exit 2 when the contour it saw ended without one. Patience is infinite (I9). No document → the queue.
+// [TESTED: 2026-09-25 19:37–20:01 · selftest: exit 0 on a partial record, exit 2 when the lock it saw is gone; s22 D (7): a separate
+//  process on the deployed copy printed «Recorded: … — Q1 = A · questions left: 2» and exited 0; report testcases/reports/2026-09-25_ow6-partial-save-revision.md]
+// (court RL 2.8, B-F1) a waiter that never sees a live contour — the page closed before it started, or was never raised — ends with 2
+// after WAIT_NO_CONTOUR_MS instead of waiting forever; the window lets it start BEFORE the page, as the ritual says (the page comes up
+// within seconds). An answer recorded before the waiter started is on disk — `--queue --list` names it.
+export function waitForRecord(root, docPath = null, { log = console.log, pollMs = WAIT_POLL_MS, graceMs = WAIT_NO_CONTOUR_MS } = {}) {
+  const cfg = cfgOf(root), dir = decisionsAbs(root, cfg);
+  const files = () => (docPath ? [decisionPaths(root, docPath, cfg).decision]
+    : (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.decision.json')).map((f) => join(dir, f)) : []));
+  const stamp = (f) => { try { const s = lstatSync(f); return s.size + ':' + s.mtimeMs; } catch { return null; } };
+  const start = new Map(files().map((f) => [f, stamp(f)]));
+  const lock = lockPath(root, docPath ? basename(docPath) : '_queue');
+  // (light re-judge RL 2.8, J-F1) the QUEUE page shows this document too: a document waiter next to a live queue page waits — the
+  // queue server holds the `_queue` lock, never the document's own, and the B-F1 window used to end such a waiter with a false line
+  const queueLock = docPath ? lockPath(root, '_queue') : null;
+  const live = () => existsSync(lock) || (queueLock !== null && existsSync(queueLock));
+  let lockSeen = live();
+  const startedAt = Date.now();
+  log('Waiting for the next recorded answer' + (docPath ? ' on ' + relDoc(root, docPath) : ' in the queue') + ' — exit 0 when one is recorded (OW6, I8).');
+  return new Promise((done) => {
+    const tick = setInterval(() => {
+      for (const f of files()) {
+        const s = stamp(f);
+        if (s === null || start.get(f) === s) continue;
+        clearInterval(tick);
+        let d = {};
+        try { d = JSON.parse(readFileSync(f, 'utf8')); } catch { /* a record being written — named by its file below */ }
+        const rel = d.document || relDoc(root, f);
+        const answers = Object.entries(d.answers || {}).map(([q, a]) => q + ' = ' + (a.choice || (a.text ? 'text' : 'comment'))).join(', ');
+        log('Recorded: ' + rel + (answers ? ' — ' + answers : '') + ' · questions left: ' + leftIn(root, rel)
+          + ' — apply it; while questions are left, start --wait again (the page stays open).');
+        done(0);
+        return;
+      }
+      if (live()) lockSeen = true;
+      else if (lockSeen) {
+        clearInterval(tick);
+        log('The contour ended without a new record — nothing to apply (the page was closed or the contour stopped).');
+        done(2);
+      } else if (Date.now() - startedAt > graceMs) {
+        clearInterval(tick);
+        log('No live contour' + (docPath ? ' for ' + relDoc(root, docPath) : ' for the queue') + ' within ' + Math.round(graceMs / 1000)
+          + ' s — nothing to wait for: the page was never raised, or it ended before the waiter started; an answer already recorded is on disk ('
+          + CLI_NAME + ' --queue --list names it).');
+        done(2);
+      }
+    }, pollMs);
+  });
+}
+
 export function serveContour(root, { docPath = null, batch = false, notice = false, face = 'interview' }, opts = {}) {
   const cfg = cfgOf(root), t = T(cfg);
   const { open = true, signal = true, timeoutMs = 0, log = console.log, includeStale = false } = opts; // I9: default 0 — no timeout
@@ -937,8 +1160,12 @@ export function serveContour(root, { docPath = null, batch = false, notice = fal
       } catch { /* a lock that cannot be written is reported by the listen step, not here */ }
     };
     const noticeMode = notice && !batch;
-    const unreadOutcome = () => (noticeMode ? 'notice left unread' : 'page closed without an answer');
+    let savedInRun = 0; // OW6 (judge OW10 H6): answers already recorded by this page — a close after them loses nothing and says so
+    const unreadOutcome = () => (noticeMode ? 'notice left unread'
+      : savedInRun > 0 ? 'page closed after ' + savedInRun + ' saved answer(s) — recorded, nothing lost' : 'page closed without an answer');
     const unreadSuffix = noticeMode ? ' The notice is NOT delivered (no "' + t.btn.read + '" mark, I38) — it repeats in the next batch.' : '';
+    // OW6 (2.8): the pulse is answered with the revision on disk — only for a document this contour shows
+    const pulseRev = (d) => (d && (batch ? pendingDocs(root).some((x) => x.doc === d) : d === relDoc(root, docPath)) ? docRev(root, d) : null);
     const server = createServer((req, res) => {
       const ok = (obj) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
       if (req.method === 'GET' && req.url === '/') {
@@ -962,7 +1189,8 @@ export function serveContour(root, { docPath = null, batch = false, notice = fal
           inputState = { lastInputAt: sinceInput >= 0 ? Date.now() - sinceInput : inputState.lastInputAt, draftFields: Number.isFinite(draftFields) ? draftFields : 0, saved: savedFlag };
           writeLock();
         }
-        ok({ ok: true });
+        // OW6: the page compares its revision with the document on disk; bugs/125: the entry page compares the queue's
+        ok({ ok: true, rev: pulseRev(q.get('doc')), qrev: batch ? queueRev(forOwner(), pendingNotices(root)) : null });
       } else if (req.method === 'POST' && req.url === '/tab') { // I26 (#64): the page says it is a TAB, not the app window
         if (!tabReported) {
           tabReported = true;
@@ -976,6 +1204,26 @@ export function serveContour(root, { docPath = null, batch = false, notice = fal
           try { // I10: any refusal is loud, with the reason on the page
             const payload = JSON.parse(body);
             const doc = batch ? payload.doc : relDoc(root, docPath);
+            // OW6 (2.8; the S1 of a neighbour field project — an old tab wrote answers into a rewritten document by question numbers):
+            // the page answers the REVISION it was built from; another revision — or none (a page of an older contour) — is refused
+            // loudly and the text stays on the page; the same save repeated after a lost response is recognised, never written twice
+            const revNow = docRev(root, doc);
+            if (payload.rev !== revNow) {
+              const prevDec = readDecision(root, doc, cfg);
+              const same = (a, b) => Boolean(a && b) && ['choice', 'text', 'comment'].every((k) => (a[k] || '') === (b[k] || ''));
+              const dup = Boolean(payload.rev) && Boolean(prevDec) && prevDec.rev === payload.rev && Object.keys(payload.answers || {}).length > 0
+                && Object.entries(payload.answers).every(([q, a]) => same(a, (prevDec.answers || {})[q]));
+              if (dup) {
+                ok({ ok: true, duplicate: true, written: doc + ' (' + t.st.duplicate + ')', left: leftIn(root, doc), rev: revNow, doc });
+                log('Save repeated — already recorded (' + doc + '), nothing written twice (OW6).');
+                return;
+              }
+              res.writeHead(409, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, stale: true, rev: revNow, reason: t.st.stale }));
+              log('SAVE REFUSED (409): the page was built from another revision of ' + doc + (payload.rev ? '' : ' (no revision — a page of an older contour)')
+                + ' — nothing written; the owner has the text on the page (OW6).');
+              return;
+            }
             const hasAnswers = payload.answers && Object.keys(payload.answers).length > 0;
             // NON-EMPTY ANSWERS OUTRANK ANY CLASSIFICATION (origin bugs/106): the owner's work is never dropped.
             const asNotice = !hasAnswers && ((notice && !batch) || readQueue(root).some((i) => i.doc === doc && isNoticeItem(i)));
@@ -1003,18 +1251,26 @@ export function serveContour(root, { docPath = null, batch = false, notice = fal
               setTimeout(finish, SERVER_DEATH_MS, EXIT_DECIDED);
               return;
             }
-            const record = recordDecision(root, doc, { answers: payload.answers, comment: payload.comment, artifacts: payload.artifacts }, cfg);
+            const record = recordDecision(root, doc, { answers: payload.answers, comment: payload.comment, artifacts: payload.artifacts, rev: payload.rev }, cfg);
+            const left = leftIn(root, doc); // OW6: the page stays while this is above zero
             const nAns = Object.keys(record.answers || {}).length;
+            savedInRun += nAns;
             const arts = Object.entries(record.artifacts || {});
             const nApproved = arts.filter(([, a]) => a.status === 'approved').length;
             const rest = batch ? pendingDocs(root).filter((d) => d.unanswered > 0).length : 0;
             const artWord = arts.length ? ', outbound decided ' + arts.length + ' (approved ' + nApproved + ')' : '';
-            ok({ ok: true, written: doc + ' + decision.json + archive (' + nAns + ' answer(s)' + artWord + ')', more: rest, doc });
+            ok({ ok: true, written: doc + ' + decision.json + archive (' + nAns + ' answer(s)' + artWord + ')', more: rest, doc, left, rev: docRev(root, doc) });
             outcome = 'decision recorded';
             const answersWord = Object.entries(record.answers || {}).map(([q, a]) => q + ' = ' + (a.choice || (a.text ? 'text' : 'comment'))).join(', ');
             if (arts.length) log('Outbound decision: ' + arts.map(([id, a]) => id + ' — ' + a.status).join(', ') + '. Sending is a separate agent step through a gate that calls the same checkApproval.');
             if (rest > 0) { // the batch does NOT end on the first document (origin bugs/52)
               log('Recorded: ' + doc + ' (' + answersWord + ', by ' + record.by + '). Documents left in the queue: ' + rest + ' — the page STAYS open, the contour waits.');
+              outcome = null;
+              return;
+            }
+            if (left > 0) { // OW6 (2.8, the KAIF owner's word — answers one at a time; I8): the page STAYS while anything is unanswered
+              log('Recorded: ' + doc + ' (' + (answersWord || 'comment only') + ', by ' + record.by + '). Questions left: ' + left
+                + ' — the page STAYS open; the waiter (--wait) wakes the agent (OW6, I8).');
               outcome = null;
               return;
             }
@@ -1044,7 +1300,7 @@ export function serveContour(root, { docPath = null, batch = false, notice = fal
           if (beaconTimer) clearTimeout(beaconTimer);
           beaconTimer = setTimeout(() => { // T3: ~3 s — does the page come back after a reload?
             outcome = unreadOutcome();
-            log('Outcome: page closed without an answer — ending the contour (I14, beacon fast path).' + unreadSuffix);
+            log('Outcome: ' + outcome + ' — ending the contour (I14, beacon fast path).' + unreadSuffix);
             finish(EXIT_CLOSED);
           }, BEACON_RELOAD_GRACE_MS);
         });
@@ -1203,7 +1459,11 @@ function recordRecovered(root, doc, payload, cfg) {
     const noRemarks = Boolean(payload.noRemarks) && !(payload.comment || '').trim() && Object.keys(payload.comments || {}).length === 0;
     return recordDecision(root, doc, { kind: face, comment: payload.comment, comments: payload.comments, ...(noRemarks ? { noRemarks: true } : {}), recovered: true }, cfg);
   }
-  return recordDecision(root, doc, { answers: payload.answers, comment: payload.comment, artifacts: payload.artifacts, recovered: true }, cfg);
+  // OW6 (2.8): an answer saved on the owner's machine for an OLDER revision of the document is NOT written into it by question numbers —
+  // it is recorded as data (the decision and its archive) and named out loud by the caller
+  const staleRevision = Boolean(payload.rev) && payload.rev !== docRev(root, doc);
+  return recordDecision(root, doc, { answers: payload.answers, comment: payload.comment, artifacts: payload.artifacts, recovered: true,
+    rev: payload.rev, ...(staleRevision ? { staleRevision: true } : {}) }, cfg);
 }
 function recoverOne(root, key, lock, exe, log, result) {
   const cfg = cfgOf(root);
@@ -1352,7 +1612,7 @@ export function checkDoc(root, docPath, log = console.log) {
 
 // ── Selftest (no browser): pre-flight red on the "options as paragraphs" fixture, green on the
 // canonical forms; the three faces render; records land in three places; the fact of showing ────
-export function selftest(log = console.log) {
+export async function selftest(log = console.log) {
   let n = 0, bad = 0;
   const ok = (cond, name) => { n++; if (!cond) { bad++; log('  x ' + name); } else log('  v ' + name); };
   const root = mkdtempSync(join(tmpdir(), 'kaif-contour-'));
@@ -1446,16 +1706,19 @@ export function selftest(log = console.log) {
   const aqHead = (date) => '# Interview #099\n\n> Status: awaiting\n> Created: ' + date + '\n\n';
   const aqQ = (attestation, answer) => '### Q1. What do we name the game currency?\n\n' + attestation
     + '| Option | Meaning |\n|---|---|\n| **A** | crystals |\n| **B** | coins |\n\n**Answer:**' + (answer || '') + '\n';
-  const AQ_CMD = 'grep -rniE "name|game|curren" ' + ARCHAEOLOGY_PATHS; // 6+ letters are searched by their stem
+  // the printed command carries the UTF-8 locale since 2.8 (OW5, #74: Git Bash's grep -i missed a capital Cyrillic letter without it)
+  const AQ_CMD = 'LC_ALL=C.UTF-8 grep -rniE "name|game|curren" ' + ARCHAEOLOGY_PATHS; // 6+ letters are searched by their stem
   const AQ_OK = '<!-- archaeology: ' + AQ_CMD + ' → 0 hits · read: none · prior: none -->\n\n';
   const aqCheck = (body) => { writeFileSync(join(root, AQD), body); lines.length = 0; return checkDoc(root, AQD, cap); };
   ok(aqCheck(aqHead('2026-09-18') + aqQ('')) === 3 && lines.some((l) => /Q1: no archaeology line/.test(l)) && lines.some((l) => l.includes(AQ_CMD)),
     'archaeology: a live question of a document dated on the threshold without the attestation → exit 3, and the door prints the READY grep of the heading nouns');
   ok(aqCheck(aqHead('2026-09-18') + aqQ(AQ_OK)) === 0 && lines.some((l) => /archaeology: 1 of 1 live question/.test(l)),
     'archaeology: the attestation with 0 hits and `prior: none` → exit 0, and --check says 1 of 1 attested (N = 0 is honest, the axis never promises a find)');
-  ok(aqCheck(aqHead('2026-09-18') + aqQ(AQ_OK.replace('0 hits', '3 hits'))) === 3 && lines.some((l) => /3 hits and `prior: none`/.test(l)),
+  // the hits are READ in both fixtures below (since 2.8 OW5 `read: none` with hits is refused first) — each case guards its own rule
+  const AQ_READ = (s) => s.replace('read: none', 'read: plans/03_shop.md');
+  ok(aqCheck(aqHead('2026-09-18') + aqQ(AQ_READ(AQ_OK.replace('0 hits', '3 hits')))) === 3 && lines.some((l) => /3 hits and `prior: none`/.test(l)),
     'archaeology: hits found and no prior answer named → exit 3 (the #70 class: the owner had answered it already)');
-  ok(aqCheck(aqHead('2026-09-18') + aqQ(AQ_OK.replace('0 hits', '3 hits').replace('prior: none', 'prior: unrelated — the hits are about the shop layout'))) === 0,
+  ok(aqCheck(aqHead('2026-09-18') + aqQ(AQ_READ(AQ_OK.replace('0 hits', '3 hits').replace('prior: none', 'prior: unrelated — the hits are about the shop layout')))) === 0,
     'archaeology: `prior: unrelated — <why>` is a legal answer to hits');
   ok(aqCheck(aqHead('2026-09-18') + aqQ('<!-- archaeology: searched a bit -->\n\n')) === 3 && lines.some((l) => /not in the form/.test(l)),
     'archaeology: an attestation without `N hits` and `prior:` is NOT an attestation → exit 3 (fail-closed, never a silent pass)');
@@ -1468,6 +1731,25 @@ export function selftest(log = console.log) {
   ok(headerDate('# I\n\n> Status: answered 2026-09-18 10:00\n> Created: 2026-09-13 09:47\n') === '2026-09-13',
     'archaeology: the header date is the CREATION line — an answer date standing above it never ages an old document forward');
   rmSync(join(root, AQD), { force: true });
+  // OW5 (2.8, origin issues #74 · #82): the door SEARCHES itself — a CAPITAL Cyrillic word is found with no shell and no locale (Git
+  // Bash's grep -i without the UTF-8 locale missed it); `N hits · read: none` is refused — the search found something and nothing was
+  // read. The fixtures are escaped: the payload source stays ASCII (build guard), the strings are Cyrillic at run time.
+  const OW5_PRIOR = 'interviews/interview_006_prior.md';
+  writeFileSync(join(root, OW5_PRIOR), '# Interview #006\n\n> Status: answered\n\n### Q1. \u0412\u0418\u0422\u0420\u0418\u041d\u0410 \u2014 \u043a\u0430\u043a\u043e\u0439 \u043f\u0435\u0440\u0432\u044b\u0439 \u044d\u043a\u0440\u0430\u043d?\n\n**Answer:** A\n');
+  const ow5 = archaeologySearch(root, archaeologyWords('\u0412\u0438\u0442\u0440\u0438\u043d\u0430 \u0438\u043b\u0438 \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439?'));
+  ok(ow5.files.some((f) => f.endsWith('interview_006_prior.md')) && ow5.hits >= 1,
+    'archaeology search: the door\'s own search finds a CAPITAL Cyrillic word — no shell, no locale decides (OW5, #74)');
+  ok(aqCheck(aqHead('2026-09-20') + aqQ(AQ_OK.replace('0 hits', '2 hits').replace('prior: none', 'prior: unrelated — a different screen'))) === 3
+    && lines.some((l) => /2 hits and `read: none`/.test(l)),
+    'archaeology: `N hits · read: none` → exit 3 even with a legal `prior: unrelated` — the search found something and nothing was read (OW5, #74)');
+  ok(aqCheck(aqHead('2026-09-20') + aqQ(AQ_OK.replace('0 hits', '2 hits').replace('read: none', 'read: ' + OW5_PRIOR)
+    .replace('prior: none', 'prior: unrelated — a different screen'))) === 0,
+    'archaeology: hits with the file READ and `prior: unrelated — <why>` → exit 0 (the door refuses the unread find, never the find)');
+  // judge OW10 H3: the ready line `--search` prints, pasted UNFILLED (its <…> placeholders) — refused, never «attested»
+  ok(aqCheck(aqHead('2026-09-20') + aqQ('<!-- archaeology: search "name|game|curren" → 2 hits · read: <what you read | none> · prior: <none | "<prior answer>" + address | unrelated — why> -->\n\n')) === 3
+    && lines.some((l) => /template's <…> placeholders/.test(l)),
+    'archaeology: the search\'s ready attestation pasted UNFILLED (<…> placeholders) → exit 3 — an unfilled line attests nothing (judge OW10 H3)');
+  rmSync(join(root, OW5_PRIOR), { force: true }); rmSync(join(root, AQD), { force: true });
   // I44/I45 (QL2, #54): the fourth fact — implemented; the queue and the show refuse what is already implemented
   const IMPL = 'interviews/interview_097_impl.md';
   writeFileSync(join(root, IMPL), '# Interview #097\n\n> Status: awaiting\n\n### Q1. Which?\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n');
@@ -1480,6 +1762,24 @@ export function selftest(log = console.log) {
     'a document whose every open question is implemented is NOT raised; the queue names it with Q1 and exits 2 (I45)');
   const implPage = buildPage(root, IMPL);
   ok(implPage.questions[0].answered && implPage.html.includes('implemented → commit abc123'), 'the page renders an implemented question as settled, with its address');
+  // 2.8, epic CH (criterion 13): a question a withdrawal made moot — the same fact with withdrawn: true; the page says «withdrawn», the
+  // queue does not raise it; the CLI refuses an ANSWERED question (the owner's word stays)
+  {
+    const WD = 'interviews/interview_096_withdrawn.md';
+    writeFileSync(join(root, WD), '# Interview #096\n\n> Status: awaiting\n\n### Q1. Print the delivery line?\n\n- **A)** yes\n- **B)** no\n\n**Answer:**\n\n### Q2. Keep it?\n\n- **A)** yes\n- **B)** no\n\n**Answer:** A\n');
+    const w1 = markWithdrawn(root, WD, 'Q1', 'the delivery line is withdrawn in 2.7');
+    const wmap = JSON.parse(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8'));
+    ok(w1.code === 0 && wmap[WD] && wmap[WD].Q1.withdrawn === true && wmap[WD].Q1.why === 'the delivery line is withdrawn in 2.7' && !ownerDocs(root).some((d) => d.doc === WD),
+      'a question a withdrawal made moot: --mark-withdrawn records withdrawn: true with the reason, and the queue no longer raises it (2.8, criterion 13)');
+    ok(buildPage(root, WD).html.includes('withdrawn — the delivery line is withdrawn in 2.7') && !buildPage(root, WD).html.includes('implemented → withdrawn'),'the page renders a withdrawn question as «withdrawn — <reason>», never as implemented');
+    const w2 = markWithdrawn(root, WD, 'Q2', 'moot');
+    ok(w2.code === 1 && /ANSWERED/.test(w2.line) && !JSON.parse(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8'))[WD].Q2,
+      'an ANSWERED question is refused (exit 1, nothing recorded) — a withdrawal is never an answer over the owner\'s word');
+    rmSync(join(root, WD), { force: true }); rmSync(join(root, 'interviews', 'decisions', 'implemented.json'), { force: true });
+    // judge CH5 F2: the Russian pack carries its own form of each new text — a missing key falls back to English on an owner's page
+    ok(['withdrawnBadge', 'withdrawn', 'answeredNotWithdrawn'].every((k) => String(texts('ru').impl[k]('Q1', 'x', 'y', 'z')) !== String(texts('en').impl[k]('Q1', 'x', 'y', 'z'))),
+      'the Russian pack renders the three withdrawn texts in Russian (no English fallback on the owner\'s page)');
+  }
   rmSync(join(root, IMPL), { force: true }); rmSync(join(root, 'interviews', 'decisions', 'implemented.json'), { force: true });
   // QL3 (#54): the reading view — live first, the settled and the text in one fold; nothing removed
   const ARCH = 'interviews/interview_096_arch.md';
@@ -1498,6 +1798,13 @@ export function selftest(log = console.log) {
   ok(!selfCheck({ ...plainPage, html: plainPage.html.replace('.fab { position:fixed;', '.fab { position:static;') }).ok, 'self-check goes RED when the button stops floating (mutation on a copy)');
   ok(!selfCheck({ ...plainPage, html: plainPage.html.replace('.fab { position:fixed;', '.bar { position:fixed; bottom:0;') }).ok, 'self-check goes RED on a bar pinned to the bottom edge (the #60 page)');
   ok(!selfCheck({ ...plainPage, html: plainPage.html.replace('<label class="opt"><input', '<label class="opt">**leak**<input') }).ok, 'self-check goes RED when an option label carries raw markdown');
+  // #106 (2.8): the page at 1.7x the browser base through zoom, the Save button at 1.5x, the narrow breakpoint scaled with the page
+  ok(plainPage.html.includes('html { zoom:1.7 }') && !/body \{[^}]*font:(?!15px)/.test(plainPage.html),
+    'the page renders at 1.7x the browser base through html zoom (the whole page, like Ctrl+Plus), the body font stays the 15px base (#106)');
+  ok(plainPage.html.includes('.fab #save { zoom:0.882 }') && Math.abs(PAGE_SCALE * 0.882 - SAVE_SCALE) < 0.01,
+    'the primary Save button carries its own zoom 1.5 / 1.7 = 0.882 — it renders at 1.5x the base (#106)');
+  ok(plainPage.html.includes('@media (max-width:952px)') && !plainPage.html.includes('max-width:560px'),
+    'the narrow-window breakpoint travels with the zoom: 560 x 1.7 = 952px, the unscaled 560px is gone (#106)');
   rmSync(join(root, ARCH), { force: true });
   ok(!selfCheck({ ...page, html: page.html.replace(/<input type="radio"[^>]*>/g, '') }).ok, 'self-check goes RED on a page whose radios were stripped (mutation on a copy)');
   ok(/header \{ position:static;/.test(page.html) && page.html.includes('<html lang="en">') && page.html.includes('Probe Project'), 'page: header scrolls with the page (position:static), lang and project name from the marker');
@@ -1573,11 +1880,169 @@ export function selftest(log = console.log) {
   writeFileSync(join(root, OLD), '# Interview #002\n\n> Status: awaiting\n> Created: 2026-01-01\n\n### Q1. Q?\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n');
   ok(queueDocAgeDays(root, OLD, now) > STALE_QUEUE_DAYS && !ownerDocs(root, { now }).some((d) => d.doc === OLD) && ownerDocs(root, { now, includeStale: true }).some((d) => d.doc === OLD),
     'stale queue position leaves the owner\'s showcase; --include-stale brings it back on purpose (I39)');
+  // OW7 (2.8, #100): a queue file of another shape — read as no items with one line, never written (the project's file byte for byte)
+  const qf = join(decisionsAbs(root), QUEUE_FILE);
+  const ourQueue = existsSync(qf) ? readFileSync(qf) : null;
+  const FOREIGN_Q = '{"items":[{"doc":"interviews/interview_002_old.md","queued":"2026-09-05T06:45:00.000Z"}]}\n';
+  writeFileSync(qf, FOREIGN_Q);
+  let lqF = null, thrown = null;
+  try { lqF = listQueue(root, { now }); } catch (e) { thrown = e; }
+  ok(!thrown && queueShape(root) === 'foreign' && lqF.lines.some((l) => l.startsWith('ℹ ') && l.includes(QUEUE_FILE)), 'a queue file of another shape: the list prints one line about the project\'s own queue, no TypeError (OW7, #100)');
+  let refused = false;
+  try { enqueue(root, 'interviews/interview_002_old.md'); } catch (e) { refused = e instanceof ForeignQueueError; }
+  ok(refused && readFileSync(qf, 'utf8') === FOREIGN_Q, 'a write into the foreign queue is REFUSED and the project\'s file stays byte for byte (OW7 twin)');
+  if (ourQueue) writeFileSync(qf, ourQueue); else rmSync(qf, { force: true });
+  // #86 (2.8, OW3): the agent's debt — every question answered, the status not closed — named FIRST with the age since the answer and
+  // NO date cutoff (the document itself is older than the stale threshold); a stale queue document is named in the list, never silent.
+  const DEBT = 'interviews/interview_003_answered.md';
+  writeFileSync(join(root, DEBT), '# Interview #003\n\n> Status: awaiting\n> Created: 2026-08-01\n\n### Q1. Q?\n\n- **A)** one\n- **B)** two\n\n**Answer:** A\n');
+  const dp = decisionPaths(root, DEBT);
+  mkdirSync(resolve(dp.decision, '..'), { recursive: true });
+  writeFileSync(dp.decision, JSON.stringify({ kind: 'interview', document: DEBT, at: new Date(now.getTime() - 11 * DAY_MS).toISOString(), answers: { Q1: { choice: 'A' } } }));
+  const lq3 = listQueue(root, { now });
+  ok(lq3.awaiting.some((d) => d.doc === DEBT && d.days === 11) && lq3.lines[0].startsWith('🔴') && lq3.lines.some((l) => l.includes(DEBT) && l.includes(texts('en').list.answered(11))),
+    'answered, status not closed → the agent\'s debt named FIRST with its age since the answer (11 d), no date cutoff (#86)');
+  ok(lq3.stale.some((d) => d.doc === OLD) && lq3.lines.some((l) => l.includes(OLD) && l.startsWith('! ')), 'a stale queue document is NAMED in the list without a browser, never silent (#86)');
+  rmSync(join(root, DEBT), { force: true }); rmSync(dp.decision, { force: true });
+  // the field's form (#86 S1): a ticked «answered» status whose continuation line says the answers await application, question headings the
+  // canon parser does not read — named all the same (FORK B of plans/119 OW3: the field's own proven matcher reads the status block)
+  const FIELD = 'interviews/interview_004_field_form.md';
+  writeFileSync(join(root, FIELD), '# Interview #004\n\n> **Status:** ✅ answered by the owner 2026-08-20 (both fields).\n> · **AWAITING APPLICATION**: the plane is populated only by its own kind.\n\n### A1. The plane?\n\n**Answer:** A\n');
+  const lq4 = listQueue(root, { now });
+  ok(lq4.awaiting.some((d) => d.doc === FIELD) && lq4.lines.some((l) => l.includes(FIELD)), 'the field form — a ticked status whose status block says «awaiting application» — named as the agent\'s debt (#86, FORK B)');
+  rmSync(join(root, FIELD), { force: true });
 
   // the call phrase names the class and the numbers; the owner is addressed by callName
   ok(callPhrase({ notice: true, title: 'Report' }, cfg).startsWith('Jane Owner aka JO, a Probe Project notice') && callPhrase({ batch: true, nDocs: 2, nQuestions: 1, nNotices: 1 }, cfg).includes('unread notices 1'),
     'call phrase: the owner\'s name, the project, the class and both numbers');
   ok(!callPhrase({ batch: true, nDocs: 1, nQuestions: 3, nNotices: 0 }, cfg).includes('notices'), 'call phrase: no notices — no mention of them');
+  { // OW4 (2.8, origin issues #95 · #98): the calling session is named — derived from the workspace, spoken in the deployment language
+    const ws = (name, dotGit) => { const d = join(root, 'ws', name); mkdirSync(d, { recursive: true }); if (dotGit === 'file') writeFileSync(join(d, '.git'), 'gitdir: x\n');
+      else if (dotGit) { mkdirSync(join(d, '.git', dotGit === 'main+' ? 'worktrees/probe-team-dev2' : 'objects'), { recursive: true }); } return d; };
+    ok(sessionName(ws('probe-team-dev2', 'file'), {}) === 'dev2' && sessionName(ws('probe', 'main+'), {}) === 'main' && sessionName(ws('solo', 'main'), {}) === null
+      && sessionName(ws('none', null), {}) === null && sessionName(ws('solo2', 'main'), { KAIF_SESSION_NAME: 'reviewer' }) === 'reviewer',
+      'session name: a linked workspace <project>-team-dev2 → dev2 · the main copy with others → main · one workspace → none · KAIF_SESSION_NAME wins (OW4, #98)');
+    const ru = { ...cfg, language: 'ru' }, sp = T(ru).spoken;
+    ok(spokenSession('dev2', cfg) === 'dev two' && spokenSession('dev12', cfg) === 'dev twelve' && spokenSession('dev2', ru) === new Map(sp.words).get('dev') + ' ' + sp.ones[2]
+      && spokenSession('main', ru) === new Map(sp.words).get('main') && spokenSession('qa-lead', cfg) === 'qa lead',
+      'session name, spoken: dev2 → "dev two" · dev12 → "dev twelve" · the Russian pack\'s words and numbers (OW4, #98)');
+    const named = { ...cfg, session: 'dev2' };
+    ok(callPhrase({ notice: true, title: 'Report' }, named).startsWith('Jane Owner aka JO, this is dev two. A Probe Project notice')
+      && callPhrase({ notice: true, title: 'Report' }, cfg).startsWith('Jane Owner aka JO, a Probe Project notice'),
+      'call phrase: «<owner>, this is dev two. …» when the session is named; unchanged when there is one workspace (OW4, #98)');
+    ok(pageShell(named, { title: 'T', kind: 'k', heading: '', main: '', questions: [] }).includes('<title>Probe Project · T · dev2</title>')
+      && pageShell(cfg, { title: 'T', kind: 'k', heading: '', main: '', questions: [] }).includes('<title>Probe Project · T</title>'),
+      'page window title: « · dev2» when the session is named (OW4, #98)');
+    const dl = []; const dp = callDoor(root, 'the test phone needs unlocking', { dryRun: true, log: (l) => dl.push(l) });
+    ok(dp === 'Jane Owner aka JO, the test phone needs unlocking' && dl.length === 1 && /^CALL \(dry run, no sound\): Jane Owner aka JO, the test phone/.test(dl[0]),
+      'call door --dry-run: the phrase and the banner line printed, no sound; one workspace — no session named (OW4, #95)');
+    rmSync(join(root, 'ws'), { recursive: true, force: true });
+  }
+
+  { // OW6 (2.8, the KAIF owner's word — answers are saved one at a time in every project). (1) The decision MERGES the records of one
+  // page (its rev = the revision the previous record left); a record of another revision starts a new decision; the archive keeps each.
+  const MQ = (k) => '### Q' + k + '. Pick ' + k + '?\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n';
+  const three = '# Interview #008\n\n> Status: awaiting\n\n' + MQ(1) + '\n' + MQ(2) + '\n' + MQ(3);
+  const MD = 'interviews/interview_008_merge.md';
+  writeFileSync(join(root, MD), three);
+  const decOf = (d) => JSON.parse(readFileSync(decisionPaths(root, d, cfg).decision, 'utf8'));
+  const rec1 = recordDecision(root, MD, { answers: { Q1: { choice: 'A' } }, rev: bodyHash(three) }, cfg);
+  const rec2 = recordDecision(root, MD, { answers: { Q2: { choice: 'B' } }, rev: decOf(MD).revAfter }, cfg);
+  const d2 = decOf(MD);
+  ok(rec1.answers.Q1 && !rec2.answers.Q1 && d2.answers.Q1 && d2.answers.Q2 && d2.records === 2,
+    'decision: the second record of the same page MERGES — Q1 and Q2 in decision.json (records 2); the record itself carries only Q2 (OW6)');
+  recordDecision(root, MD, { answers: { Q3: { choice: 'A' } }, rev: 'another-revision' }, cfg);
+  const d3 = decOf(MD);
+  ok(d3.answers.Q3 && !d3.answers.Q1 && !d3.records, 'decision: a record of ANOTHER revision starts a new decision — old answers never ride along (OW6)');
+  rmSync(join(root, MD), { force: true });
+  // (2) The page carries its revision into every save, re-reads itself after a partial save, keys drafts by the question's fingerprint
+  writeFileSync(join(root, MD), three);
+  const pg = buildPage(root, MD);
+  ok(pg.html.includes('"rev":"' + bodyHash(three) + '"') && pg.html.includes('p.rev=CFG.rev') && pg.html.includes("sessionStorage.setItem(DK+'__left'")
+    && pg.html.includes("String(res.j.left))}catch(e){}location.reload();return}") && pg.questions.every((q) => /^[0-9a-f]{12}$/.test(q.qh)) && pg.html.includes("return DK+n+(h?'#'+h:'')"),
+    'page: the revision rides in every save; a partial save re-reads the page; a draft key carries its question\'s fingerprint (OW6)');
+  // (3) The LIVE server: three questions; Q1 saved → 2 left, the process LIVES, the waiter wakes (0); a save of the OLD revision → 409;
+  // the same save repeated → 200 duplicate; Q2 → the decision merges; Q3 → the contour ends with exit 0
+  const sl = (ms) => new Promise((r) => setTimeout(r, ms));
+  const slog = [];
+  const served = serveContour(root, { docPath: MD }, { open: false, signal: false, log: (l) => slog.push(String(l)) });
+  let ended = null; served.then((v) => { ended = v; });
+  let url = null;
+  for (let i = 0; i < 100 && !url; i++) { url = (slog.join('\n').match(/Page is up: (http:\/\/127\.0\.0\.1:\d+\/)/) || [])[1] || null; if (!url) await sl(50); }
+  const post = (body) => fetch(url + 'decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(async (r) => ({ status: r.status, j: await r.json() })).catch((e) => ({ status: 0, j: { reason: String(e) } }));
+  if (!url) ok(false, 'live server: the page is up (OW6)');
+  else {
+    // a real page pulses; without it a quiet environment (the polygon's: silence 0.9 s) ends the server between two saves
+    const beat = setInterval(() => { fetch(url + 'alive?i=-1&d=0&s=0').catch(() => {}); }, 200);
+    const rev0 = bodyHash(three);
+    const waiter = waitForRecord(root, MD, { log: () => {}, pollMs: 100 });
+    const a1 = { doc: MD, answers: { Q1: { choice: 'A', text: '', comment: '' } }, comment: '', face: 'interview', rev: rev0 };
+    const r1 = await post(a1);
+    const w1 = await Promise.race([waiter, sl(3000).then(() => 'timeout')]);
+    await sl(SERVER_DEATH_MS + 300);
+    ok(r1.status === 200 && r1.j.left === 2 && r1.j.rev && r1.j.rev !== rev0 && ended === null && slog.some((l) => /Questions left: 2 — the page STAYS open/.test(l)),
+      'live server: a partial save (Q1 of three) → «left 2», a new revision, the process LIVES and says the page stays (OW6, I8)');
+    ok(w1 === 0, 'live server: the waiter wakes with exit 0 on the partial record — the agent learns without the page closing (OW6)');
+    const r2 = await post({ ...a1, answers: { Q2: { choice: 'B', text: '', comment: '' } } });
+    ok(r2.status === 409 && r2.j.stale && !decOf(MD).answers.Q2, 'live server: a save of the OLD revision → 409, nothing written (OW6, the stale-tab gap)');
+    const r2d = await post(a1);
+    ok(r2d.status === 200 && r2d.j.duplicate && r2d.j.left === 2, 'live server: the same save repeated after a lost response → 200 «duplicate», not written twice (OW6)');
+    const r3 = await post({ ...a1, answers: { Q2: { choice: 'B', text: '', comment: '' } }, rev: r1.j.rev });
+    const d4 = decOf(MD);
+    ok(r3.status === 200 && r3.j.left === 1 && d4.answers.Q1 && d4.answers.Q2 && d4.records === 2, 'live server: the second partial save MERGES the decision — Q1 and Q2 (OW6)');
+    const r4 = await post({ ...a1, answers: { Q3: { choice: 'A', text: '', comment: '' } }, rev: r3.j.rev });
+    for (let i = 0; i < 80 && ended === null; i++) await sl(50);
+    ok(r4.status === 200 && r4.j.left === 0 && ended && ended.exitCode === 0, 'live server: the LAST answer ends the contour with exit 0 (I8)');
+    clearInterval(beat);
+  }
+  if (ended === null) { try { await fetch(url + 'close?t=x', { method: 'POST' }); } catch { /* best effort */ } }
+  rmSync(join(root, MD), { force: true });
+  // (4) The waiter ends with 2 when the contour it saw ended without a new record — its lock gone (the page closed; the beacon path of
+  // the server itself is proved by s22 and verify-contour)
+  const LK = lockPath(root, basename(MD));
+  writeFileSync(LK, '{}\n');
+  const waiter2 = waitForRecord(root, MD, { log: () => {}, pollMs: 50 });
+  await sl(200); rmSync(LK, { force: true });
+  const w2 = await Promise.race([waiter2, sl(3000).then(() => 'timeout')]);
+  ok(w2 === 2, 'waiter: the contour it saw ended without a new record (its lock gone) → exit 2, nothing to apply (OW6)');
+  // (4b) court RL 2.8, B-F1: a waiter that never sees a live contour (the page closed before it started) ends with 2 after its window
+  const waiter3 = waitForRecord(root, MD, { log: () => {}, pollMs: 50, graceMs: 300 });
+  const w3 = await Promise.race([waiter3, sl(3000).then(() => 'timeout')]);
+  ok(w3 === 2, 'waiter: no live contour seen within its window → exit 2, never an eternal wait (B-F1)');
+  // (4c) light re-judge RL 2.8, J-F1: the document's waiter next to a live QUEUE page (the `_queue` lock only) waits past its window;
+  // when the queue page ends without a record for it → exit 2 «ended without a new record»
+  const QLK = lockPath(root, '_queue');
+  writeFileSync(QLK, '{}\n');
+  let w4 = 'pending';
+  const waiter4 = waitForRecord(root, MD, { log: () => {}, pollMs: 50, graceMs: 300 }).then((c) => { w4 = c; return c; });
+  await sl(700);
+  const waitedPastWindow = w4 === 'pending';
+  rmSync(QLK, { force: true });
+  const w4end = await Promise.race([waiter4, sl(3000).then(() => 'timeout')]);
+  ok(waitedPastWindow && w4end === 2, 'waiter: a document waiter next to a live QUEUE page waits past its window, and ends with 2 when the queue page ends (J-F1)');
+  // (5) judge OW10 H11: an answer picked up from the owner's machine for an OLDER revision is recorded as data, never written by numbers
+  writeFileSync(join(root, MD), three);
+  const recS = recordRecovered(root, MD, { answers: { Q1: { choice: 'B', text: '', comment: '' } }, rev: 'an-older-revision' }, cfg);
+  ok(recS.staleRevision === true && readFileSync(join(root, MD), 'utf8') === three && decOf(MD).answers.Q1.choice === 'B',
+    'recovery: an answer saved for an OLDER revision is kept as data (staleRevision), the document is untouched (OW6, judge OW10 H11)');
+  const recF = recordRecovered(root, MD, { answers: { Q1: { choice: 'A', text: '', comment: '' } }, rev: bodyHash(three) }, cfg);
+  ok(!recF.staleRevision && /A\)/.test(readFileSync(join(root, MD), 'utf8')), 'recovery, control: the same revision is written into the document (OW6)');
+  rmSync(join(root, MD), { force: true });
+  // (6) judge OW10 H6: a page closed after partial saves says the answers are recorded — never «without an answer»
+  writeFileSync(join(root, MD), three);
+  const slog3 = [];
+  const served3 = serveContour(root, { docPath: MD }, { open: false, signal: false, log: (l) => slog3.push(String(l)) });
+  let url3 = null;
+  for (let i = 0; i < 100 && !url3; i++) { url3 = (slog3.join('\n').match(/Page is up: (http:\/\/127\.0\.0\.1:\d+\/)/) || [])[1] || null; if (!url3) await sl(50); }
+  if (url3) await fetch(url3 + 'decide', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ doc: MD, answers: { Q1: { choice: 'A', text: '', comment: '' } }, comment: '', face: 'interview', rev: bodyHash(three) }) }).catch(() => null);
+  if (url3) await fetch(url3 + 'closed', { method: 'POST', body: 'doc:unsaved' }).catch(() => null);
+  const e3 = await Promise.race([served3, sl(BEACON_RELOAD_GRACE_MS + 3000).then(() => null)]);
+  ok(e3 && e3.exitCode === 2 && /page closed after 1 saved answer\(s\) — recorded, nothing lost/.test(e3.outcome || ''),
+    'a page closed after a partial save: exit 2 and «closed after 1 saved answer(s) — recorded, nothing lost» (OW6, judge OW10 H6)');
+  rmSync(join(root, MD), { force: true });
+  } // OW6
 
   rmSync(root, { recursive: true, force: true });
   log(bad ? 'SELFTEST RED: ' + bad + ' of ' + n : 'contour selftest green: ' + n + ' checks (pre-flight red on the "options as paragraphs" fixture, three faces, records, showing)');
@@ -1590,7 +2055,7 @@ export function main(args = process.argv.slice(2), root = process.cwd()) {
   const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
   // LP (2.7, #66; the core's bug-33 rule): an unknown flag REFUSES before any page, sound or call. The 2.6 generator let
   // `--close` fall through to the show — a page and a voice call for a flag nobody meant.
-  const valueFlags = ['--timeout', '--transport', '--mark-shown', '--mark-implemented', '--where', '--owner-word'];
+  const valueFlags = ['--timeout', '--transport', '--mark-shown', '--mark-implemented', '--mark-withdrawn', '--why', '--where', '--owner-word', '--call', '--search'];
   const unknown = args.filter((a, i) => a.startsWith('--') && !KNOWN_FLAGS.includes(a) && !valueFlags.includes(args[i - 1]));
   if (unknown.length) {
     console.error('✖ unknown flag' + (unknown.length > 1 ? 's' : '') + ': ' + unknown.join(' ') + ' — refusing BEFORE any page, sound or call (bug 33: a silently ignored flag shows something you did not ask for). Known flags: ' + KNOWN_FLAGS.join(' '));
@@ -1615,7 +2080,10 @@ export function main(args = process.argv.slice(2), root = process.cwd()) {
       '       ' + CLI_NAME + ' <image> --mockup         (the image + comments)\n' +
       '       ' + CLI_NAME + ' --queue [--include-stale] | --queue --list | --enqueue <doc.md> [--notice] | --selftest\n' +
       '       ' + CLI_NAME + ' --mark-shown <doc.md> [--transport chat]\n' +
+      '       ' + CLI_NAME + ' --wait [<doc.md>]      (the waiter: exit 0 on the next recorded answer, 2 when the contour ended without one)\n' +
+      '       ' + CLI_NAME + ' --call "<what is needed>" [--dry-run]   (call the owner — hands or a quick answer; names the calling session)\n' +
       '       ' + CLI_NAME + ' --mark-implemented <doc.md> <Q> --where <commit|file>   (the fourth fact, I44: the decision landed — never raise it again)\n' +
+      '       ' + CLI_NAME + ' --mark-withdrawn <doc.md> <Q> --why <reason>   (an OPEN question a withdrawal made moot — never an answer on the owner\'s behalf, 2.8)\n' +
       '       ' + CLI_NAME + ' <doc.md> --close [--force --owner-word "<quote>"]   (the ONLY way to end a live page: prints port · pid · title, refuses while the owner is typing or a draft is unsaved — exit 4)\n' +
       'Exit codes: 0 recorded · 2 closed without an answer · 130 interrupted · 3 pre-flight refused (fix the form) · 4 --close refused · 1 usage / unknown flag.\n' +
       'Run it as a TRACKED background task (I31). Contract: .kaif/INTERACTIVE_CONTOUR_SPEC.md');
@@ -1623,10 +2091,22 @@ export function main(args = process.argv.slice(2), root = process.cwd()) {
   };
   const cfg = cfgOf(root);
   if (!cfg.markerFound) console.log('note: no .kaif/kaif.json here — defaults in use (project "' + cfg.projectName + '", owner "' + cfg.ownerName + '", language ' + cfg.language + ').');
-  if (args.includes('--selftest')) { selftest(); process.exit(0); }
+  if (args.includes('--selftest')) { selftest().then(() => process.exit(0)); return; }
+  if (args.includes('--call')) { // OW4 (2.8, #95 · #98): the owner's hands or a quick answer — the CALL, naming the calling session
+    const text = opt('--call');
+    if (!text) usage();
+    callDoor(root, text, { dryRun: args.includes('--dry-run') });
+    return; // the voice runs in a child process; this one ends when it does
+  }
+  if (args.includes('--wait')) { // OW6 (2.8): the waiter — started by the agent next to a live page; ends on the next recorded answer
+    waitForRecord(root, docPath || null).then((code) => { process.exitCode = code; });
+    return;
+  }
   if (args.includes('--enqueue')) {
     if (!docPath) usage();
-    const items = enqueue(root, docPath, { kind: asNotice ? KIND_NOTICE : 'question' });
+    let items;
+    try { items = enqueue(root, docPath, { kind: asNotice ? KIND_NOTICE : 'question' }); }
+    catch (e) { if (e instanceof ForeignQueueError) { console.log('✖ ' + e.message); process.exit(1); } throw e; }
     console.log('Queued: ' + items.length + ' position(s)' + (asNotice ? ' (notice)' : '') + ' — shown as a batch by: ' + CLI_NAME + ' --queue');
     process.exit(0);
   }
@@ -1646,10 +2126,29 @@ export function main(args = process.argv.slice(2), root = process.cwd()) {
   }
   // LP (#66): before the queue, the check or a show — pick up what the owner saved while a server was gone
   const afterRecovery = (fn) => recoverFromWindow(root, { log: console.log }).then(fn, (e) => { console.log('recovery failed: ' + e.message); fn(); });
+  if (args.includes('--search')) { // OW5 (2.8, #82 · #74): the archaeology of a question in ANY transport — a chat question too
+    const text = opt('--search');
+    if (!text) usage();
+    const words = archaeologyWords(text);
+    const r = archaeologySearch(root, words);
+    console.log('archaeology search: "' + words.join('|') + '" → ' + r.hits + ' hits in ' + r.files.length + ' file(s)');
+    for (const h of r.lines.slice(0, 12)) console.log('  ' + relDoc(root, h.file) + ':' + h.line + ': ' + h.text);
+    if (r.lines.length > 12) console.log('  … ' + (r.lines.length - 12) + ' more');
+    console.log('attest: <!-- archaeology: search "' + words.join('|') + '" → ' + r.hits + ' hits · read: <what you read | none> · prior: <none | "<prior answer>" + address | unrelated — why> -->');
+    process.exit(0);
+  }
   if (args.includes('--check')) { // QL1 (#56): the form check is a DOOR of its own — never the show
     if (!docPath) usage();
     afterRecovery(() => process.exit(checkDoc(root, docPath)));
     return;
+  }
+  if (args.includes('--mark-withdrawn')) { // 2.8, epic CH (criterion 13): see markWithdrawn()
+    const i = args.indexOf('--mark-withdrawn');
+    const doc = args[i + 1], qid = args[i + 2], why = opt('--why');
+    if (!doc || !qid || qid.startsWith('--') || !why) usage();
+    const r = markWithdrawn(root, doc, qid, why, cfg);
+    console.log(r.line);
+    process.exit(r.code);
   }
   if (args.includes('--mark-implemented')) { // I44 (QL2, #54): the fourth fact — the agent's hand, at the moment of implementing, with an address
     const i = args.indexOf('--mark-implemented');

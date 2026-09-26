@@ -39,8 +39,97 @@
 //  broken fixture exit 1 with 14 findings in 14 scenarios (each rule named twice — EN + RU), clean
 //  fixture exit 0 with 1 warning, template-only and empty trees SKIPPED (exit 3); the origin's own
 //  plans/bugs/ideas (233 files) — SKIPPED: no scenario started there]
+// [TESTED: 2026-09-25 · 2.8 (a finding of the CK epic judge): a numbered item «N. **[rule]**» closes the scenario block — the
+//  origin's meta-plan of 2.8 lists its criteria so, and the linter read 6 scenarios with 5 false «order» findings that hid 4 real
+//  ones; now 21 scenarios and exactly the 4 real findings (criteria 10, 13 ×2, 17); selftest 35 cases with the new case «a numbered
+//  list of criteria without blank lines» in both languages, red on a copy without the break (2 of 35 — exactly the new case)]
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+// OW8 (KAIF 2.8, origin issue #101): the command runs only when this file IS the program — imported by a project's own tool, the
+// module stays silent and never exits the importer (the same guard as the shipped contour's review.mjs).
+import { pathToFileURL as __kaifToUrl } from 'node:url';
+import { resolve as __kaifResolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+// ── KAIF-WALK:BEGIN — ONE safe tree walker (2.8, epic SC; origin #77 · Q-R1′). The set of files is the one git sees
+// (`ls-files --cached --others --exclude-standard`: tracked plus untracked, never ignored); without git, a walk that skips
+// .git, node_modules and nested copies. A nested repository (a `.claude/worktrees/*` copy) is not this project; a broken
+// link is SKIPPED WITH A NAME, never a crash; an unreadable directory is FAILED — a scan that could not see part of the tree
+// must never read as clean (the old `try { walk() } catch {}` printed "no lines found" after one broken link). This block
+// in the core is the source: every tool module that walks the tree carries a byte-identical copy (a deployed module cannot
+// import the core), and the build refuses a drifted copy (check-framework 5l; `node tools/sync-walker.mjs` rewrites them).
+// [TESTED: 2026-09-26 01:42:55 +03:00 · s29 W1 (git, 20 worktrees, two broken links) · W2 (no git) · W3 (the FAILED branch on the block
+//  with an injected file system); red on v2.7 (6); five mutants on their addressees; four field trees walked read-only;
+//  report testcases/reports/2026-09-26_sc1-one-safe-walker.md]
+// [TESTED: 2026-09-26 04:22 +03:00 · SC4 part A: the read side (readWalked) and a nested copy judged below the root — s29 W4a–W4f,
+//  red on the dist of 4b06b28; sc-mutants M13; report testcases/reports/2026-09-26_sc4-read-side-fixes.md]
+function kaifWalk(roots) {
+  const files = [], skipped = [], failed = [];
+  // A nested copy is judged BELOW the walked root (SC4 F9): a project that itself lives under `.claude/worktrees/<agent>/`, walked by
+  // an absolute root, lost every file to this test and read as "nothing to scan".
+  let base = '.';
+  const nested = (p) => /(^|\/)\.claude\/worktrees(\/|$)/.test(base === '.' ? p : p.slice(base.length + 1));
+  const take = (p) => {
+    if (nested(p)) return;
+    let st;
+    try { st = statSync(p); } catch (e) { skipped.push(`${p} (${e.code || 'unreadable'})`); return; }
+    if (st.isFile()) files.push(p);             // a link to a directory is not entered (git does not enter it either)
+  };
+  const walk = (dir) => {
+    let ents;
+    try { ents = readdirSync(dir, { withFileTypes: true }); } catch (e) { failed.push(`${dir} (${e.code || e.message})`); return; }
+    for (const d of ents) {
+      const p = dir === '.' ? d.name : `${dir}/${d.name}`;
+      if (d.name === '.git' || d.name === 'node_modules' || nested(p)) continue;
+      if (d.isDirectory()) walk(p); else take(p);
+    }
+  };
+  for (const r0 of roots) {
+    const r = walkRoot(r0);
+    base = r;
+    let st;
+    try { st = statSync(r); } catch (e) {           // an absent root is the caller's business; a root that IS a broken link is named
+      const cut = r.lastIndexOf('/');
+      try { if (readdirSync(cut < 0 ? '.' : r.slice(0, cut) || '/').includes(r.slice(cut + 1))) skipped.push(`${r} (${e.code || 'unreadable'})`); }
+      catch { /* its parent is gone too — absent */ }
+      continue;
+    }
+    if (!st.isDirectory()) { take(r); continue; }
+    const git = spawnSync('git', ['-C', r, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8', maxBuffer: 1 << 28 });
+    if (git.status !== 0) { walk(r); continue; }   // not a work tree, or no git on PATH
+    for (const rel of git.stdout.split('\0')) {
+      if (!rel || rel.endsWith('/')) continue;      // a nested repository is listed as a directory — not this project
+      take(r === '.' ? rel : `${r}/${rel}`);
+    }
+    // git names what it could not open: "No such file" is a broken link (skipped with a name); any other reason is part of the
+    // tree the scan did not see (failed)
+    for (const m of String(git.stderr || '').matchAll(/could not open directory '([^']+)': ([^\r\n]+)/g))
+      (/no such file/i.test(m[2]) ? skipped : failed).push(`${r === '.' ? '' : r + '/'}${m[1].replace(/\/$/, '')} (${m[2].trim()})`);
+  }
+  return { files: [...new Set(files)].sort(), skipped, failed };
+}
+// A root as the walk writes it (forward slashes, no leading ./, no trailing /) — a caller strips `walkRoot(dir) + '/'` from a
+// returned path to judge only the segments BELOW its root (a root inside a skipped directory is still walked when named).
+function walkRoot(r0) { return String(r0).replace(/\\/g, '/').replace(/^\.\/(?=.)/, '').replace(/(?<=.)\/$/, ''); }
+function walkRel(dir, p) { const r = walkRoot(dir); return r === '.' ? p : p.slice(r.length + 1); }
+// The walk's service lines, one wording for every scanner — `walk: ` opens each, so a reader of a scanner's hits tells them
+// from findings: a FAILED walk is never a clean result; a skipped path is counted and named.
+const WALK_NOTE = 'walk: ';
+function walkNotes(tree) {
+  const out = [];
+  if (tree.failed.length) out.push(`${WALK_NOTE}the tree walk FAILED at ${tree.failed.slice(0, 3).join(', ')}${tree.failed.length > 3 ? ` and ${tree.failed.length - 3} more` : ''} — the scan is INCOMPLETE, not clean`);
+  if (tree.skipped.length) out.push(`${WALK_NOTE}skipped ${tree.skipped.length} unreadable path(s) — a broken link, or a file git lists that the disk lacks: ${tree.skipped.slice(0, 3).join(', ')}${tree.skipped.length > 3 ? ', …' : ''}`);
+  return out;
+}
+// A walked file is READ through the walk too (SC4 F1): an unreadable file — a read deny, a lock another process holds — lands in
+// `failed` (part of the tree the scan did not see) and never throws past its scanner: an EPERM stack trace ended `update` after
+// the marker was written. Returns the text, or null for a file the caller skips; one failure is recorded once.
+function readWalked(tree, p) {
+  try { return readFileSync(p, 'utf8'); }
+  catch (e) { if (!tree.failed.some((f) => f.startsWith(`${p} (`))) tree.failed.push(`${p} (${e.code || e.message})`); return null; }
+}
+// ── KAIF-WALK:END
+const IS_MAIN = import.meta.url === __kaifToUrl(__kaifResolve(process.argv[1] || '')).href;
 
 const argv = process.argv.slice(2);
 const CMD = argv[0] || 'check';
@@ -114,7 +203,9 @@ export function parseScenarios(src) {
       if (!t.trim()) break;                                            // blank line — end of block
       const it = item.exec(t);
       if (it) { cur = it[1]; block.keys.push(cur); block.text[cur] = it[2]; continue; }
-      if (/^\s*- /.test(t) || /^\s*\*\*/.test(t) || /^#/.test(t)) break; // another list / a heading
+      // another list, a heading — or the next NUMBERED item (2.8: a list of criteria «N. **[rule]**» with its scenario indented below
+      // and no blank line between items merged every criterion into one «order» finding and hid the real ones behind it)
+      if (/^\s*- /.test(t) || /^\s*\d+[.)]\s/.test(t) || /^\s*\*\*/.test(t) || /^#/.test(t)) break;
       block.text[cur] = (block.text[cur] || '') + ' ' + t.trim();        // continuation line
     }
     out.push(block);
@@ -138,18 +229,21 @@ export function lint(block) {
 }
 
 // ---------------------------------------------------------------------------
+// 2.8 (epic SC; origin #77 · Q-R1′): the files git sees (kaifWalk above) — a broken link is skipped with a name, never a stack
+// trace; a walk that could not see part of the tree is named, never a clean pass.
+const TREE = { skipped: [], failed: [] };
 function collect(paths) {
   const files = [];
-  const walk = (p) => {
-    if (!existsSync(p)) return;
-    const st = statSync(p);
-    if (st.isDirectory()) {
-      for (const n of readdirSync(p).sort()) { if (SKIP_DIRS.has(n)) continue; walk(join(p, n)); }
-      return;
+  for (const p of paths) {
+    if (!existsSync(p)) continue;
+    const tree = kaifWalk([p]);
+    TREE.skipped.push(...tree.skipped); TREE.failed.push(...tree.failed);
+    for (const f of tree.files) {
+      const segs = walkRel(p, f).split('/');
+      if (segs.slice(0, -1).some((s) => SKIP_DIRS.has(s))) continue;
+      if (/\.md$/i.test(f)) files.push(f);
     }
-    if (/\.md$/i.test(p)) files.push(p.replace(/\\/g, '/'));
-  };
-  for (const p of paths) walk(p);
+  }
   return files;
 }
 
@@ -158,13 +252,17 @@ function check(paths) {
   const files = collect(paths);
   let scenarios = 0, nF = 0, nW = 0;
   for (const f of files) {
-    for (const bl of parseScenarios(readFileSync(f, 'utf8'))) {
+    const text = readWalked(TREE, f);   // unreadable → the walk's FAILED line (SC4 F1)
+    if (text === null) continue;
+    for (const bl of parseScenarios(text)) {
       scenarios++;
       const { findings, warnings } = lint(bl);
       for (const x of findings) { nF++; console.log(`✖ ${f}:${bl.line} — ${x.id}: ${x.msg}`); }
       for (const x of warnings) { nW++; console.log(`⚠ ${f}:${bl.line} — ${x.id}: ${x.msg}`); }
     }
   }
+  for (const n of walkNotes(TREE)) console.log((n.includes('walk FAILED') ? '✖ ' : '⚠ ') + n);
+  if (TREE.failed.length) { console.log('✖ scenario-lint: the tree walk failed — not scanned is not clean'); process.exit(1); }
   if (!scenarios) {
     console.log(`⚠ scenario-lint SKIPPED — no scenario block in ${files.length} file(s) under ${paths.join(' ')}; nothing was linted (exit ${EXIT_SKIPPED})`);
     process.exit(EXIT_SKIPPED);
@@ -235,6 +333,11 @@ function selftest() {
     // The warning path: an empty Check is a warning, never a finding.
     const w = parseScenarios(render(lang, [...FIX[lang].clean[0].slice(0, 3), ''])).flatMap((b) => lint(b));
     say(w.length === 1 && w[0].findings.length === 0 && w[0].warnings.length === 1, `${lang}: empty Check — a warning, not a finding`);
+    // A numbered list of criteria, each scenario indented under its item, NO blank line between items: two scenarios, no «order».
+    const listed = FIX[lang].clean.map((l, i) => `${i + 1}. **[rule ${i + 1}]**\n` + render(lang, l).trimEnd().split('\n').map((x) => '   ' + x).join('\n')).join('\n') + '\n';
+    const lb = parseScenarios(listed);
+    const lf = lb.flatMap((b) => lint(b).findings);
+    say(lb.length === FIX[lang].clean.length && lf.length === 0, `${lang}: a numbered list of criteria without blank lines — ${lb.length} scenario(s), 0 findings${lf.length ? ' (got ' + lf.map((x) => x.id).join(',') + ')' : ''}`);
   }
   // Invisibility: a fenced template and a ❌ counter-example are not scenarios.
   const inv = parseScenarios('```\n' + render('en', FIX.en.clean[0]) + '```\n❌ Result. Works correctly.\n> - Situation. quoted\n');
@@ -243,6 +346,8 @@ function selftest() {
   console.log(`✅ scenario-lint selftest OK — ${cases} cases, ${RULE_IDS.length} rules × ${Object.keys(FIX).length} languages, every rule red on its mutation only and silent on the clean set`);
 }
 
-if (CMD === 'check') check(PATHS.length ? PATHS : DEFAULT_PATHS.filter((p) => existsSync(p)));
-else if (CMD === 'selftest') selftest();
-else { console.error(`usage: node .kaif/tools/kaif-scenario-lint.mjs check [paths…] | selftest`); process.exit(1); }
+if (IS_MAIN) {
+  if (CMD === 'check') check(PATHS.length ? PATHS : DEFAULT_PATHS.filter((p) => existsSync(p)));
+  else if (CMD === 'selftest') selftest();
+  else { console.error(`usage: node .kaif/tools/kaif-scenario-lint.mjs check [paths…] | selftest`); process.exit(1); }
+}

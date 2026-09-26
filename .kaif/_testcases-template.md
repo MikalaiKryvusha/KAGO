@@ -57,5 +57,5 @@ working (turn the controlling flag off, remove the controlling parameter).
 
 `[TESTED]` on the FEATURE is legal only when all three hold: every case above carries a status ·
 the coverage matrix names its holes · the control cases ran. Defects found go to `bugs/` in the
-defined shape (`/report-bug` → `BUG_FIXING_FRAMEWORK.md`): steps to reproduce · expected vs
-actual · severity/priority · environment · evidence.
+defined shape — `TESTING_FRAMEWORK.md` steps 6–7: hunt the reproduction when the first attempt fails,
+then the tester's report (template C of `/report-bug`) → `BUG_FIXING_FRAMEWORK.md`.

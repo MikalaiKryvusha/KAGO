@@ -28,6 +28,7 @@ hole exactly there; owners kept having to re-order the full pass by hand:
 - `PROJECT_STRUCTURE_EXTERNAL_MAP.md` — external map: modules, files, data flow
 - `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` — internal map: abstractions and interactions
 - `KAIF_FRAMEWORK.md` — the deployment record: which KAIF is deployed here and how
+- **If the project has one:** `HOUSE_RULES.md` — the owner's standing rules and the systems, stands, routes and tools of this project (tier 4 — read at entry, not part of the re-read core; the condition comes first, so `check` does not demand the file)
 - `EXPERIENCE.md` — recall relevant lessons (grep by the task's tags) so you don't repeat a known dead end
 
 If relevant to open questions:
@@ -66,6 +67,8 @@ line of every waiting document — and the same exit condition.
 
 Pick a single direction for this session. Priority (descending):
 
+0. **The owner's debt** — his decisions awaiting application (the first section of the queue command of step 1b) and the bugs
+   he flagged come before everything below (`BUG_FIXING_FRAMEWORK.md` → "The owner's debt comes first"; KAIF 2.8, origin issue #86).
 1. **Open bugs with real symptoms** — if `STATUS.md` lists an open bug with reproducible symptoms, it's
    priority #1. Work by `BUG_FIXING_FRAMEWORK.md`.
 2. **Next item from the `STATUS.md` "where to continue" checklist** — if bugs are clear.

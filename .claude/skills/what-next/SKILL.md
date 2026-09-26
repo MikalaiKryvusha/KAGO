@@ -29,7 +29,7 @@ priority claim by itself — a fresh incident earns its rank by the metric, not 
 ### Step 3. Answer in chat — in the FIXED FORM (KAIF 2.6, origin issue #53)
 The rule "the newest pain is not a priority claim" stood here as prose, and a field agent quoted it and
 broke it in the same answer. Prose does not rank; the form does. The answer OPENS with two lines read
-from the documents, never from memory, then the table, then two mandatory lines:
+from the documents, never from memory, then the table, then three mandatory lines:
 
 ```
 METRIC: <the main phase's acceptance metric — criteria closed k of n, read from MASTER_PLAN.md / the active plan, with its date>
@@ -41,17 +41,23 @@ MAIN PHASE: <the phase MASTER_PLAN.md marks as the main one now; no mark → the
 
 Fresh owner words — not ranked by the metric (→ /fix-vision): <words of the last 48 h not yet in GOAL/MASTER_PLAN, or "none">
 Tech debt: open bugs N · red M · drifted pairs K
+Owner debt: <interview #NNN QN answered, awaiting application · bugs/NN the owner flagged — or "none">
 ```
 Rules of the table: every row carries `moves` (or `—`) and `closes`; a row with `moves: —` and an empty
 `closes` NEVER stands above a row that has at least one — and row 1 in particular moves the metric or
 closes something. A fresh word of the owner earns its rank by the metric, not by its date: until
 `/fix-vision` puts it into GOAL/MASTER_PLAN it sits on the shelf — visible, recorded, NOT ranked. The
-debt line is always there (count the open bugs, the red ones, the drifted registry pairs). Then:
+debt line is always there (count the open bugs, the red ones, the drifted registry pairs). **The owner-debt line comes first in the
+ranking (KAIF 2.8, origin issue #86 — an answered decision waited 11 days behind planned work):** his decisions awaiting application
+(the first section of `node .kaif/tools/contour/review.mjs --queue --list`, named with their age, no date cutoff) and the bugs he
+flagged; when it names any, ROW 1 closes one of them (`closes: interview #NNN QN · bugs/NN`) — debt preempts the plan and the metric;
+a debt is not a fresh word, so the shelf rule above does not apply to it. Then:
 1. **The ONE next step** — row 1, and *why it is next* (tie it to GOAL/MASTER_PLAN).
 2. **2–4 runner-ups** — the rest of the table, one line each.
 3. **Blocked on the owner** — open interviews/homework, if any.
 Lint the draft BEFORE printing it: `node .kaif/tools/kaif-ranking-lint.mjs check <draft.md>` — exit 1 names
-what is missing (no METRIC:, a fresh word on row 1, no shelf, no debt line); exit 3 means it saw no answer.
+what is missing (no METRIC:, a fresh word on row 1, no shelf, no debt line, no owner-debt line, an owner's debt row 1 does not
+close); exit 3 means it saw no answer.
 
 ### Step 4. Offer to start
 Offer to begin the top step immediately; on the owner's confirmation (or in an autonomous loop) — start.

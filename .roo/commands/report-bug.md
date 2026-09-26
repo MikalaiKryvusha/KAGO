@@ -46,9 +46,9 @@ contour in `AGENT_GUIDE.md` governs the local fix; this branch governs the REPOR
 3. **File AND deliver — one step, one motion:** write `bugs/KAIF/NN_*.md` by template A/B below
    (create the directory on first use) and, on `tracking: origin`, run the delivery in the SAME
    motion, ahead of the work that found the defect — there is no separate "deliver" step to
-   postpone, because filing IS delivering (KAIF 2.7, epic SD; origin issue #65: a ticket waited
+   postpone, because filing IS delivering (KAIF 2.7, epic SD) — origin issue #65: a ticket waited
    forty minutes and one direct question of the owner for a second "send" — the broad "confirm
-   outward actions" reflex beat the carve-out that lived as prose):
+   outward actions" reflex beat the carve-out that lived as prose:
    `node .kaif/kaif-core.mjs report bugs/KAIF/NN_*.md`
    It files the origin issue signed by the agent under the KAIF owner's STANDING AUTHORIZATION
    (origin issue #15 — the owner's word: "this is CANON"; the `AGENT_GUIDE.md` authorization
@@ -74,7 +74,8 @@ Both templates open with the machine-grepable fingerprint
 `**Delivered upstream:**` line under it is machine-read — `report` delivers by it, `check` reads the
 delivery state from it — so the field name stays verbatim (English, bold, its own line) in any
 project language; the value may be in the project language and carries EITHER the issue URL or `#NN`
-standing as the value OR the words `NOT YET` — never both (name a related issue in the body) (KAIF 2.7, epic SD: a field name
+standing as the value OR the words `NOT YET` — never both (name a related issue in the body) — OR, when the ORIGIN resolved it
+without an issue (a withdrawal, a shipped fix; 2.8), `resolved in origin <version>` (KAIF 2.7, epic SD: a field name
 translated into the project language hid a waiting ticket from both commands).
 
 ### Template A — KAIF bug report
@@ -133,6 +134,37 @@ proven in production — projects, hours, sources. The owner of KAIF decides the
 ## Expected effect and its check
 <observable verification that the change worked; which framework invariant it serves>
 ```
+
+### Template C — tester's bug report (a defect of THE PRODUCT, for its developer)
+
+The report a tester hands to the product's developer (2.8; origin issue #105 — the owner-QA: this is how a tester describes a bug).
+File it where the product's tracker takes it; BEFORE sending, check it:
+`node .kaif/tools/kaif-testrun-lint.mjs bug <report.md>` (four sections, three lines, the steps a path, the hunt).
+When the defect did not reproduce on the first attempt, hunt first (`TESTING_FRAMEWORK.md` → "Hunt the reproduction").
+
+```markdown
+# <one line: what is broken, where>
+
+**Build:** <version · commit · build number> · **Environment:** <OS · device · browser · stage | production · account: fresh | accumulated> · **Evidence:** <recording · screenshot · log excerpt — paths>
+
+## Description
+<what the user runs into, in one or two sentences>
+
+## Steps to reproduce
+1. <the user's path in the product, one action per item — never state assembled through a back door>
+2. <…>
+
+## Expected result
+<what should happen — cite the requirement, the spec or the owner's word>
+
+## Actual result
+<what happens — the exact text, screen or log line>
+```
+
+When it did NOT reproduce, the report says so on its own line — `**Status:** not reproduced after the variants below` — and carries
+`## Reproduction hunt`: a table `| # | variant (axis: value) | outcome |`, at least three rows (data and state · position · timing and
+races · entry point · fresh vs accumulated account · stage vs production · network). A report in the owner's language uses that
+language's headings and labels — `node .kaif/tools/kaif-testrun-lint.mjs bug --keywords` prints the ones the check accepts.
 
 ## What to do
 

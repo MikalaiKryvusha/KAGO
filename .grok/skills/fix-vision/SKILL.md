@@ -1,6 +1,6 @@
 ---
 name: fix-vision
-description: Capture the owner's latest VISIONARY chat messages — vision corrections, priorities, brand and direction given while the agent worked — and fix them into the project's KAIF documents (GOAL.md, MASTER_PLAN.md, the owner's notes in AGENT_GUIDE.md). Use when the human says "fix the vision", "capture my vision", "зафиксируй видение", "обнови видение из чата", OR when the agent notices vision-level guidance accumulating in the chat that is not yet reflected in the docs. Trigger aliases (ru): «зафиксируй видение», «обнови видение из чата»
+description: Capture the owner's latest VISIONARY chat messages — vision corrections, priorities, brand and direction given while the agent worked — and fix them into the project's KAIF documents (GOAL.md, MASTER_PLAN.md, the house-rules file, the owner's notes in AGENT_GUIDE.md). Use when the human says "fix the vision", "capture my vision", "зафиксируй видение", "обнови видение из чата", OR when the agent notices vision-level guidance accumulating in the chat that is not yet reflected in the docs. Trigger aliases (ru): «зафиксируй видение», «обнови видение из чата»
 ---
 
 # /fix-vision — fix the owner's vision from the chat into the docs
@@ -19,12 +19,19 @@ opposed to one-off task instructions.
 
 ### Step 2. Distill
 Turn each into a short principle **in the owner's voice**. Keep the owner's wording where it carries
-meaning; never paraphrase the intent away. Convert relative dates to absolute.
+meaning; never paraphrase the intent away. Convert relative dates to absolute. A standing WORKING RULE takes
+the rule form of Step 3 — the owner's verbatim words stay at their source.
 
 ### Step 3. Fix into the documents
 - **`GOAL.md`** — changes to the vision itself (what we want in the end, for whom).
 - **`MASTER_PLAN.md`** — changes of priorities/scope; if the shift is big, re-derive via `/revision`.
-- **`AGENT_GUIDE.md` → "Notes from the owner"** — durable working-style directives.
+- **A standing working rule of the owner** → the project's house-rules file (tier 4 of the document taxonomy —
+  `HOUSE_RULES.md` at the project root; none yet → `cp .kaif/_house-rules-template.md HOUSE_RULES.md`) as a strict rule in its section "The owner's standing rules" (a
+  file without that section — add it): imperative, numbered, with
+  its exceptions, plus one provenance line `[OWNER] <date> · <where the verbatim lives>`. Commit the owner's
+  message verbatim first (`AGENT_GUIDE.md`, checklist step 18) and cite that commit; a block of raw messages in
+  the rulebook is a defect (`AGENT_GUIDE.md` → "Authorship of a decision").
+- **`AGENT_GUIDE.md` → "Notes from the human"** — only what changes the framework's own procedure here.
 - The agent system's persistent memory, if it has one — a pointer, not a copy (DRY).
 
 ### Step 4. De-duplicate & report

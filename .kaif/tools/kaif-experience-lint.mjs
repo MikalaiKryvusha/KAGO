@@ -40,6 +40,9 @@
 //
 // Commands:
 //   node .kaif/tools/kaif-experience-lint.mjs check [journal] [--baseline <file>]   # default: EXPERIENCE.md
+//        [--verbose]   # list every pre-class failure entry instead of the one fold line (origin issue #80)
+//        [--write-baseline]   # record the inherited field debt ONCE (default file .kaif/experience-lint.baseline.json,
+//                             # read by every later bare `check`); a later write only shrinks it (origin issue #80)
 //   node .kaif/tools/kaif-experience-lint.mjs --shrink EXP-NNNN [journal] [--yes]   # show; --yes writes
 //   node .kaif/tools/kaif-experience-lint.mjs selftest                              # PROVE every rule (EN + RU)
 //
@@ -72,12 +75,28 @@
 //  reasoning (a numeric-only id skipped 13 of 328 entries; an ignored runtime path read as a dangling
 //  guard; guard addresses "missing" for a journal outside its tree; a declaration whose reason carried
 //  `<...>` dropped silently) — report: testcases/reports/2026-09-18_experience-lint.md]
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+// [TESTED: 2026-09-24 · the no-class fold (2.8, epic CK step CK5.7, origin issue #80): selftest 75 cases green (fold,
+//  oldest-first, --verbose, same-day history, a misplaced newer entry, a one-date journal); three mutants on copies —
+//  the two earlier editions (by date alone · direction from the first and last entries) and the later-date guard
+//  removed — each red on its own case; a copy of the origin's journal made into the field's shape (the class line
+//  removed from EXP-0001…EXP-0116): this module prints ONE no-class line for 90 entries, the HEAD module 90 lines,
+//  --verbose 90 —
+//  report: testcases/reports/2026-09-24_ck57-experience-fold.md]
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+// OW8 (KAIF 2.8, origin issue #101): the command runs only when this file IS the program — imported by a project's own tool, the
+// module stays silent and never exits the importer (the same guard as the shipped contour's review.mjs).
+import { pathToFileURL as __kaifToUrl } from 'node:url';
+import { resolve as __kaifResolve } from 'node:path';
+const IS_MAIN = import.meta.url === __kaifToUrl(__kaifResolve(process.argv[1] || '')).href;
 
 const argv = process.argv.slice(2);
 const EXIT_SKIPPED = 3;
 const DEFAULT_JOURNAL = 'EXPERIENCE.md';
+// The inherited field debt of a DEPLOYED project lives next to the journal, under .kaif/ (origin issue #80: a journal updated
+// from 2.6 carries 88–246 entries written before the fields existed, and the shipped module could not record them — only the
+// origin's own wrapper could). `check --write-baseline` records it; a bare `check` reads it when it is there.
+const DEFAULT_BASELINE = join('.kaif', 'experience-lint.baseline.json');
 
 // ---------------------------------------------------------------------------
 // The fields per language. A project whose owner writes in another language adds a row; the engine
@@ -150,6 +169,7 @@ export function parseEntries(text) {
     return {
       ...e,
       failure: FAILURE_MARK.test(e.heading),
+      date: (/\b(\d{4}-\d{2}-\d{2})\b/.exec(e.heading) || [null, null])[1],
       rawClass: raw,
       klass: raw && SLUG.test(raw) ? raw : null,
       mech: FIELD_MECH.test(e.body),
@@ -242,9 +262,36 @@ export const RULES = [
       .filter((e) => e.klass && !baseline.has(e.id) && e.trap && !e.mech && !e.none)
       .map((e) => `${e.id} (line ${e.line}): the text reduces to an order of actions (a trap by form) — it needs \`${KEYWORDS.en.mechanized}:\` or \`${KEYWORDS.en.noneCheap}: <why>\`, never \`${KEYWORDS.en.subject}\``) },
   // A failure entry with no class is invisible to the deadline — the axis says so instead of counting it green.
-  { id: 'no-class', kind: 'warning', run: ({ entries, baseline }) => entries
-      .filter((e) => e.failure && !e.klass && !baseline.has(e.id))
-      .map((e) => `${e.id} (line ${e.line}): a failure entry with no \`${KEYWORDS.en.klass}: <slug>\`${e.rawClass ? ` (the value "${e.rawClass}" is not a slug — lowercase latin, digits and dashes)` : ''} — recurrence cannot be counted for it`) },
+  // History written BEFORE the journal's first classed entry is outside the field rules by the release's own words, so it
+  // folds into ONE line (origin issue #80: 88 per-entry lines buried the one line that mattered, on every closing); an
+  // unclassed failure written after it stays its own warning: that one is a real finding. "Before" is the entry's PLACE in
+  // the journal, read in the journal's own direction, AND never a later date than the edge entry's: comparing dates alone
+  // left same-day history unfolded (a copy of the origin's journal: 5 lines instead of 1), and a direction guessed from the
+  // first and last entries alone was flipped by ONE misplaced entry, folding a real warning (light judge of CK5.7). So the
+  // direction is the MAJORITY of adjacent dated pairs, and a journal whose order the dates cannot tell (no dates, one date,
+  // a tie) is not folded at all — the noise stays, a real warning is never hidden.
+  { id: 'no-class', kind: 'warning', run: ({ entries, baseline, verbose }) => {
+    const bare = entries.filter((e) => e.failure && !e.klass && !baseline.has(e.id));
+    const dated = entries.filter((e) => e.date);
+    let down = 0, up = 0;
+    for (let i = 1; i < dated.length; i++) {
+      if (dated[i].date < dated[i - 1].date) down++;
+      else if (dated[i].date > dated[i - 1].date) up++;
+    }
+    const direction = down > up ? 'newest-first' : up > down ? 'oldest-first' : null;
+    const classedAt = entries.map((e, i) => (e.klass ? i : -1)).filter((i) => i >= 0);
+    const edge = direction && classedAt.length ? (direction === 'newest-first' ? Math.max(...classedAt) : Math.min(...classedAt)) : -1;
+    const first = edge >= 0 ? entries[edge] : null;
+    const legacy = first && !verbose ? bare.filter((e) => {
+      const i = entries.indexOf(e);
+      const beyond = direction === 'newest-first' ? i > edge : i < edge;
+      return beyond && !(e.date && first.date && e.date > first.date);
+    }) : [];
+    const fold = legacy.length ? [`${legacy.length} failure entr${legacy.length === 1 ? 'y carries' : 'ies carry'} no \`${KEYWORDS.en.klass}:\` and` +
+      ` predate${legacy.length === 1 ? 's' : ''} the first classed entry (${first.id}${first.date ? `, ${first.date}` : ''}) — outside the field` +
+      ` rules; list them: --verbose (classify from the newest end: the fold shrinks as you go)`] : [];
+    return fold.concat(bare.filter((e) => !legacy.includes(e))
+      .map((e) => `${e.id} (line ${e.line}): a failure entry with no \`${KEYWORDS.en.klass}: <slug>\`${e.rawClass ? ` (the value "${e.rawClass}" is not a slug — lowercase latin, digits and dashes)` : ''} — recurrence cannot be counted for it`)); } },
   // A slug outside the header's list: a warning, because a new class is what a new lesson brings.
   { id: 'unlisted-class', kind: 'warning', run: ({ entries, list }) => {
       if (!list) return [];
@@ -262,7 +309,7 @@ export const RULES = [
 ];
 export const RULE_IDS = RULES.map((r) => r.id);
 
-export function lint(text, { root = '.', baseline = new Set(), tree = null, addressable = null } = {}) {
+export function lint(text, { root = '.', baseline = new Set(), tree = null, addressable = null, verbose = false } = {}) {
   const entries = parseEntries(text);
   const list = classList(text);
   const { declared, empty } = declaredClasses(text);
@@ -273,7 +320,7 @@ export function lint(text, { root = '.', baseline = new Set(), tree = null, addr
   const realTree = { exists: (rel) => existsSync(join(root, rel)), ignored: (rel) => isIgnored(rel, root) };
   const t = tree || realTree;
   const addr = addressable === null ? (existsSync(join(root, 'package.json')) || existsSync(join(root, 'tools'))) : addressable;
-  const ctx = { entries, text, root, baseline, list, declared, declaredEmpty: empty, addressable: addr, tree: t };
+  const ctx = { entries, text, root, baseline, list, declared, declaredEmpty: empty, addressable: addr, tree: t, verbose };
   const findings = [], warnings = [];
   for (const rule of RULES)
     for (const msg of rule.run(ctx)) (rule.kind === 'finding' ? findings : warnings).push({ id: rule.id, msg });
@@ -297,10 +344,32 @@ const positional = () => {
   return out;
 };
 
-function loadBaseline(path) {
-  if (!path) return new Set();
+// An explicit `--baseline <file>` must exist; without the flag the project's own file next to the journal is read when present.
+function loadBaseline(path, fallback) {
+  if (!path) return fallback && existsSync(fallback) ? new Set(JSON.parse(readFileSync(fallback, 'utf8')).ids || []) : new Set();
   if (!existsSync(path)) { console.error(`\u2716 experience-lint: no baseline at ${path}`); process.exit(1); }
   return new Set(JSON.parse(readFileSync(path, 'utf8')).ids || []);
+}
+
+// `check --write-baseline`: the first capture records every entry id of the journal; a later one only SHRINKS the line \u2014 it keeps
+// the ids still present and adopts none written since (those are exactly what the field rules are for), and says how many it
+// refused. Same contract as the origin's wrapper and the attribution lint's baseline: an always-red guard teaches itself to be
+// ignored, a baseline that grows teaches the same thing quieter.
+// [TESTED: 2026-09-25 · suite s28 on the DEPLOYED module: write → 4 ids, a bare check reads it, a second write adopts no new
+//  entry; red on the 2.7 dist; functional run on a copy of a field journal (122 entries): one fold warning before, 0 after,
+//  "inherited field debt 122" — testcases/reports/2026-09-25_ck57b-experience-baseline.md]
+function writeBaseline(text, path) {
+  const ids = parseEntries(text).map((e) => e.id);
+  const prev = existsSync(path) ? new Set(JSON.parse(readFileSync(path, 'utf8')).ids || []) : null;
+  const kept = prev ? ids.filter((id) => prev.has(id)) : ids;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({
+    note: 'inherited field debt of the lesson journal (origin issues #14, #80): it only SHRINKS, new entries are never adopted; a repeated class is never silenced by it',
+    capturedAt: new Date().toISOString(), ids: kept,
+  }, null, 2) + '\n', 'utf8');
+  console.log(`experience-lint: baseline written \u2014 ${path}, ${kept.length} entr${kept.length === 1 ? 'y' : 'ies'}` +
+    `${prev ? ` (was ${prev.size}; ${ids.length - kept.length} entr${ids.length - kept.length === 1 ? 'y' : 'ies'} written after the first capture NOT adopted \u2014 the line only shrinks)` : ''}` +
+    ' \u2014 commit it with the closing');
 }
 
 function check() {
@@ -311,8 +380,10 @@ function check() {
   }
   const text = readFileSync(journal, 'utf8');
   const root = dirname(resolve(journal));
-  const baseline = loadBaseline(flagValue('--baseline'));
-  const { entries, list, declared, addressable, findings, warnings } = lint(text, { root, baseline });
+  const ownBaseline = join(root, DEFAULT_BASELINE);
+  if (argv.includes('--write-baseline')) writeBaseline(text, flagValue('--baseline') || ownBaseline);
+  const baseline = loadBaseline(flagValue('--baseline'), ownBaseline);
+  const { entries, list, declared, addressable, findings, warnings } = lint(text, { root, baseline, verbose: argv.includes('--verbose') });
   const classed = entries.filter((e) => e.klass);
   if (!classed.length) {
     console.log(`\u26A0 experience-lint SKIPPED — not one entry of ${journal} carries \`${KEYWORDS.en.klass}: <slug>\` (${entries.length} entries read);` +
@@ -530,6 +601,42 @@ function selftest() {
   const lg = lint(legacy, { root: '.', tree: TREE, addressable: true });
   say(lg.findings.length === 0 && lg.warnings.map((w) => w.id).join() === 'no-class',
     `a journal updated from 2.6 - legacy entries under one 2.7 lesson: 0 findings, one no-class warning (got [${lg.findings.map((f) => f.id)}] / [${lg.warnings.map((w) => w.id)}])`);
+  // Origin issue #80 (a field journal: 88 per-entry no-class lines on every closing): pre-class history folds into ONE
+  // line; an unclassed failure written AFTER the first classed entry stays its own warning; --verbose lists them all.
+  const foldJ = '# EXPERIENCE\n\n## Entries\n\n### EXP-0012 \u00B7 2026-09-20 \u00B7 \u274C \u00B7 #x\n**Lesson:** after the first classed one.\n\n' +
+    '### EXP-0011 \u00B7 2026-09-18 \u00B7 \u274C \u00B7 #x\nclass: shown-as-link\n**Lesson:** y\n**Mechanization:** mechanized: `tools/showcase-lint.mjs`\n\n' +
+    '### EXP-0003 \u00B7 2026-09-01 \u00B7 \u274C \u00B7 #x\n**Lesson:** a.\n\n### EXP-0002 \u00B7 2026-08-01 \u00B7 \u274C \u00B7 #x\n**Lesson:** b.\n\n' +
+    '### EXP-0001 \u00B7 2026-07-01 \u00B7 \u274C \u00B7 #x\n**Lesson:** c.\n';
+  const fw = lint(foldJ, { root: '.', tree: TREE, addressable: true }).warnings.filter((w) => w.id === 'no-class').map((w) => w.msg);
+  say(fw.length === 2 && /^3 failure entries carry no/.test(fw[0]) && /\(EXP-0011, 2026-09-18\)/.test(fw[0]) && /^EXP-0012 /.test(fw[1]),
+    `#80: three pre-class entries fold into ONE line naming the first classed entry; the entry written after it stays its own (got ${JSON.stringify(fw)})`);
+  // the same journal written oldest-first (the dates say so) folds the same three and keeps the same one
+  const oldestFirst = foldJ.split(/\n(?=### )/).slice(1).reverse().join('\n').replace(/^/, '# EXPERIENCE\n\n## Entries\n\n');
+  const fo = lint(oldestFirst, { root: '.', tree: TREE, addressable: true }).warnings.filter((w) => w.id === 'no-class').map((w) => w.msg);
+  say(fo.length === 2 && /^3 failure entries carry no/.test(fo[0]) && /^EXP-0012 /.test(fo[1]),
+    `#80: an oldest-first journal folds the same pre-class history (got ${JSON.stringify(fo)})`);
+  const fv = lint(foldJ, { root: '.', tree: TREE, addressable: true, verbose: true }).warnings.filter((w) => w.id === 'no-class');
+  say(fv.length === 4 && fv.every((w) => /^EXP-00\d\d /.test(w.msg)), `#80: --verbose lists every unclassed failure entry by id (got ${fv.length})`);
+  // Light judge of CK5.7: the three shapes that broke the first two editions, each locked by a case.
+  const ent = (id, date, klass, lesson) => `### ${id} · ${date} · ❌ · #x\n` + (klass ? `class: ${klass}\n` : '') +
+    `**Lesson:** ${lesson}.\n` + (klass ? '**Mechanization:** mechanized: `tools/showcase-lint.mjs`\n' : '') + '\n';
+  const J = (...es) => '# EXPERIENCE\n\n## Entries\n\n' + es.join('');
+  const noClassOf = (text) => lint(text, { root: '.', tree: TREE, addressable: true }).warnings.filter((w) => w.id === 'no-class').map((w) => w.msg);
+  // (1) history written the SAME day as the first classed entry is history too (a date-only fold kept it per entry)
+  const sameDay = noClassOf(J(ent('EXP-0005', '2026-09-18', null, 'after'), ent('EXP-0004', '2026-09-18', 'shown-as-link', 'y'),
+    ent('EXP-0003', '2026-09-18', null, 'same day, before'), ent('EXP-0002', '2026-09-10', null, 'b'), ent('EXP-0001', '2026-09-01', null, 'c')));
+  say(sameDay.length === 2 && /^3 failure entries carry no/.test(sameDay[0]) && /^EXP-0005 /.test(sameDay[1]),
+    `#80: history of the same day as the first classed entry folds with the rest (got ${JSON.stringify(sameDay)})`);
+  // (2) ONE newer entry appended at the bottom of a newest-first journal neither flips the direction nor hides itself
+  const misplaced = noClassOf(J(ent('EXP-0010', '2026-09-22', null, 'newer'), ent('EXP-0009', '2026-09-21', 'shown-as-link', 'y'),
+    ent('EXP-0003', '2026-09-03', null, 'a'), ent('EXP-0002', '2026-09-02', null, 'b'), ent('EXP-0001', '2026-09-01', null, 'c'),
+    ent('EXP-0011', '2026-09-23', null, 'appended at the bottom')));
+  say(misplaced.length === 3 && /^3 failure entries carry no/.test(misplaced[0]) && misplaced.some((m) => /^EXP-0010 /.test(m)) && misplaced.some((m) => /^EXP-0011 /.test(m)),
+    `#80: a misplaced newer entry at the bottom stays its own warning, the history still folds (got ${JSON.stringify(misplaced)})`);
+  // (3) a journal whose order the dates cannot tell (one date) is not folded at all — nothing real is ever hidden
+  const oneDay = noClassOf(J(ent('EXP-0003', '2026-09-18', null, 'a'), ent('EXP-0002', '2026-09-18', 'shown-as-link', 'y'), ent('EXP-0001', '2026-09-18', null, 'c')));
+  say(oneDay.length === 2 && oneDay.every((m) => /^EXP-000\d /.test(m)),
+    `#80: an undecidable order (one date) folds nothing — every unclassed failure stays its own line (got ${JSON.stringify(oneDay)})`);
   // Prose that merely contains the word "class:" mid-sentence is NOT the field (a field journal does this).
   const prose = CLEAN.en.replace('**Lesson:** showing was replaced by a link.', '**Lesson:** the owner named the class: the dossier was supposed to make it impossible.');
   say(lint(prose, { root: '.', tree: TREE, addressable: true }).entries.filter((e) => e.klass).length === 3, 'prose with "class:" mid-sentence is not the field (got a fourth class)');
@@ -538,7 +645,9 @@ function selftest() {
 }
 
 // ---------------------------------------------------------------------------
-if (argv.includes('--shrink')) shrinkCmd();
-else if (argv[0] === 'check' || argv.length === 0) check();
-else if (argv[0] === 'selftest') selftest();
-else { console.error('usage: node .kaif/tools/kaif-experience-lint.mjs check [journal] [--baseline <file>] | --shrink EXP-NNNN [journal] [--yes] | selftest'); process.exit(1); }
+if (IS_MAIN) {
+  if (argv.includes('--shrink')) shrinkCmd();
+  else if (argv[0] === 'check' || argv.length === 0) check();
+  else if (argv[0] === 'selftest') selftest();
+  else { console.error('usage: node .kaif/tools/kaif-experience-lint.mjs check [journal] [--baseline <file>] [--verbose] [--write-baseline] | --shrink EXP-NNNN [journal] [--yes] | selftest'); process.exit(1); }
+}

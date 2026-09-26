@@ -105,7 +105,8 @@ Output: a short analysis note (a plan or research doc per project convention). N
    the pattern): the project prefix keeps team windows distinguishable from other projects on
    the same machine, the `team` infix marks the window as a team seat at a glance, the suffix
    names the seat. Build the workplace tool to the contract in the constitution template
-   (create / list / reset-from-main / remove).
+   (create / list / reset-from-main / remove). Each workspace CALLS the owner under its seat's name — the contour derives it from
+   the directory (`<role>`; `KAIF_SESSION_NAME` overrides), so a call says which seat needs the owner (2.8, `/owner-reviews` I28b).
 4. **Role instructions.** For each seat, prepare the manager's briefing message from the role
    contract: you are <Role> · your zone · read the constitution in full · run the project's
    resume ritual on a FRESH main · announce yourself on the board · report readiness.

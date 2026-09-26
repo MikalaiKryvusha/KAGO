@@ -11,7 +11,7 @@ description: Respectfully update & migrate the KAIF framework deployed in this p
 > a project a full manual migration and stale snapshots; lifecycle skills are exactly the class of
 > file whose staleness breaks the update itself).
 
-A newer KAIF version exists upstream (see `/kaif-version`). Since KAIF 1.5 the heavy lifting is
+A newer KAIF version exists upstream (see `/kaif-version`). Since 1.5 the heavy lifting is
 **mechanical**: the machinery (`.kaif/kaif-core.mjs`) knows what was deployed and which files were never
 touched since (content snapshots in `.kaif/deploy-manifest.json`), so it replaces the untouched framework
 files itself, adds the new ones, never enters owner content (`GOAL.md`, `STATUS.md`, the knowledge
@@ -45,9 +45,13 @@ diverged places. Your cognitive work is that task, not the migration.
      in `.kaif/update-rehearsal.json`: the next `update` over this tree freezes any file whose live
      verdict differs from what you read here (task item `verdict-mismatch`, both number sets).
    - The **sandbox copy** — not a model of the pass but the pass itself: export the tree
-     (`git archive HEAD | tar -x -C <tmpdir>`), `git init` there, run the REAL update/bootstrap in
-     the copy and read its diff. A minute and a few MB buy a byte-accurate preview — in the field
-     the live pass matched the sandbox byte for byte. Prefer this on the first-ever update and on
+     (`git -c core.autocrlf=false archive HEAD | tar -x -C <tmpdir>` — the flag keeps the committed line endings, unless a `.gitattributes` `eol` pins them;
+     on a Windows tree with `core.autocrlf=true` a plain export rewrites them, 2.8, origin issue #81), `git init` there, run the
+     REAL update/bootstrap in the copy and read its diff. A minute and a few MB buy a byte-accurate preview — in the field the
+     live pass matched the sandbox byte for byte, up to line endings on a `core.autocrlf=true` tree (compare there with
+     `git diff --ignore-cr-at-eol`). A rehearsal record binds only the core that wrote it (2.8): the automatic record of another core is named,
+     ignored and removed; a `--rehearsal <receipt>` you name that another core SIGNED is refused (re-run the copy with this core);
+     an unsigned one you name (a pre-2.8 copy) is applied with a warning. Prefer this on the first-ever update and on
      any deployment with heavy localization. The copy's receipt (`<copy>/.kaif/last-update.json`)
      carries the verdicts it printed: hand it to the live run — `update --rehearsal
      <copy>/.kaif/last-update.json` on the core-update route, `node KAIF-LOADER.mjs --lang <code>
@@ -92,6 +96,11 @@ diverged places. Your cognitive work is that task, not the migration.
    does not verify green without the report. A rake that is an explicit framework defect/improvement
    also gets its own ticket: skill `/report-bug`, templates A/B (delivery upstream follows the
    deployment's tracking mode — an anonymous deployment never reaches for the origin).
+   **The report itself is a KAIF signal** (2.8, origin issue #78): on tracking: origin deliver it in the same move —
+   `node .kaif/kaif-core.mjs report reports/KAIF_UPDATES/<file>.md` (the KAIF owner's standing authorization, origin issue #15;
+   no owner's approval is awaited). **Re-measure before a public correction:** a correction to an already delivered ticket goes
+   out only after the judge's finding behind it is RE-MEASURED by a command, and the update judge runs in a clean context (a
+   subagent or a fresh pass that has not read the update's reasoning).
 
 6. **Verify & self-clean:** `node .kaif/kaif-core.mjs update-verify` — it greps the checkpoints and
    removes the transient installer files.

@@ -191,7 +191,8 @@ gh release view vX.Y --web   # open the PUBLISHED page, not the notes file
 ```
 Read the first screen: paragraphs intact, breaks where you intended them, image in place, links
 clickable. The mechanical half of the gate runs before publishing: the notes body file must have
-**no two non-empty lines in a row** outside code blocks and tables.
+**no two non-empty lines in a row** outside code blocks, tables, HTML blocks and comments (a centred logo, an
+anchor before a heading and an HTML comment are structure, not wrapped prose).
 
 The rule is wider than releases and applies to any foreign medium — an issue, an email, a chat bot,
 a slide: learn its wrapping rule BEFORE writing, open the result AFTER shipping.

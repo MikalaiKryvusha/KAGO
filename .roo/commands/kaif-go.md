@@ -19,6 +19,8 @@ grants **authority**.
 
 Take the FIRST one that exists, in this order:
 
+0. **A `PARKED:` line** at the top of `STATUS.md` → "where to continue" — a task an owner's "switch" set aside (`AGENT_GUIDE.md` →
+   "The owner's word mid-turn"); it survives compaction, a chat note may not. Once the work that displaced it is done, it is next.
 1. **The parking note** left in this chat by `/pause` — it names the next concrete action.
 2. **The active plan** — the step after the last checked box, quoted by its anchor line
    (`AGENT_GUIDE.md` → quote the plan line you are about to execute).

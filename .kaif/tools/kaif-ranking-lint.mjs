@@ -15,6 +15,10 @@
 //   <shelf line>  "Fresh owner words — not ranked by the metric" / «Свежие слова владельца — не ранжированы
 //                 метрикой» (+ pointer to /fix-vision); may say "none" — but the shelf EXISTS;
 //   <debt line>   "Tech debt:" / «Техдолг:» with at least one number (open bugs · red · drifted pairs).
+//   <owner debt>  "Owner debt:" / «Долг перед владельцем:» (2.8, epic OW, OW3; origin issue #86, S1 — an owner's answered decision
+//                 waited 11 days behind planned work): the owner's decisions awaiting application (`interview #NNN QN`) and the bugs he
+//                 flagged (`bugs/NN`) — or "none". When it names any, ROW 1 closes one of them: debt preempts the plan; the #53 rule
+//                 (a fresh word is ranked by the metric) is untouched — a debt is not a fresh word.
 //
 // Boundaries, so the linter never becomes bureaucracy (same as kaif-scenario-lint):
 //   · keywords are a per-language table — a project adds a row; rules are DATA;
@@ -32,6 +36,11 @@
 //  tripped `order` — `order` now judges rows 2+; sandbox suite s23 on a deployed copy: install · check #53 → 1 · fixed → 0 ·
 //  foreign → 3 · usage → 1 · bundle meta 2.6 entries]
 import { readFileSync, existsSync } from 'node:fs';
+// OW8 (KAIF 2.8, origin issue #101): the command runs only when this file IS the program — imported by a project's own tool, the
+// module stays silent and never exits the importer (the same guard as the shipped contour's review.mjs).
+import { pathToFileURL as __kaifToUrl } from 'node:url';
+import { resolve as __kaifResolve } from 'node:path';
+const IS_MAIN = import.meta.url === __kaifToUrl(__kaifResolve(process.argv[1] || '')).href;
 
 const argv = process.argv.slice(2);
 const CMD = argv[0] || 'check';
@@ -43,14 +52,18 @@ const DASH = /^\s*(?:—|-|–|none|нет)?\s*$/i;   // an empty `moves` / `clo
 // Keywords per language — the form's anchors. Latin anchors (METRIC:, MAIN PHASE:, moves, closes) are the
 // same in every language: they are the machine half of the form, the owner reads the table cells.
 export const KEYWORDS = {
-  en: { shelf: 'Fresh owner words', debt: 'Tech debt', fixVision: '/fix-vision' },
-  ru: { shelf: 'Свежие слова владельца', debt: 'Техдолг', fixVision: '/fix-vision' },
+  en: { shelf: 'Fresh owner words', debt: 'Tech debt', ownerDebt: 'Owner debt', fixVision: '/fix-vision' },
+  ru: { shelf: 'Свежие слова владельца', debt: 'Техдолг', ownerDebt: 'Долг перед владельцем', fixVision: '/fix-vision' },
 };
 const METRIC_RE = /^\s*\**METRIC:\**\s*(.*)$/i;
 const PHASE_RE = /^\s*\**MAIN PHASE:\**\s*(.*)$/i;
 const HEADER_RE = /^\s*\|.*\bmoves\b.*\|.*\bcloses\b.*\|/i;
 const SEP_RE = /^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$/;
 const shelfRe = () => new RegExp('(' + Object.values(KEYWORDS).map((k) => k.shelf).join('|') + ')', 'i');
+const ownerDebtRe = () => new RegExp('^\\s*\\**(?:' + Object.values(KEYWORDS).map((k) => k.ownerDebt).join('|') + ')\\**\\s*:', 'i');
+// A debt item, normalised to one key in both languages: `interview #066 Q1` / «интервью №066 В1» → iv66q1 · `bugs/12` → bug12.
+export const debtItems = (s) => [...String(s || '').matchAll(/(?:interview|\u0438\u043d\u0442\u0435\u0440\u0432\u044c\u044e)\s*[#\u2116]?\s*0*(\d+)\s*,?\s*(?:Q|\u0412)(\d+)|bugs\/0*(\d+)/giu)]
+  .map((m) => (m[3] ? 'bug' + m[3] : 'iv' + m[1] + 'q' + m[2]));
 const debtRe = () => new RegExp('^\\s*\\**(?:' + Object.values(KEYWORDS).map((k) => k.debt).join('|') + ')\\**\\s*:', 'i');
 
 // ---------------------------------------------------------------------------
@@ -87,6 +100,7 @@ export function parseAnswer(src) {
     table: hIdx >= 0, tableLine: hIdx >= 0 ? visible[hIdx].n : null, rows,
     shelf: visible.some((v) => shelfRe().test(v.t)),
     debt: visible.find((v) => debtRe().test(v.t)) || null,
+    ownerDebt: visible.find((v) => ownerDebtRe().test(v.t)) || null,
   };
 }
 
@@ -108,6 +122,11 @@ export const RULES = [
     test: (a) => !a.shelf },
   { id: 'no-debt', msg: 'no "Tech debt:" line with numbers (open bugs · red · drifted pairs)',
     test: (a) => !a.debt || !/\d/.test(a.debt.t) },
+  { id: 'no-owner-debt', msg: 'no "Owner debt:" line — the owner\'s decisions awaiting application and the bugs he flagged (may say "none")',
+    test: (a) => !a.ownerDebt },
+  { id: 'owner-debt-not-first', msg: 'the owner\'s debt is named, and row 1 closes none of it — debt preempts the plan (#86)',
+    // an empty row 1 is recency-first's finding — this axis judges a row 1 that carries SOMETHING else than the debt
+    test: (a) => { const items = a.ownerDebt ? debtItems(a.ownerDebt.t) : []; return items.length > 0 && a.rows.length > 0 && carries(a.rows[0]) && !debtItems(a.rows[0].closes).some((k) => items.includes(k)); } },
 ];
 export const RULE_IDS = RULES.map((r) => r.id);
 
@@ -145,26 +164,28 @@ const CLEAN = {
     'MAIN PHASE: Phase 2 — Reach (v2), marked as the main one now in MASTER_PLAN.md',
     '',
     '| step | moves | closes | effort |', '|---|---|---|---|',
-    '| 1. Traffic series: index the catalogue | criterion 3 (Catalogue) | bugs/12 | 0.5 chat |',
+    '| 1. Traffic series: index the catalogue | criterion 3 (Catalogue) | bugs/12 · interview #066 Q1 | 0.5 chat |',
     '| 2. Yandex verification | criterion 5 | — | 0.25 chat |',
     '| 3. Refactor the console | — | plans/40 | 1 chat |',
     '| 4. Rename the sidebar | — | — | 0.25 chat |',
     '',
     'Fresh owner words — not ranked by the metric (→ /fix-vision): "MVP of the messenger" (today), "rewrite the terms" (yesterday).',
     'Tech debt: open bugs 87 · red 30 · drifted pairs 0.',
+    'Owner debt: interview #066 Q1 (answered 11 d ago, awaiting application) · bugs/12 (flagged by the owner).',
   ],
   ru: [
     'METRIC: критерии приёмки главной фазы закрыты 9 из 15 (2026-09-05)',
     'MAIN PHASE: Фаза 2 — Охват (v2), помечена «ГЛАВНОЕ СЕЙЧАС» в MASTER_PLAN.md',
     '',
     '| шаг | moves | closes | трудоёмкость |', '|---|---|---|---|',
-    '| 1. Серия трафика: индексация каталога | критерий 3 (Каталог) | bugs/12 | 0,5 чата |',
+    '| 1. Серия трафика: индексация каталога | критерий 3 (Каталог) | bugs/12 · интервью №066 В1 | 0,5 чата |',
     '| 2. Верификация Яндекса | критерий 5 | — | 0,25 чата |',
     '| 3. Рефакторинг консоли | — | plans/40 | 1 чат |',
     '| 4. Переименовать сайдбар | — | — | 0,25 чата |',
     '',
     'Свежие слова владельца — не ранжированы метрикой (→ /fix-vision): «MVP мессенджера» (сегодня), «перепись условий» (вчера).',
     'Техдолг: открытых багов 87 · красных 30 · разъехавшихся пар 0.',
+    'Долг перед владельцем: интервью №066 В1 (отвечено 11 дн. назад, ждёт внесения) · bugs/12 (отмечен владельцем).',
   ],
 };
 // The #53 incident, as the field agent answered it: fresh words on top, no metric, no phase, no shelf, no debt line.
@@ -182,6 +203,9 @@ const MUTATIONS = {
   'order': (L) => { const r = L.filter((l) => /^\| [0-9]\./.test(l)); return L.map((l) => l === r[1] ? r[3] : l === r[3] ? r[1] : l); },
   'no-shelf': (L) => L.filter((l) => !/Fresh owner words|Свежие слова владельца/.test(l)),
   'no-debt': (L) => L.filter((l) => !/^(Tech debt|Техдолг):/.test(l)),
+  'no-owner-debt': (L) => L.filter((l) => !/^(Owner debt|Долг перед владельцем):/.test(l)),
+  // row 1 (closes the debt) and row 2 (moves the metric, closes nothing) swap: both carry, so `order` and `recency-first` stay silent
+  'owner-debt-not-first': (L) => { const r = L.filter((l) => /^\| [0-9]\./.test(l)); return L.map((l) => l === r[0] ? r[1] : l === r[1] ? r[0] : l); },
 };
 
 function selftest() {
@@ -197,7 +221,7 @@ function selftest() {
     }
   }
   const f53 = lint(parseAnswer(FIX_53.join('\n') + '\n')).map((x) => x.id);
-  say(JSON.stringify([...f53].sort()) === JSON.stringify(['no-debt', 'no-main-phase', 'no-metric', 'no-shelf', 'order', 'recency-first']),
+  say(JSON.stringify([...f53].sort()) === JSON.stringify(['no-debt', 'no-main-phase', 'no-metric', 'no-owner-debt', 'no-shelf', 'order', 'recency-first']),
     `the #53 fixture (fresh words on top, no metric) is RED: [${f53.join(', ')}]`);
   say(parseAnswer('# A plan\n\nSome prose.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n') === null, 'a plain document with an unrelated table is not an answer (SKIPPED path)');
   say(parseAnswer('> METRIC: quoted\n```\n| step | moves | closes |\n```\n') === null, 'a quoted METRIC: line and a fenced table are invisible');
@@ -205,6 +229,8 @@ function selftest() {
   console.log(`✅ ranking-lint selftest OK — ${cases} cases, ${RULE_IDS.length} rules × ${Object.keys(CLEAN).length} languages, every rule red on its mutation only, the #53 fixture red, the clean answer green`);
 }
 
-if (CMD === 'check') check(PATHS);
-else if (CMD === 'selftest') selftest();
-else { console.error('usage: node .kaif/tools/kaif-ranking-lint.mjs check <draft.md> [more.md…] | selftest'); process.exit(1); }
+if (IS_MAIN) {
+  if (CMD === 'check') check(PATHS);
+  else if (CMD === 'selftest') selftest();
+  else { console.error('usage: node .kaif/tools/kaif-ranking-lint.mjs check <draft.md> [more.md…] | selftest'); process.exit(1); }
+}

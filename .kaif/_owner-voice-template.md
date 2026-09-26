@@ -9,7 +9,8 @@
 > in `KAIF_FRAMEWORK.md` (and, for the shipped linter, in `.kaif/kaif.json` → `voicePortrait`) — the
 > machinery never renames an owner-class file. **Load, do not consult:** before the first word of any
 > text the owner reads as his own, `node .kaif/tools/kaif-voice-lint.mjs load` prints the filled
-> portrait into the agent's working context and leaves a witness; `check` refuses a text written before
+> portrait's writing sections (§0 · §2 · §2-C · §5 · §6 · §7 — keep their numbers; `--all` prints the
+> whole) into the agent's working context and leaves a witness; `check` refuses a text written before
 > that load (the owner's word: write BY the stylometry, with it in the working cache).
 
 > **Status: a BINDING instruction** for any agent writing <the owner's target artifact>. It acts
@@ -109,7 +110,7 @@ actually moves a model — descriptions alone do not.
 The checklist is the INDEPENDENT check that follows writing BY this portrait — the text is first written
 by §2/§2-C/§5/§6, then checked here, then fixed, and only then it counts as written and goes to the owner
 (`AGENT_GUIDE.md` → the fable loop's fourth KAIF obligation). 7A — the machine minute:
-`node .kaif/tools/kaif-voice-lint.mjs check <file…>` — the shipped module runs the §8 table (stop-patterns
+`node .kaif/tools/kaif-voice-lint.mjs check <file…> --genre <genre>` — the shipped module runs the §8 table (stop-patterns
 and required positives) over the artifact and prints every hit with the row's hint; `SKIPPED` is said in
 the report, never read as green. 7B — the semantic pass by a CLEAN instance (a subagent, or a fresh pass
 forbidden to see the writer's rationale) against the anti-portrait and the pairs. 7C — the second
@@ -123,7 +124,9 @@ grep stays silent. They live HERE, as the table below — the owner edits the pa
 them, and the shipped linter reads THIS table (`node .kaif/tools/kaif-voice-lint.mjs check <file…>`):
 prose in this section is invisible to it, and a §8 without the table makes the linter say `SKIPPED`
 aloud rather than pass green. Calibrate on the live artifact first (`--warn` prints the hits without
-reddening); noise above signal = the row is narrowed or deleted, never the guard weakened.
+reddening); noise above signal = the row is narrowed or deleted, never the guard weakened. A row that belongs to one genre
+OPENS its hint with a label — `[work]` (every genre but the essay), `[document]` (documents only), `[prose]` (the essay only);
+`check --genre <document|ticket|comment|message|reply|essay>` silences the rows of other genres, a row without a label judges every text.
 
 | pattern | class | hint | legal exception |
 |---|---|---|---|

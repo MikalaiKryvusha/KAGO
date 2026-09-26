@@ -29,7 +29,7 @@
 //         after ARCHAEOLOGY_SINCE must not open without the attestation of the search that was run
 //         (`<!-- archaeology: … → N hits · read: … · prior: … -->`); the refusal prints the READY grep.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, basename, extname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { PARSER, texts } from './texts.mjs';
@@ -66,6 +66,24 @@ export function ownerFromIdentityTable(root) {
  * The contour configuration of a project root. Every field has a derived default; `.kaif/kaif.json`
  * may override any of them under `contour: { … }`. Nothing here asks a human.
  */
+// OW4 (2.8, origin issues #95 · #98): the CALLING SESSION's name — with several workspaces of one project the owner hears which window
+// calls. Derived, never typed per call: KAIF_SESSION_NAME wins; a linked workspace (its .git is a FILE) is named by its directory
+// (`<project>-team-<role>` → `<role>`, the /team-deployment naming invariant); the main copy is "main" when other workspaces exist (its
+// .git/worktrees/ lists them); one workspace → no name (nothing to tell apart). Read from the file system — no git program is started.
+// [TESTED: 2026-09-25 20:15–20:24 · selftest: a linked workspace → its role, the main copy with others → main, one workspace → none, the env
+//  var wins; on the origin (8 worktrees) → «main»; s22 F on two deployed workspaces; mutant «the workspace not read» red exactly on its case;
+//  report testcases/reports/2026-09-25_ow4-call-names-session.md]
+export function sessionName(root, env = process.env) {
+  const own = String(env.KAIF_SESSION_NAME || '').trim();
+  if (own) return own;
+  const dotGit = resolve(root, '.git');
+  let st;
+  try { st = statSync(dotGit); } catch { return null; }
+  if (st.isFile()) { const base = basename(resolve(root)); const m = base.match(/-team-(.+)$/u); return m ? m[1] : base; }
+  if (!st.isDirectory()) return null;
+  try { return readdirSync(resolve(dotGit, 'worktrees')).length > 0 ? 'main' : null; } catch { return null; }
+}
+
 export function loadContourConfig(root) {
   const marker = readJson(resolve(root, KAIF_JSON)) || {};
   const c = (marker.contour && typeof marker.contour === 'object') ? marker.contour : {};
@@ -81,6 +99,7 @@ export function loadContourConfig(root) {
     quietFrom: c.quietFrom || null, quietTo: c.quietTo || null, // I6: none by default
     closeQuietMs: Number(c.closeQuietMs) > 0 ? Number(c.closeQuietMs) : null, // LP (2.7, #66): `--close` refuses while the owner typed less than this ago (default in the generator: 180 s)
     markerFound: existsSync(resolve(root, KAIF_JSON)),
+    session: sessionName(root), // OW4 (2.8): the calling session — named in every call and in the page window's title
   };
 }
 
@@ -140,6 +159,18 @@ const STATUS_CLOSED_RE = new RegExp(PARSER.statusClosed, 'iu');
 const STATUS_WAITING_RE = new RegExp(PARSER.statusWaiting, 'iu');
 const STATUS_NEGATION_RE = new RegExp(PARSER.statusNegation, 'iu');
 
+// OW3 (2.8, origin issue #86): the whole STATUS BLOCK — the status line and the quote lines that continue it — says the answers await
+// application. A field marks it on a continuation line under a ticked "answered" (its S1: an 11-day-old decision stayed invisible);
+// the canonical sign (every question answered, the status not closed) misses that form, so the debt view reads both.
+const AWAITING_APPLICATION_RE = new RegExp(PARSER.awaitingApplication, 'iu');
+export function statusBlockAwaitsApplication(md) {
+  const lines = normalize(md).split('\n').slice(0, HEAD_LINES);
+  const at = lines.findIndex((l) => STATUS_LINE_RE.test(l));
+  if (at < 0) return false;
+  const block = [lines[at]];
+  for (let i = at + 1; i < lines.length && /^\s*>/.test(lines[i]) && !STATUS_LINE_RE.test(lines[i]) && !/^\s*>\s*\*{0,2}[\p{L} ]{2,30}:\*{0,2}/u.test(lines[i].replace(/^\s*>\s*·\s*/, '> ')); i++) block.push(lines[i]);
+  return AWAITING_APPLICATION_RE.test(block.join(' '));
+}
 export function docStatus(md) {
   const head = normalize(md).split('\n').slice(0, HEAD_LINES).join('\n');
   const m = head.match(STATUS_LINE_RE);
@@ -312,6 +343,8 @@ const ARCHAEOLOGY_NA_RE = /<!--\s*archaeology:\s*n\/a\s*[-—–:]*\s*\S/u;
 const ARCHAEOLOGY_HITS_RE = /(?:→|->)\s*(\d+)\s*hits/iu;
 const ARCHAEOLOGY_PRIOR_RE = /prior:\s*([\s\S]*)$/iu;
 const ARCHAEOLOGY_PRIOR_NONE_RE = /^\s*none(?![\p{L}\d])/iu;
+const ARCHAEOLOGY_READ_NONE_RE = /read:\s*none(?![\p{L}\d])/iu;   // OW5 (2.8, #74): hits found and NOTHING read — refused
+const ARCHAEOLOGY_PLACEHOLDER_RE = /<[^<>]*>/u;   // judge OW10 H3: a `<…>` of the template left unfilled is not an attestation
 const STOP_WORDS = new Set(String(PARSER.archaeologyStopWords || '').split('|').filter(Boolean));
 
 /** The document's header date: the `Created` line of the head when present, else its first ISO date. */
@@ -345,10 +378,31 @@ export function archaeologyWords(title) {
   return (words.length ? words : pick(ARCHAEOLOGY_MIN_LETTERS_FALLBACK)).slice(0, ARCHAEOLOGY_MAX_WORDS);
 }
 
-/** The READY command for a question heading — the door prints it, the agent copies and runs it. */
+/** The READY command for a question heading — the door prints it, the agent copies and runs it. The UTF-8 locale is part of the command:
+ *  Git Bash's `grep -i` without it misses a capital Cyrillic letter (origin issue #74). The door can also search itself — archaeologySearch. */
 export function archaeologyGrep(title) {
   const words = archaeologyWords(title);
-  return words.length ? 'grep -rniE "' + words.join('|') + '" ' + ARCHAEOLOGY_PATHS : null;
+  return words.length ? 'LC_ALL=C.UTF-8 grep -rniE "' + words.join('|') + '" ' + ARCHAEOLOGY_PATHS : null;
+}
+// OW5 (2.8, origin issues #74 · #82): the door SEARCHES itself — in Node, Unicode-aware and case-insensitive, so no shell and no locale
+// decides whether a capital Cyrillic letter is found. Same words, same paths as the printed command; hits are LINES, like `grep -rn`.
+// [TESTED: 2026-09-25 19:07–19:10 · selftest 83 · s22 E on the deployed copy (red on v2.7) · mutant «search case-sensitive» red exactly on its
+//  case · on the origin in Git Bash without a locale the door found 473 lines = grep with LC_ALL=C.UTF-8, 30 more than a bare grep -i;
+//  report testcases/reports/2026-09-25_ow5-archaeology-any-transport.md]
+export function archaeologySearch(root, words, paths = ARCHAEOLOGY_PATHS) {
+  const out = { hits: 0, files: [], lines: [] };
+  if (!words.length) return out;
+  const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'iu');
+  const files = [];
+  const walk = (p) => { if (!existsSync(p)) return; if (statSync(p).isDirectory()) { for (const f of readdirSync(p).sort()) walk(join(p, f)); } else if (/\.md$/i.test(p)) files.push(p); };
+  for (const rel of paths.split(/\s+/).filter(Boolean)) walk(resolve(root, rel));
+  for (const f of files) {
+    const lines = readFileSync(f, 'utf8').split(/\r?\n/);
+    let n = 0;
+    lines.forEach((l, i) => { if (re.test(l)) { n++; out.lines.push({ file: f, line: i + 1, text: l.trim().slice(0, 100) }); } });
+    if (n) { out.hits += n; out.files.push(f); }
+  }
+  return out;
 }
 
 /** The attestation of ONE question: what stands between its heading and its first option. */
@@ -361,7 +415,8 @@ export function archaeologyOf(q) {
   const hits = m[1].match(ARCHAEOLOGY_HITS_RE);
   const prior = m[1].match(ARCHAEOLOGY_PRIOR_RE);
   if (!hits || !prior) return { present: true, formOk: false };
-  return { present: true, formOk: true, hits: Number(hits[1]), priorNone: ARCHAEOLOGY_PRIOR_NONE_RE.test(prior[1]) };
+  if (ARCHAEOLOGY_PLACEHOLDER_RE.test(m[1])) return { present: true, formOk: false, placeholder: true }; // the search's ready line pasted unfilled
+  return { present: true, formOk: true, hits: Number(hits[1]), priorNone: ARCHAEOLOGY_PRIOR_NONE_RE.test(prior[1]), readNone: ARCHAEOLOGY_READ_NONE_RE.test(m[1]) };
 }
 
 /**
@@ -385,9 +440,10 @@ export function archaeology(md) {
       else out.exempt++;                                 // no searchable word in the heading — no command to print
       continue;
     }
-    if (!a.formOk) { out.problems.push({ id: q.id, kind: 'malformed', grep }); continue; }
+    if (!a.formOk) { out.problems.push({ id: q.id, kind: a.placeholder ? 'placeholder' : 'malformed', grep }); continue; }
     out.attested++;
-    if (a.hits > 0 && a.priorNone) out.problems.push({ id: q.id, kind: 'hits-without-prior', hits: a.hits, grep });
+    if (a.hits > 0 && a.readNone) out.problems.push({ id: q.id, kind: 'hits-unread', hits: a.hits, grep });   // OW5 (#74)
+    else if (a.hits > 0 && a.priorNone) out.problems.push({ id: q.id, kind: 'hits-without-prior', hits: a.hits, grep });
   }
   return out;
 }
@@ -397,6 +453,12 @@ function archaeologyProblems(md) {
   const ARCH = (grep) => '<!-- archaeology: ' + (grep || 'grep -rniE "<nouns>" ' + ARCHAEOLOGY_PATHS)
     + ' → N hits · read: <files|none> · prior: <none | "<prior answer>" + address> -->';
   return archaeology(md).problems.map((p) => {
+    if (p.kind === 'placeholder')
+      return p.id + ': the archaeology line still carries the template\'s <…> placeholders — fill what you READ (files or `none`) and the prior'
+        + ' answer (`none`, the prior answer with its address, or `unrelated — <why>`); an unfilled line attests nothing.';
+    if (p.kind === 'hits-unread')
+      return p.id + ': archaeology says ' + p.hits + ' hits and `read: none` — the search FOUND something and nothing was read. Read the hits'
+        + ' (the door searches for you: review.mjs --search "<the question>") and name what you read, then the prior answer or `prior: unrelated — <why>`.';
     if (p.kind === 'hits-without-prior')
       return p.id + ': archaeology says ' + p.hits + ' hits and `prior: none` — the search FOUND something and no prior'
         + ' answer is named. Read the hits and name the prior answer with its address, or write `prior: unrelated — <why>`'
@@ -559,8 +621,9 @@ export function recordDecision(root, docPath, payload, cfg = loadContourConfig(r
     ...(payload.comments ? { comments: payload.comments } : {}),
     ...(payload.noRemarks ? { noRemarks: true } : {}), // bugs/113: "looked, no remarks" — a legal verdict on an artifact
     ...(payload.recovered ? { recovered: true } : {}), // LP (2.7, #66): the answer was saved on the owner's computer while the server was gone and picked up by the agent
+    ...(payload.staleRevision ? { staleRevision: true } : {}), // OW6 (2.8): made against an older revision — kept as data, not written into the document
   };
-  const isMd = extname(abs).toLowerCase() === '.md';
+  const isMd = extname(abs).toLowerCase() === '.md' && !payload.staleRevision; // OW6: an older revision's answer never lands by question numbers
   if (isMd) {
     const src = readFileSync(abs, 'utf8');
     const eol = /\r\n/.test(src) ? '\r\n' : '\n';
@@ -605,8 +668,23 @@ export function recordDecision(root, docPath, payload, cfg = loadContourConfig(r
     if (touched) writeFileSync(abs, lines.join(eol), 'utf8');
   }
   const p = decisionPaths(root, docPath, cfg);
+  // OW6 (2.8, the KAIF owner's word — answers are saved ONE AT A TIME in every project): a record from the SAME page — its `rev` is
+  // the document revision the previous record left (`revAfter`) — MERGES into the decision; a new revision of the document starts a
+  // new decision (old answers never land on renumbered questions). The archive (place 3) keeps every record as it came.
+  // [TESTED: 2026-09-25 19:37–20:01 · selftest: two records of one page merge, another revision starts a new decision; s22 D (7) on the
+  //  deployed copy: records 2 after two saves; mutant «merge removed» red exactly on both cases; report testcases/reports/2026-09-25_ow6-partial-save-revision.md]
+  if (payload.rev) record.rev = payload.rev;
+  if (isMd) record.revAfter = bodyHash(readFileSync(abs, 'utf8'));
+  const prev = existsSync(p.decision) ? readJson(p.decision) : null;
+  const decision = { ...record };                          // place 2 — merged; the archive and the caller get THIS record as it came
+  if (prev && payload.rev && prev.revAfter === payload.rev && (prev.kind || 'interview') === record.kind) {
+    if (prev.answers || record.answers) decision.answers = { ...(prev.answers || {}), ...(record.answers || {}) };
+    if (prev.artifacts || record.artifacts) decision.artifacts = { ...(prev.artifacts || {}), ...(record.artifacts || {}) };
+    if (!record.comment && prev.comment) decision.comment = prev.comment;
+    decision.records = (prev.records || 1) + 1;
+  }
   mkdirSync(resolve(root, cfg.archiveDir), { recursive: true });
-  writeFileSync(p.decision, JSON.stringify(record, null, 2) + '\n', 'utf8');      // place 2
+  writeFileSync(p.decision, JSON.stringify(decision, null, 2) + '\n', 'utf8');    // place 2
   writeFileSync(p.archive(at), JSON.stringify(record, null, 2) + '\n', 'utf8');   // place 3 — never rewritten
   return record;
 }

@@ -132,6 +132,21 @@ Two caps that keep the protection layer from becoming the project's main source 
 
 ---
 
+## The owner's debt comes first — a bug he flagged, a decision he answered
+
+An owner's answered decision once waited eleven days behind planned work; he found it unapplied himself, mid-game (origin issue #86).
+The field owner's words, rendered from Russian (quoted in that issue): "the calendar says September 19; I decided on the 8th — what were you doing
+for 11 days?" The canon ranked WORK by the metric and the plan, and nothing said that DEBT preempts them. Four steps:
+
+1. **A bug the owner flagged and a decision he answered but you have not applied are job number one** — ahead of the plan and the
+   metric. The task in flight goes to its nearest clean cut (a green commit), then the debt.
+2. **"Apply it together with X" never parks the decision in X's queue** — raise X with it, or apply the decision alone.
+3. **Filing a bug is fixing it in the same move — or writing when:** `Fixing: <this session | after <commit or plan step>>` in the
+   bug document; "later" without an address is not a plan.
+4. **Where the debt is seen:** `node .kaif/tools/contour/review.mjs --queue --list` names his decisions awaiting application FIRST,
+   with their age and no date cutoff; `/what-next` carries the "Owner debt:" line and its row 1 closes it
+   (`node .kaif/tools/kaif-ranking-lint.mjs check <draft>`); `/resume` step 2 takes the debt above everything.
+
 ## Instrumentation — build a test harness, don't guess
 
 The single biggest force multiplier for autonomous debugging is a **harness**: tooling that lets the

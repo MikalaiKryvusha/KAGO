@@ -89,13 +89,14 @@ without those resources.
 
 > 📥 **The human wrote mid-loop — classify first** (the drive-by rule, `AGENT_GUIDE.md`): a drive-by idea/bug not about the
 > current task goes to `ideas/`/`bugs/` (source noted) with a one-line confirmation, and the loop
-> CONTINUES; only a direct interactive request or an explicit "stop/switch" interrupts the series.
+> CONTINUES; only a direct interactive request or an explicit "stop/switch" interrupts the series. A message delivered MID-TURN is the same word — the system signs its author (`AGENT_GUIDE.md` → "The owner's word mid-turn"): "stop" ends the loop in this turn; "switch" writes a `PARKED:` line in `STATUS.md` first.
 
 ## When to STOP the loop (and report to the human)
 
 - The owner NAMED an end time for this run and it has arrived → **start `/end-chat-soft`**; until
   that time — normal pace, no early finish out of deadline fear (`AGENT_GUIDE.md` → Working until
-  a named time).
+  a named time). At the start of each iteration take the clock by a probe (`date '+%Y-%m-%d %H:%M %z'`), never by feel; before any closing
+  ceremony print `BOUNDARY: now <that probe> · named <the owner's time> · pool <empty | N items>` — the clock decides (origin issue #96).
 - The autonomous pool is exhausted (everything left needs the human/resources).
 - A serious UI/UX/brand/architecture fork the agent must NOT decide alone → file an `/interview` and
   pause. (A project running the `/owner-reviews` contour queues the interview to its "N accumulated"

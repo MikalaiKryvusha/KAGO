@@ -18,7 +18,7 @@ stdlib localhost server that lives seconds (serve → record → die), system ut
 voice/sound/notification/browser; the page is self-contained and opens offline. The temptation to
 take a static-site generator or UI framework is large and the win is zero.
 
-**KAIF 2.6 — the contract has a ONE-PAGE executable form: `.kaif/INTERACTIVE_CONTOUR_SPEC.md`** (ships
+**Since 2.6 the contract has a ONE-PAGE executable form: `.kaif/INTERACTIVE_CONTOUR_SPEC.md`** (ships
 with the update as a bundle-only page beside the other `.kaif/_*` skeletons; origin issues #19 #38 #47
 #51 — four contours rebuilt per project and broken on their own edge cases, the last one opened WITHOUT
 radio buttons because the options were typed as paragraphs). The page names, in a form a session verifies
@@ -84,17 +84,23 @@ raised in a batch next to a live question.
 - **I7. Autonomous loops accumulate, never block.** The queue is a STATE FILE — never move live
   documents into a pending folder (moving breaks every link to them from status and plans); one
   "N accumulated" page (each card linking to its document) calls the owner ONCE per batch. Paired
-  with I8, the batch page must not live long: the owner answers one document, the contour closes
-  and wakes the agent; if the queue still holds items, re-raising the batch is the agent's duty.
+  with I8 (2.8): the page lives until its last question and the waiter wakes the agent on each answer;
+  a batch page closed while items still wait — re-raising the batch is the agent's duty.
 
 **The waiting-and-wake loop (I8–I14):**
 
-- **I8. Saving wakes the waiter.** Field wording, vendored verbatim: *"The contour must WAKE the
-  waiting agent on save. The agent learns of events by the TERMINATION of a process it started —
-  therefore a long-lived server and a wake-up are mutually exclusive, and the wake-up wins. Any
-  recorded decision terminates the contour; if anything remains unanswered, re-opening the page is
-  the AGENT's duty, never the human's."* Every check before this one asserted the path TO the
-  human; the path BACK is what the contour exists for.
+- **I8. Saving wakes the waiter — and the page lives until its last question.** Field wording of 2.2,
+  vendored verbatim: *"The contour must WAKE the waiting agent on save. The agent learns of events by
+  the TERMINATION of a process it started — therefore a long-lived server and a wake-up are mutually
+  exclusive, and the wake-up wins. Any recorded decision terminates the contour; if anything remains
+  unanswered, re-opening the page is the AGENT's duty, never the human's."* The first half stands;
+  the conclusion is REVISED in 2.8 by the KAIF owner's word <!-- KAIF-VERSION-OK: the version the conclusion was revised in --> — answers are saved one at a time in every
+  project, as on the field page he pointed to: the process that ends is a separate WAITER
+  (`review.mjs --wait <doc>`, exit 0 on each recorded answer, 2 when the contour ended without one or none came up within a minute), and
+  the page's server lives while anything on it is unanswered and ends with the last answer. Start
+  both as tracked background tasks (I31); on each waiter exit apply the answer and start the waiter
+  again while questions are left — re-opening a page the owner still has is never the agent's move.
+  Every check before this one asserted the path TO the human; the path BACK is what the contour exists for.
 - **I9. The machine's patience is infinite.** Waiting for a human's answer has NO timeout by
   default — the default is `0`, not "a big number" (a finite default gives the same defect, just
   rarer, and a rare defect is worse: it arrives when nobody expects it). A finite limit is an
@@ -184,6 +190,13 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   browser refuses, the page honestly says "please close me" — never a silent "hangs as it was".
 - **I28. The voice call by name is the DEFAULT level,** not an option for the brave: a voice built
   but switched off by a setting exists only on paper.
+- **I28b. The call names the caller** (2.8, origin issue #98: a field owner with three windows of one project could not tell which
+  one called). With more than one workspace of the project (a `/team-deployment` team, parallel worktrees) every call — the voice,
+  the console banner `CALL · <session>:`, the page window's title — names the calling session right after the owner: «<owner>, this
+  is <session>. …». The name is derived, never typed per call: `KAIF_SESSION_NAME`, else the workspace directory
+  (`<project>-team-<role>` → `<role>`), `main` for the main copy; one workspace — no name; spoken by the language pack
+  (`dev2` → «dev two»). A request for the owner's hands or a quick answer outside a page goes by the same call —
+  `review.mjs --call "<what is needed>"` (`--dry-run` prints it without sound) — never as a line left in the chat (origin issue #95).
 - **I29. One document — one window.** A lock with pid and address; a second launch prints the live
   address and exits. Two windows are two calls AND two different drafts — the port is part of the
   web origin, so a draft written in one window is invisible to the other.
@@ -193,11 +206,11 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
 - **I31. Process termination is the answer-delivery channel.** The agent starts the contour as a
   TRACKED background task and subscribes to its termination; a bare `&` is not tracked by the
   harness and no notification ever comes.
-  **The launch is a COMMAND the agent copies, never a paragraph it interprets** (KAIF 2.7, origin
+  **The launch is a COMMAND the agent copies, never a paragraph it interprets** (KAIF 2.7) — origin
   issue #64: an agent launched the contour in the foreground with `--timeout 60` — the shell's
   timeout killed it and the owner's window with it; a second launch took a fresh port and orphaned
   the draft; a third handed the URL to `Start-Process` — a tab in the owner's working browser; three
-  invariants in a row, nothing went red; the owner lost the answer he was typing):
+  invariants in a row, nothing went red; the owner lost the answer he was typing:
 
   | Agent system | Ready launch |
   |---|---|
@@ -211,6 +224,10 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   (`display-mode: standalone` is false there). And the generator comes up on the PREVIOUS run's port
   when that process is gone (I29 mechanized): the draft of the window that outlived the process is
   restored on load; a taken port is named in the log together with the loss — never a silent fresh port.
+  **Next to the page — the waiter (2.8, I8):** the same way, `node .kaif/tools/contour/review.mjs --wait <doc>` — it
+  ends with exit 0 on each recorded answer (the page stays open while questions are left) and with 2 when
+  the contour ended without one or none came up within a minute (2.8, court B-F1: it used to wait forever when the page had closed
+  before it started — start it BEFORE the page); apply the answer, start the waiter again while questions are left.
 
 **The call (I32–I36):**
 
@@ -310,7 +327,9 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   the owner's will (origin issue #54: "you brought me an OLD question… WHICH YOU YOURSELF ALREADY
   FIXED"). The fact lives next to the others (`<decisionsDir>/implemented.json`: `{ "<doc>": {
   "<Q>": { "at", "where" } } }`) and is written by `--mark-implemented <doc> <Q> --where <commit or
-  file>` — never inferred from a diff, never written "later": implementing and marking are one move.
+  file>` — never inferred from a diff, never written "later": implementing and marking are one move. A question a WITHDRAWAL
+  made moot (a release retired the feature it was about — 2.8, epic CH) takes the same fact through `--mark-withdrawn <doc> <Q>
+  --why <reason>` (`"withdrawn": true`); only an OPEN question is withdrawn — an answered one is the owner's word and stays.
 - **I45. The queue and the show REFUSE what is already implemented — out loud, exit 2.** A document
   whose every open question is implemented is not owed to the owner: `--queue`, `--queue --list` and
   a direct show print `implemented, but open: <doc> Q1 → close the status (or fill the answer)` and
@@ -492,8 +511,9 @@ hand over a path is born (I15).
   rides to the synthesizer as a FILE and the command itself is ASCII-only · print plain text to
   the console — the exit code does not prove the human heard.
 - **C9. Accumulation — and immediately I8.** The queue is a state file; live documents are
-  never moved (I7). Any save closes the contour; if the queue still holds unanswered items,
-  re-raising the page is the agent's duty (I8). The command that holds the server MUST have a
+  never moved (I7). A save no longer closes the contour (2.8): the page lives until its last
+  question and the waiter wakes the agent on each answer (I8); a queue still holding unanswered items
+  after its page closed — re-raising the page is the agent's duty. The command that holds the server MUST have a
   build-and-exit flag (`--no-serve`) — otherwise any synchronous caller, your own QA run first
   of all, hangs forever; and every child call inside the guard carries a hard deadline.
 - **C10. The QA run in a live browser — eleven blocks, the minimal field set that caught

@@ -19,7 +19,7 @@ Stop the loop ONLY if one of:
    question → exit the loop immediately, switch to them; a **drive-by idea/bug NOT about the current
    task** → capture it as a document right away (`/propose-idea` / `/report-bug`, source noted:
    "tossed by the owner"), confirm in one chat line and CONTINUE the loop; vision-level →
-   `/fix-vision`, then continue.
+   `/fix-vision`, then continue. A message delivered MID-TURN is the same word — the system signs its author (`AGENT_GUIDE.md` → "The owner's word mid-turn"): "stop" ends the loop in this turn; "switch" writes a `PARKED:` line in `STATUS.md` first.
 2. **ONLY a truly critical error** that can't be worked around autonomously and makes continuing
    impossible in principle (toolchain hopelessly broken; repo in an unresolvable state). This is RARE.
    ❗ **Non-critical errors are NOT a stop condition — just keep working:** a failed build (fix it), a
@@ -27,7 +27,8 @@ Stop the loop ONLY if one of:
    (take another), a crash (investigate/fix). These are normal working situations.
 3. **The owner NAMED an end time when starting this run** ("work until 11", "for an hour") and it
    has arrived → **start `/end-chat-soft`**; until that time — normal pace, no early finish out of
-   deadline fear (`AGENT_GUIDE.md` → Working until a named time).
+   deadline fear (`AGENT_GUIDE.md` → Working until a named time). At the start of each iteration take the clock by a probe (`date '+%Y-%m-%d %H:%M %z'`), never by feel; before any closing
+   ceremony print `BOUNDARY: now <that probe> · named <the owner's time> · pool <empty | N items>` — the clock decides (origin issue #96).
 
 ⚠️ **No time-stop, no pauses, no time checks** (unless the owner named an end time — condition 3).
 Unlike the night loop, don't stop at any hour and don't

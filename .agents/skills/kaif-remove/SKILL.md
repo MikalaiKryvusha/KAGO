@@ -43,7 +43,8 @@ intact and working — we only remove what KAIF added, surgically.
      the deployed skills (`.claude/skills/` or the agent's equivalent), the `kaif` tools,
      `KAIF.md`/`framework/` if present, `.kaif/`, and the KAIF additions to the auto-loaded context file
      (`CLAUDE.md`/`AGENTS.md`).
-   - **Content artifacts (kept in partial, removed in full):** `bugs/`, `interviews/`, `ideas/`,
+   - **Content artifacts (kept in partial, removed in full):** the house-rules file `HOUSE_RULES.md` and the voice portrait
+     `AUTHOR_STYLOMETRY.md` (if present), `bugs/`, `interviews/`, `ideas/`,
      `researches/`, `homeworks/`, `plans/`, `reports/`, etc.
    - **NEVER touched:** the user's own project files and directories.
 

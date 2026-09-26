@@ -63,12 +63,9 @@ the project's sphere library: its *Verification by observation* and *Minimum evi
 
 ## What the word "test" means — a functional run on the real product, by the user's path
 
-The word was never defined, and a session used it honestly while the owner read it as false (origin
-issue #62: "25 closed, all tested" on unit · self-test · mutant, recounted by the owner-QA as **3 of
-25**). The owner then defined "by hand" for an AI agent (decision #116, rendered): it writes itself the
-scenarios from the functionality of the module, the feature, the fixed bug, writes itself the machinery,
-and in the real product — stage or production — walks the application: presses the buttons, reads the
-lines, looks at the screen, reads the logs — as a QA would by hand. So:
+The agent does by machinery what a QA does by hand: it derives the scenarios from the functionality of
+the module, the feature or the fixed bug, then walks the real product — stage or production — the way the
+user does, pressing the buttons, reading the lines, looking at the screen and reading the logs. So:
 
 1. **A test is a functional run on the REAL product (stage or production), by the user's path, whose
    result is READ.** The agent derives the scenarios from the functionality under test (the chain
@@ -85,10 +82,8 @@ lines, looks at the screen, reads the logs — as a QA would by hand. So:
 ## The testing activities — the chain that makes "tested" mean something
 
 The trust contract below says how much to TRUST a result; this section says how the testing WORK
-is done. Field-paid reason for its existence (origin issue #21): with no obligation to design the
-observation set, an agent ran ONE happy path, reported the feature as working, and the owner
-produced five uncovered cases in about a minute. Testing a feature is a chain of activities, not
-one observation — walk it in order, each step with its exit condition:
+is done. Testing a feature is a chain of activities, not one observation — walk it in order, each
+step with its exit condition:
 
 1. **Analyze the test basis.** Name the source of truth for the expected behaviour — a
    requirement, the owner's word, a spec, the canon map (`REQUIREMENTS_FRAMEWORK.md` shapes
@@ -113,9 +108,16 @@ one observation — walk it in order, each step with its exit condition:
 5. **Run the control case before calling the feature working.** Turn the controlling flag off /
    remove the controlling parameter and observe the feature NOT work: a feature check that cannot
    fail proves nothing (gate 5 below, applied at feature level).
-6. **File defects in the defined shape.** Steps to reproduce · expected vs actual ·
-   severity/priority · environment · evidence — then hand off to `BUG_FIXING_FRAMEWORK.md`
-   (one document per defect; skill `/report-bug`).
+6. **Hunt the reproduction** when a defect or a reported phenomenon does not reproduce on the
+   first attempt: vary it over named axes — data and state · position · timing and races · entry
+   point · fresh vs accumulated account · stage vs production · network — and write every attempt
+   down. *Exit:* the steps reproduce it, or the report says "not reproduced" and lists at least
+   three variants tried, each with its outcome — one attempt is never a verdict.
+7. **File defects in the defined shape** — the tester's report a developer reads: **Description ·
+   Steps to reproduce · Expected result · Actual result**, plus **Build · Environment · Evidence** and the
+   severity/priority the tracker takes; the steps are the user's path in the product, never state assembled
+   through a back door (template C of `/report-bug`; `node .kaif/tools/kaif-testrun-lint.mjs bug <report>`
+   checks the sections and the hunt) — then hand off to `BUG_FIXING_FRAMEWORK.md` (one document per defect).
 
 ## Test-status markers — the trust contract
 
@@ -147,23 +149,16 @@ of the project language:
    other sphere → the nearest commentable carrier the sphere convention offers.
 7. **A FEATURE marker requires a designed set.** `[TESTED]` on a feature is legal only alongside the
    written case set with its covered dimensions (the activities chain above); a single observation
-   flips the marker of a single CASE, never of the feature. "It worked once on the happy path" is a
-   case-level fact — a marker satisfied by one observation certifies that something was observed,
-   while silently claiming the feature was tested: two different statements (origin issue #21).
+   flips the marker of a single CASE, never of the feature: "it worked once on the happy path" is a
+   case-level fact.
 
 Markers are the persistent memory of verification: fable-method's Step 5 verifies *in the moment*; the
-marker preserves that fact **across sessions**, for future agents and posterity — who else will know the
-foundation was load-tested?
+marker preserves that fact **across sessions**, for future agents.
 
 ## The work produces its own means of checking
 
-"Raw deserves no trust" binds the PRODUCER, not only the checker: building something includes
-building what checks it — a test suite, a check-list, test cases, a fixture, a guard. They are
-planned WITH the work and land in the SAME step, never "later": verification postponed to a later
-step is verification that never happens, and verification that lives only in a session's scratchpad
-dies with the session. This is principle 3 (early testing) applied to production rather than to
-inspection, and it is why the harness section below exists — the harness is what makes the checking
-repeatable once it exists.
+Building something includes building what checks it — a test suite, a check-list, test cases, a
+fixture, a guard — planned WITH the work and landing in the SAME step, never "later".
 
 The contract in step form — walk it on every non-trivial piece of work:
 
@@ -182,11 +177,7 @@ that can re-check it.
 
 ## An executed run produces its report
 
-The chain above puts test documents BEFORE a run and the trust contract puts a marker INSIDE the
-claim — and nothing said what the run itself must leave behind. Field-paid (origin issue #59; the
-owner-QA's word: "THERE WAS NO TESTING"): the agent ran a probe twice, wrote `[TESTED]` and "stage
-accepted", and the owner could see neither a command, nor a moment, nor what was found. A run that
-left no artifact is indistinguishable from a run that never happened. So:
+A run that left no artifact is indistinguishable from a run that never happened. So:
 
 1. **Every executed run leaves a run report** — a live probe, a smoke, a polygon, a functional
    run — in the test-doc home, as a catalog by date:
@@ -321,30 +312,20 @@ a verification and never flips a marker; the owner's recorded verdict is.
 
 ## How this composes with the rest of KAIF
 
-- **`REQUIREMENTS_FRAMEWORK.md`** — shapes what is REQUIRED before anything is made; this framework
-  verifies what was MADE against it. Principle 3 (early testing) is executed at the requirements
-  stage by that canon; bugs are what is born where the two meet (`BUG_FIXING_FRAMEWORK.md`). The
-  boundary does not close the door on requirements analysis: deriving the test basis FROM the
-  requirements is step 1 of the activities chain here.
-- **fable-method** — Step 5 (verify by observation) is HOW a single check is performed; this framework
-  says WHAT must carry a status and how trust propagates. The triviality gate still applies: a trivial
-  change verified by its one obvious check needs no ceremony beyond its normal comment.
+- **`REQUIREMENTS_FRAMEWORK.md`** — shapes what is REQUIRED; this framework verifies what was MADE
+  against it. Principle 3 (early testing) is executed at the requirements stage there; deriving the test
+  basis FROM the requirements is step 1 of the chain here; bugs are born where the two meet (`BUG_FIXING_FRAMEWORK.md`).
+- **fable-method** — Step 5 (verify by observation) is HOW one check is done; this framework says WHAT carries a status.
 - **`/fable-judge`** — treats test-status markers as claims: a `[TESTED]` it cannot reproduce is REFUTED.
-- **The guard-declaration block as a guard** — the optional tool module `kaif-guard-lint`
-  (`.kaif/tools/`) runs gate 5's second half mechanically over explicit `@guard` / `@forensic` /
-  `@fork` markers; advisory, `SKIPPED=3` when a tree declares nothing.
-- **The run-report form as a guard** — the optional tool module `kaif-testrun-lint` (`.kaif/tools/`)
-  judges the seven fields and the date catalog of "An executed run produces its report"; advisory,
-  `SKIPPED=3` when the test-doc home has no `reports/`.
+- **Its guards** — optional tool modules in `.kaif/tools/` (`.kaif/KAIF_REFERENCE.md` §14): `kaif-guard-lint` (gate 5's
+  declaration block) and `kaif-testrun-lint` (the run report's seven fields; `bug` — the tester's report); advisory.
 - **`BUG_FIXING_FRAMEWORK.md`** — where testing's findings go (one doc per defect; 3 attempts → research).
-- **Spheres** (`.kaif/spheres/`) — define the sphere's evidence, verification-by-observation meaning, and
-  fraud table; principle 6 lives there.
+- **Spheres** (`.kaif/spheres/`) — the sphere's evidence, its meaning of "verified by observation", its fraud table (principle 6).
 - **The harness** — invest in tooling that makes verification observable and deterministic
   (`AGENT_GUIDE.md` → Test harness); eyeballing is not testing.
+- **Why a rule here is the way it is** — the field history of the sections that have one (the ticket that
+  paid for a rule, the owner's word) lives in `.kaif/KAIF_REFERENCE.md` §17, under the same heading; read the
+  entry before changing or dropping a rule.
 
-*Grounding: the seven principles and the activities chain (test basis → design techniques →
-documentation → execution → defect reporting) are the ISTQB canon (istqb.org; ru: testbase.ru) —
-distilled here for an AI agent across all spheres; the run report is the ISO/IEC/IEEE 29119-3 test
-execution log and test completion report distilled to seven fields. The activities section, the
-feature/case marker rule, gates 6–7 and the run report were paid for in the field: origin issues #21,
-#18 and #59.*
+*Grounding: the seven principles and the activities chain are the ISTQB canon (istqb.org; ru: testbase.ru);
+the run report is the ISO/IEC/IEEE 29119-3 test execution log and test completion report, distilled to seven fields.*
