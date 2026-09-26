@@ -126,8 +126,12 @@ export function runInFlight(nodeProcs, armed, isAlive) {
   // `bugs/64`, близнец `bugs/21` контуром выше: там уборка убила прогон, здесь — страницу
   // владельца (дважды за вечер, его слова: «опять закрылось само!!!!»). Мгновенные формы без
   // сервера и окна (`--no-serve`, `--selftest`) уборке не преграда.
-  const review = (nodeProcs ?? []).find((p) => /tools[\\/]review\.mjs/u.test(p.cmd)
-    && !/--no-serve|--selftest/u.test(p.cmd));
+  // С KAIF 2.8 (plans/104) страницу держит ПОСТАВЛЯЕМЫЙ контур `.kaif/tools/contour/review.mjs`, входом — `tools/ask.mjs`, и
+  // страница живёт до последнего вопроса, через несколько моих ходов, — узнаём все три пути; сторож `--wait` ждёт владельца
+  // так же. Мгновенные формы поставки (`--dry-run`, `--list`, `--search`, `--check`, `--help`) — тоже не преграда.
+  // [TESTED: 2026-09-26 · блоки «bugs/64 на пути 2.8» ниже; мутация — убрать `ask|contour` из регулярки → блоки красные]
+  const review = (nodeProcs ?? []).find((p) => /tools[\\/](?:review|ask)\.mjs|tools[\\/]contour[\\/]review\.mjs/u.test(p.cmd)
+    && !/--no-serve|--selftest|--dry-run|--list|--search|--check|--help/u.test(p.cmd));
   if (review) return { busy: true, why: `контур согласований ждёт владельца: pid ${review.pid}` };
 
   // `--dry-run` ничего не пишет и никого не поднимает; убирать при нём законно.
@@ -274,6 +278,19 @@ async function selfTest() {
   check('мгновенные формы контура (--no-serve, --selftest) уборке не преграда',
     runInFlight([P(4, 'node tools/review.mjs doc.md --no-serve --no-signal')], null, alive).busy === false
     && runInFlight([P(5, 'node tools/review.mjs --selftest')], null, alive).busy === false);
+
+  // bugs/64 на пути KAIF 2.8 (plans/104): вход `tools/ask.mjs`, дочерний поставляемый контур и его сторож ответа.
+  for (const [pid, cmd] of [[6, 'node tools/ask.mjs interviews/interview_031.md'],
+    [7, 'node D:\\work\\ai_sandbox\\KAGO\\.kaif\\tools\\contour\\review.mjs interviews/interview_031.md'],
+    [8, 'node tools/ask.mjs --wait interviews/interview_031.md']]) {
+    const r = runInFlight([P(pid, cmd)], null, alive);
+    check(`bugs/64 на пути 2.8: живой контур делает машину занятой — ${cmd.split(' ').slice(1, 3).join(' ')}`,
+      r.busy === true && /контур согласований/u.test(r.why), r.why);
+  }
+  check('bugs/64 на пути 2.8: мгновенные формы поставки уборке не преграда',
+    ['node tools/ask.mjs --selftest', 'node tools/ask.mjs --call "x" --dry-run', 'node tools/ask.mjs --queue --list',
+      'node .kaif/tools/contour/review.mjs --search "x"', 'node tools/ask.mjs --help']
+      .every((cmd, i) => runInFlight([P(20 + i, cmd)], null, alive).busy === false));
 
   check('посторонний node не делает машину занятой',
     runInFlight([P(2, 'node some/other/thing.mjs')], null, alive).busy === false);

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>KAGO · Интервью 032 — новая страница вопросов: читается ли, и убирать ли старую</title><link rel="icon" href="data:,"><style>
+  :root { --bg:#f7f7f5; --card:#ffffff; --ink:#1d1d1f; --muted:#6b6b70; --line:#d9d9de;
+    --wait:#d97706; --done:#16a34a; --you:#2563eb; --danger:#dc2626; --accent:#2563eb;
+    --tagink:#0b1020; --tagwait:#fbbf24; --tagdone:#4ade80; --tagyou:#93c5fd; --tagrec:#86efac; --recbg:rgba(22,163,74,.10); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17171a; --card:#212126; --ink:#ececf0; --muted:#a0a0a8; --line:#3a3a42;
+      --wait:#f59e0b; --done:#22c55e; --you:#60a5fa; --danger:#f87171; --accent:#60a5fa;
+      --tagink:#0b1020; --tagwait:#f59e0b; --tagdone:#22c55e; --tagyou:#60a5fa; } }
+  html { zoom:1.7 } /* #106: the whole page at PAGE_SCALE, like Ctrl+Plus */
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui, "Segoe UI", sans-serif; }
+  /* The header SCROLLS WITH THE PAGE — the owner's word (2026-09-05): not sticky. Only the emergency banner may pin. */
+  header { position:static; background:var(--card); border-bottom:1px solid var(--line); padding:10px 230px 10px 20px; display:flex; gap:12px; align-items:baseline; z-index:5; flex-wrap:wrap }
+  header .project { font-weight:700; color:var(--accent) } .kind { color:var(--muted) } .langnote { font-size:12px; color:var(--muted) }
+  main { max-width:900px; margin:0 auto; padding:16px 20px 40px }
+  .doc { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 22px; overflow-x:auto }
+  .doc pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; overflow-x:auto }
+  .doc code { background:var(--bg); padding:1px 4px; border-radius:4px }
+  .doc table { border-collapse:collapse; margin:8px 0 } .doc th,.doc td { border:1px solid var(--line); padding:4px 8px }
+  .doc blockquote { border-left:3px solid var(--line); margin:8px 0; padding:2px 12px; color:var(--muted) }
+  .qcard { background:var(--card); border:1px solid var(--line); border-left:5px solid var(--wait); border-radius:10px; padding:12px 16px; margin:14px 0 }
+  .qcard.done { border-left-color:var(--done) } .qcard.done > * { opacity:.72 } .qcard.done .addcomment { opacity:1 }
+  .tag { font-size:12px; padding:2px 8px; border-radius:99px; color:var(--tagink); font-weight:600 }
+  .tag.wait { background:var(--tagwait) } .tag.done { background:var(--tagdone) } .tag.you { background:var(--tagyou) } .tag.rec { background:var(--tagrec) }
+  .opt.rec { background:var(--recbg); border-radius:10px; padding:6px 10px; margin-left:-10px }
+  .tag.notice { background:var(--muted) }
+  .noticehead { margin-top:28px; padding-top:10px; border-top:2px solid var(--line) }
+  .group.notice { border-left:5px solid var(--muted); border-radius:10px; padding-left:14px }
+  .cards { display:grid; gap:14px }
+  .card { display:grid; gap:6px; padding:18px 20px; background:var(--card); border:1px solid var(--line); border-left:6px solid var(--wait); border-radius:12px; text-decoration:none; color:var(--ink) }
+  .card:hover { border-color:var(--accent); border-left-color:var(--accent) } .card.notice { border-left-color:var(--you) }
+  .ckind { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted) } .ctitle { font-size:19px; font-weight:600; line-height:1.35 }
+  .cmeta { font-size:13px; color:var(--muted); font-family:ui-monospace,Consolas,monospace } .cpend { font-size:14px; color:var(--wait); font-weight:600 }
+  .card.notice .cpend { color:var(--you) } .cgo { font-size:14px; color:var(--accent) }
+  .opt { display:flex; gap:12px; align-items:flex-start; margin:10px 0; cursor:pointer }
+  .opt input[type=radio] { width:22px; height:22px; flex:0 0 auto; margin-top:0; accent-color:var(--accent); cursor:pointer }
+  .opt div p { margin:2px 0 } .qbody p { margin:6px 0 } .qmeta { font-size:13px; color:var(--muted); margin:6px 0 }
+  .outbox { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:10px 0; max-height:60vh; overflow:auto }
+  .qcard.danger { border-left-color:var(--danger) }
+  details.archive { margin:22px 0 } details.archive > summary { cursor:pointer; color:var(--muted); font-weight:600; padding:8px 0 } /* QL3 (#54): the settled below, one fold */
+  /* proofreading: paragraph cards with their id in the margin; mockup: the image at page width */
+  .pcard { background:var(--card); border:1px solid var(--line); border-left:5px solid var(--you); border-radius:10px; padding:10px 16px; margin:12px 0 }
+  .pid { font-size:12px; color:var(--muted); font-family:ui-monospace,Consolas,monospace } .ptext p { margin:6px 0 }
+  .mock { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; margin:10px 0; text-align:center }
+  .mock img { max-width:100%; height:auto }
+  textarea, input[type=text] { width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px; font:inherit }
+  /* QL4 (2.7, origin issue #60 — the owner's word: the Save button is a FAB at the top right): a control pinned to the
+     BOTTOM edge is unreachable when the window is taller than the screen (remote desktop, phone) — the owner typed
+     the answers and could not press the button. The FAB is fixed at the top right, visible at any scroll and any
+     height; the status is a pill under it on its own background, gone when empty. A bottom bar is FORBIDDEN (spec §4). */
+  .fab { position:fixed; top:12px; right:16px; z-index:50; display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:60vw }
+  .fab button { border-radius:999px; box-shadow:0 4px 14px rgba(0,0,0,.28); padding:10px 20px }
+  .fab #save { zoom:0.882 } /* #106: the primary Save button renders at SAVE_SCALE of the base */
+  .fab #status { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:4px 12px; font-size:13px; text-align:right } .fab #status:empty { display:none }
+  @media (max-width:952px) { .fab { top:8px; right:8px } .fab button { padding:8px 14px } header, #banner { padding-right:170px } }
+  .muted{opacity:.7;font-size:.95em;margin:4px 0 0} /* bugs/113: the no-remarks hint under the field */
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 18px; font:inherit; cursor:pointer } button:disabled { opacity:.5; cursor:default }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent) }
+  .err { color:var(--danger); font-weight:600 } .okmsg { color:var(--done); font-weight:600 }
+  #rescue { display:none; border:2px solid var(--danger); border-radius:10px; padding:12px; margin:14px 0 }
+  #banner { display:none; position:sticky; top:0; background:var(--danger); color:#fff; padding:8px 230px 8px 20px; font-weight:600; z-index:6 } /* OW6: room for the floating Save button, as the header has */
+  /* I26 (#64): the page found itself in a TAB, not in the contour's own window — a yellow note, never the red banner:
+     the answer still goes through; what is at risk is the draft (it lives in this tab) and the auto-close. */
+  #tabnote { display:none; background:#fde68a; color:#1d1d1f; padding:8px 20px; font-weight:600; border-bottom:1px solid #f59e0b }</style></head><body><header><span class="project">KAGO</span><span class="kind">интервью</span><span>Интервью 032 — новая страница вопросов: читается ли, и убирать ли старую</span> <span class="tag done">отвечено 0</span> <span class="tag you">ждут вас 2</span></header><div id="banner"></div><div id="tabnote"></div><main><div class="doc"><h1>Интервью 032 — новая страница вопросов: читается ли, и убирать ли старую</h1>
+<p><strong>Topic:</strong> две короткие проверки новой страницы (KAIF 2.8). На них же проверяется главное новое: ответ на каждый вопрос</p>
+<p>записывается отдельно, и страница после первого ответа не закрывается.</p>
+<p><strong>Status:</strong> 🟡 ждёт ответа</p>
+<p><strong>Создано:</strong> 2026-09-26 · <strong>Родитель:</strong> ваше слово в чате 26.09: «давай сделаем, что осталось, что 2.8 просит и у нас это пока</p>
+<p>долг - делаем. интерактивный контур, голос» · <code>plans/104</code> шаг Ш7</p>
+<p><strong>Куда уйдут ответы:</strong> Q1 → размер страницы (настройка контура, если скажете «крупно» или «мелко») · Q2 → старый вход</p>
+<p><code>npm run ask:legacy</code> (<code>package.json</code>, <code>HOUSE_RULES.md</code> §6)</p>
+<hr>
+<h2>Коротко</h2>
+<p>Это новая страница. Ответили на первый вопрос — нажмите «Записать»: страница скажет «Записано. Осталось вопросов: 1» и</p>
+<p>останется открытой. Второй вопрос можно ответить сразу или позже — окно ждёт.</p></div><h2>Вопросы</h2><section class="qcard"><div><strong>Q1.</strong> Страница читается без увеличения? <span class="tag wait">без ответа</span> <span class="tag you">ждёт вас</span></div><div class="qbody"><ul>
+<li><strong>Ситуация.</strong> Страница теперь выводится в 1,7 раза крупнее обычного размера браузера, кнопка «Записать» — в 1,5 раза.</li>
+<li><strong>Что вы получаете.</strong> Читаете без Ctrl+колёсика.</li>
+<li><strong>Чем платите.</strong> На узком окне меньше текста на экране.</li>
+</ul></div><label class="opt"><input type="radio" data-draft name="choice:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q1" value="A"><div><p><strong>A)</strong> Читается — оставить так.</p></div></label><label class="opt"><input type="radio" data-draft name="choice:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q1" value="B"><div><p><strong>B)</strong> Слишком крупно — уменьшить.</p></div></label><label class="opt"><input type="radio" data-draft name="choice:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q1" value="C"><div><p><strong>C)</strong> Мелко — ещё крупнее.</p></div></label><p><input type="text" data-draft name="text:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q1" placeholder="Свой вариант или текст ответа"></p><p><textarea data-draft name="comment:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q1" rows="2" placeholder="Комментарий"></textarea></p></section>
+<section class="qcard"><div><strong>Q2.</strong> Старую страницу убирать? <span class="tag wait">без ответа</span> <span class="tag you">ждёт вас</span></div><div class="qbody"><ul>
+<li><strong>Ситуация.</strong> Старая страница закрывалась после первого же ответа. Она пока оставлена запасной — на случай, если новая</li>
+</ul>
+<p>  вам не подойдёт.</p>
+<ul>
+<li><strong>Что вы получаете.</strong> С ответом A — одна страница, без двойников. С ответом B — запасной путь ещё неделю.</li>
+<li><strong>Чем платите.</strong> A — если новая где-то подведёт, вернуть старую — отдельная работа. B — неделю в проекте живут две страницы.</li>
+</ul></div><label class="opt"><input type="radio" data-draft name="choice:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q2" value="A"><div><p><strong>A)</strong> Убрать сразу — новая подошла.</p></div></label><label class="opt"><input type="radio" data-draft name="choice:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q2" value="B"><div><p><strong>B)</strong> Подержать неделю запасной, потом убрать.</p></div></label><p><input type="text" data-draft name="text:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q2" placeholder="Свой вариант или текст ответа"></p><p><textarea data-draft name="comment:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md:Q2" rows="2" placeholder="Комментарий"></textarea></p></section><h3>Комментарий по документу целиком</h3><p><textarea data-draft data-doc="interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md" name="doccomment:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md" rows="3" placeholder="Можно без ответов — просто сказать"></textarea></p><div id="rescue"><p class="err">Запись не прошла — ваш текст ниже, он не потерян.</p><textarea id="rescuetext" rows="8"></textarea><p><button class="ghost" id="copybtn" type="button">Скопировать</button> <button class="ghost" id="retry" type="button">Повторить запись</button></p></div></main><div class="fab"><button id="save" type="button" data-doc="interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md">Записать решение</button><div id="status"></div></div><script>var CFG={"batch":false,"index":false,"face":"interview","aliveMs":15000,"closeMs":2000,"reserveMs":2000,"rev":"9b5d40b3a861e372cd857e3e093035133da38e32f8f554eac68c6e2def87f8ef","doc":"interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md","qrev":null,"notices":[],"paragraphs":[],"artifacts":[],"expectRadioGroups":2,"draftKey":"owner-review:interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md","txt":{"draft":"Подхвачен черновик: {n} полей(я) восстановлено из браузера","saving":"Записываю…","saved":"Записано: {w}. Окно закроется само…","nothing":"Нечего записывать: ни ответа, ни комментария","needArt":"Нужно решение по исходящему: одобряю или отклоняю","err":"ОШИБКА ЗАПИСИ: {m}","serverGone":"СЕРВЕР КОНТУРА НЕДОСТУПЕН — ответ НЕ уйдёт. Черновик сохранён в браузере; скопируйте текст (кнопка ниже) или перезапустите контур.","serverGoneLocal":"Сервер контура недоступен — пишите дальше и нажмите «Записать» как обычно: ответ сохранится на этом компьютере, в папке проекта, и агент его заберёт.","savedLocally":"Сервер недоступен — ответ сохранён на этом компьютере (в папке проекта); агент его заберёт. Окно можно закрыть.","closeYourself":"Браузер не дал закрыть окно — закройте его, пожалуйста, сами","copied":"Скопировано в буфер","copyManually":"Выделите и скопируйте вручную","selfcheck":"САМОПРОВЕРКА СТРАНИЦЫ НЕ ПРОШЛА: радиогрупп {r} на {q} вопрос(ов) — форма сломана, здесь не отвечайте; скажите агенту.","tabnote":"Эта страница открылась ВКЛАДКОЙ в браузере, а не окном контура — черновик живёт только в этой вкладке: не закрывайте её, пока не записали. Агент предупреждён (I26).","left":"Записано. Осталось вопросов: {n} — страница остаётся открытой; на остальные можно ответить сейчас или позже.","stale":"Документ ИЗМЕНЁН после того, как страница открылась, — этот ответ НЕ записан. Ваш текст ниже; откройте новую редакцию: черновики неизменённых вопросов вернутся.","rewritten":"Документ переписан после того, как страница открылась, — запись здесь выключена. Откройте новую редакцию:","orphan":"Черновик прошлой редакции — эти вопросы изменились или исчезли; ваш текст сохранён здесь:","reloadRev":"Открыть новую редакцию"}};var QS=[{"doc":"interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md","id":"Q1","title":"Страница читается без увеличения?","answered":false,"target":null,"qh":"e6acab7f86b7","bodyHtml":"\u003cul>\n\u003cli>\u003cstrong>Ситуация.\u003c/strong> Страница теперь выводится в 1,7 раза крупнее обычного размера браузера, кнопка «Записать» — в 1,5 раза.\u003c/li>\n\u003cli>\u003cstrong>Что вы получаете.\u003c/strong> Читаете без Ctrl+колёсика.\u003c/li>\n\u003cli>\u003cstrong>Чем платите.\u003c/strong> На узком окне меньше текста на экране.\u003c/li>\n\u003c/ul>","recommended":null,"options":[{"letter":"A","html":"\u003cp>\u003cstrong>A)\u003c/strong> Читается — оставить так.\u003c/p>","recommended":false},{"letter":"B","html":"\u003cp>\u003cstrong>B)\u003c/strong> Слишком крупно — уменьшить.\u003c/p>","recommended":false},{"letter":"C","html":"\u003cp>\u003cstrong>C)\u003c/strong> Мелко — ещё крупнее.\u003c/p>","recommended":false}],"existing":[]},{"doc":"interviews/interview_032_the_new_question_page_is_it_readable_and_shall_the_old_one_go.md","id":"Q2","title":"Старую страницу убирать?","answered":false,"target":null,"qh":"01e27183df1f","bodyHtml":"\u003cul>\n\u003cli>\u003cstrong>Ситуация.\u003c/strong> Старая страница закрывалась после первого же ответа. Она пока оставлена запасной — на случай, если новая\u003c/li>\n\u003c/ul>\n\u003cp>  вам не подойдёт.\u003c/p>\n\u003cul>\n\u003cli>\u003cstrong>Что вы получаете.\u003c/strong> С ответом A — одна страница, без двойников. С ответом B — запасной путь ещё неделю.\u003c/li>\n\u003cli>\u003cstrong>Чем платите.\u003c/strong> A — если новая где-то подведёт, вернуть старую — отдельная работа. B — неделю в проекте живут две страницы.\u003c/li>\n\u003c/ul>","recommended":null,"options":[{"letter":"A","html":"\u003cp>\u003cstrong>A)\u003c/strong> Убрать сразу — новая подошла.\u003c/p>","recommended":false},{"letter":"B","html":"\u003cp>\u003cstrong>B)\u003c/strong> Подержать неделю запасной, потом убрать.\u003c/p>","recommended":false}],"existing":[]}];
+var $=function(s){return document.querySelector(s)};var TX=CFG.txt;
+function fmt(s,o){for(var k in o)s=s.replace('{'+k+'}',o[k]);return s}
+function status(msg,cls){var s=$('#status');s.textContent=msg;s.className=cls||''}
+var DK=CFG.draftKey+':';
+function qhOf(n){var p=n.split(':');if(p.length<3)return'';var id=p[p.length-1],d=p.slice(1,p.length-1).join(':');for(var i=0;i<QS.length;i++)if(QS[i].doc===d&&QS[i].id===id)return QS[i].qh||'';return''}
+function dkey(n){var h=qhOf(n);return DK+n+(h?'#'+h:'')}
+function saveDraft(el){try{localStorage.setItem(dkey(el.name),el.type==='radio'?(el.checked?el.value:''):el.value)}catch(e){}}
+function restoreDraft(){var n=0;var els=document.querySelectorAll('[data-draft]');
+ for(var i=0;i<els.length;i++){var el=els[i];var v=null;try{v=localStorage.getItem(dkey(el.name))}catch(e){}
+  if(v===null||v==='')continue;
+  if(el.type==='radio'){if(el.value===v&&!el.checked){el.checked=true;n++}}else if(!el.value){el.value=v;n++}}
+ var orph=[];try{for(var j=0;j<localStorage.length;j++){var k=localStorage.key(j);if(k.indexOf(DK)!==0)continue;var nm=k.slice(DK.length).split('#')[0];
+  if(nm.indexOf('__')===0)continue;var ov=localStorage.getItem(k);if(ov&&k!==dkey(nm))orph.push(nm+': '+ov)}}catch(e){}
+ if(orph.length){var od=document.createElement('section');od.className='qcard danger';var op=document.createElement('p');op.className='err';op.textContent=TX.orphan;
+  var ot=document.createElement('textarea');ot.rows=Math.min(12,orph.length*2+1);ot.value=orph.join(String.fromCharCode(10));od.appendChild(op);od.appendChild(ot);
+  var mn=document.querySelector('main');if(mn)mn.insertBefore(od,mn.firstChild)}
+ if(n>0)status(fmt(TX.draft,{n:n}),'okmsg')}
+document.addEventListener('pointerdown',function(e){var lab=e.target&&e.target.closest?e.target.closest('label.opt'):null;
+ if(!lab)return;var inp=lab.querySelector('input[type=radio]');if(!inp||inp.disabled)return;
+ e.preventDefault();var was=inp.checked;
+ if(e.target===inp){inp.checked=!was}else if(!was){inp.checked=true}
+ lastInput=Date.now();saveDraft(inp);pulseSoon()});
+document.addEventListener('input',function(e){if(e.target&&e.target.hasAttribute&&e.target.hasAttribute('data-draft')){lastInput=Date.now();saveDraft(e.target);pulseSoon()}});
+var pulseTimer=null;function pulseSoon(){if(pulseTimer)return;pulseTimer=setTimeout(function(){pulseTimer=null;pulse()},800)}
+function fieldVal(name){var el=document.getElementsByName(name)[0];return el?el.value:''}
+function collect(doc){var answers={};for(var i=0;i<QS.length;i++){var q=QS[i];
+ if(q.doc!==doc)continue;
+ var com=fieldVal('comment:'+doc+':'+q.id);
+ if(q.answered){if(com.trim())answers[q.id]={choice:'',text:'',comment:com.trim()};continue}
+ var chosen='';var rs=document.getElementsByName('choice:'+doc+':'+q.id);
+ for(var j=0;j<rs.length;j++)if(rs[j].checked)chosen=rs[j].value;
+ var own=fieldVal('text:'+doc+':'+q.id);
+ if(chosen||own.trim()||com.trim())answers[q.id]={choice:chosen,text:own.trim(),comment:com.trim()}}
+ var arts={};var A=CFG.artifacts||[];
+ for(var k=0;k<A.length;k++){var a=A[k];if(a.doc!==doc||!a.exists)continue;
+  var st='';var ars=document.getElementsByName('art:'+doc+':'+a.id);
+  for(var m=0;m<ars.length;m++)if(ars[m].checked)st=ars[m].value;
+  var ac=fieldVal('artcomment:'+doc+':'+a.id).trim();
+  if(st||ac)arts[a.id]={status:st,sha256:a.sha256,comment:ac}}
+ var p={doc:doc,answers:answers,comment:fieldVal('doccomment:'+doc),face:CFG.face};
+ for(var z in arts){p.artifacts=arts;break}
+ if(CFG.face==='proofread'){var cm={};for(var pi=0;pi<CFG.paragraphs.length;pi++){var pid=CFG.paragraphs[pi];var pv=fieldVal('para:'+doc+':'+pid).trim();if(pv)cm[pid]=pv}p.comments=cm}
+ return p}
+function rescue(payload,msg){status(fmt(TX.err,{m:msg}),'err');var r=$('#rescue');r.style.display='block';
+ $('#rescuetext').value=JSON.stringify(payload,null,2);enableButtons(true)}
+function enableButtons(on){var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].disabled=!on}
+var saved=false,closeTimer=null,lastPayload=null,saving=false;
+var lastInput=0,lsOk=true,submittedLocally=false;try{localStorage.setItem(DK+'__probe','1');localStorage.removeItem(DK+'__probe')}catch(e){lsOk=false}
+var inApp=false;try{inApp=!!(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)}catch(e){}
+function draftCount(){var n=0;try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k.indexOf(DK)===0&&k!==DK+'__submitted'&&k!==DK+'__probe')n++}}catch(e){}return n}
+function idbPut(k,v,cb){try{var r=indexedDB.open('kaif-contour',1);r.onupgradeneeded=function(){r.result.createObjectStore('kv')};
+ r.onsuccess=function(){try{var tx=r.result.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);tx.oncomplete=function(){cb(true)};tx.onerror=function(){cb(false)};tx.onabort=function(){cb(false)}}catch(e){cb(false)}};
+ r.onerror=function(){cb(false)}}catch(e){cb(false)}}
+function saveLocally(p,e){var js=JSON.stringify(p);var ls=false;if(lsOk){try{localStorage.setItem(DK+'__submitted',js);ls=true}catch(e2){}}
+ idbPut(DK+'__submitted',js,function(okIdb){if(!okIdb&&!ls){rescue(p,String(e));return}
+  submittedLocally=true;saved=true;status(TX.savedLocally,'okmsg');$('#banner').style.display='none';$('#rescue').style.display='none';enableButtons(false)})}
+function isNotice(doc){var n=CFG.notices||[];for(var i=0;i<n.length;i++)if(n[i]===doc)return true;return false}
+function hasArtifacts(doc){var A=CFG.artifacts||[];for(var i=0;i<A.length;i++)if(A[i].doc===doc&&A[i].exists)return true;return false}
+function hasComments(p){for(var k in (p.comments||{}))return true;return false}
+function clearSaved(p){var ids=Object.keys(p.answers||{});try{var ks=[];for(var i=0;i<localStorage.length;i++)ks.push(localStorage.key(i));
+ for(var k=0;k<ks.length;k++){if(ks[k].indexOf(DK)!==0)continue;var nm=ks[k].slice(DK.length).split('#')[0];
+  if(p.comment&&nm==='doccomment:'+p.doc)localStorage.removeItem(ks[k]);
+  for(var j=0;j<ids.length;j++)if(nm==='choice:'+p.doc+':'+ids[j]||nm==='text:'+p.doc+':'+ids[j]||nm==='comment:'+p.doc+':'+ids[j])localStorage.removeItem(ks[k])}}catch(e){}}
+function newRevision(msg){var b=$('#banner');b.style.display='block';b.textContent='';var bt=document.createElement('button');bt.type='button';
+ bt.style.background='#fff';bt.style.color='#1d1d1f';bt.style.marginRight='10px';bt.textContent=TX.reloadRev;bt.onclick=function(){location.reload()};b.appendChild(bt);b.appendChild(document.createTextNode(msg));
+ var sv=document.querySelectorAll('#save,.savedoc,#retry');for(var i=0;i<sv.length;i++)sv[i].disabled=true}
+function staleSave(p){rescue(p,TX.stale);status('','');newRevision(TX.stale)}
+function doSave(doc){var p=collect(doc);if(isNotice(doc))p.read=true;p.rev=CFG.rev;lastPayload=p;
+ var quiet=CFG.face==='proofread'||CFG.face==='mockup';
+ if(quiet&&!(p.comment||'').trim()&&!hasComments(p))p.noRemarks=true;
+ if(!p.read&&!quiet&&Object.keys(p.answers).length===0&&!(p.comment||'').trim()&&!p.artifacts&&!hasComments(p)){
+  status(hasArtifacts(doc)?TX.needArt:TX.nothing,'err');return}
+ enableButtons(false);status(TX.saving);saving=true;
+ fetch('/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+ .then(function(r){return r.json().then(function(j){return{ok:r.ok,st:r.status,j:j}})})
+ .then(function(res){saving=false;if(res.st===409){staleSave(p);return}if(!res.ok||!res.j.ok){rescue(p,res.j.reason||'server refused');return}
+  if(res.j.rev)CFG.rev=res.j.rev;
+  if(CFG.face==='interview'&&res.j.left>0){clearSaved(p);try{sessionStorage.setItem(DK+'__left',String(res.j.left))}catch(e){}location.reload();return}
+  saved=true;status(fmt(TX.saved,{w:res.j.written}),'okmsg');
+  try{var ks=[];for(var i=0;i<localStorage.length;i++)ks.push(localStorage.key(i));
+   for(var k=0;k<ks.length;k++)if(ks[k].indexOf(DK)===0)localStorage.removeItem(ks[k])}catch(e){}
+  setTimeout(function(){window.close();closeTimer=setTimeout(function(){status(TX.closeYourself,'err')},CFG.reserveMs)},CFG.closeMs)})
+ .catch(function(e){saving=false;if(inApp)saveLocally(p,e);else rescue(p,TX.serverGone)})}
+document.addEventListener('click',function(e){var t=e.target;
+ if(t&&t.classList&&t.classList.contains('savedoc'))doSave(t.getAttribute('data-doc'));
+ if(t&&t.id==='retry'&&lastPayload)doSave(lastPayload.doc)});
+var single=$('#save');if(single)single.addEventListener('click',function(){doSave(single.getAttribute('data-doc'))});
+var cp=$('#copybtn');if(cp)cp.addEventListener('click',function(){var t=$('#rescuetext');t.select();
+ try{document.execCommand('copy');status(TX.copied,'okmsg')}catch(e){status(TX.copyManually,'err')}});
+function pulse(){fetch('/alive?i='+(lastInput?Date.now()-lastInput:-1)+'&d='+draftCount()+'&s='+(saved?1:0)+'&doc='+encodeURIComponent(CFG.doc||'')).then(function(r){if(!r.ok)throw 0;if(!selfBroken&&!submittedLocally)$('#banner').style.display='none';return r.json().catch(function(){return null})})
+ .then(function(j){if(CFG.index&&j&&j.qrev&&CFG.qrev&&j.qrev!==CFG.qrev){location.reload();return}
+  if(j&&j.rev&&CFG.rev&&j.rev!==CFG.rev&&!saving&&!saved)newRevision(TX.rewritten)})
+ .catch(function(){var b=$('#banner');if(submittedLocally){b.style.display='none';return}b.style.display='block';b.textContent=(lsOk&&inApp)?TX.serverGoneLocal:TX.serverGone;
+  if(!(lsOk&&inApp)){var r=$('#rescue');r.style.display='block';if(lastPayload)$('#rescuetext').value=JSON.stringify(lastPayload,null,2)}
+  if(!submittedLocally)enableButtons(true)})}
+setInterval(pulse,CFG.aliveMs);pulse();
+window.addEventListener('pagehide',function(){if(closeTimer)clearTimeout(closeTimer);
+ try{navigator.sendBeacon('/closed',(CFG.index?'index':'doc')+':'+(saved?'saved':'unsaved'))}catch(e){}});
+if(CFG.index)window.addEventListener('focus',pulse);
+var selfBroken=false;(function(){if(CFG.face!=='interview'||CFG.index)return;var rs=document.querySelectorAll('input[type=radio]');var names={};
+ for(var i=0;i<rs.length;i++)if(rs[i].name.indexOf('choice:')===0)names[rs[i].name]=1;var n=Object.keys(names).length;
+ if(n!==CFG.expectRadioGroups){selfBroken=true;var b=$('#banner');b.style.display='block';b.textContent=fmt(TX.selfcheck,{r:n,q:CFG.expectRadioGroups});enableButtons(false)}})();
+(function(){if(inApp)return;var tn=$('#tabnote');if(tn){tn.style.display='block';tn.textContent=TX.tabnote}
+ try{fetch('/tab',{method:'POST'})}catch(e){}})();
+restoreDraft();
+try{var lf=sessionStorage.getItem(DK+'__left');if(lf!==null){sessionStorage.removeItem(DK+'__left');status(fmt(TX.left,{n:lf}),'okmsg')}}catch(e){}</script></body></html>
