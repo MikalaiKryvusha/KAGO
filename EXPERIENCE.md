@@ -126,6 +126,19 @@
 
 ## Entries
 
+### EXP-0301 · 2026-09-26 · ❌→✅ · #owner-page #read-the-whole-answer #waiter #s2
+class: owner-decision-not-applied
+**Context / did / result:** the owner answered interview 032 on the new 2.8 page — Q1 = A, Q2 = A — and wrote into the answer text,
+the Q2 comment and the document comment, three times: «Не снимаются радиокнопки повторным тапом - баг в КАИФ и у тебя». The waiter
+printed «Q1 = A, Q2 = A»; I had read the decision file after Q1 only, applied both «A»s, closed the interview as done and began the
+chat closure — the defect report stood unread until a clean-context judge found it.
+**Lesson:** **an owner's answer is the WHOLE record — choice, free text, per-question and document comments — and it is read whole
+after EVERY save, never inferred from the choice line.**
+mechanized: `tools/ask.mjs` — after every `--wait` that ends with a record it prints «ОТВЕТ ВЛАДЕЛЬЦА ЦЕЛИКОМ» (choices, texts,
+comments, the document comment) from the decision file (`wholeAnswer`, tested on interview 032).
+**Trigger:** a `--wait` exit 0 · marking an interview «ЗАКРЫТО» or «Исполнено».
+→ link: `bugs/144` · origin #128 · `plans/104`
+
 ### EXP-0300 · 2026-09-26 · ❌→✅ · #tidy #wmic #fail-open #guard-sees-nothing #owner-page #s2
 class: blind-read-as-empty
 **Context / did / result:** the Stop-hook `tools/tidy.mjs` listed processes only through `wmic`; Windows 11 26200 no longer ships it, the

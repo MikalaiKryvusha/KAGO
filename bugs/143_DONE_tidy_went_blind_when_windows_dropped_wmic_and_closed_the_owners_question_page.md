@@ -10,7 +10,8 @@ server and its window are killed when `runInFlight` sees nothing) — no card ru
 
 ## Symptom
 
-The page of `interview_032` came up at 16:16:28 (`interviews/decisions/shown.json`), called the owner, and closed at 16:16:44 —
+The page of `interview_032` came up at 16:16:28 (the modification time of `interviews/decisions/shown.json` at that moment; the file
+was rewritten by the second page at 16:20:08, which is what it holds now), called the owner, and closed at 16:16:44 (the log files' time) —
 `Outcome: page closed without an answer — ending the contour (I14, beacon fast path)`, exit 2 — seconds after my turn ended, i.e. when
 the `Stop` hook runs `node tools/tidy.mjs --apply`.
 

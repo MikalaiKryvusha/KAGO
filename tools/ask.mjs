@@ -4,8 +4,10 @@
 // Why a door and not a contour: KAIF 2.8 SHIPS the contour (`.kaif/tools/contour/review.mjs`) — answers saved one at a time
 // with the page alive until its last question, the `--wait` waiter, the 409 on a rewritten document, the page at 1.7×, the
 // `--call` outside a page. This file adds exactly one thing the shipped contour takes from the environment only: OUR voice
-// (the owner's Silero «eugene» through `voice-say.mjs`), set for the child process alone — a machine-wide variable would change
-// the call's voice in the owner's other projects on this machine behind his back.
+// (the owner's Silero «eugene» through `voice-say.mjs`), set for the child process alone, so KAGO does not depend on what a
+// machine's environment happens to hold. (✏️ The first edition said a machine-wide variable «would change the voice in the
+// owner's other projects»; on this machine the user environment ALREADY carries KAIF_VOICE=eugene and the same KAIF_VOICE_TOOL —
+// found by the sixth judge pass — so the door is a guarantee, not a shield.) It also prints the owner's WHOLE answer after `--wait`.
 //
 // @fork owner-contour-2-8
 // OPTIONS:  port the six 2.8 changes into our own tools/review.mjs · move to the shipped contour · keep both side by side
@@ -18,9 +20,11 @@
 //        node tools/ask.mjs --help
 //
 // [TESTED: 2026-09-26 16:16–16:2x · plans/104 Ш7 with the owner at the machine: the page called in the voice «eugene», Q1 saved
-//  alone («Questions left: 1 — the page STAYS open», the waiter exit 0), Q2 saved later, the page ended itself with exit 0]
+//  alone («Questions left: 1 — the page STAYS open», the waiter exit 0), Q2 saved later, the page ended itself with exit 0;
+//  report testcases/reports/2026-09-26_contour_2_8_live.md — verdict partial: the radio second-tap defect P3, bugs/144]
 
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -50,11 +54,36 @@ const HELP = [
   'Старая страница проекта (tools/review.mjs) снята словом владельца 2026-09-26 — interviews/interview_032, Q2 = A.',
 ].join('\n');
 
+/**
+ * The owner's WHOLE answer to a document — every choice, free text, per-question comment and the document comment — as lines to
+ * print. The waiter of the shipped contour names only the choices («Q2 = A»); on 2026-09-26 the owner wrote a defect report into
+ * the text and comment fields of interview 032 («Не снимаются радиокнопки повторным тапом - баг в КАИФ и у тебя», three times) and
+ * the agent, reading the choices, applied «A» and missed it (EXP-0301). Printed after every `--wait` that ends with a record.
+ * [TESTED: 2026-09-26 · on interviews/decisions/interview_032_….decision.json — the three fields printed]
+ */
+export function wholeAnswer(docPath, root = ROOT) {
+  const base = String(docPath).replace(/\\/g, '/').split('/').pop().replace(/\.md$/i, '');
+  const file = resolve(root, 'interviews', 'decisions', base + '.decision.json');
+  if (!existsSync(file)) return [];
+  let d;
+  try { d = JSON.parse(readFileSync(file, 'utf8')); } catch { return ['✖ ask: ' + file + ' is not readable JSON']; }
+  const out = ['ОТВЕТ ВЛАДЕЛЬЦА ЦЕЛИКОМ (' + (d.atHuman || d.at || '') + ') — читать всё, не только выбор:'];
+  for (const [q, a] of Object.entries(d.answers || {})) {
+    out.push('  ' + q + ': ' + (a.choice || '—') + (a.text ? ' · текст: «' + a.text + '»' : '') + (a.comment ? ' · комментарий: «' + a.comment + '»' : ''));
+  }
+  if (d.comment) out.push('  к документу: «' + d.comment + '»');
+  return out;
+}
+
 function main(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { console.log(HELP); return Promise.resolve(0); }
   return new Promise((done) => {
     const child = spawn(process.execPath, [CONTOUR, ...argv], { stdio: 'inherit', env: contourEnv() });
-    child.on('exit', (code, signal) => done(code ?? (signal ? 130 : 1)));
+    child.on('exit', (code, signal) => {
+      const at = argv.indexOf('--wait');
+      if (code === 0 && at >= 0 && argv[at + 1]) for (const l of wholeAnswer(argv[at + 1])) console.log(l);
+      done(code ?? (signal ? 130 : 1));
+    });
     child.on('error', (e) => { console.error('✖ ask: ' + e.message); done(1); });
   });
 }

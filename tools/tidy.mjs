@@ -17,10 +17,13 @@
  * осталось пустым**. Оболочка агента здесь работает под администратором, поэтому каждый вызов
  * `powershell.exe` оставлял за собой такое окно.
  *
- * ⚠️ ПОЭТОМУ В ЭТОМ ФАЙЛЕ НЕТ НИ ОДНОГО ВЫЗОВА `powershell.exe`. Прежняя редакция звала его для
- * перечисления процессов — то есть инструмент уборки САМ порождал ровно тот мусор, который убирает.
- * Используются `tasklist` / `wmic` / `taskkill`: это обычные консольные программы, они наследуют уже
- * существующую консоль и новых окон не создают.
+ * ⚠️ ПОЭТОМУ перечисление процессов долго шло через `wmic`, а не `powershell.exe` — прежняя редакция с
+ * PowerShell САМА порождала ровно тот мусор, который убирает. С 2026-09-26 `wmic` в Windows 11 26200 НЕТ
+ * (`bugs/143`: список молча пустел, и уборка закрыла страницу владельца), поэтому `listProcesses` снова
+ * зовёт `powershell.exe` — со скрытым окном (`windowsHide`). Наблюдено: после голого прогона под
+ * администратором лишнего окна терминала не осталось (шестой проход судьи, сессия 105). Появится такое
+ * окно снова — это не повод вернуться к `wmic` (его нет), а повод перейти на прямой вызов CIM из Node.
+ * `tasklist` / `taskkill` остаются: обычные консольные программы, новых окон не создают.
  *
  * ⚠️ ГРАНИЦА, КОТОРУЮ ЭТА КОМАНДА НЕ ПЕРЕХОДИТ (`AGENT_GUIDE.md` → THE OWNER'S-MACHINE RULE):
  *   · закрывается только окно, поднятое ЧЕРЕЗ DCOM (`-Embedding`) и БЕЗ процессов внутри — это по
@@ -60,15 +63,18 @@ function run(exe, args) {
  * идёт» и на конце каждого хода закрывала окно вычитки владельца (2026-09-26 16:16, страница interview_032 — `bugs/64`
  * снова). Теперь — `Get-CimInstance` через PowerShell (скрытым окном, как `closeWindow` в run-dashboard), а НЕУДАЧА
  * получить список — это `null`, «не вижу», и вызывающий обязан ничего не трогать: пустота и слепота — разные ответы.
- * [TESTED: 2026-09-26 · живой список node.exe на этой машине; блок «список не получен → занято»; мутация — null как [] → красный]
+ * [TESTED: 2026-09-26 · живой список node.exe на этой машине; блок «список не получен → занято»; мутация — null как [] → красный;
+ *  сломанный фильтр CIM без `-ErrorAction Stop` давал `[]`/0, с ним — 1/пусто → null; отчёт testcases/reports/2026-09-26_contour_2_8_live.md]
  * @returns {{pid:number, ppid:number, cmd:string}[] | null}
  */
 function listProcesses(filter) {
   let raw;
   try {
     raw = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-      '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-      + `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter "${filter}" | `
+      // `-ErrorAction Stop` + `$ErrorActionPreference`: a FAILED CIM query is non-terminating by default, and PowerShell then
+      // prints `[]` with exit 0 — blindness dressed as «nothing runs» again (found by the sixth judge pass of session 105).
+      '$ErrorActionPreference="Stop"; [Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+      + `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -ErrorAction Stop -Filter "${filter}" | `
       + 'Select-Object ProcessId,ParentProcessId,CommandLine)'],
     { encoding: 'utf8', windowsHide: true, timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] });
   } catch { return null; }
@@ -149,7 +155,8 @@ export function runInFlight(nodeProcs, armed, isAlive) {
   // С KAIF 2.8 (plans/104) страницу держит ПОСТАВЛЯЕМЫЙ контур `.kaif/tools/contour/review.mjs`, входом — `tools/ask.mjs`, и
   // страница живёт до последнего вопроса, через несколько моих ходов, — узнаём все три пути; сторож `--wait` ждёт владельца
   // так же. Мгновенные формы поставки (`--dry-run`, `--list`, `--search`, `--check`, `--help`) — тоже не преграда.
-  // [TESTED: 2026-09-26 · блоки «bugs/64 на пути 2.8» ниже; мутация — убрать `ask|contour` из регулярки → блоки красные]
+  // [TESTED: 2026-09-26 · блоки «bugs/64 на пути 2.8» ниже; мутация — убрать `ask|contour` из регулярки → блоки красные;
+  //  на живой странице — «ПРОГОН В РАБОТЕ — НЕ ТРОГАЮ НИЧЕГО», отчёт testcases/reports/2026-09-26_contour_2_8_live.md]
   const review = (nodeProcs ?? []).find((p) => /tools[\\/](?:review|ask)\.mjs|tools[\\/]contour[\\/]review\.mjs/u.test(p.cmd)
     && !/--no-serve|--selftest|--dry-run|--list|--search|--check|--help/u.test(p.cmd));
   if (review) return { busy: true, why: `контур согласований ждёт владельца: pid ${review.pid}` };
@@ -220,15 +227,20 @@ async function main(argv) {
     console.log(gone.closed.length ? `   окно: закрыто (${gone.closed.join(', ')})` : '   окно: закрывать было нечего');
   }
 
-  const samplers = (processesNamed('node.exe') ?? []).filter((p) => /hardware-mon/.test(p.cmd));
-  console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
+  const nodes = processesNamed('node.exe');
+  const samplers = (nodes ?? []).filter((p) => /hardware-mon/.test(p.cmd));
+  console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${nodes === null ? 'не видно (список процессов не получен, bugs/143)'
+    : samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
   if (APPLY) for (const s of samplers) { kill(s.pid); console.log(`   снят ${s.pid}`); }
 
   // ---- 2. БРОШЕННЫЕ ОКНА ТЕРМИНАЛА — те, что подняты системой через DCOM и опустели.
   console.log('');
-  const terms = [...(processesNamed('WindowsTerminal.exe') ?? []), ...(processesNamed('OpenConsole.exe') ?? [])];
+  const wt = processesNamed('WindowsTerminal.exe');
+  const oc = processesNamed('OpenConsole.exe');
+  const terms = [...(wt ?? []), ...(oc ?? [])];
+  if (wt === null || oc === null) console.log('ОКНА ТЕРМИНАЛА: список не получен полностью — видны не все (bugs/143)');
   if (terms.length === 0) {
-    console.log('ОКНА ТЕРМИНАЛА: ни одного — чисто');
+    console.log(wt === null || oc === null ? 'ОКНА ТЕРМИНАЛА: видимых нет — трогать нечего' : 'ОКНА ТЕРМИНАЛА: ни одного — чисто');
   } else {
     for (const t of terms) {
       const kids = childCount(t.pid);

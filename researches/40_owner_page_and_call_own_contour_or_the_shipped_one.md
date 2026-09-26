@@ -1,6 +1,6 @@
 # Research 40 — the owner's page and the call on KAIF 2.8: finish our own contour, or move to the shipped one
 
-**Created:** 2026-09-26 16:2x +03:00 · **Parent:** the owner's word in the chat, 2026-09-26: «давай сделаем, что осталось, что 2.8
+**Created:** 2026-09-26 ≈ 16:1x +03:00 (committed in `ba0f0b8` at 16:15:31; ✏️ the first edition said «16:2x», ahead of the clock) · **Parent:** the owner's word in the chat, 2026-09-26: «давай сделаем, что осталось, что 2.8
 просит и у нас это пока долг - делаем. интерактивный контур, голос» · **Status:** decided (§5) · **Outbound:** `plans/104` ·
 the `@fork owner-contour-2-8` block in `package.json`'s neighbour `tools/ask.mjs`
 
@@ -68,6 +68,7 @@ fig answers the risk of the move: the old contour stays reachable (`npm run ask:
 ## 5. Decision
 
 **Option 2 — move the single-document page and the call to the shipped contour**, keep the old one reachable as `ask:legacy` (and for
-the batch page), move the `tidy` twin in the same change, carry the voice by the environment, set `contour.callName` /
+the batch page) — ✏️ superseded the same afternoon by the owner, who saw the new page and answered `interviews/interview_032` Q2 = A
+(«Убрать сразу — новая подошла»): `ask:legacy` removed, the batch page moved to `node tools/ask.mjs --queue` — move the `tidy` twin in the same change, carry the voice by the environment, set `contour.callName` /
 `spokenProjectName`. Option 1 rejected: a second implementation of a moving contract. Option 3 is option 2's transition state, not a
 destination.
