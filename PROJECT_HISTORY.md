@@ -1,3 +1,392 @@
+<!-- перенесено при обновлении KAIF 2.7 → 2.8, 2026-09-26 -->
+## 📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8 — перенесено дословно 2026-09-26
+
+> Перенесено из `AGENT_GUIDE.md` → «Notes from the human» при обновлении KAIF 2.7 → 2.8: правило
+> 2.8 «свод правил берёт правило, а не цитату» — постоянное поручение владельца стоит в своде строгим
+> правилом с одной строкой происхождения, а дословные слова живут у источника. Правила, выведенные из
+> этого текста, — `HOUSE_RULES.md` §1 (R1–R9); действующие определения продукта — `ЗАКАЗ.md`;
+> дословный архив слов владельца — `GOAL.md`. Ниже — текст раздела байт в байт, как он стоял в
+> руководстве на коммите `006c7ce`, без строки заголовка `## Notes from the human`. Многое в нём
+> заменено позднейшими решениями (два профиля → четыре режима `ЗАКАЗ.md` §1; три ярлыка и трей без
+> кнопок → решения 23.08, `STATUS.md`; два режима поиска 25/5 мВ → метод модели кремния, `ЗАКАЗ.md` §2);
+> здесь он хранится как свидетельство, а не как действующее правило. `ЗАКАЗ.md` §6 цитирует отсюда
+> метод владельца 10.08 («весь профиль кривой… тестировался…»).
+
+
+**THE REGISTER — ACADEMIC AND SCIENTIFIC, AND IT IS THE OWNER'S STANDING RULE** (chat, 2026-08-15
+21:1x — the stamp taken from the commit receipt `3b1efad` at 21:13:46, after the first draft of this
+line carried «22:0x» written from the head; EXP-0019 is exactly this). His words, verbatim:
+
+> *«мы тут не прозу пишем, а серьезный инструмент, и пользуемся академическим и научным языком»*
+
+Said after the agent printed «мохибейк» — a transliteration of a Japanese term used in English
+documentation — in a tool's diagnostic, in `STATUS.md` and in a commit message, and he had to ask
+what it meant. He first offered the colloquial Russian «абракадабра», then ruled it out himself in
+favour of the strict term **«порча кодировки»**. Both halves of that exchange are the rule:
+
+1. **A borrowed or transliterated term is not a term.** If a Russian technical name exists, it is the
+   name. Foreign jargon reaches the owner only through its Russian equivalent, and a term genuinely
+   without one is expanded at first use (the storefront rule, item 6 — this is that rule applied to
+   the working artifacts, not only to the showcase).
+2. **The register is the instrument's, not the essayist's.** Colloquial synonyms are rejected even
+   when the owner himself supplies one and even when they are clearer to a casual reader: KAGO writes
+   in the register of a measuring device. Wit, folksiness and metaphor do not belong in a diagnostic,
+   a status line or a document that decides what to do with his hardware.
+3. **Scope: everything the owner reads** — chat replies, `STATUS.md`, `GOAL.md`, `MASTER_PLAN.md`,
+   epic meta-plans, interviews, commit messages, and every string a command PRINTS. Identifiers and
+   agent-internal comments stay English (the Languages rule above); the register binds the output.
+
+**The owner's standing constraints for KAGO** (their words, `GOAL.md` and chat, 2026-08-09):
+
+- *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАТНО!!!! ТРИЖДЫ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО-ТО ДЕЛАТЬ! НЕ
+  ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗИДАТЕЛЕН!»* (chat, 2026-08-10; typos fixed on his
+  instruction, the unedited original is in commit `8ef55af`) — the standing law above every other
+  line in this guide. Its executable form is **the owner's-machine rule** in the test-harness
+  section: look it up first · name the rollback before the write · smallest reversible form ·
+  re-read until stable · report the numbers. A permission entry is not a reason to act.
+- **THE BENCH MAY TAKE THE MACHINE — a standing permission, so no future session spends a turn asking
+  for it** (chat, 2026-08-10 19:4x): *«можешь занимать комп, не переживай по этому поводу»*. Said after
+  the agent asked whether to run a fullscreen game benchmark that would seize his display for minutes.
+  **What it covers:** occupying the screen and the card for measurement runs — fullscreen loads, long
+  burns, series taken back to back. **What it does NOT touch, because it is a different question
+  entirely:** the owner's-machine rule above. Permission to USE the machine is not permission to
+  CHANGE its state — a GPU write still walks the five steps, and installing software, touching the
+  registry or writing outside the repository is still the destructive class.
+- *«при измерениях всё, что создаёт фоновую нагрузку — останавливай»* (chat, 2026-08-10) — during a
+  measurement run the agent MAY stop what heats the card. Bounded by the rule above, so the boundary
+  is named rather than assumed: stop the consumer apps that hold the GPU awake (NVIDIA Broadcast,
+  LosslessScaling, PotPlayer, Chrome, the NVIDIA app overlay, the LG Hub tray); **never** touch what
+  is a channel to the machine or holds someone else's work (Parsec, NordVPN, the IDE hosting the
+  session, Docker with running containers). **Everything stopped is started again when the run
+  ends** — a measurement that leaves the owner's desktop stripped has no rollback, and that makes it
+  the destructive class.
+
+  **Measured 2026-08-10, and it bounds how much this permission is worth: stopping apps buys ~6 W and
+  cannot reach the idle floor.** With NVIDIA Broadcast and LosslessScaling fully stopped the card
+  still sat at 825–950 MHz / ~28 W against the 180 MHz / 21.76 W seen earlier that morning, because
+  the largest remaining GPU client is **`dwm.exe`** — the Windows compositor, i.e. the desktop
+  itself, which cannot be stopped while Windows is displayed on this card. The 180 MHz floor is not
+  "no background"; it is "nothing repainted for a while". **So a stock-vs-profile delta is NOT
+  obtained by silencing the desktop.** It is obtained by measuring both sides under the SAME
+  background and under a load heavy enough to dominate it — at hundreds of watts under load, a 6 W
+  desktop wobble is noise in the third digit. Quieting apps matters only when comparing IDLE
+  numbers, and even then the floor stays out of reach.
+- **THE PDF'S NUMBERS ARE NOT TARGETS — THE OPTIMUM IS SEARCHED FOR ON THIS SPECIFIC CARD.** Quoted
+  from the owner's chat, 2026-08-10 09:4x +03:00, verbatim and unedited:
+
+  > *«в мастерплане было написано про "перегиб кривой производительности" - что это является свит
+  > спот, и что он якоды на 97% - это чистой воды спекуляция. Нужно не доверять этиц цифрам, а
+  > ИСКАТЬ РЕАЛЬНЫЙ оптимум нашего конкретного экземпляра GPU, который мы тюним»*
+
+  And, minutes later, the reason and the authority order, in his words:
+
+  > *«то, что я сказал в чат - вот это главнее. Я сказал, что цифре 97 не верим, она может плавать
+  > от экземпляра видеокарты к экземпляру.»*
+
+  **THE AUTHORITY ORDER, STATED HERE BECAUSE THE PDF HAS BEEN TREATED AS THE SPEC:** the owner's
+  spoken word > `RTX_5070Ti_Undervolting_Master_Plan.pdf` > tests > current code behaviour. The PDF is
+  a source document the owner brought in, not a contract he signed; where the two disagree, the chat
+  wins and the PDF line is marked superseded rather than quietly kept.
+
+  **AND THE REASON IS PHYSICAL, NOT RHETORICAL: the figure FLOATS BETWEEN INDIVIDUAL CARDS.** A
+  percentage measured on somebody's die is not a property of the model — `researches/02` already
+  measured card-to-card Vmin spreading up to 70 mV, so a per-instance sweet spot is exactly what that
+  spread predicts. This is why the number cannot simply be re-checked once and adopted: it is a
+  property of the silicon in this machine.
+
+  **THE TRADE-OFF ITSELF IS AN ASSUMPTION, AND THE OWNER STRUCK IT DOWN TOO** (chat, same exchange):
+
+  > *«на некоторых картах вообще не наблюдается потери производительности при существенном снижении
+  > потребления»*
+
+  So the two profiles must NOT be designed as a bargain — "fast one" and "quiet one", performance
+  spent to buy silence. The honest shape is: **map this card's power↔performance curve first, then see
+  what the curve offers.** If a large power reduction with no measurable loss exists on this die,
+  `Max Optimal` IS that point, and "97 %" was never a ceiling to aim at — it was somebody else's
+  measurement standing in for ours.
+
+  **The consequence for the instrument, and it is a hard requirement, not a caveat:** *"no performance
+  loss"* is a claim about a DIFFERENCE, so it may only be made after the meter's own run-to-run
+  spread has been measured and shown to be SMALLER than the effect being denied. A 0 % loss reported
+  by an instrument that scatters 3 % between two identical stock runs is not a finding — it is a blunt
+  instrument. Measure the spread at stock first (the pattern is already written into
+  `plans/03` §4.4), state it next to every delta, and never report a difference thinner than it.
+
+  **AND THEN THE OWNER GAVE THE DESIGN FORMULA ITSELF** (chat, same exchange) — this is the answer to
+  "what is the optimum", and it means the agent never has to guess that definition again:
+
+  > *«профили проектируем по пронципу : "хотим снизить потребление видеокарты, и смотрим, чем за это
+  > платим. Снижаем потребление насколько можем до тех пор, пока не платим больше, чем N. Больше N
+  > платить не хотим. Ищем вменяемый оптимум и компромис."»*
+
+  **Written as the optimization it is: MAXIMIZE the power reduction, SUBJECT TO the price paid ≤ N.**
+  The controlled variable is power; performance is the CURRENCY, not the objective; N is a budget the
+  owner sets, and **a profile is simply one value of N.** Consequences the agent must not re-derive:
+  - The search descends while the price stays under budget and stops at the last point that does —
+    it does not aim at a percentage and it does not stop at a number somebody else measured.
+  - **N belongs to the owner, and it is asked WITH the curve in hand, never before it exists.** Asking
+    "what loss will you accept?" before the card's own power↔performance curve has been measured is
+    asking him to guess; the question carries the measured curve (the self-sufficient-question rule).
+  - If a cost other than performance turns up (a thinner stability margin, a fan-speed floor), it is
+    NAMED as part of the price rather than quietly left out of the budget.
+  - "Вменяемый компромис" is not a stop word here — it is made verifiable by N: once N is a number,
+    "sane compromise" means "the largest power reduction whose measured price is ≤ N".
+
+  **THE SHIPPED POINT: THE OWNER CHOSE A CONVERGENCE LOOP, NOT A STATIC GUARDBAND** (chat,
+  2026-08-10, answering the A/B/C question the agent put to him about the guardband; verbatim):
+
+  > *«ну и было бы здорово мерить не телько на картоких импульсах, но и на длительных, например,
+  > минуту - но не на каждом шаге, а после очередной итерации тюнинга все кривой, чтобы проверить
+  > нагревы на длительном прожиге, и стабильность»*
+  >
+  > *«Хотелось бы, чтобы готовый профиль в точке вставал на минимальный шаг выше, а затем всеь
+  > профиль кривой из таких "хрупких около сбоя" точках напряжения тестировался. Если он показывает
+  > себя стабильно (я лично буду в Palworld играть и тестировать на реальном использвовании) - то его
+  > оставляем. Есил он будет "сбоить", то ищем точку, которая даёт сбои и у неё повышаем напряжение
+  > на один минимальный шаг вверх, и вновь тестируем всю кривую в стресс-тестах. То есть, хочется
+  > довольно аггресивно тюнить, искать минимально рабочее напряжение без сбоев.»*
+
+  **This is a fourth option, and it was not in the agent's A/B/C list.** It replaces a *static*
+  margin with an *empirically converged* one:
+
+  1. Each point ships at **one minimal hardware step above its measured failure point**.
+  2. The WHOLE curve of those fragile points is then tested as one profile — stress tests plus the
+     owner's own real use (Palworld).
+  3. Stable → kept. Misbehaving → **find the failing point, raise THAT point by one step, retest the
+     WHOLE curve**. Repeat.
+  4. **Long burns (≈1 minute) are run after each whole-curve iteration, not at every step** — to see
+     heat soak and stability, which short bursts cannot show.
+
+  **Why this is defensible rather than reckless, stated so no future session "corrects" it back:**
+  the 25 mV guardband is a PROXY for workloads we never ran (`researches/02`: Vmin spreads ~100 mV
+  between programs). The owner's loop attacks the same risk directly instead — by enlarging the
+  observation set (a real game, long thermal soaks) and by ratcheting any point that ever failed. A
+  margin earned by observation beats a margin assumed by proxy, where the observation is actually
+  taken.
+
+  **THE ONE CONDITION THAT MAKES THE LOOP SOUND, AND IT IS NOT OPTIONAL: the escalation trigger must
+  be the SDC ORACLE, never "it didn't crash".** More than half of undervolting failures are silent —
+  correct-looking frames, wrong numbers. A loop driven by crashes alone converges to *"nothing
+  visibly broke"* and parks the card INSIDE the corruption region, which is the worst outcome
+  available and the exact thing `researches/02` exists to prevent. So: every whole-curve retest
+  carries the checksum-versus-golden verdict AND the throughput check (`researches/04` §2 — clock
+  stretching and memory replay are invisible to both crashes and checksums), and the owner's Palworld
+  session is a SECOND witness beside them, never a replacement.
+
+  **What the loop still does not close, listed once and honestly:** silicon ages, so a point converged
+  to the edge today can fail in months; ambient temperature moves, so a profile settled in winter is
+  not proven for summer. Both are answered the same way — by RE-running the loop, which the design
+  makes cheap because it is a loop. Record per point: every verdict it ever produced, so an escalation
+  is a ratchet (a point that has failed is never lowered again) rather than a fresh guess.
+
+  **THE SEARCH HAS TWO MODES, AND THE OWNER SPECIFIED THEM** (chat, 2026-08-10, verbatim):
+
+  > *«для прогонов тюнинга нужно будет предусмотреть два режима - грубый и точный. Грубый меняет
+  > напряжениена 25 мВ, тестит, фиксирует точку выше напряжения, при котором были отказы. А точный
+  > режим - меняет напряжение на 5 мВ и ищет точку отказа, и фиксирует режим на шаг на 5 мВ выше
+  > точки отказа.»*
+
+  Recorded here before it is reconciled, because the owner's words are the record and the
+  reconciliation is ours. **Two things in it need checking against the project's own measurements
+  rather than being implemented as read** — both are open at the time of writing:
+  - **5 mV may not be expressible — SETTLED by the owner the same day.** He asked whether 6.25 mV is
+    this card's minimum step; the honest answer is that nobody has measured it (`config.mjs` carries
+    `VOLTAGE_GRID_STEP_IS_MEASURED = false`, and `nvidia-smi` has no voltage field at all). His rule:
+    *«если да - тогда он будет шагом для точной настройки»* — so **the fine mode's step IS the
+    hardware's own minimum step, whatever the measurement says**, never a number taken on faith. That
+    formulation is correct on any card, which is why it is the rule instead of a figure.
+  - **"One step above the failure point" collides with the guardband** the project already measured
+    into `GUARDBAND_MIN_GRID_STEPS = 4` / `GUARDBAND_MIN_MILLIVOLTS = 25` (`researches/02`: the
+    error rate goes 3 % → 90 % across 2 % of voltage, and Vmin spreads ~100 mV between programs).
+    The likely reconciliation is that his three numbers describe the **search resolution** while the
+    guardband governs the **shipped operating point** — but that is the owner's call, not ours, and
+    it goes to him as a question with the arithmetic shown.
+
+  Operationally, and it changes acceptance rather than only tone:
+  - **Every figure inherited from `RTX_5070Ti_Undervolting_Master_Plan.pdf` — ≥97 % of stock, −60…−80 W,
+    −100…−120 W, ≤65 °C / ≤58 °C, the "knee" of the curve — is a REFERENCE, never a target and never a
+    promise.** A criterion may cite one; it may not be PASSED or FAILED by one.
+  - **The acceptance criterion becomes the SEARCH and its evidence:** measure this card's own
+    performance-per-watt curve, show where its knee actually sits, and report the number found. A
+    profile is defined by the measured optimum of this silicon, not by hitting an inherited percentage.
+  - **This is the same class of finding the project already paid for twice** — the power-limit floor
+    turned out to be 250 W, not the PDF's assumption, and the hotspot sensor the PDF's thermal rows
+    rest on is disabled at driver level on RTX 50. The owner is generalizing what the measurements
+    already showed: the PDF describes a GPU model, and we are tuning ONE die.
+  - **The three-doors rule applies without an exception here** (`PHILOSOPHY.md`): where the optimum is
+    not yet measured, the honest answer is «не измерено», never a plausible inherited number.
+
+- **FOUR MODES, NOT TWO PROFILES — the owner's own taxonomy** (chat, 2026-08-10 18:5x). Quoted in full
+  in `GOAL.md` → «Четыре режима»; the reasoning and what is already measured per mode is
+  `MASTER_PLAN.md` → «Четыре режима». The names are his and ship as written: **Max Perfomance ·
+  Optimised · Silent Cold · Stock Default.** His framing: *«напрашивается четыре режима… и у всех них
+  разные критерии оптимальности»*.
+
+  | Mode | Maximizes | Pays with | Clock ceiling |
+  |---|---|---|---|
+  | 🚀 **Max Perfomance** | performance across the FULL clock range | nothing in performance; temperature is not optimized at all | the curve's TOP |
+  | ⚖️ **Optimised** | **watts, degrees and NOISE brought down hard** | **≤ 5 % of FPS, measured against Max Perfomance** | at the stock operating clock, **plus a power ceiling** |
+  | ❄️ **Silent Cold** | COLD, and only cold | **up to 10 %** | well below the stock operating clock |
+  | 🔄 **Stock Default** | — | — | none; every offset to 0 |
+
+  **`Optimised` WAS SHARPENED BY THE OWNER THE SAME EVENING (chat, 2026-08-10 19:1x +03:00), and the
+  change is structural rather than cosmetic** — he wrote it after the agent reported that every
+  stability result was taken at 137 W while he plays at 300 W and 77 °C. Verbatim in `GOAL.md` →
+  «Уточнение по Optimised»; the operative sentence: *«допускается просадка FPS не более 5%, но
+  покупаем на это СИЛЬНОЕ снижение можности… чтобы она молотила не на 300 Вт, а сильно ниже, и выше не
+  поднималась… Выть можно и греться на режиме Max Perfomance.»*
+
+  Four consequences the agent must not re-derive:
+  - **The objective and the constraint swapped places.** `Optimised` MAXIMIZES the reduction in watts,
+    temperature and noise, SUBJECT TO FPS ≥ 95 %. It is the owner's own «снижаем потребление, пока цена
+    ≤ N» formula with **N = 5 % of FPS** — and the reference is **Max Perfomance, not stock**.
+  - **A THIRD LEVER enters the mechanism: a power ceiling.** "Выше не поднималась" is a bound, and a
+    raised curve with a clock cap bounds consumption only indirectly. `nvidia-smi -pl` is the hard one,
+    and under a game load it is finally live (the card sits at 300 W throttling on `sw_power_cap`).
+    So the "one mechanism, only the ceiling's place differs" line above now holds for `Max Perfomance`
+    and `Silent Cold`; `Optimised` is that mechanism PLUS `-pl`.
+  - **That lever's range is narrow and it is measured, not assumed:** `-pl` moves only 300 → 250 W on
+    this card (`researches/01`). Everything below 250 W has to come from the raised curve and the clock
+    cap, which lower the draw itself rather than its limit. Working shape: both at once — the curve sets
+    the level, `-pl` stands above it as insurance.
+  - **Noise became an acceptance criterion with a measured floor.** This card's fan does not go below
+    **30 %**; under the game it ran at **72–75 %**, which is where the room to be quieter actually is.
+  - **The instrument is FPS.** The criterion is stated about frames, so it is measured by the graphics
+    load (`plans/05` §4.3) — not by ops/s and not by the delivered clock.
+
+  **This SUPERSEDES the two-profile table below**, which is kept because its reasoning about the knee and
+  the two levers is still what `Optimised` runs on. What changed: the old `Max Optimal` was one profile
+  serving two different optima, and it splits. **One mechanism serves all three working modes** — the
+  whole curve raised, `offset_i = min(Δ, cap − F_i)`, differing only in where the ceiling sits — and NONE
+  of them uses a clock lock (his requirement, and also a necessity: `-lgc min=max` forbids clocking down).
+  Consequence for the surface: **four shortcuts, not three** (internal map §4 updated).
+
+- **THE TWO PROFILES, DEFINED BY THE OWNER IN OPERATIONAL TERMS** (chat, 2026-08-10, after he caught
+  the agent describing CLOCK CLAMPING while he meant UNDERVOLTING). His words, verbatim:
+
+  > *«ты рубить хочешь, а я ТЮНИТЬ И ВЫЖИМАТЬ МАКСИМУМ СОКОВ из видеокарты»*
+  >
+  > *«НЕ СНИЖАЕМ ЧАСТОТУ, РАБОТАЕМ НА ВСЁМ ДИАПАЗОНЕ ЧАСТОТ — СНИЖАЕМ НАПРЯЖЕНИЯ НА ВСЁМ ДИАПАЗОНЕ
+  > ЧАСТОТ»*
+  >
+  > *«в ноль потерь нацелен только Max. Cold нацелен на снижение производительности примерно на 10%
+  > в обмен на максимальный холод какой только сможим получить от карты. Макс - максимум выигрыша
+  > производительности ценою минимума потери производительности. Холод - максимум выигрыша холода
+  > ценою детерминированной потери производительности»*
+
+  **This SUPERSEDES every earlier description of Silent Cold as "the profile that trades performance
+  away" with no number attached.** The two objective functions, stated so no session re-derives them:
+
+  | Profile | Objective | Price |
+  |---|---|---|
+  | 🚀 **Max Optimal** | **the KNEE** — the point after which giving up more performance stops paying | **≤ 5 %, a CEILING and not a target** |
+  | ❄️ **Silent Cold** | **maximize COLD** | **~10 %**, DETERMINED in advance and spent deliberately |
+
+  **THE KNEE IS A COMPUTATION, NOT AN IMPRESSION — and getting this wrong is a documented failure of
+  this project's own agent.** The owner had to state it five times, and the fourth restatement wrote
+  "target = zero loss" into this file, because on the CLOCK axis the knee happened to land at 0.1 %.
+  Where the knee LANDS is a measurement; what we look for is the knee. His words:
+
+  > *«Ищем перегиб, где перестаёт давать увеличивающуюся отдачу от продолжения снижения
+  > производительности»* · *«мы можем заплатить до 5% производительности, если это даёт очень весомые
+  > выигрыши по холоду»*
+
+  The definition, executable: walk the candidates downward; for each step compute the MARGINAL RETURN
+  — watts (or degrees) gained per percent of performance given up. The knee is the point after which
+  that return COLLAPSES. Aim there; the 5 % is the wall you may not pass, not the place to stand.
+  Measured on the clock axis 2026-08-10: 73 W per percent down to 2692 MHz, then 6.1 — a twelvefold
+  collapse, so the knee is 2692 at a cumulative price of 0.1 %. **On the VOLTAGE axis the knee may sit
+  at 2–4 %, and that is exactly what the 5 % ceiling exists to permit.**
+
+  **Two levers, and which profile may use which is the whole design:**
+  - **Voltage** — lowers watts and degrees at FULL clocks, i.e. free. Max Optimal's ONLY lever: a
+    profile whose price is zero may not touch anything that costs.
+  - **Clock** — lowers watts and degrees for money. Silent Cold's SECOND lever, and the reason its
+    10 % exists: the budget is what buys the extra cold.
+
+  So `Silent Cold` = a deep undervolt PLUS a clock cap sized to spend the 10 %; `Max Optimal` = the
+  undervolt alone. The clock axis was mapped on the live card 2026-08-10 (`plans/03` §4.5) — that
+  table is the second lever's map, not a profile.
+
+  **The tension to settle with the owner's ears, named rather than assumed:** "maximum cold" and
+  "quiet" pull opposite ways through the fan. The reading in force until he says otherwise: cold at
+  the STOCK fan curve, where fewer watts make the card colder and quieter at once.
+
+- **THE SHIPPED PROFILE NEVER PINS THE CLOCK — the card keeps its whole dynamic range and runs it at
+  less voltage.** The owner's words, chat 2026-08-10, after the agent explained the phase-5 §4.1
+  experiment badly and he cut through it:
+
+  > *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но работала на пониженном
+  > напряжении согласно кривой VF профиля»*
+
+  **This retires `-lgc` as a profile mechanism**, and the reason is concrete rather than aesthetic:
+  `ladder.candidateProfile()` locks `graphicsClockLockMhz: {min: mhz, max: mhz}`, so a pinned card can
+  go neither up nor down — at idle it would sit at the locked clock instead of dropping to 180 MHz. That
+  shape is legitimate for a MEASUREMENT (a held clock is what makes a watt delta legal, EXP-0018) and
+  wrong for anything the owner boots into.
+
+  **The shape that satisfies him, stated as the arithmetic so no session re-derives it.** Our lever is a
+  per-point frequency offset, so with `F_top` = the stock curve's highest frequency and `Δ` = the raise:
+
+  ```
+  offset_i = clamp(F_top − F_i , 0 , Δ)
+  ```
+
+  - points well below the top get the full `Δ` → every frequency they serve now needs LESS voltage;
+  - points near the top get a SMALLER offset so none of them can offer more than `F_top` → the maximum
+    boost is provably unchanged, and the savings are not spent on speed (`researches/02` §6.2: raising
+    the curve without a ceiling buys speed, not watts);
+  - the bottom of the curve is untouched in effect — points 0…~20 sit on the 180 MHz floor — so idle
+    behaviour and zero-RPM survive.
+
+  **Two properties worth naming because they make this the safest shape available:** every offset is
+  **non-negative** (the earlier plan assumed negative offsets would be needed to flatten the tail — they
+  are not), and `min(F_i + Δ, F_top)` preserves monotonicity, so the curve cannot be made non-monotone
+  by construction. The clock ceiling therefore lives INSIDE the curve, as one artifact with one rollback,
+  and no clock lock is written at all.
+
+- *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
+  dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
+  records how it is satisfied.
+- *"последний установленный по ярлыку профиль — должен запоминаться для автозапуска на старте ПК"* —
+  the last shortcut-applied profile is remembered and re-applied at boot.
+- ~~*"Если убить её — профиль сбрасывается…"*~~ — **SUPERSEDED by the owner, 2026-08-09:** *"в трее
+  делаем без кнопок, а просто показ статуса, а сброс до заводских настроек — по третьему ярлыку с
+  записью в автозагрузку"*. Three shortcuts (Max Optimal · Silent Cold · Reset to factory), each
+  becoming the remembered boot state; the tray only displays. Killing the tray costs the indicator,
+  not the profile. Full reasoning: `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4.
+- *"нужна методология, как так настроить, чтобы напряжения были в каждой точке чуть выше точки сбоев
+  видеокарты"* — per-point voltage sits just above the failure threshold, with margin.
+  `researches/02` is the answer.
+
+**The owner's voice — installed here, and deliberately not shipped.** `AUTHOR_STYLOMETRY.md` sits in
+the project root: the **full private core**, pulled in on the owner's instruction (2026-08-09) so the
+agent works from the richest version rather than a stripped one. It carries verbatim quotes from the
+owner's personal writing and this repository is public, so the file is **git-ignored and stays that
+way**. A fresh clone has to fetch it:
+
+```bash
+cp d:\work\krinik_voice\AUTHOR_STYLOMETRY.md .
+```
+
+The single source of truth is the owner's voice store, `d:\work\krinik_voice\` (decision №39: one
+portrait per owner, not per project). The copy here is a working mirror — never edit it; edit the
+store and re-copy. A public, quote-stripped snapshot of the same portrait exists in the KAIF
+repository; it is not what is installed here, and the two must not be confused.
+
+Open it and run its checklist before handing over any text the owner signs or reads as their own —
+`README`, release notes, the landing copy. Skill: `/owner-voice`.
+
+**General working guidance:**
+- Always check the current time and the log file's time before reading logs — read fresh logs, not stale ones.
+- Work autonomously without interactive questions. If you need information from the human, write an
+  interview document and pause the session (so the human is signaled to come answer), rather than blocking.
+- If you find bugs in third-party libraries, file tickets for them via `gh` on the human's behalf.
+- Actively test what you build, using whatever tooling lets you drive the software effectively.
+- Periodically re-read and, where useful, improve your own guidance docs so a fresh session can be
+  effective despite context loss. Steer and tune yourself toward maximum effectiveness and autonomy
+  toward the stated goal.
+
 <!-- перенесено стрижкой 2026-09-25, закрытие сессии 104 -->
 ## ✂️ ПЕРЕНЕСЕНО ИЗ STATUS 2026-09-25 (закрытие сессии 104, /end-chat-soft): СЕССИЯ 103, ЭСТАФЕТА К ВЕЧЕРУ, ПРОМЕЖУТОЧНАЯ ЗАПИСЬ ВЕЧЕРА
 

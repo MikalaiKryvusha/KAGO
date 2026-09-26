@@ -406,7 +406,7 @@ itself.
   to be measured before any delta is called an effect, exactly as the power meter's was (EXP-0018). A
   benchmark's FPS number is an instrument like any other and inherits the same rule.
 - **What the FPS number means for the owner's real use.** His Palworld session stays the second witness
-  (`AGENT_GUIDE.md` → Notes from the human); a benchmark is evidence, not his experience.
+  (`PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8»); a benchmark is evidence, not his experience.
 
 ## 9. Sources
 

@@ -139,5 +139,5 @@
 
 ## 7. Связи
 
-`researches/32` (разведка с источниками) · `AGENT_GUIDE.md` → THE REGISTER · `GOAL.md` ·
+`researches/32` (разведка с источниками) · `HOUSE_RULES.md` → R1 (регистр; до 26.09 — `AGENT_GUIDE.md` → THE REGISTER) · `GOAL.md` ·
 `tools/glossary-guard.mjs` (сторож) · [[EXP-0215]].

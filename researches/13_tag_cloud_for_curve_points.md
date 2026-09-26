@@ -93,7 +93,7 @@ cannot branch on — which is exactly the owner's complaint: *«чтобы ко�
 
 **The overwrite is the sharpest of these.** `closePoint` sets one status, so a frequency that found
 its edge and THEN held the one-minute burn cannot say both. The owner's convergence loop
-(`AGENT_GUIDE.md` → «THE SHIPPED POINT…») is built on accumulating exactly that kind of evidence
+(`PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8» → «THE SHIPPED POINT…»; in force — `ЗАКАЗ.md` §6) is built on accumulating exactly that kind of evidence
 over time, and the document has no place to accumulate it.
 
 ### 1.4 Consumers — the blast radius, counted rather than estimated

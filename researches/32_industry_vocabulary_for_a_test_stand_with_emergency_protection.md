@@ -107,5 +107,5 @@
 
 ## 4. Связи
 
-`GLOSSARY.md` · `AGENT_GUIDE.md` → THE REGISTER · `GOAL.md` → «🎓 НА РАЗВИЛКЕ — НЕ РЕШАТЬ САМОМУ» ·
+`GLOSSARY.md` · `HOUSE_RULES.md` → R1 (the register; `AGENT_GUIDE.md` → THE REGISTER until 2026-09-26) · `GOAL.md` → «🎓 НА РАЗВИЛКЕ — НЕ РЕШАТЬ САМОМУ» ·
 `plans/81` Ш5 (получил имя АПВ) · `bugs/90` (сторож словаря) · [[EXP-0215]].

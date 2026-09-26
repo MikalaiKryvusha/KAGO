@@ -134,7 +134,8 @@ missing, and the logon disarm (2.6) clears it without the owner doing anything.
 - [ ] `--off` — restore by the receipt, item by item, **each in its own `try`** (R10a: a rollback with
       more than one duty is a LIST, never a chain — the first throw must not cancel the rest).
 - [ ] Never touch a channel to the machine or someone else's work: Parsec, VPN, the IDE hosting the
-      session, Docker with running containers — the standing rule from `AGENT_GUIDE.md`.
+      session, Docker with running containers — the standing rule, now `HOUSE_RULES.md` → R4 step 2 (the owner's word of
+      2026-09-08 lets Parsec be stopped before a live evening and raised after).
 - [ ] `--selftest` on injected service/disk seams, offline, and it joins `selftest:all` **with the
       code, not later** (`TESTING_FRAMEWORK.md` → the work produces its own means of checking).
 

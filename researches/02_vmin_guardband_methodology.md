@@ -170,7 +170,7 @@ gameplay, and states plainly that even hours of play can leave instability undis
 
 - an express test **selects a candidate**; it never qualifies anything;
 - qualification is the long burn plus the diverse set — and the owner's own convergence loop
-  (`AGENT_GUIDE.md` → Notes from the human) is the better-shaped version of this, because it retests
+  (`PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8»; in force — `ЗАКАЗ.md` §6) is the better-shaped version of this, because it retests
   the WHOLE curve after each iteration and ratchets any point that ever failed.
 
 ### 6.4 THE HONEST LIMIT OF THE METHOD — the edge is a probability, not a line

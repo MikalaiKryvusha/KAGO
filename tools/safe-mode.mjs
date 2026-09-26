@@ -38,7 +38,7 @@
  *    run time and refused. The earlier plan said «put the receipt on C:», which is diligence; this is
  *    machinery, and it keeps holding when someone moves the repo.
  *  • Touch a channel to the machine or someone else's work — Parsec, VPN, the IDE hosting the session,
- *    Docker with running containers (`AGENT_GUIDE.md`, standing rule).
+ *    Docker with running containers (`HOUSE_RULES.md` → R4 step 2; until 2026-09-26 `AGENT_GUIDE.md`, standing rule).
  *
  * ─── DISKS ARE KEYED BY LETTER, NOT BY NUMBER ─────────────────────────────────────────────────────
  *

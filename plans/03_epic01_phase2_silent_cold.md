@@ -6,7 +6,7 @@
 > `npm run phase1:accept`, and the owner's consent for `-lgc`/`-rgc` is granted)
 > **Outbound:** the first real profile → `profiles/` · the −100 W verdict → the owner (epic AC4 may
 > turn out unreachable on this backend, exactly as the −50 W power-limit floor did) · new harness
-> commands → the `AGENT_GUIDE.md` test-harness table
+> commands → the test-harness table, `HOUSE_RULES.md` §3 (in `AGENT_GUIDE.md` until 2026-09-26)
 
 ---
 
@@ -364,7 +364,7 @@ that had to be assumed.
 
 ### 4.7 — Housekeeping the phase owes
 
-- [ ] New harness commands into the `AGENT_GUIDE.md` table, each row saying what it PROVES.
+- [ ] New harness commands into the harness table (`HOUSE_RULES.md` §3; in `AGENT_GUIDE.md` until 2026-09-26), each row saying what it PROVES.
 - [ ] The truth↔mirror registry: the profile's stamp ↔ the live card is a genuine pair (two
       independent authors, one of them a moment in the past) — register it with
       `npm run profile -- --verify-stamps`. Do NOT register anything one side can simply import from

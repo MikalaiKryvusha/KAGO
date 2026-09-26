@@ -184,7 +184,7 @@ export const PROVEN_STATUSES = Object.freeze([
  *
  * Worse than cramped — LOSSY. `long-burn-proved` OVERWRITES `edge-found`, so a frequency that found
  * its edge and then held the one-minute burn cannot say both. The owner's convergence loop
- * (`AGENT_GUIDE.md` → «THE SHIPPED POINT…») is built on accumulating exactly that evidence over time,
+ * (`PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8» → «THE SHIPPED POINT…»; in force — `ЗАКАЗ.md` §6) is built on accumulating exactly that evidence over time,
  * and until now the document had nowhere to accumulate it.
  *
  * ─── CLASSES, AND WHY THE CLOUD IS NOT FLAT ───────────────────────────────────────────────────────

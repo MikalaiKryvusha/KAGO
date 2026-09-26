@@ -7,8 +7,8 @@
 > **Status:** ✅ answered by probe and sweep, 2026-08-09 22:30 +03:00 · feeds
 > `plans/01_EPIC_kago_orchestrator.md` and the phase-1 operational plan.
 > **Outbound:** three owner forks → `interviews/interview_001_harness_boundaries.md` ·
-> HWiNFO64 removal → `PROJECT_STRUCTURE_EXTERNAL_MAP.md` + `AGENT_GUIDE.md` architecture block ·
-> four probed facts → the `AGENT_GUIDE.md` environment dossier.
+> HWiNFO64 removal → `PROJECT_STRUCTURE_EXTERNAL_MAP.md` + `AGENT_GUIDE.md` architecture block (its module tree dropped 2026-09-26 — the maps hold it) ·
+> four probed facts → the environment dossier (`HOUSE_RULES.md` §4 since 2026-09-26; then in `AGENT_GUIDE.md`).
 
 ---
 

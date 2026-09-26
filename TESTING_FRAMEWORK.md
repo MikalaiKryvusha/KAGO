@@ -36,13 +36,11 @@
 > не мой счёт сущностей.
 <!-- KAIF:PRAYER:END -->
 
-Raw generated content — code, a document, an analysis, anything — **must not be trusted**. It may *look*
-logical and working and still be broken, or fail the owner's actual requirements (the idea, the plan, the
-vision). An early defect that rides silently to production is the most expensive kind — it destroys
-projects from the inside. Testing is a distinct, first-class part of ALL work, not a formality after it.
-This document is the agent's testing canon; it applies to **every artifact in every sphere** — a function,
-a dataset, a legal clause, a bridge design, a thought (what "verify" means in your sphere is defined by
-the project's sphere library: its *Verification by observation* and *Minimum evidence set* sections).
+Raw generated content — code, a document, an analysis, anything — **must not be trusted**: it may *look*
+logical and working and still be broken or fail the owner's actual requirements, and an early defect that
+rides silently to production is the most expensive kind. Testing is a first-class part of ALL work, not a
+formality after it; this canon applies to **every artifact in every sphere** (what "verify" means in your
+sphere is defined by the sphere library's *Verification by observation* and *Minimum evidence set*).
 
 ## The seven principles of testing (the canon)
 
@@ -224,13 +222,9 @@ ships, walk the gates that apply:
    version first (see `BUG_FIXING_FRAMEWORK.md` → Guards); goldens for refactors are byte-exact —
    an empty diff is proof, "the numbers look the same" is not.
    **And the broken version is NAMED — together with its distance from the THREAT.** Reddening a
-   guard against *a* broken version is necessary and not sufficient: four field guards in one
-   evening were each green and mutation-proven — and each proven against the failure that was
-   convenient to simulate (a process death on a digital twin instead of a machine freeze; a
-   readback after a CLEAN close instead of a death without one; one warning instead of an
-   accumulation; the first step instead of any step). The machine hung, and the fuse built for it
-   recorded nothing (origin issue #35). A green mutation over a wrong-threat fixture does not
-   withhold confidence — it ISSUES it, falsely. So every guard declares, next to itself, four
+   guard against *a* broken version is necessary and not sufficient: a guard proven against the
+   failure that was convenient to simulate, instead of the threat it exists for, does not withhold
+   confidence — it ISSUES it, falsely. So every guard declares, next to itself, four
    greppable lines, and a guard is DONE only when the last one is no longer `NOT YET`:
    ```
    @guard <name>
@@ -249,8 +243,7 @@ ships, walk the gates that apply:
    the product offers, walk the real screens, read the console — only then is "deployed" a fact.
    A smoke that only walks public surfaces proves the landing page is alive, not the product: if
    the product has authenticated state, an unauthenticated smoke is NOT evidence about the
-   product. (Field-paid: three deploys in one night served an application that did not start at
-   all, with every local instrument green — origin issue #18.)
+   product.
 6a. **«Is the engine mounted?» — the owner's name (2026-08-30) for gate 5's second half above.**
    A fuse built over two days, green suite, mutations reddening exactly their own blocks, recorded
    ZERO trips when the owner's machine actually hung — everything it was proved against was a
@@ -270,22 +263,18 @@ ships, walk the gates that apply:
    output directory that is not cleaned between builds ships a mixture of two builds — every
    individual file valid, the SET broken — and mixtures fail in ways no test sees.
 
-Two placement rules, paid for by the same outage: gates 6–7 belong IN THE DEPLOY PATH, not in
-prose — one deploy door that runs them itself and fails on any red step (where the agent system
-has hooks, deny the raw deploy command; a rule that lives only in a document is a rule the
-shipping session skips under pressure). And a post-deploy smoke must be able to FAIL on a dead
-product: prove there was something to measure before painting green — a smoke that is greenest
-when the product is emptiest is worse than no smoke.
+Two placement rules: gates 6–7 belong IN THE DEPLOY PATH, not in prose — one deploy door that runs
+them itself and fails on any red step (where the agent system has hooks, deny the raw deploy command).
+And a post-deploy smoke must be able to FAIL on a dead product: prove there was something to measure before
+painting green — a smoke that is greenest when the product is emptiest is worse than no smoke.
 
 ## The agent's stand is not the owner's real world — "done" about production comes after the real world
 
 The agent verifies its work on a clean, freshly built stand — a fresh browser, a clean checkout, a
 new user, today's build — and says "done". The owner's world is ACCUMULATED: an old session, a saved
-profile, his own edits in the deployed tree, the cache of the previous build — and there it breaks, <!-- KAIF-VERSION-OK: upstream's own text — the next line names the version this rule ARRIVED in -->
-while every instrument of the agent was green by construction (KAIF 2.6; origin issue #52; the
-owner's word: the agent is OBLIGED to verify on the real world so as not to break what is already in
-production). Before the word "done" about anything already in production, the report carries the
-difference line:
+profile, his own edits in the deployed tree, the cache of the previous build — and there it breaks,
+while every instrument of the agent was green by construction. Before the word "done" about anything
+already in production, the report carries the difference line:
 
 ```
 REAL WORLD: accumulated — <what the owner's world already holds: sessions, profiles, data, edits>;

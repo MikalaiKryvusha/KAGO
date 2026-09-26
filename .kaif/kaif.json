@@ -14,6 +14,12 @@
   ],
   "language": "ru",
   "canonArtifacts": [],
+  "archives": {
+    "GOAL.md": {
+      "digest": "ЗАКАЗ.md",
+      "owner": "interviews/interview_017_five_method_forks.md → Q3 = A (2026-08-28): «GOAL.md остаётся дословным архивом, append-only»; ЗАКАЗ.md approved by the owner 2026-09-25 («ЗАКАЗ принят»)"
+    }
+  },
   "projectName": "KAGO",
   "history": [
     {

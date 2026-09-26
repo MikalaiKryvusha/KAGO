@@ -513,7 +513,7 @@ export const ADAPTIVE_INTENSITY_BAND = Object.freeze([0.40, 0.60]);
  * THE LOW-LOAD SHAPE — a short burst against a long idle.
  *
  * SOURCE for its EXISTENCE: `researches/04` §3.1, plus the owner's own account of the same trap on
- * CPUs (`AGENT_GUIDE.md` → Notes from the human): an undervolt can be *conditionally* stable —
+ * CPUs (quoted verbatim in `researches/04`, 2026-08-10): an undervolt can be *conditionally* stable —
  * surviving sustained heavy stress and dying at idle or on a browser click, because the LOW end of
  * the V/F curve has stability requirements of its own. A heavy test never visits that region, so it
  * cannot qualify a profile however long it runs.

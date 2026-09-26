@@ -17,7 +17,8 @@
 //
 // ─── THE ONE CONDITION THAT MAKES THE LOOP SOUND ──────────────────────────────────────────────────
 //
-// «The escalation trigger must be the SDC ORACLE, never "it didn't crash"» (AGENT_GUIDE, and it is
+// «The escalation trigger must be the SDC ORACLE, never "it didn't crash"» (AGENT_GUIDE until 2026-09-26, now
+// PROJECT_HISTORY.md → «📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8»; the guide keeps it as the Test-harness principle; and it is
 // not optional). More than half of undervolting failures are silent. So a record's verdict is the
 // oracle's three-way answer, and this module treats **anything that is not PASS as evidence against
 // the offset** — including `UNKNOWN`, because a comparison that could not happen is not a pass.

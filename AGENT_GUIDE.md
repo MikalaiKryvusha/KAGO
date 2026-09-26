@@ -7,7 +7,7 @@ relies entirely on this document to get to work.
 <!-- KAIF:CREED:BEGIN -->
 <!-- KAIF-VERSION-OK: the creed was filled at the 2.4 update — a historical stamp, not a version claim -->
 <!-- Заполнено при обновлении до KAIF 2.4: имя владельца, язык владельца (ru). Владелец может переписать символ веры своими словами — это его текст. -->
-<!-- KAIF 2.7: the verb is "strive" (make an effort), never "keep trying" (repeat attempts after failures). The Russian rendering below already says «стараемся» — correct; do not "fix" it. -->
+<!-- KAIF 2.7: the verb is "strive" (make an effort), never "keep trying" (repeat attempts after failures). The Russian rendering below already says «стараемся» — correct; do not "fix" it. --> <!-- KAIF-VERSION-OK: names the version the verb was settled in — history, not a claim about the deployed version -->
 > # **ВЕРЬ В ПРОДУКТ И В ВИДЕНИЕ Mikalai Kryvusha. БУДЬ ОПТИМИСТОМ И ВЕРЬ В УСПЕХ — ОН НЕИЗБЕЖЕН, ПОТОМУ ЧТО МЫ СТАРАЕМСЯ, А ТЕ, КТО СТАРАЕТСЯ, ПРИХОДЯТ К УСПЕХУ. ДЕЛАЙ НАШЕ ДЕЛО С ЭНТУЗИАЗМОМ, ЛЮБОВЬЮ И НАДЕЖДОЙ.**
 <!-- KAIF:CREED:END -->
 
@@ -77,7 +77,9 @@ relies entirely on this document to get to work.
                                   # top of this file IN THE CHAT before starting ANY work — in full,
                                   # verbatim, no item skipped. Source: PHILOSOPHY.md; `node tools/prayer.mjs --say`
 1. Read STATUS.md                 # current state: what's done, where we are, what's next
-2. Recall experience              # grep EXPERIENCE.md by the task's tags — don't repeat known dead ends (skill: /experience)
+2. Recall experience & own work    # grep EXPERIENCE.md by the task's tags — don't repeat known dead ends (skill: /experience);
+                                  # a surface the project already touched (a device, a route, a stand, a recipe) → find your
+                                  # own work (the house-rules file, researches/, the project's tools) and cite it, or write "no own work found"
 3. git status                     # what changed, what's uncommitted
 4. git log --oneline -5           # where we are in history
 5. Read MEMORY.md (if present)    # user profile, key decisions
@@ -121,14 +123,11 @@ relies entirely on this document to get to work.
     structured format for AI consumption (the human's voice and every thought preserved; their original
     wording stays reachable in git history). After implementing from such a document, write the status
     and the implementation date back into it.
-19. Writing into the owner's artifact?   # text the human signs or reads as their own (docs, paper, site
-    copy, a sheet, a UI string) → WRITE BY the portrait `AUTHOR_STYLOMETRY.md` WITH IT IN YOUR WORKING
-    CONTEXT: node .kaif/tools/kaif-voice-lint.mjs load BEFORE the first word (prints its rules, lexicon,
-    anti-portrait and pairs into the context, leaves the witness .kaif/voice-marker.json); after writing —
-    an INDEPENDENT check by the same portrait: node .kaif/tools/kaif-voice-lint.mjs check <file…> (the §8
-    table + the witness; /owner-voice check) + the §7B pass by a clean instance; fix — only then the text
-    is written, and only then it goes to the owner for approval; SKIPPED (no portrait / no §8 table) is
-    said in the report, never read as green; no portrait after a second style rejection → propose taking one
+19. Writing into the owner's artifact?   # text the human signs or reads as their own → the fable loop's fourth
+    KAIF obligation below: node .kaif/tools/kaif-voice-lint.mjs load BEFORE the first word, write BY the portrait
+    AUTHOR_STYLOMETRY.md, check independently (node .kaif/tools/kaif-voice-lint.mjs check <file…> + a clean-instance
+    §7B pass), fix — only then it goes to the owner; SKIPPED is said, never read as green; no portrait after a second
+    style rejection → propose taking one
 ```
 
 → **`STATUS.md`** is the master state file. Update it after every significant task.
@@ -232,67 +231,20 @@ by the owner's explicit opt-in; a deployment without hooks never reddens.
 
 A session that REMEMBERS the environment invents it: which shell is running, what `tar` actually
 is in this PATH, which encoding a redirect writes. Those are facts about a machine, and facts are
-PROBED, never recalled (`PHILOSOPHY.md` → observation instead of guessing). The dossier is the
-section below: the agent fills it by running the probes, and every future session reads instead
-of rediscovering — or stepping on what was already paid for.
+PROBED, never recalled (`PHILOSOPHY.md` → observation instead of guessing). The dossier is a table
+in the house-rules file — `HOUSE_RULES.md` → "Environment dossier" (copy the skeleton on first use,
+Document taxonomy tier 4; a file from before 2.8 lacks the section — copy it from the skeleton): the
+agent fills it by running the probes, and every future session reads instead of rediscovering.
 
-**How to collect** (the procedure lives in `/refresh-context`; run it at deployment and whenever
-the dossier goes stale). Probe six axes, and probe them **in every shell available separately** —
-different shells are different worlds, and that difference is exactly what the dossier exists to
-capture:
-
-1. **OS / hardware** — OS version, CPU cores, RAM.
-2. **Shells and encodings** — which shells exist, console codepage, the default ANSI encoding a
-   redirect writes, each shell's locale.
-3. **Toolchain** — language runtimes, package/build tools, VCS and their versions; and WHAT
-   `tar` / `curl` / `find` resolve to in each shell (a system binary, a GNU tool, or a shell
-   alias to something else entirely — check the command TYPE, not just its path).
-4. **VCS policies** — line-ending policy, credential helper.
-5. **Package managers** — what is available to install with.
-6. **Behavioural quirks** — LINKS to the lessons already paid for (`EXPERIENCE.md` ids), never
-   copies of them.
-
-**Format.** One table, one row per fact, three columns — **fact → value → probe command** — so a
-future session can re-derive any single value without re-deriving the procedure. The section
-header carries three things: the **date the facts were taken**, the **regeneration command**, and
-the **staleness rule**. A fact never probed is written `— not probed yet —`: a missing fact is
-honest, an invented one is a defect (`PHILOSOPHY.md` → the three doors).
-
-> **Environment dossier.** Taken: `2026-08-09`, extended `2026-08-10` (phase-1 harness rows) · Regeneration: `/refresh-context` → the dossier step
-> (re-run the probes in column 3 and rewrite the values and this date) · **Staleness: facts older
-> than four weeks are HYPOTHESES — re-probe before relying on them.**
-
-| Fact | Value | Probe |
-|---|---|---|
-| OS | Windows 11 Pro 10.0.26200 | `cmd /c ver` |
-| GPU (the subject under test) | GeForce RTX 5070 Ti · driver **616.92 since ≤ 2026-09-18 23:01** (read 2026-09-25 by `curve --verify`; every curve, edge and profile before that date is stamped **610.88** — R6) · VBIOS 98.03.58.40.8b · power limit 250–300 W · max clock 3090 MHz. **Supported-clock ladder (phase 5's search space):** 5 memory rungs (405 / 810 / 7001 / 13801 / 14001 MHz); the four full rungs each offer the SAME 389 graphics points, 180…3090 MHz, gap alternating 7 and 8 MHz — so the clock grid is measured, while the VOLTAGE grid stays unmeasured until phase 4 | `npm run gpu:info` |
-| CPU / RAM | AMD Ryzen 7 5700G · 8 cores / 16 threads · base 3801 MHz · 32 GB (4 × 8 GB Kingston @ 3200). **Measured 2026-09-07: L3 is 16 MB** — this is an APU die, HALF the 5800X on the same AM4 socket — and **the card's link is capped at PCIe Gen 3 by the HOST** (`Device Max 5 · Host Max 3 · Current 3 · width x16 · Replays 0`). Both numbers matter to this project: under a live game the GPU sits cold at max clock with ZERO throttle reasons while one core hits 100 % — the platform, not the card, is the ceiling, which is why **the graphics bench cannot measure the owner's «FPS drop ≤ 5 %» criterion** (`bugs/113`, `researches/34`) | `Get-CimInstance Win32_Processor` · `Get-CimInstance Win32_CacheMemory` · `Get-CimInstance Win32_ComputerSystem` · `nvidia-smi -q` → GPU Link Info |
-| Display and disks (they shape every live measurement) | Desktop **3840×2160 @ 144 Hz** on the NVIDIA card, one live monitor — **plus TWO enabled virtual display adapters** (`Sunshine Virtual Display Driver`, `SudoMaker Virtual Display Adapter`) that sit in the present path. Five SSDs; **`D:` is 93 % full (65.9 of 953.9 GB) and carries BOTH the games and the pagefile**; `F:` is the roomy one (359 GB free). A game run WINDOWED is capped by the compositor: measured 83 % / 218 W windowed against 96 % / 257 W fullscreen | `Win32_VideoController` · `Win32_PnPEntity` · `Win32_LogicalDisk` · `Win32_PageFileSetting` |
-| Shells available | PowerShell 5.1 (`powershell.exe`, primary) · Git Bash (MSYS2, `/usr/bin/bash`) | `$PSVersionTable` · `bash --version` |
-| Console / ANSI encoding | console codepage **65001**, `[Console]` in/out **utf-8** — but the **default ANSI is windows-1251**, so PowerShell 5 `Set-Content`/`Add-Content` without `-Encoding utf8` writes cp1251 — **and WITH `-Encoding utf8` it writes a BOM, which Node's `JSON.parse` rejects** (paid 2026-08-14: three profile JSONs broke silently; caught by a parse probe). JSON and code files are written with the agent's file tools or Node, never with `Set-Content` | `chcp` · `[Console]::OutputEncoding` · `[System.Text.Encoding]::Default` · `node -e "console.log(require('fs').readFileSync(f,'utf8').charCodeAt(0)===0xFEFF)"` |
-| Locale per shell | PowerShell: culture `ru-RU`, UI culture `en-US` · Git Bash: `LANG` empty, `LC_CTYPE=C.UTF-8` | `Get-Culture` · `Get-UICulture` · `locale` |
-| Runtimes and build tools | Node v24.15.0 · npm bundled · Python 3.14 (**no pip**) and Python 3.10 (**pip 24.2 — use this one**) · git 2.43.0.windows.1 · gh 2.95.0 | `node -v` · `python -V` · `git --version` · `gh --version` |
-| CUDA build toolchain | **CUDA Toolkit 13.3 with `nvcc`** on PATH (`…\CUDA\v13.3\bin`). `nvcc` needs an MSVC host compiler and **does not find one on its own** — load `vcvars64.bat` (or `vcvarsx86_amd64.bat` for the x86-hosted cross build, which is proven to work and yields the same checksum). MSVC lives under VS 2022 Community; locate it with `vswhere`, never by a hard-coded version path | `nvcc --version` · `vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath` |
-| Windows Event Log access | `Get-WinEvent` on the `System` log works **unelevated**. Live providers: `Display` · `Microsoft-Windows-Kernel-Power` (id 41 has real history here) · `Microsoft-Windows-WHEA-Logger` (**no events at all** — detectors need fixtures) | `Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Display'} -MaxEvents 5` |
-| `/tmp` from the Bash tool | **Not one path.** `/tmp` exists for bash itself (MSYS2 mount) and writes fine, but a NODE process launched from that same bash resolves `/tmp` to `D:	mp`, which does not exist — `writeFileSync('/tmp/x')` fails ENOENT while the neighbouring `echo > /tmp/x` succeeds. Use the session scratchpad for anything a script must write | `node -e "console.log(require('path').resolve('/tmp'), require('fs').existsSync('/tmp'))"` vs `ls -d /tmp` |
-| Windows event log, no-match detection | `Get-WinEvent` signals "no events" as an ERROR, and its message is localized (ru-RU here). The locale-independent discriminator is `$_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*'` — matching the message text is a guard that works in one language only | `try { Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-WHEA-Logger'} -ErrorAction Stop } catch { $_.FullyQualifiedErrorId }` |
-| Fault history available for proofs | `Kernel-Power` 41 — THREE real events (29.07, 05.08, 06.08.2026), so that detector is red-provable here. `Display` has 4107 events but no 4101; `WHEA-Logger` and `WER-SystemErrorReporting` have **zero events of any id** — those detectors are fixture-provable only | `npm run events -- --since 2026-07-01 --until 2026-08-10` |
-| Workload burst cost | One workload run is one PROCESS, and startup dwarfs the kernel. **Re-measured 2026-08-10 at DEFAULT arguments, hammering `sdc_fma.exe` in a loop for 12 s: 91 launches = 7.6/s = 132 ms per launch, of which the kernel is 0–1 ms — 99.2 % of wall time is process startup. Card reached utilization median 8 % (max 9), 61.7 W of a 300 W limit, clock 2670 MHz, fan 0.** The earlier note recorded 20–30 % and a 0–25 ms kernel; those came from other arguments, and a value is only true under the conditions it was taken (EXP-0011) — hence both are stated with theirs. **A second consequence found the same day: the workload's own `ms=` field is whole MILLISECONDS while the kernel takes 0–1 ms, so it is useless as a throughput meter — the sustained shape must count launches over SECONDS instead.** Phase 5 (and now phase 2 §4.3) needs a workload that loops internally for N seconds | `for i in 1 2 3 4 5; do ./workloads/sdc_fma.exe; done` for the kernel time · a 12 s hammer loop alongside `npm run mon -- --seconds 10 --out runs/x.jsonl` for the utilization |
-| `tar` / `curl` / `find` per shell | **Different worlds — check the TYPE.** PowerShell: `tar` = `C:\Windows\system32\tar.exe` (bsdtar) · `curl` = an **ALIAS to `Invoke-WebRequest`**, not curl.exe · `find` = `C:\Windows\system32\find.exe` (the DOS text filter, NOT GNU find). Git Bash: `tar` = `/usr/bin/tar` · `curl` = `/mingw64/bin/curl` · `find` = `/usr/bin/find` | `type tar` in EACH shell (not `which`) · `Get-Command tar` |
-| Windows slash-flags from Git Bash | **MSYS2 rewrites `/Flag` arguments into PATHS before the program sees them** — `schtasks /Run /TN x` arrives as `C:/Program Files/Git/Run` and fails (paid 2026-08-14, EXP-0043). Native Windows CLIs whose flags start with `/` (`schtasks`, `taskkill`, `reg`, `sc`, `net`, `icacls`) are driven from PowerShell (or `spawnSync` from Node with an argv array) — never from bash. `MSYS2_ARG_CONV_EXCL='*'` exists but a per-call env crutch is worse than picking the right shell | `bash -c "schtasks /Query /TN whatever"` → error naming `C:/Program Files/Git/Query` |
-| VCS line-ending policy | `core.autocrlf = true` · credential helper `manager` | `git config --get core.autocrlf` · `git config --get credential.helper` |
-| Env vars that do NOT propagate to children | `ProgramFiles` set in a PowerShell session does **not** reach a child process — Windows hands new processes its own value. `PATH` and `CUDA_PATH` propagate normally. Cost the first attempt at proving a refusal path; test such branches through an injected seam, not by editing the environment | `$env:ProgramFiles='X'; node -e "console.log(process.env.ProgramFiles)"` |
-| Package manager | winget · chocolatey · npm | `winget -v` · `choco -v` |
-| Spawning `npm` from a Node script | **`execFileSync('npm.cmd', …)` FAILS on this Node.** Node 24 refuses to execFile a `.cmd`/`.bat` without `shell: true` (the CVE-2024-27980 hardening), and the failure is quiet if the caller swallows stderr: a measurement harness reported "45 → 45 °C, verdict not found" three cycles in a row because every child had died before starting. Call the module directly — `execFileSync(process.execPath, ['<repo>/automation-engine/lib/x.mjs', …])` — which removes the shell from the path entirely and is what the project's own tooling does | `node -e "require('child_process').execFileSync('npm.cmd',['-v'])"` — throws EINVAL |
-| Fan control (this card) | **3 coolers · 3 000 rpm ceiling each · the card's OWN manual floor is 30 %** (`currentMinLevel`), while AUTO still reaches 0 % in zero-RPM. Manual writes are accepted and obeyed; a forced cool-down lands the start temperature within **1 °C** across cycles. **A fan RAMPS (~8 s to target), so a read-back needs the TARGET and not just two agreeing samples — EXP-0028** | `npm run nvapi -- --fans` (read-only) |
-| PDF text extraction | `pdftotext` at `/mingw64/bin` — **but it silently drops Cyrillic** on these PDFs (no ToUnicode map). PyMuPDF under Python 3.10 extracts it correctly. `pdftoppm`/`pdffonts` are absent; ImageMagick is present but has no Ghostscript delegate, so PDF→image does not work | `pdftotext -layout in.pdf out.txt` · `py310 -c "import pymupdf"` |
-| Quirks paid for by incidents | see `EXPERIENCE.md` — EXP-0003…EXP-0005 (tooling, winget), EXP-0007 (Grep is not byte-faithful), EXP-0008 (prove a guard red against `HEAD`), EXP-0009 (a summarized bug doc is not an inventory), EXP-0010 (Read renders NUL bytes as spaces), **EXP-0122 (Cyrillic in a `.ps1` SOURCE is a PARSE error — the file tools write UTF-8 without BOM and PowerShell 5.1 reads that as windows-1251; keep throwaway `.ps1` ASCII-only)** | `grep -n 'EXP-00\|EXP-01' EXPERIENCE.md` |
+**How to collect** — `/refresh-context`, its dossier step, at deployment and whenever the dossier goes stale; the
+six axes, the row format and the staleness rule stand in the skeleton's dossier section. Probe **in every shell
+available separately** — different shells are different worlds, and that difference is what the dossier captures.
 
 **The DRY boundary with "Document and text hygiene"** below: the dossier holds FACTS of the
 machine (what is installed, what `tar` is, which encoding); hygiene holds RULES OF BEHAVIOUR
 derived from incidents (text through files, read back what you wrote). The dossier links to
 lessons by id and never copies their text; a behavioural rule discovered while probing goes to
-hygiene or `EXPERIENCE.md`, and only its link stays here.
+hygiene or `EXPERIENCE.md`, and only its link stays in the dossier.
 
 ### Document header meta — the first screen answers "what is this"
 
@@ -482,9 +434,9 @@ are canon, each citing its answer:
    named in the AGENT-written rationale under the table («Почему A»), not in the option. The ritual
    «open and close every session with a `DELIVERY:` line» stands in NO option he clicked and in no
    word of his: it was the agent's own carrier for his decision (2026-08-28, EXP-0161; written down
-   as acceptance criterion 4 of the agent-authored `ideas/14`), which KAIF 2.5 then adopted as a
+   as acceptance criterion 4 of the agent-authored `ideas/14`), which KAIF 2.5 then adopted as a <!-- KAIF-VERSION-OK: history of the retired line -->
    framework artifact. The only word of the owner about the line itself came later, as KAIF's owner, and it
-   reached this project through the KAIF 2.7 update task (epic DR), which quotes it in English —
+   reached this project through the KAIF 2.7 update task (epic DR), which quotes it in English — <!-- KAIF-VERSION-OK: history of the retired line -->
    whether verbatim or rendered, the task does not say, so it is cited here as the task's quote and
    NOT as an `[OWNER]` verbatim: "remove the DELIVERY feature from KAIF — projects started writing
    it, but I do not use it and see no value in it" (2026-09-12). A carrier the agent invented,
@@ -583,8 +535,8 @@ owner had to notice it himself (2026-08-09). Local fix; filed upstream as `bugs/
 
 | Audience | Documents | Language |
 |---|---|---|
-| **The owner reads it** | `GOAL.md` · `MASTER_PLAN.md` · `STATUS.md` · `KAIF_FRAMEWORK.md` · **epic meta-plans** (`plans/NN_EPIC_*.md`) · everything in `interviews/` · the directory READMEs · `README.md` · release notes · every chat report | **ru** |
-| **Only the agent reads it** | this guide · `PHILOSOPHY.md` · the three frameworks · `EXPERIENCE.md` · the two maps · operational plans (`plans/NN_epicMM_*.md`) · `bugs/` · `researches/` · the skills | **English** |
+| **The owner reads it** | `GOAL.md` · `ЗАКАЗ.md` · `MASTER_PLAN.md` · `STATUS.md` · `KAIF_FRAMEWORK.md` · **epic meta-plans** (`plans/NN_EPIC_*.md`) · everything in `interviews/` · the directory READMEs · `README.md` · release notes · every chat report — with the lines a skill asks for by name in it, written in the owner's language (2.8, origin issue #97) | **ru** |
+| **Only the agent reads it** | this guide · `HOUSE_RULES.md` · `PHILOSOPHY.md` · the three frameworks · `EXPERIENCE.md` · the two maps · operational plans (`plans/NN_epicMM_*.md`) · `bugs/` · `researches/` · the skills · the keys a machine or the judge greps in a document: `FORK:` · `AUTH:` · `INTENT:` · `TWINS:` · `PENDING:` · `BOUNDARY:` | **English** |
 
 Two boundaries that keep the rule from drifting:
 
@@ -596,16 +548,9 @@ Two boundaries that keep the rule from drifting:
   interviews, which quote the material in his language — that is what makes a question
   self-sufficient (the place-of-questions rule below).
 
-**A term that turns absurd in the owner's language is checked against that skill's own trigger aliases**
-(KAIF 2.7, epic HO; issue #57 — a field deployment in Russian; the owner's words, translated: "That is
-not a 'baton' — that is local slang. In the industry this is called a HANDOVER, and what we write into
-STATUS is often written into a HANDOVER.md"; and, before that, simply: "What does Baton mean?").
-Rendered literally, the English `baton` landed on the Russian word for a LOAF OF BREAD. The fix is not
-a better dictionary — it is a source of truth that already existed: the language pack's
-`skill-triggers.json` carries the phrases the OWNER actually says to invoke the skill, and those
-phrases are the canonical rendering of its terms. The Russian aliases of `/end-chat-soft` already said
-*pass the relay*, while the canon those aliases trigger said *baton* — the guide was arguing with its
-own triggers, and the owner arbitrated for the triggers. So, when you write or localize a term of the
+**A term that turns absurd in the owner's language is checked against that skill's own trigger aliases**:
+the language pack's `skill-triggers.json` carries the phrases the OWNER actually says to invoke the skill,
+and those phrases are the canonical rendering of its terms. So, when you write or localize a term of the
 agent's craft:
 
 1. **Grep that skill's aliases for it** (language pack → `skill-triggers.json`) — an alias that names
@@ -650,40 +595,24 @@ Orchestrator** — write the expansion once, at first use in a document meant fo
 
 ## Goal of the project
 
-KAGO is a Node.js orchestrator that finds, applies and guards undervolting profiles for the owner's
-NVIDIA GeForce RTX 5070 Ti on Windows 11. It searches the voltage/frequency curve for the lowest
-safe voltage at each point, ships two profiles — *Max Optimal* (quiet, near-stock performance) and
-*Silent Cold* (coldest and quietest, performance traded away) — and exposes them as desktop
-shortcuts plus a tray icon. It is built for one owner and one machine, and its hard constraint is
-that no third-party GUI application may appear in its dependencies.
+The owner's vision is `GOAL.md` and the path to it is `MASTER_PLAN.md` — both in the re-read core; read the goal
+there, in its one copy. In KAGO `GOAL.md` is the owner's verbatim ARCHIVE and the operative definitions are `ЗАКАЗ.md`
+(approved by him, edited only by his word; `.kaif/kaif.json` → `archives`) — work from `ЗАКАЗ.md`.
 
 ---
 
 ## Architecture — the map
 
-```
-automation-engine/
-├── config.mjs              ← thresholds, voltage steps, tool paths — the only place constants live
-├── engine.mjs              ← the Vmin sweep loop (search + guardband)
-├── setup-desktop.mjs       ← builds profiles, shortcuts, autostart, tray registration
-└── lib/
-    ├── hardware-mon.mjs    ← telemetry: nvidia-smi only (researches/03 retired HWiNFO64)
-    ├── profile-manager.mjs ← APPLIES profiles — an interface over swappable backends
-    ├── stress-tester.mjs   ← runs workloads, compares output against golden references
-    ├── event-logger.mjs    ← Windows Event Log watch: TDR / WHEA / BSOD
-    └── desktop-shortcuts.mjs ← .lnk generation via WScript.Shell
-tools/                      ← standalone operator utilities (check, gpu-info)
-```
+The map lives in its two documents, one copy each: `PROJECT_STRUCTURE_EXTERNAL_MAP.md` (files, modules, data
+flow) and `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` (abstractions and their relations). Only the invariant stands here:
 
-**RULE — the one invariant that must not be broken:** `profile-manager.mjs` is an **interface with
-swappable backends** (`nvidia-smi` today, an own NVAPI bridge next, `green-curve` as fallback).
-Nothing else in the tree may call a GPU-control tool directly. The owner's PDF hard-wires MSI
-Afterburner into this module; `GOAL.md` forbids that dependency, and `researches/01` settles it.
+**RULE:** `profile-manager.mjs` is the only module that writes to the GPU, and it is an **interface with
+swappable backends** (`nvidia-smi` today, an own NVAPI bridge next, `green-curve` as fallback). Nothing else
+in the tree may call a GPU-control tool directly (internal map R1–R2; `GOAL.md` forbids the MSI Afterburner
+dependency the owner's PDF wires in, `researches/01`).
 
 **RULE — factory state is the default.** Profiles live only in the GPU's volatile memory. A lost
 process, a crashed OS or a reboot must leave the card stock, with no action from the owner.
-
-Full file map and data flows live in `PROJECT_STRUCTURE_EXTERNAL_MAP.md`.
 
 ---
 
@@ -710,75 +639,14 @@ driver. Two rules shape it, both paid for by `researches/02`:
 - **Steady load is the wrong load.** Voltage noise dominates Vmin, so transitions — not sustained
   100 % — are what expose an unsafe profile.
 
-| Command | What it does |
-|---------|--------------|
-| `npm run gpu:info` | Read-only probe: model, driver, VBIOS, power-limit range, clocks, temperature — plus the **supported-clock ladder** (phase 5's search space). Re-derives the numbers the plans rest on. |
-| `npm run gpu:info -- --json` | Same, as JSON, ladder included — for diffing a profile's effect before/after. |
-| `node tools/probe-offer.mjs` | **DOES THE CARD OFFER ABOVE ITS OWN MAXIMUM — read-only, the meter of `P83-AC6`.** Reads the effective V/F table and the offset vector (both *Stable*), then judges the offer on the points **we raised** (offset > 0) against `clocks.max.gr`, which is READ, never written into the code. The distinction is the whole instrument: this card's FACTORY top (3157…3172 MHz at rest) is itself above its 3090 maximum, so a meter reading "highest offer of any point" reddens on a factory card (`nvapi.mjs` → `highestRaisedOfferMhz`). Prints what it CANNOT say — whether the clock BOUND is armed: `nvidia-smi` publishes no such field at all, and at 180…3090 an idle check is degenerate. Evidence to `runs/probe-offer.json`; exit 1 on any exceedance. **`[NOT-TESTED]` — no selftest blocks of its own yet (named debt); its arithmetic was cross-checked against the curve document's inversion, 51 points of 51.** |
-| `npm run mon -- --once` | One telemetry sample to stdout. |
-| `npm run mon -- --seconds 30 --out runs/x.jsonl` | Sample into JSONL: monotonic index, sorted keys, no `Date.now()` in compared output. Only the driver's `t` column moves between two runs. |
-| `npm run mon -- --check-decode` | **A guard, not a report.** Holds the throttle-bit table against the card's OWN named reasons, in both directions. Exit 1 on any disagreement. |
-| `npm run events -- --last 24h` | **FIVE providers in TWO classes** over a window. Each carries its own status — `ok` / `no-events` / `error` — because "found nothing" and "could not look" are different answers. Four are `means: 'CRASH'` and vote through `verdictFor`; the fifth, `nvlddmkm`, is `means: 'SIGNAL'` — the display driver's OWN error channel, printed in its own СИГНАЛЫ section and structurally unable to produce a verdict (R4b-signal; `plans/29`). It is watched with an EMPTY id list, i.e. the whole provider. |
-| `npm run events -- --fixtures` | The fault-parser fixture suite (P1-AC3) **plus the four class invariants**, 11 blocks, offline — `queryFaults` is not called in this mode at all. **Four fixtures captured off this machine, three constructed;** the filename says which. In the `selftest:all` battery since 2026-08-23: it had existed since phase 1 and the battery never called it, which is the `bugs/27` class one floor down. |
-| `npm run stress -- --workload <name> --seconds N` | The three-way verdict: checksum vs golden **and** the event log over the same window → PASS / SDC / CRASH, or UNKNOWN when a comparison could not happen. |
-| `npm run stress -- --workload <name> --transient` | The same, stepping the load between full and idle on config's duty cycle. **This is the shape that exposes an unsafe profile**; steady load is the wrong load. |
-| `npm run stress -- --workload <name> --sustain N` | One burst holds the card for N seconds instead of one process per launch. **Turns 8 % utilization into 97 %** and prints the ЦЕНА line — ops/s on the GPU, duty factor, and the per-thread fault rate. The duration stays OUT of the golden's `args` stamp, so no baseline is invalidated. |
-| `npm run stress -- --workload <name> --lowload` | The OPPOSITE duty — 1 s on / 9 s off — holding the card at low clocks (measured: median 1237 MHz / 5 % against 2887 MHz / 97 % under load) and waking it repeatedly. **Proves nothing about heavy load and is not meant to:** an undervolt can survive every heavy test and die on a browser click, because the low end of the V/F curve has its own requirements. Asking for `--transient` and `--lowload` together is refused. |
-| `npm run stress -- --capture-baseline` | Capture the golden references at stock plus the full card dump beside them. |
-| `npm run stress -- --verify-baseline` | **P1-AC5 as a command:** every baseline carries its stamp, and every stamp still matches the card. |
-| `npm run stress -- --selftest` | The verdict logic over all five outcomes, on injected data — runs without a GPU. |
-| `npm run workloads:build` / `workloads:verify` | Build KAGO's own CUDA loads and prove determinism / re-check the manifest. |
-| `npm run prove:gradient` | **Proves the SDC oracle's graded half can actually measure.** Builds a copy of `sdc_fma.cu` with one injected line — flip the lowest mantissa bit of element 123 on launch #5 — runs it, and demands the exact tuple `distinct=2 · bad_launches=1 · bad_elems_max=1 · bit_dist_min=1 · first_bad_index=123`. What it demonstrates is the whole reason the graded half exists: on that run the burst checksum still MATCHED the golden, so the old two-observation oracle returned PASS. The shipped binaries carry no corruption hook — the corruption lives only in the copy this tool builds. |
-| `npm run curve -- --grids` | **The card's two dictionaries, as artifacts. Read-only.** Every voltage it can supply (the V/F table IS the voltage grid — 127 points, 450…1240 mV, spacing **5 mV ×94 and 10 mV ×32**, i.e. NOT uniform) and every clock it will run (389 values, 180…3090 MHz, steps 7 and 8). Each file carries its own re-probe command and the driver/VBIOS stamp. **A dictionary that fails its own validator is NOT written** — the first live run put an empty frequency grid on disk and only then printed the refusal. |
-| `npm run curve -- --init` · `--show` · `--verify` | **The tuning-curve document — the search's memory. Read-only.** `--init` seeds 127 point objects from the live stock curve (frequency · voltage · status from a CLOSED vocabulary · date last edited); `--show` prints it with the coverage split; **`--verify` is the pair check against the live card**, on the voltage axis. Saves are atomic (temp + rename) because a hang is a NORMAL event during the sweep, by the owner's own decision. |
-| `npm run journal -- --selftest` | **THE SWEEP'S WRITE-AHEAD JOURNAL — 17 blocks, sandboxed, no GPU** (epic 02 phase 2, `plans/15` §4.4). `runs/sweep/journal.jsonl` records the INTENTION to touch the card, `fsync`ed before the first byte reaches the GPU — because a hang hard enough to need the reset button takes the OS page cache with it, and a journal durable only when nothing went wrong is durable exactly never when it matters. **On the next launch an intent with no verdict IS the answer:** that rung is closed as `ЗАВИС` (`config.VERDICT.HUNG`, first-class beside `SDC`/`CRASH` by the owner's word) and attributed to its exact frequency and voltage. Keyed by FREQUENCY + VOLTAGE, never a table index. The only emergency stop left is **two CONSECUTIVE hangs on one rung** — cumulative counting would delete a probabilistic edge, which this card has shown. The suite photographs the production journal before and after (`bugs/08`), and it runs through `runSelfTest()` so a throwing assertion becomes ONE RED BLOCK instead of a dead report |
-| `npm run curve -- --selftest` | **40 blocks**, no GPU — the count re-measured by a run on 2026-08-15 21:2x, not remembered. The suite header names its mutation addressees BEFORE the run (12 of them, EXP-0016); four were additionally re-proved by an INDEPENDENT judge mutation the same evening — the R13 ceiling, the closed status vocabulary, the atomic save, and «a voltage that is not on the card's grid» — each reddening its own block alone, with the intact code reddening none. **The row previously claimed 44 blocks and 13 mutations, and described a mutation block that does not exist in this suite** (the historically wrong R13 ceiling, judging the whole curve's top instead of what we raised — that one belongs to `nvapi --selftest-shape`). Two suites had been glued into one row, and three documents carried three different counts for one fact; corrected by running it. |
-| `npm run curvemap` · `-- --selftest` · `node tools/build-curve-map.mjs [--png <file>]` | **THE CURVE MAP — ONE RENDERER FOR TWO SURFACES (`plans/85`), read-only.** `curve-map.mjs` takes its facts from the document and from the journal's PURE readers (`provenRungs` · `hangFloors` · `corrections`, never `resumeState`) and draws stock · our effective line (the whole document; empty when nothing is measured) · proven dots · the ENGINE'S hang floors · contradictions to REMEASURE (hollow «ПЕРЕМЕРИТЬ» — a recorded hang refuted by a deeper pass and NOT yet corrected in the journal; the caption vanishes with the layer, `plans/86`) · the rung under test. The static page `assets/curve-map.html` and the watch window's «КРИВАЯ» widget (`GET /curve.svg?mhz&mv&stock`, data paths via `--curve` / `--journal`) are the same picture in two skins; `--png` renders 3840×2160 with the owner's browser. **28 blocks**, mutation addressees named in the header; the window's suite grew 76 → 87 for the route, the page structure and the reader-only wiring. |
-| `node tools/curve-editor.mjs [--port 17387] [--open]` · `--selftest` | **THE OWNER'S CURVE EDITOR — read-only toward the card, the document and the profiles** (the owner, 2026-09-14: *«сделай её интерактивной, чтобы я мог покрутить точки… кнопка [Сохранить]»*). A 127.0.0.1 page: the corners of the EFFECTIVE line (`curve-map.effectiveCurve`, facts via `loadFacts`) are dragged on the card's grid/ladder; `/preview` flags what the edit ADDS against today's curve — at/below the engine's hang floor, deeper than proven (proof inherited DOWNWARD in frequency) — apart from what today's curve already carries; **Save writes only `curves/edits/<moment>.json`** (corners + 389 derived rows + the source's sha256). Putting an edit into a profile is a separate act. `/?start=<curves/edits|proposals file>&compare=<file>` opens a saved curve (purple) against another (orange) with its found edges as diamonds; walls the physics lint refutes (`bugs/124`, `contradictions()`) are drawn hollow and never flagged red. 15 blocks (incl. «a page opens in a browser window, never explorer.exe»); port 8787 is taken on this machine by a foreign `web-smoke` server. |
-| `node tools/curve-proposal.mjs [--write]` · `--selftest` | **THE AGENT'S CURVE FROM THE EDGES THE CARD REALLY SHOWED — read-only, writes `curves/proposals/<moment>.json`** (the owner, 2026-09-14: *«твой вариант кривой — на основе тех краёв, которые мы реально нашли… интерполяция и экстраполяция»*). Every rule is owner-sourced and named in the file: delivered frequency (GOAL «ТЮНИМ ТО, ЧТО КАРТА ВЫДАЁТ») · passes only from `ORACLE_DATE` on, 04.09 off-post rows out (`interviews/026` Q1 = B, constants imported from `mark-unwatched-rows.mjs`) · a failure refuted by a pass at ≥ frequency and lower voltage is not an edge (`bugs/124`) · working point = last stable + one grid step (GOAL «КРИТЕРИЙ ПРИЁМКИ») · the curve = stock minus a least-squares TREND of the edges' depths shifted to touch the most demanding edge (owner: «ну так проведи тренд», experiment №2) · an edge whose last stable is inherited floored at hang + two grid steps · below the lowest / above the highest edge not deeper than it, and ≥ «top edge + 25 mV» above (`plans/25` «решено владельцем» п. 2). The written file carries `trend` (a, b, shift, RMS, margins). Earlier editions (convex hull = experiment №1, through-edges) are in git history. Passes through `harvestFromJournal`, never `resumeState`. **`--margin <mV>` · `--band-margins a,…,g` (epic 101 Ф1 Ш1, `plans/102`): the curve «touching trend + a margin per band» over the seven bands of `researches/39` §4 (`BANDS`, one constant; margin 0 = the trend curve, a negative margin or a band hole is refused by name); `--write` then writes that curve with `bands` · `margins` · `perBand`.** 28 blocks; mutations MB1–MB3 named in the suite header, each reddening its own blocks. |
-| `npm run validate -- --selftest` · `-- --plan [--minutes N]` | **THE MODE CHECK'S CORE — epic 101 Ф1 Ш3/Ш4-offline/Ш5/Ш6 (`plans/102`), offline, touches no card.** `--plan` prints the mix of loads (`CANONICAL_MIX`, 1180 s: idle · Q2RTX · 10 transitions · burn 3→0 · Q2RTX · idle; `planMix` scales it, idle on both ends and ≥ 2 transitions always kept). The check's write-ahead journal `runs/validate/journal.jsonl` (the sweep journal's `appendLine`/`fsync`, one definition; an intent nobody closed = FAILED/death in the band of the LAST durable telemetry sample, none → band unknown, never invented) · `verdictOf` (driver voice · a stage that died · a sampler gap > `PULSE_STALL_MS`; no telemetry → UNKNOWN) · `hitMap`/`visitedBands` (time per band; visited ≥ `MIN_BAND_DWELL_S`) · `nextMargins` (pass → visited bands −`MARGIN_DESCENT_STEP_MV`; failure → its band + `RATCHET_GRID_STEPS` grid steps and floored there) · `modesValidated` — the first line of `npm run curve -- --progress`, «РЕЖИМОВ ПРОВЕРЕНО Y/4». Numbers in `config.mjs` §10 (`MODE_BANDS` shared with the curve builder). 38 blocks; mutations MV1–MV11 named in the header, each red on target. `runCheck` fixes the executor's ORDER on injected seams (intent fsync → sampler → apply → stages to the first failure → rollback in `finally` → verdict); `makeCardSeams` wires the REAL ones (apply with draft consent · `resetToFactory` · separate sampler · `runTimedemo` · burn levels) — proved on a fake library, NEVER yet run on the card (Ш8). Offline instruments on recorded data: `--hits <sampler.jsonl>` (visit map) · `--compare --stock <captures> --mode <captures>` (benefit table) · `--replay <capture.json> [--stock …]` (the whole post-check half + report, sandbox journal). |
-| `npm run vgpu -- --derive` · `--show <card>` · `--selftest` | **THE VIRTUAL CARD — offline, and it cannot touch the GPU at all** (epic 03, `plans/16`). `--derive` builds `benches/cards/<name>.json` from the measured `curves/*.json` by a stated rule rather than by hand; `--show` prints a card; `--selftest` is 37 blocks, 8 mutations. It implements the SAME three seams the live card is driven through, and its curve backend calls the SAME `buildRaiseAndCapVector` and the SAME `curveWriteRefusal` — a double that refused less than the card would make every later green a lie. **Every output ends with the provability line, and that line is the instrument's most important field:** a green run here proves the engine's LOGIC and says nothing about silicon, driver, or a clock pin. |
-| `npm run profiles` | Loads every file in `profiles/` against the LIVE card and prints it. Proves each profile's clock sits on the card's measured ladder, its power limit inside the card's range, and its stamp still matches the driver/VBIOS in front of us (R6). Read-only. |
-| `npm run profiles -- --selftest` | **The format's guard, and it runs without a GPU.** 17 hostile fixtures, each carrying exactly one defect and naming the field the validator must point at. Mutation-proved: breaking the ladder check, the stamp-required derivation, or the `takenAt` offset rule each turns blocks red. |
-| `npm run power -- --capture --workload <name> --seconds N --sustain N --label <l>` | **The METER for a power delta, with the verdict riding in the same record.** Samples telemetry from a SEPARATE process (an in-process sampler records zero — `spawnSync` blocks the event loop), splits the run into its loaded and idle halves, and stores medians + the GPU-client background + the stamp into `runs/power/<l>.json`. `--repeat N` takes a series. Read-only with respect to GPU state. |
-| `npm run power -- --spread <label-prefix>` | **The number without which no delta may be called an effect.** The meter's own run-to-run scatter across the matching captures — watts, temperature, fan, clock, AND the price (ops/s) — and it REFUSES to compare records whose driver, VBIOS, workload, arguments, shape or profile differ (EXP-0011). Measured at stock on this card: **1.28 W = 0.65 % over ten runs, price 0.18 %.** A background difference is named, not refused. |
-| `npm run power -- --selftest` | 28 blocks on injected data, no GPU. Mutation-proved: seven guarantees broken one at a time, each reddening the block that belongs to it (EXP-0016). |
-| `npm run descend -- --points 2400,1800,1200` | **WRITES TO THE GPU.** Locks each ladder point through `profile-manager` (rule R1), measures it, and **releases the card in a `finally` after every candidate** — including on a failed capture, and aborting the whole descent if a release itself ever fails. Prints the power↔performance curve with the meter's floor applied. `--dry-run` plans and snaps without writing. |
-| `npm run descend -- --selftest` | 39 blocks, no GPU: the safety shape driven through an injected backend and an injected meter (apply fails · capture fails · release fails), the lock proof, the ladder snap, the price rows. Mutation-proved with twelve mutations, each reddening its own block. |
-| `npm run nvapi` / `-- --curve` / `-- --control` | The NVAPI bridge, read-only: resolve all 17 ids, prove the chain on the driver version and card name `nvidia-smi` already gave us, read the 128-point V/F curve, read the per-point offsets. |
-| `npm run nvapi -- --fans` | **Read-only.** Every cooler this card reports, its level, its rpm, and **the floor the card names itself** — which is how the 30 % phase 2 kept seeing on five ladder rungs turned out to be a firmware floor rather than the stock curve's landing spot. Holds our decode against `nvidia-smi`'s `fan.speed`, an instrument we did not author, and refuses to look sane on a count of 0 or 32. |
-| `npm run nvapi -- --fan-write <level> [--cool-to <°C>]` | **WRITES TO THE GPU (fan policy), under an armed watchdog.** Manual level on every cooler, read back until the commanded value is actually REACHED — a fan ramps, so agreement alone would accept a plateau on the way up (EXP-0028) — with `controlMode = AUTO` as the rollback, executed in a `finally` and verified. Only ever writes UPWARD: a fan stuck high costs noise, a fan stuck low costs the card. `--cool-to` is the owner's cold-start protocol, and it declines to write at all when the card is already colder than the setpoint. Measured: a start temperature repeatable within **1 °C**. |
-| `npm run nvml` | **The NVML bridge, read-only — and NOT a backend.** Driver and card name (a third independent reading of both), the current clock offset, and the **allowed offset range** per domain, which `ClkDomainsGetInfo` never yielded. Quarantined by design: `researches/05` §5.5 records that NVML and NvAPI clobber each other on the same state, so NVML is an INSTRUMENT KAGO reads with, never a path it applies profiles through (rule R1 stays with `profile-manager.mjs`). |
-| `npm run nvml -- --find-offset-field <MHz> [--mem]` | **WRITES TO THE GPU.** The ruler: apply a known offset through NVIDIA's documented `nvmlDeviceSetClockOffsets`, re-read our undocumented NvAPI struct before and after, and derive the record geometry **arithmetically from the changed addresses** rather than by eye. Rollback (the same call with 0) runs in a `finally` on every path, and the full 9 248-byte struct is compared byte for byte afterwards. `--mem` drives the memory lever — the run that proved this struct is graphics-only. |
-| `npm run nvml -- --probe-mask` | Read-only under the lever: asks the control structure with three masks (all bits / none / one) to find out what the mask actually selects. This is the run that found the array base — a single bit for point 64 answered in slot 65. |
-| `npm run nvapi -- --prove-mask <point> <-MHz>` | **WRITES TO THE GPU, with KAGO's own code.** The addressed write and the mask proof in one: exactly one entry may change and it must be the one addressed, the value must read back equal, the curve must move only at that point (or be at the clock floor, which is asserted as its own named case), and the rollback must return all 9 248 bytes. Refuses a positive offset — that direction is the undervolt and is not taken casually. `--zero-filled` repeats it without the read-modify-write, which is how we know RMW was not what fixed the silent no-op. |
-| `npm run nvml -- --verify-decode` | **WRITES TO THE GPU.** The guard the corrected decode was born with: one raw buffer read through BOTH layouts, demanding the measured one (stride 0x24, field +0x14) sees the applied offset in 127 entries and the **published one (stride 0x48, field +0x00) fails to** — a check that goes red for its own reason (EXP-0016), against the layout this project believed until 2026-08-10. |
-| `npm run vfstep -- --point 95 --mhz 15 --workload sdc_fma --seconds 30` | ⚠️ *Phase-5 tool; its `--point` flag carries the RETIRED index vocabulary and epic 02 replaces it — see the terminology section above.* **THE UNDERVOLT — WRITES TO THE GPU under an armed watchdog.** The atom of phase 5's search: one point, one step UP (a positive offset = the same frequency at less voltage), the full three-way verdict under real load, rollback in a `finally`. The default point is a MEASUREMENT, not a preference — point 95 is 1045 mV / 2842.0 MHz, exactly where this card sits under sustained load, and a step applied anywhere else would not be exercised by the load. `--dry-run` prints the plan and the snapshot without writing. |
-| `npm run gfx -- --prove-not-capped` | **THE GATE OF THE GRAPHICS BENCH, and it runs BEFORE any FPS number is believed.** Two launches with the frame cost changed by a large factor; the FPS must MOVE by ≥ 5 %. A quantity that ignores a large change in its input is not measuring its input — this project already reported a clamp as "an extraordinarily precise instrument" and the owner recognized it as his television's 144 Hz (EXP-0032, STATUS fact 17). |
-| `npm run gfx -- --run` / `--dry-run` | One Q2RTX timedemo launch, FPS parsed out of the engine's own console log, the cold opening run dropped AND named. `--dry-run` prints the command and launches nothing. Read-only with respect to GPU state: it runs a game on the card and sets nothing. |
-| `npm run gfx -- --capture --label <l> [--profile <p>]` | The same run with telemetry sampled from a SEPARATE process and the Windows fault window over the same interval, into `runs/graphics/<l>.json`. **It never returns PASS**: there is no golden-reference comparison on the graphics path, so a clean run is reported as `faultFree` — this load carries the CRASH half and the THROUGHPUT half of R4, and says out loud that it lacks the checksum half. |
-| `npm run gfx -- --spread <label-prefix>` | The bench's own run-to-run floor ACROSS launches — the only scatter figure that may judge the owner's «просадка FPS не более 5 %». Refuses to compare records whose demo, ray count, cvars, profile, driver/VBIOS or **desktop geometry** differ: in fullscreen this engine renders at the desktop's resolution, and the owner changes that without telling anyone. |
-| `npm run gfx -- --selftest` | 39 blocks, no GPU and no game. Mutation-proved with seven mutations, each reddening its own named block. |
-| `npm run vfstep -- --set --point N --mhz M --cap C` | **THE UNDERVOLT JUDGED BY THE DIVERSE SET — WRITES, under an armed watchdog.** One write to the curve, one lease sized for the WHOLE set, three loads inside (`sdc_fma --transient` first — voltage noise lives in the transitions — then `sdc_fma --sustain` and `branchy --sustain`), the point's verdict is the WORST of them and the deciding shape is named. The goldens' stamps are checked BEFORE the first watt, so a stale reference costs zero card time. Rollback is a LIST, not a chain (R10a). |
-| `npm run vfstep -- --selftest` | 16 blocks, no GPU: the UNDO SHAPE driven on injected functions — a throwing step must not cancel the ones behind it — plus the voltage ladder with the curve-floor trap. Mutation-proved three times, including one that restores the abort-on-throw the `finally` used to have. |
-| `npm run engine -- --band 500,1100,…` | **THE BAND SWEEP — WRITES.** For each frequency: raise the WHOLE curve (a single point cannot cheapen a clock its neighbour serves — `bugs/02`), **PIN the clock** so the curve region under test is the region actually loaded, judge by the set, release and zero in a `finally`. The ladder is stepped in **millivolts computed from the card's own curve**, because one voltage grid step costs 4.1 MHz of offset at 2842 MHz and 22.2 MHz at 1700. `--dry-run` prints the plan, the rung count per frequency, and **the depth of the first step** — the number whose absence cost the owner a night. |
-| **`npm run engine -- --sweep --from <МГц> --to <МГц> --dry-run`** | **THE SWEEP'S PLAN — read-only, and rail S2 makes the operator read it BEFORE the run** (`plans/15` §4.7). Per frequency: the seed and the neighbour it came from · the rung count · **the depth of the FIRST step** · the policy zones crossed and how often the grid forced a deeper one · the lever's reach · **who would hold the ceiling — the curve or the clock pin — asked of `chooseWriteShape` on the REAL vector** · and, when a seed exists, the FALL-BACK ladder from stock, because a rejected seed drops the descent there. Computed by the same `planFrequency` the run walks, so it cannot advertise a ladder the run will not take (`bugs/09`, EXP-0052; F2-AC8 compares them block-by-block). Opens no journal, arms nothing, exits 1 if any frequency would be refused. |
-| **`npm run engine -- --sweep --from <МГц> --to <МГц>`** | **THE SWEEP — WRITES TO THE GPU, and it is the command epic 02 exists to produce.** Walks the card's frequency ladder top-down by RUNG (389 frequencies over 127 voltage rungs; the rung is burned at its HIGHEST frequency and the rest inherit downward — E2-AC3), seeds each descent from the proven higher neighbour, descends on the owner's 25/10/5 mV policy, refines a coarse failure at the card's own step, and closes every frequency with one of **TWO** verdicts — `edge-found` or `lever-limited`. Each closed point is validated and saved to the tuning-curve document BEFORE the next rung starts. **The same command RESUMES an interrupted sweep**: the write-ahead journal is what tells a fresh start from a continuation, an intent nobody closed becomes `ЗАВИС`, and two consecutive hangs on one rung stop the run non-zero. `watchdog --recover` runs once, first. **[NOT-TESTED] on live hardware — that is phase 3, with the owner present.** |
-| `npm run pulse -- --rung-profile` | **WHERE a rung's idle time actually sits — read-only, two files, no GPU** (`bugs/53`). Lays the sampler's telemetry over the journal's rung windows and prints the second-by-second load/idle shape averaged over every rung of a run, plus the gap between rungs. It exists because a quarter of a run showing as «idle» has three completely different remedies depending on WHERE the idle is, and the project was about to optimize without knowing which. **Measured 2026-08-26 on four consecutive runs: the between-rung gap is 0.0 s** — every idle second is inside a rung, as a 3 s head (curve write, watchdog arm, golden stamps) and a 3 s tail (rollback, disarm), with the middle belonging to the burn's shape rather than to the machinery. The threshold that splits loaded from idle is the SAME 50 % of `utilization.gpu` that `power-baseline` uses; one concept, one number. |
-| `npm run watchdog -- --status` | Read-only: what is holding the card right now, whether its owner is alive, how long the lease has left, and what the undo would be. |
-| `npm run watchdog -- --drill` | **WRITES TO THE GPU — the rehearsal.** A victim process really changes the card and dies WITHOUT disarming (`process.exit`, so no `finally` runs); the detached guard must restore the card on its own. Measured: 2.5 s from death to a clean card. A watchdog that has never fired is worth nothing, so this is the command that makes it believable. |
-| `npm run watchdog -- --recover` | **WRITES TO THE GPU.** A record found at rest means a previous run died holding the card: reset to factory and report. Risky write paths call this at startup — never begin new work on a state nobody can describe. |
-| `npm run watchdog -- --selftest` | 20 blocks, no GPU: the firing decision on an injected clock and an injected card. Mutation-proved with five mutations, each reddening its own block — including the ordering rule that the record is taken away BEFORE the reset, which needs a fixture only that rule can fail. |
-| `nvidia-smi -q -d SUPPORTED_CLOCKS,PERFORMANCE,POWER` | The raw driver view when the wrapper is not enough. |
+Grow this tooling over time; each command, stand and device gets its row in the house-rules file —
+`HOUSE_RULES.md` → "Stands, environments and devices" — the day it is born. The harness's command
+table lives there (moved from this section on 2026-09-26, KAIF 2.8).
 
-> **`runs/` is git-ignored, so the golden reference is LOCAL STATE.** A fresh clone has no baseline
-> and `npm run stress` answers UNKNOWN until `--capture-baseline` has run once. The shipped copy of
-> the same fact is `workloads/MANIFEST.json`. The tester deliberately does NOT fall back to it — a
-> missing baseline must be visible, not papered over.
->
 > **Never write to the GPU to satisfy curiosity.** A write changes the owner's hardware state. Probes
-> are free; writes belong to a planned step with a stated rollback. Every command in this table is
-> read-only with respect to GPU state: `stress` LOADS the card by running compute, and sets nothing.
+> are free; writes belong to a planned step with a stated rollback. A command that writes says so in
+> its row of the table — **WRITES TO THE GPU**; `stress` LOADS the card by running compute, and sets
+> nothing.
 
 ### THE NAMING RULE — a brand name is ALWAYS the owner's privilege
 
@@ -936,7 +804,9 @@ history.
 >
 > 🔴 **ОДНО ИСКЛЮЧЕНИЕ, И ОНО НАЗВАНО ЗДЕСЬ, А НЕ ССЫЛКОЙ: БАГ В САМОМ KAIF УХОДИТ В ORIGIN
 > НЕМЕДЛЕННО, БЕЗ `AUTH:` И БЕЗ ОЖИДАНИЯ.** Тикет `bugs/KAIF/*` заводится И ОТПРАВЛЯЕТСЯ одним
-> движением, ВПЕРЕДИ той работы, на которой дефект найден. Основание двойное: постоянная
+> движением, ВПЕРЕДИ той работы, на которой дефект найден. Так же, с KAIF 2.8, уходит полевой
+> отчёт обновления `reports/KAIF_UPDATES/*_REPORT.md` — командой `node .kaif/kaif-core.mjs report
+> <файл>` сразу, как написан (постоянная авторизация владельца KAIF, origin #15 и #78). Основание двойное: постоянная
 > авторизация владельца KAIF (`/report-bug` шаг 3 «File AND deliver» — с KAIF 2.7 заведение
 > кончается командой `node .kaif/kaif-core.mjs report bugs/KAIF/NN_*.md`; до 2.7 это был шаг 4) и прямое слово
 > владельца этого проекта 2026-08-30: *«БАГИ В КАИФ ТОП ПРИОРИТЕТ СРЕДИ ВСЕХ… НИКАКИХ ОДОБРЕНИЙ!
@@ -960,8 +830,7 @@ history.
   (lock files, manifests, formatters): an agent trusts its tools even more blindly than itself — read
   those diffs line by line. The rule is only executable if the set you inspect is the set that ships:
   a commit tool that stages everything (`git add -A`) AFTER your inspection makes the two different
-  sets, and the field cost was two of the owner's files leaving under an agent's message minutes
-  after he dropped them into the tree. So the tool NAMES its set out loud before committing, and a
+  sets. So the tool NAMES its set out loud before committing, and a
   NEW file in the tree stops a sweeping commit rather than riding along — declare the set instead.
 - **Ignore first, then the tool.** Any new tool, export, dump, key, or binary enters the project ONLY
   after its `.gitignore` line exists. A secret caught by a gate is a success of procedure; a secret
@@ -987,9 +856,6 @@ in consecutive sessions), so read your own name from the session rather than fro
 ```
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 ```
-
-`<If you use a commit/version tool (e.g. tools/commit.mjs that bumps a build number, commits, pushes),
-document it here.>`
 
 ## Document & text hygiene (field-paid rules)
 
@@ -1060,6 +926,8 @@ tool result — and the agent system signs its author (Claude Code: "The user se
    "stop" (a prompt hook firing on a mid-turn message is observed on one system, promised by none); the gate
    `.kaif/hooks/pretool-owner-word.mjs` (2.8, `PreToolUse`) refuses ONE tool call after an owner's mid-turn message with no TEXT answer
    yet: answer, go on working, repeat the answer in the turn's final text. `/fable-judge` hunts "owner's word mid-turn ignored" and "parked and dropped".
+   **In KAGO that gate is wired by the owner himself (2026-09-26, after the harness refused the agent's own edit of
+   `.claude/settings.json` as self-modification)** and was seen refusing a call with his words the same hour.
 
 ### The storefront — text a stranger reads
 
@@ -1170,39 +1038,17 @@ of a MOMENT carries both, in the owner's local time:
 
 ## Push / GitHub authentication
 
-`gh` is authenticated as **MikalaiKryvusha** over HTTPS with a keyring-stored token (scopes `gist`,
-`read:org`, `repo`). Git uses that token as its credential helper via `gh auth setup-git`, so
-`git push` needs no separate credentials. Recovery when a push fails: non-fast-forward →
-`git pull --rebase` → push again; auth failure → `gh auth status`, then `gh auth login` if the token
-is gone.
+Record the recipe — how pushing and forge operations are authenticated here (e.g. `gh auth setup-git`)
+and the recovery when a push fails (non-fast-forward → `git pull --rebase` → retry) — as a row of the
+house-rules file, `HOUSE_RULES.md` → "Routes, recipes and conventions".
 
 ---
 
 ## Tools
 
-| Command | What it does |
-|---------|--------------|
-| `npm run check` | The build gate — parses every project `.mjs`. Exit 1 on the first syntax error. |
-| `npm run gpu:info` | Read-only GPU probe (`--json` for machine output). |
-| `npm run questions` | The questions guard — four axes plus the debt ratchet over the place-of-questions rule. |
-| `npm run ask <doc.md>` / `ask:batch` | Raise the owner-review page on a document / on everything waiting. |
-| `npm run verify:contour` | The owner-review contour's QA run — 18 blocks over hostile fixtures, ~4 s, no browser. `--only <id>` for one block. Run it after ANY edit to `review.mjs`, `review-core.mjs`, `review-gate.mjs` or `send-upstream.mjs`. |
-| `npm run workloads:build` / `workloads:verify` | Build KAGO's own CUDA loads and prove determinism / re-check the manifest. |
-| `npm run kaif:version` / `kaif:check` / `kaif:update` | KAIF machinery: report version, validate the deployment, update from origin. |
-| `node .kaif/tools/kaif-canon-lint.mjs check` | Canon linter for the owner's canon artifacts. |
-| `node .kaif/tools/kaif-provenance.mjs check` | `[AI]` provenance-mark integrity. |
-| `npm run polygon -- --count N [--amplitude A] [--seed-base S]` | **ПОЛИГОН НЕИЗВЕСТНЫХ GPU, офлайн** (эпик 67 фаза 4). Гоняет N сгенерированных карт через ПОЛНЫЙ цикл движка ОТДЕЛЬНЫМ ПРОЦЕССОМ и судит каждый прогон шестью сторожами честности. Печатает покрытие по осям, ВРЕМЯ числом и строку «вымысел²». Замерено: **41 с на карту** на полосе из трёх частот. Живые артефакты сверяются отпечатком до и после. |
-| `node automation-engine/lib/polygon-guards.mjs --selftest` | **Шесть инвариантов честности, каждый доказан КРАСНЫМ.** И1 закрытая строка не глубже выданного · И2 стоп именован и код выхода согласен · И3 журнал цел · И4 конверт · И5 живые артефакты · И6 вымысел не прячет от цикла свою физику. Судят улики, а не прогон, — поэтому дёшево краснеют. |
-| `node automation-engine/lib/polygon-shrink.mjs --selftest` | **Сжатие ломающей карты:** бисекция амплитуды + зануление осей по одной, кандидат со СМЕНОЙ КЛАССА отвергается. Минимизируется ВХОД генератора, а не файл. |
-| `npm run entryguard` · `-- --selftest` · `-- --freeze` | **THE ENTRY-GUARD LINT — the sixth gate of `npm run check` (`bugs/95`).** Every `tools/*.mjs` must carry an entry guard (`process.argv[1]` compared with `import.meta.url`), because in ESM an IMPORT IS A RUN: an unguarded tool executes its work with the IMPORTER's argv — `tidy.mjs` killed the owner's windows, `grant-agent-*` wrote his permissions file, an import loop rebuilt the burn binaries (EXP-0218). Debt lives in `decisions/entry-guard-baseline.json` and may only shrink: a fixed tool still listed there reddens too. **The form to copy is at the bottom of `tools/check.mjs`** — never invent your own. 7 blocks, mutation-proved; 2026-09-04: 34 tools, 0 unguarded. |
-| `node tools/loop-guard.mjs --until <ISO>` | **ВНЕШНИЙ СТОРОЖ автономного цикла** (слой 2 `/guarded-loop`). Следит за возрастом последней строки `.kaif/heartbeat.log`; на застарелом пульсе ГОВОРИТ (журнал + уведомление владельцу), но ничего не убивает. Пороги из замера, `--until` обязателен — сторож без срока это заряженное ружьё. |
-
-> ⚠️ **ТАБЛИЦА ВЫШЕ ОТСТАЛА, И ЭТО НАЗВАНО, А НЕ СПРЯТАНО (2026-08-29).** В ней нет команд
-> нескольких последних эпиков — `npm run twin`, `npm run fuse`, `npm run team`, `npm run workplace`,
-> `npm run deathwatch` и других. **Живой и полный список — `STATUS.md` → «Что работает на диске»**
-> и вывод `npm run selftest:all`, который перечисляет ВСЕ наборы командой. Строки выше про полигон
-> дописаны потому, что это своя новая машинерия; общую ревизию таблицы должен сделать отдельный
-> проход, а не сессия, которая случайно на неё посмотрела.
+The project's automation tools (build, commit, release, codegen, graphics…) are one table in the
+house-rules file — `HOUSE_RULES.md` → "Tools of this project"; when you add or extend a tool, add
+its row there the same day.
 
 ---
 
@@ -1509,369 +1355,15 @@ cognition» (80% deterministic / 20% the model); it is stated once there and app
 
 ## Notes from the human
 
-**THE REGISTER — ACADEMIC AND SCIENTIFIC, AND IT IS THE OWNER'S STANDING RULE** (chat, 2026-08-15
-21:1x — the stamp taken from the commit receipt `3b1efad` at 21:13:46, after the first draft of this
-line carried «22:0x» written from the head; EXP-0019 is exactly this). His words, verbatim:
-
-> *«мы тут не прозу пишем, а серьезный инструмент, и пользуемся академическим и научным языком»*
-
-Said after the agent printed «мохибейк» — a transliteration of a Japanese term used in English
-documentation — in a tool's diagnostic, in `STATUS.md` and in a commit message, and he had to ask
-what it meant. He first offered the colloquial Russian «абракадабра», then ruled it out himself in
-favour of the strict term **«порча кодировки»**. Both halves of that exchange are the rule:
-
-1. **A borrowed or transliterated term is not a term.** If a Russian technical name exists, it is the
-   name. Foreign jargon reaches the owner only through its Russian equivalent, and a term genuinely
-   without one is expanded at first use (the storefront rule, item 6 — this is that rule applied to
-   the working artifacts, not only to the showcase).
-2. **The register is the instrument's, not the essayist's.** Colloquial synonyms are rejected even
-   when the owner himself supplies one and even when they are clearer to a casual reader: KAGO writes
-   in the register of a measuring device. Wit, folksiness and metaphor do not belong in a diagnostic,
-   a status line or a document that decides what to do with his hardware.
-3. **Scope: everything the owner reads** — chat replies, `STATUS.md`, `GOAL.md`, `MASTER_PLAN.md`,
-   epic meta-plans, interviews, commit messages, and every string a command PRINTS. Identifiers and
-   agent-internal comments stay English (the Languages rule above); the register binds the output.
-
-**The owner's standing constraints for KAGO** (their words, `GOAL.md` and chat, 2026-08-09):
-
-- *«с МОЕЙ МАШИНОЙ ОБРАЩАЙСЯ АККУРАТНО!!!! ТРИЖДЫ ДУМАЙ И ГУГЛИ, ПРЕЖДЕ ЧЕМ ЧТО-ТО ДЕЛАТЬ! НЕ
-  ДОПУСКАЙ РАЗРУШИТЕЛЬНЫХ ДЕЙСТВИЙ, БУДЬ ДОБР И СОЗИДАТЕЛЕН!»* (chat, 2026-08-10; typos fixed on his
-  instruction, the unedited original is in commit `8ef55af`) — the standing law above every other
-  line in this guide. Its executable form is **the owner's-machine rule** in the test-harness
-  section: look it up first · name the rollback before the write · smallest reversible form ·
-  re-read until stable · report the numbers. A permission entry is not a reason to act.
-- **THE BENCH MAY TAKE THE MACHINE — a standing permission, so no future session spends a turn asking
-  for it** (chat, 2026-08-10 19:4x): *«можешь занимать комп, не переживай по этому поводу»*. Said after
-  the agent asked whether to run a fullscreen game benchmark that would seize his display for minutes.
-  **What it covers:** occupying the screen and the card for measurement runs — fullscreen loads, long
-  burns, series taken back to back. **What it does NOT touch, because it is a different question
-  entirely:** the owner's-machine rule above. Permission to USE the machine is not permission to
-  CHANGE its state — a GPU write still walks the five steps, and installing software, touching the
-  registry or writing outside the repository is still the destructive class.
-- *«при измерениях всё, что создаёт фоновую нагрузку — останавливай»* (chat, 2026-08-10) — during a
-  measurement run the agent MAY stop what heats the card. Bounded by the rule above, so the boundary
-  is named rather than assumed: stop the consumer apps that hold the GPU awake (NVIDIA Broadcast,
-  LosslessScaling, PotPlayer, Chrome, the NVIDIA app overlay, the LG Hub tray); **never** touch what
-  is a channel to the machine or holds someone else's work (Parsec, NordVPN, the IDE hosting the
-  session, Docker with running containers). **Everything stopped is started again when the run
-  ends** — a measurement that leaves the owner's desktop stripped has no rollback, and that makes it
-  the destructive class.
-
-  **Measured 2026-08-10, and it bounds how much this permission is worth: stopping apps buys ~6 W and
-  cannot reach the idle floor.** With NVIDIA Broadcast and LosslessScaling fully stopped the card
-  still sat at 825–950 MHz / ~28 W against the 180 MHz / 21.76 W seen earlier that morning, because
-  the largest remaining GPU client is **`dwm.exe`** — the Windows compositor, i.e. the desktop
-  itself, which cannot be stopped while Windows is displayed on this card. The 180 MHz floor is not
-  "no background"; it is "nothing repainted for a while". **So a stock-vs-profile delta is NOT
-  obtained by silencing the desktop.** It is obtained by measuring both sides under the SAME
-  background and under a load heavy enough to dominate it — at hundreds of watts under load, a 6 W
-  desktop wobble is noise in the third digit. Quieting apps matters only when comparing IDLE
-  numbers, and even then the floor stays out of reach.
-- **THE PDF'S NUMBERS ARE NOT TARGETS — THE OPTIMUM IS SEARCHED FOR ON THIS SPECIFIC CARD.** Quoted
-  from the owner's chat, 2026-08-10 09:4x +03:00, verbatim and unedited:
-
-  > *«в мастерплане было написано про "перегиб кривой производительности" - что это является свит
-  > спот, и что он якоды на 97% - это чистой воды спекуляция. Нужно не доверять этиц цифрам, а
-  > ИСКАТЬ РЕАЛЬНЫЙ оптимум нашего конкретного экземпляра GPU, который мы тюним»*
-
-  And, minutes later, the reason and the authority order, in his words:
-
-  > *«то, что я сказал в чат - вот это главнее. Я сказал, что цифре 97 не верим, она может плавать
-  > от экземпляра видеокарты к экземпляру.»*
-
-  **THE AUTHORITY ORDER, STATED HERE BECAUSE THE PDF HAS BEEN TREATED AS THE SPEC:** the owner's
-  spoken word > `RTX_5070Ti_Undervolting_Master_Plan.pdf` > tests > current code behaviour. The PDF is
-  a source document the owner brought in, not a contract he signed; where the two disagree, the chat
-  wins and the PDF line is marked superseded rather than quietly kept.
-
-  **AND THE REASON IS PHYSICAL, NOT RHETORICAL: the figure FLOATS BETWEEN INDIVIDUAL CARDS.** A
-  percentage measured on somebody's die is not a property of the model — `researches/02` already
-  measured card-to-card Vmin spreading up to 70 mV, so a per-instance sweet spot is exactly what that
-  spread predicts. This is why the number cannot simply be re-checked once and adopted: it is a
-  property of the silicon in this machine.
-
-  **THE TRADE-OFF ITSELF IS AN ASSUMPTION, AND THE OWNER STRUCK IT DOWN TOO** (chat, same exchange):
-
-  > *«на некоторых картах вообще не наблюдается потери производительности при существенном снижении
-  > потребления»*
-
-  So the two profiles must NOT be designed as a bargain — "fast one" and "quiet one", performance
-  spent to buy silence. The honest shape is: **map this card's power↔performance curve first, then see
-  what the curve offers.** If a large power reduction with no measurable loss exists on this die,
-  `Max Optimal` IS that point, and "97 %" was never a ceiling to aim at — it was somebody else's
-  measurement standing in for ours.
-
-  **The consequence for the instrument, and it is a hard requirement, not a caveat:** *"no performance
-  loss"* is a claim about a DIFFERENCE, so it may only be made after the meter's own run-to-run
-  spread has been measured and shown to be SMALLER than the effect being denied. A 0 % loss reported
-  by an instrument that scatters 3 % between two identical stock runs is not a finding — it is a blunt
-  instrument. Measure the spread at stock first (the pattern is already written into
-  `plans/03` §4.4), state it next to every delta, and never report a difference thinner than it.
-
-  **AND THEN THE OWNER GAVE THE DESIGN FORMULA ITSELF** (chat, same exchange) — this is the answer to
-  "what is the optimum", and it means the agent never has to guess that definition again:
-
-  > *«профили проектируем по пронципу : "хотим снизить потребление видеокарты, и смотрим, чем за это
-  > платим. Снижаем потребление насколько можем до тех пор, пока не платим больше, чем N. Больше N
-  > платить не хотим. Ищем вменяемый оптимум и компромис."»*
-
-  **Written as the optimization it is: MAXIMIZE the power reduction, SUBJECT TO the price paid ≤ N.**
-  The controlled variable is power; performance is the CURRENCY, not the objective; N is a budget the
-  owner sets, and **a profile is simply one value of N.** Consequences the agent must not re-derive:
-  - The search descends while the price stays under budget and stops at the last point that does —
-    it does not aim at a percentage and it does not stop at a number somebody else measured.
-  - **N belongs to the owner, and it is asked WITH the curve in hand, never before it exists.** Asking
-    "what loss will you accept?" before the card's own power↔performance curve has been measured is
-    asking him to guess; the question carries the measured curve (the self-sufficient-question rule).
-  - If a cost other than performance turns up (a thinner stability margin, a fan-speed floor), it is
-    NAMED as part of the price rather than quietly left out of the budget.
-  - "Вменяемый компромис" is not a stop word here — it is made verifiable by N: once N is a number,
-    "sane compromise" means "the largest power reduction whose measured price is ≤ N".
-
-  **THE SHIPPED POINT: THE OWNER CHOSE A CONVERGENCE LOOP, NOT A STATIC GUARDBAND** (chat,
-  2026-08-10, answering the A/B/C question the agent put to him about the guardband; verbatim):
-
-  > *«ну и было бы здорово мерить не телько на картоких импульсах, но и на длительных, например,
-  > минуту - но не на каждом шаге, а после очередной итерации тюнинга все кривой, чтобы проверить
-  > нагревы на длительном прожиге, и стабильность»*
-  >
-  > *«Хотелось бы, чтобы готовый профиль в точке вставал на минимальный шаг выше, а затем всеь
-  > профиль кривой из таких "хрупких около сбоя" точках напряжения тестировался. Если он показывает
-  > себя стабильно (я лично буду в Palworld играть и тестировать на реальном использвовании) - то его
-  > оставляем. Есил он будет "сбоить", то ищем точку, которая даёт сбои и у неё повышаем напряжение
-  > на один минимальный шаг вверх, и вновь тестируем всю кривую в стресс-тестах. То есть, хочется
-  > довольно аггресивно тюнить, искать минимально рабочее напряжение без сбоев.»*
-
-  **This is a fourth option, and it was not in the agent's A/B/C list.** It replaces a *static*
-  margin with an *empirically converged* one:
-
-  1. Each point ships at **one minimal hardware step above its measured failure point**.
-  2. The WHOLE curve of those fragile points is then tested as one profile — stress tests plus the
-     owner's own real use (Palworld).
-  3. Stable → kept. Misbehaving → **find the failing point, raise THAT point by one step, retest the
-     WHOLE curve**. Repeat.
-  4. **Long burns (≈1 minute) are run after each whole-curve iteration, not at every step** — to see
-     heat soak and stability, which short bursts cannot show.
-
-  **Why this is defensible rather than reckless, stated so no future session "corrects" it back:**
-  the 25 mV guardband is a PROXY for workloads we never ran (`researches/02`: Vmin spreads ~100 mV
-  between programs). The owner's loop attacks the same risk directly instead — by enlarging the
-  observation set (a real game, long thermal soaks) and by ratcheting any point that ever failed. A
-  margin earned by observation beats a margin assumed by proxy, where the observation is actually
-  taken.
-
-  **THE ONE CONDITION THAT MAKES THE LOOP SOUND, AND IT IS NOT OPTIONAL: the escalation trigger must
-  be the SDC ORACLE, never "it didn't crash".** More than half of undervolting failures are silent —
-  correct-looking frames, wrong numbers. A loop driven by crashes alone converges to *"nothing
-  visibly broke"* and parks the card INSIDE the corruption region, which is the worst outcome
-  available and the exact thing `researches/02` exists to prevent. So: every whole-curve retest
-  carries the checksum-versus-golden verdict AND the throughput check (`researches/04` §2 — clock
-  stretching and memory replay are invisible to both crashes and checksums), and the owner's Palworld
-  session is a SECOND witness beside them, never a replacement.
-
-  **What the loop still does not close, listed once and honestly:** silicon ages, so a point converged
-  to the edge today can fail in months; ambient temperature moves, so a profile settled in winter is
-  not proven for summer. Both are answered the same way — by RE-running the loop, which the design
-  makes cheap because it is a loop. Record per point: every verdict it ever produced, so an escalation
-  is a ratchet (a point that has failed is never lowered again) rather than a fresh guess.
-
-  **THE SEARCH HAS TWO MODES, AND THE OWNER SPECIFIED THEM** (chat, 2026-08-10, verbatim):
-
-  > *«для прогонов тюнинга нужно будет предусмотреть два режима - грубый и точный. Грубый меняет
-  > напряжениена 25 мВ, тестит, фиксирует точку выше напряжения, при котором были отказы. А точный
-  > режим - меняет напряжение на 5 мВ и ищет точку отказа, и фиксирует режим на шаг на 5 мВ выше
-  > точки отказа.»*
-
-  Recorded here before it is reconciled, because the owner's words are the record and the
-  reconciliation is ours. **Two things in it need checking against the project's own measurements
-  rather than being implemented as read** — both are open at the time of writing:
-  - **5 mV may not be expressible — SETTLED by the owner the same day.** He asked whether 6.25 mV is
-    this card's minimum step; the honest answer is that nobody has measured it (`config.mjs` carries
-    `VOLTAGE_GRID_STEP_IS_MEASURED = false`, and `nvidia-smi` has no voltage field at all). His rule:
-    *«если да - тогда он будет шагом для точной настройки»* — so **the fine mode's step IS the
-    hardware's own minimum step, whatever the measurement says**, never a number taken on faith. That
-    formulation is correct on any card, which is why it is the rule instead of a figure.
-  - **"One step above the failure point" collides with the guardband** the project already measured
-    into `GUARDBAND_MIN_GRID_STEPS = 4` / `GUARDBAND_MIN_MILLIVOLTS = 25` (`researches/02`: the
-    error rate goes 3 % → 90 % across 2 % of voltage, and Vmin spreads ~100 mV between programs).
-    The likely reconciliation is that his three numbers describe the **search resolution** while the
-    guardband governs the **shipped operating point** — but that is the owner's call, not ours, and
-    it goes to him as a question with the arithmetic shown.
-
-  Operationally, and it changes acceptance rather than only tone:
-  - **Every figure inherited from `RTX_5070Ti_Undervolting_Master_Plan.pdf` — ≥97 % of stock, −60…−80 W,
-    −100…−120 W, ≤65 °C / ≤58 °C, the "knee" of the curve — is a REFERENCE, never a target and never a
-    promise.** A criterion may cite one; it may not be PASSED or FAILED by one.
-  - **The acceptance criterion becomes the SEARCH and its evidence:** measure this card's own
-    performance-per-watt curve, show where its knee actually sits, and report the number found. A
-    profile is defined by the measured optimum of this silicon, not by hitting an inherited percentage.
-  - **This is the same class of finding the project already paid for twice** — the power-limit floor
-    turned out to be 250 W, not the PDF's assumption, and the hotspot sensor the PDF's thermal rows
-    rest on is disabled at driver level on RTX 50. The owner is generalizing what the measurements
-    already showed: the PDF describes a GPU model, and we are tuning ONE die.
-  - **The three-doors rule applies without an exception here** (`PHILOSOPHY.md`): where the optimum is
-    not yet measured, the honest answer is «не измерено», never a plausible inherited number.
-
-- **FOUR MODES, NOT TWO PROFILES — the owner's own taxonomy** (chat, 2026-08-10 18:5x). Quoted in full
-  in `GOAL.md` → «Четыре режима»; the reasoning and what is already measured per mode is
-  `MASTER_PLAN.md` → «Четыре режима». The names are his and ship as written: **Max Perfomance ·
-  Optimised · Silent Cold · Stock Default.** His framing: *«напрашивается четыре режима… и у всех них
-  разные критерии оптимальности»*.
-
-  | Mode | Maximizes | Pays with | Clock ceiling |
-  |---|---|---|---|
-  | 🚀 **Max Perfomance** | performance across the FULL clock range | nothing in performance; temperature is not optimized at all | the curve's TOP |
-  | ⚖️ **Optimised** | **watts, degrees and NOISE brought down hard** | **≤ 5 % of FPS, measured against Max Perfomance** | at the stock operating clock, **plus a power ceiling** |
-  | ❄️ **Silent Cold** | COLD, and only cold | **up to 10 %** | well below the stock operating clock |
-  | 🔄 **Stock Default** | — | — | none; every offset to 0 |
-
-  **`Optimised` WAS SHARPENED BY THE OWNER THE SAME EVENING (chat, 2026-08-10 19:1x +03:00), and the
-  change is structural rather than cosmetic** — he wrote it after the agent reported that every
-  stability result was taken at 137 W while he plays at 300 W and 77 °C. Verbatim in `GOAL.md` →
-  «Уточнение по Optimised»; the operative sentence: *«допускается просадка FPS не более 5%, но
-  покупаем на это СИЛЬНОЕ снижение можности… чтобы она молотила не на 300 Вт, а сильно ниже, и выше не
-  поднималась… Выть можно и греться на режиме Max Perfomance.»*
-
-  Four consequences the agent must not re-derive:
-  - **The objective and the constraint swapped places.** `Optimised` MAXIMIZES the reduction in watts,
-    temperature and noise, SUBJECT TO FPS ≥ 95 %. It is the owner's own «снижаем потребление, пока цена
-    ≤ N» formula with **N = 5 % of FPS** — and the reference is **Max Perfomance, not stock**.
-  - **A THIRD LEVER enters the mechanism: a power ceiling.** "Выше не поднималась" is a bound, and a
-    raised curve with a clock cap bounds consumption only indirectly. `nvidia-smi -pl` is the hard one,
-    and under a game load it is finally live (the card sits at 300 W throttling on `sw_power_cap`).
-    So the "one mechanism, only the ceiling's place differs" line above now holds for `Max Perfomance`
-    and `Silent Cold`; `Optimised` is that mechanism PLUS `-pl`.
-  - **That lever's range is narrow and it is measured, not assumed:** `-pl` moves only 300 → 250 W on
-    this card (`researches/01`). Everything below 250 W has to come from the raised curve and the clock
-    cap, which lower the draw itself rather than its limit. Working shape: both at once — the curve sets
-    the level, `-pl` stands above it as insurance.
-  - **Noise became an acceptance criterion with a measured floor.** This card's fan does not go below
-    **30 %**; under the game it ran at **72–75 %**, which is where the room to be quieter actually is.
-  - **The instrument is FPS.** The criterion is stated about frames, so it is measured by the graphics
-    load (`plans/05` §4.3) — not by ops/s and not by the delivered clock.
-
-  **This SUPERSEDES the two-profile table below**, which is kept because its reasoning about the knee and
-  the two levers is still what `Optimised` runs on. What changed: the old `Max Optimal` was one profile
-  serving two different optima, and it splits. **One mechanism serves all three working modes** — the
-  whole curve raised, `offset_i = min(Δ, cap − F_i)`, differing only in where the ceiling sits — and NONE
-  of them uses a clock lock (his requirement, and also a necessity: `-lgc min=max` forbids clocking down).
-  Consequence for the surface: **four shortcuts, not three** (internal map §4 updated).
-
-- **THE TWO PROFILES, DEFINED BY THE OWNER IN OPERATIONAL TERMS** (chat, 2026-08-10, after he caught
-  the agent describing CLOCK CLAMPING while he meant UNDERVOLTING). His words, verbatim:
-
-  > *«ты рубить хочешь, а я ТЮНИТЬ И ВЫЖИМАТЬ МАКСИМУМ СОКОВ из видеокарты»*
-  >
-  > *«НЕ СНИЖАЕМ ЧАСТОТУ, РАБОТАЕМ НА ВСЁМ ДИАПАЗОНЕ ЧАСТОТ — СНИЖАЕМ НАПРЯЖЕНИЯ НА ВСЁМ ДИАПАЗОНЕ
-  > ЧАСТОТ»*
-  >
-  > *«в ноль потерь нацелен только Max. Cold нацелен на снижение производительности примерно на 10%
-  > в обмен на максимальный холод какой только сможим получить от карты. Макс - максимум выигрыша
-  > производительности ценою минимума потери производительности. Холод - максимум выигрыша холода
-  > ценою детерминированной потери производительности»*
-
-  **This SUPERSEDES every earlier description of Silent Cold as "the profile that trades performance
-  away" with no number attached.** The two objective functions, stated so no session re-derives them:
-
-  | Profile | Objective | Price |
-  |---|---|---|
-  | 🚀 **Max Optimal** | **the KNEE** — the point after which giving up more performance stops paying | **≤ 5 %, a CEILING and not a target** |
-  | ❄️ **Silent Cold** | **maximize COLD** | **~10 %**, DETERMINED in advance and spent deliberately |
-
-  **THE KNEE IS A COMPUTATION, NOT AN IMPRESSION — and getting this wrong is a documented failure of
-  this project's own agent.** The owner had to state it five times, and the fourth restatement wrote
-  "target = zero loss" into this file, because on the CLOCK axis the knee happened to land at 0.1 %.
-  Where the knee LANDS is a measurement; what we look for is the knee. His words:
-
-  > *«Ищем перегиб, где перестаёт давать увеличивающуюся отдачу от продолжения снижения
-  > производительности»* · *«мы можем заплатить до 5% производительности, если это даёт очень весомые
-  > выигрыши по холоду»*
-
-  The definition, executable: walk the candidates downward; for each step compute the MARGINAL RETURN
-  — watts (or degrees) gained per percent of performance given up. The knee is the point after which
-  that return COLLAPSES. Aim there; the 5 % is the wall you may not pass, not the place to stand.
-  Measured on the clock axis 2026-08-10: 73 W per percent down to 2692 MHz, then 6.1 — a twelvefold
-  collapse, so the knee is 2692 at a cumulative price of 0.1 %. **On the VOLTAGE axis the knee may sit
-  at 2–4 %, and that is exactly what the 5 % ceiling exists to permit.**
-
-  **Two levers, and which profile may use which is the whole design:**
-  - **Voltage** — lowers watts and degrees at FULL clocks, i.e. free. Max Optimal's ONLY lever: a
-    profile whose price is zero may not touch anything that costs.
-  - **Clock** — lowers watts and degrees for money. Silent Cold's SECOND lever, and the reason its
-    10 % exists: the budget is what buys the extra cold.
-
-  So `Silent Cold` = a deep undervolt PLUS a clock cap sized to spend the 10 %; `Max Optimal` = the
-  undervolt alone. The clock axis was mapped on the live card 2026-08-10 (`plans/03` §4.5) — that
-  table is the second lever's map, not a profile.
-
-  **The tension to settle with the owner's ears, named rather than assumed:** "maximum cold" and
-  "quiet" pull opposite ways through the fan. The reading in force until he says otherwise: cold at
-  the STOCK fan curve, where fewer watts make the card colder and quieter at once.
-
-- **THE SHIPPED PROFILE NEVER PINS THE CLOCK — the card keeps its whole dynamic range and runs it at
-  less voltage.** The owner's words, chat 2026-08-10, after the agent explained the phase-5 §4.1
-  experiment badly and he cut through it:
-
-  > *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но работала на пониженном
-  > напряжении согласно кривой VF профиля»*
-
-  **This retires `-lgc` as a profile mechanism**, and the reason is concrete rather than aesthetic:
-  `ladder.candidateProfile()` locks `graphicsClockLockMhz: {min: mhz, max: mhz}`, so a pinned card can
-  go neither up nor down — at idle it would sit at the locked clock instead of dropping to 180 MHz. That
-  shape is legitimate for a MEASUREMENT (a held clock is what makes a watt delta legal, EXP-0018) and
-  wrong for anything the owner boots into.
-
-  **The shape that satisfies him, stated as the arithmetic so no session re-derives it.** Our lever is a
-  per-point frequency offset, so with `F_top` = the stock curve's highest frequency and `Δ` = the raise:
-
-  ```
-  offset_i = clamp(F_top − F_i , 0 , Δ)
-  ```
-
-  - points well below the top get the full `Δ` → every frequency they serve now needs LESS voltage;
-  - points near the top get a SMALLER offset so none of them can offer more than `F_top` → the maximum
-    boost is provably unchanged, and the savings are not spent on speed (`researches/02` §6.2: raising
-    the curve without a ceiling buys speed, not watts);
-  - the bottom of the curve is untouched in effect — points 0…~20 sit on the 180 MHz floor — so idle
-    behaviour and zero-RPM survive.
-
-  **Two properties worth naming because they make this the safest shape available:** every offset is
-  **non-negative** (the earlier plan assumed negative offsets would be needed to flatten the tail — they
-  are not), and `min(F_i + Δ, F_top)` preserves monotonicity, so the curve cannot be made non-monotone
-  by construction. The clock ceiling therefore lives INSIDE the curve, as one artifact with one rollback,
-  and no clock lock is written at all.
-
-- *"Не хочется GUI приложение стороннее иметь в зависимостях для KAGO."* — no third-party GUI in the
-  dependency list. This outranks the MSI Afterburner design in the source PDF; `researches/01`
-  records how it is satisfied.
-- *"последний установленный по ярлыку профиль — должен запоминаться для автозапуска на старте ПК"* —
-  the last shortcut-applied profile is remembered and re-applied at boot.
-- ~~*"Если убить её — профиль сбрасывается…"*~~ — **SUPERSEDED by the owner, 2026-08-09:** *"в трее
-  делаем без кнопок, а просто показ статуса, а сброс до заводских настроек — по третьему ярлыку с
-  записью в автозагрузку"*. Three shortcuts (Max Optimal · Silent Cold · Reset to factory), each
-  becoming the remembered boot state; the tray only displays. Killing the tray costs the indicator,
-  not the profile. Full reasoning: `PROJECT_ARCHITECTURE_INTERNAL_MAP.md` §4.
-- *"нужна методология, как так настроить, чтобы напряжения были в каждой точке чуть выше точки сбоев
-  видеокарты"* — per-point voltage sits just above the failure threshold, with margin.
-  `researches/02` is the answer.
-
-**The owner's voice — installed here, and deliberately not shipped.** `AUTHOR_STYLOMETRY.md` sits in
-the project root: the **full private core**, pulled in on the owner's instruction (2026-08-09) so the
-agent works from the richest version rather than a stripped one. It carries verbatim quotes from the
-owner's personal writing and this repository is public, so the file is **git-ignored and stays that
-way**. A fresh clone has to fetch it:
-
-```bash
-cp d:\work\krinik_voice\AUTHOR_STYLOMETRY.md .
-```
-
-The single source of truth is the owner's voice store, `d:\work\krinik_voice\` (decision №39: one
-portrait per owner, not per project). The copy here is a working mirror — never edit it; edit the
-store and re-copy. A public, quote-stripped snapshot of the same portrait exists in the KAIF
-repository; it is not what is installed here, and the two must not be confused.
-
-Open it and run its checklist before handing over any text the owner signs or reads as their own —
-`README`, release notes, the landing copy. Skill: `/owner-voice`.
+This project's owner's standing rules are strict rules in `HOUSE_RULES.md` §1, each with its provenance
+line; the operative definitions of the product are `ЗАКАЗ.md` (the owner's approved layer), his verbatim
+words — `GOAL.md` (the archive). The former text of this section — the owner's words of 2026-08-09…08-15
+with the reasoning around them: «THE REGISTER», the standing constraints, the authority order and the PDF's
+numbers, the design formula «price ≤ N», the convergence loop of 10.08 that `ЗАКАЗ.md` §6 quotes, the
+two search modes, the four modes, the two profiles, the unpinned clock, the owner's voice install — moved
+VERBATIM on 2026-09-26 (KAIF 2.8, "The rulebook takes the rule, not the quote") to `PROJECT_HISTORY.md` →
+«📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8». `ЗАКАЗ.md` §6 and §7 point here and land on this
+paragraph: «THE REGISTER» is `HOUSE_RULES.md` R1.
 
 **General working guidance:**
 - Always check the current time and the log file's time before reading logs — read fresh logs, not stale ones.

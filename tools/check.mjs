@@ -73,7 +73,7 @@ function parseGate(files) {
 //
 // Two rules met here, and both were already written down: the storefront rule that an internal word
 // expands into a human name (`AGENT_GUIDE.md` → the storefront, item 6), and the owner's register
-// (`AGENT_GUIDE.md` → Notes from the human). Identifiers stay English — code is read by the agent;
+// (`HOUSE_RULES.md` → R1; in `AGENT_GUIDE.md` → Notes from the human until 2026-09-26). Identifiers stay English — code is read by the agent;
 // the OUTPUT is the owner's language, in his register.
 //
 // EXP-0067 (text through the shell instead of through the file tools) was written on 2026-08-15 and

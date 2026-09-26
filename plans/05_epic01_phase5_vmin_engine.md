@@ -120,7 +120,7 @@ Asked whether to run this experiment, he answered with the requirement instead (
 > *«Я хочу, чтобы карта сама могла и разгоняться и снижать частоты, но работала на пониженном напряжении
 > согласно кривой VF профиля»*
 
-So `-lgc` is retired as a profile mechanism (full reasoning: `AGENT_GUIDE.md` → Notes from the human).
+So `-lgc` is retired as a profile mechanism (the rule — `HOUSE_RULES.md` → R7; full reasoning: `PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes from the human" до KAIF 2.8»).
 `ladder.candidateProfile()`'s `{min: mhz, max: mhz}` is a **PIN**: the card can go neither up nor down, so
 at idle it would hold the locked clock instead of dropping to 180 MHz. Correct for a MEASUREMENT, wrong
 for anything he boots into.
@@ -565,8 +565,8 @@ its purpose (EXP-0026).
 
 ### 4.6 — The margin: two named policies, and the owner's arithmetic goes to him 🔲
 
-*Anchor: `researches/02` §3 step 3 (guardband ≥ 4 grid steps AND ≥ 25 mV) vs `AGENT_GUIDE.md` → Notes
-from the human (the owner's convergence loop: one minimal step above failure, whole-curve retest, ratchet).*
+*Anchor: `researches/02` §3 step 3 (guardband ≥ 4 grid steps AND ≥ 25 mV) vs `PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes
+from the human" до KAIF 2.8» (the owner's convergence loop: one minimal step above failure, whole-curve retest, ratchet).*
 
 These two are not the same number and the collision is already recorded in the canon: *"the likely
 reconciliation is that his three numbers describe the SEARCH RESOLUTION while the guardband governs the

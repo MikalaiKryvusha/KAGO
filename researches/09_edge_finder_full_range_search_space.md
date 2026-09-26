@@ -153,7 +153,7 @@ load. **Fetching the article did not confirm it** — the page discusses tool ch
 benchmark for *performance* certification, not low-clock instability. The claim is therefore **not
 cited to that source**. It happens to be true on this project's own evidence — `--lowload` exists
 because an undervolt can survive every heavy test and die on a browser click (`AGENT_GUIDE.md` →
-harness) — and that is the evidence the epic will lean on: **ours, measured, not a snippet.**
+Test harness, the principle; the `--lowload` row — `HOUSE_RULES.md` §3) — and that is the evidence the epic will lean on: **ours, measured, not a snippet.**
 
 **Implication:** the owner's 10 s (step 9) and 3 min (step 15) are two different instruments, and the
 epic must say so out loud. 10 s finds the gross edge cheaply; 3 min qualifies a point; neither is

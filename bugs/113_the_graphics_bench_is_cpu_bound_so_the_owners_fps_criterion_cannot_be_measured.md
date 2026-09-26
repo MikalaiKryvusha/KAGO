@@ -94,5 +94,5 @@
 
 - `researches/34_microstutter_on_the_owners_machine.md` — замеры, породившие тикет
 - `GOAL.md` → мерка владельца по FPS · `MASTER_PLAN.md` → «числа из PDF — справка, а не цель», п. 5
-- `AGENT_GUIDE.md` → досье среды (строки платформы: L3, PCIe)
+- `HOUSE_RULES.md` §4 → досье среды (строки платформы: L3, PCIe; до 26.09 — в `AGENT_GUIDE.md`)
 - `bugs/73` (числа, выбранные агентом) — родственный класс: порог Ш2 обязан быть замером

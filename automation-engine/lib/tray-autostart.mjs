@@ -12,7 +12,7 @@
 //
 // WHY POWERSHELL CMDLETS AND NOT `schtasks` (a departure from the plan's letter, and it is measured):
 // `schtasks /Query` prints LOCALIZED text — on this machine «Состояние: Готово» — and the dossier
-// already records the class (`AGENT_GUIDE.md`: a guard matching a localized message works in one
+// already records the class (`HOUSE_RULES.md` §4, until 2026-09-26 `AGENT_GUIDE.md`: a guard matching a localized message works in one
 // language only). `Get-ScheduledTask` returns an OBJECT whose `State` is a locale-independent enum,
 // and `setup-desktop.mjs` already reads tasks exactly this way — one method, not two.
 //
