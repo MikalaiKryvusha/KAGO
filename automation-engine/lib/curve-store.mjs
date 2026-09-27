@@ -1425,6 +1425,14 @@ export const REFERENCE_REGIME = Object.freeze({
   pstate: 'P0',
 });
 
+// HOW THE CAPTURE READS AND LOADS (`bugs/142`) — measurement parameters, `[AI]` 2026-09-27, revisable.
+// The load runs in CHUNKS that end by themselves, because killing the burn process mid-kernel is what made
+// the driver log `nvlddmkm` 153: all three captures (31.08 23:13:42 · 25.09 19:01:08 · 25.09 19:27:07) ended
+// with `load.kill()` and each has a 153 in the same second; the mode check, whose burns end naturally, had 0.
+export const REFERENCE_READS = 8;               // reads over which the worst case per entry is taken
+export const REFERENCE_READ_GAP_MS = 500;       // ~4 s of reads: long enough to see the table slide, short against a chunk
+export const REFERENCE_LOAD_CHUNK_S = 20;       // one chunk of `stress-tester --seconds`; the stop waits ≤ one chunk
+
 /**
  * Is this telemetry sample inside the regime? Returns the refusals, so the caller can NAME them.
  * `null`/absent readings are refused, never assumed — «did not look» is not «looked and found»
@@ -1476,6 +1484,43 @@ export function buildReferenceTable({ points, telemetry, gpuInfo = null, nowIso 
     note,
     points: points.map((p, i) => ({ i, mv: p.mv, mhz: p.mhz, freqKhz: p.freqKhz })),
   };
+}
+
+/**
+ * THE WORST CASE OVER N READS — `bugs/142`, step 1 of its fix plan.
+ *
+ * Per voltage entry, the LOWEST base frequency any read saw: the hot, loaded table serves each voltage
+ * with the least frequency, and that is what «worst case» means for this artefact (`bugs/97`). The
+ * former rule demanded two IDENTICAL raw reads; on driver 616.92 the loaded table never settled within
+ * 12 samples (2026-09-25, twice) — demanding stillness of a table that slides with heat contradicted the
+ * artefact's own meaning. What still refuses: a read that lost an entry, and a voltage axis that
+ * differs between reads (the comparison by index rests on it — `compareToReference` shouts the same).
+ *
+ * @param {Array<Array<{mv:number, mhz:number|null, freqKhz:number}>>} reads  base tables (live minus our offsets)
+ * @returns {{ points, movedPoints:number, spreadMhz:number }}  spread = the widest max−min over entries — information, not a gate
+ *
+ * [NOT-TESTED] on the card — hygiene: `curve --selftest` blocks «ХУДШИЙ СЛУЧАЙ…» (mutations MW1–MW3); the
+ * functional run is the live capture of `plans/105` Ш6.
+ */
+export function worstCaseBase(reads) {
+  if (!Array.isArray(reads) || reads.length === 0) throw new Error('чтений нет — худший случай выводить не из чего');
+  const n = reads[0].length;
+  if (reads.some((r) => !Array.isArray(r) || r.length !== n)) throw new Error('чтения разной длины — одно из них потеряло точки');
+  const points = [];
+  let movedPoints = 0;
+  let spreadMhz = 0;
+  for (let j = 0; j < n; j++) {
+    const col = reads.map((r) => r[j]);
+    if (col.some((p) => p?.mv !== col[0]?.mv)) throw new Error(`точка ${j}: ось напряжений разошлась между чтениями — сравнение по индексу невозможно`);
+    const finite = col.filter((p) => Number.isFinite(p?.mhz));
+    if (finite.length === 0) { points.push(col[0]); continue; }       // an unused entry passes through as-is
+    if (finite.length !== col.length) throw new Error(`точка ${j}: частота прочитана не во всех чтениях`);
+    const lo = finite.reduce((a, b) => (b.mhz < a.mhz ? b : a));
+    const hi = Math.max(...finite.map((p) => p.mhz));
+    if (hi !== lo.mhz) { movedPoints++; spreadMhz = Math.max(spreadMhz, hi - lo.mhz); }
+    points.push(lo);
+  }
+  return { points, movedPoints, spreadMhz };
 }
 
 const REF_POINT_KEYS = Object.freeze(['i', 'mv', 'mhz', 'freqKhz']);
@@ -3149,6 +3194,40 @@ function cmdSelftest() {
     return b[0].mhz === null;
   })());
 
+  // ── ХУДШИЙ СЛУЧАЙ ЗА N ЧТЕНИЙ (`bugs/142`). Адресаты мутаций названы ДО прогона (EXP-0016):
+  //   MW1 наибольшая частота вместо наименьшей  → «ХУДШИЙ СЛУЧАЙ — НАИМЕНЬШАЯ ЧАСТОТА…»
+  //   MW2 взять первое чтение, не сводя        → «ХУДШИЙ СЛУЧАЙ — НАИМЕНЬШАЯ ЧАСТОТА…»
+  //   MW3 не сверять ось напряжений             → «ОСЬ НАПРЯЖЕНИЙ, РАЗОШЕДШАЯСЯ…»
+  // Фикстура выражает замер 25.09 на 616.92: под нагрузкой таблица едет на единицы–десятки МГц между чтениями.
+  console.log('\n— ХУДШИЙ СЛУЧАЙ ЗА N ЧТЕНИЙ (bugs/142) —');
+  const shiftAt = (pts, j, d) => pts.map((p, i) => (i === j ? { ...p, mhz: p.mhz + d, freqKhz: (p.mhz + d) * 1000 } : p));
+  ok('ХУДШИЙ СЛУЧАЙ — НАИМЕНЬШАЯ ЧАСТОТА КАЖДОЙ ТОЧКИ ПО ВСЕМ ЧТЕНИЯМ', (() => {
+    const base = refPts();
+    const w = worstCaseBase([base, shiftAt(shiftAt(base, 2, -15), 5, 10), shiftAt(base, 5, -5)]);
+    return w.points[2].mhz === base[2].mhz - 15 && w.points[5].mhz === base[5].mhz - 5
+      && w.points.every((p, i) => i === 2 || i === 5 || p.mhz === base[i].mhz) && w.movedPoints === 2 && w.spreadMhz === 15;
+  })());
+  ok('таблица стоит — сдвинувшихся точек 0, разброс 0', (() => {
+    const w = worstCaseBase([refPts(), refPts(), refPts()]);
+    return w.movedPoints === 0 && w.spreadMhz === 0 && w.points.every((p, i) => p.mhz === refPts()[i].mhz);
+  })());
+  ok('ОСЬ НАПРЯЖЕНИЙ, РАЗОШЕДШАЯСЯ МЕЖДУ ЧТЕНИЯМИ, — ОТКАЗ ПО ИМЕНИ', (() => {
+    try { worstCaseBase([refPts(), refPts().map((p, i) => (i === 4 ? { ...p, mv: p.mv + 5 } : p))]); return false; }
+    catch (e) { return /ось напряжений/.test(e.message); }
+  })());
+  ok('чтение, потерявшее точку, — отказ по имени', (() => {
+    try { worstCaseBase([refPts(), refPts().slice(0, 7)]); return false; } catch (e) { return /разной длины/.test(e.message); }
+  })());
+  ok('частота, прочитанная не во всех чтениях, — отказ; незанятая запись проходит насквозь', (() => {
+    const holed = refPts().map((p, i) => (i === 3 ? { ...p, mhz: null } : p));
+    let refused = false;
+    try { worstCaseBase([refPts(), holed]); } catch (e) { refused = /не во всех чтениях/.test(e.message); }
+    const empty = (pts) => pts.map((p, i) => (i === 7 ? { mv: p.mv, mhz: null, freqKhz: 0 } : p));
+    const w = worstCaseBase([empty(refPts()), empty(refPts())]);
+    return refused && w.points[7].mhz === null;
+  })());
+  ok('чтений нет — отказ, а не пустая опора', (() => { try { worstCaseBase([]); return false; } catch { return true; } })());
+
   // ── МУТАЦИИ: каждая красит СВОЁ, и адресаты названы ДО прогона (EXP-0016) ─────────────────────
   //
   // Проверяется не «стало красно», а «покраснел ИМЕННО тот блок»: сторож, краснеющий на всё, не
@@ -3320,14 +3399,17 @@ function cmdSelftest() {
 /**
  * TAKE THE REFERENCE TABLE IN THE REGIME WE TUNE FOR — `bugs/97`, the owner's «худший случай».
  *
- * Reads only. It raises a load, waits for the card to ENTER the regime, reads the base twice and
- * demands the two agree, then writes the artefact. Three refusals, and each one exists because its
- * absence would silently store a base that is wrong in the unsafe direction:
+ * Reads only. It raises a load, waits for the card to ENTER the regime, reads the base
+ * `REFERENCE_READS` times and keeps the WORST case per entry (`worstCaseBase`), then writes the artefact.
+ * The load is a chain of chunks that end by themselves and the stop WAITS for the running one — never a
+ * kill mid-kernel (`bugs/142`: the kill was the driver's 153). Three refusals, and each one exists because
+ * its absence would silently store a base that is wrong in the unsafe direction:
  *
- *   1. **Regime not reached** → refuse. Storing a REST table under the name «worst case» is the exact
- *      failure this artefact prevents, and it would redden nowhere afterwards.
- *   2. **The two reads disagree** → refuse. Under load the table was MEASURED stable across 59…69 °C
- *      (0 of 128, four comparisons), so a disagreement means we are not in the regime we think we are.
+ *   1. **Regime not reached, or lost during the reads** → refuse. Storing a REST table under the name
+ *      «worst case» is the exact failure this artefact prevents, and it would redden nowhere afterwards.
+ *   2. **The reads do not line up** (an entry lost, the voltage axis moved) → refuse. Two IDENTICAL reads
+ *      are no longer demanded: on 610.88 the loaded table stood still (0 of 128, 31.08), on 616.92 it
+ *      slid and never settled (25.09, twice) — the spread is printed and stored in the note instead.
  *   3. **The offsets channel is silent** → refuse. Without knowing what we ourselves put on the card,
  *      «live minus our offset» cannot recover the factory base at all (same barrier as `B98-base`).
  *
@@ -3354,12 +3436,20 @@ async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 
     };
   };
 
-  let load = null;
+  // The load: a chain of chunks, each ending by itself. `stopLoad` ends the chain and the stop AWAITS the
+  // running chunk — a kill here is what the driver logged as 153 (`bugs/142`, witnessed 2026-09-27 23:42:36).
+  let stopLoad = false;
+  let loadDone = null;
   if (withLoad) {
-    console.log(`\nподнимаю нагрузку: furnace, ровная, ${seconds} с …`);
-    load = spawn(process.execPath, [
-      fileURLToPath(new URL('./stress-tester.mjs', import.meta.url)), '--workload', 'furnace', '--seconds', String(seconds),
-    ], { stdio: 'ignore', windowsHide: true });
+    console.log(`\nподнимаю нагрузку: furnace, ровная, кусками по ${REFERENCE_LOAD_CHUNK_S} с (каждый кончается сам) …`);
+    const stress = fileURLToPath(new URL('./stress-tester.mjs', import.meta.url));
+    loadDone = (async () => {
+      while (!stopLoad) {
+        const chunk = spawn(process.execPath, [stress, '--workload', 'furnace', '--seconds', String(REFERENCE_LOAD_CHUNK_S)],
+          { stdio: 'ignore', windowsHide: true });
+        await new Promise((r) => { chunk.once('exit', r); chunk.once('error', r); });
+      }
+    })();
   } else {
     console.log('\nнагрузку поднимает оператор (--no-load): ждём, пока карта войдёт в режим …');
   }
@@ -3392,7 +3482,7 @@ async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 
       return 1;
     }
 
-    // ── READ THE BASE TWICE AND DEMAND AGREEMENT ─────────────────────────────────────────────────
+    // ── READ THE BASE N TIMES AND KEEP THE WORST CASE PER ENTRY (`bugs/142`) ─────────────────────
     const nv = nvapi.openNvapi();
     nv.koffi.call(nv.resolve(0x0150E828).ptr, nv.protos.Initialize);
     const hs = Buffer.alloc(64 * 8); const cnt = Buffer.alloc(4);
@@ -3400,31 +3490,33 @@ async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 
     const handle = hs.readBigUInt64LE(0);
     let taken = null;
     try {
-      const readBase = () => {
-        const curve = nvapi.readVfCurveStable(nv, handle);
-        if (!curve.ok) throw new Error(`таблица не прочитана: ${curve.why}`);
-        const offs = nvapi.readVfOffsetsStable(nv, handle);
-        if (!offs.ok || !Array.isArray(offs.offsets)) {
-          throw new Error(`наши сдвиги не прочитались (${offs.why ?? 'причина не названа'})`
-            + ' — без них «живая минус наш сдвиг» посчитать нечем, и опора была бы выдумкой');
-        }
-        return { points: factoryBaseFrom(curve.points, offs.offsets), live: curve.points, offsets: offs.offsets };
-      };
-      const first = readBase();
-      const t1 = tele();
-      await new Promise((r) => setTimeout(r, 3000));
-      const second = readBase();
-      const t2 = tele();
-      let moved = 0;
-      for (let j = 0; j < Math.min(first.points.length, second.points.length); j++) {
-        if (first.points[j]?.mhz !== second.points[j]?.mhz) moved++;
+      // Our offsets are the CONTROL structure — they do not slide with heat, so one settled read serves all N.
+      const offs = nvapi.readVfOffsetsStable(nv, handle);
+      if (!offs.ok || !Array.isArray(offs.offsets)) {
+        throw new Error(`наши сдвиги не прочитались (${offs.why ?? 'причина не названа'})`
+          + ' — без них «живая минус наш сдвиг» посчитать нечем, и опора была бы выдумкой');
       }
-      console.log(`\nдва чтения опоры при ${t1.tempC} → ${t2.tempC} °C: расходится точек ${moved} из ${first.points.length}`);
-      if (moved !== 0) {
-        console.log('🔴 ОТКАЗ: под нагрузкой таблица обязана стоять (замер bugs/97: 0 из 128 на 59…69 °C).');
-        console.log('   Расхождение значит, что режим не тот, каким мы его считаем. Опора НЕ записана.');
+      const t1 = tele();
+      const reads = [];
+      let firstLive = null;
+      for (let k = 0; k < REFERENCE_READS; k++) {
+        if (k > 0) await new Promise((r) => setTimeout(r, REFERENCE_READ_GAP_MS)); // non-blocking: the load chain keeps respawning
+        const curve = nvapi.readVfCurve(nv, handle);
+        if (!curve.ok) throw new Error(`таблица не прочитана (чтение ${k + 1} из ${REFERENCE_READS}): ${curve.why}`);
+        firstLive = firstLive ?? curve.points;
+        reads.push(factoryBaseFrom(curve.points, offs.offsets));
+      }
+      const t2 = tele();
+      const worst = worstCaseBase(reads);
+      console.log(`\n${REFERENCE_READS} чтений опоры при ${t1.tempC} → ${t2.tempC} °C: точек, сдвинувшихся между чтениями,`
+        + ` ${worst.movedPoints} из ${worst.points.length}, наибольший разброс ${worst.spreadMhz} МГц — взят худший случай (наименьшая частота)`);
+      const lost = referenceRegimeRefusals(t2);
+      if (lost.length) {
+        console.log('🔴 ОТКАЗ: карта вышла из режима худшего случая за время чтений. Опора НЕ записана.');
+        for (const b of lost) console.log(`   · ${b.field}: ${b.why}`);
         return 1;
       }
+      const first = { live: firstLive, offsets: offs.offsets };
       const info = probeGpuInfo();
       const cardMax = Number(info['clocks.max.graphics']);
       // ⚠️ «ЖИВАЯ ≥ МАКСИМУМА КАРТЫ» — НЕ ПРИЗНАК ЗАЖИМА, и это проверено данными, а не рассуждением.
@@ -3437,10 +3529,11 @@ async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 
       const suspect = first.live.filter((p, j) => j < CURVE_GRAPHICS_POINT_COUNT && p.freqKhz > 0
         && p.mhz >= cardMax && Math.round((first.offsets[j] ?? 0) / 1000) > 0).length;
       taken = buildReferenceTable({
-        points: first.points,
+        points: worst.points,
         telemetry: t2,
         gpuInfo: info,
-        note: `снята под ровной нагрузкой furnace · два чтения сошлись точка в точку`
+        note: `снята под ровной нагрузкой furnace · худший случай ${REFERENCE_READS} чтений`
+          + ` (сдвинулось ${worst.movedPoints} точек, разброс до ${worst.spreadMhz} МГц)`
           + ` · вентилятор ${t2.fanPct} % · ядро ${t2.clockMhz} МГц`
           + (suspect
             ? ` · ⚠️ ${suspect} поднятых нами точек стоят на максимуме карты ${cardMax} МГц: их опора`
@@ -3461,7 +3554,9 @@ async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 
     console.log(`   ${taken.note}`);
     return 0;
   } finally {
-    if (load && !load.killed) load.kill();
+    // The chain stops at the end of the running chunk: waiting ≤ one chunk is the price of no driver 153.
+    stopLoad = true;
+    if (loadDone) { console.log(`жду конца текущего куска нагрузки (≤ ${REFERENCE_LOAD_CHUNK_S} с) …`); await loadDone; }
   }
 }
 

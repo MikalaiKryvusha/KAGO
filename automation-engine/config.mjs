@@ -1228,6 +1228,16 @@ export const MODE_BANDS = Object.freeze([
   { id: 'B7', loMhz: 2950, hiMhz: Infinity, label: 'выше 2950' },
 ].map(Object.freeze));
 
+/**
+ * THE LOAD BANDS — the only bands whose margin may go BELOW the touching trend (`plans/105`, level 2 of the
+ * owner's «Вся кривая -> полоса -> точка», 2026-09-25). `[AI]` 2026-09-27, revisable: the card lives there under
+ * game and burn (the accepted 25.09 check: B5 49 % · B6 14 % · B7 22 % of the time) and 13 of the 14 edges lie
+ * there, so the builder's «known failure + two grid steps» floor stands under their rows; the bands below are
+ * crossed at idle and in transitions, give no watts back, and idle after a write is where the proved 08.09 death
+ * came (researches/36) — they keep a margin ≥ 0.
+ */
+export const NEGATIVE_MARGIN_FROM_MHZ = 2700;
+
 /** One step of the margin descent after a passed check, mV — `[AI]`, researches/39 §6 («шаг спуска запаса 10 мВ»). */
 export const MARGIN_DESCENT_STEP_MV = 10;
 
@@ -1325,6 +1335,7 @@ export default Object.freeze({
   PLATEAU_LOAD_UTILIZATION_PCT,
   SILENT_COLD_FAN_CEILING_PCT,
   MODE_BANDS,
+  NEGATIVE_MARGIN_FROM_MHZ,
   MARGIN_DESCENT_STEP_MV,
   RATCHET_GRID_STEPS,
   MIN_BAND_DWELL_S,

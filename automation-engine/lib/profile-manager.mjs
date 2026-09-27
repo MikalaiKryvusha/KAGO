@@ -681,6 +681,10 @@ export async function resolveProfileCurve(profile, {
   // Опорная таблица (`bugs/97`). Внедряется по той же причине: набор обязан пройти и с опорой, и без
   // неё, не имея ни карты, ни каталога `curves/`.
   loadReferenceFn = null, cardStamp = null,
+  // Штамп карты для R6-сверки опоры (`bugs/142`). Не подан и путь не песочница — читается у самой карты:
+  // ворота, взводимые только необязательным аргументом, который не передавал ни один вызывающий, не были
+  // взведены никогда (EXP-0295). Внедряем — набор проверяет производственный путь без карты.
+  probeStampFn = null,
   // Куда сказать, ЧТО послужило опорой. Молчащий выбор опоры — это ровно тот дефект, который
   // `bugs/97` и лечит, поэтому канал наружу обязателен по построению, а не по желанию.
   onBase = null,
@@ -778,7 +782,15 @@ export async function resolveProfileCurve(profile, {
     const refDoc = loadRef();
     if (refDoc) {
       const { referenceUsableFor } = await import('./curve-store.mjs');
-      const usable = referenceUsableFor(refDoc, { card: cardStamp });
+      // A sandbox (any injected loader) with no stamp stays unstamped, as before; the production path reads the card.
+      let stamp = cardStamp;
+      if (!stamp && probeStampFn) stamp = await probeStampFn();
+      else if (!stamp && !(loadCurve || loadSnapshot || loadReferenceFn)) {
+        const { probeCard } = await import('./profile-store.mjs');
+        const c = probeCard();
+        stamp = { driver: c.driver, vbios: c.vbios };
+      }
+      const usable = referenceUsableFor(refDoc, { card: stamp });
       if (usable.ok) {
         base = refDoc.points;
         baseSource = { kind: 'reference', stamp: refDoc.stamp };
@@ -3049,6 +3061,14 @@ async function cmdSelftest() {
     if (eff.deltaByPointMhz[2] !== 200) return `после отклонения подъём ${eff.deltaByPointMhz[2]}, ожидалось 200 (по покою)`;
     const said = curveBaseSaid(eff);
     return said.includes('ОТКЛОНЁН') ? null : `строка не говорит об отклонении: ${said}`;
+  });
+
+  // bugs/142 · мутация MS1 (адресат назван ДО прогона): убрать чтение штампа у карты → этот блок красный.
+  block('bugs/142: ОПОРА ЧУЖОГО ДРАЙВЕРА ОТВЕРГНУТА БЕЗ cardStamp — штамп читается у самой карты', async () => {
+    const eff = await b97Resolve({ cardStamp: null, probeStampFn: async () => ({ driver: '616.92', vbios: '98.03.58.40.8b' }) });
+    if (eff.__base?.kind !== 'live-subtracted') return `опорой стало «${eff.__base?.kind}» — опора 610.88 принята на карте 616.92`;
+    const same = await b97Resolve({ cardStamp: null, probeStampFn: async () => ({ driver: '610.88', vbios: '98.03.58.40.8b' }) });
+    return same.__base?.kind === 'reference' ? null : `опора своего драйвера не принята: «${same.__base?.kind}»`;
   });
 
   block('bugs/97: ОПОРА В ПОКОЕ отклоняется даже со верным штампом — режим проверяется, а не только карта', async () => {

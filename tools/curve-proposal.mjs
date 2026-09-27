@@ -43,7 +43,7 @@ import { readJournal, harvestFromJournal, orphanIntents, corrections, LINE, RUNG
 import { loadFacts, effectiveCurve, CURVE_PATH, JOURNAL_PATH } from '../automation-engine/lib/curve-map.mjs';
 import { ORACLE_DATE, FUSE_OFF_POST_MHZ } from './mark-unwatched-rows.mjs';
 import { cornersOf } from './curve-editor.mjs';
-import { MODE_BANDS } from '../automation-engine/config.mjs';
+import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV } from '../automation-engine/config.mjs';
 import { bandOf } from '../automation-engine/lib/mode-validate.mjs';
 import { CURVE_TAGS, validateCurveDoc, saveCurveDoc, curvePath } from '../automation-engine/lib/curve-store.mjs';
 import { loadGrid } from '../automation-engine/lib/card-grids.mjs';
@@ -219,6 +219,8 @@ export function trendModel({ stockAt, grid, anchors }) {
   const shift = Math.max(0, ...pts.map((p) => (fit.a + fit.b * p.x) - p.y));
   const depthAt = (f) => fit.a + fit.b * f - shift;
   const edge = new Set(anchors.map((x) => x.mhz));
+  // Above the top edge: never below «top edge + 25 mV» (plans/25, решено владельцем п. 2) — a margin below 0 respects it too.
+  const upFloorMv = edgeFloorMv(hi, grid) + EXTRAPOLATION_FLOOR_MV;
   const rawAt = (mhz) => {
     const stock = stockAt(mhz);
     let d = depthAt(mhz);
@@ -227,11 +229,11 @@ export function trendModel({ stockAt, grid, anchors }) {
     if (mhz < lo.mhz) { d = Math.min(d, lo.stockMv - edgeFloorMv(lo, grid)); origin = 'extrapolated-down'; v = stock - d; }
     else if (mhz > hi.mhz) {
       d = Math.min(d, hi.stockMv - edgeFloorMv(hi, grid)); origin = 'extrapolated-up';
-      v = Math.max(stock - d, edgeFloorMv(hi, grid) + EXTRAPOLATION_FLOOR_MV);
+      v = Math.max(stock - d, upFloorMv);
     } else v = stock - d;
     return { v, origin };
   };
-  return { fit, shift, rawAt };
+  return { fit, shift, rawAt, upFloorMv };
 }
 
 /** Known failures stay failures: a row is never below «credible failure + two grid steps» at or below its frequency. */
@@ -281,8 +283,10 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
 // WHAT «ТРЕНД» MEANS HERE — `[AI]`, revisable: the TOUCHING trend of `trendModel` (the least-squares line
 // shifted to touch the most demanding edge, with the extrapolation rules of R5). So margin 0 IS experiment
 // №2's curve, every known edge floor honoured and the worst one touched; +30 (Ф2's start) stands 30 mV
-// above that. Negative margins are refused: going under the model's most demanding edge is the Ф5 probe's
-// business (a new anchor), not a margin's.
+// above that. NEGATIVE margins (`plans/105`, level 2 of the owner's «Вся кривая -> полоса -> точка», 25.09) are
+// allowed in the LOAD bands only (`config.NEGATIVE_MARGIN_FROM_MHZ`): there every row stands above a known
+// failure + two grid steps, and that floor — not a margin constant — is where the descent ends
+// (`exhaustedBands`). Going under a KNOWN failure stays the Ф5 probe's business (a new anchor), by the owner's word.
 //
 // SEVEN BANDS — researches/39 §4 п. 2, `[AI]` boundaries to be refined by the visit map. Half-open
 // [loMhz, hiMhz): a boundary frequency belongs to the band ABOVE it. The first and the last are the bands
@@ -314,25 +318,52 @@ export function bandsRefusal(bands = BANDS) {
   return bad === -1 ? null : `полоса ${bands[bad].label}: начало ${bands[bad].loMhz} не стыкуется с концом предыдущей ${bands[bad - 1]?.hiMhz ?? '—'}`;
 }
 
-/** A margin vector is one non-negative whole number of millivolts per band — anything else is refused by name. */
+/** May this band's margin go below the touching trend? Only a LOAD band (`config.NEGATIVE_MARGIN_FROM_MHZ`, plans/105). */
+export const negativeMarginAllowed = (band) => band.loMhz >= NEGATIVE_MARGIN_FROM_MHZ;
+
+/**
+ * A margin vector is one whole number of millivolts per band; below 0 only in a load band — anything else
+ * is refused by name. What stops a load band's descent is not a number here but the builder's floors
+ * (known failure + two grid steps, monotonicity) — `exhaustedBands` says when a band has reached them.
+ */
 export function marginRefusal(margins, bands = BANDS) {
   if (!Array.isArray(margins)) return 'запас не задан вектором';
   if (margins.length !== bands.length) return `запасов ${margins.length}, полос ${bands.length}`;
-  const bad = margins.findIndex((m) => !Number.isInteger(m) || m < 0);
-  return bad === -1 ? null : `полоса ${bands[bad].label}: запас «${margins[bad]}» — нужно целое число мВ ≥ 0`;
+  const bad = margins.findIndex((m, i) => !Number.isInteger(m) || (m < 0 && !negativeMarginAllowed(bands[i])));
+  if (bad === -1) return null;
+  return `полоса ${bands[bad].label}: запас «${margins[bad]}» — нужно целое число мВ`
+    + (Number.isInteger(margins[bad]) ? ` ≥ 0 (ниже тренда — только полосы от ${NEGATIVE_MARGIN_FROM_MHZ} МГц)` : '');
+}
+
+/**
+ * Which bands would NOT move if their margin went one more step down — every row of the band already
+ * stands on a floor (a known failure + two grid steps, the band below through monotonicity, or stock).
+ * Computed by building the lower curve, not guessed: the descent of level 2 ends exactly here (plans/105).
+ */
+export function exhaustedBands(args, stepMv = MARGIN_DESCENT_STEP_MV) {
+  const bands = args.bands ?? BANDS;
+  const now = bandedCurve(args);
+  return bands.map((b, i) => {
+    const lower = [...args.margins]; lower[i] -= stepMv;
+    if (marginRefusal(lower, bands)) return true;                    // may not go lower at all
+    const next = bandedCurve({ ...args, margins: lower });
+    return now.rows.every((r, j) => r.band !== b.id || r.voltageMv === next.rows[j].voltageMv);
+  });
 }
 
 export function bandedCurve({ ladder, stockAt, grid, anchors, credible = [], maxMhz, margins, bands = BANDS }) {
   const refusal = bandsRefusal(bands) ?? marginRefusal(margins, bands);
   if (refusal) throw new Error(`кривая с запасом по полосам не строится: ${refusal}`);
   if (anchors.length === 0) throw new Error('кривая с запасом по полосам не строится: нет ни одного края-опоры — модели не на чем стоять');
-  const { fit, shift, rawAt } = trendModel({ stockAt, grid, anchors });
+  const { fit, shift, rawAt, upFloorMv } = trendModel({ stockAt, grid, anchors });
   const rows = ladder.filter((m) => m <= maxMhz).map((mhz) => {
     const stock = stockAt(mhz);
     const { v, origin } = rawAt(mhz);
     const band = bandOf(mhz, bands);
     const marginMv = margins[band];
-    return { mhz, voltageMv: Math.min(onGridUp(grid, v + marginMv), stock), stockVoltageMv: stock, origin, band: bands[band].id, marginMv, trendMv: Math.round(v * 10) / 10 };
+    // A negative margin never undercuts the owner's extrapolation floor above the top edge (for m ≥ 0 this is a no-op).
+    const target = origin === 'extrapolated-up' ? Math.max(v + marginMv, upFloorMv) : v + marginMv;
+    return { mhz, voltageMv: Math.min(onGridUp(grid, target), stock), stockVoltageMv: stock, origin, band: bands[band].id, marginMv, trendMv: Math.round(v * 10) / 10 };
   });
   const failRaises = raiseToFailures(rows, credible, grid);
   const monotoneRaises = raiseToMonotone(rows);
@@ -512,8 +543,35 @@ export function selfTest() {
   check('СТРОКА НА СТОКЕ — «НЕ ТРОНУТА», ОСТАЛЬНЫЕ — «МОДЕЛЬ», ЛИШНИХ ПОЛЕЙ НЕТ', doc.frequencies.length === bc.rows.length && doc.frequencies.every((r) => r.tags.join() === (r.voltageMv === r.stockVoltageMv ? 'stop:untouched' : 'origin:model')
     && bc.rows.some((b) => b.mhz === r.mhz && b.voltageMv === r.voltageMv)
     && Object.keys(r).sort().join() === 'editedAt,mhz,provenBy,stockVoltageMv,tags,voltageMv'), doc.frequencies.map((r) => r.mhz + ':' + r.tags).join(' '));
-  check('ПЛОХОЙ ВЕКТОР ЗАПАСА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', marginRefusal([30, 30, 30, 30, 30, 30, -10]) !== null && marginRefusal([30, 30, 30, 30, 30, 30, 2.5]) !== null
+  // plans/105: a negative margin is no longer «bad» as such — it is bad BELOW the load bands (the next block).
+  check('ПЛОХОЙ ВЕКТОР ЗАПАСА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', marginRefusal([-10, 30, 30, 30, 30, 30, 30]) !== null && marginRefusal([30, 30, 30, 30, 30, 30, 2.5]) !== null
     && marginRefusal([30, 30, 30, 30, 30, 30, 30]) === null && /запасов 3, полос 7/.test(threw ?? ''), threw ?? 'не отклонил');
+
+  // ---- plans/105 level 2: the margin below the trend. Mutation addressees, named BEFORE the run:
+  //   MN1 allow a negative margin in every band            → «НИЖЕ ТРЕНДА — ТОЛЬКО НАГРУЗОЧНЫЕ ПОЛОСЫ»
+  //   MN2 drop raiseToFailures from bandedCurve             → «ОТРИЦАТЕЛЬНЫЙ ЗАПАС НЕ ПРОБИВАЕТ ИЗВЕСТНЫЙ ОТКАЗ…»
+  //   MN3 exhaustedBands never says «exhausted»             → «ИСЧЕРПАНИЕ ПОЛОСЫ…»
+  //   MN4 the margin undercuts the «top edge + 25» floor     → «…ВЫШЕ ВЕРХНЕГО КРАЯ НИЖЕ «КРАЙ + 25 мВ»»
+  const belowTrend = marginRefusal([0, 0, -10, 0, 0, 0, 0]);
+  check('НИЖЕ ТРЕНДА — ТОЛЬКО НАГРУЗОЧНЫЕ ПОЛОСЫ', /только полосы от 2700/.test(belowTrend ?? '') && marginRefusal([0, 0, 0, -10, -20, -10, -10]) === null
+    && BANDS.map(negativeMarginAllowed).join() === 'false,false,false,true,true,true,true', belowTrend ?? 'B3 ниже тренда не отклонена');
+  // Edges INSIDE the load bands (the real card's shape: 13 of 14 edges lie in 2745…3030), so B4–B6 rows are
+  // interpolated and stand on failure floors, not on the extrapolation rule.
+  const loadFx = anchorsFrom({
+    passes: [{ mhz: 2300, mv: 830 }, { mhz: 2750, mv: 860 }, { mhz: 2850, mv: 870 }, { mhz: 2945, mv: 900 }],
+    fails: [{ mhz: 2300, mv: 825, kind: 'hung' }, { mhz: 2750, mv: 850, kind: 'hung' }, { mhz: 2850, mv: 860, kind: 'hung' }, { mhz: 2945, mv: 890, kind: 'hung' }],
+    grid, stockAt,
+  });
+  const lArgs = { ...bArgs, anchors: loadFx.anchors, credible: loadFx.credible };
+  const deep = bandedCurve({ ...lArgs, margins: [0, 0, 0, -200, -200, -200, -200] });
+  check('ОТРИЦАТЕЛЬНЫЙ ЗАПАС НЕ ПРОБИВАЕТ ИЗВЕСТНЫЙ ОТКАЗ + ДВА ШАГА', deep.failRaises > 0 && deep.rows.every((r) => loadFx.credible.every((f) => f.mhz > r.mhz
+    || r.voltageMv >= Math.min(r.stockVoltageMv, nextStep(bGrid, nextStep(bGrid, f.mv))))), `подъёмов к отказам ${deep.failRaises} · ${deep.rows.map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
+  const upFloor = trendModel({ stockAt, grid: bGrid, anchors: loadFx.anchors }).upFloorMv;
+  check('ОТРИЦАТЕЛЬНЫЙ ЗАПАС НЕ ОПУСКАЕТ ВЫШЕ ВЕРХНЕГО КРАЯ НИЖЕ «КРАЙ + 25 мВ»', deep.rows.filter((r) => r.origin === 'extrapolated-up').every((r) => r.voltageMv >= Math.min(r.stockVoltageMv, upFloor)),
+    `пол ${upFloor} · ${deep.rows.filter((r) => r.origin === 'extrapolated-up').map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
+  const ex = exhaustedBands({ ...lArgs, margins: [0, 30, 0, -200, -200, -200, 0] });
+  check('ИСЧЕРПАНИЕ ПОЛОСЫ: УПЁРШАЯСЯ В ПОЛЫ — ДА, СО СВОИМ ЗАПАСОМ НАД НИМИ — НЕТ', ex[0] === true && ex[1] === false && ex.slice(3, 6).every(Boolean),
+    `исчерпаны: ${ex.map((x, i) => `${BANDS[i].id}=${x ? 'да' : 'нет'}`).join(' ')}`);
   return results;
 }
 
@@ -563,11 +621,16 @@ if (isMain) {
   if (margins) {
     const ladder = p.facts.rows.map((r) => r.mhz);
     const stock = new Map(p.facts.rows.map((r) => [r.mhz, r.stockVoltageMv]));
-    banded = bandedCurve({ ladder, stockAt: (m) => stock.get(m), grid: p.facts.grid, anchors: p.anchors, credible: p.credible, maxMhz: p.facts.card.maxGraphicsMhz ?? Math.max(...ladder), margins });
+    const bArgsCli = { ladder, stockAt: (m) => stock.get(m), grid: p.facts.grid, anchors: p.anchors, credible: p.credible, maxMhz: p.facts.card.maxGraphicsMhz ?? Math.max(...ladder), margins };
+    banded = bandedCurve(bArgsCli);
     banded.corners = cornersFromRows(banded.rows, p.facts.grid);
+    const exhausted = exhaustedBands(bArgsCli);
     console.log('\nКРИВАЯ «ТРЕНД + ЗАПАС ПО ПОЛОСАМ» (запас — над касающимся трендом; 0 = эксперимент №2)');
-    console.log('полоса · запас, мВ · частот · из них на стоке · глубина под стоком, мВ');
-    for (const b of banded.perBand) console.log(`${b.label} · +${b.marginMv} · ${b.rows} · ${b.atStock} · ${b.depthMinMv ?? '—'}…${b.depthMaxMv ?? '—'}`);
+    console.log(`полоса · запас, мВ · частот · из них на стоке · глубина под стоком, мВ · ещё −${MARGIN_DESCENT_STEP_MV} мВ что-то сдвинет?`);
+    for (const [i, b] of banded.perBand.entries()) {
+      console.log(`${b.label} · ${b.marginMv >= 0 ? '+' : ''}${b.marginMv} · ${b.rows} · ${b.atStock} · ${b.depthMinMv ?? '—'}…${b.depthMaxMv ?? '—'} · `
+        + (exhausted[i] ? (negativeMarginAllowed(BANDS[i]) || b.marginMv > 0 ? 'нет — полоса упёрлась в полы (отказ + 2 шага, монотонность, сток)' : 'нет — ниже тренда только полосы от 2700') : 'да'));
+    }
     console.log(`подъёмы: к известным отказам ${banded.failRaises} · монотонность ${banded.monotoneRaises}`);
     console.log('УГЛЫ КРИВОЙ С ЗАПАСОМ:', banded.corners.map((c) => `${c.mhz}@${c.mv}`).join(' '));
   }

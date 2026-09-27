@@ -26,6 +26,26 @@
    session, not on disk. Since `40e2c86` the order is clamped downward instead of refused — the symptom is gone; the
    stale base is not.
 
+## Finding 2026-09-27 (session 106) — the driver's 153 was the echo of OUR kill, witnessed
+
+- **Archive (offline):** the 610.88 reference's own stamp reads `takenAt 2026-08-31T23:13:42` and the System log has
+  `nvlddmkm` 153 at **23:13:42** the same night — so ALL THREE captures (31.08 success · 25.09 19:01:08 failure ·
+  25.09 19:27:07 failure) carry a 153 in the second the capture ended. Every capture ends in `finally { load.kill() }`:
+  the load is a `stress-tester` node process whose `furnace.exe` child sits in libuv's kill-on-close job object, so
+  killing the parent terminates the CUDA process mid-kernel.
+- **Controlled experiment on the live card at factory** (0 non-zero offsets of 128, driver 616.92, owner at the machine):
+  `stress-tester --workload furnace --seconds 60` started 23:42:16, `Stop-Process` at **23:42:36** → `nvlddmkm` **153 at
+  23:42:36**; control: the same burn, 30 s, natural end 23:43:18 → **0 events**. `plans/105` P105-AC1 met.
+- **Consequences:** (1) the 25.09 failures were NOT caused by the driver — the table simply never settled under load
+  (the refusal came first, the kill's echo after it); (2) the mode check is clean of this echo: its burns end by
+  themselves and only the telemetry sampler (no CUDA) and a timed-out game are ever killed; (3) any future tool that
+  must stop a burn waits for it — a kill costs a 153 in the owner's log.
+- **Fix (this session, `curve-store.cmdTakeReference`):** the load is a chain of 20-s chunks that end by themselves and
+  the stop awaits the running one; the base is read `REFERENCE_READS` = 8 times and the WORST case per entry is kept
+  (`worstCaseBase` — the lowest base frequency, the artefact's meaning per `bugs/97`), with the spread printed instead
+  of refusing; the regime is re-checked after the reads. Hygiene: `curve --selftest` blocks «ХУДШИЙ СЛУЧАЙ…», mutations
+  MW1–MW3. Functional run: the live capture of `plans/105` Ш6.
+
 ## Fix plan (offline first)
 
 1. Take the reference at a THERMAL PLATEAU (the project has a plateau detector, `npm run thermal -- --analyze`) or accept
