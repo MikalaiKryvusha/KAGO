@@ -93,7 +93,8 @@
 > <!-- classes: question-already-answered, guard-not-proven-against-threat, shown-as-link,
 >      claim-before-evidence, owner-decision-not-applied, text-in-agents-world,
 >      etalon-from-dirty-tree, shell-lied, escaping-layer, twins-missed,
->      field-dropped-in-rebuild, agent-decision-worn-as-owner-word, blind-read-as-empty -->
+>      field-dropped-in-rebuild, agent-decision-worn-as-owner-word, blind-read-as-empty,
+>      self-inflicted-signal, load-shape-unmeasured -->
 >
 > <!-- class-ok: agent-decision-worn-as-owner-word — price re-checked 2026-09-18 after three strikes in one evening (EXP-0284): the one shipped guard, kaif-attribution-lint, would be a NEW gate contour under the owner's moratorium (интервью 017, Q1 = A, until «краёв ≥ 195/389»), it is run by hand instead; and it cannot see the worst form — a real interview address that does not say what it is cited for. What caught the three strikes is a PROCESS, not a guard: `/interview` step 3d's «READ the hits» once, and a clean-context judge pass before commit twice. Re-check this declaration when the moratorium threshold is reached. -->
 >
@@ -125,6 +126,31 @@
 > Skill: `/experience` (capture a lesson · recall relevant lessons).
 
 ## Entries
+
+### EXP-0303 · 2026-09-27 · ❌ · #load-shape #regime-hold #sustain #measure-the-load-first #s3-one-line
+class: load-shape-unmeasured
+**Context / did / result:** I rebuilt the reference capture's load as chunks of `stress-tester --seconds N` and ran it
+live twice at the owner's machine: both refused «режим не удержан 20 с». Without `--sustain` a burn is a train of short
+process launches — 42.6 % GPU time, printed by my own control run 20 minutes earlier — so 5-s samples kept landing at
+~70–80 W. The number that answered it was already on my screen.
+**Lesson:** **before a live step that demands a load to HOLD a regime, read the load's own duty line (`доля времени на
+GPU`) — a burn without `--sustain` is a launch train, not a held load.**
+none-cheap: the fix is `--sustain` in the chunk (`bugs/142`); the habit is «read the duty line of the load you rely on».
+**Trigger:** any code that waits for a power/utilization regime under a load it spawns.
+
+### EXP-0302 · 2026-09-27 · ❌→✅ · #kill #cuda #driver-voice #self-inflicted-signal #archive-first #s2
+class: self-inflicted-signal
+**Context / did / result:** `bugs/142` read two `nvlddmkm` 153 events of 25.09 as a driver fault «to investigate before a
+third attempt». Offline, the 31.08 reference's own `takenAt 23:13:42` sat on a 153 at 23:13:42 — all three captures ended
+in `load.kill()`; a controlled run at the owner's machine confirmed it: kill at 23:42:36 → 153 at 23:42:36, natural end → 0.
+Node on Windows keeps children in a kill-on-close job, so killing the node load kills `furnace.exe` mid-kernel.
+**Lesson:** **killing a CUDA process mid-kernel writes a driver error into the owner's log — our tools stop a burn by
+letting it END; and a driver event that coincides with our own tool's exit is checked against the archive (its stamps,
+its seconds) before it is called the card's fault.**
+none-cheap: the capture no longer kills (`curve-store.cmdTakeReference`, chunks awaited); the mode check never kills a burn
+(read in `mode-validate.makeCardSeams`); other kill sites (`graphics-load` timeout, `tidy`) are not burns.
+**Trigger:** `.kill(` / `Stop-Process` / `taskkill` on a process that runs GPU work · a driver event «during» our run.
+→ link: `bugs/142` · `plans/105` P105-AC1
 
 ### EXP-0301 · 2026-09-26 · ❌→✅ · #owner-page #read-the-whole-answer #waiter #s2
 class: owner-decision-not-applied

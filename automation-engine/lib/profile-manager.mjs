@@ -782,14 +782,14 @@ export async function resolveProfileCurve(profile, {
     const refDoc = loadRef();
     if (refDoc) {
       const { referenceUsableFor } = await import('./curve-store.mjs');
-      // A sandbox (any injected loader) with no stamp stays unstamped, as before; the production path reads the card.
+      // A sandbox (any injected loader) with no stamp stays unstamped, as before.
+      // ⚠️ THE PRODUCTION BRANCH IS HELD OFF until a 616.92 reference exists (`bugs/142`, plans/105 Ш0 в): armed
+      // on 2026-09-27 with only the 610.88 reference on disk, it moved the ⚖️ shortcut to the live-subtracted base —
+      // a vector the 25.09 check never proved. Re-arm by replacing `null` below with the card probe
+      // (`(await import('./profile-store.mjs')).probeCard()` → { driver, vbios }) in the commit that lands the new
+      // reference, and re-check Optimised on it.
       let stamp = cardStamp;
       if (!stamp && probeStampFn) stamp = await probeStampFn();
-      else if (!stamp && !(loadCurve || loadSnapshot || loadReferenceFn)) {
-        const { probeCard } = await import('./profile-store.mjs');
-        const c = probeCard();
-        stamp = { driver: c.driver, vbios: c.vbios };
-      }
       const usable = referenceUsableFor(refDoc, { card: stamp });
       if (usable.ok) {
         base = refDoc.points;

@@ -46,6 +46,23 @@
   of refusing; the regime is re-checked after the reads. Hygiene: `curve --selftest` blocks «ХУДШИЙ СЛУЧАЙ…», mutations
   MW1–MW3. Functional run: the live capture of `plans/105` Ш6.
 
+### Two more refusals the same night — the LOAD SHAPE, not the table (2026-09-27 23:52 · 23:56, zero writes)
+
+`npm run curve -- --take-reference` with the new code refused twice with «карта не вошла в режим… не удержала его 20 с»:
+first with 20-s chunks (the idle gap between chunks — startup and the event-log query — reset the hold every fourth
+5-s sample), then with 60-s chunks (samples still at ~70–80 W inside a chunk). Cause: `stress-tester --seconds N`
+WITHOUT `--sustain` is a train of short `furnace.exe` launches — 42.6 % GPU time in the control run of 23:42:47 — so a
+5-s sample often lands between launches. The 31.08 capture passed on the same shape by luck of sampling. Fix in the
+tree (`c` below, `[NOT-TESTED]` on the card): the chunk spawns `--sustain <chunk>`, one burst holding the card the
+whole chunk. Driver events after 23:43:20: **0** (the stop waited, no kill).
+
+**The stamp gate's production branch is HELD OFF** (`profile-manager.resolveProfileCurve`): armed with only the 610.88
+reference on disk it moved the ⚖️ shortcut to the live-subtracted base — a vector the 25.09 check never proved. Re-arm
+it in the commit that lands the 616.92 reference, then re-check Optimised (`plans/105` Ш6–Ш7). The injectable half
+(`probeStampFn`) and its block stay.
+
+**Fixing:** next card evening, `plans/105` Ш6 (capture with `--sustain`) → re-arm the stamp → Ш7.
+
 ## Fix plan (offline first)
 
 1. Take the reference at a THERMAL PLATEAU (the project has a plateau detector, `npm run thermal -- --analyze`) or accept

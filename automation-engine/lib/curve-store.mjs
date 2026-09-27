@@ -1431,7 +1431,11 @@ export const REFERENCE_REGIME = Object.freeze({
 // with `load.kill()` and each has a 153 in the same second; the mode check, whose burns end naturally, had 0.
 export const REFERENCE_READS = 8;               // reads over which the worst case per entry is taken
 export const REFERENCE_READ_GAP_MS = 500;       // ~4 s of reads: long enough to see the table slide, short against a chunk
-export const REFERENCE_LOAD_CHUNK_S = 20;       // one chunk of `stress-tester --seconds`; the stop waits ≤ one chunk
+// One chunk of `stress-tester --seconds`; the stop waits ≤ one chunk. 60, not 20: between chunks the card
+// idles several seconds (startup, the event-log query at the end), and with 20-s chunks the 20-s regime hold
+// never fit inside one (witnessed 2026-09-27 23:52–23:56: every fourth 5-s sample at ~70 W). 60 s holds the
+// load for the hold (~25 s from the chunk's start) plus the 8 reads (~4 s) inside one chunk.
+export const REFERENCE_LOAD_CHUNK_S = 60;
 
 /**
  * Is this telemetry sample inside the regime? Returns the refusals, so the caller can NAME them.
@@ -3445,8 +3449,11 @@ async function cmdTakeReference({ seconds = 240, withLoad = true, minRegimeMs = 
     const stress = fileURLToPath(new URL('./stress-tester.mjs', import.meta.url));
     loadDone = (async () => {
       while (!stopLoad) {
-        const chunk = spawn(process.execPath, [stress, '--workload', 'furnace', '--seconds', String(REFERENCE_LOAD_CHUNK_S)],
-          { stdio: 'ignore', windowsHide: true });
+        // `--sustain`: ONE burst holds the card for the whole chunk. Without it the chunk is a train of short
+        // process launches — 42.6 % GPU time (control run 2026-09-27 23:42:47) and 5-s samples at ~70–80 W, so
+        // the regime never held 20 s (two refusals 23:52 and 23:56). [NOT-TESTED] on the card — next card evening.
+        const chunk = spawn(process.execPath, [stress, '--workload', 'furnace', '--seconds', String(REFERENCE_LOAD_CHUNK_S),
+          '--sustain', String(REFERENCE_LOAD_CHUNK_S)], { stdio: 'ignore', windowsHide: true });
         await new Promise((r) => { chunk.once('exit', r); chunk.once('error', r); });
       }
     })();
