@@ -783,13 +783,18 @@ export async function resolveProfileCurve(profile, {
     if (refDoc) {
       const { referenceUsableFor } = await import('./curve-store.mjs');
       // A sandbox (any injected loader) with no stamp stays unstamped, as before.
-      // ⚠️ THE PRODUCTION BRANCH IS HELD OFF until a 616.92 reference exists (`bugs/142`, plans/105 Ш0 в): armed
-      // on 2026-09-27 with only the 610.88 reference on disk, it moved the ⚖️ shortcut to the live-subtracted base —
-      // a vector the 25.09 check never proved. Re-arm by replacing `null` below with the card probe
-      // (`(await import('./profile-store.mjs')).probeCard()` → { driver, vbios }) in the commit that lands the new
-      // reference, and re-check Optimised on it.
+      // ✅ THE PRODUCTION BRANCH IS ARMED 2026-10-17 (`bugs/142`, plans/105 Ш0 в) — in the commit that lands the 616.92
+      // reference (taken 14:06:53, 8 reads, 0 points moved). Held off 2026-09-27…10-17 because only the 610.88 reference
+      // existed and arming it moved the ⚖️ shortcut to an unproven base. Not a sandbox (no injected loader) and no stamp
+      // given → the stamp is read from the card itself (read-only `gpu-info`); a reference of another driver is refused
+      // by name (`reference-rejected`) and the apply falls back to the live subtraction. Optimised is re-checked on it.
       let stamp = cardStamp;
-      if (!stamp && probeStampFn) stamp = await probeStampFn();
+      const sandbox = Boolean(loadReferenceFn || loadCurve || loadSnapshot);
+      const probe = probeStampFn ?? (sandbox ? null : async () => {
+        const c = (await import('./profile-store.mjs')).probeCard();
+        return { driver: c.driver, vbios: c.vbios };
+      });
+      if (!stamp && probe) stamp = await probe();
       const usable = referenceUsableFor(refDoc, { card: stamp });
       if (usable.ok) {
         base = refDoc.points;
