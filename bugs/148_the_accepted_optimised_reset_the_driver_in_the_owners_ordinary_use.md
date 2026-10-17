@@ -42,3 +42,24 @@ At 16:42 the GPU clients were light: explorer, Chrome ×2, VS Code, NVIDIA Overl
 ## Links
 
 `runs/shell/remembered-state.json` (still «optimised») · `bugs/146` · `bugs/147` · `plans/100` (the shortcut is silent when a mode fails)
+
+## Diagnosis and fix — session 109, 2026-10-17 16:42–16:54 (the owner at the machine, «комп твой»)
+
+- **The load at 16:16 (owner's word):** «мы гоняли твои тесты, а соседний бот играет в сварог» — Svarog's Dream (Unity), driven by
+  the neighbour session KUMM; «сварог по ГПУ не тяжелая игра, там ГПУ отдыхает, а CPU вот сильно грузится». KUMM independently
+  saw the game die once today with d3d11 887a0005 (DXGI_ERROR_DEVICE_REMOVED) — the same event from the game's side.
+- **Reproduced 16:45:17** (telemetry `runs/use/2026-10-17T16-42-56-optimised.jsonl`, sampler running since 16:42): Optimised
+  applied by the shortcut 16:43, the game at its menu (3 %, 700–800 MHz), then `npm run stress -- --workload sdc_fma --lowload
+  --seconds 60`. Seconds before the failure: P3→P5→P8 (330–600 MHz) 16:45:07–12, a burst woke the card straight to **3037 → 3075
+  MHz** at 16:45:12.9, at 16:45:14.9 power collapsed 197 → 70 W under «100 %» (the GPU stalled), 16:45:17.09 `153` ×2, `14`
+  (PF FLR), TDR — the same signature as 16:16. **The failing band: above 2950 MHz, on a wake from deep idle** — a transition the
+  check's mix does not contain (12-s idles, 2 transitions of 5/5 s; the card never reaches P8 before a full burst).
+- **Fix by the ratchet:** the top band −10 → +10 (two 10-mV grid steps), the other bands untouched:
+  `npm run validate -- --step --mode optimised --band-margins 0,0,0,-10,-10,-10,10 --minutes 4` → PASSED
+  (`runs/validate/2026-10-17T16-46-32/`, driver 0, gap 532 ms, Q2RTX 58.5 / 57.3 FPS) → `profiles/optimised.json` → snapshot
+  `2026-10-17T16-46-32` → shortcut 16:51:36 → **the wake exam:** `stress --lowload` 2 × 60 s (105 wake bursts), checksums
+  matched, `nvlddmkm` 0 events (16:51:52–16:53:57). The same exam on the previous snapshot failed within ~60 s.
+- **Open:** (1) the check's mix lacks the wake-from-deep-idle shape — add a `--lowload` stage to `CANONICAL_MIX` (the instrument,
+  not a new contour) so the next step is judged on it; (2) the Svarog run under the new curve (the game was relaunched at 16:54 by
+  the neighbour session; the driver is watched while it runs); (3) the earlier «wrong» top floors of `bugs/146` (14:17/14:19,
+  attributed to 2985…3082) may have been RIGHT — the top fails on wake; item 2 of `bugs/146` is to be re-judged with this in hand.
