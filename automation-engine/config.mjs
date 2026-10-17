@@ -1256,6 +1256,16 @@ export const RATCHET_GRID_STEPS = 2;
  */
 export const MIN_BAND_DWELL_S = 30;
 
+/**
+ * LEVEL 3 of the owner's «Вся кривая -> полоса -> точка» (2026-09-25; `plans/105` Ш2): a failed check is
+ * attributed to a FREQUENCY — the LOWEST frequency the card delivered within this window before the failing
+ * moment. `[AI]` 2026-10-17, revisable: the sampler writes every 500 ms, so 2 s holds four samples; the
+ * lowest of them is the conservative side — the builder's failure floor then covers every frequency above
+ * it, and a miss downward (flooring a frequency the card was not at, while the guilty one stays low) is
+ * impossible by construction.
+ */
+export const FAILURE_ATTRIBUTION_WINDOW_MS = 2000;
+
 /** Every constant in one object — what the phase-1 step 3.1 verification prints and audits. */
 export default Object.freeze({
   GUARDBAND_MIN_GRID_STEPS,
@@ -1339,4 +1349,5 @@ export default Object.freeze({
   MARGIN_DESCENT_STEP_MV,
   RATCHET_GRID_STEPS,
   MIN_BAND_DWELL_S,
+  FAILURE_ATTRIBUTION_WINDOW_MS,
 });

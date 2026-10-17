@@ -44,7 +44,7 @@ import { loadFacts, effectiveCurve, CURVE_PATH, JOURNAL_PATH } from '../automati
 import { ORACLE_DATE, FUSE_OFF_POST_MHZ } from './mark-unwatched-rows.mjs';
 import { cornersOf } from './curve-editor.mjs';
 import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV } from '../automation-engine/config.mjs';
-import { bandOf } from '../automation-engine/lib/mode-validate.mjs';
+import { bandOf, checkFailureFloors, openValidateJournal } from '../automation-engine/lib/mode-validate.mjs';
 import { CURVE_TAGS, validateCurveDoc, saveCurveDoc, curvePath } from '../automation-engine/lib/curve-store.mjs';
 import { loadGrid } from '../automation-engine/lib/card-grids.mjs';
 
@@ -112,6 +112,19 @@ export function failures(records) {
   }
   for (const i of orphanIntents(records)) if (Number.isFinite(i.frequencyMhz) && Number.isFinite(i.voltageMv)) out.push(one(i, null, 'смерть'));
   return out.sort((a, b) => a.mhz - b.mhz || a.mv - b.mv);
+}
+
+/**
+ * plans/105 Ш2 (level 3 of «Вся кривая -> полоса -> точка»): the failures of whole-mode CHECKS join the credible
+ * failures — the floor «failure + two grid steps» then raises the neighbourhood of a failed frequency and nothing
+ * else. Two choices, `[AI]`, revisable: (1) they are NOT passed through R3 — the passes that could refute them are
+ * single-frequency burns of the sweep, taken on another driver (610.88), while a check failure was observed on the
+ * whole mode on the live one; (2) they never become ANCHORS — the trend stays the model of the sweep's edges, a
+ * check failure is a floor under the curve, not a point the line is fitted through.
+ * Mutation MV13 (named in mode-validate's selftest header): return `credible` alone → «УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЬ…» red.
+ */
+export function withCheckFailures(credible, checkFloors = []) {
+  return [...credible, ...checkFloors].sort((a, b) => a.mhz - b.mhz || a.mv - b.mv);
 }
 
 /** R3: refuted by a trusted PASS at an equal-or-higher frequency on a strictly lower voltage. */
@@ -406,10 +419,12 @@ export function propose() {
   const stockAt = (m) => stock.get(m);
   const passes = trustedPasses(records).filter((p) => stock.has(p.mhz));
   const fails = failures(records).filter((f) => stock.has(f.mhz));
-  const { anchors, credible, refuted } = anchorsFrom({ passes, fails, grid: facts.grid, stockAt });
+  const { anchors, credible: sweepCredible, refuted } = anchorsFrom({ passes, fails, grid: facts.grid, stockAt });
+  const checkFloors = checkFailureFloors(readJournal(openValidateJournal()).records);
+  const credible = withCheckFailures(sweepCredible, checkFloors);
   const maxMhz = facts.card.maxGraphicsMhz ?? Math.max(...ladder);
   const { rows, monotoneRaises, failRaises, trend } = buildRows({ ladder, stockAt, grid: facts.grid, anchors, credible, maxMhz });
-  return { facts, records, passes, fails, anchors, credible, refuted, rows, monotoneRaises, failRaises, trend, corners: cornersFromRows(rows, facts.grid), current: cornersOf(effectiveCurve(facts)) };
+  return { facts, records, passes, fails, anchors, credible, checkFloors, refuted, rows, monotoneRaises, failRaises, trend, corners: cornersFromRows(rows, facts.grid), current: cornersOf(effectiveCurve(facts)) };
 }
 
 /**
@@ -604,6 +619,7 @@ if (isMain) {
   if (margins) { const why = marginRefusal(margins); if (why) { console.error(`ОШИБКА: ${why}`); process.exit(2); } }
   const p = propose();
   console.log(`доверенных прожигов (выданная частота, с ${ORACLE_DATE}): ${p.passes.length} · отказов: ${p.fails.length} · опровергнуто физикой: ${p.refuted.length} · краёв-опор: ${p.anchors.length}`);
+  console.log(`отказов проверок режима (уровень частоты, plans/105): ${p.checkFloors.length}${p.checkFloors.length ? ' — ' + p.checkFloors.map((f) => `${f.mhz}/${f.mv} (seq ${f.seq})`).join(' · ') : ''}`);
   console.log('\nОПОРЫ (частота · отказ · последняя стабильная · рабочая точка · сток · глубина)');
   for (const a of p.anchors) console.log(`${a.mhz} · отказ ${a.failMv} (${a.failKind}, ${a.failFrom}) · стабильно ${a.lastStableMv}${a.lastStableAt !== a.mhz ? ' на ' + a.lastStableAt : ''} · РАБОЧАЯ ${a.workingMv}${a.raisedFromMv ? ' (поднята с ' + a.raisedFromMv + ')' : ''} · сток ${a.stockMv} · −${a.depthMv}`);
   console.log('\nОПРОВЕРГНУТЫЕ ОТКАЗЫ (частота/напряжение → чем)');

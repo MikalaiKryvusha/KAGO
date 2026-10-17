@@ -3,6 +3,7 @@
 **Status:** 🔧 FIX PENDING LIVE WITNESS — cause found and fixed in code 2026-09-25 ≤ 20:07 (session 104, offline; commit
 `5bc3904` at 20:07:15 — ✏️ the first edition wrote «20:2x», ahead of the clock, EXP-0292 again, caught by the judge): an ESM
 import cycle under top-level await (details «Root cause»); guard block + mutation MV141; the live CLI run is the next card evening
+· twins searched 2026-10-17 — none live (Fix, item 4) · the 27.09 stock run is NOT the witness (Fix, item 5)
 **Severity:** S2 — three live runs lost at the owner's machine (~6 min of his time, and his patience: «ну что бля, что чинишь? где прогон?»)
 **Version/build:** HEAD `e2e4441` … `40e2c86` · **When/context:** card evening 2026-09-25 19:04–19:15, epic 101 Ф2, session 104
 
@@ -66,6 +67,20 @@ curve-store. Reproduced as a 3-file control in scratch (TLA + cycle → exit 13;
    through the CLI, apply within seconds.
 4. TWINS: searched `grep -ln "^if (process.argv\[1\]" automation-engine/lib/*.mjs` for other entry CLIs with top-level
    await that sit in an import cycle — not done tonight (named debt).
+   ✅ **Done 2026-10-17 13:13 +03:00 (session 108).** TWINS: searched every `.mjs` of `automation-engine/`, `tools/`,
+   `.kaif/tools/` (111 modules) — V8 itself says whether a module has top-level await (`vm.SourceTextModule(...)
+   .hasTopLevelAwait()`, parse only, nothing linked or run; control: the pre-fix `5bc3904^` form → `true`, today's →
+   `false`), and the static + dynamic import graph says whether it can reach itself: **17 with top-level await, 2 in a
+   cycle — `driver-voice.mjs` and `nvml.mjs`, neither a live twin.** `driver-voice` closes its cycle STATICALLY (through
+   `fuse.mjs`) and makes no dynamic `import()` — a static cycle is linked before any await runs. `nvml` closes it through
+   `watchdog.realDeps()` (`await import('./nvml.mjs')`), which runs only inside the watchdog's own process; `nvml`'s CLI
+   never calls it. Script: the session-108 scratchpad `twins141b.cjs`; run report `testcases/reports/2026-10-17_approximation-step-offline.md`.
+5. ✏️ **Correction 2026-10-17 (session 108) — the «live witness» of 27.09 was not one.** `STATUS.md` said: «живой
+   свидетель получен 27.09 23:43: проверка стока через CLI … код 0». This document's own Symptom says the STOCK check
+   passed through the same CLI BEFORE the fix — a curve-less profile never imports `curve-store`, so a stock run cannot
+   witness this fix. ON-REAL-PATH stays **NOT YET**: the witness is the first CLI check of a profile WITH a snapshot
+   (`validate --step … ` or `--mode optimised --candidate …`) reaching apply within seconds — the next card evening.
+   Corrected in `STATUS.md` (two places).
 
 ## Decisions made without the owner
 

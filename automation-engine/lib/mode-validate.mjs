@@ -29,6 +29,12 @@
 //   MV9 the real apply seam drops the draft consent           → «НАСТОЯЩИЕ ШВЫ (НА ПОДДЕЛКЕ БИБЛИОТЕКИ)…»
 //   MV10 the real rollback forgets the applied clock lock     → the same block
 //   MV11 the card is touched although the sampler never came up → «ИСПОЛНИТЕЛЬ: СЭМПЛЕР НЕ ПОДНЯЛСЯ…»
+//   plans/105 Ш2–Ш3 (2026-10-17):
+//   MV12 failureFrequency takes the LAST sample, not the lowest in the window → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ ПРИПИСАН НАИМЕНЬШЕЙ…»
+//   MV13 curve-proposal.withCheckFailures returns `credible` alone  → «УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЬ ПОДНИМАЕТ ОКРЕСТНОСТЬ СБОЯ…»
+//   MV14 nextMargins ratchets the band of a frequency-attributed failure → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ С ЧАСТОТОЙ И НАПРЯЖЕНИЕМ НЕ ДВИГАЕТ…»
+//   MV15 prepareStep saves the document before the dry-run return → «ШАГ: СУХОЙ ПРОГОН НИЧЕГО НЕ ПИШЕТ…»
+//   MV16 runCheck drops failureAt from the verdict record          → «ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ ЧАСТОТУ И НАПРЯЖЕНИЕ СНИМКА»
 //
 // [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
@@ -43,12 +49,14 @@ import { openJournal, appendLine, readJournal, orphanIntents, LINE } from './swe
 import { parseSampleTime } from './hardware-mon.mjs';
 import { driverEventsInWindow, momentOf } from './driver-voice.mjs';
 import { queryFaults } from './event-logger.mjs';
-import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS } from '../config.mjs';
+import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS, FAILURE_ATTRIBUTION_WINDOW_MS } from '../config.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 export const VALIDATE_DIR = join(ROOT, 'runs', 'validate');
 export const CHECK_KIND = 'mode-check';
+/** A margin as printed: «+10», «0», «−10» — a negative margin (plans/105) must not print as «+-10». */
+export const signedMv = (m) => (m > 0 ? `+${m}` : m < 0 ? `−${-m}` : '0');
 
 export const CHECK_VERDICT = Object.freeze({ PASSED: 'passed', FAILED: 'failed', UNKNOWN: 'unknown' });
 export const FAILURE_CLASS = Object.freeze({
@@ -110,6 +118,52 @@ export function bandAt(samples, atMs, bands = MODE_BANDS) {
 }
 
 // -------------------------------------------------------------------------------------------------
+// plans/105 Ш2 — LEVEL 3, the frequency: a failure is attributed to the frequency the card delivered
+// -------------------------------------------------------------------------------------------------
+//
+// The owner, 25.09: «А если будет зависать? но из-за одно точки? как ты её будешь искать? Чтобы другие ещё поднять,
+// а эту наоборот снизить?» · «Вся кривая -> полоса -> точка». A failed check becomes ONE MORE KNOWN FAILURE (f, V):
+// f = the LOWEST delivered frequency within `FAILURE_ATTRIBUTION_WINDOW_MS` before the failing moment (the sampler
+// writes every 500 ms, so the guilty frequency is not known exactly — the lowest is the side that cannot miss
+// downward), V = the voltage the check's own snapshot serves f with. The builder already keeps every row at f' ≥ f
+// at or above «failure + two grid steps» (`curve-proposal.raiseToFailures`), so the neighbourhood of the failure
+// rises and every other frequency keeps descending — no new mechanism, one more input to an existing floor.
+// [NOT-TESTED] on the card — hygiene: the blocks «УРОВЕНЬ ЧАСТОТЫ…» of the selftest, mutations MV12–MV14.
+
+/** The lowest frequency delivered in [atMs − window, atMs]; the last sample before `atMs` when the window is empty; null without samples. */
+export function failureFrequency(samples, atMs, windowMs = FAILURE_ATTRIBUTION_WINDOW_MS) {
+  if (!Number.isFinite(atMs)) return null;
+  const inWindow = samples.filter((s) => s.ms <= atMs && s.ms >= atMs - windowMs).map((s) => s.mhz);
+  if (inWindow.length) return Math.min(...inWindow);
+  let last = null;
+  for (const s of samples) { if (s.ms <= atMs) last = s; else break; }
+  return last ? last.mhz : null;
+}
+
+/**
+ * The voltage a curve serves `mhz` with: the card serves a frequency with the lowest entry that reaches it, so
+ * the row of the smallest ladder frequency ≥ `mhz` (the top row above the ladder). `rows` = [{ mhz, voltageMv }]
+ * in any order — a snapshot's `frequencies`. Null when there are no rows.
+ */
+export function curveVoltageAt(rows, mhz) {
+  if (!Array.isArray(rows) || rows.length === 0 || !Number.isFinite(mhz)) return null;
+  const sorted = [...rows].filter((r) => Number.isFinite(r?.mhz) && Number.isFinite(r?.voltageMv)).sort((a, b) => a.mhz - b.mhz);
+  return (sorted.find((r) => r.mhz >= mhz) ?? sorted.at(-1) ?? null)?.voltageMv ?? null;
+}
+
+/**
+ * The failures the CHECK journal knows, in the builder's shape ({ mhz, mv, … } — `curve-proposal.failures`'s
+ * form): verdict records whose `failureAt` carries both a frequency and a voltage. A failure the instrument could
+ * not attribute (no durable sample, no snapshot) is NOT here — it is the band ratchet's business (`nextMargins`).
+ */
+export function checkFailureFloors(records) {
+  return checkRecords(records)
+    .filter((r) => r.state === LINE.VERDICT && r.verdict === CHECK_VERDICT.FAILED && Number.isFinite(r.failureAt?.mhz) && Number.isFinite(r.failureAt?.voltageMv))
+    .map((r) => ({ mhz: r.failureAt.mhz, mv: r.failureAt.voltageMv, seq: r.seq, at: r.at ?? null, kind: `проверка режима: ${r.failure?.cls ?? 'сбой'}`, decidedBy: 'mode-check', from: 'выданная (проверка режима)', orderedMhz: null }))
+    .sort((a, b) => a.mhz - b.mhz || a.mv - b.mv);
+}
+
+// -------------------------------------------------------------------------------------------------
 // Ш5 — the verdict
 // -------------------------------------------------------------------------------------------------
 
@@ -146,7 +200,7 @@ export function verdictOf({ samples = [], driverEvents = [], stages = [], stallM
   if (failures.length === 0 && driverEvents === null) return { verdict: CHECK_VERDICT.UNKNOWN, why: 'голос драйвера не прочитан — пройденной проверку назвать нельзя', failures, failure: null };
   if (failures.length === 0) return { verdict: CHECK_VERDICT.PASSED, why: 'драйвер молчал, нагрузки живы, телеметрия без разрывов', failures, failure: null };
   const first = failures[0];
-  return { verdict: CHECK_VERDICT.FAILED, why: first.why, failures, failure: { ...first, band: bandAt(samples, first.atMs, bands) } };
+  return { verdict: CHECK_VERDICT.FAILED, why: first.why, failures, failure: { ...first, band: bandAt(samples, first.atMs, bands), mhz: failureFrequency(samples, first.atMs) } };
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -169,11 +223,14 @@ export function ratchetMvByBand(rows, grid, { steps = RATCHET_GRID_STEPS, bands 
 /**
  * The next margin vector.
  *   PASSED  → every VISITED band descends one step, never below its floor or 0.
- *   FAILED  → the failure's band rises by its ratchet and is FLOORED there; an unknown band (a death with
- *             no durable sample) raises EVERY band — the conservative direction, named in `changes`.
+ *   FAILED with a frequency AND its voltage (`failureAt`, plans/105 level 3) → NO band moves: the failure is a known failure now
+ *             (`checkFailureFloors`), and the builder's floor raises its neighbourhood alone — «эту наоборот снизить,
+ *             другие ещё поднять»; the band's other frequencies keep their margin and keep descending.
+ *   FAILED without a frequency → the failure's band rises by its ratchet and is FLOORED there; an unknown band (a
+ *             death with no durable sample) raises EVERY band — the conservative direction, named in `changes`.
  *   UNKNOWN → nothing moves.
  */
-export function nextMargins({ margins, floors = null, verdict, visited = [], failureBand = null, ratchetMv, stepMv = MARGIN_DESCENT_STEP_MV, bands = MODE_BANDS }) {
+export function nextMargins({ margins, floors = null, verdict, visited = [], failureBand = null, failureAt = null, ratchetMv, stepMv = MARGIN_DESCENT_STEP_MV, bands = MODE_BANDS }) {
   const m = [...margins];
   // The floor of a band's descent: its ratchet floor; below the trend (margin < 0) only a LOAD band may go
   // (`config.NEGATIVE_MARGIN_FROM_MHZ`, plans/105) — the builder's failure floors end its descent there.
@@ -185,6 +242,10 @@ export function nextMargins({ margins, floors = null, verdict, visited = [], fai
       if (to !== m[i]) changes.push({ band: i, from: m[i], to, why: 'проверка пройдена, полоса посещена — спуск на шаг' });
       m[i] = to;
     }
+  } else if (verdict === CHECK_VERDICT.FAILED && Number.isFinite(failureAt?.mhz) && Number.isFinite(failureAt?.voltageMv)) {
+    // Without the voltage the builder cannot see the failure (`checkFailureFloors`) — then the band ratchet below holds.
+    const i = bandOf(failureAt.mhz, bands);
+    changes.push({ band: i, from: m[i], to: m[i], why: `сбой приписан частоте ${failureAt.mhz} МГц при ${failureAt.voltageMv} мВ — запас полосы не меняется, пол построителя поднимет окрестность этой частоты` });
   } else if (verdict === CHECK_VERDICT.FAILED) {
     const targets = Number.isInteger(failureBand) && failureBand >= 0 ? [failureBand] : m.map((_, i) => i);
     for (const i of targets) {
@@ -216,8 +277,9 @@ export function writeCheckIntent(journal, { mode, candidate = null, snapshot = n
 }
 
 /** The verdict that closes an intent. */
-export function writeCheckVerdict(journal, { seq, verdict, failure = null, hits = null, at, why = '' }, io = {}) {
-  const rec = { state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict, failure, hits, why, at };
+export function writeCheckVerdict(journal, { seq, verdict, failure = null, failureAt = null, hits = null, at, why = '' }, io = {}) {
+  // `failureAt` = { mhz, voltageMv } — plans/105 level 3; `checkFailureFloors` hands it to the builder.
+  const rec = { state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict, failure, failureAt, hits, why, at };
   appendLine(journal, rec, io);
   return rec;
 }
@@ -227,14 +289,20 @@ export function writeCheckVerdict(journal, { seq, verdict, failure = null, hits 
  * FAILED/death, and the band is the one the LAST durable sample of that check's telemetry names
  * (ЗАКАЗ.md §4). `readSamples(path)` is injected so the rule is provable without a card.
  */
-export function deathVerdicts(records, { readSamples = (p) => parseSamples(readFileSync(p, 'utf8')).samples, bands = MODE_BANDS } = {}) {
+export function deathVerdicts(records, { readSamples = (p) => parseSamples(readFileSync(p, 'utf8')).samples, voltageAt = null, bands = MODE_BANDS } = {}) {
+  // `voltageAt(snapshotId, mhz)` — the voltage the check's snapshot served the death's frequency with (plans/105 Ш2);
+  // injected so the rule is provable without files; null → the death keeps its band ratchet only.
   return orphanIntents(checkRecords(records)).map((intent) => {
     let samples = [];
     try { samples = intent.telemetryPath ? readSamples(intent.telemetryPath) : []; } catch { samples = []; }
     const last = samples.at(-1) ?? null;
+    const mhz = last ? failureFrequency(samples, last.ms) : null;
+    let voltageMv = null;
+    try { voltageMv = mhz !== null && voltageAt && intent.snapshot ? voltageAt(intent.snapshot, mhz) : null; } catch { voltageMv = null; }
     return {
       seq: intent.seq, mode: intent.mode, verdict: CHECK_VERDICT.FAILED,
-      failure: { cls: FAILURE_CLASS.DEATH, atMs: last?.ms ?? null, band: last ? bandOf(last.mhz, bands) : null, lastMhz: last?.mhz ?? null, why: last ? `незакрытое намерение; последняя долговечная проба ${last.mhz} МГц` : 'незакрытое намерение; долговечных проб нет — полоса неизвестна' },
+      failureAt: mhz !== null ? { mhz, voltageMv: Number.isFinite(voltageMv) ? voltageMv : null } : null,
+      failure: { cls: FAILURE_CLASS.DEATH, atMs: last?.ms ?? null, band: last ? bandOf(last.mhz, bands) : null, lastMhz: last?.mhz ?? null, mhz, why: last ? `незакрытое намерение; последняя долговечная проба ${last.mhz} МГц` : 'незакрытое намерение; долговечных проб нет — полоса неизвестна' },
     };
   });
 }
@@ -315,11 +383,105 @@ export function candidateProfile(modeProfile, { snapshotId, stamp, takenAt, marg
     title: `${modeProfile.title} — кандидат проверки`,
     mode: modeProfile.mode,
     qualified: false,
-    draft: { candidate: `снимок ${snapshotId}${margins ? ` · запас по полосам ${margins.map((m) => '+' + m).join('/')}` : ''}`, source: 'эпик 101 Ф1 Ш2 (plans/102); проверка целого режима' },
+    draft: { candidate: `снимок ${snapshotId}${margins ? ` · запас по полосам ${margins.map(signedMv).join('/')}` : ''}`, source: 'эпик 101 Ф1 Ш2 (plans/102); проверка целого режима' },
     settings: { ...modeProfile.settings, curveRef: null, curveSnapshot: snapshotId },
     stamp: { driver: stamp.driver, vbios: stamp.vbios, takenAt },
     evidence: { 'КАНДИДАТ': `построен из профиля «${modeProfile.name}» заменой кривой на снимок ${snapshotId}; прожига нет — доказательство только проверка режима` },
   };
+}
+
+// -------------------------------------------------------------------------------------------------
+// plans/105 Ш3 — ONE STEP OF THE APPROXIMATION IS ONE COMMAND (E101-AC5: «один шаг — одна команда, откат — одно действие»)
+// -------------------------------------------------------------------------------------------------
+//
+// `npm run validate -- --step --mode <режим> --band-margins a,…,g [--minutes N] [--dry-run]`:
+//   the builder's banded curve (the sweep's edges + the check journal's failures) → a tuning-curve DOCUMENT
+//   (named by its margins, the card's driver and a hash of its rows — the same rows reuse the same file, a changed
+//   floor gets a new one; documents are never overwritten) → a battle SNAPSHOT of it → the CANDIDATE profile
+//   (`profiles/candidate-<mode>.local.json`, git-ignored, a draft) → the whole-mode check.
+// A composition of existing functions: `curve-proposal` (bandedCurve, exhaustedBands, curveDocFromRows), `curve-store`
+// (validateCurveDoc, saveCurveDoc, takeSnapshot), `profile-store` (probeCard — READ-ONLY, validateProfile) and this
+// module (candidateProfile, the check). No new rule lives here. `--dry-run` reads the card's stamp and the files and
+// writes NOTHING — not the card, not a document, not a snapshot, not the candidate, not the journal.
+// The rollback of an accepted step is one action: the mode's profile points at the previous snapshot (ЗАКАЗ.md §10).
+// [NOT-TESTED] on the card — hygiene: «ШАГ…» blocks of the selftest on injected deps (the dry run writes nothing).
+
+export const STEP_MODES = Object.freeze(['optimised', 'max-performance', 'silent-cold']);
+
+/** The step document's name: margins (negative → `n`), the card's driver, the rows' hash — `[a-z0-9-]` only. */
+export function stepDocName(margins, driver, rowsSha) {
+  return `model-bands-${margins.map((m) => (m < 0 ? `n${-m}` : String(m))).join('-')}-d${String(driver).replace(/\./g, '-')}-${String(rowsSha).slice(0, 6)}`;
+}
+
+async function loadStepDeps() {
+  const cp = await import('../../tools/curve-proposal.mjs');
+  const cs = await import('./curve-store.mjs');
+  const ps = await import('./profile-store.mjs');
+  const cg = await import('./card-grids.mjs');
+  const { existsSync } = await import('node:fs');
+  return {
+    propose: cp.propose, marginRefusal: cp.marginRefusal, bandedCurve: cp.bandedCurve, exhaustedBands: cp.exhaustedBands, curveDocFromRows: cp.curveDocFromRows,
+    validateCurveDoc: cs.validateCurveDoc, saveCurveDoc: cs.saveCurveDoc, takeSnapshot: cs.takeSnapshot, snapshotIdFor: cs.snapshotIdFor,
+    docExists: (name) => existsSync(cs.curvePath(name)), frequencyGrid: () => cg.loadGrid('frequency'),
+    probeCard: ps.probeCard, validateProfile: ps.validateProfile,
+    readModeProfile: (mode) => JSON.parse(readFileSync(join(ps.PROFILES_DIR, `${mode}.json`), 'utf8')),
+    candidateFile: (mode) => join(ps.PROFILES_DIR, `candidate-${mode}.local.json`),
+    writeCandidate: (file, obj) => writeFileSync(file, JSON.stringify(obj, null, 2) + '\n'),
+    nowIso: () => cg.localIso(),
+  };
+}
+
+/**
+ * Prepare one approximation step (everything before the card). Returns what the step IS — margins, the curve per
+ * band, which bands are exhausted, the document, and (not dry) the snapshot and the candidate. Throws by name on a
+ * refused margin vector, a document the validator refuses, or a candidate the profile format refuses.
+ */
+export async function prepareStep({ mode, margins, dry = false, deps = null }) {
+  if (!STEP_MODES.includes(mode)) throw new Error(`шаг не строится: режим «${mode}» — шаг приближения есть только у ${STEP_MODES.join(' · ')}`);
+  const D = deps ?? await loadStepDeps();
+  const why = D.marginRefusal(margins);
+  if (why) throw new Error(`шаг не строится: ${why}`);
+  const card = D.probeCard();                                   // read-only: the driver the check will run on
+  const p = D.propose();
+  const stock = new Map(p.facts.rows.map((r) => [r.mhz, r.stockVoltageMv]));
+  const ladder = p.facts.rows.map((r) => r.mhz);
+  const args = { ladder, stockAt: (m) => stock.get(m), grid: p.facts.grid, anchors: p.anchors, credible: p.credible, maxMhz: p.facts.card?.maxGraphicsMhz ?? Math.max(...ladder), margins };
+  const banded = D.bandedCurve(args);
+  const exhausted = D.exhaustedBands(args);
+  const { createHash } = await import('node:crypto');
+  const rowsSha = createHash('sha256').update(banded.rows.map((r) => `${r.mhz}:${r.voltageMv}`).join(',')).digest('hex');
+  const docName = stepDocName(margins, card.driver, rowsSha);
+  const takenAt = D.nowIso();
+  const dataDriver = p.facts.stamp?.driver;
+  const stamp = { ...p.facts.stamp, driver: card.driver, vbios: card.vbios ?? p.facts.stamp?.vbios, ...(dataDriver && dataDriver !== card.driver ? { dataDriver } : {}) };
+  const doc = D.curveDocFromRows({ rows: banded.rows, name: docName, card: p.facts.card, grid: p.facts.grid, stamp, takenAt });
+  const refusals = D.validateCurveDoc(doc, { card: doc.card, frequencyGrid: D.frequencyGrid() });
+  if (refusals.length) throw new Error(`шаг не строится: документ кривой не прошёл валидатор — ${refusals.slice(0, 5).map((r) => `${r.field}: ${r.why}`).join(' · ')}`);
+  const modeProfile = D.readModeProfile(mode);
+  const candidateFile = D.candidateFile(mode);
+  const step = { mode, margins, card: { driver: card.driver, vbios: card.vbios }, docName, docExists: D.docExists(docName), perBand: banded.perBand, exhausted,
+    failRaises: banded.failRaises, monotoneRaises: banded.monotoneRaises, checkFloors: (p.checkFloors ?? []).length, candidateFile, dry, snapshotId: null };
+  if (dry) return step;
+  if (!step.docExists) D.saveCurveDoc(doc, { name: docName });
+  const { snapshot } = D.takeSnapshot({ name: docName, nowIso: takenAt });
+  step.snapshotId = D.snapshotIdFor(snapshot.takenAt);
+  const cand = candidateProfile(modeProfile, { snapshotId: step.snapshotId, stamp: card, takenAt, margins });
+  const bad = D.validateProfile(cand, { fileName: candidateFile });
+  if (bad.length) throw new Error(`кандидат не записан: ${bad.slice(0, 5).map((r) => `${r.field}: ${r.why}`).join(' · ')}`);
+  D.writeCandidate(candidateFile, cand);
+  step.candidate = cand;
+  return step;
+}
+
+/** What a step prints before the card — pure, so the dry run's promise is a block, not a console.log. */
+export function renderStepPlan(step) {
+  const L = [`ШАГ ПРИБЛИЖЕНИЯ · режим ${step.mode} · запас по полосам ${step.margins.map(signedMv).join('/')} · карта: драйвер ${step.card.driver}`];
+  L.push(`  отказов проверок режима под кривой (уровень частоты): ${step.checkFloors} · подъёмов к известным отказам ${step.failRaises} · монотонность ${step.monotoneRaises}`);
+  for (const [i, b] of step.perBand.entries()) L.push(`  ${b.label}: запас ${signedMv(b.marginMv)} · глубина под стоком ${b.depthMinMv ?? '—'}…${b.depthMaxMv ?? '—'} мВ · ${step.exhausted[i] ? 'исчерпана (ещё шаг ничего не сдвинет)' : 'можно ниже'}`);
+  L.push(`  документ: curves/${step.docName}.json ${step.docExists ? '(уже есть — те же строки, переиспользуется)' : '(новый)'}`);
+  L.push(step.dry ? '  СУХОЙ ПРОГОН: документ, снимок, кандидат, журнал и карта не тронуты.'
+    : `  снимок: ${step.snapshotId} · кандидат: ${String(step.candidateFile).replace(/\\/g, '/')}`);
+  return L.join('\n');
 }
 
 /**
@@ -367,9 +529,16 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
   const events = seams.driverEvents(startedMs, endedMs);
   const v = verdictOf({ samples, driverEvents: events, stages: stages.map((s) => ({ ...s, name: s.name })) });
   const hits = hitMap(samples, { periodMs });
+  // plans/105 level 3: the failure's frequency and the voltage THIS check's curve served it with (the snapshot seam).
+  let failureAt = null;
+  if (v.failure && Number.isFinite(v.failure.mhz)) {
+    let voltageMv = null;
+    try { voltageMv = seams.curveVoltageAt ? await seams.curveVoltageAt(v.failure.mhz) : null; } catch { voltageMv = null; }
+    failureAt = { mhz: v.failure.mhz, voltageMv: Number.isFinite(voltageMv) ? voltageMv : null };
+  }
   const why = rollback?.ok === false ? `${v.why} · ⚠️ ОТКАТ НЕ ПОДТВЕРЖДЁН: ${rollback.why}` : v.why;
-  writeCheckVerdict(journal, { seq: intent.seq, verdict: v.verdict, failure: v.failure, hits: hits.map((h) => ({ id: h.id, seconds: h.seconds })), at: atIso(), why });
-  return { seq: intent.seq, mode, candidate, snapshot, margins, fromMs: startedMs, toMs: endedMs, verdict: v, stages, rollback, hits,
+  writeCheckVerdict(journal, { seq: intent.seq, verdict: v.verdict, failure: v.failure, failureAt, hits: hits.map((h) => ({ id: h.id, seconds: h.seconds })), at: atIso(), why });
+  return { seq: intent.seq, mode, candidate, snapshot, margins, fromMs: startedMs, toMs: endedMs, verdict: v, failureAt, stages, rollback, hits,
     samples: { count: samples.length, periodMs, maxGapMs: maxGapMs(samples) }, driverEvents: events };
 }
 
@@ -401,6 +570,7 @@ async function loadCardLib() {
   const ps = await import('./profile-store.mjs');
   const gl = await import('./graphics-load.mjs');
   const st = await import('./stress-tester.mjs');
+  const cs = await import('./curve-store.mjs'); // safe here: the CLI runs in a function (bugs/141), this module has finished evaluating
   const { spawn } = await import('node:child_process');
   const { existsSync: exists } = await import('node:fs');
   const MON = join(HERE, 'hardware-mon.mjs');
@@ -410,7 +580,7 @@ async function loadCardLib() {
     probeCard: ps.probeCard, resolveProfileCurve: pm.resolveProfileCurve, nvapiCurveBackend: pm.nvapiCurveBackend,
     nvidiaSmiBackend: pm.nvidiaSmiBackend, apply: pm.apply, resetToFactory: pm.resetToFactory,
     runTimedemo: gl.runTimedemo, stressTest: st.stressTest, runOptionsForShape: st.runOptionsForShape,
-    sweepBurnShape: st.sweepBurnShape, FURNACE_LADDER: st.FURNACE_LADDER,
+    sweepBurnShape: st.sweepBurnShape, FURNACE_LADDER: st.FURNACE_LADDER, loadSnapshot: cs.loadSnapshot,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)), nowMs: () => Date.now(),
   };
 }
@@ -473,6 +643,12 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
     },
     readSamples: (path) => parseSamples(readFileSync(path, 'utf8')),
     driverEvents: (fromMs, toMs) => realDriverEvents(fromMs, toMs),
+    // plans/105 Ш2: the voltage the candidate's own snapshot serves a frequency with; null for a curve-less (stock) profile.
+    curveVoltageAt(mhz) {
+      const id = profile?.settings?.curveSnapshot;
+      if (!id || !L.loadSnapshot) return null;
+      return curveVoltageAt(L.loadSnapshot({ id })?.frequencies, mhz);
+    },
   };
 }
 
@@ -497,9 +673,12 @@ export function renderCheckReport(r) {
   const hms = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 19) + 'Z' : '—');
   const L = [];
   L.push(`# Проверка режима ${r.mode} — ${VERDICT_WORD[r.verdict.verdict] ?? r.verdict.verdict}`, '');
-  L.push(`Окно: ${hms(r.fromMs)} … ${hms(r.toMs)} · кандидат: ${r.candidate ?? '—'} · снимок: ${r.snapshot ?? '—'} · запас по полосам: ${r.margins ? r.margins.map((m) => '+' + m).join('/') : '—'}`, '');
+  L.push(`Окно: ${hms(r.fromMs)} … ${hms(r.toMs)} · кандидат: ${r.candidate ?? '—'} · снимок: ${r.snapshot ?? '—'} · запас по полосам: ${r.margins ? r.margins.map(signedMv).join('/') : '—'}`, '');
   L.push('## Вердикт', '', `**${VERDICT_WORD[r.verdict.verdict] ?? r.verdict.verdict}** — ${r.verdict.why}`);
   if (r.verdict.failure) L.push('', `Первый сбой: ${r.verdict.failure.cls} · полоса ${band(r.verdict.failure.band)} · ${hms(r.verdict.failure.atMs)} · ${r.verdict.failure.why}`);
+  if (r.verdict.failure) L.push('', r.failureAt && Number.isFinite(r.failureAt.voltageMv)
+    ? `Отказ приписан частоте: **${r.failureAt.mhz} МГц при ${r.failureAt.voltageMv} мВ** (наименьшая выданная за ${FAILURE_ATTRIBUTION_WINDOW_MS / 1000} с до сбоя) — построитель поднимет её окрестность`
+    : `Отказ частоте НЕ приписан (${r.failureAt ? `частота ${r.failureAt.mhz} МГц, напряжение снимка неизвестно` : 'долговечной пробы нет'}) — действует храповик полосы`);
   if (r.rollback) L.push('', `Откат: ${r.rollback.ok ? 'подтверждён' : '⚠️ НЕ ПОДТВЕРЖДЁН — ' + (r.rollback.why ?? '')}`);
   L.push('', '## Карта посещений', '', '| полоса | секунд | доля | посещена |', '|---|---|---|---|');
   const visited = new Set(r.hits ? visitedBands(r.hits) : []);
@@ -618,7 +797,7 @@ export function lastBootLine(text) {
 /** The metric line — first line of `npm run curve -- --progress`. */
 export function renderValidatedLine(v) {
   const margins = Object.entries(v.last).filter(([, x]) => Array.isArray(x.margins))
-    .map(([m, x]) => `${m} ${x.margins.map((n) => '+' + n).join('/')}`);
+    .map(([m, x]) => `${m} ${x.margins.map(signedMv).join('/')}`);
   return `РЕЖИМОВ ПРОВЕРЕНО ${v.passed.length}/${v.total}${v.passed.length ? ' (' + v.passed.join(' · ') + ')' : ''}`
     + ` · запас по полосам: ${margins.length ? margins.join(' ; ') : 'проверок ещё не было'}`
     + ' · выгода против стока: таблиц ещё нет · неделя пользования: прибором не отслеживается'
@@ -735,6 +914,7 @@ export async function selfTest() {
         rollback: async () => { calls.push('rollback'); if (opts.rollbackThrows) throw new Error('нет ответа'); return { ok: true }; },
         readSamples: () => ({ samples: samples20, periodMs: 1000 }),
         driverEvents: () => [],
+        curveVoltageAt: async () => (opts.noVoltage ? null : 880),
       };
       const r = await runCheck({ journal: j, mode: 'optimised', plan: smokePlan, telemetryPath: join(exDir, 'mon.jsonl'), seams, atIso: () => '2026-09-25T01:40:00+03:00' });
       return { r, calls };
@@ -746,6 +926,9 @@ export async function selfTest() {
     const b = await run({ failAt: MIX_STAGE.TRANSITIONS });
     check('ИСПОЛНИТЕЛЬ: СМЕСЬ ВСТАЁТ НА ПЕРВОЙ ПАДАЮЩЕЙ СТУПЕНИ, ОТКАТ ВСЁ РАВНО', b.r.verdict.verdict === CHECK_VERDICT.FAILED && b.r.verdict.failure.cls === FAILURE_CLASS.LOAD
       && !b.calls.includes('stage:burn') && b.calls.at(-2) === 'rollback', b.calls.join(' '));
+    const bRec = readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1);
+    check('ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ ЧАСТОТУ И НАПРЯЖЕНИЕ СНИМКА', bRec?.failureAt?.mhz === 2850 && bRec?.failureAt?.voltageMv === 880 && b.r.failureAt?.mhz === 2850
+      && renderCheckReport(b.r).includes('2850 МГц при 880 мВ') && a.r.failureAt === null, JSON.stringify(bRec?.failureAt));
     const c = await run({ throwAt: MIX_STAGE.GAME });
     check('ИСПОЛНИТЕЛЬ: ИСКЛЮЧЕНИЕ В НАГРУЗКЕ — СБОЙ, А НЕ ПАДЕНИЕ ПРИБОРА; ОТКАТ СДЕЛАН', c.r.verdict.verdict === CHECK_VERDICT.FAILED && c.calls.includes('rollback'), c.r.verdict.why);
     const d = await run({ applyOk: false });
@@ -863,6 +1046,80 @@ export async function selfTest() {
   check('СТРОКА МЕТРИКИ: ЧИСЛО, ЗАПАС ПО ПОЛОСАМ И ЧЕСТНОЕ «НЕ ОТСЛЕЖИВАЕТСЯ»', line.startsWith('РЕЖИМОВ ПРОВЕРЕНО 1/4 (optimised)') && line.includes('+30/+30/+30/+30/+20/+30/+30') && line.includes('прибором не отслеживается'), line);
   check('СТРОКА МЕТРИКИ НА ПУСТОМ ЖУРНАЛЕ — 0/4', renderValidatedLine(modesValidated([], { modes: MODES })).startsWith('РЕЖИМОВ ПРОВЕРЕНО 0/4 · запас по полосам: проверок ещё не было'));
 
+
+  // ---- plans/105 Ш2: LEVEL 3, the frequency. Mutation addressees MV12–MV16 are named in the header.
+  {
+    const fw = [S(-600, 2700), S(0, 2880), S(500, 2880), S(1000, 2865), S(1500, 2880), S(2000, 2895)];
+    const fq = failureFrequency(fw, 2000);
+    const rowsV = [{ mhz: 2880, voltageMv: 890 }, { mhz: 2850, voltageMv: 870 }, { mhz: 2865, voltageMv: 880 }];
+    check('УРОВЕНЬ ЧАСТОТЫ: СБОЙ ПРИПИСАН НАИМЕНЬШЕЙ ВЫДАННОЙ ЧАСТОТЕ ЗА 2 С, ПРОБА ДО ОКНА НЕ СЧИТАЕТСЯ', fq === 2865
+      && failureFrequency([S(0, 2800), S(5000, 2900)], 4000) === 2800 && failureFrequency([], 100) === null
+      && verdictOf({ samples: fw, driverEvents: [{ atMs: 2000, id: 153 }] }).failure.mhz === 2865,
+      `окно → ${fq} · пустое окно → ${failureFrequency([S(0, 2800), S(5000, 2900)], 4000)}`);
+    check('УРОВЕНЬ ЧАСТОТЫ: НАПРЯЖЕНИЕ СНИМКА — СТРОКИ НАИМЕНЬШЕЙ ЧАСТОТЫ ≥ f', curveVoltageAt(rowsV, 2860) === 880 && curveVoltageAt(rowsV, 2865) === 880
+      && curveVoltageAt(rowsV, 3000) === 890 && curveVoltageAt([], 2860) === null, `${curveVoltageAt(rowsV, 2860)} · ${curveVoltageAt(rowsV, 2865)} · ${curveVoltageAt(rowsV, 3000)}`);
+    const m0 = [0, 0, 0, -10, -10, -10, -10];
+    const lvl3 = nextMargins({ margins: m0, verdict: CHECK_VERDICT.FAILED, failureBand: 4, failureAt: { mhz: 2865, voltageMv: 880 }, ratchetMv: r10 });
+    const noV = nextMargins({ margins: m0, verdict: CHECK_VERDICT.FAILED, failureBand: 4, failureAt: { mhz: 2865, voltageMv: null }, ratchetMv: r10 });
+    check('УРОВЕНЬ ЧАСТОТЫ: СБОЙ С ЧАСТОТОЙ И НАПРЯЖЕНИЕМ НЕ ДВИГАЕТ ЗАПАС ПОЛОСЫ; БЕЗ НАПРЯЖЕНИЯ — ХРАПОВИК ПОЛОСЫ', lvl3.margins.join() === m0.join() && lvl3.floors.join() === nextMargins({ margins: m0, verdict: CHECK_VERDICT.UNKNOWN, ratchetMv: r10 }).floors.join()
+      && /2865 МГц при 880 мВ/.test(lvl3.changes[0]?.why ?? '') && noV.margins[4] === 0 && noV.floors[4] === 0, `с частотой ${lvl3.margins.join()} · без напряжения ${noV.margins.join()}`);
+    const deathRecs = [{ state: LINE.INTENT, kind: CHECK_KIND, seq: 9, mode: 'optimised', snapshot: 'snapX', telemetryPath: 'x.jsonl' }];
+    const dv = deathVerdicts(deathRecs, { readSamples: () => fw, voltageAt: (id, mhz) => (id === 'snapX' ? curveVoltageAt(rowsV, mhz) : null) });
+    check('УРОВЕНЬ ЧАСТОТЫ: СМЕРТЬ С ДОЛГОВЕЧНОЙ ПРОБОЙ ПОЛУЧАЕТ ЧАСТОТУ И НАПРЯЖЕНИЕ СВОЕГО СНИМКА', dv[0]?.failureAt?.mhz === 2865 && dv[0]?.failureAt?.voltageMv === 880
+      && deathVerdicts(deathRecs, { readSamples: () => [] })[0].failureAt === null, JSON.stringify(dv[0]?.failureAt));
+    const floors = checkFailureFloors([
+      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 1, verdict: CHECK_VERDICT.FAILED, failure: { cls: 'driver-voice' }, failureAt: { mhz: 2865, voltageMv: 880 } },
+      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 2, verdict: CHECK_VERDICT.FAILED, failureAt: { mhz: 2900, voltageMv: null } },
+      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 3, verdict: CHECK_VERDICT.PASSED, failureAt: { mhz: 2800, voltageMv: 860 } },
+      { state: LINE.VERDICT, seq: 4, verdict: CHECK_VERDICT.FAILED, failureAt: { mhz: 2700, voltageMv: 850 } },
+    ]);
+    check('УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЮ ИДУТ ТОЛЬКО СБОИ ПРОВЕРОК С ЧАСТОТОЙ И НАПРЯЖЕНИЕМ', floors.length === 1 && floors[0].mhz === 2865 && floors[0].mv === 880, JSON.stringify(floors));
+
+    // P105-AC4 on the builder itself: a failure at 2865 MHz / 880 mV raises rows ≥ 2865 to 880 + two grid steps and nothing below.
+    const cp = await import('../../tools/curve-proposal.mjs');
+    const g5 = []; for (let v = 800; v <= 1100; v += 5) g5.push(v);
+    const ladderA = []; for (let f = 2600; f <= 3000; f += 15) ladderA.push(f);
+    const stockA = (f) => 900 + Math.round((f - 2000) / 10);
+    const fx = cp.anchorsFrom({ passes: [{ mhz: 2750, mv: 860 }, { mhz: 2850, mv: 870 }, { mhz: 2945, mv: 900 }], fails: [{ mhz: 2750, mv: 850, kind: 'hung' }, { mhz: 2850, mv: 860, kind: 'hung' }, { mhz: 2945, mv: 890, kind: 'hung' }], grid: g5, stockAt: stockA });
+    const argsA = { ladder: ladderA, stockAt: stockA, grid: g5, anchors: fx.anchors, maxMhz: 3000, margins: [0, 0, 0, -30, -30, -30, -30] };
+    const baseC = cp.bandedCurve({ ...argsA, credible: fx.credible });
+    const withC = cp.bandedCurve({ ...argsA, credible: cp.withCheckFailures(fx.credible, floors) });
+    const need = 890; // 880 + two steps of a 5 mV grid
+    const raised = withC.rows.filter((r, i) => r.voltageMv !== baseC.rows[i].voltageMv).map((r) => r.mhz);
+    check('УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЬ ПОДНИМАЕТ ОКРЕСТНОСТЬ СБОЯ (≥ 2865 — НЕ НИЖЕ 880 + 2 ШАГА), НИЖЕ — БЕЗ ИЗМЕНЕНИЙ (P105-AC4)',
+      raised.length > 0 && raised.every((f) => f >= 2865) && withC.rows.every((r) => r.mhz < 2865 || r.voltageMv >= Math.min(r.stockVoltageMv, need))
+      && withC.rows.every((r, i) => r.mhz >= 2865 || r.voltageMv === baseC.rows[i].voltageMv),
+      `поднято: ${raised.join(' ')} · ${withC.rows.filter((r) => r.mhz >= 2850 && r.mhz <= 2950).map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
+
+    // P105-AC5 (Ш3): one step = one command; the dry run writes nothing; the real one writes document → snapshot → candidate, in that order.
+    const cs = await import('./curve-store.mjs');
+    const psm = await import('./profile-store.mjs');
+    const writes = [];
+    const deps = (over = {}) => ({
+      propose: () => ({ facts: { rows: ladderA.map((mhz) => ({ mhz, stockVoltageMv: stockA(mhz) })), grid: g5, card: { name: 'fixture', maxGraphicsMhz: 3000 }, stamp: { driver: '610.88', vbios: '98.03.58.40.8b' } }, anchors: fx.anchors, credible: cp.withCheckFailures(fx.credible, floors), checkFloors: floors }),
+      marginRefusal: cp.marginRefusal, bandedCurve: cp.bandedCurve, exhaustedBands: cp.exhaustedBands, curveDocFromRows: cp.curveDocFromRows,
+      validateCurveDoc: cs.validateCurveDoc, saveCurveDoc: (doc, o) => writes.push(`doc:${o.name}:${doc.stamp.driver}/${doc.stamp.dataDriver}`),
+      takeSnapshot: (o) => { writes.push(`snapshot:${o.name}`); return { snapshot: { takenAt: o.nowIso } }; }, snapshotIdFor: cs.snapshotIdFor,
+      docExists: () => false, frequencyGrid: () => null, probeCard: () => ({ driver: '616.92', vbios: '98.03.58.40.8b' }), validateProfile: psm.validateProfile,
+      readModeProfile: () => base, candidateFile: (m) => `candidate-${m}.local.json`, writeCandidate: (file, obj) => writes.push(`candidate:${file}:${obj.settings.curveSnapshot}`),
+      nowIso: () => '2026-10-17T13:00:00+03:00', ...over,
+    });
+    const marginsA = [0, 0, 0, -30, -30, -30, -30];
+    const dryStep = await prepareStep({ mode: 'optimised', margins: marginsA, dry: true, deps: deps() });
+    check('ШАГ: СУХОЙ ПРОГОН НИЧЕГО НЕ ПИШЕТ И НАЗЫВАЕТ ДОКУМЕНТ ПО ЗАПАСУ, ДРАЙВЕРУ И СТРОКАМ', writes.length === 0 && /^model-bands-0-0-0-n30-n30-n30-n30-d616-92-[0-9a-f]{6}$/.test(dryStep.docName)
+      && dryStep.checkFloors === 1 && dryStep.exhausted.length === 7 && /СУХОЙ ПРОГОН/.test(renderStepPlan(dryStep)) && /−30/.test(renderStepPlan(dryStep)), `${writes.join(' | ') || 'записей нет'} · ${dryStep.docName}`);
+    const realStep = await prepareStep({ mode: 'optimised', margins: marginsA, deps: deps() });
+    check('ШАГ: ДОКУМЕНТ → СНИМОК → КАНДИДАТ, КАНДИДАТ НА СНИМКЕ ШАГА СО ШТАМПОМ КАРТЫ, ДРАЙВЕР ДАННЫХ НЕ СПРЯТАН', writes.length === 3 && writes[0] === `doc:${realStep.docName}:616.92/610.88`
+      && writes[1] === `snapshot:${realStep.docName}` && writes[2] === 'candidate:candidate-optimised.local.json:2026-10-17T13-00-00'
+      && realStep.candidate.stamp.driver === '616.92' && realStep.candidate.qualified === false && /−30/.test(realStep.candidate.draft.candidate), `${writes.join(' | ')} · ${realStep.candidate?.draft?.candidate}`);
+    writes.length = 0;
+    await prepareStep({ mode: 'optimised', margins: marginsA, deps: deps({ docExists: () => true }) });
+    let refusedB3 = null; try { await prepareStep({ mode: 'optimised', margins: [0, 0, -10, 0, 0, 0, 0], deps: deps() }); } catch (e) { refusedB3 = e.message; }
+    let refusedStock = null; try { await prepareStep({ mode: 'stock-default', margins: marginsA, deps: deps() }); } catch (e) { refusedStock = e.message; }
+    check('ШАГ: ТОТ ЖЕ ДОКУМЕНТ НЕ ПЕРЕПИСЫВАЕТСЯ; ЗАПАС НИЖЕ ТРЕНДА ВНЕ НАГРУЗОЧНЫХ ПОЛОС И ЗАВОДСКОЙ РЕЖИМ ОТКЛОНЯЮТСЯ ПО ИМЕНИ',
+      !writes.some((w) => w.startsWith('doc:')) && writes.length === 2 && /только полосы от 2700/.test(refusedB3 ?? '') && /только у optimised/.test(refusedStock ?? ''), `${writes.join(' | ')} · ${refusedB3} · ${refusedStock}`);
+  }
+
   return { ok: results.every((r) => r.ok), results };
 }
 
@@ -870,6 +1127,46 @@ export async function runSelfTest() {
   try { return await selfTest(); } catch (e) {
     return { ok: false, results: [{ ok: false, what: 'НАБОР УПАЛ, НЕ ДОЙДЯ ДО КОНЦА — это красный блок', got: `${e.name}: ${e.message}` }] };
   }
+}
+
+// The CLI's two halves of a check, shared by `--mode` and `--step` (plans/105 Ш3) — one path to the card, not two.
+
+/**
+ * Order (plans/102 «Схема прибора»): an unclosed intent in the check journal is closed FIRST as a death, and the
+ * launch stops there. The death now carries its frequency and the snapshot's voltage at it (plans/105 Ш2), so the
+ * builder sees it as a known failure. Returns the number of deaths found.
+ */
+async function closeDeathsFirst(journal, dry) {
+  const cs = await import('./curve-store.mjs');
+  const voltageAt = (id, mhz) => curveVoltageAt(cs.loadSnapshot({ id })?.frequencies, mhz);
+  const deaths = deathVerdicts(readJournal(journal).records, { voltageAt });
+  for (const d of deaths) {
+    const at = d.failureAt ? ` · частота ${d.failureAt.mhz} МГц${Number.isFinite(d.failureAt.voltageMv) ? ` при ${d.failureAt.voltageMv} мВ` : ''}` : '';
+    console.log(`🔴 НЕЗАКРЫТОЕ НАМЕРЕНИЕ seq ${d.seq} (${d.mode}) — это СМЕРТЬ машины во время проверки: ${d.failure.why}; полоса ${d.failure.band === null ? 'неизвестна' : MODE_BANDS[d.failure.band].label}${at}`);
+    if (!dry) writeCheckVerdict(journal, { seq: d.seq, verdict: d.verdict, failure: d.failure, failureAt: d.failureAt, at: new Date().toISOString(), why: `закрыто при следующем запуске: ${d.failure.why}` });
+  }
+  if (deaths.length) console.log(dry ? '(сухой прогон: журнал не тронут)' : 'Намерения закрыты. Храповик — в отчёте запуска; новую проверку начинать ПОСЛЕ разбора.');
+  return deaths.length;
+}
+
+/** Print the check's plan and (not dry) run it on the card; returns the exit code. `profile` is null only in a dry step. */
+async function checkCommand({ mode, profile, plan, dry, margins, journal }) {
+  // The owner's local clock, never UTC (EXP-0012) — the same form curve-proposal gives its files.
+  const now = new Date(); const moment = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace(/:/g, '-');
+  const dir = join(VALIDATE_DIR, moment);
+  const telemetryPath = join(dir, 'mon.jsonl');
+  console.log(`ПРОВЕРКА РЕЖИМА ${mode} · кандидат ${profile?.name ?? (dry ? `candidate-${mode}.local (будет записан шагом)` : '—')} · снимок ${profile?.settings?.curveSnapshot ?? (dry ? 'будет снят шагом' : '—')} · штамп ${profile?.stamp?.driver ?? '—'} · ${Math.round(plan.totalS / 6) / 10} мин`);
+  for (const s of plan.stages) console.log(`  · ${s.label} — ${s.kind === MIX_STAGE.GAME ? `проходов демо: ${Math.max(1, Math.ceil(s.seconds / DEMO_PASS_S))}` : s.kind === MIX_STAGE.TRANSITIONS ? `${s.cycles} × (${s.onS}/${s.offS} с), уровень ${TRANSITIONS_LEVEL}` : `${s.seconds} с`}`);
+  console.log(`  телеметрия → ${telemetryPath.replace(/\\/g, '/')} · журнал → ${journal.path.replace(/\\/g, '/')}`);
+  if (profile?.stamp?.driver) console.log(`  ⚠️ штамп кандидата — драйвер ${profile.stamp.driver}: при применении сверится с живой картой (R6); не совпал — отказ до записи, вердикт НЕИЗВЕСТНО`);
+  if (dry) { console.log('СУХОЙ ПРОГОН: карта, журнал и файлы не тронуты. (P102-AC4 на живой карте добавляет чтение сдвигов до и после — карточный день.)'); return 0; }
+  mkdirSync(dir, { recursive: true });
+  const seams = await makeCardSeams({ profile, totalS: plan.totalS });
+  const result = await runCheck({ journal, mode, candidate: profile.name, snapshot: profile.settings?.curveSnapshot ?? null, margins, plan, telemetryPath, seams, atIso: () => new Date().toISOString() });
+  const out = writeCheckReport(dir, result);
+  console.log(renderCheckReport(result));
+  console.log(`отчёт: ${out.report.replace(/\\/g, '/')}`);
+  return result.verdict.verdict === CHECK_VERDICT.PASSED ? 0 : 1;
 }
 
 // 🔴 `bugs/141`: THE CLI RUNS INSIDE AN ASYNC FUNCTION, NEVER AS TOP-LEVEL `await`. `curve-store.mjs` imports this
@@ -884,6 +1181,8 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       'npm run validate -- …  (automation-engine/lib/mode-validate.mjs) — проверка целого режима, эпик 101 Ф1',
       '  --mode <режим> --candidate <профиль.json> [--minutes N]   ⚠️ ПИШЕТ В КАРТУ: применяет кандидата, гоняет смесь, откатывает к заводскому',
       '  --mode <режим> --candidate <профиль.json> --dry-run        план проверки; карта, журнал и файлы не трогаются',
+      '  --step --mode <режим> --band-margins a,…,g [--minutes N]  ⚠️ ПИШЕТ В КАРТУ: шаг приближения — документ → снимок → кандидат → проверка (plans/105)',
+      '  --step --mode <режим> --band-margins a,…,g --dry-run      план шага: запас и исчерпание по полосам, имя документа; ничего не пишет',
       '  --plan [--minutes N]                                      смесь нагрузок, без карты',
       '  --hits <сэмплер.jsonl> […]                                карта посещений по записанной телеметрии, без карты',
       '  --compare --stock <захваты.json,…> --mode <захваты.json,…>  таблица выгоды по записанным захватам, без карты',
@@ -909,12 +1208,23 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       console.log(`${f.replace(/\\/g, '/')} — проб ${parsed.samples.length}, ${total} с; посещены (≥ ${MIN_BAND_DWELL_S} с): ${visitedBands(map).map((i) => map[i].label).join(' · ') || 'ни одна'}`);
       console.log('  ' + map.map((p) => `${p.label}: ${p.seconds} с (${Math.round(p.share * 100)} %)`).join(' · '));
     }
+  } else if (process.argv.includes('--step')) {
+    // plans/105 Ш3: npm run validate -- --step --mode <режим> --band-margins a,…,g [--minutes N] [--dry-run]
+    const arg = (f) => { const i = process.argv.indexOf(f); return i === -1 ? null : process.argv[i + 1]; };
+    const mode = arg('--mode'); const raw = arg('--band-margins'); const dry = process.argv.includes('--dry-run');
+    const minutesArg = arg('--minutes');
+    if (!mode || !raw) { console.error('ОШИБКА: --step --mode <режим> --band-margins a,b,c,d,e,f,g [--minutes N] [--dry-run]'); process.exit(2); }
+    const margins = raw.split(',').map((x) => Number(x.trim()));
+    let plan; try { plan = planMix({ minutes: minutesArg === null ? null : Number(minutesArg) }); } catch (e) { console.error(`ОШИБКА: ${e.message}`); process.exit(2); }
+    const journal = openValidateJournal();
+    if (await closeDeathsFirst(journal, dry)) process.exit(dry ? 0 : 1);
+    let step; try { step = await prepareStep({ mode, margins, dry }); } catch (e) { console.error(`ОТКАЗ: ${e.message}`); process.exit(2); }
+    console.log(renderStepPlan(step));
+    process.exit(await checkCommand({ mode, profile: dry ? null : step.candidate, plan, dry, margins, journal }));
   } else if (process.argv.includes('--mode') && !process.argv.includes('--compare')) {
     // `--compare` has its own `--mode` flag (the mode's captures) — found by the session-102 judge: this branch,
     // placed first, swallowed every `--compare` call (128f6bf). The check path is taken only without it.
     // THE CHECK. npm run validate -- --mode <mode> --candidate <profile.json> [--minutes N] [--dry-run]
-    // Order (plans/102 «Схема прибора»): an unclosed intent in the check journal is closed FIRST as a death,
-    // and the launch stops there; else intent → sampler → apply → mix → rollback → verdict → report.
     const arg = (f) => { const i = process.argv.indexOf(f); return i === -1 ? null : process.argv[i + 1]; };
     const mode = arg('--mode'); const candFile = arg('--candidate'); const dry = process.argv.includes('--dry-run');
     const minutesArg = arg('--minutes');
@@ -923,31 +1233,8 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     if (profile.mode !== mode) { console.error(`ОТКАЗ: кандидат «${profile.name}» — режима «${profile.mode}», а заказан «${mode}»`); process.exit(2); }
     let plan; try { plan = planMix({ minutes: minutesArg === null ? null : Number(minutesArg) }); } catch (e) { console.error(`ОШИБКА: ${e.message}`); process.exit(2); }
     const journal = openValidateJournal();
-    const deaths = deathVerdicts(readJournal(journal).records);
-    if (deaths.length) {
-      for (const d of deaths) {
-        console.log(`🔴 НЕЗАКРЫТОЕ НАМЕРЕНИЕ seq ${d.seq} (${d.mode}) — это СМЕРТЬ машины во время проверки: ${d.failure.why}; полоса ${d.failure.band === null ? 'неизвестна' : MODE_BANDS[d.failure.band].label}`);
-        if (!dry) writeCheckVerdict(journal, { seq: d.seq, verdict: d.verdict, failure: d.failure, at: new Date().toISOString(), why: `закрыто при следующем запуске: ${d.failure.why}` });
-      }
-      console.log(dry ? '(сухой прогон: журнал не тронут)' : 'Намерения закрыты. Храповик — в отчёте запуска; новую проверку начинать ПОСЛЕ разбора.');
-      process.exit(dry ? 0 : 1);
-    }
-    // The owner's local clock, never UTC (EXP-0012) — the same form curve-proposal gives its files.
-    const now = new Date(); const moment = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace(/:/g, '-');
-    const dir = join(VALIDATE_DIR, moment);
-    const telemetryPath = join(dir, 'mon.jsonl');
-    console.log(`ПРОВЕРКА РЕЖИМА ${mode} · кандидат ${profile.name} · снимок ${profile.settings?.curveSnapshot ?? '—'} · штамп ${profile.stamp?.driver ?? '—'} · ${Math.round(plan.totalS / 6) / 10} мин`);
-    for (const s of plan.stages) console.log(`  · ${s.label} — ${s.kind === MIX_STAGE.GAME ? `проходов демо: ${Math.max(1, Math.ceil(s.seconds / DEMO_PASS_S))}` : s.kind === MIX_STAGE.TRANSITIONS ? `${s.cycles} × (${s.onS}/${s.offS} с), уровень ${TRANSITIONS_LEVEL}` : `${s.seconds} с`}`);
-    console.log(`  телеметрия → ${telemetryPath.replace(/\\/g, '/')} · журнал → ${journal.path.replace(/\\/g, '/')}`);
-    if (profile.stamp?.driver) console.log(`  ⚠️ штамп кандидата — драйвер ${profile.stamp.driver}: при применении сверится с живой картой (R6); не совпал — отказ до записи, вердикт НЕИЗВЕСТНО`);
-    if (dry) { console.log('СУХОЙ ПРОГОН: карта, журнал и файлы не тронуты. (P102-AC4 на живой карте добавляет чтение сдвигов до и после — карточный день.)'); process.exit(0); }
-    mkdirSync(dir, { recursive: true });
-    const seams = await makeCardSeams({ profile, totalS: plan.totalS });
-    const result = await runCheck({ journal, mode, candidate: profile.name, snapshot: profile.settings?.curveSnapshot ?? null, plan, telemetryPath, seams, atIso: () => new Date().toISOString() });
-    const out = writeCheckReport(dir, result);
-    console.log(renderCheckReport(result));
-    console.log(`отчёт: ${out.report.replace(/\\/g, '/')}`);
-    process.exit(result.verdict.verdict === CHECK_VERDICT.PASSED ? 0 : 1);
+    if (await closeDeathsFirst(journal, dry)) process.exit(dry ? 0 : 1);
+    process.exit(await checkCommand({ mode, profile, plan, dry, margins: null, journal }));
   } else if (process.argv.includes('--replay')) {
     // --replay <capture.json> [--stock <capture.json,…>] — the post-check half (verdict · the REAL driver voice
     // from the Windows log for the recording's window · visit map · report) over a RECORDED game capture.
