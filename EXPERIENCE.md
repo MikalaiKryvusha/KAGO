@@ -128,6 +128,12 @@
 
 ## Entries
 
+### EXP-0309 · 2026-10-17 · ❌ · #backticks #node-e #bash #text-through-files #repeat-of-0288 #s3-one-line
+**Twice in one session `node -e "…"` inside bash double quotes carried a markdown code span (`` `4215c7` ``) — bash ran it as a
+command and the plan/STATUS got holes, exit 0 both times; caught only by reading back.** A document edit goes through the Edit tool
+or a script FILE (heredoc with a quoted delimiter), never a `node -e` string in double quotes. → AGENT_GUIDE «TEXT TRAVELS THROUGH FILES».
+**Trigger:** `node -e "` + any markdown in the payload.
+
 ### EXP-0308 · 2026-10-17 · ❌→✅ · #attribution #tdr #driver-voice #floor-swallows-step #bisection #recon #s2
 **Two «the step does nothing» traps in one session, both caught by a selftest before the card: (1) a failure's moment is not
 its report — Windows speaks TdrDelay (2 s) after the GPU stops, so a window before the driver's voice sees the stalled card (16:45:
