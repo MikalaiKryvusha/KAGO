@@ -82,6 +82,18 @@ function load() {
  * @returns {number} код выхода
  */
 function main(argv) {
+  // 2026-10-17 (session 109, twin of grant-agent-rights): an unknown argument — `--help`, a typo — fell through to the grant
+  // and WROTE the owner's permissions file. An unknown word prints the usage and writes nothing; the bare call grants.
+  const known = new Set(['--show', '--revoke']);
+  if (argv.includes('--help') || argv.includes('-h') || argv.some((a) => !known.has(a))) {
+    const unknown = argv.filter((a) => !known.has(a) && a !== '--help' && a !== '-h');
+    const usage = 'node tools/grant-agent-file-ops.mjs            выдать (пишет .claude/settings.local.json)\n'
+      + 'node tools/grant-agent-file-ops.mjs --show     показать, ничего не пишет\n'
+      + 'node tools/grant-agent-file-ops.mjs --revoke   снять\n'
+      + 'node tools/grant-agent-file-ops.mjs --help     эта справка, ничего не пишет';
+    console.log(unknown.length ? `НЕЗНАКОМЫЙ АРГУМЕНТ: ${unknown.join(' ')} — ничего не записано.\n\n${usage}` : usage);
+    return unknown.length ? 2 : 0;
+  }
   const settings = load();
   settings.permissions ??= {};
   settings.permissions.allow ??= [];

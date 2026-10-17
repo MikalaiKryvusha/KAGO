@@ -101,7 +101,21 @@ function save(obj) {
  * @param {string[]} argv аргументы БЕЗ `node` и пути к файлу
  * @returns {number} код выхода
  */
+const USAGE = `node tools/grant-agent-rights.mjs            выдать широкие права агенту (пишет .claude/settings.local.json)
+node tools/grant-agent-rights.mjs --show     только показать текущее состояние, ничего не пишет
+node tools/grant-agent-rights.mjs --revoke   снять ровно эти широкие правила
+node tools/grant-agent-rights.mjs --help     эта справка, ничего не пишет`;
+
 function main(argv) {
+  // 2026-10-17 (session 109, the class of `bugs/118`): any argument this tool did not know — `--help`, a typo like `--shwo` —
+  // fell through to «grant» and WROTE the owner's permissions file. An unknown word now prints the usage and writes nothing;
+  // only the bare call grants, as the owner uses it.
+  const known = new Set(['--show', '--revoke']);
+  if (argv.includes('--help') || argv.includes('-h') || argv.some((a) => !known.has(a))) {
+    const unknown = argv.filter((a) => !known.has(a) && a !== '--help' && a !== '-h');
+    console.log(unknown.length ? `НЕЗНАКОМЫЙ АРГУМЕНТ: ${unknown.join(' ')} — ничего не записано.\n\n${USAGE}` : USAGE);
+    return unknown.length ? 2 : 0;
+  }
   const mode = argv.includes('--show') ? 'show'
     : argv.includes('--revoke') ? 'revoke'
     : 'grant';

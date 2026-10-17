@@ -51,8 +51,6 @@
     "tools/entry-guard-lint.mjs",
     "tools/fan-ladder.mjs",
     "tools/gpu-info.mjs",
-    "tools/grant-agent-file-ops.mjs",
-    "tools/grant-agent-rights.mjs",
     "tools/guard-lint.mjs",
     "tools/harvest-acceptance.mjs",
     "tools/heartbeat.mjs",
