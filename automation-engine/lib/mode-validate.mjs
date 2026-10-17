@@ -36,6 +36,9 @@
 //   MV15 prepareStep saves the document before the dry-run return → «ШАГ: СУХОЙ ПРОГОН НИЧЕГО НЕ ПИШЕТ…»
 //   MV16 runCheck drops failureAt from the verdict record          → «ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ РАЗБРОС И ТОЧКИ СНИМКА…»
 //   MV17 attributeFailure attributes a LOAD failure too             → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ НАГРУЗКИ ЧАСТОТЕ НЕ ПРИПИСЫВАЕТСЯ…»
+//   bugs/146 (2026-10-17, session 109):
+//   MV18 attributeFailure ignores `baseRows` (the window alone, as before) → «УРОВЕНЬ ЧАСТОТЫ: СТРОКИ, ОПУЩЕННЫЕ ШАГОМ…»
+//   MV19 lastPassedSnapshot takes the last check of the mode, passed or not → the same block
 //
 // [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
@@ -165,17 +168,53 @@ export function failurePoints(rows, span) {
   return [...fs].sort((a, b) => a - b).map((mhz) => ({ mhz, voltageMv: curveVoltageAt(rows, mhz) })).filter((p) => Number.isFinite(p.voltageMv));
 }
 
+// bugs/146 (2026-10-17, session 109) — THE STEP'S OWN DIFF IS A SUSPECT TOO. Live 17.10 14:17 and 14:19: a step that
+// lowered ONLY 2800–2900 MHz failed twice in the first Q2RTX pass, and the 2-s window held only top samples (Q2RTX's
+// light frames run 3000+ MHz, the clock swings faster than the 500-ms sampler resolves) — so the floors landed on the top
+// and the band the step changed stayed down. The window says where the card WAS, not what FAILED.
+// FORK: options <window only (as was) | window ∪ rows the step lowered against the last PASSED check of the mode | the
+//   step's rows only> · price of error <a floor on the wrong rows: the guilty band is descended again (driver resets, a
+//   possible hang) or an innocent band is blocked> · consulted <delta debugging — the change between the last good and the
+//   first bad run is the prime suspect (Zeller, «Yesterday, my program worked», ESEC/FSE 1999; the method `git bisect`
+//   mechanizes); the overclocking rule «one change at a time — instability after a change indicts that change»; EXP-0305:
+//   under uncertainty take the envelope over every candidate, never one end>. Chosen: the union — the window keeps what
+//   it honestly saw, the diff adds what the step changed; each row at its own voltage of THIS check's snapshot.
+// [NOT-TESTED] on the card — hygiene: block «УРОВЕНЬ ЧАСТОТЫ: СТРОКИ, ОПУЩЕННЫЕ ШАГОМ…», mutation MV18; the 17.10 failures
+// re-attributed on their recorded telemetry and snapshots (`bugs/146`).
+
+/** Rows the check's curve serves LOWER than the base curve does — each at the check's own voltage. Empty without a base. */
+export function stepDiffPoints(rows, baseRows) {
+  if (!Array.isArray(rows) || !Array.isArray(baseRows) || baseRows.length === 0) return [];
+  return rows.filter((r) => Number.isFinite(r?.mhz) && Number.isFinite(r?.voltageMv))
+    .filter((r) => { const b = curveVoltageAt(baseRows, r.mhz); return Number.isFinite(b) && b > r.voltageMv; })
+    .map((r) => ({ mhz: r.mhz, voltageMv: r.voltageMv })).sort((a, b) => a.mhz - b.mhz);
+}
+
 /**
- * The journal's `failureAt` of one failure: { loMhz, hiMhz, points } — `points` null when the curve is unknown (no
- * snapshot: a stock check); the whole field null for a LOAD failure (its moment is not the failing one) or without a
- * durable sample. Only `points` reach the builder.
+ * The base of a step: the snapshot of the LAST PASSED check of `mode` before `beforeSeq` (a smoke counts — it is a
+ * check of the same journal). Null when the mode has none, or it passed with no curve (stock).
  */
-export function attributeFailure({ samples, failure, rows = null }) {
+export function lastPassedSnapshot(records, mode, beforeSeq = Infinity) {
+  const checks = checkRecords(records);
+  const passed = new Set(checks.filter((r) => r.state === LINE.VERDICT && r.verdict === CHECK_VERDICT.PASSED).map((r) => r.seq));
+  const hit = checks.filter((r) => r.state === LINE.INTENT && r.mode === mode && r.seq < beforeSeq && passed.has(r.seq)).at(-1);
+  return hit?.snapshot ?? null;
+}
+
+/**
+ * The journal's `failureAt` of one failure: { loMhz, hiMhz, points, stepPoints } — `points` null when the curve is
+ * unknown (no snapshot: a stock check); the whole field null for a LOAD failure (its moment is not the failing one) or
+ * without a durable sample. `baseRows` = the last passed check's curve: the rows this check lowered against it join the
+ * points (bugs/146); `stepPoints` counts them. Only `points` reach the builder.
+ */
+export function attributeFailure({ samples, failure, rows = null, baseRows = null }) {
   if (!failure || failure.cls === FAILURE_CLASS.LOAD) return null;
   const span = failureSpan(samples, failure.atMs);
   if (!span) return null;
-  const points = failurePoints(rows, span);
-  return { ...span, points: points.length ? points : null };
+  const diff = stepDiffPoints(rows, baseRows);
+  const byMhz = new Map([...failurePoints(rows, span), ...diff].map((p) => [p.mhz, p]));
+  const points = [...byMhz.values()].sort((a, b) => a.mhz - b.mhz);
+  return { ...span, points: points.length ? points : null, stepPoints: diff.length };
 }
 
 /**
@@ -332,7 +371,10 @@ export function deathVerdicts(records, { readSamples = (p) => parseSamples(readF
     const last = samples.at(-1) ?? null;
     let rows = null;
     try { rows = rowsOf && intent.snapshot ? rowsOf(intent.snapshot) : null; } catch { rows = null; }
-    const failureAt = last ? attributeFailure({ samples, failure: { cls: FAILURE_CLASS.DEATH, atMs: last.ms }, rows }) : null;
+    // bugs/146: the base of the step — the last passed check of this mode before the dead one, from the same journal.
+    let baseRows = null;
+    try { const b = lastPassedSnapshot(records, intent.mode, intent.seq); baseRows = rowsOf && b ? rowsOf(b) : null; } catch { baseRows = null; }
+    const failureAt = last ? attributeFailure({ samples, failure: { cls: FAILURE_CLASS.DEATH, atMs: last.ms }, rows, baseRows }) : null;
     return {
       seq: intent.seq, mode: intent.mode, verdict: CHECK_VERDICT.FAILED,
       failureAt,
@@ -568,7 +610,10 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
   if (v.failure) {
     let rows = null;
     try { rows = seams.snapshotRows ? await seams.snapshotRows() : null; } catch { rows = null; }
-    failureAt = attributeFailure({ samples, failure: v.failure, rows });
+    // bugs/146: the curve of the last PASSED check of this mode before this one — the step's diff joins the points.
+    let baseRows = null;
+    try { baseRows = seams.baseRows ? await seams.baseRows(readJournal(journal).records, mode, intent.seq) : null; } catch { baseRows = null; }
+    failureAt = attributeFailure({ samples, failure: v.failure, rows, baseRows });
   }
   const why = rollback?.ok === false ? `${v.why} · ⚠️ ОТКАТ НЕ ПОДТВЕРЖДЁН: ${rollback.why}` : v.why;
   writeCheckVerdict(journal, { seq: intent.seq, verdict: v.verdict, failure: v.failure, failureAt, hits: hits.map((h) => ({ id: h.id, seconds: h.seconds })), at: atIso(), why });
@@ -683,6 +728,12 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
       if (!id || !L.loadSnapshot) return null;
       return L.loadSnapshot({ id })?.frequencies ?? null;
     },
+    // bugs/146: the rows of the last PASSED check of the mode before `seq` — the base the step's diff is taken against.
+    baseRows(records, mode, seq) {
+      const id = lastPassedSnapshot(records, mode, seq);
+      if (!id || !L.loadSnapshot) return null;
+      return L.loadSnapshot({ id })?.frequencies ?? null;
+    },
   };
 }
 
@@ -711,7 +762,7 @@ export function renderCheckReport(r) {
   L.push('## Вердикт', '', `**${VERDICT_WORD[r.verdict.verdict] ?? r.verdict.verdict}** — ${r.verdict.why}`);
   if (r.verdict.failure) L.push('', `Первый сбой: ${r.verdict.failure.cls} · полоса ${band(r.verdict.failure.band)} · ${hms(r.verdict.failure.atMs)} · ${r.verdict.failure.why}`);
   if (r.verdict.failure) L.push('', r.failureAt?.points
-    ? `Отказ приписан частотам **${spanText(r.failureAt)}** (выданные за ${FAILURE_ATTRIBUTION_WINDOW_MS / 1000} с до сбоя): точек пола ${r.failureAt.points.length}, напряжения снимка ${r.failureAt.points[0].voltageMv}…${r.failureAt.points.at(-1).voltageMv} мВ — построитель поднимет их окрестность`
+    ? `Отказ приписан частотам **${spanText(r.failureAt)}** (выданные за ${FAILURE_ATTRIBUTION_WINDOW_MS / 1000} с до сбоя)${r.failureAt.stepPoints ? ` и **${r.failureAt.stepPoints} строкам, опущенным шагом** против последней пройденной проверки режима` : ''}: точек пола ${r.failureAt.points.length}, напряжения снимка ${r.failureAt.points[0].voltageMv}…${r.failureAt.points.at(-1).voltageMv} мВ — построитель поднимет их окрестность`
     : r.failureAt ? `Отказ частотам ${spanText(r.failureAt)} НЕ приписан — кривая снимка неизвестна; действует храповик полосы`
     : r.verdict.failure.cls === FAILURE_CLASS.LOAD ? 'Отказ частоте НЕ приписан — сбой нагрузки, его момент — конец ступени; действует храповик полосы'
     : 'Отказ частоте НЕ приписан — долговечной пробы нет; действует храповик полосы');
@@ -1114,6 +1165,24 @@ export async function selfTest() {
     const dv = deathVerdicts(deathRecs, { readSamples: () => fw, rowsOf: (id) => (id === 'snapX' ? rowsV : null) });
     check('УРОВЕНЬ ЧАСТОТЫ: СМЕРТЬ С ДОЛГОВЕЧНОЙ ПРОБОЙ ПОЛУЧАЕТ РАЗБРОС И ТОЧКИ СВОЕГО СНИМКА', dv[0]?.failureAt?.loMhz === 2865 && dv[0]?.failureAt?.points?.map((p) => p.mhz).join() === '2865,2880,2895'
       && deathVerdicts(deathRecs, { readSamples: () => [] })[0].failureAt === null, JSON.stringify(dv[0]?.failureAt));
+    // bugs/146 — the 17.10 case in miniature: the step lowered 2850/2900 against the last PASSED check (seq 1; the FAILED
+    // seq 2 is not a base, nor is another mode's pass), and the 2-s window holds only top samples (3000).
+    const recs146 = [I(1, 'optimised', 'snapPass'), V(1, CHECK_VERDICT.PASSED), I(2, 'optimised', 'snapBad'), V(2, CHECK_VERDICT.FAILED),
+      I(4, 'silent-cold', 'snapCold'), V(4, CHECK_VERDICT.PASSED), { ...I(5, 'optimised', 'snapStep'), telemetryPath: 'step.jsonl' }];
+    const snaps146 = { snapPass: [{ mhz: 2850, voltageMv: 880 }, { mhz: 2900, voltageMv: 895 }, { mhz: 3000, voltageMv: 970 }],
+      snapBad: [{ mhz: 2850, voltageMv: 860 }, { mhz: 2900, voltageMv: 875 }, { mhz: 3000, voltageMv: 970 }],
+      snapStep: [{ mhz: 2850, voltageMv: 870 }, { mhz: 2900, voltageMv: 885 }, { mhz: 3000, voltageMv: 970 }] };
+    const top = [S(0, 3000), S(500, 3000), S(1000, 3000)];
+    const base146 = lastPassedSnapshot(recs146, 'optimised', 5);
+    const withBase = attributeFailure({ samples: top, failure: { cls: FAILURE_CLASS.DRIVER, atMs: 1000 }, rows: snaps146.snapStep, baseRows: snaps146[base146] });
+    const noBase = attributeFailure({ samples: top, failure: { cls: FAILURE_CLASS.DRIVER, atMs: 1000 }, rows: snaps146.snapStep });
+    const dead146 = deathVerdicts(recs146, { readSamples: () => top, rowsOf: (id) => snaps146[id] ?? null });
+    check('УРОВЕНЬ ЧАСТОТЫ: СТРОКИ, ОПУЩЕННЫЕ ШАГОМ ПРОТИВ ПОСЛЕДНЕЙ ПРОЙДЕННОЙ ПРОВЕРКИ, — ТОЖЕ ПОД ПОЛОМ (bugs/146)',
+      base146 === 'snapPass' && lastPassedSnapshot(recs146, 'optimised', 1) === null
+      && withBase?.points?.map((p) => `${p.mhz}@${p.voltageMv}`).join() === '2850@870,2900@885,3000@970' && withBase.stepPoints === 2 && withBase.hiMhz === 3000
+      && noBase?.points?.map((p) => p.mhz).join() === '3000' && noBase.stepPoints === 0
+      && dead146[0]?.failureAt?.points?.map((p) => p.mhz).join() === '2850,2900,3000',
+      `база ${base146} · с базой ${JSON.stringify(withBase?.points)} · без ${JSON.stringify(noBase?.points)} · смерть ${JSON.stringify(dead146[0]?.failureAt?.points)}`);
     const floors = checkFailureFloors([
       { state: LINE.VERDICT, kind: CHECK_KIND, seq: 1, verdict: CHECK_VERDICT.FAILED, failure: { cls: 'driver-voice' }, failureAt: pts },
       { state: LINE.VERDICT, kind: CHECK_KIND, seq: 2, verdict: CHECK_VERDICT.FAILED, failureAt: { loMhz: 2900, hiMhz: 2900, points: null } },
