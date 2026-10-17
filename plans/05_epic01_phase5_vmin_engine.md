@@ -566,7 +566,7 @@ its purpose (EXP-0026).
 ### 4.6 — The margin: two named policies, and the owner's arithmetic goes to him 🔲
 
 *Anchor: `researches/02` §3 step 3 (guardband ≥ 4 grid steps AND ≥ 25 mV) vs `PROJECT_HISTORY.md` → «📦 AGENT_GUIDE "Notes
-from the human" до KAIF 2.8» (the owner's convergence loop: one minimal step above failure, whole-curve retest, ratchet).*
+from the human" до KAIF 2.8» <!-- KAIF-VERSION-OK: the name of a chronicle heading --> (the owner's convergence loop: one minimal step above failure, whole-curve retest, ratchet).*
 
 These two are not the same number and the collision is already recorded in the canon: *"the likely
 reconciliation is that his three numbers describe the SEARCH RESOLUTION while the guardband governs the

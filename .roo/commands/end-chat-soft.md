@@ -99,17 +99,18 @@ is bilingual, keep both languages in sync. Don't invent — reflect only what is
 
 ### Step 3. (Re)build / regenerate artifacts
 
-`<Run the project build and any artifact regeneration (e.g. a rendered README.pdf). For this framework's
-own project: `node tools/build-framework.mjs` regenerates KAIF.md, and `node tools/readme-pdf.mjs`
-regenerates README.pdf.>` If a build fails, stop and show the errors — don't commit broken state.
+KAGO: `npm run check` — the build gate (every `.mjs` parses, the encoding guard, the prayer's copies, the served
+dashboard page against its sources). If this chat's runs touched the sweep journal or a curve document, also
+`node tools/build-curve-map.mjs` and commit `assets/curve-map.html` with them (`AGENT_GUIDE.md` → the pairs registry).
+If a build fails, stop and show the errors — don't commit broken state.
 
 ### Step 4. Commit and push (judge first)
 
 Run a `/fable-judge` pass over this chat's finished claims before pushing (the canon: a judge pass
 precedes every push). Then:
 
-`<Use your commit tool/flow. If you have one (e.g. tools/commit.mjs that bumps build, adds, commits,
-pushes), run it. Otherwise: git add -A && git commit -m "..." && git push.>`
+KAGO has no commit tool: `git add <the declared set>`, then `git diff --cached --stat`, then `git commit -F <message file>`,
+then `git push` — each its own tool call, never chained (`AGENT_GUIDE.md` → Git workflow).
 
 Message style (from `AGENT_GUIDE.md`): `feat:` / `fix:` / `docs:` / `refactor:` / `ci:` + one line.
 End the message with your standard co-author trailer, e.g.:

@@ -152,7 +152,7 @@ export function runInFlight(nodeProcs, armed, isAlive) {
   // `bugs/64`, близнец `bugs/21` контуром выше: там уборка убила прогон, здесь — страницу
   // владельца (дважды за вечер, его слова: «опять закрылось само!!!!»). Мгновенные формы без
   // сервера и окна (`--no-serve`, `--selftest`) уборке не преграда.
-  // С KAIF 2.8 (plans/104) страницу держит ПОСТАВЛЯЕМЫЙ контур `.kaif/tools/contour/review.mjs`, входом — `tools/ask.mjs`, и
+  // С KAIF 2.8 (KAIF-VERSION-OK: версия прихода) (plans/104) страницу держит ПОСТАВЛЯЕМЫЙ контур `.kaif/tools/contour/review.mjs`, входом — `tools/ask.mjs`, и
   // страница живёт до последнего вопроса, через несколько моих ходов, — узнаём все три пути; сторож `--wait` ждёт владельца
   // так же. Мгновенные формы поставки (`--dry-run`, `--list`, `--search`, `--check`, `--help`) — тоже не преграда.
   // [TESTED: 2026-09-26 · блоки «bugs/64 на пути 2.8» ниже; мутация — убрать `ask|contour` из регулярки → блоки красные;
@@ -312,7 +312,7 @@ async function selfTest() {
     runInFlight([P(4, 'node tools/review.mjs doc.md --no-serve --no-signal')], null, alive).busy === false
     && runInFlight([P(5, 'node tools/review.mjs --selftest')], null, alive).busy === false);
 
-  // bugs/64 на пути KAIF 2.8 (plans/104): вход `tools/ask.mjs`, дочерний поставляемый контур и его сторож ответа.
+  // bugs/64 на пути KAIF 2.8 (KAIF-VERSION-OK: версия прихода) (plans/104): вход `tools/ask.mjs`, дочерний поставляемый контур и его сторож ответа.
   for (const [pid, cmd] of [[6, 'node tools/ask.mjs interviews/interview_031.md'],
     [7, 'node D:\\work\\ai_sandbox\\KAGO\\.kaif\\tools\\contour\\review.mjs interviews/interview_031.md'],
     [8, 'node tools/ask.mjs --wait interviews/interview_031.md']]) {

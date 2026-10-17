@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// tools/ask.mjs — KAGO's door to the owner-review contour of KAIF 2.8 (plans/104, researches/40).
+// tools/ask.mjs — KAGO's door to the owner-review contour KAIF ships since 2.8 (KAIF-VERSION-OK: arrival version) (plans/104, researches/40).
 //
-// Why a door and not a contour: KAIF 2.8 SHIPS the contour (`.kaif/tools/contour/review.mjs`) — answers saved one at a time
+// Why a door and not a contour: KAIF SHIPS the contour since 2.8 (KAIF-VERSION-OK: arrival version) (`.kaif/tools/contour/review.mjs`) — answers saved one at a time
 // with the page alive until its last question, the `--wait` waiter, the 409 on a rewritten document, the page at 1.7×, the
 // `--call` outside a page. This file adds exactly one thing the shipped contour takes from the environment only: OUR voice
 // (the owner's Silero «eugene» through `voice-say.mjs`), set for the child process alone, so KAGO does not depend on what a
@@ -40,7 +40,7 @@ export function contourEnv(env = process.env) {
 }
 
 const HELP = [
-  'tools/ask.mjs — вход KAGO в контур согласований KAIF 2.8 (plans/104).',
+  'tools/ask.mjs — вход KAGO в контур согласований KAIF (поставляется с 2.8; plans/104).' /* KAIF-VERSION-OK: версия прихода */,
   'Передаёт все аргументы поставляемому контуру .kaif/tools/contour/review.mjs и даёт ему голос KAGO',
   '(KAIF_VOICE_TOOL = ' + VOICE_TOOL + ', KAIF_VOICE = ' + VOICE + ') — только своему дочернему процессу.',
   '',

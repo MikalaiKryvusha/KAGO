@@ -1,6 +1,6 @@
 # Bug 144 — на странице вопросов выбор (радиокнопка) не снимается повторным касанием
 
-**Status:** 🔴 open — the fix belongs upstream: KAGO's page IS the shipped KAIF 2.8 contour since `plans/104`; origin **#128**
+**Status:** 🔧 fix delivered by the KAIF 2.9 update (2026-10-17, `review.mjs:872`, epic CP; contour `--selftest` 138 checks green — it does not simulate a tap) — `[NOT-TESTED]` until the owner's tap on a live page clears a chosen option. Was: 🔴 open — the fix belongs upstream: KAGO's page IS the shipped KAIF 2.8 contour since `plans/104`; origin **#128**
 (filed by NDim Space the same day, with the same symptom) carries KAGO's +1 with the owner's words
 (`…/issues/128#issuecomment-5846727975`). Arrives with the KAIF update that fixes #128; then verified by a tap on a live page.
 **Severity:** S3 — no answer lost (the owner recorded Q1 = A, Q2 = A); a wrong choice cannot be taken back by a second tap, only

@@ -67,7 +67,7 @@ const EXCLUDED_DIRS = new Set([
 //
 // THIS IS THE SHAPE THE PROJECT ALREADY USES FOR THE SAME PROBLEM: the stamp guard «scopes itself by
 // the stamp's OWN date — stamps dated before the adoption stay silent without any baseline file to
-// maintain» (`AGENT_GUIDE.md` until KAIF 2.8; since 2.8 this clause lives in `.kaif/KAIF_REFERENCE.md` §17 →
+// maintain» (`AGENT_GUIDE.md` until KAIF 2.8; since 2.8 this clause [KAIF-VERSION-OK: history] lives in `.kaif/KAIF_REFERENCE.md` §17 →
 // «`AGENT_GUIDE.md` → The storefront — text a stranger reads», the guide keeps the short rule). Scope, not a suppression list: nothing has to be kept up to date.
 //
 // Measured before/after on 2026-08-23 17:2x: axis G1 went 8 findings → 6, and the two that left were
