@@ -1,7 +1,7 @@
 # Plan 108 — ❄️ Silent Cold: the frequency ceiling over the Optimised curve, chosen by the fan on the PLATEAU (40…50 %)
 
-> **Created:** 2026-10-17 18:2x (session 110) · **Parent:** `plans/101_EPIC…` (Ф3) · **Status:** 🔲 planned; the card part with the
-> owner · **Outbound:** —
+> **Created:** 2026-10-17 18:2x (session 110) · **Parent:** `plans/101_EPIC…` (Ф3) · **Status:** ✅ Ш1–Ш3 2026-10-17 20:40 (session 111): cap 2205, plateau fan 48 %, РЕЖИМОВ ПРОВЕРЕНО 4/4; Ш4 — the
+> comparison table vs stock (owner 20:3x) · **Outbound:** —
 
 ## Goal vector (Achieve)
 
@@ -35,12 +35,12 @@ flowchart TD
 
 ## Steps
 
-- [ ] **Ш1. Check at the draft's cap 2797** (the owner present, under the KUMM lock): `npm run validate -- --step --mode silent-cold
+- [x] **Ш1. Check at the draft's cap 2797** (the owner present, under the KUMM lock): `npm run validate -- --step --mode silent-cold
   --band-margins 0,0,0,-10,-10,-10,10 --minutes 4` — the candidate inherits the profile's `curveCapMhz` (verify in the dry run that
   the cap lands in the candidate: `--dry-run` first).
-- [ ] **Ш2. Qualify and apply**: profile → snapshot, stamp 617.42, `qualified: true` (the fan criterion is still open — the
+- [x] **Ш2. Qualify and apply**: profile → snapshot, stamp 617.42, `qualified: true` (the fan criterion is still open — the
   evidence says so), ❄️ shortcut, two reads.
-- [ ] **Ш3. Fan plateau**: `npm run gfx -- --capture --label silent-2797 --profile silent-cold --runs <≈12 min>` → `thermal --analyze
+- [x] **Ш3. Fan plateau**: `npm run gfx -- --capture --label silent-2797 --profile silent-cold --runs <≈12 min>` → `thermal --analyze
   silent-2797`. Fan > 50 % → C lower and back to Ш1; < 40 % → C higher; 40…50 % → done.
 - [ ] **Ш4. Close**: metric 4/4, area frames unchanged (the curve is the same), benefit table needs the stock 4-min check on 617.42.
 
@@ -55,3 +55,23 @@ flowchart TD
 
 ≈ 20 min of the card per ceiling tried (4-min check + ~12-min plateau), 1–3 ceilings → 20…60 min with the owner. Closes the project's
 acceptance «4/4» (the week of use aside).
+
+## Execution log — 2026-10-17, session 111
+
+| moment | ceiling | check (4 min) | under Q2RTX | outcome |
+|---|---|---|---|---|
+| 20:03 | 2797 | FAILED — stall at 2737 (226 → 58 W), driver reset; floors misattributed to 2805 → `bugs/151`, fixed + journal correction | — | curve 4215c7 → d5b12a (2737…2797 +10 mV) |
+| 20:10 | 2797 | PASSED (`runs/validate/2026-10-17T20-10-20`) | 2715 MHz, 248 W (power cap), fan 60–65 % rising | ceiling does not bind — too high |
+| 20:15 | 2452 | PASSED (`…T20-15-51`) | 2452 MHz, 218 W, fan 52 % rising | too high |
+| 20:21 | 2205 | PASSED (`…T20-21-32`) | 2227 MHz, 187 W, fan ≤ 45 % | qualified, shortcut 20:27 |
+| 20:27–20:40 | 2205 | plateau capture 60 runs (`runs/graphics/silent-2205.json`) | **plateau 62 °C · fan 48 % · 180 W** · 2212 MHz · 47.7 FPS | ✅ in 40…50 % |
+
+The estimate «power ∝ f·V² from stock anchors» predicted 191 W at 2452 and was wrong (218 W measured): on this curve the Q2RTX
+power is close to linear in the delivered clock (218 W @ 2452 · 187 W @ 2212). Use measured points, not the V² model, to pick caps.
+
+## Decisions made without the owner
+
+- `[AI]` ceilings tried 2797 → 2452 → 2205 (estimates named in chat before each run); 2205 kept at fan 48 % — the upper part of
+  40…50 % = the most performance under the limit; going up one rung (≈ +5 W) risks crossing 50 %.
+- `[AI]` the ceiling is held by the curve only (bound stays 180…3090): the card delivers up to two grid rungs above it (2212…2227
+  at 2205) as the factory table slides with temperature — measured, inside the fan criterion.
