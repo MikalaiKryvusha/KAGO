@@ -1,7 +1,9 @@
 # Bug 146 — two check failures were attributed to the top band (2985…3082 MHz) while the step had changed only 2800–2900 MHz
 
-**Status:** 🔧 FIX PENDING LIVE WITNESS — fix plan items 1 and 3 done in code 2026-10-17 15:48 +03:00 (session 109, offline):
-the rows the step lowered join the attribution; item 2 (correction lines for the two wrong top floors) is NOT built. Found
+**Status:** 🟡 PARTIAL — items 1 and 3 done in code 2026-10-17 15:48 +03:00 (session 109) and **witnessed live 15:52**: the
+smoke 0,0,0,−10,−20,−10,−10 failed again (driver reset, window 3082 MHz only) and the verdict floored the 5 rows the step
+lowered, 2850…2895 MHz at 865…875 mV, besides 3082 @ 1000 (journal seq 23, `runs/validate/2026-10-17T15-51-50/report.md`).
+Item 2 (correction lines for the two wrong top floors of 17.10) is NOT built. Found
 live 2026-10-17 14:17–14:21 (session 108, the owner at the machine); no harm to the curve's safety (the wrong floors raise
 voltage), harm to the method: level 3 raised the wrong rows twice and the third smoke failed again.
 **Severity:** S2 — two driver resets (`nvlddmkm` 153, the machine recovered by itself) spent on a misread.

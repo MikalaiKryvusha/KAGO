@@ -43,3 +43,18 @@ rollback confirmed — pass; (d) shortcut — the card reads 61 non-zero offsets
 ## Verdict
 pass — Optimised re-validated on 617.42 and on the shortcut; bugs/146 items 1 and 3 done offline, the live witness of the
 new attribution waits for the next descent of 2800–2900 with the owner at the machine.
+
+## Addendum — 15:51–16:05, the deepening smoke and what it found
+
+- **Run:** 15:51:50 `npm run validate -- --step --mode optimised --band-margins 0,0,0,-10,-20,-10,-10 --minutes 0.5` (WRITES TO
+  THE GPU), the owner at the machine. **Verdict: FAILED** — driver reset (`nvlddmkm` 153) 12:52:07Z in the first Q2RTX pass,
+  37 resets to 12:55:53Z, the screen hung ~4 min, the machine survived; Q2RTX hung in the driver and left a crash report.
+- **Checks:** the new attribution floored the 5 rows the step lowered (2850…2895 MHz @ 865…875 mV) plus 3082 @ 1000 — the live
+  witness of `bugs/146` item 1 — pass. The rollback waited for the hung game (killed by the agent ~15:56) and was not confirmed
+  («nvidia-smi не ответил»); the card read factory at 15:57 and 15:59 (0 offsets, 300 W), driver silent since 15:56; ⚖️ Optimised
+  re-applied 15:59 by the shortcut (61 offsets, 250 W, 0 above 3090) — pass.
+- **Found:** `bugs/147` (the game stage inherited a 900-s timeout — fixed: 63 s / 261 s by passes, MV20); the metric printed
+  1/4 after the failed candidate (a check of another curve demoted the mode — fixed, MV21; the live line reads 2/4 again).
+- **Hygiene:** validate selftest 60/60; control 60/60; MV18–MV21 each red on its own block alone.
+- **Traces:** `runs/validate/2026-10-17T15-51-50/` · journal seq 23 · `curves/battle/2026-10-17T15-51-50.json` · `bugs/147_…md`.
+- **Verdict:** partial — the band 2800–2900 has its edge at −20 on 617.42 (three failures over two drivers); Optimised stays on −10.

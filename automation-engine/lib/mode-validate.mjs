@@ -39,6 +39,9 @@
 //   bugs/146 (2026-10-17, session 109):
 //   MV18 attributeFailure ignores `baseRows` (the window alone, as before) → «УРОВЕНЬ ЧАСТОТЫ: СТРОКИ, ОПУЩЕННЫЕ ШАГОМ…»
 //   MV19 lastPassedSnapshot takes the last check of the mode, passed or not → the same block
+//   bugs/147 (2026-10-17, session 109):
+//   MV20 the game stage drops its own timeout (inherits 900 s again)   → «НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА…»
+//   MV21 modesValidated counts the last check of ANY curve (the first edition) → «МЕТРИКА: УПАВШАЯ ПРОВЕРКА КРИВОЙ-КАНДИДАТА…»
 //
 // [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
@@ -641,6 +644,17 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
 // Loaded lazily: nothing of this reaches `curve --progress` or the selftest's import graph.
 
 export const DEMO_PASS_S = 11;        // one Q2RTX demo pass, measured 10.6–14.2 s in runs/graphics/exp0914_*.json
+// bugs/147 (2026-10-17 15:52, session 109): the game stage inherited `config.Q2RTX_LAUNCH_TIMEOUT_MS` = 900 s. A driver reset
+// inside the first demo pass left Q2RTX hung in the driver; the stage — and with it the rollback in `finally` — waited ~6 min
+// while 37 resets (`nvlddmkm` 153) hit the card under the candidate. The stage now ends at its OWN measured size: the game
+// stages of the 17.10 checks took 15.7 s for 1 pass and 81.5…88.8 s for 7 (≈ 12 s a pass with the launch,
+// runs/validate/2026-10-17T1{4-08-57,4-15-58,4-22-08,5-36-44}/result.json) → × 3 + 30 s: 63 s for a smoke, 261 s for 7 passes.
+// `runTimedemo` resolves on the timeout even when the hung process cannot be killed, so the rollback runs.
+// [NOT-TESTED] on the card — hygiene: block «НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА…», mutation MV20.
+export const GAME_STAGE_TIMEOUT_FACTOR = 3;
+export const GAME_STAGE_TIMEOUT_SLACK_S = 30;
+/** The game stage's timeout for `runs` demo passes, ms. */
+export const gameStageTimeoutMs = (runs) => (runs * DEMO_PASS_S * GAME_STAGE_TIMEOUT_FACTOR + GAME_STAGE_TIMEOUT_SLACK_S) * 1000;
 export const TRANSITIONS_LEVEL = 1;   // [AI] a mid furnace level for the load/idle steps (0 = strongest, 3 = weakest)
 const SAMPLER_PAD_S = 120;            // the sampler outlives the mix: a death after the last stage must still be sampled
 
@@ -696,7 +710,8 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
       try {
         if (stage.kind === MIX_STAGE.IDLE) { await L.sleep(stage.seconds * 1000); return { ok: true, endedAtMs: L.nowMs() }; }
         if (stage.kind === MIX_STAGE.GAME) {
-          const run = await L.runTimedemo({ runs: Math.max(1, Math.ceil(stage.seconds / DEMO_PASS_S)) });
+          const runs = Math.max(1, Math.ceil(stage.seconds / DEMO_PASS_S));
+          const run = await L.runTimedemo({ runs, timeoutMs: gameStageTimeoutMs(runs) });
           const ok = run.exitCode === 0 && !run.timedOut;
           return { ok, why: ok ? `FPS ${run.stats?.median ?? '—'}` : `игра: код ${run.exitCode}${run.timedOut ? ', таймаут' : ''}`, endedAtMs: L.nowMs(), fps: run.stats?.median ?? null };
         }
@@ -848,14 +863,20 @@ export function modesValidated(records, { profiles = [], modes }) {
   const checks = checkRecords(records);
   const verdicts = new Map(checks.filter((r) => r.state === LINE.VERDICT).map((r) => [r.seq, r]));
   const byMode = new Map(profiles.filter((p) => p && typeof p === 'object').map((p) => [p.mode, p]));
+  // ✏️ 2026-10-17 16:0x (session 109): «the LAST check of the mode» let a FAILED smoke of a CANDIDATE curve (a deepening step
+  // that did not take) demote the mode standing on its own, passed snapshot — the line printed 1/4 over an Optimised that had
+  // passed on 617.42 twenty minutes earlier. A check of another curve proves nothing about this one, in either direction:
+  // the verdict counted is the last one OF THE CURVE THE PROFILE STANDS ON; `last` still reports the latest check of any curve.
   const last = {};
+  const lastOnCurve = {};
   for (const i of checks.filter((r) => r.state === LINE.INTENT)) {
     const v = verdicts.get(i.seq);
-    if (v) last[i.mode] = { verdict: v.verdict, snapshot: i.snapshot ?? null, margins: i.margins ?? null, at: v.at ?? null };
+    if (!v) continue;
+    last[i.mode] = { verdict: v.verdict, snapshot: i.snapshot ?? null, margins: i.margins ?? null, at: v.at ?? null };
+    if ((i.snapshot ?? null) === (byMode.get(i.mode)?.settings?.curveSnapshot ?? null)) lastOnCurve[i.mode] = last[i.mode];
   }
-  const passed = modes.filter((m) => last[m]?.verdict === CHECK_VERDICT.PASSED
-    && (last[m].snapshot ?? null) === (byMode.get(m)?.settings?.curveSnapshot ?? null));
-  return { passed, total: modes.length, last, open: orphanIntents(checks).length };
+  const passed = modes.filter((m) => lastOnCurve[m]?.verdict === CHECK_VERDICT.PASSED);
+  return { passed, total: modes.length, last, lastOnCurve, open: orphanIntents(checks).length };
 }
 
 /**
@@ -883,7 +904,8 @@ export function lastBootLine(text) {
 
 /** The metric line — first line of `npm run curve -- --progress`. */
 export function renderValidatedLine(v) {
-  const margins = Object.entries(v.last).filter(([, x]) => Array.isArray(x.margins))
+  // The margins of the curve the mode STANDS on (session 109); a mode with no check of its own curve falls back to its latest.
+  const margins = Object.entries({ ...v.last, ...(v.lastOnCurve ?? {}) }).filter(([, x]) => Array.isArray(x.margins))
     .map(([m, x]) => `${m} ${x.margins.map(signedMv).join('/')}`);
   return `РЕЖИМОВ ПРОВЕРЕНО ${v.passed.length}/${v.total}${v.passed.length ? ' (' + v.passed.join(' · ') + ')' : ''}`
     + ` · запас по полосам: ${margins.length ? margins.join(' ; ') : 'проверок ещё не было'}`
@@ -1052,6 +1074,13 @@ export async function selfTest() {
       ap.ok && rb.ok && st.every((x) => x.ok) && log.includes('sampler 206s') && log.includes('apply consent=true curve=snapX') && log.includes('reset lock=3090 backend=true')
       && log.filter((x) => x === 'timedemo runs=2').length === 2 && log.includes('stress transient A1 20s') && ['L3', 'L2', 'L1', 'L0'].every((l) => log.includes(`stress level ${l} 5s`)) && log.at(-1) === 'sampler killed',
       log.join(' | '));
+    // bugs/147: the game stage passes its OWN timeout (a hung game after a driver reset must not hold the rollback 15 min).
+    const tmo = [];
+    const tSeams = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, runTimedemo: async ({ runs, timeoutMs }) => { tmo.push(`${runs}:${timeoutMs}`); return { exitCode: null, timedOut: true, stats: null }; } } });
+    const g1 = await tSeams.runStage({ kind: MIX_STAGE.GAME, label: 'игра', seconds: 5 });
+    const g7 = await tSeams.runStage({ kind: MIX_STAGE.GAME, label: 'игра', seconds: 77 });
+    check('НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА СВОИМ ТАЙМАУТОМ (1 проход — 63 с, 7 — 261 с), ТАЙМАУТ — СБОЙ СТУПЕНИ (bugs/147)',
+      tmo.join() === '1:63000,7:261000' && g1.ok === false && /таймаут/.test(g1.why) && g7.ok === false, `${tmo.join(' ')} · ${g1.why}`);
     const throwing = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, apply: async () => { throw new Error('отказ до записи: stamp.driver'); } } });
     const factorySeams = await makeCardSeams({ profile: { settings: { curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null } }, totalS: 10,
       lib: { ...fakeLib, resolveProfileCurve: async () => null, apply: async (be, p, o) => { log.push(`factory apply backend=${Boolean(o.curveBackend)}`); return { steps: [] }; } } });
@@ -1134,6 +1163,11 @@ export async function selfTest() {
   const mv2 = modesValidated([I(1, 'optimised', 'snapB', [30, 30, 30, 30, 20, 30, 30]), V(1, 'passed')], { profiles: profs, modes: MODES });
   const line = renderValidatedLine(mv2);
   check('СТРОКА МЕТРИКИ: ЧИСЛО, ЗАПАС ПО ПОЛОСАМ И ЧЕСТНОЕ «НЕ ОТСЛЕЖИВАЕТСЯ»', line.startsWith('РЕЖИМОВ ПРОВЕРЕНО 1/4 (optimised)') && line.includes('+30/+30/+30/+30/+20/+30/+30') && line.includes('прибором не отслеживается'), line);
+  // Session 109: a FAILED check of a candidate curve after a pass of the mode's own curve demotes nothing, and its margins are not the mode's.
+  const mv3 = modesValidated([I(1, 'optimised', 'snapB', [0, 0, 0, -10, -10, -10, -10]), V(1, 'passed'), I(2, 'optimised', 'snapCand', [0, 0, 0, -10, -20, -10, -10]), V(2, 'failed')], { profiles: profs, modes: MODES });
+  const line3 = renderValidatedLine(mv3);
+  check('МЕТРИКА: УПАВШАЯ ПРОВЕРКА КРИВОЙ-КАНДИДАТА НЕ РАЗЖАЛУЕТ РЕЖИМ НА ЕГО ПРОЙДЕННОЙ КРИВОЙ; ЗАПАС — ЕГО КРИВОЙ',
+    mv3.passed.join() === 'optimised' && mv3.last.optimised.snapshot === 'snapCand' && line3.includes('optimised 0/0/0/−10/−10/−10/−10') && !line3.includes('−20'), line3);
   check('СТРОКА МЕТРИКИ НА ПУСТОМ ЖУРНАЛЕ — 0/4', renderValidatedLine(modesValidated([], { modes: MODES })).startsWith('РЕЖИМОВ ПРОВЕРЕНО 0/4 · запас по полосам: проверок ещё не было'));
 
 
