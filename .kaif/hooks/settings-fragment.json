@@ -1,5 +1,5 @@
 {
-  "_readme": "SAMPLE Claude Code hooks config for the optional KAIF refresh-hooks module (.kaif/hooks/README.md explains it). This file is NEVER applied automatically: KAIF does not edit your settings.json — wiring the hooks is an explicit opt-in step done by the project owner (or by the agent with the owner's quoted consent). Merge the `hooks` object below into .claude/settings.json (project) or settings.local.json (personal).",
+  "_readme": "SAMPLE Claude Code hooks config for the optional KAIF refresh-hooks module (.kaif/hooks/README.md explains it). Since 2.9 the install and update tasks wire it: `node .kaif/kaif-core.mjs wire-hooks` merges the `hooks` object below into .claude/settings.json additively (the owner's entries kept, a repeat run changes nothing); `\"hooks\": \"off\"` in .kaif/kaif.json opts out. By hand: merge the `hooks` object into .claude/settings.json (project) or settings.local.json (personal).",
   "hooks": {
     "SessionStart": [
       {
@@ -28,18 +28,6 @@
             "command": "node",
             "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/prompt-resume-word.mjs"],
             "timeout": 15
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PROJECT_DIR}/.kaif/hooks/pretool-owner-word.mjs"],
-            "timeout": 10
           }
         ]
       }

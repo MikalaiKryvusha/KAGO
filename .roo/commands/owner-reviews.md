@@ -95,7 +95,7 @@ raised in a batch next to a live question.
   unanswered, re-opening the page is the AGENT's duty, never the human's."* The first half stands;
   the conclusion is REVISED in 2.8 by the KAIF owner's word <!-- KAIF-VERSION-OK: the version the conclusion was revised in --> — answers are saved one at a time in every
   project, as on the field page he pointed to: the process that ends is a separate WAITER
-  (`review.mjs --wait <doc>`, exit 0 on each recorded answer, 2 when the contour ended without one or none came up within a minute), and
+  (`review.mjs --wait <doc>`, exit 0 on each recorded answer, 2 when the contour ended without one — its server dead counts, 2.9 — or none came up within a minute), and
   the page's server lives while anything on it is unanswered and ends with the last answer. Start
   both as tracked background tasks (I31); on each waiter exit apply the answer and start the waiter
   again while questions are left — re-opening a page the owner still has is never the agent's move.
@@ -226,7 +226,8 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   **Next to the page — the waiter (2.8, I8):** the same way, `node .kaif/tools/contour/review.mjs --wait <doc>` — it
   ends with exit 0 on each recorded answer (the page stays open while questions are left) and with 2 when
   the contour ended without one or none came up within a minute (2.8, court B-F1: it used to wait forever when the page had closed
-  before it started — start it BEFORE the page); apply the answer, start the waiter again while questions are left.
+  before it started — start it BEFORE the page); a KILLED page server leaves its lock (I29), and the waiter judges the lock's pid: dead →
+  exit 2 with «the page's server is gone — run --queue --list» (2.9, origin issue #125; before, it waited until someone ran the queue); apply the answer, start the waiter again while questions are left.
 
 **The call (I32–I36):**
 
@@ -351,7 +352,8 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   the owner's word on interview 032: "no choice, no 'save as' — everything works for the user as it did! JS
   itself writes the file to the computer, into the project folder".) The app window runs on
   `.kaif/contour-window/` (ignore-first before the first window; the three sign-in-off flags; `account_info`
-  checked after launch — EXP-0134), so the draft is on the owner's disk IN THE PROJECT; Save with the server gone
+  checked after launch — EXP-0134; a browser off the standard paths is named by the environment variable `KAIF_BROWSER` — it raises the
+  window and runs the answer recovery, 2.9), so the draft is on the owner's disk IN THE PROJECT; Save with the server gone
   stores the answer there — IndexedDB is the PRIMARY carrier (measured: on disk half a second after the write even when the
   browser is then killed; `localStorage` needs about six, so it only keeps a copy and the typed DRAFT) — and
   the page says "saved on this computer, the agent will pick it up", no dialog. The agent picks it up at the
@@ -363,7 +365,8 @@ die anyway, let it also die on a timer"* — that false symmetry is exactly what
   Only the app window promises the pick-up — the page OBSERVES it (`display-mode: standalone`); a page in a
   TAB lives in a browser profile the agent never reads, so there Save with the server gone takes I11's path:
   the rescue ring with the answer text, Copy and Retry, and no word about the agent (2.7, court finding D-F2).
-  Verified on Edge/Windows; Chrome, macOS and Linux take the same flags and are NOT verified — say so.
+  Verified on Edge/Windows; Chrome and macOS take the same flags and are NOT verified — say so. Linux is not supported: the window is not
+  raised there, the contour prints the URL.
 
 ## The named class: "handling the human's work"
 
@@ -383,15 +386,20 @@ Accepting a contour = walking this roster.
   state (waiting / answered): one detail carries two meanings — separates and informs.
 - **P2** — explicit state tags on every question: answered / unanswered / awaits you.
 - **P3** — fork options are RADIO INPUTS, ALWAYS: one radio per parsed option row (the canon's
-  two forms — a table row `| **A** | … |` or a list item `- **A)** …`) plus the free-variant
+  two carriers — a table row `| **A** | … |` or a list item `- **A)** …` with the table's letter vocabulary `A)` · `A:` · `A.` · `A (note):` · a bold
+  letter, 2.9 — a letter the door cannot read is named, exit 3) plus the free-variant
   field; options shown as prose are a question NOT shown — the field keeps re-paying this
   (agents render the A/B/C/D options as plain text and the human has nothing to click). Selection clearable
   by a second click (a native radio cannot return to "none").
   Field-corrected mechanics (pilot 2026-08-07 — the mousedown/click scheme still let the label
   duplicate the click, and the second click "cleared and instantly re-selected"): take the
-  activation over on `pointerdown` with `preventDefault` — the native label duplicate ceases to
-  exist by construction; a click on the FIELD toggles (the second click CLEARS), a click on the
-  label text selects but never clears; disabled inputs are skipped.
+  activation over on `pointerdown` with `preventDefault`, AND swallow the one `click` the same press
+  still produces (a capture listener, same label, within ~800 ms) — `preventDefault` on `pointerdown`
+  does NOT cancel that click, and it re-checked the radio: the owner met it in two projects (2.9, KAIF
+  issue #128); a keyboard click comes without a `pointerdown` and stays native. A click on the FIELD
+  toggles (the second click CLEARS), a click on the label text selects but never clears; disabled
+  inputs are skipped. Prove it with a REAL press (CDP mouse pressed+released, a touch tap) — a
+  synthetic `pointerdown` from page JS is half a press and passes where the owner's tap fails.
 - **P4** — no "who answers" question on a one-owner project; the server still stamps `by` —
   remove the QUESTION, not the RECORD, or the archive is unreadable months later.
 - **P5** — both OS themes via `prefers-color-scheme`, colors as variables, contrast measured in

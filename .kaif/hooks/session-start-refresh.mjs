@@ -30,9 +30,32 @@
 // Systems whose session-start event cannot inject at all (Windsurf, Cline) get no sample: see
 // .kaif/hooks/README.md. Unknown shape → treated as `claude`, never as silence.
 // [TESTED: 2026-08-07 · polygon s14: stdin JSON piped in → stdout order names the re-read core, the marker and the quote; length under the cap]
-import { readFileSync } from 'node:fs';
+//
+// 2.9, epic HK (origin bugs 120 no. 1, 119 no. 1, ticket #94): the order says what HAPPENED, by the event's `source` — `compact` →
+// "compacted" and trigger `compaction`, `clear` → "cleared" and `ritual:/clear`; `startup`, `resume`, any other value and an event
+// without the field → "(re)started" and `ritual:session-start` (the canon's trigger list is closed, its `ritual:` prefix is the open
+// door). Before, every source but `clear` was told "the context was just compacted" — a lie on each session start of the systems whose
+// sample wires no matcher (Cursor, Copilot). The marker is named by its FULL path in the project root.
+// [TESTED: 2026-09-28 · suite s14: startup, resume and an event without `source` - "(re)started" and ritual:session-start, compact
+//  from <root>/src/deep - "compacted", compaction and the root marker by its full path; red on v2.8; mutants M24-M25; report testcases/reports/2026-09-28_hk-hooks-project-root.md (origin repository)]
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 
 const OUTPUT_CAP = 10000; // Claude Code caps hook output strings at 10 000 characters
+const DEPLOYMENT = join('.kaif', 'kaif.json');  // the deployment marker: its directory IS the project root
+// source → [what happened, the trigger the agent stamps]; anything else → SESSION_START
+const WORDING = { compact: ['The context was just compacted', 'compaction'], clear: ['The context was just cleared', 'ritual:/clear'] };
+const SESSION_START = ['The session just (re)started', 'ritual:session-start'];
+
+// The project root, not the event's `cwd` — twin of prompt-refresh-timer.mjs (the reasoning is there).
+function projectRoot(cwd) {
+  for (let d = resolve(cwd); ;) {
+    if (existsSync(join(d, DEPLOYMENT))) return d;
+    const up = dirname(d);
+    if (up === d) return cwd;
+    d = up;
+  }
+}
 
 // One order string, four envelopes. Keeping this table next to the writer (rather than in a
 // shared lib) keeps the module at three self-contained scripts — a fourth file would have to be
@@ -48,23 +71,26 @@ try {
   const ei = argv.indexOf('--emit');
   const shape = ei !== -1 ? String(argv[ei + 1]) : 'claude';
 
-  let source = 'compact';
+  let source = '';   // unreadable event or no `source` field → the neutral wording: an unknown event is not a compaction (bug 120)
+  let cwd = process.cwd();
   try {
     // A leading U+FEFF is dropped before the parse (Windows PowerShell 5.1 puts it in front of any
     // string piped into a native command; RFC 8259 §8.1 lets a parser ignore it). Unstripped, a
     // `clear` event fell back to the default and ordered the WRONG trigger stamp — origin bug 119.
     const input = JSON.parse(readFileSync(0, 'utf8').replace(/^\uFEFF/, '') || '{}');
     if (input.source) source = String(input.source);
-  } catch { /* unreadable stdin — keep the default source label; the order still stands */ }
+    if (input.cwd) cwd = String(input.cwd);
+  } catch { /* unreadable stdin — the neutral wording; the order still stands */ }
 
-  // The trigger value the agent must stamp follows the ACTUAL event: a marker stamped
-  // "compaction" after a /clear would misreport why the refresh happened.
-  const trigger = source === 'clear' ? 'ritual:/clear' : 'compaction';
+  // The words and the trigger value follow the ACTUAL event: a marker stamped "compaction" after a
+  // /clear or on a plain session start would misreport why the refresh happened.
+  const [happened, trigger] = Object.prototype.hasOwnProperty.call(WORDING, source) ? WORDING[source] : SESSION_START;
+  const markerPath = join(projectRoot(cwd), '.kaif', 'refresh-marker.json');
   const order =
-    `KAIF context refresh (SessionStart:${source}). The context was just ${source === 'clear' ? 'cleared' : 'compacted'}: ` +
+    `KAIF context refresh (SessionStart${source ? ':' + source : ''}). ${happened}: ` +
     `what this session now remembers of the canon is a retelling, not the canon. BEFORE task work: ` +
     `(1) re-read the re-read core (tier 1 of the document taxonomy — see AGENT_GUIDE.md → "Context refresh"); ` +
-    `(2) stamp .kaif/refresh-marker.json { "at": "<ISO>", "docs": [...], "trigger": "${trigger}" }; ` +
+    `(2) stamp ${markerPath} { "at": "<ISO>", "docs": [...], "trigger": "${trigger}" }; ` +
     `(3) put the acceptance quote in the chat — one concrete line from what you re-read, relevant to the current task. ` +
     `A marker without the quote is fraud of the false-[TESTED] class (/fable-judge hunts it).`;
 

@@ -87,7 +87,6 @@
     ".kaif/tools/kaif-scenario-lint.mjs",
     ".kaif/tools/kaif-testrun-lint.mjs",
     ".kaif/tools/kaif-voice-lint.mjs",
-    ".kaif/hooks/pretool-owner-word.mjs",
     ".kaif/hooks/prompt-refresh-timer.mjs",
     ".kaif/hooks/prompt-resume-word.mjs",
     ".kaif/hooks/README.md",
@@ -260,20 +259,20 @@
     "CLAUDE.md"
   ],
   "shas": {
-    "AGENT_GUIDE.md": "ae6448da75278917dfd878de7dfd0ef64d3bfb2d92bbd469f4f74615e90ef774",
+    "AGENT_GUIDE.md": "68d5661183387e461882057b8444e7495df4824c3a2639f34ae4517fdd2d863e",
     "PHILOSOPHY.md": "3bbdc388a1885f107f1eecd42c6248ae42b15ac9d158a56f94dcbc313b907e30",
     "BUG_FIXING_FRAMEWORK.md": "fe494c4eec4ed4a4164e2eb460375554b9c76e9b71c92e083b5c4dfa79fc10a2",
     "TESTING_FRAMEWORK.md": "9846f2f6a00ca65cf3a940fba767fda29e5d835c8b5338e1017bd7aefda37be2",
     "REQUIREMENTS_FRAMEWORK.md": "5aca929236c1ef2b3d2b9d1387fe55ee3d024f38bc83bd36d304f188c7f166c1",
-    "STATUS.md": "0cfefb59b58279c6dd20be5a03eadc742b931cbb1738d76ca699b751068ac167",
-    "PROJECT_HISTORY.md": "7577493cb444d4e67cd5534e29434ad60dca2cd5430bced5394a656ad25d093e",
-    "EXPERIENCE.md": "687fa70c77872c09ff0adc7f3f6ab74fc50f1dd20c60b6ee9c24d7cc28db2181",
+    "STATUS.md": "6fe0309a2c581ea2c235301e2fc3bf1a57fd7c9800f201723edf49677a0d5c4e",
+    "PROJECT_HISTORY.md": "3b07bbe257da1db491a900939539db0a627d13ee444a0c26f43318a8ae65453d",
+    "EXPERIENCE.md": "4b3d10d520c40e8a1c947c1361bde8b104b31af545bfd68ec1c0fa131d97f134",
     "GOAL.md": "be9645176eaec98a2f00455fd509af2090e2fbf30e96a7ab0b2ba881439c0e05",
     "MASTER_PLAN.md": "f20344b0d69482663ac8c889c82149811cf346c25ac198280449ca4add715f13",
     "PROJECT_STRUCTURE_EXTERNAL_MAP.md": "1ba307004099f200826c92dc092316719f633b50a6b8c5a9787fb84545dc271a",
     "PROJECT_ARCHITECTURE_INTERNAL_MAP.md": "90da257f35dc7e7785275211109a7e18ed9bc2fdf2847f51187e73bec2dda1f2",
     "KAIF_FRAMEWORK.md": "f34ce24fb34b4b509ea32d5e8cadcfcebf271cc02ab7897a2d1cbf3194ee2984",
-    ".kaif/KAIF_REFERENCE.md": "85f01ce82bcb5925a3f982444e8047a321a84f47ebcaf54d0f1c632c31ecf659",
+    ".kaif/KAIF_REFERENCE.md": "8e990c5d0595d3d13451a7d7a01f6f9c5ead652c8221764b137678d83626ffc0",
     "plans/README.md": "602a383d0f913888207083c308769b4a6328b9e21b0ebd57fa02ffb2170d3d9d",
     "ideas/README.md": "3b347bdae725aa12b8c6b7583a098a3f17086d09ad79575d6105eb72387d6298",
     "bugs/README.md": "5ab0d5535b1821cbdb3e9151dc5d76ae2baad9fda6f31f1a81ed9ee7904e1759",
@@ -288,11 +287,11 @@
     ".claude/skills/code-revision/references/audit-report-template.md": "ee8c5b8df9704063ef2c2a211a894178a9531d0e36b8321cdf8ea2e2ec789c6b",
     ".claude/skills/dayloop/SKILL.md": "da68427302f0121a0f7a0df03cc1717065c550b1231a26a8119b7e5a9346bb42",
     ".claude/skills/derive-styleguide/SKILL.md": "53abfdea26673258e5845d9479bbfe631a67416aa437c1946dfa5e757680b27f",
-    ".claude/skills/end-chat-force/SKILL.md": "9d8727d75d889f4e3f0538a25e9e3837ac1d96501d46224a407d7e6855c580ed",
+    ".claude/skills/end-chat-force/SKILL.md": "dbac1b76b05c985f72163240ecb3987e198521c082052218b3d540687dce3db1",
     ".claude/skills/end-chat-soft/SKILL.md": "c0a2e0c421256224188c83fd544b654f1c854604458147dea966957b817d3d87",
-    ".claude/skills/experience/SKILL.md": "9d5372d26b19f8b3c0d7e03d6ba0ee3baf7f07105d8ed0b60adc8d2935548c89",
+    ".claude/skills/experience/SKILL.md": "6e8cfeb220a05188161715ef360467061c1651002c5248ab00cf870b6614adb5",
     ".claude/skills/fable-domain/SKILL.md": "2e91bd86140fc039fdd536b057bcb24e87827e50372d6de2a0952ca038d221bc",
-    ".claude/skills/fable-judge/SKILL.md": "cd6a0b2af4ea8de1a4624c6860318b1ceffb159cf10f8498386b99349d7980a9",
+    ".claude/skills/fable-judge/SKILL.md": "dac4c0bedfeadab2daff0baf75cf89bdf2904bcdeb2396088b294d428c3b180e",
     ".claude/skills/fable-loop/SKILL.md": "e67ea3e3138e2e72431809d62be4f8a25dfdf34e49a1d4493ff35ee92e2e2e8b",
     ".claude/skills/fable-method/SKILL.md": "35848193378669bfd6de4ee62ff3ea07b3012a1578160daeb080b158d1f106a3",
     ".claude/skills/fable-method/references/examples.md": "38164477dc5de3b98fb7167e8683c6eb2241b7aa54d802aabbed4154f24f38b3",
@@ -301,7 +300,7 @@
     ".claude/skills/fix-vision/SKILL.md": "3f7ae36d6a11d496e2b13a22fd85515f34f51f25f9e3b92bc602593ccc9b1fe8",
     ".claude/skills/guarded-loop/SKILL.md": "acc6a6e7f01df05fc594665ce2ac6019436ac2d6e1d4001a5c6fffc19f6bd067",
     ".claude/skills/help-kaif/SKILL.md": "fd952fe9dbcc451bc59f44bc0ba151c82f04c19436ca78d195829912c75ec508",
-    ".claude/skills/interview/SKILL.md": "6f8a6ef185b6b2f68f755fce41a5de504de7bc8cdd15c0c6c6ea268ce4b3bb27",
+    ".claude/skills/interview/SKILL.md": "f1ab8e69880390096694b4e77248d978fb443bcf01b749be545a7e2ede15af3a",
     ".claude/skills/kaif-fork/SKILL.md": "61823f1f02109ee9bde41d0194ada5a531577b636283d1e0fd3665fbff857268",
     ".claude/skills/kaif-go/SKILL.md": "34d5de31b6561e4cced3316bd6428f3cbaf238ea306ce6b313a565a23c30b2aa",
     ".claude/skills/kaif-remove/SKILL.md": "e99761fee6319d5958f30f2d3e3154bb406b3d07a9126b1fa85c554bdfd8de97",
@@ -309,16 +308,16 @@
     ".claude/skills/kaif-update/SKILL.md": "905328dc63f87703d892bf09c7860f6c0064775668205f264136ff14d6987cf7",
     ".claude/skills/kaif-version/SKILL.md": "cad4b700ac7b09ca42a2b49ff3d20ca266d104f5247aca8e4f01eccbcbd73cda",
     ".claude/skills/nightloop/SKILL.md": "8036695e61457b075517f6dd945e6db36a109f487dffe8d0c57b1c98f42059af",
-    ".claude/skills/owner-reviews/SKILL.md": "97586913f3e8fb07442a412d8c50faed323e5fddddc318a29ce50b9395317019",
-    ".claude/skills/owner-voice/SKILL.md": "9deba8d3fd7342188de426360067518cd22e62196ed380b81571d28db9132593",
+    ".claude/skills/owner-reviews/SKILL.md": "bbc7f65840750162a897065d3f99e2c12093104295bc7ad41650803c870624b3",
+    ".claude/skills/owner-voice/SKILL.md": "dfec565b7baa768675b175b5417970215f6d0346f2b489983884797da81b2172",
     ".claude/skills/pause/SKILL.md": "92878a5fb9bf46a682635d64feec8af9250d8b60339bc008e8f8342b65a2b696",
     ".claude/skills/plan-epic/SKILL.md": "de558f44647c2a5f3ddc955e1d8164c19698596982f56dd55a64319907182ad4",
     ".claude/skills/plan-task/SKILL.md": "fe62c093467b5c034c9a5cc78f938141977e579232c590b1ac977c3126dbd127",
     ".claude/skills/propose-idea/SKILL.md": "53f0cdc91dd05d96516cc52a65c10d015eb336d75adc490a6762634d5d45c055",
-    ".claude/skills/refresh-context/SKILL.md": "c8468c0626e70c0339de7a15b444d13afbbe9f534da8230ac9d68fb779c8c9ca",
-    ".claude/skills/release/SKILL.md": "9a94a76693ba8e416b6cb4837616b8ad315382823367f8c408bfa2c48bf684c1",
+    ".claude/skills/refresh-context/SKILL.md": "5024fb893e5e8669b9c3bf594c80c75a8bc9227afcb489b764527a56354c4d51",
+    ".claude/skills/release/SKILL.md": "601ce94e175bbe03559857935530d1b2eda30c6e9e42fea2e8d6e78aa9c0175f",
     ".claude/skills/report-bug/SKILL.md": "ed4f7b0d671536768e3dc27a2cf813c76585614162bd757cecea8e9ef69fdd25",
-    ".claude/skills/resume/SKILL.md": "6c8d761de9d37e93b434bed0170306cdd31979ec9d63d8d46ca6041fc711359c",
+    ".claude/skills/resume/SKILL.md": "2563c312e4c41c493ffde19a782dc016aea631ca2fd2abedbbdaa030511ad5a0",
     ".claude/skills/revision/SKILL.md": "7b1a378e823786c31c52d2e8f62ebdc7314e9d0981639c923729e3b1705b1913",
     ".claude/skills/team-deployment/SKILL.md": "5069708075a8f107bfed093c8b287888c4f8e8a693fdcca869cc0109739765e6",
     ".claude/skills/team-deployment/references/team-adopt.md": "eb3b99da9270d81fea136764d5eb6a72ec6b97844b1dafac01afd3dba35ce63c",
@@ -333,36 +332,35 @@
     ".kaif/spheres/science.md": "3503ce14dc18bf411796ff5eedd99e6c3357ba3e87157d9a5a771ffe8a2b91a7",
     ".kaif/spheres/_index.md": "35a6421771f9c0fb349f69649be5e517eab7d44b74a193a5d63960bc6ae580bc",
     ".kaif/spheres/_template.md": "0e534621241f8a729071ce08201caddd20cf5b87687db130cd583d2518f69f5f",
-    ".kaif/tools/contour/core.mjs": "68e1b75e9ef61b98cdef198f8ba4cb8effc68cbf9db31c989617d46effab6304",
-    ".kaif/tools/contour/review.mjs": "183910b9b843a0fd0b4bf22899b512f3674cb1464fc0ffdba128a0f0d5a351b1",
-    ".kaif/tools/contour/texts.mjs": "7a62877a07349f68259b60e694fce3f9a4d0c85ecb7edb19bde51984857b6cbb",
-    ".kaif/tools/kaif-attribution-lint.mjs": "585a9f7c227b179e97eab44f9f2c878dc350c4a7211b2411890fceb7de1c94f4",
+    ".kaif/tools/contour/core.mjs": "2bd42c280d547dbb429ab401ba599419a8d0a3fce3af760f326f98031122970d",
+    ".kaif/tools/contour/review.mjs": "66d1151bb736cc3604a70a913d013003a4e417b19a454c4abc21aabf09234704",
+    ".kaif/tools/contour/texts.mjs": "909da50090668150b82f67d54c2ac1ae8f46de60f236ac9fa4db581c5be21c20",
+    ".kaif/tools/kaif-attribution-lint.mjs": "885eb4d22bdbed9d8a82753863df916c69a29250df2efb5b5caf5557774c7d9f",
     ".kaif/tools/kaif-canon-lint.mjs": "4c973c41b1b04d66c5ea4676d5fe0e8bb5b82830054ee0f5cf1d7f60bafff8f5",
-    ".kaif/tools/kaif-experience-lint.mjs": "c94af1f843134859eccd6c2efea6affcf4c068bf4a37014233ceb2ba80447720",
+    ".kaif/tools/kaif-experience-lint.mjs": "22bd5925ffd89c69a4de8afd12d31555390758d36b957577e48d94e5dc3b08d0",
     ".kaif/tools/kaif-guard-lint.mjs": "cc050d721be52a71031b1a8c23532212d22f0307d4c3211a0ae31aaf3c23ab0e",
     ".kaif/tools/kaif-provenance.mjs": "d2563cd3ded94573a8a7a40ad8574ade892459b97ddf6db88cd25b52a45c787e",
     ".kaif/tools/kaif-ranking-lint.mjs": "9cdb757cafdf0a1969637aaf5eabf3b73c11254380421179ad11f61ee42f9b66",
     ".kaif/tools/kaif-requirements-lint.mjs": "6971b9d284446a9f5f83f2aab5b9ef4ba485c9eb1eb6b61ec5da1d9966fa3c14",
     ".kaif/tools/kaif-scenario-lint.mjs": "0996fc1e6fd4c29aee45d928a33187dd8f47a23bb7480280c8ab86b8a0c84546",
-    ".kaif/tools/kaif-testrun-lint.mjs": "5f4f9442abcce31a320ae281b567d50db3a8473102fc90cf1d51d30ca1e9f427",
-    ".kaif/tools/kaif-voice-lint.mjs": "c9a7a8c456f220930a5d7e3d389b2196d794b2d5f3e37aac2bf006f97956f498",
-    ".kaif/hooks/pretool-owner-word.mjs": "fdceea9ea8efc9ec43435d9bd76e1ac9f1ede7712e9383d15e977ba456a17e65",
-    ".kaif/hooks/prompt-refresh-timer.mjs": "e0614691f8eb1e9e962b5a50db4b87b7813e89dd3a1f7d502f92e40f6af0ba34",
-    ".kaif/hooks/prompt-resume-word.mjs": "9918d37095e9b021a391fb13f51a0129b84003c748dc35087e40c7e82006041b",
-    ".kaif/hooks/README.md": "5587227b4d623305c1a97fdb95ef8a0e2a517e23dfd42905c25446e666ca623d",
-    ".kaif/hooks/sample-antigravity-hooks.json": "b9e7b5e8f4c88cf69c7cef3051428ada49eb39a028e9e715ac49fde028040f50",
-    ".kaif/hooks/sample-codex-hooks.json": "0574ca353d79d916426f40a93a5339e5baf89ccd7ca940f7aa780cf07a999789",
-    ".kaif/hooks/sample-copilot-hooks.json": "0270b90873e6335f393a8d48dc122b42cf9c21bae3e7e22c120974551fef2a56",
-    ".kaif/hooks/sample-cursor-hooks.json": "2bedba79743d0479bca70294b1b71b0676ab54222bc4af04a0d1aec2bfaa48ea",
-    ".kaif/hooks/session-start-refresh.mjs": "8cadb6cbc900e82206d231043d9da9658b8a8057fbfef03b19ef51bdaf5b023d",
-    ".kaif/hooks/settings-fragment.json": "05c1fbf8ae790491966c7eb973771da83c268e59dc0a585c38a5a242ce2190da",
-    ".kaif/hooks/stop-status-guard.mjs": "71cfd64e5ee4005b0bfe75509753a543b28019c6bbec1c320b508ff31eafd130",
+    ".kaif/tools/kaif-testrun-lint.mjs": "90f77761f34087916e1ed0841c6d25e7ae984978a13059dd80862c08c8c6c269",
+    ".kaif/tools/kaif-voice-lint.mjs": "27cf0acfa2dad7c2b9673b5b64031f91f42fafaf4e26d9e055fe4c1cfb234405",
+    ".kaif/hooks/prompt-refresh-timer.mjs": "fafe30549c6f79cf92d28cc5a76bf0fe119fdd5c8575d89424ea2db5c2743bd7",
+    ".kaif/hooks/prompt-resume-word.mjs": "8173794ff48ed1bc0c2f7e32e8c93be3166423aa087e5a1bbaaddf7753480b1a",
+    ".kaif/hooks/README.md": "7d13c2a9e267aed1bc8359f63cba28b26b6251327cf5c0a5d89e631d5af93c48",
+    ".kaif/hooks/sample-antigravity-hooks.json": "d12375900f4c646b74b7dd2961bea068116d6f7b3403a237ee85196aab035450",
+    ".kaif/hooks/sample-codex-hooks.json": "dbb1766c7334b57eb95880f102d2e8d149db8bf59fba008152e2d58062ade24e",
+    ".kaif/hooks/sample-copilot-hooks.json": "b4b51ca2ed76584e691f929142ba58342637859390378f71314cf96485068dde",
+    ".kaif/hooks/sample-cursor-hooks.json": "b2c05e4f8680f9d4e7756449b2b990efcba5b7277bb439451b074dbe611b6da8",
+    ".kaif/hooks/session-start-refresh.mjs": "917a84e2359f6c8e23dbc83b7bbe3eb7226e7f414ee38551192b550b5831a89d",
+    ".kaif/hooks/settings-fragment.json": "13c2a9e356f77229ca310f799b14066f803ce0555df915425220c8a749f6415c",
+    ".kaif/hooks/stop-status-guard.mjs": "1875b4987d22c0e23e3f20ed4c656c1ff4c19d8c52830351bf9249dc1180031a",
     ".kaif/_owner-voice-template.md": "902a78ed54a02b6c1daf532595b74f9014c7c36e6c7406239915ac6b100d0429",
     ".kaif/_testcases-template.md": "7ce3a4168efa47fe1313bc33426d55121c7a5b34f0fc9298d35d46ef36bf39d7",
     ".kaif/_testrun-report-template.md": "e7073cf97c995730f8daee900c6d6027838cc410069054dfdf31b1d575385829",
     ".kaif/_house-rules-template.md": "fa53752f38c980f5f772ddb547a8dd5ffd247b21164ab5a650666b658b5e2f80",
     ".kaif/_explain-page-template.html": "39931ddce496641aba11a941df7ceb1d6c0ebf3f74d8ff2da8dfd3b2f8917678",
-    ".kaif/INTERACTIVE_CONTOUR_SPEC.md": "ba3a7334bfdb5b75a833750a21c218c151b0cd1987cd89331c44506f54b2db2c",
+    ".kaif/INTERACTIVE_CONTOUR_SPEC.md": "2de32403d517402e7f12db1a60ba7299f3a8e456e8c5033c86eeb8529dd4e039",
     "AGENTS.md": "f1afb852cd6f0c046d8901dd62a84d64b6f5b79e5521c016ccfbf95abd70569e",
     ".agents/skills/autoloop/SKILL.md": "f340baffbfb2a4ab1abff3e225fad622443bb83b09e370f12872bf9734982b95",
     ".agents/skills/bug-research/SKILL.md": "711cefbda345cda85c7d434a8579e962cb59d454ee0d8cb20d70fdc6c8adac33",
@@ -512,12 +510,12 @@
     ".roo/commands/revision.md": "61900d41be19e7c25896c832031e54e3282237113a4ae3de0f0c4dedc2fddc27",
     ".roo/commands/team-deployment.md": "e9e09cd320f7156cc48205b0df1f9882edf57c0f3dca68d0c35ee80d454cbb2f",
     ".roo/commands/what-next.md": "0c95831262c472f486aa193baeb3d995312a9a46b806d2df1b9cbdaf4594f830",
-    ".roo/rules/kaif.md": "2a24ad9c5d7aff455a68ff7e7078339fd0bf5801c81837d6b61c77b8d8a23f7f",
+    ".roo/rules/kaif.md": "dea66c5ef62dca50d421adb21bf58099cea18a72bd41c6fdf097e3871f84f499",
     ".clinerules/kaif.md": "3018e3139b96d01fe8dda24513b48f4f0347628b60cea5f013776f3a94870e35",
     "CLAUDE.md": "f1afb852cd6f0c046d8901dd62a84d64b6f5b79e5521c016ccfbf95abd70569e"
   },
   "templateShas": {
-    "AGENT_GUIDE.md": "33ad2e2c6f43a7f70055c5bf130a1871066a102effe9807acf0599b8a6660b82",
+    "AGENT_GUIDE.md": "193c2e30cd0133163559a66a3e7cbb9fedb856d619e964e3155bbcf10353cccb",
     "PHILOSOPHY.md": "e4e6be997c8dd9bb38a33e6d145d8d73b4a36fb570e2789d8958c7db204e9550",
     "BUG_FIXING_FRAMEWORK.md": "1a1f5cb05490565acf8e0b44e2de668285a97105bfe0c58a9612dccb8dc7a21a",
     "TESTING_FRAMEWORK.md": "50f7c98cd4b9c1bf532ba3f8220672b0a0b9954c3a6f5d57562bd845595954a0",
@@ -530,7 +528,7 @@
     "PROJECT_STRUCTURE_EXTERNAL_MAP.md": "8be8fce1f9e1c746494e32230b577733eb5e6405e5945904683fde419aa38576",
     "PROJECT_ARCHITECTURE_INTERNAL_MAP.md": "3813e39b1d67164a89a26967f2e172df67bbb72e5612748f92efd66b4f3712eb",
     "KAIF_FRAMEWORK.md": "6420a9aebf13ae46c6c649ed550b736980b9bb9567343dedcf58fd9ea689b19d",
-    ".kaif/KAIF_REFERENCE.md": "102b4b35bbe13f42f75a989e5b001856c239b050d903d1baa783a5339cd3b104",
+    ".kaif/KAIF_REFERENCE.md": "068736de87c85b593d9e991d8a870d8fb8f4edb0189e33bde23bf0859f0c1559",
     "plans/README.md": "3762a91299483bab753477a78c3a1b06858a15ad59a416195dd33d4157b33093",
     "ideas/README.md": "3b347bdae725aa12b8c6b7583a098a3f17086d09ad79575d6105eb72387d6298",
     "bugs/README.md": "5ab0d5535b1821cbdb3e9151dc5d76ae2baad9fda6f31f1a81ed9ee7904e1759",
@@ -545,11 +543,11 @@
     ".claude/skills/code-revision/references/audit-report-template.md": "4007d106cf442a6495b4bddc7504209d969d45d5780517f0f6eaa649a4838a43",
     ".claude/skills/dayloop/SKILL.md": "81e06d148e1627353fef37a533b9abef0ae2eb99920f75b10d4c7d3c972b328c",
     ".claude/skills/derive-styleguide/SKILL.md": "53abfdea26673258e5845d9479bbfe631a67416aa437c1946dfa5e757680b27f",
-    ".claude/skills/end-chat-force/SKILL.md": "47f31d1ab90c493292092d2292c29e3f96b0c76731385a447524cd1596c58665",
-    ".claude/skills/end-chat-soft/SKILL.md": "93888ee87fde5b76476e2cd745dc498961846d24e1241eaa5585eebebeacefea",
-    ".claude/skills/experience/SKILL.md": "d4fef2aa8482824da443213e4aac560c752a3529198d33d5d345d01b2faf6b9d",
+    ".claude/skills/end-chat-force/SKILL.md": "d644ecb3b7285ee099fb11a620b3792285e60cabba797108cb2d76dd53cc7472",
+    ".claude/skills/end-chat-soft/SKILL.md": "95aa52fc650197c11d41eb72b3bfe8ca32f7f860e469a60c6171aadc21221381",
+    ".claude/skills/experience/SKILL.md": "0407e839d52529873fd89a3fd881adcc116bbb584f37d1b27ef00cdfa7619ea1",
     ".claude/skills/fable-domain/SKILL.md": "2e91bd86140fc039fdd536b057bcb24e87827e50372d6de2a0952ca038d221bc",
-    ".claude/skills/fable-judge/SKILL.md": "66605cf8dbef1605d8a3f7402fbef28eeda98ace044408a554d4533e3b3cce52",
+    ".claude/skills/fable-judge/SKILL.md": "218f9befa740128352a9ce0b77e800b72ffd87cd30462a2b8f1633d0e7786207",
     ".claude/skills/fable-loop/SKILL.md": "e67ea3e3138e2e72431809d62be4f8a25dfdf34e49a1d4493ff35ee92e2e2e8b",
     ".claude/skills/fable-method/SKILL.md": "c244458b31caa432c09a3785a631a02f4213e2cbaee7996b014925e7f8f26a43",
     ".claude/skills/fable-method/references/examples.md": "38164477dc5de3b98fb7167e8683c6eb2241b7aa54d802aabbed4154f24f38b3",
@@ -558,7 +556,7 @@
     ".claude/skills/fix-vision/SKILL.md": "3f7ae36d6a11d496e2b13a22fd85515f34f51f25f9e3b92bc602593ccc9b1fe8",
     ".claude/skills/guarded-loop/SKILL.md": "55510986ec164bf9a13a64ddb49651bf78b00e2f2dd0da78dbff6777e89df597",
     ".claude/skills/help-kaif/SKILL.md": "fd952fe9dbcc451bc59f44bc0ba151c82f04c19436ca78d195829912c75ec508",
-    ".claude/skills/interview/SKILL.md": "5954a52b2741975cfb577bd23e041d7dcd275a4667706ecf4aa6e0a0bf1bff47",
+    ".claude/skills/interview/SKILL.md": "e40eb513e5cd5c6704199e8ac7f1530b34aeff193d983ca655f2d526d88460b3",
     ".claude/skills/kaif-fork/SKILL.md": "61823f1f02109ee9bde41d0194ada5a531577b636283d1e0fd3665fbff857268",
     ".claude/skills/kaif-go/SKILL.md": "290b4659b9e5a43e89c5a2a3c2c15c36563192ed66932067df02742c9a18b3c1",
     ".claude/skills/kaif-remove/SKILL.md": "e99761fee6319d5958f30f2d3e3154bb406b3d07a9126b1fa85c554bdfd8de97",
@@ -566,16 +564,16 @@
     ".claude/skills/kaif-update/SKILL.md": "671f74e7b4d39efa3d813dbdabb525045a8457f6bbb452c6bf6138d72f0916ba",
     ".claude/skills/kaif-version/SKILL.md": "cad4b700ac7b09ca42a2b49ff3d20ca266d104f5247aca8e4f01eccbcbd73cda",
     ".claude/skills/nightloop/SKILL.md": "0b4828dcdf2014d8872f3fe8a6d10430963cd1d10e661f52f7ad95cf33ee2f84",
-    ".claude/skills/owner-reviews/SKILL.md": "bef1c5db76cee1a97eedaf873329eb4d1fb77759aa1466c6bbd0ad6179e93507",
-    ".claude/skills/owner-voice/SKILL.md": "197818d38c843514b4e500e5a83bff5f9b845c9d8f1d865e232e6b12a26b4160",
+    ".claude/skills/owner-reviews/SKILL.md": "fa1830fcf261543d714380318b054971b224c96364b94837d666f9067c439d76",
+    ".claude/skills/owner-voice/SKILL.md": "0a1dd838f53e78558876bca07774a5b9685549383ae21aacdc6093f7755942d1",
     ".claude/skills/pause/SKILL.md": "92878a5fb9bf46a682635d64feec8af9250d8b60339bc008e8f8342b65a2b696",
     ".claude/skills/plan-epic/SKILL.md": "de558f44647c2a5f3ddc955e1d8164c19698596982f56dd55a64319907182ad4",
     ".claude/skills/plan-task/SKILL.md": "fe62c093467b5c034c9a5cc78f938141977e579232c590b1ac977c3126dbd127",
     ".claude/skills/propose-idea/SKILL.md": "53f0cdc91dd05d96516cc52a65c10d015eb336d75adc490a6762634d5d45c055",
-    ".claude/skills/refresh-context/SKILL.md": "c8468c0626e70c0339de7a15b444d13afbbe9f534da8230ac9d68fb779c8c9ca",
-    ".claude/skills/release/SKILL.md": "9f3b7dcaa6329b812251ad08ab5f87e0204c7c024dbf2c00e90bb223fadc4173",
+    ".claude/skills/refresh-context/SKILL.md": "5024fb893e5e8669b9c3bf594c80c75a8bc9227afcb489b764527a56354c4d51",
+    ".claude/skills/release/SKILL.md": "31b473942d5a1f5d160c4768ea008204377e42e12b5cd11c48a84027b78b328f",
     ".claude/skills/report-bug/SKILL.md": "1b7b552264a2405c97d7bb7eec90bcdd0d7534d542ddb50e8d4271dd083f7d9c",
-    ".claude/skills/resume/SKILL.md": "803cba094480aa4486f1774f893f3fe8c11ff19d1224391f40ef0a5c3fa9edff",
+    ".claude/skills/resume/SKILL.md": "42c2bd4dd233ba30bf4a45fe8eb76fa875d91608edfd141364d525c808ac9b05",
     ".claude/skills/revision/SKILL.md": "7b1a378e823786c31c52d2e8f62ebdc7314e9d0981639c923729e3b1705b1913",
     ".claude/skills/team-deployment/SKILL.md": "38ad57c8a82b608d19eced4804b31ffa642e66b207b8557bbc33431b544bbb48",
     ".claude/skills/team-deployment/references/team-adopt.md": "4e32fbc49c205b09b7718fb3a39149c72b707130a39516bac17c2d89f42bf035",
@@ -590,36 +588,35 @@
     ".kaif/spheres/science.md": "3503ce14dc18bf411796ff5eedd99e6c3357ba3e87157d9a5a771ffe8a2b91a7",
     ".kaif/spheres/_index.md": "4e4a43e793ef10b10512a8670784eab1df25c3c421b357d175d3bd7efd46a32f",
     ".kaif/spheres/_template.md": "5368ed07270c639803ec025ab9161ee5509cd73271f5c2b2e1c382143bd3556c",
-    ".kaif/tools/contour/core.mjs": "2443158932a4c754a46bff5c6386f7917e63226f8fb035bc431f73752e1b3ad8",
-    ".kaif/tools/contour/review.mjs": "0c2ddf2fb35c10dd6a56d97541173a0412585412a3f17fdb48c8052b4fb4c829",
-    ".kaif/tools/contour/texts.mjs": "d50503946d5136ca40c2fdf594cfba1537c806705d975cc893ac29dc140ed65b",
-    ".kaif/tools/kaif-attribution-lint.mjs": "0809ecf695601fe03725f95a9197ef1f193601326c5aef2d2c16d807e9c3e067",
+    ".kaif/tools/contour/core.mjs": "438d7749892b63d6e287ff1a7a009fe9ac476802c705aabbe22d051d4e649397",
+    ".kaif/tools/contour/review.mjs": "73c828404934b7e35b979bd3f61271d6081c5ba37a7e6a7b3abbe5e578c80692",
+    ".kaif/tools/contour/texts.mjs": "1976f439c5551f77452faf1e74f33215459d1e937a7aa77c2c3545af407d26c5",
+    ".kaif/tools/kaif-attribution-lint.mjs": "4894babf0291357fe5313eb950e9ede528e260be624439700b0b591a3c0ff7a4",
     ".kaif/tools/kaif-canon-lint.mjs": "1c6dbb1b022885f6247a67a5006d88f138eae9ebbe971649647595d812dade4b",
-    ".kaif/tools/kaif-experience-lint.mjs": "df8f346bfd8f115e03fbcfa81182990626485d99f68e5a209db6a71308816876",
+    ".kaif/tools/kaif-experience-lint.mjs": "df7f971692d0598e61b19062ccb8da95488edf66814a9535426169b5db8113db",
     ".kaif/tools/kaif-guard-lint.mjs": "cc050d721be52a71031b1a8c23532212d22f0307d4c3211a0ae31aaf3c23ab0e",
     ".kaif/tools/kaif-provenance.mjs": "6517b11796b72fc289605dd10c3a5a3020ef4ee15a5922d963c2c3027da18e68",
     ".kaif/tools/kaif-ranking-lint.mjs": "b2a64aa624e9ef65e88c72b4d816c31200a8cd46b3616c627b37b069ad95bb73",
     ".kaif/tools/kaif-requirements-lint.mjs": "22ec413b623d0fa0923ee5051c9c293adb8243d06cf24fdc76b8ce1965ab05a4",
     ".kaif/tools/kaif-scenario-lint.mjs": "efb0ea3cb35b89ab56d98738ae4ea79509dc64a65d1295cfa23548f052b43fa4",
-    ".kaif/tools/kaif-testrun-lint.mjs": "97779db8af6064364bc0f0e567a829901ce6b95b640ea9bf0765f9628775b199",
-    ".kaif/tools/kaif-voice-lint.mjs": "55a0d979fea7d7ccc6e77616949037dc1bc73ec8c3021d959d578d147bc4a502",
-    ".kaif/hooks/pretool-owner-word.mjs": "fdceea9ea8efc9ec43435d9bd76e1ac9f1ede7712e9383d15e977ba456a17e65",
-    ".kaif/hooks/prompt-refresh-timer.mjs": "3dc910f14fe1bc72baa522a2dd3caa3428d985bb6b883109a32cd6c882c20169",
-    ".kaif/hooks/prompt-resume-word.mjs": "bd8c8f183e5c4273794f2a014f982894c9e7691f6650c3dec63bd4e5c695dadb",
-    ".kaif/hooks/README.md": "1a78e070c780ec09132d593e11408cce9d3d89b327716f70570fcf5dfd8a2050",
-    ".kaif/hooks/sample-antigravity-hooks.json": "b9e7b5e8f4c88cf69c7cef3051428ada49eb39a028e9e715ac49fde028040f50",
-    ".kaif/hooks/sample-codex-hooks.json": "0574ca353d79d916426f40a93a5339e5baf89ccd7ca940f7aa780cf07a999789",
-    ".kaif/hooks/sample-copilot-hooks.json": "0270b90873e6335f393a8d48dc122b42cf9c21bae3e7e22c120974551fef2a56",
-    ".kaif/hooks/sample-cursor-hooks.json": "2bedba79743d0479bca70294b1b71b0676ab54222bc4af04a0d1aec2bfaa48ea",
-    ".kaif/hooks/session-start-refresh.mjs": "11b4de5353d0a7918b3c9f9f1080ba0cf8791515f8e1bc605ccb4c2213a02085",
-    ".kaif/hooks/settings-fragment.json": "d3e573d2aefc2a04982b533cf7de400b4cd9698ad44b9b8e1a05a64ea30d6e3a",
-    ".kaif/hooks/stop-status-guard.mjs": "d2a2cbbd83671affcf04350956951239506ac4c6de5593fffb9887a117f500b4",
+    ".kaif/tools/kaif-testrun-lint.mjs": "02da7262cd314f66e2662ef73cbbb52e8ff10e2022738a89ac6df6703cde3c1e",
+    ".kaif/tools/kaif-voice-lint.mjs": "4922789d70c21790536d0d916e6c135e58c41612ef539e304c38bac29554823f",
+    ".kaif/hooks/prompt-refresh-timer.mjs": "266dbea0970bd9acc814e9832d78d74e2817da2c01d3d7fae001ff8f1b56f23a",
+    ".kaif/hooks/prompt-resume-word.mjs": "f3bbf204f9afaad96f80a8c0f3b3f666d4affe590799c94cba28dc5bc9670e22",
+    ".kaif/hooks/README.md": "b0e672816cfca7937ead3f48d970447af5e195f206426851017c2eac2e12747e",
+    ".kaif/hooks/sample-antigravity-hooks.json": "d12375900f4c646b74b7dd2961bea068116d6f7b3403a237ee85196aab035450",
+    ".kaif/hooks/sample-codex-hooks.json": "dbb1766c7334b57eb95880f102d2e8d149db8bf59fba008152e2d58062ade24e",
+    ".kaif/hooks/sample-copilot-hooks.json": "b4b51ca2ed76584e691f929142ba58342637859390378f71314cf96485068dde",
+    ".kaif/hooks/sample-cursor-hooks.json": "b2c05e4f8680f9d4e7756449b2b990efcba5b7277bb439451b074dbe611b6da8",
+    ".kaif/hooks/session-start-refresh.mjs": "841e8f66068ef4f244f9ed8408f0923b3147d8acdb3ca789f27b7b9ba25a36d3",
+    ".kaif/hooks/settings-fragment.json": "2a9fca6c7625cfb87f81a7facd215648bce93f778b7269b3874b171a657db0e9",
+    ".kaif/hooks/stop-status-guard.mjs": "7ad1c74ee78d33b1fb09c72f32c425af3e8bbe44b0269645118851056142b458",
     ".kaif/_owner-voice-template.md": "7f42ebfd6c79a017100758a059b1c2137b5f83d6a8cb2f3f381959cad6f33235",
     ".kaif/_testcases-template.md": "5dff0064a26ca6ab8e40bfd5c339a8ea5afd88c2ee1c0487d0e7f6b86d58edfe",
     ".kaif/_testrun-report-template.md": "baa40abc37ff006d8fd830bc602a2298b8aa52ef54853dee704594a2091a3038",
     ".kaif/_house-rules-template.md": "fa53752f38c980f5f772ddb547a8dd5ffd247b21164ab5a650666b658b5e2f80",
     ".kaif/_explain-page-template.html": "39931ddce496641aba11a941df7ceb1d6c0ebf3f74d8ff2da8dfd3b2f8917678",
-    ".kaif/INTERACTIVE_CONTOUR_SPEC.md": "1d817b7c2214116d140b14344c8538ea14b985a2ce6e3a434e1d83dde50fe1dd"
+    ".kaif/INTERACTIVE_CONTOUR_SPEC.md": "69dcd49da3b5c243a4e864ed12fd7023076f09537eae2a03a25edb3db28bb2d9"
   },
   "moduleShas": {
     "AGENT_GUIDE.md": [
@@ -651,7 +648,7 @@
       {
         "signature": "### Context refresh — the re-read rule and its witness",
         "class": "static",
-        "sha256": "04a1436f0c75c7790bff79b7022c45279c9b1ac6ed99fbc72fc205e4b394b277"
+        "sha256": "c107de37182f232e1931ecde11797ea0d257a84d48e5d264a04fb18df85cec81"
       },
       {
         "signature": "### Environment dossier — the agent knows its machine from its own notes",
@@ -721,7 +718,7 @@
       {
         "signature": "## Git workflow",
         "class": "static",
-        "sha256": "0f91d7842cc285f7fb99034180d2f092e510b9d9a8ac5eab247a3507c77715e4"
+        "sha256": "22262f042accc859208b34c34ab1f2fc5321e64db8bb9d8ecd228c71ec77ad9f"
       },
       {
         "signature": "## Commits",
@@ -746,7 +743,7 @@
       {
         "signature": "### The owner's word mid-turn — the system signs its author",
         "class": "static",
-        "sha256": "684390114c3fff3a514e77727920fc2e14c9d44ef4c605bbefebf967592d02db"
+        "sha256": "bc76daf8f68758a87b67655b02b11c56332966f1993cfb60271069f4120f52e3"
       },
       {
         "signature": "### The storefront — text a stranger reads",
@@ -771,7 +768,7 @@
       {
         "signature": "## Decisions the agent must NOT make alone — interviews",
         "class": "static",
-        "sha256": "6178ec6ee9d65889d2acf3e953e6c93f8feb99a38dc7fb9086de8d66589e1620"
+        "sha256": "45906ab1220123ee48e76cdff6d5094672f2fdfee7c323a1930b73469ca82b6a"
       },
       {
         "signature": "## Code style",
@@ -1427,12 +1424,12 @@
       {
         "signature": "### 10.6 Policy changes",
         "class": "static",
-        "sha256": "16e95c45a56a09a36130c416cf0b23f294d04d01d2dd4a80cff97e42d2868d11"
+        "sha256": "5869d546cf5573b2306e3da279ca023d534c0ca4f9370752cb4233c33dc9e537"
       },
       {
         "signature": "### 10.7 Commands",
         "class": "static",
-        "sha256": "9e35c3fc02c67268c3b8ddefc9170955f0fa1194b07d8c125f559dbda9348c60"
+        "sha256": "e88c2a115365d74aa806ead4307332de8e1e3322e515ebacef6853999a719827"
       },
       {
         "signature": "### 10.8 Predicting a pass",
@@ -1492,7 +1489,7 @@
       {
         "signature": "## 14. Optional tool modules",
         "class": "static",
-        "sha256": "94294f5cd446a7c60ad2e3eb4e0bd78ca53407c4f3410587e2fc058e0761da78"
+        "sha256": "bf8ba4ee5d951829abda1f5a941a7877b2e5e234e1329a05bab224cd5b14e1c3"
       },
       {
         "signature": "## 15. Lifecycle",
@@ -1582,7 +1579,7 @@
       {
         "signature": "### `AGENT_GUIDE.md` → The owner's word mid-turn — the system signs its author",
         "class": "static",
-        "sha256": "be86f8795496fba6d2bc08ed5f3545613c113de6c2349d1bbbb88e49659ea1b7"
+        "sha256": "eae00218c3717259eaed36995477652329bc6e318b77d404aeff1c067f9f0084"
       },
       {
         "signature": "### `AGENT_GUIDE.md` → The storefront — text a stranger reads",
@@ -1597,7 +1594,7 @@
       {
         "signature": "### `AGENT_GUIDE.md` → Git workflow",
         "class": "static",
-        "sha256": "7d820b1348ae7940cf42356abce337e503eb4981a0fed1147198271570212f99"
+        "sha256": "9811ab96edcfd4a192ac5af1654029b54a29e6f971a66d8c56af275a0acbf91d"
       },
       {
         "signature": "### `AGENT_GUIDE.md` → Planning discipline — the task ladder (`/plan-task` · `/plan-epic`)",
@@ -1987,7 +1984,7 @@
       {
         "signature": "## Step 2. Commit and push",
         "class": "static",
-        "sha256": "5f547e6e7c0ef1cbe1f753174c92ece484718184b4da19382d7e6366b83dbc24"
+        "sha256": "7594a4a59edb861292332a5ac9a2c9d1f94673762047ad28371816f3415303ae"
       },
       {
         "signature": "## Step 3. The one-line farewell",
@@ -2044,7 +2041,7 @@
       {
         "signature": "### Step 4. Commit and push (judge first)",
         "class": "adaptive",
-        "sha256": "6bc315e9289e6fb2e7c5f80c593e055d379bf5b9a1710827654a850c0e80ecac"
+        "sha256": "6ea677b93aa18f56528e9b4778063f053a61e2b407611d33f5d5909350da5de7"
       },
       {
         "signature": "### Step 5. The farewell report",
@@ -2071,7 +2068,7 @@
       {
         "signature": "## Mode A — CAPTURE a lesson (\"add this to experience\")",
         "class": "static",
-        "sha256": "632fe0cca5f292631299ccf9383e2cec6217a3049f262a68866b06398e33d787"
+        "sha256": "e1c516263ab1c70a577b5f596dfb7eb471fcb367fc00302daa4c64aa82895953"
       },
       {
         "signature": "## Mode B — RECALL lessons (\"recount your experience\")",
@@ -2140,7 +2137,7 @@
       {
         "signature": "## Default mode: judge the work",
         "class": "static",
-        "sha256": "df27acf2d807a0927c946586f0dfd0265bb5583fb169507d0861d3984f16a040"
+        "sha256": "2fdb55a2f9259aca0e9d4f1169b4cf4f86870806cf87831f4e614d887ddb5de6"
       },
       {
         "signature": "## suite mode: judge a skill or a model",
@@ -2498,7 +2495,7 @@
       {
         "signature": "### Step 3. Rules for good questions",
         "class": "static",
-        "sha256": "182198296c3c0f69a47a1ec69ea6e17c4302207dd1e9053c4ab1208d2a0a4f73"
+        "sha256": "815ff63c874ee0e395839800811097952eea632a56fbedd315927980bf6aee92"
       },
       {
         "signature": "### Step 3a. Every question and every option — a scenario of what the owner will see, the formula after",
@@ -2744,7 +2741,7 @@
       {
         "signature": "## The invariants (normative — a contour without them falls apart)",
         "class": "static",
-        "sha256": "6da26f6c76f8a60335383d5a195635038421f26b5e47a329a7eaf5ecdaf4306b"
+        "sha256": "f3bae34e3ad1e478006fa79f3bee9ac144677139ccc2467aeb1078e40678b55c"
       },
       {
         "signature": "## The named class: \"handling the human's work\"",
@@ -2754,7 +2751,7 @@
       {
         "signature": "## Page elements by name (P1–P9) — one style across projects",
         "class": "static",
-        "sha256": "89329e4df17a11bb38fa7a8d82395186f01e604e4bb58ac5d7835a39cc430250"
+        "sha256": "9225ee6511c6030c3bc8d4e222b0e1211f39fa79be309ec4d78f98849955930f"
       },
       {
         "signature": "## The name contract (candidate, field-tested on four product routines)",
@@ -2816,12 +2813,12 @@
       {
         "signature": "## The writing contract — by the portrait, independently checked, then the owner",
         "class": "static",
-        "sha256": "bd3452b51fed9932f9236403fa6f484ef45c553562dda7455dfb5bb4b35d26f8"
+        "sha256": "51c04c011fc5e026c69a807bb55b6ff89719dfbacd09766d429c74e0964cb361"
       },
       {
         "signature": "## Mode `check` — the machine half of the independent check",
         "class": "static",
-        "sha256": "52e4121d7826c6c368233609b0710124e4cd5bdacdfc286f5990372fae226d99"
+        "sha256": "973a0b6e4d8ef2dd6cc18191c787bc13fd8f0f6d4f98ccee6d8c07e02888398b"
       },
       {
         "signature": "## Mode `portrait` — capturing the voice",
@@ -2996,7 +2993,7 @@
       {
         "signature": "## What to do",
         "class": "static",
-        "sha256": "0c678693aa088bcef466e947b998bd2db5a4ecf62da9034f6216c94eed25ad3d"
+        "sha256": "0805e48156eb7fca81e56c93db64daf0ed49ad9369591f51bf4a13695af755b8"
       },
       {
         "signature": "## Notes",
@@ -3053,7 +3050,7 @@
       {
         "signature": "## Step 6. Publish (after the human's confirmation)",
         "class": "static",
-        "sha256": "3019009c113c500556c6a8203677ae4d418eb3fca0dedfb90b45801ff431101f"
+        "sha256": "416ff0ba662985ef4b3685a37b18326a7c200645800d0c80e61fae1f5791648e"
       },
       {
         "signature": "## Step 6.5. The deploy checklist (when shipping replaces a RUNNING system)",
@@ -3127,12 +3124,12 @@
       {
         "signature": "<preamble>",
         "class": "adaptive",
-        "sha256": "06e1d2921dbaf9e7cd3341d978a8edcb3a3a9ff370abea1c23df9436f431c5c0"
+        "sha256": "5013e5ea72b21ae0bebc830b25d7326ad80b018bafcae7df5a2349a5809bf8cf"
       },
       {
         "signature": "# /resume — pick up where we left off",
         "class": "static",
-        "sha256": "1f45d03ab63947ecf2e2d662e69de27f3ce63ef626f49c2408ba1b3b6d6a4e58"
+        "sha256": "1a8014534794718e7c53746acce7b5520d0a7b40f50e66ad1f11ecf07a8e5349"
       },
       {
         "signature": "## Step 1. Read ALL the canon documents of the KAIF framework (in parallel)",
@@ -3147,12 +3144,12 @@
       {
         "signature": "## Step 2. Synthesize — choose the one main thing",
         "class": "static",
-        "sha256": "4566376f8b3f48c55d70ad12de0e081ce4ab398e07a31dac462952b887bde2d0"
+        "sha256": "fba62c309334afeab3613fc37d87f4253186dda092ce817a67255bd72c165fae"
       },
       {
         "signature": "## Step 3. Work",
         "class": "static",
-        "sha256": "145c5c387ea213935bc7900033ebeeec8bbdca49fc7d8ba6d207d365e09859b4"
+        "sha256": "d5d3b385c0f180bd4702555c36f9770443d080ef8c11af6697ea24aef8bf8a02"
       },
       {
         "signature": "## Notes",
@@ -3852,17 +3849,17 @@
       {
         "signature": "## What ships here",
         "class": "static",
-        "sha256": "d385464baa6a57eebd9a10339d6db273b6aa0e0d8bcedd4a7fe7685086fc0cc5"
+        "sha256": "e70b1146e63546e42c1b81fa86368206cac6b7c1a548a73322d5eec325f1bca9"
       },
       {
-        "signature": "## Opt-in — an explicit owner step",
+        "signature": "## Wiring — the task wires it, the owner can opt out",
         "class": "static",
-        "sha256": "31fc9296cefaa7e6e4f457ac9907d7d36dc29debd50c608e1de2e2d45965bb93"
+        "sha256": "cc8dec6fa61fdbcc80781a776d4ef4a004f930683e2febc9651f631883e210e5"
       },
       {
         "signature": "## Other agent systems",
         "class": "static",
-        "sha256": "e2b8be6943be30ff3b386c0508cc9ff52b477002fa17f94bd815253a95847354"
+        "sha256": "8e304a0c9fde224ac8d82eddd8bdec2d761c5eaf0a49125e2dd45b62eff88fb6"
       }
     ],
     ".kaif/_owner-voice-template.md": [
@@ -4067,27 +4064,27 @@
       {
         "signature": "## 1. Source document — what the page is built from",
         "class": "static",
-        "sha256": "43a881df1a36268275b80b2b328a13a46e8da87bf0b80ea1f51bcf3e2b884a29"
+        "sha256": "4bf8e5248826c1b960cc9ff1b170e96a77dc3d1da497233631e8f35f1ca0389c"
       },
       {
         "signature": "## 2. Pre-flight — runs before any page opens (exit 3 = refuse to open)",
         "class": "static",
-        "sha256": "53424a52df8e1c2b1f6dff8438a4fa44a44465e44f07a7812da189492a4835a7"
+        "sha256": "4f67b8c2434061fd9a6f8356194e9e2f39e9cfe1c3d6371fe12b3dc6f0b4cdcb"
       },
       {
-        "signature": "## 3. Records — three files, derived names, never overwritten",
+        "signature": "## 3. Records — three files, derived names; a record is replaced only by a NEW revision of the document (the table below)",
         "class": "static",
-        "sha256": "e670f80a31ab16b00e9dc8ab15e33f62358de906ed916600401291e3f03564c2"
+        "sha256": "a2c75806179d88331910c2575e64f88c94556dcb9ff80ffe92be22d93fecb098"
       },
       {
         "signature": "## 4. The page — what the owner must see",
         "class": "static",
-        "sha256": "cdbf7ab57f67b14ab3a7461d30cffd5af63b0b0866f8e69e0914f4e2892f2ec5"
+        "sha256": "3e2f24746e10ec93417953fa595753be5a440c48b8df911212fe4c934feab8ff"
       },
       {
         "signature": "## 5. Process — outcomes, patience, wake-up",
         "class": "static",
-        "sha256": "21b2e7012f8aed4a65101844f6992a644dd5bbe85bc44090025ce4ef6a32bf1d"
+        "sha256": "caf677a8572719a3b1f9e370f911c70c45aa6688c89206cd0415b8c437190f93"
       },
       {
         "signature": "## 6. The call — sound first, voice by language",
@@ -4120,10 +4117,12 @@
   "kept": [
     "AGENT_GUIDE.md",
     "PHILOSOPHY.md",
+    "BUG_FIXING_FRAMEWORK.md",
     "TESTING_FRAMEWORK.md",
     "REQUIREMENTS_FRAMEWORK.md",
     "plans/README.md",
-    "interviews/README.md"
+    "interviews/README.md",
+    ".claude/skills/end-chat-soft/SKILL.md"
   ],
   "values": {
     "<PROJECT_NAME>": "KAGO",
@@ -4141,8 +4140,8 @@
   },
   "marker": {
     "framework": "KAIF",
-    "version": "2.8",
-    "released": "2026-09-26",
+    "version": "2.9",
+    "released": "2026-10-16",
     "origin": "https://github.com/MikalaiKryvusha/KAIF",
     "tracking": "origin",
     "sphere": "programming",
@@ -4155,6 +4154,16 @@
     ],
     "language": "ru",
     "canonArtifacts": [],
+    "archives": {
+      "GOAL.md": {
+        "digest": "ЗАКАЗ.md",
+        "owner": "interviews/interview_017_five_method_forks.md → Q3 = A (2026-08-28): «GOAL.md остаётся дословным архивом, append-only»; ЗАКАЗ.md approved by the owner 2026-09-25 («ЗАКАЗ принят»)"
+      }
+    },
+    "contour": {
+      "callName": "Проект КАГО",
+      "spokenProjectName": "КАГО"
+    },
     "projectName": "KAGO",
     "history": [
       {
@@ -4180,8 +4189,14 @@
         "to": "2.7",
         "route": "bootstrap",
         "date": "2026-09-18T18:01:23+03:00"
+      },
+      {
+        "from": "2.7",
+        "to": "2.8",
+        "route": "bootstrap",
+        "date": "2026-09-26T13:37:38+03:00"
       }
     ],
-    "build": "106b97d7715c"
+    "build": "1fc046329eb2"
   }
 }

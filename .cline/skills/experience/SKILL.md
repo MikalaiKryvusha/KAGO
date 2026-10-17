@@ -29,7 +29,7 @@ non-obvious gotcha). **Capture proactively — don't wait to be asked.**
    (defect detail belongs in `bugs/`; `EXPERIENCE.md` is "what to do / not do next time").
    A lesson about a dangerous ACTION (a command that destroys state: a test runner that wipes a
    directory, a reset, a force-push) also lives IN THE ROW OF THAT ACTION in the project's tool
-   registry (`AGENT_GUIDE.md` → Tools) — where sessions look when they RUN it; the journal entry
+   registry (`HOUSE_RULES.md` → "Tools of this project") — where sessions look when they RUN it; the journal entry
    duplicates it with an `#action:<command>` tag, it never replaces it (sessions grep by what they
    FIX and get burned by what they RUN).
 2. **Write one entry** at the **top** of the `## Entries` section, in the canonical format:

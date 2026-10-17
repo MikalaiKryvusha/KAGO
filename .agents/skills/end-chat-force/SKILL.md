@@ -33,7 +33,8 @@ move) instead of finishing it — naming survives, rushing corrupts.
 Commit through the project's staging gate and push:
 
 `<Use your commit tool/flow. If you have one (e.g. tools/commit.mjs that bumps build, adds, commits,
-pushes), run it. Otherwise: git add -A && git commit -m "..." && git push.>`
+pushes), run it. Otherwise: git add -A, then git commit -m "...", then git push — each its own tool call, never chained
+(AGENT_GUIDE.md → Git workflow).>`
 
 If the build is known-broken, say so IN the commit message (`wip:` prefix) — an honest broken
 state beats a silently lost one. If a push is rejected (non-fast-forward) — `git pull --rebase`,

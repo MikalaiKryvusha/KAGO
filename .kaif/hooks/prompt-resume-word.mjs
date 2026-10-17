@@ -47,9 +47,32 @@
 // UserPromptSubmit, but whether ITS event carries the prompt text was not read in its live
 // documentation — so no Codex sample wires this hook (README table: "prompt field not verified").
 // A wrong guess would fail invisibly; an explicit gap stays visible.
-import { readFileSync } from 'node:fs';
+// 2.9, epic HK (origin ticket #94): the /resume order names the refresh marker by its FULL path in the project root — an agent that
+// ran `cd src` stamped `src/.kaif/refresh-marker.json`, where no hook reads it.
+// [TESTED: 2026-09-28 · suite s14: the order from <root>/src/deep names the root marker by its full path; red on v2.8; mutant M26;
+//  report testcases/reports/2026-09-28_hk-hooks-project-root.md (origin repository)]
+// 2.9 (decision #143 — the KAIF owner, rendered from Russian: "the entry skill tells you wrong"; a session answered "how much is
+// left?" and then started the plan's next item by itself): the order says what is under the word SETS THE SCOPE — a question is
+// answered and the turn ends with the pick offered; a task is done; only a bare "resume" starts the chosen direction.
+// 2.9, ticket #144: the "next step" arrow line left the canon with the hooks that read it — the order no longer names it.
+// [TESTED: 2026-10-14 09:31 · s14 «resume-word (№143)» green on HEAD and red on the v2.8 dist; s21 E (№143): the update run by the
+//  2.8 core leaves this order on disk (red on v2.8); probe tools/sandbox/probes/resume-scope-red.mjs; report
+//  testcases/reports/2026-10-14_resume-scope-143.md (origin repository); the owner's own next "resume + question" is not observed yet]
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 
 const OUTPUT_CAP = 10000; // Claude Code caps hook output strings at 10 000 characters
+const DEPLOYMENT = join('.kaif', 'kaif.json');  // the deployment marker: its directory IS the project root
+
+// The project root, not the event's `cwd` — twin of prompt-refresh-timer.mjs (the reasoning is there).
+function projectRoot(cwd) {
+  for (let d = resolve(cwd); ;) {
+    if (existsSync(join(d, DEPLOYMENT))) return d;
+    const up = dirname(d);
+    if (up === d) return cwd;
+    d = up;
+  }
+}
 
 // The leading word: optional slash, then `resume` (English — the owner's word under every language
 // pack) or the Russian shorthand family ("rezyum", "rezyume", "rezyumiruy" — spelled here as Unicode
@@ -88,6 +111,7 @@ try {
   const shape = ei !== -1 ? String(argv[ei + 1]) : 'claude';
 
   let prompt = null;
+  let cwd = process.cwd();
   try {
     // A leading U+FEFF is dropped before the parse: Windows PowerShell 5.1 on a UTF-8 console puts
     // the three bytes in front of ANY string piped into a native command, so the hand-run smoke of
@@ -95,6 +119,7 @@ try {
     // parser "MAY ignore the presence of a byte order mark rather than treating it as an error".
     const input = JSON.parse(readFileSync(0, 'utf8').replace(/^\uFEFF/, '') || '{}');
     if (typeof input.prompt === 'string') prompt = input.prompt;
+    if (input.cwd) cwd = String(input.cwd);
   } catch { /* unreadable stdin — no text, no predicate, no output */ }
 
   if (prompt !== null && LEADING_STOP.test(prompt)) {
@@ -113,8 +138,10 @@ try {
       `skill IN FULL: (1) read every canon document of its step 1 — the full set, not a slice; (2) run the ` +
       `owner's queue (step 1b) and raise what was never shown; (3) say the creed and the prayer aloud; ` +
       `(4) announce in one paragraph what you read, what you chose and what you do next; (5) stamp ` +
-      `.kaif/refresh-marker.json with trigger "ritual:/resume" and put the acceptance quote in the chat. ` +
-      `Only then take the task written under the word. The same word mid-sentence would be prose; at the ` +
+      `${join(projectRoot(cwd), '.kaif', 'refresh-marker.json')} with trigger "ritual:/resume" and put the acceptance quote in the chat. ` +
+      `Only then read what the owner wrote under the word — it sets the scope (the skill's Step 2): a question is ` +
+      `answered and the turn ends with your pick OFFERED, never taken; a task is done; only a bare ` +
+      `"resume" lets you start the direction you chose. The same word mid-sentence would be prose; at the ` +
       `top of the message it is this order.`;
     // Unknown shape → reference envelope (see session-start-refresh.mjs for the reasoning).
     const payload = (ENVELOPES[shape] || ENVELOPES.claude)(order, 'UserPromptSubmit');

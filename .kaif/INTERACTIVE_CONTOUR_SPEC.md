@@ -9,9 +9,9 @@ This page has a BUDGET (120 lines, judged by the origin's suite s22): a new arti
 - **md is the source, HTML is derived. Always.** The page is rendered from the document; nothing is hand-edited.
 - A question is a heading `### Q<n>. <text>`; its answer field is a line starting with `**Answer:**` (the Russian alias of the
   label is legal). An answer already written by the owner is NEVER overwritten — a new text lands as a dated follow-up field.
-- **Options are recognised in exactly two forms** — anything else renders WITHOUT radio buttons:
+- **Options are recognised in two carriers with one letter vocabulary** (2.9, origin issue #127) — anything else renders WITHOUT radio buttons:
   - a table row per option: `| **A** | what it means | price and risk |`
-  - a list item per option: `- **A)** what it means` (a parenthesised note after the letter is legal)
+  - a list item per option: `- **A)**` · `- **A:**` · `- **A.**` · `- **A (note):**` · a bold letter alone `- **A** — …`; a letter the parse does not read — a list item or a paragraph `**C.** …` — is NAMED by the door (`letters authored N, recognised M`, exit 3), never dropped
 - A question with NO options is legal only when it DECLARES a free field (a `D) your own answer` option, or the marker
   `<!-- questions-guard:no-scenario <reason> -->` for a naming/taste question). Paragraph headings like `**A. …**` are NOT options — the #51 defect.
 - Every question and every option is a four-line scenario (Situation · Action · Result · Check) in the owner's language; the technical note stands UNDER the scenario, never instead of it.
@@ -20,7 +20,7 @@ This page has a BUDGET (120 lines, judged by the origin's suite s22): a new arti
 
 ```
 for each question Q<n>:
-  options(Q<n>) = table rows | **X** |  ∪  list items - **X)**
+  options(Q<n>) = table rows | **X** |  ∪  list items - **X)** · - **X:** · - **X.** · - **X (note):** · - **X**   (letters authored > options → exit 3)
   if count(options) < 2 and no declared free field:
     print "Q<n>: 0 options in list form and no declared free field — the page would open without radio
            buttons; fix the form: - **A)** …"   →  exit 3
@@ -32,9 +32,9 @@ no server, no sound, no call, no showing recorded. `--no-open` is NOT a check: i
 **Second axis of the same door — ARCHAEOLOGY (2.7, origin issue #70: 13 questions brought to one owner that his own prior answers had already settled, one of them 44 days after his answer).** A LIVE question of a document whose header date is on or after `2026-09-18` opens only WITH the attestation of the search that was actually run, standing between its heading and its FIRST option; the door searches itself for a question in ANY transport, a chat question too (2.8, origin issues #74 · #82: `review.mjs --search "<the question>"` — no shell and no locale decide whether a capital Cyrillic letter is found; the printed grep carries `LC_ALL=C.UTF-8`):
 `<!-- archaeology: search "<the heading's words>" → N hits · read: <files | none> · prior: <none | "<the prior answer>" + address> -->`
 Without it the door exits 3 and PRINTS the ready command; `N > 0` with `read: none` or `prior: none` is refused too (legal: `prior: unrelated — <why>`), while `N = 0` is an honest attestation — the axis promises the agent SEARCHED and said with what, never that it found.
-Exempt: answered questions, the declared `<!-- archaeology: n/a — <reason> -->`, and every document dated before that day (the field's history is never repainted). `--check` says which of the two it did: `archaeology: N of M live questions attested` / `archaeology: not judged — header date … is before …`.
+Exempt: answered questions, the declared `<!-- archaeology: n/a — <reason> -->`, and every document dated before that day (the field's history is never repainted). `--check` says which of the two it did: `archaeology: N of M live questions attested` / `archaeology: not judged — header date … is before …`. **Third axis — the question is SELF-CONTAINED (2.9, origin issue #124).** A live question's heading and stem (the lines before its first option or answer field; the addressee and origin lines excluded) refuse the door with exit 3 on a BACKWARD or SIDEWAYS reference — the parser's `refBack`: «see above», «in the section», «§3» and their Russian mirrors; a forward reference («options below») is legal; `<!-- ref-ok: <reason> -->` on the line exempts it, an empty reason does not; documents dated before 2026-09-28 stay silent.
 
-## 3. Records — three files, derived names, never overwritten
+## 3. Records — three files, derived names; a record is replaced only by a NEW revision of the document (the table below)
 
 | Fact | Where | Shape |
 |---|---|---|
@@ -53,7 +53,7 @@ Approval binds to the SHA-256 of the NORMALISED body (BOM stripped, CRLF/CR → 
   collapsed archive (`<details class="archive">`) — nothing removed. Three legal outcomes: answer · remark · «read, no remarks» (§5).
 - A radio button per option under every question, a free-text field, one **Save** button, a visible "saved" signal. **Readable without the browser's zoom** (2.8, origin issue #106 — a field owner's explicit word): the page renders at 1.7× the browser base through `html { zoom }` — the whole page, as Ctrl+Plus does (raising font-size alone turns the radio circles into dots), the Save button at 1.5× (its own zoom 1.5 / 1.7), and every width breakpoint is multiplied by the same scale (media queries do not see CSS zoom).
 - **The Save control is a FLOATING button at the top right** (`.fab { position:fixed; top; right }`), visible at any scroll and window height; the status is a pill
-  under it. **A bar pinned to the bottom edge is FORBIDDEN** — a window taller than the screen (remote desktop, phone) hides it (2.7, origin issue #60, the
+  under it, no wider than the button's column the header keeps free and at most two lines tall — a status that does not fit them rides the bar above the page, and each bar is cleared only by its own owner (2.9, origin issue #125 — a wide pill covered the document title). **A bar pinned to the bottom edge is FORBIDDEN** — a window taller than the screen (remote desktop, phone) hides it (2.7, origin issue #60, the
   owner's word: a FAB at the top right). The render self-check judges it (`.fab` fixed, no `bottom:0`, no raw `**` in labels) and refuses a failing page with exit 3.
 - **The header scrolls with the page** (`header { position: static }`) — the owner's word; only the emergency banner ("server silent") may stay pinned.
 - Refusing the owner's work is LOUD: every request that carries the owner's text sits in try/catch; a failed save returns the text onto the page with Copy and Retry; a draft lives in `localStorage` and is restored on load ("picked up N fields"). No path may leave the Save button disabled with no
@@ -73,7 +73,7 @@ Approval binds to the SHA-256 of the NORMALISED body (BOM stripped, CRLF/CR → 
 - Patience is infinite by default (`--timeout 0`); a finite timeout is an automation flag and means tolerated silence.
 - Answers are saved ONE AT A TIME (2.8, the KAIF owner's word): the page LIVES while its document has an unanswered question («Saved. Questions left:
   N», the answered one moves to the settled fold, the other drafts stay); the last answer ends it with exit 0. The agent is woken by a separate WAITER
-  started next to the page as a tracked task — `review.mjs --wait <doc>`: exit 0 on each recorded answer, 2 when the contour ended without one or none came up within a minute; apply the
+  started next to the page as a tracked task — `review.mjs --wait <doc>`: exit 0 on each recorded answer, 2 when the contour ended without one — its lock gone, or its server's process dead while the lock stays (2.9, #125: `--queue --list` then picks up an answer saved in the window) — or none came up within a minute; apply the
   answer, start it again while questions are left. The page dying is an event too: `sendBeacon('/closed')` on `pagehide` plus a silence watch (~3 min, two strikes).
 - A save carries the REVISION its page was built from: another revision (the document rewritten under an open tab) → 409, the text stays on the page with
   «Open the new revision»; a repeated save is recognised; a draft key carries its question's fingerprint — a draft never lands on a rewritten question.

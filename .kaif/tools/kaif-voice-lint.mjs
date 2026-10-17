@@ -60,7 +60,7 @@
 // section, `--all` together with `--sections` — then nothing is loaded and no witness is written).
 //
 // Commands:
-//   node .kaif/tools/kaif-voice-lint.mjs load [--all | --sections <regex>]   # print the writing sections into
+//   node .kaif/tools/kaif-voice-lint.mjs load [--all | --sections <regex>] [--out <file>]   # print the writing sections into
 //                                                                        # your context (--all: the whole portrait;
 //                                                                        # --sections: the head + the H2 sections
 //                                                                        # matching) + write the witness — BEFORE
@@ -107,6 +107,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'no
 import { join, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 // OW8 (KAIF 2.8, origin issue #101): the command runs only when this file IS the program — imported by a project's own tool, the
 // module stays silent and never exits the importer (the same guard as the shipped contour's review.mjs).
 import { pathToFileURL as __kaifToUrl } from 'node:url';
@@ -121,7 +122,11 @@ const SECTIONS_AT = argv.indexOf('--sections');
 const SECTIONS_ARG = SECTIONS_AT >= 0 ? argv[SECTIONS_AT + 1] : null;
 const GENRE_AT = argv.indexOf('--genre');
 const GENRE_ARG = GENRE_AT >= 0 ? argv[GENRE_AT + 1] : null;
-const FILES = argv.slice(1).filter((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--sections' && all[i - 1] !== '--genre');
+// `load --out <file>` (2.9; origin tickets #143 §2.3 · #145 §2.4): a client that caps tool output by BYTES cut the ~60 KB print inside a
+// UTF-8 sequence and the loaded text ended in U+FFFD — the selection is written to the file instead, and the agent reads that file whole
+const OUT_AT = argv.indexOf('--out');
+const OUT_ARG = OUT_AT >= 0 ? argv[OUT_AT + 1] : null;
+const FILES = argv.slice(1).filter((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--sections' && all[i - 1] !== '--genre' && all[i - 1] !== '--out');
 const EXIT_FINDINGS = 1;
 const EXIT_USAGE = 2;
 const EXIT_SKIPPED = 3;
@@ -132,7 +137,7 @@ const FRAGMENT_MAX = 80;
 const LOADS_KEPT = 100;               // the load history a witness keeps (the oldest fall off)
 export const STALE_MINUTES = 60;      // the hour rule of context refresh: an older load is no longer "in the cache"
 export const BOUNDARY = 'likeness is not judged — that verdict is the owner\'s (the taste class); the linter catches only the explicit patterns of the portrait\'s §8 table';
-const USAGE = 'usage: node .kaif/tools/kaif-voice-lint.mjs load [--all | --sections <regex>] [--genre <genre>] | check <files…> [--genre <genre>] [--warn] | selftest';
+const USAGE = 'usage: node .kaif/tools/kaif-voice-lint.mjs load [--all | --sections <regex>] [--genre <genre>] [--out <file>] | check <files…> [--genre <genre>] [--warn] | selftest';
 // The WRITING sections a bare `load` prints (2.8, epic CK; the origin's plan names the decision and its sources): the numbered
 // H2 sections the canon's fourth obligation and the portrait's own "how to use" name for writing — §0 the bans the owner dictated,
 // §1 how to read the portrait (a 2.x core: the order of work and its terms — the core tells the writer to keep §0–§3 in context;
@@ -433,13 +438,13 @@ function readTemplateShas() {
   try { return JSON.parse(readFileSync(DEPLOY_MANIFEST, 'utf8').replace(/^\uFEFF/, '')).templateShas || null; } catch { return null; }
 }
 function readMarker() {
-  try { return JSON.parse(readFileSync(VOICE_MARKER, 'utf8')); } catch { return null; }
+  try { return JSON.parse(readFileSync(VOICE_MARKER, 'utf8').replace(/^\uFEFF/, '')); } catch { return null; }
 }
 
 // ---------------------------------------------------------------------------
 function portraitPath() {
   try {
-    const j = JSON.parse(readFileSync(MARKER, 'utf8'));
+    const j = JSON.parse(readFileSync(MARKER, 'utf8').replace(/^\uFEFF/, ''));
     if (typeof j.voicePortrait === 'string' && j.voicePortrait.trim()) return j.voicePortrait.trim();
   } catch { /* no marker or unreadable — the default name stands */ }
   return DEFAULT_PORTRAIT;
@@ -474,7 +479,17 @@ function load() {
     else why = ` — no writing section (${[...WRITING_SECTIONS, ...extra].map((n) => '§' + n).join(' · ')} or their subsections) is numbered in this portrait, so the whole of it is loaded`;
   }
   printed = printed.replace(/\s*$/, '');
-  process.stdout.write(printed + '\n');
+  if (OUT_AT >= 0) {
+    if (!OUT_ARG || OUT_ARG.startsWith('--')) usage('--out needs a file path — nothing loaded, no witness written');
+    // the copy may be of a PRIVATE portrait: inside a git work tree it goes only where git ignores it, or it rides the next commit
+    const outDir = dirname(resolve(OUT_ARG));
+    const inTree = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: existsSync(outDir) ? outDir : '.', encoding: 'utf8' });
+    if (inTree.status === 0 && String(inTree.stdout).trim() === 'true'
+        && spawnSync('git', ['check-ignore', '-q', '--no-index', resolve(OUT_ARG)], { cwd: existsSync(outDir) ? outDir : '.' }).status !== 0)
+      usage(`--out ${OUT_ARG} is inside this git work tree and git does not ignore it — the copy of the portrait would ride the next commit; write it outside the project (your scratchpad, the OS temp folder) or to an ignored path — nothing loaded, no witness written`);
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(OUT_ARG, printed + '\n', 'utf8');
+  } else process.stdout.write(printed + '\n');
   const now = new Date(), prev = readMarker();
   const same = prev && prev.portrait === portrait;                     // another portrait starts a new witness
   const loads = (same ? (Array.isArray(prev.loads) ? prev.loads : [prev.firstAt].filter(Boolean)) : []).concat(localIso(now)).slice(-LOADS_KEPT);
@@ -490,7 +505,8 @@ function load() {
   const whole = text.replace(/\s*$/, ''), part = printed !== whole;
   const size = part ? `${marker.lines} of ${whole.split(/\r?\n/).length} line(s)` : `${marker.lines} line(s)`;
   const cost = part ? `${fmtTokens(tokensOf(printed))} of ${fmtTokens(tokensOf(whole))} tokens` : `${fmtTokens(tokensOf(whole))} tokens`;
-  console.log(`\n✅ voice-lint load — ${portrait} (${size}, sections: ${sections}${why}; ${cost}) is now in your working context; witness ${VOICE_MARKER} at ${marker.at} (${loads.length} load(s) on record) — write BY it, then \`check\``);
+  if (OUT_AT >= 0) console.log(`✅ voice-lint load — ${portrait} (${size}, sections: ${sections}${why}; ${cost}) written to ${OUT_ARG} (${Buffer.byteLength(printed + '\n', 'utf8')} bytes, UTF-8); witness ${VOICE_MARKER} at ${marker.at} (${loads.length} load(s) on record) — READ THAT FILE WHOLE NOW: until you have, the portrait is not in your working context; then write BY it and \`check\``);
+  else console.log(`\n✅ voice-lint load — ${portrait} (${size}, sections: ${sections}${why}; ${cost}) is now in your working context; witness ${VOICE_MARKER} at ${marker.at} (${loads.length} load(s) on record) — write BY it, then \`check\``);
   if (!left.length) return;
   // Every section the writing selection left out, by name, weight and a ready command — the unit that needs one loads it.
   const titles = h2Sections(text).sections.map((s) => s.title);
@@ -650,7 +666,9 @@ function selftest() {
   say(witness(null, P, 'abc', T + MIN).findings.length === 1 && /no load witness/.test(witness(null, P, 'abc', T + MIN).findings[0]), 'witness: no marker → finding "no load witness"');
   say(/another portrait/.test((witness(mk([T], 'abc', 'voice/OTHER.md'), P, 'abc', T + MIN).findings[0] || '')), 'witness: a marker for another portrait → finding');
   say(witness(mk([T]), P, 'abc', T + MIN).findings.length === 0 && witness(mk([T]), P, 'abc', T + MIN).warnings.length === 0, 'witness: loaded, then written within the hour → clean');
-  say(/the file was last written at 2026-09-12T13:59/.test(witness(mk([T]), P, 'abc', T - MIN).findings[0] || ''), 'witness: written BEFORE the first load → finding, both moments in the local zone');
+  // the expected moment is computed in THIS machine's zone (2.9: a literal «13:59» held only at +03:00 — red in a UTC container and in any
+  // field project west or east of the origin)
+  say((witness(mk([T]), P, 'abc', T - MIN).findings[0] || '').includes('the file was last written at ' + localIso(new Date(T - MIN)).slice(0, 16)), 'witness: written BEFORE the first load → finding, both moments in the local zone');
   say(/(\d+) min earlier/.test(witness(mk([T]), P, 'abc', T + 90 * MIN).findings[0] || ''), 'witness: written 90 min after the last load → finding (the hour rule)');
   say(witness(mk([T, T + 80 * MIN]), P, 'abc', T + 90 * MIN).findings.length === 0, 'witness: a re-load 10 min before the write → clean (the load history counts)');
   say(witness(mk([T]), P, 'other', T + MIN).warnings.some((w) => /changed since it was last loaded/.test(w)), 'witness: the portrait changed since the load → warning "reload"');

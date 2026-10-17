@@ -37,12 +37,36 @@
 // Cursor (`beforeSubmitPrompt` → only `continue`/`user_message`) and GitHub Copilot
 // (`additionalContext` is not permitted on `userPromptSubmitted`) cannot carry this hook at
 // all — they ship the session-start hook only, and .kaif/hooks/README.md says so per system.
-import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+//
+// 2.9, epic HK (origin ticket #94, bugs 119 no. 1-2): the marker is read in the PROJECT ROOT, not in the event's `cwd` — one `cd src`
+// by the agent moved `cwd` and the timer answered every prompt with "no refresh witness" while the root marker was fresh; the order
+// names the marker by its FULL path, so the agent stamps it where this hook reads it. A marker `at` later than now is no witness: a
+// zone slip stamped "…Z" over local digits lies hours ahead, and a future `at` used to silence the timer until that moment came.
+// [TESTED: 2026-09-28 · suite s14: an event from <root>/src/deep reads like one from the root (fresh marker - silent, 2 h - the
+//  order with the age), the order names the marker by its full path, an `at` 30 min ahead with a fresh mtime gives the order, 30 s
+//  ahead stays silent; red on the v2.8 core; mutants M22-M23; on the live origin tree an event from tools/sandbox with the root
+//  marker 21 min old - silent, where the v2.8 timer printed "no refresh witness found"; report testcases/reports/2026-09-28_hk-hooks-project-root.md (origin repository)]
+import { readFileSync, statSync, existsSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 
 const OUTPUT_CAP = 10000;           // Claude Code caps hook output strings at 10 000 characters
 const DEFAULT_INTERVAL_MIN = 60;    // the canon's "refresh at least once an hour"
 const MARKER = '.kaif/refresh-marker.json';
+const DEPLOYMENT = join('.kaif', 'kaif.json');  // the deployment marker: its directory IS the project root
+const FUTURE_TOLERANCE_MIN = 2;     // an `at` further ahead than this is no witness (two processes of one machine share a clock;
+                                    // a zone slip is whole hours, so two minutes separates the two without false alarms)
+
+// The project root, not the event's `cwd`: the nearest ancestor of `cwd` (itself included) that holds the deployment marker;
+// none → `cwd` itself, as before. Twins — the same function in stop-status-guard.mjs, session-start-refresh.mjs and
+// prompt-resume-word.mjs (the module keeps self-contained scripts; suite s14 feeds each an event from a subfolder).
+function projectRoot(cwd) {
+  for (let d = resolve(cwd); ;) {
+    if (existsSync(join(d, DEPLOYMENT))) return d;
+    const up = dirname(d);
+    if (up === d) return cwd;
+    d = up;
+  }
+}
 
 // Same order, different envelope per system — see the PORTABILITY note above.
 const ENVELOPES = {
@@ -65,7 +89,7 @@ try {
     if (input.cwd) cwd = String(input.cwd);
   } catch { /* unreadable stdin — fall back to process.cwd() */ }
 
-  const markerPath = join(cwd, MARKER);
+  const markerPath = join(projectRoot(cwd), MARKER);
   // Age of the last refresh: the marker's own `at` field is the truth; a malformed field falls
   // back to the file mtime; a missing file means "never refreshed" → infinitely stale.
   let ageMin = Infinity;
@@ -78,11 +102,13 @@ try {
     ageMin = (Date.now() - at) / 60000;
   } catch { /* no marker at all — stays Infinity */ }
 
-  if (ageMin > intervalMin) {
-    const ageLabel = ageMin === Infinity ? 'no refresh witness found this session' : `last refresh ${Math.round(ageMin)} min ago`;
+  const future = ageMin < -FUTURE_TOLERANCE_MIN;
+  if (future || ageMin > intervalMin) {
+    const ageLabel = future ? `the marker "at" lies ${Math.ceil(-ageMin)} min in the future - no witness`
+      : ageMin === Infinity ? 'no refresh witness found this session' : `last refresh ${Math.round(ageMin)} min ago`;
     const order =
       `KAIF context refresh (timer: ${ageLabel}, interval ${intervalMin} min). Before starting on this prompt: ` +
-      `re-read the re-read core (AGENT_GUIDE.md → "Context refresh"), re-stamp .kaif/refresh-marker.json ` +
+      `re-read the re-read core (AGENT_GUIDE.md → "Context refresh"), re-stamp ${markerPath} ` +
       `{ "at": "<ISO>", "docs": [...], "trigger": "hour" } and put the acceptance quote in the chat — one concrete ` +
       `line from what you re-read, relevant to the task. This reminder repeats until the marker is actually refreshed.`;
     // Unknown shape → reference envelope (see session-start-refresh.mjs for the reasoning).

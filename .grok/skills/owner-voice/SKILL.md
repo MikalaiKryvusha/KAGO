@@ -49,7 +49,9 @@ Three steps, in this order — and the report of the unit names each:
    `node .kaif/tools/kaif-voice-lint.mjs load` prints the WRITING sections of `AUTHOR_STYLOMETRY.md` — the
    bans §0, how to read it §1, the rules §2, the lexicon §2-C, the anti-portrait §5, the before/after pairs §6, the checklist
    §7 (with `--genre essay` also the prose register §3) — INTO YOUR WORKING CONTEXT, names every other section with its weight and a ready `--sections`
-   command (load one the unit needs; `--all` loads the whole portrait) and leaves the witness `.kaif/voice-marker.json`;
+   command (load one the unit needs; `--all` loads the whole portrait) and leaves the witness `.kaif/voice-marker.json`
+   (your client cuts long tool output by bytes? `--out <file>` writes the same selection to a UTF-8 file outside the project
+   tree — read that file whole before the first word);
    write by it while it is there — the owner's word: write BY the stylometry, WITH IT IN THE WORKING
    CACHE — the lexicon's turn of phrase, not a synonym; the skeleton of the section the owner uses; the
    register of the artifact. A draft written "natively" and re-voiced afterwards is the class this
@@ -76,7 +78,7 @@ A rule that yields an artifact names the command that produces it — this is th
 machine half of step 2 above (the semantic half is the clean-instance pass §7B):
 
 ```
-node .kaif/tools/kaif-voice-lint.mjs load [--all | --sections <regex>] [--genre <genre>]   # step 1: the portrait into your context + the witness
+node .kaif/tools/kaif-voice-lint.mjs load [--all | --sections <regex>] [--genre <genre>] [--out <file>]   # step 1: the portrait into your context + the witness
 node .kaif/tools/kaif-voice-lint.mjs check <file…> --genre <genre> [--warn]        # step 2, the machine half; genres: document · ticket · comment · message · reply · essay
 ```
 

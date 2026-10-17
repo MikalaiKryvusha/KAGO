@@ -1,7 +1,7 @@
 {
   "framework": "KAIF",
-  "version": "2.8",
-  "released": "2026-09-26",
+  "version": "2.9",
+  "released": "2026-10-16",
   "origin": "https://github.com/MikalaiKryvusha/KAIF",
   "tracking": "origin",
   "sphere": "programming",
@@ -55,7 +55,13 @@
       "to": "2.8",
       "route": "bootstrap",
       "date": "2026-09-26T13:37:38+03:00"
+    },
+    {
+      "from": "2.8",
+      "to": "2.9",
+      "route": "bootstrap",
+      "date": "2026-10-17T11:49:06+03:00"
     }
   ],
-  "build": "106b97d7715c"
+  "build": "1fc046329eb2"
 }

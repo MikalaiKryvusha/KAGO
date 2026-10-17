@@ -1,10 +1,10 @@
 ---
-description: Resume work where the last session left off — read the key project documents, decide the single most important thing to do now, announce it, and start. Use when the human says "continue", "let's continue", "what's next", "where did we leave off", "resume", "резюм", "резюме", "pick up where we left off", "продолжи", "продолжим", "что дальше" — and ALWAYS when "resume" (or "резюм") is the FIRST word of the human's message with the task written below it: the skill runs FIRST, in full, then the task (AGENT_GUIDE.md → "A leading skill word is an order"). Trigger aliases (ru): «resume», «резюм», «резюме», «продолжи», «продолжим», «возобнови», «на чём мы остановились», «что дальше по работе»
+description: Resume work where the last session left off — read the key project documents, decide the single most important thing to do now, announce it — then do what the owner wrote under the word (a question is answered, not followed by work; a bare "resume" starts the chosen direction). Use when the human says "continue", "let's continue", "what's next", "where did we leave off", "resume", "резюм", "резюме", "pick up where we left off", "продолжи", "продолжим", "что дальше" — and ALWAYS when "resume" (or "резюм") is the FIRST word of the human's message with the task written below it: the skill runs FIRST, in full, then the task (AGENT_GUIDE.md → "A leading skill word is an order"). Trigger aliases (ru): «resume», «резюм», «резюме», «продолжи», «продолжим», «возобнови», «на чём мы остановились», «что дальше по работе»
 ---
 
 # /resume — pick up where we left off
 
-A new session starts with empty context. This skill rebuilds the picture fast and gets to work.
+A new session starts with empty context. This skill rebuilds the picture fast and gets to the work the owner asked for.
 
 > **The word at the top of the message is the order; the task under it waits.** A message that
 > opens with `resume` (or its Russian shorthand) and continues with a task runs THIS skill first, in full — the task
@@ -78,12 +78,19 @@ between `KAIF:CREED` / `KAIF:PRAYER` markers — in full, no paraphrase), then *
 one paragraph**: what you read and the current status; what you picked as the main thing and why;
 what you're about to do right now.
 
-Wait for confirmation only if the task is **destructive** or **large and non-obvious**. If the plan is
-clear — start right after the short announcement.
+**The owner's message sets the scope** (KAIF 2.9; the KAIF owner's word on a session that answered "how much is left?"
+and then started the next item of the plan by itself: the skill told it wrong — decision #143). Read what he wrote under
+the word, then:
+
+- **a question** ("how much is left?", "where are we?", "what is X?") → answer it in the announcement and END the turn:
+  the direction you picked is OFFERED as the next step, never taken — no work was asked for;
+- **a task** → that task is the session's work; your pick from the list above is named in one line;
+- **nothing under the word** (a bare `resume`) → the direction you picked: wait for confirmation only if it is
+  **destructive** or **large and non-obvious**; otherwise start right after the short announcement.
 
 ## Step 3. Work
 
-Do the chosen task. Along the way:
+Do the work the scope gave — the owner's task, or with a bare `resume` the direction you picked. Along the way:
 - Write short updates in the chat (what you're doing, what you found, where you're digging).
 - Follow `AGENT_GUIDE.md` (code style, the bug framework, the test harness).
 - If it's a bug — keep a log in the relevant `bugs/` file.

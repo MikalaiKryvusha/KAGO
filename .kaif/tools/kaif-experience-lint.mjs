@@ -206,7 +206,7 @@ export function declaredClasses(text) {
 function danglingOf(value, root, tree) {
   const missing = [];
   let pkg = null;
-  try { pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')); } catch { /* no package.json — npm scripts are not checked */ }
+  try { pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8').replace(/^\uFEFF/, '')); } catch { /* no package.json — npm scripts are not checked */ }
   for (const m of value.matchAll(NPM_RUN))
     if (pkg && pkg.scripts && !(m[1] in pkg.scripts)) missing.push(`npm run ${m[1]}`);
   // A path the project deliberately IGNORES is expected to be absent from a checkout — a runtime
@@ -346,9 +346,9 @@ const positional = () => {
 
 // An explicit `--baseline <file>` must exist; without the flag the project's own file next to the journal is read when present.
 function loadBaseline(path, fallback) {
-  if (!path) return fallback && existsSync(fallback) ? new Set(JSON.parse(readFileSync(fallback, 'utf8')).ids || []) : new Set();
+  if (!path) return fallback && existsSync(fallback) ? new Set(JSON.parse(readFileSync(fallback, 'utf8').replace(/^\uFEFF/, '')).ids || []) : new Set();
   if (!existsSync(path)) { console.error(`\u2716 experience-lint: no baseline at ${path}`); process.exit(1); }
-  return new Set(JSON.parse(readFileSync(path, 'utf8')).ids || []);
+  return new Set(JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')).ids || []);
 }
 
 // `check --write-baseline`: the first capture records every entry id of the journal; a later one only SHRINKS the line \u2014 it keeps
@@ -360,7 +360,7 @@ function loadBaseline(path, fallback) {
 //  "inherited field debt 122" — testcases/reports/2026-09-25_ck57b-experience-baseline.md]
 function writeBaseline(text, path) {
   const ids = parseEntries(text).map((e) => e.id);
-  const prev = existsSync(path) ? new Set(JSON.parse(readFileSync(path, 'utf8')).ids || []) : null;
+  const prev = existsSync(path) ? new Set(JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')).ids || []) : null;
   const kept = prev ? ids.filter((id) => prev.has(id)) : ids;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify({

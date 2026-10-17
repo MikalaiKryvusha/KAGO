@@ -82,6 +82,12 @@ If it shapes brand/architecture/UX for the long term — interview.
 - **Option D is always "your own answer"** — a slot for the owner to write their own choice if none of
   A/B/C fits.
 - **B and C** are the serious alternatives, each with a short "why" / trade-off.
+- **One fork — one question, and short** (KAIF 2.9, origin issue #142 — a field owner facing 29 questions of about 2,400 characters
+  each, rendered from Russian: "you write VERY MUCH, I get tired reading and I am afraid to answer these questions"): the question
+  carries only what the owner chooses BY — the options, their price and what he will see; the recon, the evidence and the history
+  stay in the context section above the questions or in the research. Several forks → several short questions, never one long one.
+  Short is not a pointer: the SUBJECT of the decision — the list, the order, the wording, the numbers, the two variants — is quoted
+  INTO the question; a link beside it confirms, a link instead of it sends the owner away (the contour door refuses its back-reference words — "above", "see the section", "§N" — with `--check`, exit 3; a bare link it cannot judge).
 - **Every question declares its ANSWER TARGET** (contour invariant I18) — the document/section
   blocked by the question, written at question-writing time: the agent knows it exactly then
   (that knowledge is the reason to ask), and by closing time — often another session, days later —

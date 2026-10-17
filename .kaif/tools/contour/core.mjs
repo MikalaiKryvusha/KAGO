@@ -158,6 +158,15 @@ const STATUS_LINE_RE = new RegExp('^\\s*>?\\s*\\*{0,2}(?:' + PARSER.statusLabels
 const STATUS_CLOSED_RE = new RegExp(PARSER.statusClosed, 'iu');
 const STATUS_WAITING_RE = new RegExp(PARSER.statusWaiting, 'iu');
 const STATUS_NEGATION_RE = new RegExp(PARSER.statusNegation, 'iu');
+const STATUS_CLOSED_WORD_RE = new RegExp(PARSER.statusClosedWord, 'iu');   // CP (2.9, #109 · #121 R3)
+const STATUS_PENDING_RE = new RegExp(PARSER.statusPending, 'iu');           // the light re-judge of epic CP, F5
+const WAITING_NEGATED_RE = new RegExp(PARSER.statusWaitingNegation + '\\s+$', 'iu');
+// a waiting marker counts unless a negation stands right before it («no longer awaiting» — the document is closed)
+function waitsUnnegated(line) {
+  const re = new RegExp(PARSER.statusWaiting, 'giu');
+  for (let m; (m = re.exec(line));) if (!WAITING_NEGATED_RE.test(line.slice(Math.max(0, m.index - 24), m.index))) return true;
+  return false;
+}
 
 // OW3 (2.8, origin issue #86): the whole STATUS BLOCK — the status line and the quote lines that continue it — says the answers await
 // application. A field marks it on a continuation line under a ticked "answered" (its S1: an 11-day-old decision stayed invisible);
@@ -176,6 +185,10 @@ export function docStatus(md) {
   const m = head.match(STATUS_LINE_RE);
   if (!m) return 'none';                                 // no status line — the document is LIVE
   const line = m[1];
+  // an explicit closing word FIRST outranks an explanation after it (#109) — but not an explicit, unnegated WAITING marker or a NOT-YET
+  // mark on the same line: a partial status «closed Q1; Q2 awaits an answer / is not yet answered» still waits (the light judges of epic
+  // CP, F5 and its re-judge); «closed — no longer awaiting an answer» closes
+  if (STATUS_CLOSED_WORD_RE.test(line)) return waitsUnnegated(line) || STATUS_PENDING_RE.test(line) ? 'waiting' : 'closed';
   if (STATUS_NEGATION_RE.test(line)) return 'waiting';   // negation outranks the tick
   if (STATUS_CLOSED_RE.test(line)) return 'closed';
   if (STATUS_WAITING_RE.test(line)) return 'waiting';
@@ -190,15 +203,55 @@ const ANSWER_LABEL_RE = new RegExp('^\\s*\\*{0,2}(?:' + PARSER.answerLabels + ')
 const COUNTER_LABEL_RE = new RegExp(PARSER.counterQuestion, 'iu');      // rule 2: a counter-question is NOT an answer
 const COMMENT_LABEL_RE = new RegExp('^\\s*\\*{0,2}(?:' + PARSER.commentLabels + ')', 'iu');
 const TARGET_LABEL_RE = new RegExp('^\\s*\\*{0,2}(?:' + PARSER.targetLabels + ')\\s*:?\\*{0,2}\\s*(.*)$', 'iu');
-const RECOMMEND_RE = new RegExp('(?:' + PARSER.recommendLabels + ')\\s*[:—–-]?\\s*\\*{0,2}([' + L + '])(?![\\p{L}\\d])', 'u');
-// FIRST legal option form — a list item `- **A)** …` (a note in brackets after the letter is legal)
-export const OPTION_START_RE = new RegExp('^\\s*-\\s+\\*\\*([' + L + '])\\)', 'u');
+// CP (2.9, origin ideas/31 p. 28): the label may close its own bold before the letter — «**Agent's recommendation:** A» was read as none
+const RECOMMEND_RE = new RegExp('(?:' + PARSER.recommendLabels + ')(?:\\s|[:—–-]|\\*){0,6}([' + L + '])(?![\\p{L}\\d])', 'u');
+// FIRST legal option form — a list item `- **A)** …` (a note in brackets after the letter is legal). 2.9, epic CP (origin issue #127): the
+// list form speaks the TABLE form's dictionary — `- **A:**`, `- **A.**`, `- **A (note):**` and a bold letter alone `- **A** — …` are options too. A field project's live corpus
+// was written that way: 169 of 1941 options recognised, 47 of 107 interviews invisible. The donor contours' recon recorded the fate in
+// advance ("a richer letter rule — at the first mismatch of the count", origin researches/17 §4 p. 4); #127 is that mismatch.
+export const OPTION_START_RE = new RegExp('^\\s*-\\s+\\*\\*([' + L + '])(?:\\)|[:.](?![\\p{L}\\d])|\\s*\\([^)]*\\)\\s*[:.)]?|(?=\\*\\*))', 'u');
+// A list item that OPENS with a bold single letter — what the author meant as an option, whether or not the form is recognised. The
+// door counts these against the parsed options: a letter the parse did not see is named, never lost in silence (#127).
+const AUTHORED_LETTER_RE = new RegExp('^\\s*-\\s+\\*\\*\\s*([' + L + '])(?![\\p{L}\\d])', 'u');
+// (light judge of epic CP, F4) an option written as a PARAGRAPH — `**C.** three`, the #51 form, no list dash — is a letter authored
+// too: two list options plus a paragraph C used to show A and B and lose C in silence. Only a letter with its mark (. ) :) counts, so
+// prose that merely opens with a bold letter ("**B** costs more") is not taken for an option. The re-judge: the list form's dash
+// (`**C** — three`, the bold closed before a dash) is a mark too.
+const AUTHORED_PARA_LETTER_RE = new RegExp('^\\s*\\*\\*\\s*([' + L + '])\\s*(?:[.):]|\\*\\*\\s*[\\u2014\\u2013-](?=\\s))', 'u');
+const authoredLetter = (l) => AUTHORED_LETTER_RE.test(l) || AUTHORED_PARA_LETTER_RE.test(l);
 // SECOND legal form — a TABLE ROW `| **A** | … |` (bugs/51 of the origin): a one-letter cell (bold
 // optional, dot/bracket optional, a bracketed note on either side of the bold) + at least one
 // content cell to the right. A header row and the `---` separator do not match and drop out.
 export const OPTION_ROW_RE = new RegExp('^\\s*\\|\\s*\\*{0,2}([' + L + '])[.)]?(?:\\s*\\([^)]*\\))?\\*{0,2}(?:\\s*\\([^)]*\\))?\\s*\\|(.+)$', 'u');
 const FREE_FIELD_RE = new RegExp(PARSER.freeFieldMarker, 'u');
 const isOptionLine = (line) => OPTION_START_RE.test(line) || OPTION_ROW_RE.test(line);
+// Light judge of epic NT, F1, and its twins (2.9): text the owner typed into a multi-line field — the own answer (NT1, #139) and the
+// comments, which were textareas before it — lands as LINES of the file, and a continuation line that reads as structure was read back
+// as structure: a fence swallowed the rest of the file, a heading made a phantom question, a rule, an option, a table row or a label
+// cut the answer. The writer puts a markdown backslash escape before such a line (after its indent) and the reader takes it off; a line
+// the owner himself began with a backslash before structure gets one more, so the round trip returns exactly what he typed.
+// [TESTED: 2026-10-16 16:09 +03:00 · contour selftest case «NT F1» (twelve forms + a multi-line comment; Q2 kept, read back as typed);
+//  tools/sandbox/probes/nt1-contour-mutants.mjs M3 (no escape) and M4 (no unescape) red exactly on it]
+// Court RL 2.9, E-F1: a STATUS line is structure too — in a document with no status line of its own, an answer line «Status: done»
+// within the head closed the whole document and hid its open questions; E-F2: the reader judges a line without the provenance mark the
+// writer appends to the last line («\--- <!-- owner-review … -->» used to read back with its backslash).
+const STRUCTURE_LINE_RES = [/^\s*(```|~~~)/, /^#{1,6}\s/, /^---\s*$/, /^\s*\|/, OPTION_START_RE, AUTHORED_LETTER_RE,
+  AUTHORED_PARA_LETTER_RE, ANSWER_LABEL_RE, TARGET_LABEL_RE, COMMENT_LABEL_RE, STATUS_LINE_RE];
+const ESCAPED_RE = /^(\s*)\\/;
+const dropEscape = (l) => l.replace(ESCAPED_RE, (m, indent) => indent);
+const dropMark = (l) => l.replace(/\s*<!--[\s\S]*?-->\s*$/, '');
+const readsAsStructure = (l) => STRUCTURE_LINE_RES.some((re) => re.test(l)) || (ESCAPED_RE.test(l) && readsAsStructure(dropEscape(l)));
+const escapeStructure = (l) => (readsAsStructure(l) ? l.replace(/^\s*/, (indent) => indent + '\\') : l);
+export const unescapeStructure = (l) => (ESCAPED_RE.test(l) && readsAsStructure(dropMark(dropEscape(l))) ? dropEscape(l) : l);
+// the owner's text as lines of the file: trailing blanks trimmed, every line after the first escaped where it reads as structure; blank
+// lines are dropped (an answer is read back as a paragraph up to a blank line) unless `keepBlank` — a comment is never read back
+export const ownerTextLines = (text, { keepBlank = false } = {}) => {
+  const ls = String(text).split(/\r?\n/).map((s) => s.replace(/\s+$/, ''));
+  while (ls.length && !ls[0].trim()) ls.shift();
+  while (ls.length && !ls[ls.length - 1].trim()) ls.pop();
+  const kept = keepBlank ? ls : ls.filter((s) => s.trim());
+  return kept.length ? kept.map((s, i) => (i ? escapeStructure(s) : s)) : [''];
+};
 
 export function parseQuestions(md) {
   const lines = normalize(md).split('\n');
@@ -269,17 +322,23 @@ function finishQuestion(q, docClosed) {
     targetOpen = false;
     const a = line.match(ANSWER_LABEL_RE);
     if (a && !COUNTER_LABEL_RE.test(line)) {
-      let text = (a.groups.rest || '').trim();
-      if (!text) { // the answer text may sit on the first non-empty line below the label
-        for (let k = j + 1; k < q.body.length; k++) {
-          const nl = q.body[k].trim();
-          if (!nl) continue;
-          if (ANSWER_LABEL_RE.test(q.body[k]) || TARGET_LABEL_RE.test(q.body[k]) ||
-              isOptionLine(q.body[k]) || COMMENT_LABEL_RE.test(q.body[k])) break; // an owner's comment is NOT the answer
-          text = nl; break;
-        }
+      // 2.9, epic CP (origin #123, #127 p. 5): the answer is a PARAGRAPH — the label's rest and every line below it up to a blank line
+      // or the next label (an owner who wraps his answer was read by its first line only); an HTML comment is cut before the answer
+      // is judged — a comment under an empty label ("<!-- write here -->") made a live question look answered.
+      const noComment = (t) => t.replace(/<!--[\s\S]*?-->/g, '').trim();
+      // a label bolded TOGETHER with the answer ("**Answer: A — the choice.** more") leaves the rest with one unpaired "**" — dropped
+      const rest0 = noComment(a.groups.rest || '');
+      const rest = /^\s*\*\*/.test(line) && !/:\*\*/.test(line) && (rest0.match(/\*\*/g) || []).length % 2 === 1 ? rest0.replace('**', '') : rest0;
+      const parts = [rest].filter(Boolean);
+      const lines = [j];   // court RL 2.9, E-F3: the body lines this answer took — the page card leaves them out of the question's prose
+      for (let k = j + 1; k < q.body.length; k++) {
+        const raw = q.body[k];
+        if (ANSWER_LABEL_RE.test(raw) || TARGET_LABEL_RE.test(raw) || isOptionLine(raw) || COMMENT_LABEL_RE.test(raw)) break; // an owner's comment is NOT the answer
+        const nl = noComment(unescapeStructure(raw)); // NT F1: a continuation line escaped by the writer reads back as the owner typed it
+        if (!raw.trim()) { if (parts.length) break; continue; } // a blank line ends the answer — or precedes it
+        if (nl) { parts.push(nl); lines.push(k); }
       }
-      q.answers.push({ line: j, text, followUp: Boolean(a.groups.mod) });
+      q.answers.push({ line: j, lines, text: parts.join('\n'), followUp: Boolean(a.groups.mod) });
     }
   }
   for (const o of q.options) {
@@ -479,10 +538,50 @@ function archaeologyProblems(md) {
  * question and the fix (the #51 defect: options typed as paragraphs `**A. …**` are NOT options).
  * Answered questions are exempt (they render grey, no radios needed); a declared free field is legal.
  */
+// ── 2.9, epic CP (origin issue #124): the THIRD axis of the door — the question is SELF-CONTAINED ────────────────
+// The canon says "the subject of the decision lives INSIDE the question; a reference INSTEAD of the content is a defect, guarded
+// mechanically" — and the shipped door did not guard it (the executor lived only in the origin's wrapper; a field owner's standing rule,
+// quoted verbatim in the issue: write the proposal right in the question, he will not scroll a long document for "that formula"). Every LIVE question's
+// heading and stem (the lines before its first option or answer field) is read: a backward or sideways reference refuses the door;
+// the addressee and origin lines carry legal addresses and are skipped, HTML comments are cut; the declared exception is
+// <!-- ref-ok: <reason> --> on the line (an empty reason is itself a violation). Judged FORWARD by the header date, like archaeology.
+export const REFERENCES_SINCE = '2026-09-28';        // the day the axis was shipped; older documents stay silent
+const REF_BACK_RE = new RegExp(PARSER.refBack, 'iu');
+const REF_OK_RE = /<!--\s*ref-ok:\s*([\s\S]*?)\s*-->/u;
+const ORIGIN_LABEL_RE = new RegExp('^\\s*[>*\\s]*(?:' + PARSER.originLabels + ')\\s*:', 'iu');
+export function referenceProblems(md) {
+  const date = headerDate(md);
+  if (!date || date < REFERENCES_SINCE) return [];
+  const out = [];
+  for (const q of parseQuestions(md)) {
+    if (q.answered || q.freeField) continue;
+    const answerAt = q.answers.length ? q.answers[0].line : q.body.length;
+    const end = q.firstOptionLine >= 0 ? Math.min(q.firstOptionLine, answerAt) : answerAt;
+    const lines = [q.title, ...q.body.slice(0, end)];
+    for (const line of lines) {
+      if (TARGET_LABEL_RE.test(line) || ORIGIN_LABEL_RE.test(line)) continue;
+      const ok = REF_OK_RE.exec(line);
+      if (ok) { if (!ok[1].trim()) out.push(q.id + ': a <!-- ref-ok: --> marker without a reason declares nothing — name why the reference stays: ' + line.trim().slice(0, 80)); continue; }
+      const clean = line.replace(/<!--[\s\S]*?-->/g, '');
+      if (REF_BACK_RE.test(clean))
+        out.push(q.id + ': the question sends the owner OUTSIDE itself for its own content — «' + clean.trim().slice(0, 90) + '». Put the content'
+          + ' right in the question (the formula, the list, the numbers — a reference may stand NEXT to it, never instead of it);'
+          + ' declared exception on the line: <!-- ref-ok: <reason> -->');
+    }
+  }
+  return out;
+}
+
 export function preflight(md) {
   const problems = [];
   for (const q of parseQuestions(md)) {
     if (q.answered || q.freeField) continue;
+    const authored = q.body.filter(authoredLetter).length;   // CP (2.9, #127): a letter written but not parsed is named
+    const parsedList = q.options.filter((o) => !o.row).length;
+    if (authored > parsedList)
+      problems.push(q.id + ': letters authored ' + authored + ', recognised ' + parsedList + ' — an option the page would not show; write it'
+        + ' - **A)** · - **A:** · - **A.** · - **A (note):** (or a table row | **A** | … |): '
+        + q.body.filter((l) => authoredLetter(l) && !OPTION_START_RE.test(l)).map((l) => l.trim().slice(0, 40)).join(' | '));
     if (q.options.length < MIN_OPTIONS)
       problems.push(q.id + ': ' + q.options.length + ' option(s) in list form and no declared free field' +
         ' — the page would open without radio buttons; fix the form: - **A)** … (or a table row | **A** | … |),' +
@@ -491,6 +590,7 @@ export function preflight(md) {
   // AQ (2.7, origin issue #70): the SECOND axis of the same door — the question's archaeology. A free
   // field exempts the FORM, never the claim: a free-form question to the owner is a claim too.
   problems.push(...archaeologyProblems(md));
+  problems.push(...referenceProblems(md));   // CP (2.9, #124): the third axis — the question is self-contained
   return problems;
 }
 
@@ -524,16 +624,28 @@ export const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, 
 function inline(s) {
   return s
     .replace(/`([^`]+)`/g, (_, c) => '<code>' + c + '</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    // a single star INSIDE bold is text ("kaif-*" in a bold phase list — origin #123, interview 018 of the origin): only a pair closes
+    .replace(/\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*\p{L}\d])\*([^*]+)\*(?!\*)/gu, '$1<em>$2</em>')
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 }
+// 2.9, epic CP (origin #123): the owner's own answer shown on the page keeps its own markup (bold, code) — escaped first, then inline
+export const renderInline = (s) => inline(escapeHtml(s));
 export function renderMd(md) {
   const src = normalize(md).split('\n');
   const out = [];
   let inFence = false, fenceBuf = [], listOpen = false, quoteOpen = false, tableBuf = [];
-  const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
-  const closeQuote = () => { if (quoteOpen) { out.push('</blockquote>'); quoteOpen = false; } };
+  // 2.9, epic CP (origin #123): the unit of markdown is the PARAGRAPH, not the line — a hard-wrapped paragraph came out as one <p> per
+  // line and a bold span across the wrap stayed raw "**", which also made the page's own self-check refuse a legal wrapped option.
+  // Lines of a paragraph, of a list item (its continuation lines — CommonMark "lazy continuation") and of a quote paragraph are
+  // collected and joined with a newline before inline markup; a blank line, a heading, a rule, a table and a fence end them.
+  let para = [], item = null, qpara = [];
+  const flushPara = () => { if (para.length) { out.push('<p>' + inline(escapeHtml(para.join('\n'))) + '</p>'); para = []; } };
+  const flushItem = () => { if (item) { out.push('<li>' + inline(escapeHtml(item.join('\n'))) + '</li>'); item = null; } };
+  const flushQuotePara = () => { if (qpara.length) { out.push('<p>' + inline(escapeHtml(qpara.join('\n'))) + '</p>'); qpara = []; } };
+  const closeList = () => { flushItem(); if (listOpen) { out.push('</ul>'); listOpen = false; } };
+  const closeQuote = () => { flushQuotePara(); if (quoteOpen) { out.push('</blockquote>'); quoteOpen = false; } };
+  const closeAll = () => { flushPara(); closeList(); closeQuote(); };
   const flushTable = () => {
     if (!tableBuf.length) return;
     const rows = tableBuf.map((r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim()));
@@ -548,26 +660,28 @@ export function renderMd(md) {
   };
   for (const raw of src) {
     if (/^\s*```/.test(raw)) {
+      if (!inFence) closeAll();
       if (inFence) { out.push('<pre><code>' + escapeHtml(fenceBuf.join('\n')) + '</code></pre>'); fenceBuf = []; }
       inFence = !inFence;
       continue;
     }
     if (inFence) { fenceBuf.push(raw); continue; } // inside fenced, comments are content (I24)
     const line = raw.replace(/<!--[\s\S]*?-->/g, '').replace(/[ \t]+$/, ''); // I24: comments outside code are cut
-    if (/^\s*\|.*\|\s*$/.test(line)) { closeList(); closeQuote(); tableBuf.push(line); continue; }
+    if (/^\s*\|.*\|\s*$/.test(line)) { closeAll(); tableBuf.push(line); continue; }
     flushTable();
     const h = line.match(/^(#{1,6})\s+(.*)$/);
-    if (h) { closeList(); closeQuote(); out.push('<h' + h[1].length + '>' + inline(escapeHtml(h[2])) + '</h' + h[1].length + '>'); continue; }
-    if (/^---+\s*$/.test(line)) { closeList(); closeQuote(); out.push('<hr>'); continue; }
+    if (h) { closeAll(); out.push('<h' + h[1].length + '>' + inline(escapeHtml(h[2])) + '</h' + h[1].length + '>'); continue; }
+    if (/^---+\s*$/.test(line)) { closeAll(); out.push('<hr>'); continue; }
     const q = line.match(/^>\s?(.*)$/);
-    if (q) { closeList(); if (!quoteOpen) { out.push('<blockquote>'); quoteOpen = true; } out.push('<p>' + inline(escapeHtml(q[1])) + '</p>'); continue; }
+    if (q) { flushPara(); closeList(); if (!quoteOpen) { out.push('<blockquote>'); quoteOpen = true; } if (q[1].trim()) qpara.push(q[1]); else flushQuotePara(); continue; }
     closeQuote();
     const li = line.match(/^\s*[-*+]\s+(.*)$/);
-    if (li) { if (!listOpen) { out.push('<ul>'); listOpen = true; } out.push('<li>' + inline(escapeHtml(li[1])) + '</li>'); continue; }
+    if (li) { flushPara(); flushItem(); if (!listOpen) { out.push('<ul>'); listOpen = true; } item = [li[1]]; continue; }
+    if (item && line.trim()) { item.push(line.trim()); continue; } // a continuation line of the list item
     closeList();
-    if (line.trim()) out.push('<p>' + inline(escapeHtml(line)) + '</p>');
+    if (line.trim()) para.push(line); else flushPara();
   }
-  flushTable(); closeList(); closeQuote();
+  flushTable(); closeAll();
   return out.join('\n');
 }
 
@@ -636,30 +750,48 @@ export function recordDecision(root, docPath, payload, cfg = loadContourConfig(r
       .map(([qid, ans]) => ({ qid, ans, q: questions.find((x) => x.id === qid) }))
       .filter((e) => e.q)
       .sort((a, b) => b.q.line - a.q.line);
+    // the owner's text as lines of the file with the provenance mark at the end of the last (NT F1 — ownerTextLines above)
+    const marked = (text, opts) => { const ls = ownerTextLines(text, opts); ls[ls.length - 1] += ' ' + prov; return ls; };
     for (const { ans, q } of entries) {
       const answerText = [ans.choice ? ans.choice + ')' : '', ans.text || ''].filter(Boolean).join(' — ').trim();
       const qStart = q.line; // 1-based line of the question heading
       if (ans.comment) { // the comment FIRST (end of block): a splice below the answer line does not shift it
-        lines.splice(qStart + q.body.length, 0, '', '**' + T.wb.ownerComment(atHuman) + '** ' + ans.comment + ' ' + prov, '');
+        const cl = marked(ans.comment, { keepBlank: true });
+        lines.splice(qStart + q.body.length, 0, '', '**' + T.wb.ownerComment(atHuman) + '** ' + cl[0], ...cl.slice(1), '');
         touched = true;
       }
       if (!answerText) continue; // "comment only" is NOT an answer — the question stays open
       const emptyAns = q.answers.find((a) => !a.text);
       touched = true;
+      // NT1 (2.9, origin issue #139): an answer of several lines is written as several LINES of the file (the file's own line ends), the
+      // first on the label, the provenance mark at the end of the last; blank lines are dropped — the answer is read back as a paragraph
+      // up to a blank line, and a blank line inside would cut it
+      const [first, ...rest] = marked(answerText);
       if (emptyAns !== undefined) {
-        lines[qStart + emptyAns.line] = lines[qStart + emptyAns.line].replace(/\s*$/, '') + ' ' + answerText + ' ' + prov;
+        lines[qStart + emptyAns.line] = lines[qStart + emptyAns.line].replace(/\s*$/, '') + ' ' + first;
+        if (rest.length) lines.splice(qStart + emptyAns.line + 1, 0, ...rest);
       } else { // the owner's answer is UNTOUCHABLE: new text only as a dated follow-up (I2)
         const lastAns = q.answers[q.answers.length - 1];
-        const insertAt = lastAns ? qStart + lastAns.line + 1 : qStart + q.body.length;
-        lines.splice(insertAt, 0, '', '**' + T.wb.followUp(atHuman) + '** ' + answerText + ' ' + prov);
+        // CP (2.9, #127 p. 3): a follow-up goes to the END of the question's block — below an applied-mark line ("Applied: …") — never
+        // right under the answer line, which also cut a multi-line answer in two; trailing blank lines of the block stay last.
+        let endAt = q.body.length; while (endAt > 0 && !q.body[endAt - 1].trim()) endAt--;
+        const insertAt = lastAns ? qStart + endAt : qStart + q.body.length;
+        lines.splice(insertAt, 0, '', '**' + T.wb.followUp(atHuman) + '** ' + first, ...rest);
       }
     }
     const tail = [];
     if (record.comments && Object.keys(record.comments).length) { // proofreading: a dated block at the END
       tail.push('**' + T.wb.proofread(atHuman) + '** ' + prov, '');
-      for (const [pid, text] of Object.entries(record.comments)) if (String(text).trim()) tail.push('- **' + pid + '** — ' + String(text).trim());
+      for (const [pid, text] of Object.entries(record.comments)) {
+        if (!String(text).trim()) continue;
+        const pl = ownerTextLines(text, { keepBlank: true });
+        tail.push('- **' + pid + '** — ' + pl[0], ...pl.slice(1));
+      }
     }
-    if (record.comment) tail.push(...(tail.length ? [''] : []), '**' + T.wb.ownerComment(atHuman) + '** ' + record.comment + ' ' + prov);
+    if (record.comment) {
+      const dl = marked(record.comment, { keepBlank: true });
+      tail.push(...(tail.length ? [''] : []), '**' + T.wb.ownerComment(atHuman) + '** ' + dl[0], ...dl.slice(1));
+    }
     if (tail.length) {
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
       lines.push('', '---', '', ...tail, '');

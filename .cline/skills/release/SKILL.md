@@ -133,8 +133,11 @@ Commit the README/docs updates so the `release: X.Y` commit is a clean version b
 builds, renames the artifact, commits "release: X.Y", tags vX.Y, pushes, and runs gh release create),
 run it. Otherwise, do it explicitly:>`
 ```bash
-# bump version (in version.json or your manifest), then:
-git commit -am "release: X.Y" && git tag vX.Y && git push && git push --tags
+# bump version (in version.json or your manifest), then — ONE tool call per line, never chained (AGENT_GUIDE.md → Git workflow):
+git commit -am "release: X.Y"
+git tag vX.Y
+git push
+git push --tags
 gh release create vX.Y --title "<PROJECT> X.Y — <Codename>" --notes-file <NOTES.md> <ARTIFACT(S) if any>
 ```
 

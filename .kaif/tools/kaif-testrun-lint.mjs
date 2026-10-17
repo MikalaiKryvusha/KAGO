@@ -294,7 +294,7 @@ function bugCheck(file) {
 function homeOf(arg) {
   if (arg) return arg;
   try {
-    const j = JSON.parse(readFileSync(MARKER, 'utf8'));
+    const j = JSON.parse(readFileSync(MARKER, 'utf8').replace(/^\uFEFF/, ''));
     if (typeof j.testdocs === 'string' && j.testdocs.trim()) return j.testdocs.trim();
   } catch { /* no marker or unreadable — the default home stands */ }
   return DEFAULT_HOME;

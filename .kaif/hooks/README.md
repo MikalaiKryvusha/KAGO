@@ -13,30 +13,55 @@ lacking them.
 |---|---|---|---|---|
 | `session-start-refresh.mjs` | `SessionStart`, matcher `compact\|clear` | none — compaction is itself rare | one order per compaction or clear | injects the ORDER to re-read the re-read core + stamp the witness |
 | `prompt-refresh-timer.mjs` | `UserPromptSubmit` | marker age > 60 min (`--minutes N` to override) | on EVERY prompt until the marker is re-stamped — the marker is the only off switch | injects the refresh order; silent while the marker is fresh |
-| `stop-status-guard.mjs` | `Stop` | session did work AND STATUS.md untouched > 3 h | **once per session** — the only suppression window in the module | soft block: update STATUS.md or say why nothing changed |
+| `stop-status-guard.mjs` | `Stop` | dirty worktree OR a commit within 3 h, AND STATUS.md untouched > 3 h (2.9: the reason names which) | **once per session** — the only suppression window in the module | soft block: update STATUS.md or say why nothing changed |
 | `prompt-resume-word.mjs` (2.7, epic RS) | `UserPromptSubmit` | the prompt's FIRST word is `resume` / `/resume` / the Russian shorthand of it — the owner's leading word (`AGENT_GUIDE.md` → "A leading skill word is an order"); the same word mid-sentence is prose and never fires; an imperative before it (`run resume`, its Russian mirror) is still the order, the Russian noun as a heading with a colon is prose (2.8) — any other first word from the family fires, including a file named `resume.log`: one extra entry ritual is the named price. **2.8, epic OW:** a leading `stop` (or its Russian word) → the order to stop in this turn — an amplifier of "The owner's word mid-turn": a hook firing on a message typed mid-turn is observed on one system, promised by none | on every message that opens with the word — each one is a separate order | injects the ORDER to run `/resume` in full before the rest of the message, or the ORDER to stop; silent on every other prompt and on an event without a `prompt` field |
-| `pretool-owner-word.mjs` (2.8, epic OW) | `PreToolUse` (every tool call of the main thread) | the owner's LATEST message typed mid-turn (`queued_command`, `origin.kind: human` in the transcript) has no assistant TEXT block after it — reasoning is not delivered (origin bug 123, recurrence 2026-09-25) | ONCE per owner's message: the first tool call after it with no text answer yet is refused, the next passes — the work goes on (the origin owner's word, 2026-09-25); a subagent's call (`agent_id`) and a peer's message are silent; `KAIF_OWNER_WORD_GATE=off` switches it off | **blocks** the call (exit 2); the reason quotes the owner's words and says: answer AS TEXT by its kind, continue, repeat the answer in the turn's final text |
 
 Design rules baked in (they are canon requirements, not preferences): every hook carries a
 predicate, or names why it needs none, and the table above says which; a suppression window
-exists where repeating would be noise (`Stop` fires at most once per session) and is absent ON
+exists where repeating would be noise (`stop-status-guard.mjs` fires at most once per session) and is absent ON
 PURPOSE where repeating is the point — a reminder that goes away unobeyed teaches that it can be
 ignored, so the timer repeats until the marker is re-stamped, and every message that opens with
 the resume word is a separate order; injections are ORDERS to re-read, never document bodies
 (the output cap is 10 000 characters, and pasting docs would spend the context the refresh
-restores); `Stop` is the only blocking hook. A hook never breaks the session: on any internal
+restores); the one blocking hook is `stop-status-guard.mjs`, at most once per session — no hook of this module stops the agent on
+the owner's word (2.9: the two that did are retired — "Retired in 2.9" below). A hook never breaks the session: on any internal
 error it exits 0 silently.
 
-## Opt-in — an explicit owner step
+**The hooks judge the project, not the folder the agent went into** (2.9, epic HK; origin ticket #94). The event's `cwd` follows
+every `cd` of the agent, so the refresh marker, `STATUS.md` and git are read in the PROJECT ROOT — the nearest folder above `cwd`
+(itself included) that holds `.kaif/kaif.json`; with none, `cwd` itself. Every order names the marker by its full path, so the agent
+stamps it where the hook reads it. A marker whose `at` lies more than two minutes in the future is no witness — the timer speaks.
+The session-start order follows the event's `source`: `compact` → "compacted" and trigger `compaction`, `clear` → "cleared" and
+`ritual:/clear`, a start, a resume or no source → "(re)started" and `ritual:session-start`. The root search runs only once the
+script is started: the Claude Code fragment names it through `${CLAUDE_PROJECT_DIR}`; the other systems' samples start it by the
+relative path `node .kaif/hooks/…`, and whether those systems launch a hook from the project root or from the agent's current
+folder is NOT verified — a launch from a subfolder would not find the script at all.
 
-**KAIF never edits your `settings.json`.** Wiring hooks changes how your agent system behaves
-on every prompt — that is the project owner's decision, exactly like `.gitattributes` or CI
-config. To enable:
+## Wiring — the task wires it, the owner can opt out
 
-1. Open `.kaif/hooks/settings-fragment.json` — it carries the ready `hooks` object.
-2. Merge that object into `.claude/settings.json` (shared with the team, committed) or
-   `.claude/settings.local.json` (personal), with the owner's consent recorded where your
-   project records decisions.
+**On Claude Code the hooks are wired for you** (2.9, epic SW; origin issue #115 — the KAIF owner's rule: what KAIF delivers is
+wired, with no question to the project owner). The install and update tasks tell the agent to run
+`node .kaif/kaif-core.mjs wire-hooks`: it merges the `hooks` object of `settings-fragment.json` into `.claude/settings.json`
+additively — the owner's own entries and their order stay, a script already wired for its event (there or in
+`.claude/settings.local.json`) is left alone, a repeat run changes nothing, an unparseable file is left untouched with a warning.
+The write is the agent's and OPEN to its harness, never hidden inside `update`: Claude Code protects `.claude/` and may ask the owner
+or refuse; a refusal is recorded in the task, and the owner gets the same one command. `node .kaif/kaif-core.mjs check` names a
+delivered hook that is not wired. To opt out: `"hooks": "off"` in `.kaif/kaif.json` — nothing is written then (entries wired
+earlier are removed by hand). The other systems below — and Claude Code by hand — are wired this way:
+
+**Retired in 2.9 — the two hooks that stopped the agent on the owner's word** (origin ticket #144; the KAIF owner's verdict on the
+field, rendered from Russian: remove this from KAIF entirely — "I don't like that you stop on this"): `pretool-owner-word.mjs`
+(2.8, `PreToolUse` — refused the next tool call after a mid-turn word) and `stop-owner-answer.mjs` (2.9 pre-release, `Stop` — demanded
+a last "next step" arrow line and resumed the turn) are no longer shipped. The update removes an untouched copy of each; `wire-hooks`
+REMOVES their entries from `.claude/settings.json` (the owner's other entries and their order stay, the values proven before the
+write); `check` names an entry still running one of them — in `.claude/settings.local.json` too, which the machinery never edits —
+with the command. Where the harness refuses that write, the hook no longer stops anyone: its script is gone, `node` exits 1, and
+Claude Code treats any exit code but 2 as a non-blocking error — but it prints a `<hook name> hook error` notice in the transcript
+(on `PreToolUse`, at every tool call; vendor hooks reference, read 2026-10-16), so give the owner the command and let him run it.
+
+1. Open the sample of your system — `.kaif/hooks/settings-fragment.json` for Claude Code, `sample-*.json` for the others.
+2. Merge its `hooks` object into that system's config — for Claude Code `.claude/settings.json` (shared with the team, committed)
+   or `.claude/settings.local.json` (personal).
 3. Reload the session (hook configs are read at session start), then smoke the scripts by hand
    from the project root, with no `.kaif/refresh-marker.json` present. Use the block of YOUR
    shell — a redirect or a `printf` that one shell understands is a parse error in another.
@@ -78,25 +103,22 @@ sample is visible to a human reading it.
 
 Contracts below were read in each vendor's live documentation on **2026-08-07**. Treat any row
 older than a few weeks as a hypothesis and re-read the vendor doc before relying on it — hook
-APIs were still moving through beta across the industry when this table was written.
+APIs were still moving through beta across the industry when this table was written. The end-of-turn cells of Codex, Copilot and Grok
+Build were re-read on **2026-09-29** from the vendors' own GitHub repositories, pinned by commit (their documentation sites were not
+reachable from that session): each of them can now return the agent to work from its end-of-turn event — the samples do not wire it yet.
 
 | System | Sample | Canon after compaction | Hourly timer | STATUS guard |
 |---|---|---|---|---|
 | **Claude Code** | `settings-fragment.json` | ✅ | ✅ | ✅ |
-| **OpenAI Codex** | `sample-codex-hooks.json` | ✅ same field names, matcher on `source` | ✅ | ❌ output shape of `Stop` not verified |
+| **OpenAI Codex** | `sample-codex-hooks.json` | ✅ same field names, matcher on `source` | ✅ | ❌ not wired — `Stop` returns `{"decision":"block","reason"}` (2026-09-29); continuation cap not found |
 | **Cursor** | `sample-cursor-hooks.json` | ✅ `additional_context` | ❌ `beforeSubmitPrompt` cannot inject agent context | ❌ `stop` auto-submits a followup prompt instead |
 | **Google Antigravity** | `sample-antigravity-hooks.json` | ❌ no session/compaction event exists | ✅ `PreInvocation` → `injectSteps` | ❌ field names match, blocking value not verified |
-| **GitHub Copilot** | `sample-copilot-hooks.json` | ✅ `additionalContext` on `sessionStart` | ❌ injection not permitted on `userPromptSubmitted` | ❌ not permitted on `agentStop` |
-| **Grok Build** | *(none needed)* | ⚠️ reads `.claude/settings.json`; **injection not verified** | ⚠️ same path, same gap | ⚠️ same path, same gap |
+| **GitHub Copilot** | `sample-copilot-hooks.json` | ✅ `additionalContext` on `sessionStart` | ❌ injection not permitted on `userPromptSubmitted` | ❌ not wired — `agentStop` returns `{"decision":"block","reason"}`, 8 in a row (2026-09-29) |
+| **Grok Build** | *(none needed)* | ⚠️ reads `.claude/settings.json`; **injection not verified** | ⚠️ same path, same gap | ⚠️ same path; `Stop` can block (8 per turn), its last-message field is `lastAssistantMessage` and no transcript path (2026-09-29) |
 | **Meta Muse Code** | *(none yet)* | ❌ `PreCompact`/`PostCompact` exist, context-injection output not documented | ❌ prompt/LLM-call events exist, same injection gap | ❌ output contract of `Stop` not documented |
 | **Windsurf / Cascade** | *(not supported)* | ❌ | ❌ | ❌ hooks cannot inject context at all — exit codes only |
 | **Cline** | *(not supported)* | ❌ | ❌ | ❌ hooks are SDK plugins (TS/JS objects), not config-invoked commands |
 | **Zoo Code** | *(markdown ritual)* | — | — | — no hook mechanism |
-
-**The fifth hook — `pretool-owner-word.mjs` (2.8, epic OW) — is wired for Claude Code only** (`PreToolUse` in `settings-fragment.json`). It reads the
-session transcript (`transcript_path`), which the vendor says «is written asynchronously and may lag»: one call may pass before a fresh
-message is visible, one reminder may repeat right after an answer. The other systems' samples do not wire it — their transcript shape was
-not read: **not verified**.
 
 **The fourth hook — `prompt-resume-word.mjs` (2.7, epic RS) — is wired for Claude Code only.** It
 needs the prompt TEXT in the event (`prompt`), and only the Claude Code contract was read to carry

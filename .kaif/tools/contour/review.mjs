@@ -6,7 +6,7 @@
 //  11/11 on a fresh install from the bundle (#051 → exit 3 naming Q1 and `- **A)**`, canonical doc → --no-serve exit 0
 //  + RENDER IS NOT YET A SHOW, --mark-shown writes shown.json); suite s22 (fresh install · pre-flight · three faces ·
 //  shown fact · update route with the project's own tools/review.mjs untouched); polygon `all 22 suites green`.
-//  NOT observed yet: a live browser window (origin's verify-contour — step IC5), the macOS/Linux fallbacks]
+//  NOT observed yet: a live browser window (origin's verify-contour — step IC5), the macOS fallback]
 //
 //   node .kaif/tools/contour/review.mjs <doc.md>                 # interview: radio per option, free field, Save
 //   node .kaif/tools/contour/review.mjs <doc.md> --notice        # something to TELL — "OK, read" is the outcome
@@ -45,8 +45,9 @@ import { join, resolve, basename, relative, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   loadContourConfig, normalize, bodyHash, provenance, inQuietHours, parseMetaBlock, parseQuestions,
-  docStatus, renderMd, splitParagraphs, recordDecision, preflight, checkForm, escapeHtml, tmpDirOf, TMP_DIR,
+  docStatus, OPTION_START_RE, renderMd, renderInline, splitParagraphs, recordDecision, preflight, REFERENCES_SINCE, checkForm, escapeHtml, tmpDirOf, TMP_DIR,
   headerDate, ARCHAEOLOGY_PATHS, // AQ (2.7, #70): the archaeology axis of the same door
+  unescapeStructure, // court RL 2.9, B-F2: the card shows an owner's escaped comment line as he typed it
   decisionPaths, // OW3 (2.8, #86): the age of an answer is read from its decision record
   statusBlockAwaitsApplication, // OW3 (2.8, #86): the field's form — the status block says «awaiting application»
   archaeologyWords, archaeologySearch, // OW5 (2.8, #74 · #82): the door searches itself — also for a question in the chat
@@ -63,6 +64,8 @@ const SERVER_DEATH_MS = 2500;         // DEF3: server death after the save (the 
 const BEACON_RELOAD_GRACE_MS = 3000;  // DEF6/T3: ~3 s after the beacon — reload vs close
 const WAIT_POLL_MS = 2000;            // OW6 (2.8): the waiter polls the decision file(s) — the field device the KAIF owner pointed to polls every 2 s
 const WAIT_NO_CONTOUR_MS = 60000;     // B-F1 (2.8): no live contour seen within a minute → exit 2 (a page comes up in seconds; the ritual starts the waiter first)
+const CLICK_OF_PRESS_MS = 800;        // CP (2.9, #128): a click this soon after a taken pointerdown on the same label is that press's own click
+const WORDS_QUOTE_CHARS = 160;      // CP (2.9, #128 c.2): how much of the owner's text and comments the waiter's line and the log quote
 const QH_LEN = 12;                    // OW6: hex chars of a question's fingerprint in a draft key (title + body of the question)
 // 2.8, origin issue #106 (a field owner's explicit word, three requests in one evening): owner-facing pages render at 1.7x the browser
 // base — the WHOLE page through CSS zoom, as Ctrl+Plus does (raising font-size alone turned the fixed radio circles into dots and slid
@@ -71,6 +74,19 @@ const QH_LEN = 12;                    // OW6: hex chars of a question's fingerpr
 export const PAGE_SCALE = 1.7;
 export const SAVE_SCALE = 1.5;
 const NARROW_PX = 560;                // the narrow-window breakpoint at scale 1 (rendered as NARROW_PX * PAGE_SCALE)
+// CP6 (2.9, origin issue #125): the floating Save column. The header and the banner keep FAB_COLUMN_PX free on the right; the button
+// floats FAB_EDGE_PX from the edge; the status pill under it is at most the column minus the edge and a gap wide — so it wraps
+// INSIDE the column and never lies over the document title (it used to grow to 60vw and covered the title in a 1100x900 window).
+// One source for the three: the pill's width is derived, never a second literal that drifts from the header's padding.
+const FAB_COLUMN_PX = 230, FAB_EDGE_PX = 16;            // regular window
+const FAB_COLUMN_NARROW_PX = 170, FAB_EDGE_NARROW_PX = 8; // narrow window (NARROW_PX)
+const FAB_GAP_PX = 4;                                    // air between the pill and the title column
+const pillMaxPx = (column, edge) => column - edge - FAB_GAP_PX;
+// CP (2.9, #125 — the light judges' findings F1 and N1): a narrow pill wraps a long message into lines that fall past the header onto
+// the document's own title. So the pill holds at most PILL_LINES lines (CSS line-clamp) — a pill of two lines ends above the first
+// line of the page — and a status that does not fit them, MEASURED on the page (a count of characters is a proxy that differs per
+// font, language and window), goes to the BAR above the page (in the flow, it keeps the Save column free), the pill a short label.
+const PILL_LINES = 2;
 // Silence-watch thresholds may be TIGHTENED by the environment — and only tightened.
 const stricterMs = (envName, canon) => {
   const v = Number(process.env[envName]);
@@ -410,7 +426,7 @@ export function implementedGate(root) {
 //  field clone at its S1-era state names the #86 decision «answered 17 d ago»; report testcases/reports/2026-09-25_ow3-ow7-owner-debt-foreign-queue.md]
 export function answeredAgeDays(root, rel, now = new Date()) {
   let at = NaN;
-  try { at = Date.parse(JSON.parse(readFileSync(decisionPaths(root, rel).decision, 'utf8')).at); } catch { at = NaN; }
+  try { at = Date.parse(JSON.parse(stripBom(readFileSync(decisionPaths(root, rel).decision, 'utf8'))).at); } catch { at = NaN; }
   return Number.isNaN(at) ? queueDocAgeDays(root, rel, now) : Math.max(0, Math.floor((now.getTime() - at) / DAY_MS));
 }
 export function awaitingApplication(root, now = new Date()) {
@@ -471,7 +487,7 @@ const docKind = (root, rel, meta) => {
 };
 const ANSWER_LINE_RE = new RegExp('^\\s*\\*{0,2}(?:' + PARSER.answerLabels + ')\\s*(?:\\([^)]*\\))?\\s*:', 'iu');
 const TARGET_LINE_RE = new RegExp('^\\s*\\*{0,2}(?:' + PARSER.targetLabels + ')\\s*:', 'iu');
-const OPTION_LINE_RE = new RegExp('^\\s*-\\s+\\*\\*[' + PARSER.letters + ']\\)', 'u');
+const OPTION_LINE_RE = OPTION_START_RE; // CP (2.9, #127): one option regex for the parse and the card prose — the copy is gone
 const QSECTION_RE = new RegExp('^#{1,3}\\s+(?:' + PARSER.questionsSectionHeadings + ')(?![\\p{L}\\d])', 'iu');
 
 export function buildPage(root, docPath) {
@@ -487,15 +503,18 @@ export function buildPage(root, docPath) {
   const proseOf = (q) => {
     const keep = [];
     let inOpt = false;
+    // court RL 2.9, E-F3: the continuation lines of an answer paragraph are the answer, shown below as «answered:» — never as prose
+    const answerLines = new Set((q.answers || []).flatMap((a) => a.lines || []));
     for (let j = 0; j < q.body.length; j++) {
       const line = q.body[j];
+      if (answerLines.has(j)) continue;
       if (q.optionTableLines && q.optionTableLines.has(j)) { inOpt = false; continue; }
       if (OPTION_LINE_RE.test(line)) { inOpt = true; continue; }
       if (inOpt && /^\s{2,}\S/.test(line)) continue;
       inOpt = false;
       if (ANSWER_LINE_RE.test(line)) continue;
       if (TARGET_LINE_RE.test(line)) continue;
-      keep.push(line);
+      keep.push(unescapeStructure(line));
     }
     return renderMd(keep.join('\n'));
   };
@@ -552,7 +571,7 @@ export function buildPage(root, docPath) {
       settled.map((q) => qCard(q, t)).join('\n') + '</details>' + docCommentBlock(rel, t)
     : '<div class="doc">' + body + '</div>' + artSection + qSection + docCommentBlock(rel, t);
   const html = pageShell(cfg, {
-    title, kind, heading: '<span class="kind">' + esc(kind) + '</span><span>' + esc(title) + '</span>' + summary + formNote,
+    title, kind, heading: '<span class="kind">' + esc(kind) + '</span><span>' + renderInline(title) + '</span>' + summary + formNote,
     main: mainHtml,
     questions, artifacts, face: 'interview', rev: docHash,
   });
@@ -567,7 +586,7 @@ export function buildNoticePage(root, docPath) {
   const title = docTitle(md, docPath);
   const html = pageShell(cfg, {
     title, kind: t.kind.notice,
-    heading: '<span class="kind">' + t.kind.notice + '</span><span>' + esc(title) + '</span> <span class="tag notice">' + t.tag.noAnswerNote + '</span>',
+    heading: '<span class="kind">' + t.kind.notice + '</span><span>' + renderInline(title) + '</span> <span class="tag notice">' + t.tag.noAnswerNote + '</span>',
     main: '<div class="doc">' + renderMd(md) + '</div>' + noticeCommentBlock(rel, t),
     questions: [], notices: [rel], noticeDoc: rel, face: 'notice', rev: bodyHash(md),
   });
@@ -587,7 +606,7 @@ export function buildProofreadPage(root, docPath) {
     '<p><textarea data-draft data-doc="' + esc(rel) + '" name="para:' + esc(rel) + ':' + p.id + '" rows="2" placeholder="' + esc(t.ph.paragraph) + '"></textarea></p></section>').join('\n');
   const html = pageShell(cfg, {
     title, kind: t.kind.proofread,
-    heading: '<span class="kind">' + t.kind.proofread + '</span><span>' + esc(title) + '</span> <span class="tag you">' + t.tag.you + '</span>',
+    heading: '<span class="kind">' + t.kind.proofread + '</span><span>' + renderInline(title) + '</span> <span class="tag you">' + t.tag.you + '</span>',
     main: '<h2>' + t.head.paragraphs + ' (' + paras.length + ')</h2>' + cards + docCommentBlock(rel, t) + '<p class="muted">' + esc(t.ph.noRemarks) + '</p>',
     questions: [], face: 'proofread', faceDoc: rel, paragraphs: paras.map((p) => p.id), rev: bodyHash(md),
   });
@@ -607,7 +626,7 @@ export function buildMockupPage(root, imagePath) {
   const title = basename(imagePath);
   const html = pageShell(cfg, {
     title, kind: t.kind.mockup,
-    heading: '<span class="kind">' + t.kind.mockup + '</span><span>' + esc(title) + '</span> <span class="tag you">' + t.tag.you + '</span>',
+    heading: '<span class="kind">' + t.kind.mockup + '</span><span>' + renderInline(title) + '</span> <span class="tag you">' + t.tag.you + '</span>',
     main: '<h2>' + t.head.mockup + '</h2><div class="mock"><img src="' + src + '" alt="' + esc(title) + '"></div>' +
       '<p><textarea data-draft data-doc="' + esc(rel) + '" name="doccomment:' + esc(rel) + '" rows="5" placeholder="' + esc(t.ph.mockup) + '"></textarea></p>' + '<p class="muted">' + esc(t.ph.noRemarks) + '</p>',
     questions: [], face: 'mockup', faceDoc: rel, rev: bodyHash(data.toString('base64')),
@@ -624,7 +643,7 @@ export function buildQueuePage(root, docs, notices = pendingNotices(root)) {
   });
   const total = groups.reduce((s, g) => s + g.pending.length, 0);
   const questionsMain = groups.map((g) =>
-    '<section class="group"><h2>' + esc(g.title) + ' <small class="kind">' + esc(g.doc) + '</small></h2>' +
+    '<section class="group"><h2>' + renderInline(g.title) + ' <small class="kind">' + esc(g.doc) + '</small></h2>' +
     (g.pending.map((q) => qCard(q, t)).join('\n') || '<p>' + t.head.noPending + '</p>') + docCommentBlock(g.doc, t) +
     '<p><button type="button" class="savedoc" data-doc="' + esc(g.doc) + '">' + t.btn.saveDoc + '</button></p></section>').join('\n<hr>\n');
   const noticesMain = notices.length
@@ -705,14 +724,16 @@ function qCard(q, t) {
     (q.answered ? 'disabled' + (o.letter === chosenLetter ? ' checked' : '') : 'data-draft') +
     ' name="choice:' + esc(q.doc) + ':' + q.id + '" value="' + o.letter + '">' +
     '<div>' + (o.recommended ? '<span class="tag rec">' + t.tag.rec + '</span> ' : '') + o.html + '</div></label>').join('');
-  const existing = q.existing.map((x) => '<p><strong>' + t.tag.answered + ':</strong> ' + esc(x) + '</p>').join('');
+  const existing = q.existing.map((x) => '<p><strong>' + t.tag.answered + ':</strong> ' + renderInline(x) + '</p>').join(''); // CP (#123): his markup, not raw stars
   const inputs = q.answered
     ? '<p class="addcomment"><textarea data-draft name="comment:' + esc(q.doc) + ':' + q.id + '" rows="2" placeholder="' + esc(t.ph.addComment) + '"></textarea></p>'
-    : '<p><input type="text" data-draft name="text:' + esc(q.doc) + ':' + q.id + '" placeholder="' + esc(t.ph.own) + '"></p>' +
+    // NT1 (2.9, origin issue #139): the owner's own answer is a TEXTAREA — Enter starts a new line, a pasted text keeps its lines
+    : '<p><textarea data-draft name="text:' + esc(q.doc) + ':' + q.id + '" rows="2" placeholder="' + esc(t.ph.own) + '"></textarea></p>' +
       '<p><textarea data-draft name="comment:' + esc(q.doc) + ':' + q.id + '" rows="2" placeholder="' + esc(t.ph.comment) + '"></textarea></p>';
   const meta = q.target ? '<div class="qmeta">' + esc(q.target).replace(/`/g, '') + '</div>' : '';
   return '<section class="qcard' + (q.answered ? ' done' : '') + '">' +
-    '<div><strong>' + q.id + '.</strong> ' + esc(q.title) + ' ' + tag + '</div>' +
+    // light judge of epic CP, F6: a title carries the owner's markup too ("Take **B** or `C`?") — rendered, not shown raw
+    '<div><strong>' + q.id + '.</strong> ' + renderInline(q.title) + ' ' + tag + '</div>' +
     (q.bodyHtml ? '<div class="qbody">' + q.bodyHtml + '</div>' : '') + meta + existing + opts + inputs + '</section>';
 }
 
@@ -746,22 +767,23 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     draftKey: 'owner-review:' + (singleDoc || (index ? 'index' : title)), // per DOCUMENT, never per batch
     txt: { draft: t.st.draft(0).replace('0', '{n}'), saving: t.st.saving, saved: t.st.saved('{w}'), nothing: t.st.nothing,
       needArt: t.st.needArt, err: t.st.err('{m}'), serverGone: t.st.serverGone, serverGoneLocal: t.st.serverGoneLocal, savedLocally: t.st.savedLocally, closeYourself: t.st.closeYourself,
+      savedLocallyShort: t.st.savedLocallyShort, pillOk: t.st.pillOk, pillErr: t.st.pillErr,
       copied: t.st.copied, copyManually: t.st.copyManually, selfcheck: t.st.selfcheck('{r}', '{q}'), tabnote: t.st.tabnote,
       left: t.st.left('{n}'), stale: t.st.stale, rewritten: t.st.rewritten, orphan: t.st.orphan, reloadRev: t.btn.reloadRev }, // OW6
   }).replace(/</g, '\\u003c');
   // P5: both themes via prefers-color-scheme; colours are variables; contrast is built into the pairs.
   const css = `
   :root { --bg:#f7f7f5; --card:#ffffff; --ink:#1d1d1f; --muted:#6b6b70; --line:#d9d9de;
-    --wait:#d97706; --done:#16a34a; --you:#2563eb; --danger:#dc2626; --accent:#2563eb;
+    --wait:#d97706; --done:#16a34a; --you:#2563eb; --danger:#dc2626; --accent:#2563eb; --okbar:#15803d;
     --tagink:#0b1020; --tagwait:#fbbf24; --tagdone:#4ade80; --tagyou:#93c5fd; --tagrec:#86efac; --recbg:rgba(22,163,74,.10); }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#17171a; --card:#212126; --ink:#ececf0; --muted:#a0a0a8; --line:#3a3a42;
-      --wait:#f59e0b; --done:#22c55e; --you:#60a5fa; --danger:#f87171; --accent:#60a5fa;
+      --wait:#f59e0b; --done:#22c55e; --you:#60a5fa; --danger:#f87171; --accent:#60a5fa; --okbar:#15803d;
       --tagink:#0b1020; --tagwait:#f59e0b; --tagdone:#22c55e; --tagyou:#60a5fa; } }
   html { zoom:${PAGE_SCALE} } /* #106: the whole page at PAGE_SCALE, like Ctrl+Plus */
   * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui, "Segoe UI", sans-serif; }
   /* The header SCROLLS WITH THE PAGE — the owner's word (2026-09-05): not sticky. Only the emergency banner may pin. */
-  header { position:static; background:var(--card); border-bottom:1px solid var(--line); padding:10px 230px 10px 20px; display:flex; gap:12px; align-items:baseline; z-index:5; flex-wrap:wrap }
+  header { position:static; background:var(--card); border-bottom:1px solid var(--line); padding:10px ${FAB_COLUMN_PX}px 10px 20px; display:flex; gap:12px; align-items:baseline; z-index:5; flex-wrap:wrap }
   header .project { font-weight:700; color:var(--accent) } .kind { color:var(--muted) } .langnote { font-size:12px; color:var(--muted) }
   main { max-width:900px; margin:0 auto; padding:16px 20px 40px }
   .doc { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 22px; overflow-x:auto }
@@ -799,17 +821,18 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
      BOTTOM edge is unreachable when the window is taller than the screen (remote desktop, phone) — the owner typed
      the answers and could not press the button. The FAB is fixed at the top right, visible at any scroll and any
      height; the status is a pill under it on its own background, gone when empty. A bottom bar is FORBIDDEN (spec §4). */
-  .fab { position:fixed; top:12px; right:16px; z-index:50; display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:60vw }
+  .fab { position:fixed; top:12px; right:${FAB_EDGE_PX}px; z-index:50; display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:60vw }
   .fab button { border-radius:999px; box-shadow:0 4px 14px rgba(0,0,0,.28); padding:10px 20px }
   .fab #save { zoom:${+(SAVE_SCALE / PAGE_SCALE).toFixed(3)} } /* #106: the primary Save button renders at SAVE_SCALE of the base */
-  .fab #status { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:4px 12px; font-size:13px; text-align:right } .fab #status:empty { display:none }
-  @media (max-width:${Math.round(NARROW_PX * PAGE_SCALE)}px) { .fab { top:8px; right:8px } .fab button { padding:8px 14px } header, #banner { padding-right:170px } }
+  .fab #status { background:var(--card); border:1px solid var(--line); border-radius:15px; padding:4px 12px; font-size:13px; text-align:right; max-width:${pillMaxPx(FAB_COLUMN_PX, FAB_EDGE_PX)}px; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:${PILL_LINES}; overflow:hidden } .fab #status:empty { display:none }
+  @media (max-width:${Math.round(NARROW_PX * PAGE_SCALE)}px) { .fab { top:8px; right:${FAB_EDGE_NARROW_PX}px } .fab button { padding:8px 14px } .fab #status { max-width:${pillMaxPx(FAB_COLUMN_NARROW_PX, FAB_EDGE_NARROW_PX)}px } header, #banner { padding-right:${FAB_COLUMN_NARROW_PX}px } }
   .muted{opacity:.7;font-size:.95em;margin:4px 0 0} /* bugs/113: the no-remarks hint under the field */
   button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 18px; font:inherit; cursor:pointer } button:disabled { opacity:.5; cursor:default }
   button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent) }
   .err { color:var(--danger); font-weight:600 } .okmsg { color:var(--done); font-weight:600 }
   #rescue { display:none; border:2px solid var(--danger); border-radius:10px; padding:12px; margin:14px 0 }
-  #banner { display:none; position:sticky; top:0; background:var(--danger); color:#fff; padding:8px 230px 8px 20px; font-weight:600; z-index:6 } /* OW6: room for the floating Save button, as the header has */
+  #banner { display:none; position:sticky; top:0; background:var(--danger); color:#fff; padding:8px ${FAB_COLUMN_PX}px 8px 20px; font-weight:600; z-index:6 } /* OW6: room for the floating Save button, as the header has */
+  #banner.ok { background:var(--okbar) } /* CP (2.9, #125): a long GOOD message — the answer saved on this computer — rides the bar too */
   /* I26 (#64): the page found itself in a TAB, not in the contour's own window — a yellow note, never the red banner:
      the answer still goes through; what is at risk is the draft (it lives in this tab) and the auto-close. */
   #tabnote { display:none; background:#fde68a; color:#1d1d1f; padding:8px 20px; font-weight:600; border-bottom:1px solid #f59e0b }`;
@@ -819,7 +842,16 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     "var CFG=" + cfgJson + ";var QS=" + qjson + ";",
     "var $=function(s){return document.querySelector(s)};var TX=CFG.txt;",
     "function fmt(s,o){for(var k in o)s=s.replace('{'+k+'}',o[k]);return s}",
-    "function status(msg,cls){var s=$('#status');s.textContent=msg;s.className=cls||''}",
+    // CP (2.9, #125; the light judges' F1 and N1): a status that does not fit the pill's lines → the bar (green `ok` for good news, red
+    // `err` for trouble), the pill a short label. The bar has FOUR owners, each named by its class and each clearing only its own: a
+    // status (`ok`/`err` — cleared by the next status that fits the pill), the pulse (`gone` — cleared by an alive pulse, which puts
+    // back the status bar it covered), a new revision (`rev`) and the self-check (`broken`) — those two stay until the page reloads and
+    // are never covered. N1: the pulse used to hide every bar not classed ok, and the pill kept pointing at a bar that was gone.
+    "var barMsg=null,barCls='';function barFree(){var c=$('#banner').className;return c!=='rev'&&c!=='broken'}",
+    "function showBar(){var b=$('#banner');b.textContent=barMsg;b.className=barCls;b.style.display='block'}",
+    "function status(msg,cls,short){var s=$('#status');var b=$('#banner');s.className=cls||'';s.textContent=msg||'';",
+    " if(msg&&s.scrollHeight>s.clientHeight+1){s.textContent=short||(cls==='err'?TX.pillErr:TX.pillOk);barMsg=msg;barCls=cls==='err'?'err':'ok';if(barFree())showBar()}",
+    " else{barMsg=null;if(b.className==='ok'||b.className==='err'){b.style.display='none';b.className=''}}}",
     // I12: the browser draft — every field in localStorage, restored with a note
     "var DK=CFG.draftKey+':';",
     // OW6 (2.8): a draft key carries the FINGERPRINT of its question — in a new revision of the document a draft comes back only onto
@@ -837,10 +869,16 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     "  var ot=document.createElement('textarea');ot.rows=Math.min(12,orph.length*2+1);ot.value=orph.join(String.fromCharCode(10));od.appendChild(op);od.appendChild(ot);",
     "  var mn=document.querySelector('main');if(mn)mn.insertBefore(od,mn.firstChild)}",
     " if(n>0)status(fmt(TX.draft,{n:n}),'okmsg')}",
-    // P3: a radio cleared by a second click; activation taken over on pointerdown (no native double click)
+    // P3: a radio cleared by a second click; activation taken over on pointerdown. 2.9, epic CP (origin ticket #128 — the owner, twice:
+    // "the radio buttons do not clear on a second tap"): preventDefault on pointerdown does NOT cancel the click the same press
+    // produces, and that click re-checked what pointerdown had cleared. The capture listener below swallows exactly that click (same
+    // label, within CLICK_OF_PRESS_MS); a keyboard click comes without a pointerdown and stays native.
+    "var pdAt=0,pdLab=null;",
+    "document.addEventListener('click',function(e){if(!pdLab||Date.now()-pdAt>" + CLICK_OF_PRESS_MS + ")return;",
+    " var lab=e.target&&e.target.closest?e.target.closest('label.opt'):null;if(lab!==pdLab)return;pdLab=null;e.preventDefault()},true);",
     "document.addEventListener('pointerdown',function(e){var lab=e.target&&e.target.closest?e.target.closest('label.opt'):null;",
     " if(!lab)return;var inp=lab.querySelector('input[type=radio]');if(!inp||inp.disabled)return;",
-    " e.preventDefault();var was=inp.checked;",
+    " e.preventDefault();var was=inp.checked;pdAt=Date.now();pdLab=lab;",
     " if(e.target===inp){inp.checked=!was}else if(!was){inp.checked=true}",
     " lastInput=Date.now();saveDraft(inp);pulseSoon()});",
     "document.addEventListener('input',function(e){if(e.target&&e.target.hasAttribute&&e.target.hasAttribute('data-draft')){lastInput=Date.now();saveDraft(e.target);pulseSoon()}});",
@@ -889,7 +927,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     " r.onerror=function(){cb(false)}}catch(e){cb(false)}}",
     "function saveLocally(p,e){var js=JSON.stringify(p);var ls=false;if(lsOk){try{localStorage.setItem(DK+'__submitted',js);ls=true}catch(e2){}}",
     " idbPut(DK+'__submitted',js,function(okIdb){if(!okIdb&&!ls){rescue(p,String(e));return}",
-    "  submittedLocally=true;saved=true;status(TX.savedLocally,'okmsg');$('#banner').style.display='none';$('#rescue').style.display='none';enableButtons(false)})}",
+    "  submittedLocally=true;saved=true;$('#rescue').style.display='none';status(TX.savedLocally,'okmsg',TX.savedLocallyShort);enableButtons(false)})}",
     "function isNotice(doc){var n=CFG.notices||[];for(var i=0;i<n.length;i++)if(n[i]===doc)return true;return false}",
     "function hasArtifacts(doc){var A=CFG.artifacts||[];for(var i=0;i<A.length;i++)if(A[i].doc===doc&&A[i].exists)return true;return false}",
     "function hasComments(p){for(var k in (p.comments||{}))return true;return false}",
@@ -899,7 +937,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     " for(var k=0;k<ks.length;k++){if(ks[k].indexOf(DK)!==0)continue;var nm=ks[k].slice(DK.length).split('#')[0];",
     "  if(p.comment&&nm==='doccomment:'+p.doc)localStorage.removeItem(ks[k]);",
     "  for(var j=0;j<ids.length;j++)if(nm==='choice:'+p.doc+':'+ids[j]||nm==='text:'+p.doc+':'+ids[j]||nm==='comment:'+p.doc+':'+ids[j])localStorage.removeItem(ks[k])}}catch(e){}}",
-    "function newRevision(msg){var b=$('#banner');b.style.display='block';b.textContent='';var bt=document.createElement('button');bt.type='button';",
+    "function newRevision(msg){var b=$('#banner');b.className='rev';b.style.display='block';b.textContent='';var bt=document.createElement('button');bt.type='button';",
     " bt.style.background='#fff';bt.style.color='#1d1d1f';bt.style.marginRight='10px';bt.textContent=TX.reloadRev;bt.onclick=function(){location.reload()};b.appendChild(bt);b.appendChild(document.createTextNode(msg));",
     " var sv=document.querySelectorAll('#save,.savedoc,#retry');for(var i=0;i<sv.length;i++)sv[i].disabled=true}",
     "function staleSave(p){rescue(p,TX.stale);status('','');newRevision(TX.stale)}", // the banner and the ring carry the message — the pill never covers the button
@@ -918,7 +956,8 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     // question moves to the settled fold, the other drafts come back) and says how many are left
     "  if(res.j.rev)CFG.rev=res.j.rev;",
     "  if(CFG.face==='interview'&&res.j.left>0){clearSaved(p);try{sessionStorage.setItem(DK+'__left',String(res.j.left))}catch(e){}location.reload();return}",
-    "  saved=true;status(fmt(TX.saved,{w:res.j.written}),'okmsg');",
+    // the light re-judge of epic CP (QA7v): a ring left by an earlier refused save goes with the answer recorded — as on the local path
+    "  saved=true;$('#rescue').style.display='none';status(fmt(TX.saved,{w:res.j.written}),'okmsg');",
     "  try{var ks=[];for(var i=0;i<localStorage.length;i++)ks.push(localStorage.key(i));",
     "   for(var k=0;k<ks.length;k++)if(ks[k].indexOf(DK)===0)localStorage.removeItem(ks[k])}catch(e){}",
     // I27/DEF2: auto-close is an ATTEMPT; a refusal → an honest request; cancelled by pagehide
@@ -932,12 +971,13 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     " try{document.execCommand('copy');status(TX.copied,'okmsg')}catch(e){status(TX.copyManually,'err')}});",
     // I13/DEF4: page→server pulse — the human learns of a dead server AT ONCE and out loud
     // LP (#66): the pulse carries the input state — i: ms since the last keystroke (-1 = none), d: draft fields, s: saved
-    "function pulse(){fetch('/alive?i='+(lastInput?Date.now()-lastInput:-1)+'&d='+draftCount()+'&s='+(saved?1:0)+'&doc='+encodeURIComponent(CFG.doc||'')).then(function(r){if(!r.ok)throw 0;if(!selfBroken&&!submittedLocally)$('#banner').style.display='none';return r.json().catch(function(){return null})})",
+    "function pulse(){fetch('/alive?i='+(lastInput?Date.now()-lastInput:-1)+'&d='+draftCount()+'&s='+(saved?1:0)+'&doc='+encodeURIComponent(CFG.doc||'')).then(function(r){if(!r.ok)throw 0;var b=$('#banner');if(b.className==='gone'){if(barMsg)showBar();else{b.style.display='none';b.className=''}}return r.json().catch(function(){return null})})",
     // OW6 (2.8): the pulse names the document's revision on disk — another one than this page was built from → saving off, the new revision offered
     // bugs/125 (2.8): the entry page rebuilds itself only when the QUEUE changed (a document answered in another window) — never on focus alone
     " .then(function(j){if(CFG.index&&j&&j.qrev&&CFG.qrev&&j.qrev!==CFG.qrev){location.reload();return}",
     "  if(j&&j.rev&&CFG.rev&&j.rev!==CFG.rev&&!saving&&!saved)newRevision(TX.rewritten)})",
-    " .catch(function(){var b=$('#banner');if(submittedLocally){b.style.display='none';return}b.style.display='block';b.textContent=(lsOk&&inApp)?TX.serverGoneLocal:TX.serverGone;",
+    // after the LAST answer the server ends by design (I8) — a dead pulse then is no news, never «the answer will NOT be sent»
+    " .catch(function(){var b=$('#banner');if(submittedLocally||saved||!barFree())return;b.className='gone';b.style.display='block';b.textContent=(lsOk&&inApp)?TX.serverGoneLocal:TX.serverGone;",
     "  if(!(lsOk&&inApp)){var r=$('#rescue');r.style.display='block';if(lastPayload)$('#rescuetext').value=JSON.stringify(lastPayload,null,2)}",
     "  if(!submittedLocally)enableButtons(true)})}",
     "setInterval(pulse,CFG.aliveMs);pulse();",
@@ -949,7 +989,7 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
     // spec §2: the page SELF-CHECK — radio groups == questions with options; a mismatch is LOUD, never silent
     "var selfBroken=false;(function(){if(CFG.face!=='interview'||CFG.index)return;var rs=document.querySelectorAll('input[type=radio]');var names={};",
     " for(var i=0;i<rs.length;i++)if(rs[i].name.indexOf('choice:')===0)names[rs[i].name]=1;var n=Object.keys(names).length;",
-    " if(n!==CFG.expectRadioGroups){selfBroken=true;var b=$('#banner');b.style.display='block';b.textContent=fmt(TX.selfcheck,{r:n,q:CFG.expectRadioGroups});enableButtons(false)}})();",
+    " if(n!==CFG.expectRadioGroups){selfBroken=true;var b=$('#banner');b.className='broken';b.style.display='block';b.textContent=fmt(TX.selfcheck,{r:n,q:CFG.expectRadioGroups});enableButtons(false)}})();",
     // I26 (origin issue #64): the page knows whether it lives in the contour's own --app window or in a TAB of the
     // owner's working browser — `display-mode: standalone` is true only in the app window (measured on Chrome, headed
     // and headless; locationbar.visible is true everywhere and useless). A tab → a yellow note to the owner + one
@@ -982,25 +1022,31 @@ function pageShell(cfg, { title, kind, heading, main, questions, artifacts = [],
 // else an honest "open it yourself: URL" — the contour never pretends a window opened. ───────
 // LP (2.7, #66): the app window runs on its OWN profile inside the project (`.kaif/contour-window/`, ignore-first) with
 // the three EXP-0134 flags — the draft and a locally saved answer then live on the owner's disk IN THE PROJECT, and the
-// agent can read them back headless on the same profile. Verified on Edge (Windows); Chrome/macOS/Linux take the same
+// agent can read them back headless on the same profile. Verified on Edge (Windows); Chrome/macOS take the same
 // flags and are NOT verified — said so in the run report, never promised.
+// Linux is NOT supported (2.9, the owner's word 2026-10-03 — remove the contour's Linux code entirely): no launch is attempted
+// there, the contour prints the honest NO WINDOW line with the URL and serves the page as everywhere else.
 const profileDir = (root) => resolve(root, WINDOW_PROFILE_DIR);
 const profileArgs = (root) => ['--user-data-dir=' + profileDir(root), ...PROFILE_QUIET_FLAGS];
 function openWindow(url, log = console.log, root = process.cwd()) {
   const tryCmd = (cmd, args) => { try { return spawnSync(cmd, args, { stdio: 'ignore', timeout: BEEP_DEADLINE_MS }).status === 0; } catch { return false; } };
   const prof = profileArgs(root);
+  // light judge of epic CP, F7: the machine's own browser (`KAIF_BROWSER`, the first entry of the one browser list) raises the window too —
+  // before, only the answer recovery honoured it
+  const own = process.env.KAIF_BROWSER;
   if (IS_WIN) {
     const tryApp = (exe) => tryCmd('cmd.exe', ['/c', 'start', '', exe, '--app=' + url, '--window-size=' + WINDOW_SIZE, ...prof]);
+    if (own && tryApp(own)) return 'KAIF_BROWSER --app';
     if (tryApp('msedge')) return 'edge --app';
     if (tryApp('chrome')) return 'chrome --app';
     if (tryCmd('cmd.exe', ['/c', 'start', '', url])) { log('Could not raise an app window — opened a plain tab in the default browser (no project profile: a draft there cannot be recovered by the agent); please close it yourself (DEF8).'); return 'tab'; }
   } else if (IS_MAC) {
+    if (own && tryCmd('open', ['-na', own, '--args', '--app=' + url, '--window-size=' + WINDOW_SIZE, ...prof])) return 'KAIF_BROWSER --app';
     if (tryCmd('open', ['-na', 'Google Chrome', '--args', '--app=' + url, '--window-size=' + WINDOW_SIZE, ...prof])) return 'chrome --app';
     if (tryCmd('open', [url])) { log('Could not raise an app window — opened the default browser; please close it yourself (DEF8).'); return 'browser'; }
   } else {
-    for (const exe of ['google-chrome', 'chromium', 'chromium-browser', 'microsoft-edge'])
-      if (tryCmd(exe, ['--app=' + url, '--window-size=' + WINDOW_SIZE, ...prof])) return exe + ' --app';
-    if (tryCmd('xdg-open', [url])) { log('Could not raise an app window — opened the default browser; please close it yourself (DEF8).'); return 'browser'; }
+    log('NO WINDOW OPENED — open it yourself: ' + url + ' (this platform is not supported by the contour window — Windows and macOS only; the page is served until you answer or close it).');
+    return 'none';
   }
   log('NO WINDOW OPENED — open it yourself: ' + url + ' (no browser found on this machine; the page is served until you answer or close it).');
   return 'none';
@@ -1027,12 +1073,22 @@ function checkProfileAccount(root, log = console.log, attempt = 0) {
 }
 
 // ── The lock "one document — one window" (I29) ────────────────────────────────────────────────
+// CP (2.9, origin #128 comment 2): the waiter's line and the server log name the WHOLE decision — the choice, the owner's text, his
+// comment on the question and on the document. Before, a choice hid the text and both comments ("Q2 = A"), and a defect the owner
+// had written into them went unread until a judge found it.
+function decisionWords(d) {
+  const q = (t) => { const one = String(t).replace(/\s+/g, ' ').trim(); return '«' + one.slice(0, WORDS_QUOTE_CHARS) + (one.length > WORDS_QUOTE_CHARS ? '…' : '') + '»'; };
+  const parts = Object.entries(d.answers || {}).map(([k, a]) =>
+    k + ' = ' + ([a.choice, a.text ? 'text ' + q(a.text) : '', a.comment ? 'comment ' + q(a.comment) : ''].filter(Boolean).join(' + ') || '—'));
+  if (d.comment) parts.push('document comment ' + q(d.comment));
+  return parts.join(', ');
+}
 const lockPath = (root, key) => join(decisionsAbs(root), key.replace(/\.[^.]+$/u, '') + '.lock');
 function checkLock(root, key) {
   const p = lockPath(root, key);
   if (!existsSync(p)) return null;
   let lock;
-  try { lock = JSON.parse(readFileSync(p, 'utf8')); } catch { rmSync(p, { force: true }); return null; } // unreadable → gone
+  try { lock = JSON.parse(stripBom(readFileSync(p, 'utf8'))); } catch { rmSync(p, { force: true }); return null; } // unreadable → gone
   try { process.kill(lock.pid, 0); return lock; }                          // alive → the live address (I29)
   catch (e) {
     if (e.code === 'EPERM') return lock;                                   // alive under another user → still live
@@ -1059,7 +1115,8 @@ function leftIn(root, rel) {
 // OW6 (2.8; the KAIF owner's word — answers are saved one at a time in every project; the field device he pointed to wakes its agent
 // by a separate waiter): the WAITER — the process the agent starts to be woken by the next recorded answer while the page stays open
 // (I8: the agent learns of an event by the END of a process it started). Exit 0 on a new record — it names the document, the answers
-// so far and the questions left; exit 2 when the contour it saw ended without one. Patience is infinite (I9). No document → the queue.
+// so far and the questions left; exit 2 when the contour it saw ended without one — its lock gone, or (CP6, 2.9, #125) its server's
+// process dead while the lock stays. Patience is infinite (I9). No document → the queue.
 // [TESTED: 2026-09-25 19:37–20:01 · selftest: exit 0 on a partial record, exit 2 when the lock it saw is gone; s22 D (7): a separate
 //  process on the deployed copy printed «Recorded: … — Q1 = A · questions left: 2» and exited 0; report testcases/reports/2026-09-25_ow6-partial-save-revision.md]
 // (court RL 2.8, B-F1) a waiter that never sees a live contour — the page closed before it started, or was never raised — ends with 2
@@ -1075,7 +1132,23 @@ export function waitForRecord(root, docPath = null, { log = console.log, pollMs 
   // (light re-judge RL 2.8, J-F1) the QUEUE page shows this document too: a document waiter next to a live queue page waits — the
   // queue server holds the `_queue` lock, never the document's own, and the B-F1 window used to end such a waiter with a false line
   const queueLock = docPath ? lockPath(root, '_queue') : null;
-  const live = () => existsSync(lock) || (queueLock !== null && existsSync(queueLock));
+  // CP6 (2.9, origin issue #125): a KILLED server leaves its lock on purpose (I29 — the next run reuses its port), so the lock's
+  // existence is not life: its pid is judged too. Read-only (checkLock removes an unreadable lock — a waiter must never delete what
+  // the server may be writing); a lock that cannot be judged (being written, no pid) counts as live, as before.
+  // [TESTED: 2026-09-29 · selftest (4d) a SIGKILLed server's lock → exit 2 with the line, (4e) a dead lock at the start keeps the window —
+  //  both red on the v2.8 rule (mutant «lock exists = live»); verify-contour QA7: the real page server killed with SIGKILL, the waiter
+  //  started as a separate process exited 2 with «server is gone … --queue --list»; report testcases/reports/2026-09-28_cp-question-page.md]
+  const lockState = (p) => {
+    if (!existsSync(p)) return 'none';
+    let held; try { held = JSON.parse(stripBom(readFileSync(p, 'utf8'))); } catch { return 'live'; }
+    if (!Number.isInteger(held && held.pid) || held.pid <= 0) return 'live';
+    try { process.kill(held.pid, 0); return 'live'; } catch (e) { return e.code === 'EPERM' ? 'live' : 'dead'; }
+  };
+  const states = () => [lockState(lock), queueLock !== null ? lockState(queueLock) : 'none'];
+  const live = () => states().includes('live');
+  const gone = () => { const s = states(); return !s.includes('live') && s.includes('dead'); };
+  const goneLine = () => 'The page\'s server is gone (its process is not running; the lock stays for the next run, I29) — nothing was recorded '
+    + 'through it; an answer the owner saved in the window is kept on this computer: run ' + CLI_NAME + ' --queue --list to pick it up.';
   let lockSeen = live();
   const startedAt = Date.now();
   log('Waiting for the next recorded answer' + (docPath ? ' on ' + relDoc(root, docPath) : ' in the queue') + ' — exit 0 when one is recorded (OW6, I8).');
@@ -1086,9 +1159,9 @@ export function waitForRecord(root, docPath = null, { log = console.log, pollMs 
         if (s === null || start.get(f) === s) continue;
         clearInterval(tick);
         let d = {};
-        try { d = JSON.parse(readFileSync(f, 'utf8')); } catch { /* a record being written — named by its file below */ }
+        try { d = JSON.parse(stripBom(readFileSync(f, 'utf8'))); } catch { /* a record being written — named by its file below */ }
         const rel = d.document || relDoc(root, f);
-        const answers = Object.entries(d.answers || {}).map(([q, a]) => q + ' = ' + (a.choice || (a.text ? 'text' : 'comment'))).join(', ');
+        const answers = decisionWords(d);
         log('Recorded: ' + rel + (answers ? ' — ' + answers : '') + ' · questions left: ' + leftIn(root, rel)
           + ' — apply it; while questions are left, start --wait again (the page stays open).');
         done(0);
@@ -1097,10 +1170,12 @@ export function waitForRecord(root, docPath = null, { log = console.log, pollMs 
       if (live()) lockSeen = true;
       else if (lockSeen) {
         clearInterval(tick);
-        log('The contour ended without a new record — nothing to apply (the page was closed or the contour stopped).');
+        log(gone() ? goneLine() : 'The contour ended without a new record — nothing to apply (the page was closed or the contour stopped).');
         done(2);
       } else if (Date.now() - startedAt > graceMs) {
+        // a lock of a dead server found at the start is an old crash, not this page: the window still lets a new page come up on it
         clearInterval(tick);
+        if (gone()) { log(goneLine()); done(2); return; }
         log('No live contour' + (docPath ? ' for ' + relDoc(root, docPath) : ' for the queue') + ' within ' + Math.round(graceMs / 1000)
           + ' s — nothing to wait for: the page was never raised, or it ended before the waiter started; an answer already recorded is on disk ('
           + CLI_NAME + ' --queue --list names it).');
@@ -1261,7 +1336,7 @@ export function serveContour(root, { docPath = null, batch = false, notice = fal
             const artWord = arts.length ? ', outbound decided ' + arts.length + ' (approved ' + nApproved + ')' : '';
             ok({ ok: true, written: doc + ' + decision.json + archive (' + nAns + ' answer(s)' + artWord + ')', more: rest, doc, left, rev: docRev(root, doc) });
             outcome = 'decision recorded';
-            const answersWord = Object.entries(record.answers || {}).map(([q, a]) => q + ' = ' + (a.choice || (a.text ? 'text' : 'comment'))).join(', ');
+            const answersWord = decisionWords(record);
             if (arts.length) log('Outbound decision: ' + arts.map(([id, a]) => id + ' — ' + a.status).join(', ') + '. Sending is a separate agent step through a gate that calls the same checkApproval.');
             if (rest > 0) { // the batch does NOT end on the first document (origin bugs/52)
               log('Recorded: ' + doc + ' (' + answersWord + ', by ' + record.by + '). Documents left in the queue: ' + rest + ' — the page STAYS open, the contour waits.');
@@ -1446,12 +1521,15 @@ export async function closeContour(root, docPath, { force = false, ownerWord = n
 // PROJECT profile. A headless run of the same browser on the same profile and the SAME port (the origin is host:port)
 // reads it back and posts it here; the agent records it as the owner's decision and says so. Runs only when the
 // project profile exists (a window once ran) — a sandbox tree never has one, so no browser is ever launched there.
-const BROWSER_EXES = IS_WIN
+// 2.9, epic CP: ONE browser list — the origin's test tools import it from here (they kept two copies of their own). `KAIF_BROWSER`
+// names the machine's browser first (a stand whose Chromium lives off the standard paths). Linux has no list — not supported (owner's
+// word 2026-10-03).
+export const BROWSER_EXES = [...(process.env.KAIF_BROWSER ? [process.env.KAIF_BROWSER] : []), ...(IS_WIN
   ? ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
      'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe']
   : IS_MAC ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
-    : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge'];
-const findBrowser = () => BROWSER_EXES.find((p) => existsSync(p)) || null;
+    : [])];
+export const findBrowser = () => BROWSER_EXES.find((p) => existsSync(p)) || null;
 function recordRecovered(root, doc, payload, cfg) {
   const face = payload.face || 'interview';
   if (payload.read) { const r = recordDecision(root, doc, { kind: KIND_NOTICE, comment: payload.comment, recovered: true }, cfg); markNoticeRead(root, doc); return r; }
@@ -1542,7 +1620,7 @@ function recoverOne(root, key, lock, exe, log, result) {
     }
   });
 }
-/** Is a browser running on the project profile right now? Windows Chromium keeps `lockfile` open with no sharing; elsewhere `SingletonLock` marks it (not verified there — said in the returned reason). */
+/** Is a browser running on the project profile right now? Windows Chromium keeps `lockfile` open with no sharing; on macOS `SingletonLock` marks it (not verified — said in the returned reason). */
 function profileHeld(root) {
   const d = profileDir(root);
   if (IS_WIN) {
@@ -1615,6 +1693,85 @@ export function checkDoc(root, docPath, log = console.log) {
 export async function selftest(log = console.log) {
   let n = 0, bad = 0;
   const ok = (cond, name) => { n++; if (!cond) { bad++; log('  x ' + name); } else log('  v ' + name); };
+  // CP (2.9, #128 comment 2): the waiter's line names the whole decision — a choice no longer hides the owner's text and comments
+  const words = decisionWords({ answers: { Q1: { choice: 'A' }, Q2: { choice: 'B', text: 'take B,\n  but later', comment: 'the radio does not clear' }, Q3: { text: 'free' } }, comment: 'bug on the page' });
+  ok(words === 'Q1 = A, Q2 = B + text «take B, but later» + comment «the radio does not clear», Q3 = text «free», document comment «bug on the page»',
+    'CP #128: the waiter\'s line names choice · text · comment · document comment (a choice alone stays "Q1 = A")');
+  // CP (2.9, #123): a hard-wrapped paragraph, list item and quote render as ONE block each; bold across the wrap is bold, not raw "**"
+  ok(renderMd('a **b\nc** d') === '<p>a <strong>b\nc</strong> d</p>' && !renderMd('- **A)** text **bold across\n  the wrap** end').includes('**')
+    && renderMd('> one\n> two') === '<blockquote>\n<p>one\ntwo</p>\n</blockquote>' && renderMd('**P (rename kaif-*) → W**') === '<p><strong>P (rename kaif-*) → W</strong></p>'
+    && renderInline('B — one file, **no cuts**') === 'B — one file, <strong>no cuts</strong>',
+    'CP #123: paragraph, list item and quote are joined before inline markup; a single star inside bold is text; the owner\'s answer keeps its markup');
+  // CP (2.9, #123 · #127 p. 5): the owner's answer is its whole paragraph; an HTML comment under an empty label is not an answer
+  const aDoc = (ans) => '# Interview #001\n\n> Status: awaiting\n\n### Q1. Pick?\n\n- **A)** one\n- **B)** two\n\n' + ans + '\n';
+  const wrapped = parseQuestions(aDoc('**Answer:** B) — take it, on one condition: first\nthe order of steps.'))[0];
+  const commented = parseQuestions(aDoc('**Answer:**\n<!-- write here -->'))[0];
+  ok(wrapped.answers[0].text === 'B) — take it, on one condition: first\nthe order of steps.' && commented.answered === false,
+    'CP #123/#127: a wrapped answer is read whole; a comment under an empty label leaves the question LIVE');
+  { // CP (2.9, #124): the third axis of the door — a live question sends the owner nowhere for its own content
+    const rDoc = (date, stem, ans = '') => '# Interview #001\n\n> **Created:** ' + date + '\n> **Status:** awaiting\n\n### Q1. Which formula do we take?\n\n' + stem
+      + '\n\n<!-- archaeology: n/a — selftest -->\n\n- **A)** one\n- **B)** two\n\n**Answer:**' + ans + '\n';
+    const n = (date, stem, ans) => preflight(rDoc(date, stem, ans)).filter((p) => /OUTSIDE itself|ref-ok/.test(p)).length;
+    ok(n(REFERENCES_SINCE, 'The formula — see above.') === 1 && n(REFERENCES_SINCE, '\u0424\u043e\u0440\u043c\u0443\u043b\u0430 — \u0441\u043c. \u0432\u044b\u0448\u0435.') === 1 && n(REFERENCES_SINCE, 'As §3 says.') === 1
+      && n(REFERENCES_SINCE, '\u0424\u043e\u0440\u043c\u0443\u043b\u0430 — \u0441\u043c. \u0432\u044b\u0448\u0435. <!-- ref-ok: -->') === 1,
+      'CP #124: «see above» · «\u0441\u043c. \u0432\u044b\u0448\u0435» · «§3» in a live question refuse the door; a ref-ok marker without a reason refuses too');
+    ok(n(REFERENCES_SINCE, 'The formula — see above. <!-- ref-ok: the formula is quoted in full below -->') === 0 && n(REFERENCES_SINCE, '\u0412\u0430\u0440\u0438\u0430\u043d\u0442\u044b — \u0441\u043c. \u043d\u0438\u0436\u0435.') === 0
+      && n(REFERENCES_SINCE, 'The formula — see above.', ' A') === 0 && n('2026-09-20', 'The formula — see above.') === 0
+      && n(REFERENCES_SINCE, '**Answer target:** plans/24 §B8') === 0,
+      'CP #124: a reasoned ref-ok, a forward «\u0441\u043c. \u043d\u0438\u0436\u0435», an answered question, a document older than the axis and the addressee line stay silent');
+    ok(n(REFERENCES_SINCE, '\u041d\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0432\u044b\u0448\u0435 80% \u2014 \u0431\u0435\u0440\u0451\u043c B.') === 0 && n(REFERENCES_SINCE, 'B \u0432\u044b\u0448\u0435, \u0447\u0435\u043c A, \u043f\u043e \u0446\u0435\u043d\u0435.') === 0 && n(REFERENCES_SINCE, 'Load above 80% takes B.') === 0 && n(REFERENCES_SINCE, '\u0424\u043e\u0440\u043c\u0443\u043b\u0430 \u2014 \u0441\u043c. \u0442\u0430\u0431\u043b\u0438\u0446\u0443 \u043d\u0438\u0436\u0435.') === 0 && n(REFERENCES_SINCE, '\u0424\u043e\u0440\u043c\u0443\u043b\u0430 \u0446\u0435\u043b\u0438\u043a\u043e\u043c: x = 2y; \u0441\u043c. \u0442\u0430\u043a\u0436\u0435 plans/12.') === 0
+      && n(REFERENCES_SINCE, '\u041a\u0430\u043a \u0443\u043a\u0430\u0437\u0430\u043d\u043e \u0432\u044b\u0448\u0435, \u0431\u0435\u0440\u0451\u043c B.') === 1 && n(REFERENCES_SINCE, 'As listed above, B wins.') === 1,
+      'CP F3 (light judge): a comparison ("load above 80%", "B is higher than A"), a forward "see the table below" and a "see also" next to the content stay silent; "as listed above" still refuses');
+    ok(['\u0422\u0430\u043a \u043a\u0430\u043a \u043d\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0432\u044b\u0448\u0435 80%, \u0431\u0435\u0440\u0451\u043c B.', '\u0423\u043a\u0430\u0437\u0430\u043d\u043d\u0430\u044f \u043d\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0432\u044b\u0448\u0435 80%.', 'As load goes above 80%, B wins.', '\u0426\u0435\u043d\u0430 \u0432\u044b\u0448\u0435 \u043d\u0430 5% \u2014 \u0431\u0435\u0440\u0451\u043c B.'].every((s) => n(REFERENCES_SINCE, s) === 0)
+      && ['\u0411\u0435\u0440\u0451\u043c \u0444\u043e\u0440\u043c\u0443\u043b\u0443 \u0432\u044b\u0448\u0435?', '\u0412\u0430\u0440\u0438\u0430\u043d\u0442\u044b \u0432 \u0442\u0430\u0431\u043b\u0438\u0446\u0435 \u0432\u044b\u0448\u0435.', 'Pick from the list above.', 'The above decides.'].every((s) => n(REFERENCES_SINCE, s) === 1),
+      'CP N2 (light re-judge): "above" is a comparison only before a number or "than" (through "as" or a participle too); a noun form ("the formula above", "the list above") refuses');
+  }
+  { // CP (2.9, #109 · #121 R3): an explicit closing word at the start of the status closes the document, whatever the explanation after it says
+    const st = (v) => docStatus('# I\n\n> **Status:** ' + v + '\n');
+    ok(st('\u26d4 \u0421\u041d\u042f\u0422\u041e 2026-08-28 \u0440\u0435\u0448\u0435\u043d\u0438\u0435\u043c \u2116058') === 'closed' && st('\u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0435\u043d\u043e \u0432 2.10') === 'closed'
+      && st('\u2705 **\u0417\u0410\u041a\u0420\u042b\u0422\u041e 2026-08-30 — \u0412\u041e\u041f\u0420\u041e\u0421 \u0421\u041d\u042f\u0422 \u0410\u0413\u0415\u041d\u0422\u041e\u041c, \u0410 \u041d\u0415 \u041e\u0422\u0412\u0415\u0427\u0415\u041d \u0412\u041b\u0410\u0414\u0415\u041b\u042c\u0426\u0415\u041c.**') === 'closed' && st('\u26d4 WITHDRAWN 2026-08-28') === 'closed',
+      'CP #109/#121 R3: \u0421\u041d\u042f\u0422\u041e · \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0435\u043d\u043e · \u0417\u0410\u041a\u0420\u042b\u0422\u041e with a negation after it · WITHDRAWN — the document is closed, not in the owner queue');
+    ok(st('\u2705 \u043e\u0442\u0432\u0435\u0442\u044b \u043f\u043e\u043b\u0443\u0447\u0435\u043d\u044b — \u043f\u043e\u043a\u0430 \u043d\u0435 \u043e\u0442\u0432\u0435\u0447\u0435\u043d\u043e \u0434\u0432\u0430') === 'waiting' && st('\u0441\u043d\u044f\u0442\u0438\u0435 \u0444\u043b\u0430\u0433\u0430 — \u0436\u0434\u0451\u0442 \u043e\u0442\u0432\u0435\u0442\u0430') === 'waiting',
+      'CP #109: a negation still outranks a bare tick (bugs/70); a noun that starts like a closing word is no closing word');
+    ok(st('\u0417\u0430\u043a\u0440\u044b\u0442 Q1; Q2 \u0436\u0434\u0451\u0442 \u043e\u0442\u0432\u0435\u0442\u0430') === 'waiting' && st('\u2705 \u0417\u0410\u041a\u0420\u042b\u0422\u041e \u2014 \u0412\u041e\u041f\u0420\u041e\u0421 \u0421\u041d\u042f\u0422 \u0410\u0413\u0415\u041d\u0422\u041e\u041c, \u0410 \u041d\u0415 \u041e\u0422\u0412\u0415\u0427\u0415\u041d \u0412\u041b\u0410\u0414\u0415\u041b\u042c\u0426\u0415\u041c') === 'closed',
+      'CP F5 (light judge): a partial status (closed Q1; Q2 awaits an answer) waits — an explicit waiting marker outranks the closing word; a negation alone does not');
+    ok(st('\u2705 \u0417\u0410\u041a\u0420\u042b\u0422\u041e \u2014 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u0436\u0434\u0451\u0442 \u043e\u0442\u0432\u0435\u0442\u0430') === 'closed' && st('CLOSED — no longer awaiting the owner') === 'closed'
+      && st('\u0417\u0430\u043a\u0440\u044b\u0442 Q1, Q2 \u2014 \u0435\u0449\u0451 \u043d\u0435 \u043e\u0442\u0432\u0435\u0447\u0435\u043d') === 'waiting' && st('CLOSED Q1; Q2 not yet answered') === 'waiting',
+      'CP F5 (light re-judge): a NEGATED waiting marker ("no longer awaiting") leaves the document closed; a not-yet mark after the closing word waits');
+  }
+  { // CP (2.9, #127 · ideas/31 p. 28): the list form speaks the table form's dictionary; a letter written but not parsed is named
+    const q3 = (form) => '# I\n\n> **Status:** awaiting\n\n' + [1, 2, 3].map((n) => '### Q' + n + '. Pick ' + n + '?\n\n' + ['A', 'B', 'C', 'D'].map((l) => '- **' + form(l) + '** option ' + l).join('\n') + '\n\n**Answer:**\n').join('\n');
+    const count = (md) => parseQuestions(md).reduce((n, q) => n + q.options.length, 0);
+    ok(count(q3((l) => l + ':')) === 12 && count(q3((l) => l + '.')) === 12 && count(q3((l) => l + ' (\u0440\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u044e):')) === 12 && count(q3((l) => l + ')')) === 12,
+      'CP #127: 3 questions × 4 options in the forms A: · A. · A (note): · A) — 12 options each');
+    ok(count(q3((l) => l)) === 12 && preflight(q3((l) => l + ' ' + String.fromCharCode(0x2014))).some((p) => /letters authored 4, recognised 0/.test(p)),
+      'CP #127: a bold letter alone (- **A** …) is an option like the table form | **A** |; an unknown shape (- **A —** …) is named «letters authored 4, recognised 0», never lost in silence');
+    const para = (extra) => '# I\n\n> **Status:** awaiting\n\n### Q1. Pick?\n\n- **A)** one\n- **B)** two\n\n' + extra + '\n\n**Answer:**\n';
+    ok(preflight(para('**C.** three')).some((p) => /letters authored 3, recognised 2/.test(p) && p.includes('**C.** three'))
+      && !preflight(para('**B** costs more than A.')).some((p) => /letters authored/.test(p)),
+      'CP F4 (light judge): a paragraph option «**C.** three» next to two list options is named «letters authored 3, recognised 2»; prose opening with a bold letter («**B** costs more») is not an option');
+    ok(preflight(para('**C** ' + String.fromCharCode(0x2014) + ' three')).some((p) => /letters authored 3, recognised 2/.test(p)),
+      'CP F4 (light re-judge): a paragraph option with the list form\'s dash («**C** — three») is named too');
+    ok(parseQuestions('# I\n\n> **Status:** awaiting\n\n### Q1. Pick?\n\n**\u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0430\u0446\u0438\u044f \u0430\u0433\u0435\u043d\u0442\u0430:** B\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n')[0].recommended === 'B',
+      'CP ideas/31 p. 28: «**\u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0430\u0446\u0438\u044f \u0430\u0433\u0435\u043d\u0442\u0430:** B» — the letter is read after the label closes its own bold');
+    const ru = mkdtempSync(join(tmpdir(), 'kaif-contour-ru-'));
+    mkdirSync(join(ru, '.kaif'), { recursive: true }); mkdirSync(join(ru, 'interviews'), { recursive: true });
+    writeFileSync(join(ru, '.kaif', 'kaif.json'), JSON.stringify({ framework: 'KAIF', version: '2.9', language: 'ru', projectName: '\u041f\u0440\u043e\u0431\u0430' }) + '\n');
+    writeFileSync(join(ru, 'interviews', 'interview_001_ru.md'), '# \u0418\u043d\u0442\u0435\u0440\u0432\u044c\u044e #001\n\n> **\u0421\u0442\u0430\u0442\u0443\u0441:** \u2705 \u041e\u0422\u0412\u0415\u0427\u0415\u041d\u041e\n\n### Q1. \u0411\u0435\u0440\u0451\u043c?\n\n- **A)** \u0434\u0430\n- **B)** \u043d\u0435\u0442\n\n**\u041e\u0442\u0432\u0435\u0442:** A\n\n\u2705 \u0412\u043d\u0435\u0441\u0435\u043d\u043e: plans/12 \u0448\u0430\u0433 3 (\u043a\u043e\u043c\u043c\u0438\u0442 abc123).\n');
+    recordDecision(ru, 'interviews/interview_001_ru.md', { answers: { Q1: { choice: 'B', text: '\u043f\u0435\u0440\u0435\u0434\u0443\u043c\u0430\u043b', comment: '' } } }, loadContourConfig(ru), new Date(2026, 8, 28, 10, 0));
+    const ruDoc = readFileSync(join(ru, 'interviews', 'interview_001_ru.md'), 'utf8');
+    rmSync(ru, { recursive: true, force: true });
+    ok(ruDoc.indexOf('**\u041e\u0442\u0432\u0435\u0442 (\u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435, ') > ruDoc.indexOf('\u0412\u043d\u0435\u0441\u0435\u043d\u043e:') && !ruDoc.includes('Answer (\u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435'),
+      'CP #127: a follow-up in a Russian document is labelled in Russian and lands BELOW the applied-mark line');
+  }
+  { // the legal wrapped option form (spec §1, the /interview template) passes the page self-check instead of refusing to open
+    const wr = mkdtempSync(join(tmpdir(), 'kaif-contour-wrap-'));
+    mkdirSync(join(wr, 'interviews'), { recursive: true });
+    writeFileSync(join(wr, 'interviews', 'interview_001_wrap.md'), '# Interview #001\n\n> Status: awaiting\n\n### Q1. Which?\n\n- **A) (recommended)** **Title that wraps\n  onto the next line.**\n- **B)** The other one.\n\n**Answer:**\n');
+    const refused = gateForOpen(wr, 'interviews/interview_001_wrap.md');
+    rmSync(wr, { recursive: true, force: true });
+    ok(refused === null, 'CP #123: a wrapped option label opens — the page self-check no longer refuses it for raw ** (' + (refused || []).join(' ').slice(0, 80) + ')');
+  }
   const root = mkdtempSync(join(tmpdir(), 'kaif-contour-'));
   mkdirSync(join(root, '.kaif'), { recursive: true });
   mkdirSync(join(root, 'interviews'), { recursive: true });
@@ -1660,7 +1817,14 @@ export async function selftest(log = console.log) {
   const BAD = 'interviews/interview_051_paragraphs.md';
   writeFileSync(join(root, BAD), '# Interview #051 — the field defect\n\n> Status: awaiting the owner\n\n### Q1. Which one?\n\n**A. First option** — typed as a paragraph, not a list item.\n\n**B. Second option** — also a paragraph.\n\n**Answer:**\n');
   const pre = preflight(readFileSync(join(root, BAD), 'utf8'));
-  ok(pre.length === 1 && /^Q1: 0 option/.test(pre[0]) && pre[0].includes('- **A)**'), 'pre-flight is RED on the "options as paragraphs" fixture (#051): Q1 named, the fix form printed (exit 3)');
+  // light judge of epic CP, F4: the paragraph letters are named too — two lines of the door, the letters it saw and the fix form
+  ok(pre.length === 2 && pre.some((p) => /^Q1: letters authored 2, recognised 0/.test(p) && p.includes('**A. First option**')) && pre.some((p) => /^Q1: 0 option/.test(p) && p.includes('- **A)**')),
+    'pre-flight is RED on the "options as paragraphs" fixture (#051): Q1 named, the paragraph letters named, the fix form printed (exit 3)');
+  writeFileSync(join(root, 'interviews', 'interview_990_title.md'), '# I\n\n> **Status:** awaiting\n\n### Q1. Take **B** or `C`?\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n');
+  const titled = buildPage(root, 'interviews/interview_990_title.md').html;
+  rmSync(join(root, 'interviews', 'interview_990_title.md'), { force: true });
+  ok(titled.includes('<strong>Q1.</strong> Take <strong>B</strong> or <code>C</code>? <span class="tag'),
+    'CP F6 (light judge): a question title carries the owner\'s markup rendered — no raw ** or backticks on the card');
   const gate = gateForOpen(root, BAD);
   ok(Array.isArray(gate) && gate[0].includes('exit 3'), 'the open gate refuses the #051 fixture before any page');
   const GOOD = 'interviews/interview_052_canonical.md';
@@ -1755,7 +1919,7 @@ export async function selftest(log = console.log) {
   writeFileSync(join(root, IMPL), '# Interview #097\n\n> Status: awaiting\n\n### Q1. Which?\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n');
   ok(ownerDocs(root).some((d) => d.doc === IMPL) && listQueue(root).implGate.length === 0, 'an open question is owed to the owner before the implemented mark');
   recordImplemented(root, IMPL, 'Q1', 'commit abc123');
-  const implMap = JSON.parse(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8'));
+  const implMap = JSON.parse(stripBom(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8')));
   ok(implMap[IMPL] && implMap[IMPL].Q1.where === 'commit abc123' && /^\d{4}-/.test(implMap[IMPL].Q1.at), 'implemented.json carries the fact with its address and its moment (I44)');
   const lq = listQueue(root);
   ok(!ownerDocs(root).some((d) => d.doc === IMPL) && lq.exitCode === 2 && lq.lines.some((l) => l.includes(IMPL) && /Q1/.test(l) && /implemented, but open/.test(l)),
@@ -1768,12 +1932,12 @@ export async function selftest(log = console.log) {
     const WD = 'interviews/interview_096_withdrawn.md';
     writeFileSync(join(root, WD), '# Interview #096\n\n> Status: awaiting\n\n### Q1. Print the delivery line?\n\n- **A)** yes\n- **B)** no\n\n**Answer:**\n\n### Q2. Keep it?\n\n- **A)** yes\n- **B)** no\n\n**Answer:** A\n');
     const w1 = markWithdrawn(root, WD, 'Q1', 'the delivery line is withdrawn in 2.7');
-    const wmap = JSON.parse(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8'));
+    const wmap = JSON.parse(stripBom(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8')));
     ok(w1.code === 0 && wmap[WD] && wmap[WD].Q1.withdrawn === true && wmap[WD].Q1.why === 'the delivery line is withdrawn in 2.7' && !ownerDocs(root).some((d) => d.doc === WD),
       'a question a withdrawal made moot: --mark-withdrawn records withdrawn: true with the reason, and the queue no longer raises it (2.8, criterion 13)');
     ok(buildPage(root, WD).html.includes('withdrawn — the delivery line is withdrawn in 2.7') && !buildPage(root, WD).html.includes('implemented → withdrawn'),'the page renders a withdrawn question as «withdrawn — <reason>», never as implemented');
     const w2 = markWithdrawn(root, WD, 'Q2', 'moot');
-    ok(w2.code === 1 && /ANSWERED/.test(w2.line) && !JSON.parse(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8'))[WD].Q2,
+    ok(w2.code === 1 && /ANSWERED/.test(w2.line) && !JSON.parse(stripBom(readFileSync(join(root, 'interviews', 'decisions', 'implemented.json'), 'utf8')))[WD].Q2,
       'an ANSWERED question is refused (exit 1, nothing recorded) — a withdrawal is never an answer over the owner\'s word');
     rmSync(join(root, WD), { force: true }); rmSync(join(root, 'interviews', 'decisions', 'implemented.json'), { force: true });
     // judge CH5 F2: the Russian pack carries its own form of each new text — a missing key falls back to English on an owner's page
@@ -1795,6 +1959,21 @@ export async function selftest(log = console.log) {
   // QL4 (#60): the Save control is a floating top-right button; the self-check reddens on a bottom bar and on raw markdown in a label
   ok(/\.fab \{[^}]*position:fixed[^}]*top:12px[^}]*right:16px/.test(plainPage.html) && !/bottom:0/.test(plainPage.html) && plainPage.html.includes('<div class="fab"><button id="save"'),
     'the Save button floats at the top right (position:fixed; top; right) and no bottom bar exists on the page');
+  { // CP6 (2.9, origin issue #125): the status pill wraps INSIDE the button's column — its width plus the edge and the gap never exceeds
+    // the room the header keeps free on the right, in the regular and in the narrow window (the layout itself — verify-contour QA7)
+    const px = (re) => Number((plainPage.html.match(re) || [])[1]);
+    const pill = px(/\.fab #status \{ background:[^}]*max-width:(\d+)px/), head = px(/header \{[^}]*padding:10px (\d+)px/), edge = px(/\.fab \{[^}]*right:(\d+)px/);
+    const narrow = /@media[^{]*\{ \.fab \{ top:8px; right:(\d+)px \}[^@]*?\.fab #status \{ max-width:(\d+)px \}[^@]*?padding-right:(\d+)px/.exec(plainPage.html);
+    ok(pill > 0 && head > 0 && pill + edge + FAB_GAP_PX <= head && narrow && Number(narrow[2]) + Number(narrow[1]) + FAB_GAP_PX <= Number(narrow[3]),
+      'the status pill is no wider than the button column the header keeps free — regular and narrow window (CP6, #125; got pill '
+      + pill + ' + edge ' + edge + ' vs header ' + head + (narrow ? '; narrow ' + narrow.slice(1).join('/') : '; narrow rule missing') + ')');
+  }
+  // CP, the light re-judge's N1 (the layout and the pulse — verify-contour QA7v in a live browser): the pill holds at most two lines,
+  // a status that does not fit goes to the bar; an alive pulse clears only the dead pulse's bar and puts back the status bar it covered
+  ok(new RegExp('\\.fab #status \\{[^}]*-webkit-line-clamp:' + PILL_LINES + '; overflow:hidden').test(plainPage.html) && PILL_LINES === 2,
+    'N1/F1: the status pill holds at most two lines (line-clamp) — a status that does not fit them goes to the bar, measured on the page');
+  ok(plainPage.html.includes("if(b.className==='gone'){if(barMsg)showBar();") && plainPage.html.includes("if(submittedLocally||saved||!barFree())return;b.className='gone'"),
+    'N1: an alive pulse clears only the dead pulse\'s bar and restores the status bar; after the last saved answer a dead pulse says nothing');
   ok(!selfCheck({ ...plainPage, html: plainPage.html.replace('.fab { position:fixed;', '.fab { position:static;') }).ok, 'self-check goes RED when the button stops floating (mutation on a copy)');
   ok(!selfCheck({ ...plainPage, html: plainPage.html.replace('.fab { position:fixed;', '.bar { position:fixed; bottom:0;') }).ok, 'self-check goes RED on a bar pinned to the bottom edge (the #60 page)');
   ok(!selfCheck({ ...plainPage, html: plainPage.html.replace('<label class="opt"><input', '<label class="opt">**leak**<input') }).ok, 'self-check goes RED when an option label carries raw markdown');
@@ -1822,6 +2001,64 @@ export async function selftest(log = console.log) {
   ok(parseQuestions(after)[0].answered && buildPage(root, GOOD).html.includes('disabled checked'), 'after the record the question is answered and the page shows the chosen radio, disabled');
   const rec2 = recordDecision(root, GOOD, { answers: { Q1: { choice: 'A', text: '', comment: '' } } }, cfg, new Date(2026, 8, 5, 22, 1));
   ok(readFileSync(join(root, GOOD), 'utf8').includes('**Answer (follow-up, 5 September 2026, 22:01') && rec2.at !== rec.at, 'a second answer never overwrites the first — a dated follow-up (I2)');
+  { // NT1 (2.9, origin issue #139): the own-answer field is multi-line, and an answer of two lines (a blank line between) is written as two
+    // lines and read back whole
+    // its own root beside the fixture's: the queue cases below count the fixture's documents and must not see this one
+    const mlRoot = mkdtempSync(join(root, '..', 'kaif-contour-ml-'));
+    mkdirSync(join(mlRoot, 'interviews'), { recursive: true });
+    const ML = 'interviews/interview_053_multiline.md';
+    writeFileSync(join(mlRoot, ML), '# Interview #053 — multiline\n\n> Status: awaiting\n\n### Q1. Pick?\n\n<!-- archaeology: n/a — selftest -->\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n');
+    const pageML = buildPage(mlRoot, ML).html;
+    recordDecision(mlRoot, ML, { answers: { Q1: { choice: '', text: 'first line\n\nsecond line', comment: '' } } }, cfg, new Date(2026, 8, 5, 22, 2));
+    const mlAfter = readFileSync(join(mlRoot, ML), 'utf8'), mlQ = parseQuestions(mlAfter)[0];
+    rmSync(mlRoot, { recursive: true, force: true });
+    ok(pageML.includes('<textarea data-draft name="text:' + ML + ':Q1"') && !pageML.includes('<input type="text" data-draft name="text:')
+      && /\*\*Answer:\*\* first line\nsecond line <!-- owner-review:/.test(mlAfter) && mlQ.answered && mlQ.answers[0].text === 'first line\nsecond line',
+      'NT1 #139: the own answer is a textarea; an answer of two lines lands as two lines (no blank inside, the mark at the end) and reads back whole');
+  }
+  { // light judge of epic NT, F1 (2.9): a continuation line that reads as STRUCTURE — a fence, a heading, a rule, a table row, an option,
+    // a bold letter, a label — must not be parsed as structure; the same for a multi-line comment (its twin, older than NT1). Each form is
+    // its own continuation line of ONE answer; Q2 below must survive with its two options, and the answer must read back as typed.
+    const fRoot = mkdtempSync(join(root, '..', 'kaif-contour-f1-'));
+    mkdirSync(join(fRoot, 'interviews'), { recursive: true });
+    const F1 = 'interviews/interview_054_structure.md';
+    const q2 = '### Q2. Second?\n\n<!-- archaeology: n/a — selftest -->\n\n- **A)** yes\n- **B)** no\n\n**Answer:**\n';
+    writeFileSync(join(fRoot, F1), '# Interview #054 — structure\n\n> Status: awaiting\n\n### Q1. Pick?\n\n<!-- archaeology: n/a — selftest -->\n\n'
+      + '- **A)** one\n- **B)** two\n\n**Answer:**\n\n' + q2);
+    const forms = ['```', '### Q2. fake', '---', '| **A** | x |', '- **A)** actually this', '- **C** bold letter', '**C.** paragraph letter',
+      '**Answer:** x', "Owner's comment: y", 'Addressee: z', '  ~~~ indented fence', '\\- **A)** typed with a backslash'];
+    const typed = ['my pick', ...forms].join('\n');
+    recordDecision(fRoot, F1, { answers: { Q1: { choice: '', text: typed, comment: 'see:\n```\ncode\n\n### Q9. fake' } } }, cfg, new Date(2026, 8, 5, 22, 3));
+    const fAfter = readFileSync(join(fRoot, F1), 'utf8'), fQs = parseQuestions(fAfter);
+    rmSync(fRoot, { recursive: true, force: true });
+    const fQ1 = fQs.find((q) => q.id === 'Q1'), fQ2 = fQs.find((q) => q.id === 'Q2');
+    const readBack = typed.split('\n').map((s) => s.trim()).join('\n'); // the reader trims each line of a paragraph (CP), as before NT1
+    ok(fQs.length === 2 && fQ1 && fQ1.options.length === 2 && fQ1.answers.length === 1 && fQ1.answers[0].text === readBack
+      && fQ2 && fQ2.options.length === 2 && !fQ2.answered,
+      'NT F1: an own answer and a comment whose lines read as structure keep Q2 and read back as typed (questions ' + fQs.length
+      + ', Q1 options ' + (fQ1 && fQ1.options.length) + ', answers ' + (fQ1 && fQ1.answers.length) + ', Q2 options ' + (fQ2 && fQ2.options.length) + ')');
+  }
+  { // court RL 2.9, E-F1 · E-F2 · E-F3: a document with NO status line of its own — an answer line «Status: done» must not close it; a
+    // rule `---` as the LAST answer line (the provenance mark follows it) reads back without its escape; the card of the answered
+    // question shows the answer once, below — its continuation lines are not prose
+    const gRoot = mkdtempSync(join(root, '..', 'kaif-contour-e1-'));
+    mkdirSync(join(gRoot, 'interviews'), { recursive: true });
+    const G = 'interviews/interview_055_nostatus.md';
+    writeFileSync(join(gRoot, G), '# Interview #055 — no status line\n\n### Q1. Pick?\n\n<!-- archaeology: n/a — selftest -->\n\n- **A)** one\n- **B)** two\n\n**Answer:**\n\n'
+      + '### Q2. Second?\n\n<!-- archaeology: n/a — selftest -->\n\n- **A)** yes\n- **B)** no\n\n**Answer:**\n');
+    const gTyped = 'my pick\nStatus: ✅ done\n### not a heading\n---';   // «✅ done» closes a document whose head carries it (the judge's form)
+    recordDecision(gRoot, G, { answers: { Q1: { choice: '', text: gTyped, comment: 'see:\n- **A:** a fallback' } } }, cfg, new Date(2026, 8, 5, 22, 4));
+    const gAfter = readFileSync(join(gRoot, G), 'utf8'), gQs = parseQuestions(gAfter);
+    const gHtml = buildPage(gRoot, G).html;
+    rmSync(gRoot, { recursive: true, force: true });
+    const gQ1 = gQs.find((q) => q.id === 'Q1'), gQ2 = gQs.find((q) => q.id === 'Q2');
+    // the page puts LIVE questions first — the card of the answered Q1 is found by its own title, never by its place
+    const q1At = gHtml.indexOf('<strong>Q1.</strong>'), card1 = gHtml.slice(gHtml.lastIndexOf('<section', q1At), gHtml.indexOf('</section>', q1At));
+    const shownOnce = card1.split('not a heading').length - 1 === 1;   // E-F3: the answer below «answered:» — never also as prose
+    ok(docStatus(gAfter) === 'none' && gQ2 && !gQ2.answered && gQ1 && gQ1.answers[0] && gQ1.answers[0].text === gTyped
+      && shownOnce && !/qbody[^<]*<p>[^<]*\\###/.test(gHtml) && !gHtml.includes('\\---') && !gHtml.includes('\\- <strong>') && gHtml.includes('a fallback'),
+      'RL E-F1/F2/F3 · B-F2: an answer line «Status: done» keeps a status-less document open, a last line `---` reads back without its escape, the card shows no escaped answer line (status ' + docStatus(gAfter) + ', Q2 answered ' + (gQ2 && gQ2.answered) + ', read back ' + JSON.stringify(gQ1 && gQ1.answers[0] && gQ1.answers[0].text) + ')');
+  }
 
   // I37/I38: the notice class — state machine, page form, batch order
   const NOTICE = 'docs/report.md';
@@ -1863,7 +2100,7 @@ export async function selftest(log = console.log) {
   ok(threw, 'mockup face refuses a non-image loudly');
   // bugs/113: "Done" with no remarks is a RECORDED decision on the mockup and proofreading faces (never a refusal)
   const nr = recordDecision(root, PNG, { kind: 'mockup', comment: '', comments: {}, noRemarks: true }, cfgOf(root));
-  ok(nr.noRemarks === true && JSON.parse(readFileSync(join(root, 'interviews', 'decisions', 'mock.decision.json'), 'utf8')).noRemarks === true,
+  ok(nr.noRemarks === true && JSON.parse(stripBom(readFileSync(join(root, 'interviews', 'decisions', 'mock.decision.json'), 'utf8'))).noRemarks === true,
     'mockup face: Done with empty fields records noRemarks: true (bugs/113)');
   ok(mp.html.includes(texts('en').ph.noRemarks) && mp.html.includes("p.noRemarks=true") && !mp.html.includes("CFG.face==='mockup'&&!(p.comment"),
     'mockup page carries the no-remarks hint and the client gate no longer refuses an empty mockup/proofreading record (bugs/113)');
@@ -1945,7 +2182,7 @@ export async function selftest(log = console.log) {
   const three = '# Interview #008\n\n> Status: awaiting\n\n' + MQ(1) + '\n' + MQ(2) + '\n' + MQ(3);
   const MD = 'interviews/interview_008_merge.md';
   writeFileSync(join(root, MD), three);
-  const decOf = (d) => JSON.parse(readFileSync(decisionPaths(root, d, cfg).decision, 'utf8'));
+  const decOf = (d) => JSON.parse(stripBom(readFileSync(decisionPaths(root, d, cfg).decision, 'utf8')));
   const rec1 = recordDecision(root, MD, { answers: { Q1: { choice: 'A' } }, rev: bodyHash(three) }, cfg);
   const rec2 = recordDecision(root, MD, { answers: { Q2: { choice: 'B' } }, rev: decOf(MD).revAfter }, cfg);
   const d2 = decOf(MD);
@@ -2021,6 +2258,31 @@ export async function selftest(log = console.log) {
   rmSync(QLK, { force: true });
   const w4end = await Promise.race([waiter4, sl(3000).then(() => 'timeout')]);
   ok(waitedPastWindow && w4end === 2, 'waiter: a document waiter next to a live QUEUE page waits past its window, and ends with 2 when the queue page ends (J-F1)');
+  // (4d) CP6 (2.9, origin issue #125): the page's server is KILLED and its lock STAYS (I29) — the waiter judges the lock's pid: it waits
+  // while the process lives, and ends with 2 and the «server is gone → --queue --list» line once it is dead (v2.8 waited forever)
+  const srv = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  const srvExit = new Promise((r) => srv.once('exit', r));
+  writeFileSync(LK, JSON.stringify({ pid: srv.pid, url: 'http://127.0.0.1:1/' }) + '\n');
+  const wlog5 = [];
+  let w5 = 'pending';
+  const waiter5 = waitForRecord(root, MD, { log: (l) => wlog5.push(String(l)), pollMs: 50, graceMs: 300 }).then((c) => { w5 = c; return c; });
+  await sl(500);
+  const waitedWhileAlive = w5 === 'pending';
+  srv.kill('SIGKILL'); await srvExit;
+  const w5end = await Promise.race([waiter5, sl(3000).then(() => 'timeout')]);
+  ok(waitedWhileAlive && w5end === 2 && existsSync(LK) && wlog5.some((l) => /server is gone/.test(l) && /--queue --list/.test(l)),
+    'waiter: the page\'s server killed, its lock kept → exit 2 «the page\'s server is gone … --queue --list»; while it lived — waiting (CP6, #125)');
+  // (4e) CP6: a lock of a DEAD server found at the start is an old crash — the waiter still gives a new page its window, then ends with 2
+  // and the same line (never an eternal wait on a lock that nobody holds)
+  let w6 = 'pending';
+  const wlog6 = [];
+  const waiter6 = waitForRecord(root, MD, { log: (l) => wlog6.push(String(l)), pollMs: 50, graceMs: 400 }).then((c) => { w6 = c; return c; });
+  await sl(150);
+  const gaveWindow = w6 === 'pending';
+  const w6end = await Promise.race([waiter6, sl(3000).then(() => 'timeout')]);
+  ok(gaveWindow && w6end === 2 && wlog6.some((l) => /server is gone/.test(l)),
+    'waiter: a dead server\'s lock at the start — the window is kept for a new page, then exit 2 «server is gone» (CP6)');
+  rmSync(LK, { force: true });
   // (5) judge OW10 H11: an answer picked up from the owner's machine for an OLDER revision is recorded as data, never written by numbers
   writeFileSync(join(root, MD), three);
   const recS = recordRecovered(root, MD, { answers: { Q1: { choice: 'B', text: '', comment: '' } }, rev: 'an-older-revision' }, cfg);

@@ -53,7 +53,8 @@ restores it quickly and forms a current backlog.
 5. **Pick one task** from the rebuilt backlog (priority: finish what's started > bugs > new ideas) that
    doesn't need a human decision. An unplanned item gets planned before code: `/plan-task` for an
    ordinary one, `/plan-epic` when the heaviness test says it's heavy. If you're in a loop — continue
-   the loop with it.
+   the loop with it. Called by the owner with a question or a task in the same message — they set the scope
+   (as `/resume` Step 2, decision #143): a question is answered and the picked task is OFFERED, not taken.
 
 ## Notes
 - This is a FAST skill (read + list), a couple of minutes. Don't rewrite docs without need.

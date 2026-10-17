@@ -31,6 +31,14 @@ export const PARSER = {
   questionPrefixes: 'Q|В',
   // a heading that LOOKS like a question but is not in the form above (QL1, origin #56): `### Question 3` · `### Вопрос 3`
   questionWords: 'Question|Вопрос',
+  // 2.9, epic CP (origin issue #124): a BACKWARD or SIDEWAYS reference that sends the owner out of the question for its own content.
+  // Russian: the field project's pattern, its standing rule for six weeks (issue #124, verbatim), with a forward «см. ниже» left
+  // legal; English: its mirror. A forward reference ("options below") is legal by the owner's word in the ticket.
+  // The light judges of epic CP, F3 and N2: «выше» / "above" is a REFERENCE unless a comparison follows it — a number or «чем» / "than"
+  // («нагрузка выше 80%», «B выше, чем A», "above 80%" stay legal; «формула выше», «в таблице выше», "the list above", «как указано выше»
+  // refuse); «см. <…> ниже» (forward) and «см. также» / "see also" (a reference NEXT to the content) stay legal.
+  refBack: '(?<!\\p{L})(?:выше(?!\\p{L})(?!\\s*,?\\s*(?:чем(?!\\p{L})|[\\d~≈<>]|на\\s+\\d|в\\s+\\d))|вон\\s+т[оеа]\\p{L}*|в\\s+разделе|в\\s+шапке|см\\.\\s(?!(?:[\\p{L}\\d«»"\'-]+\\s+){0,3}?ниже)(?!также)|above(?!\\p{L})(?!\\s*(?:than(?!\\p{L})|[\\d~<>]|by\\s+\\d))|see\\s+(?:§|the\\s+section|section)|in\\s+the\\s+(?:section|header)|§\\s?\\d)',
+  originLabels: 'Origin|Источник|Родитель',
   // the answer field label: `**Answer:**` · `**Ответ:**` · `**Ответ владельца:**`
   answerLabels: 'Answer|Ответ(?:\\s+владельца)?',
   // a counter-question is NOT an answer (contract C4 rule 2)
@@ -43,8 +51,17 @@ export const PARSER = {
   recommendLabels: 'Рекомендация\\s+агента|Agent\'?s?\\s+recommendation',
   // status line of the document head (`> Status:` / `> **Статус:**`)
   statusLabels: 'Status|Статус',
+  // 2.9, epic CP (origin #109, #121 R3): an EXPLICIT closing word at the START of the status value (after an optional mark and bold) closes
+  // the document even when an explanation after it carries a negation («✅ ЗАКРЫТО — ВОПРОС СНЯТ АГЕНТОМ, А НЕ ОТВЕЧЕН ВЛАДЕЛЬЦЕМ»); the
+  // project's own closed words — «перенесено», «СНЯТО», WITHDRAWN — were read as a LIVE document and stood in the owner's queue
+  statusClosedWord: '^\\s*(?:[✅⛔➡🟢]\\uFE0F?\\s*)?\\*{0,2}\\s*(?:CLOSED|WITHDRAWN|MOVED|ЗАКРЫТ[ОАЫ]?|СНЯТ[ОАЫ]?|ПЕРЕНЕС[ЕЁ]Н[ОАЫ]?)(?!\\p{L})',
   statusClosed: '✅|🟢|STATUS:\\s*DONE|ANSWERS\\s+RECEIVED|ОТВЕЧЕНО',
   statusWaiting: '🟡|awaiting|ждёт\\s+ответ|ожидает\\s+ответ',
+  // (the light re-judge of epic CP, F5) on a line that opens with a closing word the document waits only for an UNNEGATED waiting marker
+  // («больше не ждёт ответа», "no longer awaiting" close) or a NOT-YET mark («Q2 — ещё не отвечен»); a bare «не отвечен» still closes —
+  // a question withdrawn by the agent is written that way.
+  statusWaitingNegation: '(?:(?<!\\p{L})не|\\bnot|\\bno\\s+longer|\\bno)',
+  statusPending: '(?<!\\p{L})(?:ещ[её]|пока)\\s+не(?!\\p{L})|\\bnot\\s+yet\\b|\\bno\\b[^.]{0,40}\\byet\\b',
   // negation outranks the tick (bugs/70): «пока НЕ отвечено», "no answers yet", "not answered"
   statusNegation: '(?<!\\p{L})не\\s*отвечен|неотвечен|(?<!\\p{L})пока\\s+не(?!\\p{L})|(?<!\\p{L})ещё\\s+не(?!\\p{L})|\\bno\\b[^.]{0,40}\\byet\\b|\\bnot\\b[^.]{0,40}\\banswer',
   // the declared free field of a question with no options (naming / taste questions)
@@ -124,6 +141,9 @@ const EN = {
     // LP (2.7, origin issue #66): with the window's own profile in the project the answer survives the server — no dialog, no choice
     serverGoneLocal: 'The contour server is unreachable — keep writing and press Save as usual: the answer is saved on this computer, in the project folder, and the agent will pick it up.',
     savedLocally: 'The server is unreachable — your answer is saved on this computer (in the project folder); the agent will pick it up. You can close the window.',
+    // CP (2.9, origin issue #125): a long message goes to the bar above the page (it keeps the Save column free); the pill under the
+    // button carries a short label only — a pill six lines tall covered the document's title
+    savedLocallyShort: 'Saved on this computer', pillOk: 'Details in the bar above', pillErr: 'Attention — see the bar above',
     closeYourself: 'The browser refused to close the window — please close it yourself',
     // OW6 (2.8): answers are saved one at a time — the page stays; a save against another revision of the document is refused
     left: (n) => 'Saved. Questions left: ' + n + ' — the page stays open; answer the rest now or later.',
@@ -196,7 +216,7 @@ const RU = {
   months: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'],
   wb: {
-    followUp: (atHuman) => 'Answer (дополнение, ' + atHuman + '):',
+    followUp: (atHuman) => 'Ответ (дополнение, ' + atHuman + '):', // CP (2.9, #127 p. 2): the label in the document's language
     ownerComment: (atHuman) => 'Комментарий владельца (' + atHuman + '):',
     proofread: (atHuman) => 'Замечания владельца по вычитке (' + atHuman + '):',
     recovered: 'забран с компьютера владельца', // LP (#66): комментарий провенанса называет, что ответ пришёл из локальной записи
@@ -235,6 +255,9 @@ const RU = {
     // LP (2.7, #66): окно на своём профиле в папке проекта — ответ переживает сервер; ни диалога, ни выбора (слово владельца Q2 = D)
     serverGoneLocal: 'Сервер контура недоступен — пишите дальше и нажмите «Записать» как обычно: ответ сохранится на этом компьютере, в папке проекта, и агент его заберёт.',
     savedLocally: 'Сервер недоступен — ответ сохранён на этом компьютере (в папке проекта); агент его заберёт. Окно можно закрыть.',
+    // CP (2.9, тикет #125): длинное сообщение — в полосу над страницей (она оставляет колонку кнопки свободной); в пилюле под кнопкой —
+    // только короткая метка: пилюля в шесть строк закрывала заголовок документа
+    savedLocallyShort: 'Сохранено на этом компьютере', pillOk: 'Подробнее — в полосе сверху', pillErr: 'Внимание — см. полосу сверху',
     closeYourself: 'Браузер не дал закрыть окно — закройте его, пожалуйста, сами',
     // OW6 (2.8): ответы записываются по одному — страница остаётся; запись по другой редакции документа отказывается
     left: (n) => 'Записано. Осталось вопросов: ' + n + ' — страница остаётся открытой; на остальные можно ответить сейчас или позже.',
