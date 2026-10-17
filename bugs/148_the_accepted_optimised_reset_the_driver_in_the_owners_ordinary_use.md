@@ -1,6 +1,6 @@
 # Bug 148 — the accepted Optimised reset the driver in the owner's ordinary use (17.10 16:16, driver 617.42)
 
-**Status:** 🔧 FIXED, PENDING THE WEEK OF USE — top band −10 → +10, 2026-10-17 16:51 (see the end); found 2026-10-17 16:41 +03:00 (session 109) by reading the card before a planned check: factory state where
+**Status:** 🟡 MITIGATED, CAUSE NOT PINNED — top band −10 → +10 (16:51) did NOT change 3037…3075 MHz where the GPU stalled (see «✏️ Correction»); found 2026-10-17 16:41 +03:00 (session 109) by reading the card before a planned check: factory state where
 Optimised had been applied at 15:59; the driver log explains it. Waiting for the owner's word on what ran at 16:16.
 **Severity:** S1 — the ACCEPTED mode (4-minute check passed 15:36, on the shortcut since 15:59) failed on the owner's machine in
 ordinary use; the card fell back to factory silently (the owner was not told; `remembered-state` still says optimised).
@@ -80,3 +80,15 @@ At 16:42 the GPU clients were light: explorer, Chrome ×2, VS Code, NVIDIA Overl
   straight to the top within 200 ms** (17:04:38 900 → 3052 MHz; 17:06:07 292 → 3067 MHz) — the failing shape. `nvlddmkm` 0 events
   17:02:21–17:06:52. With the earlier 16:54–16:57 and 16:58–17:05 runs (0 events) and the wake exam: the top band at +10 holds
   every shape that failed at −10. **Status → 🔧 fixed, witness = ordinary use** (the week of use; the shortcut and autostart carry it).
+
+## ✏️ Correction — 2026-10-17 17:1x, on the owner's question «точечно поднял их?»
+
+The diff of the two snapshots (`curves/battle/2026-10-17T15-36-44.json` → `…16-46-32.json`) changes 10 rows: 2850/2857 870→875,
+2880/2887/2895 885→890 (the −20 failure's floors), **2962/2970/2977 920–925→935, 3082/3090 1000→1015** (the top margin). **The rows
+3037…3075 MHz — where the GPU stalled at 16:45:14.9 — are UNCHANGED**: earlier check floors (14:17/14:19) already held them above
+the trend + 10 line, so the band raise did not reach them. Therefore the lines above «Fix by the ratchet» and «the top band at +10
+holds every shape that failed at −10» are true of the curves and FALSE as a cause: the raise did not touch the failing frequencies.
+Two explanations, not told apart: (1) the failure sat at 2962–2977 or 3082/3090, crossed between 500-ms samples; (2) the failure is
+probabilistic and the 10 minutes since were luck. The chat claim «2950…3030 and 3082/3090 got +20 mV» was also false (+10…15 mV).
+Status stays 🔧, but «fixed» is NOT established — the frequency-level step (a floor at 3037…3075 from the 16:45 failure, 200-ms
+telemetry) is the next card action, the owner's word pending.
