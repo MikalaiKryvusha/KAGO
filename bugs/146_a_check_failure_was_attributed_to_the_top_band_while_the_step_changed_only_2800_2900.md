@@ -64,3 +64,13 @@ TWINS: searched `attributeFailure(` / `failureSpan(` across the tree — callers
 
 `plans/105` · `testcases/reports/2026-10-17_approximation-step-offline.md` · `runs/validate/2026-10-17T14-17-44/` ·
 `runs/validate/2026-10-17T14-19-03/` · `runs/validate/2026-10-17T14-22-08/`
+
+## Independent judge — session 109, 2026-10-17 16:4x
+
+Six claims of the session CONFIRMED (base selection, check-voltage points, live = death path, no floor lower than before; the
+recorded seq 23 holds the 5 diff points + 3082@1000, `stepPoints: 5`). Design limits it named — inputs for item 2:
+- **(a)** a re-check of the SAME curve that passed once gets an empty diff (base = itself) → window only, the original bias; `--step`
+  makes a new snapshot each time, so today only a `--mode --candidate` re-check hits it.
+- **(b)** a failed WIDE step floors every row it lowered (seq 16-like: ~46 rows) on one failure, permanently; and the base is not
+  tied to a driver. Item 2 (a correction line) is the remedy for both — withdrawing a floor needs an act, not a timeout.
+- **(c)** `queryFaults` still leaves its directory when `writeFileSync`/`readNoBom` throws before cleanup (rare).
