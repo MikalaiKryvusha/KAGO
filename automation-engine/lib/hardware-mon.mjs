@@ -31,6 +31,7 @@
 //   node automation-engine/lib/hardware-mon.mjs --once                    one sample to stdout
 //   node automation-engine/lib/hardware-mon.mjs --seconds 30 --out F      sample for 30 s into F
 //   node automation-engine/lib/hardware-mon.mjs --check-decode            prove the throttle table
+//   node automation-engine/lib/hardware-mon.mjs --selftest                the loop survives a bad probe (bugs/152)
 //
 // Verified 2026-08-10 by observation on this card — every function below carries its own [TESTED]
 // marker naming what was watched. The throttle table was mutation-proved: a mistyped smiLabel made
@@ -369,8 +370,18 @@ export function appendSampleLine(path, record, io = {}) {
  * [TESTED: 2026-08-10 · 30 s at idle, 60 records, every field populated; two runs differ only in
  * the `t` column and in card-reported values — never in our bookkeeping]
  */
+// ONE BAD PROBE IS A ROW, NOT THE END OF THE SAMPLER (2026-10-17, a defence found while chasing bugs/152).
+// The loop had no catch, so any throw of `sampleOnce` ended the process, and the capture spawns it with
+// `stdio: 'ignore'` — the reason would go nowhere. (bugs/152's actual cause was outside: the end-of-turn
+// tidy killed the sampler; this hardening did not cure that and is kept for its own sake.) Now a
+// failed probe writes `{ i: -2, error, wall }` and the schedule goes on. The row is shaped so every reader
+// skips it by its existing filter (`i >= 0` and `sample` / `t` present), and the gap it leaves in the `t`
+// sequence stays visible to the pulse readers — a real gap is reported as a gap, never papered over.
+// `sampleFn` / `headerFn` are seams for the selftest only; production calls the real nvidia-smi.
+// [NOT-TESTED] at birth → flipped by `--selftest` («ОДНА ПЛОХАЯ ПРОБА…») and the cmp2 rerun.
 export async function sampleFor({
   seconds, periodMs = config.TELEMETRY_SAMPLE_MS, out = null, smi = 'nvidia-smi', onSample = null, io = {},
+  sampleFn = sampleOnce, headerFn = runHeader,
 } = {}) {
   assertFieldsSane();
   const records = [];
@@ -387,23 +398,59 @@ export async function sampleFor({
     mkdirSync(dirname(resolve(out)), { recursive: true });
     writeFileSync(out, '', 'utf8');                 // a run never appends to a previous run's file
   }
-  write(runHeader({ smi, periodMs }));
+  write(headerFn({ smi, periodMs }));
 
   const started = performance.now();               // scheduling only — never written out
-  let i = 0;
+  let i = 0;                                        // index of GOOD samples — stays monotonic and dense
+  let tick = 0;                                     // schedule slot — advances on failures too
+  let failures = 0;
   for (;;) {
-    const due = started + i * periodMs;
+    const due = started + tick * periodMs;
     const wait = due - performance.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     if ((performance.now() - started) > seconds * 1000) break;
+    tick++;
 
-    const { t, sample } = sampleOnce({ smi });
-    const record = { i, t, sample };
+    let probe;
+    try { probe = sampleFn({ smi }); } catch (e) {
+      failures++;
+      write({ i: -2, error: String(e && e.message || e), wall: new Date().toISOString() });
+      continue;
+    }
+    const record = { i, t: probe.t, sample: probe.sample };
     write(record);
     if (onSample) onSample(record);
     i++;
   }
-  return { count: i, records };
+  return { count: i, failures, records };
+}
+
+/**
+ * The sampler's own selftest — offline, injected probe, sandbox file. bugs/152's guard.
+ * Mutation addressee: delete the try/catch around `sampleFn` → block 1 reddens (the loop rejects).
+ * [TESTED: see `--selftest` output; the mutation run is recorded in bugs/152]
+ */
+async function selfTest() {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'kago-mon-'));
+  const results = [];
+  const ok = (what, got, want) => results.push({ what, ok: JSON.stringify(got) === JSON.stringify(want), got, want });
+  const headerFn = () => ({ i: -1, meta: { test: true } });
+  try {
+    let n = 0;
+    const flaky = () => { n++; if (n === 2) throw new Error('nvidia-smi вышел с кодом 15'); return { t: `2026/10/17 21:43:${String(n).padStart(2, '0')}.000`, sample: { 'power.draw.instant': 100 + n } }; };
+    const f1 = join(dir, 'flaky.jsonl');
+    let r1 = null; let err = null;
+    try { r1 = await sampleFor({ seconds: 0.25, periodMs: 50, out: f1, sampleFn: flaky, headerFn }); } catch (e) { err = e.message; }
+    const rows1 = existsSync(f1) ? readFileSync(f1, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+    ok('ОДНА ПЛОХАЯ ПРОБА — строка-ошибка, съём идёт дальше', { err, after: rows1.filter((r) => r.i >= 0).length > 1, errRows: rows1.filter((r) => r.i === -2).length, failures: r1 && r1.failures }, { err: null, after: true, errRows: 1, failures: 1 });
+    ok('индекс хороших проб плотный: 0,1,2…', rows1.filter((r) => r.i >= 0).map((r) => r.i).every((v, k) => v === k), true);
+    const f2 = join(dir, 'clean.jsonl');
+    const r2 = await sampleFor({ seconds: 0.2, periodMs: 50, out: f2, sampleFn: () => ({ t: 'x', sample: {} }), headerFn });
+    ok('без сбоев строк-ошибок нет', { failures: r2.failures, errRows: readFileSync(f2, 'utf8').split('\n').filter((l) => l.includes('"i":-2')).length }, { failures: 0, errRows: 0 });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  return { ok: results.every((x) => x.ok), results };
 }
 
 // =================================================================================================
@@ -703,10 +750,11 @@ export function archivePulseFile(livePath, { dir = PULSE_ARCHIVE_DIR, fs = null 
 // =================================================================================================
 
 function parseArgs(argv) {
-  const o = { once: false, checkDecode: false, seconds: 30, periodMs: config.TELEMETRY_SAMPLE_MS, out: null };
+  const o = { once: false, checkDecode: false, selftest: false, seconds: 30, periodMs: config.TELEMETRY_SAMPLE_MS, out: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--once') o.once = true;
+    if (a === '--selftest') o.selftest = true;
+    else if (a === '--once') o.once = true;
     else if (a === '--check-decode') o.checkDecode = true;
     else if (a === '--seconds') o.seconds = Number(argv[++i]);
     else if (a === '--period') o.periodMs = Number(argv[++i]);
@@ -723,6 +771,12 @@ async function main(argv) {
   try { o = parseArgs(argv); } catch (e) { console.error(`ОШИБКА: ${e.message}`); return 2; }
 
   try {
+    if (o.selftest) {
+      const r = await selfTest();
+      for (const x of r.results) console.log(`${x.ok ? 'OK  ' : 'ПЛОХО'} ${x.what}${x.ok ? '' : `  -> получено ${JSON.stringify(x.got)}, ждали ${JSON.stringify(x.want)}`}`);
+      console.log(`САМОПРОВЕРКА СЭМПЛЕРА: ${r.results.filter((x) => x.ok).length}/${r.results.length} зелёных`);
+      return r.ok ? 0 : 1;
+    }
     if (o.checkDecode) {
       const r = verifyThrottleDecode();
       console.log(`МАСКА СЕЙЧАС: ${r.mask} -> [${r.activeFromMask.join(', ') || 'ничего не активно'}]`);

@@ -277,6 +277,9 @@ const SUITES = [
     what: 'репетиция развёртки на стенде, в песочнице', done: /^САМОПРОВЕРКА РЕПЕТИЦИИ:/mu },
   { id: 'shortcuts', npm: 'npm run shortcuts -- --selftest', argv: ['automation-engine/lib/desktop-shortcuts.mjs', '--selftest'],
     what: 'ярлыки: эмодзи и кириллица туда-обратно, Desktop только читается', done: /^САМОПРОВЕРКА ЯРЛЫКОВ:/mu },
+  // ВОШЁЛ 2026-10-17 ВМЕСТЕ СО СВОИМ КОДОМ (защита, найденная по ходу bugs/152): проба подставлена швом, файл в mkdtemp-песочнице.
+  { id: 'sampler', npm: 'node automation-engine/lib/hardware-mon.mjs --selftest', argv: ['automation-engine/lib/hardware-mon.mjs', '--selftest'],
+    what: 'сэмплер телеметрии: одна плохая проба — строка-ошибка, а не конец съёма', done: /^САМОПРОВЕРКА СЭМПЛЕРА:/mu },
   { id: 'thermal', npm: 'npm run thermal -- --selftest', argv: ['automation-engine/lib/thermal-ladder.mjs', '--selftest'],
     what: 'тепловая лестница: разбор плато и штампов сэмплера', done: /^САМОПРОВЕРКА:/mu },
   // ВОШЁЛ 2026-08-23 18:1x ВМЕСТЕ СО СВОИМ КОДОМ, а не «потом» — правило этого списка, оплаченное

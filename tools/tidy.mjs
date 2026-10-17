@@ -137,6 +137,18 @@ function kill(pid) { run('taskkill', ['/PID', String(pid), '/T', '/F']); }
  * @param {(pid:number)=>boolean} isAlive жив ли процесс с этим pid
  * @returns {{busy:boolean, why:string}}
  */
+/**
+ * The samplers that may be killed — judged on the SAME snapshot they were found in (`bugs/152`, third death, 22:25:12).
+ * Step 0 decided «no run» on an EARLIER snapshot; a capture started between the two lists, and its brand-new sampler was
+ * taken for a leftover. A sampler cannot exist before its parent, so a snapshot that holds the sampler also holds the run
+ * that owns it: re-asking `runInFlight` here closes the race in the safe direction.
+ * [TESTED: 2026-10-17 · block «bugs/152 гонка» below; mutation MTD3 (return every sampler) → that block red]
+ */
+export function orphanSamplers(nodeProcs, armed, isAlive) {
+  if (!nodeProcs || runInFlight(nodeProcs, armed, isAlive).busy) return [];
+  return nodeProcs.filter((p) => /hardware-mon/.test(p.cmd));
+}
+
 export function runInFlight(nodeProcs, armed, isAlive) {
   // `bugs/143`: список процессов НЕ ПОЛУЧЕН — это слепота, а не «ничего не идёт». Уборка, которая не видит, не трогает.
   if (nodeProcs === null) return { busy: true, why: 'список процессов не получен — не вижу, идёт ли прогон или страница владельца' };
@@ -149,6 +161,12 @@ export function runInFlight(nodeProcs, armed, isAlive) {
     // `bugs/150`: the whole-mode check (epic 101, since 25.09) writes the card and owns its sampler — a real check carries
     // `--candidate` or `--step`; the offline forms (`--plan`, `--hits`, `--compare`, `--replay`, `--selftest`) do not.
     /mode-validate\.mjs.*--(?:candidate|step)\b/u,
+    // `bugs/152`: a Q2RTX capture (12 min for a plateau) and a power capture own a CHILD sampler too; tidy at the end of
+    // the agent's turn took them for leftovers and killed the sampler twice on 17.10 (21:43:32, 21:59:49) — the comparison
+    // runs kept their FPS and lost watts/°C/fan. Inventory of `hardware-mon` spawners: graphics-load · power-baseline ·
+    // mode-validate (above) · vf-step (above) · fuse (spawned by engine, above).
+    /graphics-load\.mjs.*--capture\b/u,
+    /power-baseline\.mjs.*--capture\b/u,
   ];
   // Контур согласований — владельцу заданы вопросы, сервер ждёт его ответа с бесконечным
   // терпением. Убить его окно или сервер значит отобрать у владельца вопросы посреди ответа —
@@ -231,7 +249,7 @@ async function main(argv) {
   }
 
   const nodes = processesNamed('node.exe');
-  const samplers = (nodes ?? []).filter((p) => /hardware-mon/.test(p.cmd));
+  const samplers = orphanSamplers(nodes, (await import('../automation-engine/lib/watchdog.mjs')).readArmed(), pidAlive);
   console.log(`СЭМПЛЕРЫ ТЕЛЕМЕТРИИ: ${nodes === null ? 'не видно (список процессов не получен, bugs/143)'
     : samplers.length ? samplers.map((s) => s.pid).join(', ') : 'нет'}`);
   if (APPLY) for (const s of samplers) { kill(s.pid); console.log(`   снят ${s.pid}`); }
@@ -349,6 +367,23 @@ async function selfTest() {
       'node automation-engine/lib/mode-validate.mjs --selftest',
       'node automation-engine/lib/mode-validate.mjs --plan --minutes 4',
     ].every((cmd, i) => runInFlight([P(40 + i, cmd)], null, alive).busy === false));
+
+  // bugs/152 · mutation MTD2, named before the run: drop the graphics-load marker → this block red.
+  check('bugs/152: идущий ЗАХВАТ Q2RTX и захват мощности — прогон, их сэмплер не трогаем; разовые формы — нет',
+    runInFlight([P(50, 'node automation-engine/lib/graphics-load.mjs --capture --label cmp2-stock --profile stock-default --runs 60')], null, alive).busy === true
+    && runInFlight([P(51, 'node automation-engine/lib/power-baseline.mjs --capture --workload branchy --seconds 30 --label x')], null, alive).busy === true
+    && [
+      'node automation-engine/lib/graphics-load.mjs --spread cmp2',
+      'node automation-engine/lib/graphics-load.mjs --selftest',
+      'node automation-engine/lib/power-baseline.mjs --spread x',
+    ].every((cmd, i) => runInFlight([P(60 + i, cmd)], null, alive).busy === false));
+
+  // bugs/152 (third death) · mutation MTD3, named before the run: orphanSamplers returns every sampler → this block red.
+  check('bugs/152 гонка: сэмплер, найденный в одном снимке с захватом, — не мусор; без хозяина — мусор',
+    orphanSamplers([P(70, 'node automation-engine/lib/graphics-load.mjs --capture --label cmp2-max --runs 60'),
+      P(71, 'node automation-engine/lib/hardware-mon.mjs --seconds 900 --out runs/graphics/cmp2-max.jsonl')], null, alive).length === 0
+    && orphanSamplers([P(72, 'node automation-engine/lib/hardware-mon.mjs --seconds 900 --out x.jsonl')], null, alive).length === 1
+    && orphanSamplers(null, null, alive).length === 0);
 
   check('посторонний node не делает машину занятой',
     runInFlight([P(2, 'node some/other/thing.mjs')], null, alive).busy === false);
