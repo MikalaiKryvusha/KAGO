@@ -49,7 +49,7 @@ the comparison tables, the Windows event log.
 | 🚀 frames above stock beyond the meter's floor (0.90 %) | > +0.9 % | +9.0 % (plateau-trend 59.0 → 60.4, not noise) | pass |
 | ⚖️ power at its 250 W limit, frames ≥ stock | 250 W, ≥ 55.3 | 250 W, 56.4 FPS | pass |
 | ❄️ fans within 40…50 % on the plateau (`ЗАКАЗ.md` §1) | 40…50 % | 47 % | pass |
-| ⚖️ frames ≥ 95 % of 🚀 (`ЗАКАЗ.md` §1) | ≥ 57.3 | 56.4 (−6.5 %) | **fail** — to the owner |
+| ⚖️ frames ≥ 95 % of 🚀 (`ЗАКАЗ.md` §1 as of the run) | ≥ 57.3 | 56.4 (−6.5 %) | **fail** → the owner moved the criterion to stock, 2026-10-17 23:40 («А… критерий считать против стока»); against stock +1.9 % — pass |
 | ⚖️ fans ≤ 60 % («желательно», `ЗАКАЗ.md` §5) | ≤ 60 % | 62 % median, 63 % plateau | **fail (soft target)** — to the owner |
 
 ## 5. Found
