@@ -219,7 +219,11 @@ export function lastPassedSnapshot(records, mode, beforeSeq = Infinity) {
  */
 export function attributeFailure({ samples, failure, rows = null, baseRows = null }) {
   if (!failure || failure.cls === FAILURE_CLASS.LOAD) return null;
-  const { span, by } = failure.cls === FAILURE_CLASS.DRIVER ? driverFailureSpan(samples, failure.atMs) : { span: failureSpan(samples, failure.atMs), by: 'window' };
+  // bugs/151: the sampler's gap is an alarm like the driver's voice (the OS freezes when TDR recovery starts, after the
+  // GPU stopped) — both take the stall onset; the other classes keep the plain window.
+  const { span, by } = failure.cls === FAILURE_CLASS.DRIVER ? driverFailureSpan(samples, failure.atMs)
+    : failure.cls === FAILURE_CLASS.TELEMETRY_GAP ? stallFailureSpan(samples, failure.atMs, { fallbackWindowMs: FAILURE_ATTRIBUTION_WINDOW_MS, fallbackBy: 'window' })
+      : { span: failureSpan(samples, failure.atMs), by: 'window' };
   if (!span) return null;
   const diff = stepDiffPoints(rows, baseRows);
   const byMhz = new Map([...failurePoints(rows, span), ...diff].map((p) => [p.mhz, p]));
@@ -249,12 +253,17 @@ export function stallOnset(samples, atMs, { tdrMs = TDR_DELAY_MS, windowMs = FAI
   return null;
 }
 
-/** A driver-voice failure's span: last healthy sample → the voice when the stall onset is seen; else the window widened by TdrDelay. */
-export function driverFailureSpan(samples, atMs) {
+/** A failure's span from the stall onset: last healthy sample → the failing moment when the onset is seen; else the window `fallbackWindowMs` before the moment, named `fallbackBy`. */
+export function stallFailureSpan(samples, atMs, { fallbackWindowMs, fallbackBy }) {
   const st = stallOnset(samples, atMs);
-  if (!st) return { span: failureSpan(samples, atMs, FAILURE_ATTRIBUTION_WINDOW_MS + TDR_DELAY_MS), by: 'tdr-window' };
+  if (!st) return { span: failureSpan(samples, atMs, fallbackWindowMs), by: fallbackBy };
   const mhz = samples.filter((s) => s.ms >= st.healthy.ms && s.ms <= atMs).map((s) => s.mhz);
   return { span: { loMhz: Math.min(...mhz), hiMhz: Math.max(...mhz), stallAtMs: st.onset.ms }, by: 'stall-onset' };
+}
+
+/** A driver-voice failure's span: the stall onset; without one, the window widened by TdrDelay (bugs/149). */
+export function driverFailureSpan(samples, atMs) {
+  return stallFailureSpan(samples, atMs, { fallbackWindowMs: FAILURE_ATTRIBUTION_WINDOW_MS + TDR_DELAY_MS, fallbackBy: 'tdr-window' });
 }
 
 /**
@@ -266,8 +275,12 @@ export function driverFailureSpan(samples, atMs) {
  * line in the journal, the way the sweep journal's are (`sweep-journal.corrections`) — not yet built for the check.
  */
 export function checkFailureFloors(records) {
+  // bugs/151: a CORRECTION line of a failed seq replaces its `failureAt` — the last one wins (`writeCheckCorrection`).
+  const fixed = new Map(checkRecords(records).filter((r) => r.state === LINE.CORRECTION && r.failureAt).map((r) => [r.seq, r.failureAt]));
   return checkRecords(records)
-    .filter((r) => r.state === LINE.VERDICT && r.verdict === CHECK_VERDICT.FAILED && Array.isArray(r.failureAt?.points))
+    .filter((r) => r.state === LINE.VERDICT && r.verdict === CHECK_VERDICT.FAILED)
+    .map((r) => (fixed.has(r.seq) ? { ...r, failureAt: fixed.get(r.seq) } : r))
+    .filter((r) => Array.isArray(r.failureAt?.points))
     .flatMap((r) => r.failureAt.points.filter((p) => Number.isFinite(p?.mhz) && Number.isFinite(p?.voltageMv))
       .map((p) => ({ mhz: p.mhz, mv: p.voltageMv, seq: r.seq, at: r.at ?? null, kind: `проверка режима: ${r.failure?.cls ?? 'сбой'}`, decidedBy: 'mode-check', from: 'выданная (проверка режима)', orderedMhz: null })))
     .sort((a, b) => a.mhz - b.mhz || a.mv - b.mv);
@@ -397,6 +410,42 @@ export function writeCheckVerdict(journal, { seq, verdict, failure = null, failu
   const rec = { state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict, failure, failureAt, hits, why, at, ...(observedIn ? { observedIn } : {}) };
   appendLine(journal, rec, io);
   return rec;
+}
+
+// bugs/151 (2026-10-17, session 111) — A FLOOR WRITTEN BY A RULE SINCE FIXED IS CORRECTED, NOT LEFT STANDING. The check's twin
+// of `sweep-journal.writeCorrection`: the journal is append-only, so a corrected `failureAt` is a new line that
+// `checkFailureFloors` prefers. It may only ADD points — every old (frequency, voltage) stays — because a failure is never
+// descended through again (ЗАКАЗ.md §3); withdrawing a floor is the owner's word, not this function's. `why` is required.
+// [NOT-TESTED] on the live journal — hygiene: block «ПОПРАВКА ЖУРНАЛА ПРОВЕРОК…», mutation MT6.
+
+/** Append a correction of a FAILED check's `failureAt`; refuses a seq that is not a failed check, a missing `why`, or a correction that drops an old point. */
+export function writeCheckCorrection(journal, { seq, failureAt, why, at }, io = {}) {
+  const { records } = readJournal(journal);
+  const verdict = checkRecords(records).filter((r) => r.state === LINE.VERDICT && r.seq === seq).at(-1);
+  if (!verdict || verdict.verdict !== CHECK_VERDICT.FAILED) throw new Error(`поправка seq ${seq}: это не проваленная проверка`);
+  if (!why) throw new Error(`поправка seq ${seq}: без основания (why) не пишется`);
+  const prev = checkRecords(records).filter((r) => r.state === LINE.CORRECTION && r.seq === seq).at(-1)?.failureAt ?? verdict.failureAt;
+  const has = new Set((failureAt?.points ?? []).map((p) => `${p.mhz}@${p.voltageMv}`));
+  const lost = (prev?.points ?? []).filter((p) => !has.has(`${p.mhz}@${p.voltageMv}`));
+  if (lost.length) throw new Error(`поправка seq ${seq} снимает пол ${lost.map((p) => `${p.mhz}@${p.voltageMv}`).join(', ')} — поправка только добавляет`);
+  const rec = { state: LINE.CORRECTION, kind: CHECK_KIND, seq, failureAt, why, at };
+  appendLine(journal, rec, io);
+  return rec;
+}
+
+/** A failed check's `failureAt` recomputed by TODAY's rule from its own telemetry and snapshot: { old, now } (old = the last correction, else the verdict's). */
+export function reattributeCheck(records, seq, { readSamples = (p) => parseSamples(readFileSync(p, 'utf8')).samples, rowsOf }) {
+  const checks = checkRecords(records);
+  const verdict = checks.filter((r) => r.state === LINE.VERDICT && r.seq === seq).at(-1);
+  if (!verdict || verdict.verdict !== CHECK_VERDICT.FAILED || !verdict.failure) throw new Error(`seq ${seq}: проваленной проверки с классом сбоя нет`);
+  const intent = checks.find((r) => r.state === LINE.INTENT && r.seq === seq) ?? null;
+  const src = intent ?? verdict.observedIn ?? {};
+  const samples = readSamples(src.telemetryPath);
+  const rows = src.snapshot ? rowsOf(src.snapshot) : null;
+  const mode = src.mode ?? null; const b = mode ? lastPassedSnapshot(records, mode, seq) : null;
+  const now = attributeFailure({ samples, failure: verdict.failure, rows, baseRows: b ? rowsOf(b) : null });
+  const old = checks.filter((r) => r.state === LINE.CORRECTION && r.seq === seq).at(-1)?.failureAt ?? verdict.failureAt;
+  return { old, now };
 }
 
 /**
@@ -1445,6 +1494,40 @@ export async function selfTest() {
       && atNoStall?.by === 'tdr-window' && atNoStall.hiMhz === 2900
       && atEnded.by === 'tdr-window' && atDeath?.by === 'window' && atDeath.loMhz === 3075 && atDeath.hiMhz === 3075, // death: the old 2-s window, untouched
       `остановка ${JSON.stringify(atStall)} · без провала ${JSON.stringify(atNoStall)} · конец нагрузки ${JSON.stringify(atEnded)} · смерть ${atDeath?.loMhz}…${atDeath?.hiMhz}`);
+
+    // bugs/151: the sampler's gap is an alarm too. The 17.10 20:04 record (check seq 30, runs/validate/2026-10-17T20-03-18/mon.jsonl),
+    // ms from 20:04:48.115; the gap 52.111 → 56.242. Mutation addressees, named BEFORE the run:
+    //   MT4 attributeFailure keeps the plain window for telemetry-gap   → «МОЛЧАНИЕ СЭМПЛЕРА…» red (2805 alone); «ПОПРАВКА…» too (it feeds on that span)
+    //   MT5 telemetry-gap without an onset takes the TdrDelay window    → «МОЛЧАНИЕ СЭМПЛЕРА…» red (no-collapse gap)
+    //   MT6 writeCheckCorrection lets a correction drop an old point   → «ПОПРАВКА ЖУРНАЛА ПРОВЕРОК…» red
+    const gap = [S4(0, 2737, 227.1, 99), S4(500, 2737, 225.7, 100), S4(992, 2797, 58.5, 100), S4(1486, 2805, 57.6, 100), S4(1996, 2805, 57.5, 100),
+      S4(2996, 2805, 57.1, 100), S4(3996, 2805, 56.8, 100), S4(8127, 2805, 75.1, 100)];
+    const rows30 = [{ mhz: 2737, voltageMv: 850 }, { mhz: 2767, voltageMv: 850 }, { mhz: 2797, voltageMv: 850 }, { mhz: 2805, voltageMv: 860 }];
+    const atGap = attributeFailure({ samples: gap, failure: { cls: FAILURE_CLASS.TELEMETRY_GAP, atMs: 3996 }, rows: rows30 });
+    // A gap with no collapse before it: the old 2-s window, never widened — the sampler's own moment is not 2 s late here.
+    const gapNoStall = [S4(0, 2700, 220, 99), S4(500, 2700, 221, 99), S4(1000, 2750, 222, 99), S4(1500, 2760, 220, 99), S4(4000, 2790, 225, 99)];
+    const atGapNo = attributeFailure({ samples: gapNoStall, failure: { cls: FAILURE_CLASS.TELEMETRY_GAP, atMs: 4000 } });
+    check('МОЛЧАНИЕ СЭМПЛЕРА: СБОЙ ПРИПИСАН МОМЕНТУ ОСТАНОВКИ (ПОСЛЕДНЯЯ ЗДОРОВАЯ ПРОБА → МОЛЧАНИЕ), БЕЗ ПРОВАЛА — ПРЕЖНЕМУ ОКНУ 2 С (bugs/151)',
+      atGap?.by === 'stall-onset' && atGap.loMhz === 2737 && atGap.hiMhz === 2805 && atGap.points?.map((p) => `${p.mhz}@${p.voltageMv}`).join() === '2737@850,2767@850,2797@850,2805@860'
+      && atGapNo?.by === 'window' && atGapNo.loMhz === 2790 && atGapNo.hiMhz === 2790,
+      `остановка ${JSON.stringify(atGap)} · без провала ${JSON.stringify(atGapNo)}`);
+
+    const cDir = mkdtempSync(join(tmpdir(), 'kago-correction-'));
+    try {
+      const cj = openValidateJournal({ dir: cDir });
+      const ci = writeCheckIntent(cj, { mode: 'silent-cold', at: 'a' });
+      writeCheckVerdict(cj, { seq: ci.seq, verdict: CHECK_VERDICT.FAILED, failure: { cls: FAILURE_CLASS.TELEMETRY_GAP }, failureAt: { loMhz: 2805, hiMhz: 2805, points: [{ mhz: 2805, voltageMv: 860 }] }, at: 'b' });
+      const pi = writeCheckIntent(cj, { mode: 'silent-cold', at: 'c' });
+      writeCheckVerdict(cj, { seq: pi.seq, verdict: CHECK_VERDICT.PASSED, at: 'd' });
+      let dropRefused = null; try { writeCheckCorrection(cj, { seq: ci.seq, failureAt: { points: [{ mhz: 2737, voltageMv: 850 }] }, why: 'x', at: 'e' }); } catch (e) { dropRefused = e.message; }
+      let passRefused = null; try { writeCheckCorrection(cj, { seq: pi.seq, failureAt: atGap, why: 'x', at: 'e' }); } catch (e) { passRefused = e.message; }
+      let noWhy = null; try { writeCheckCorrection(cj, { seq: ci.seq, failureAt: atGap, why: '', at: 'e' }); } catch (e) { noWhy = e.message; }
+      writeCheckCorrection(cj, { seq: ci.seq, failureAt: atGap, why: 'bugs/151', at: 'f' });
+      const floors = checkFailureFloors(readJournal(cj).records).map((p) => `${p.mhz}@${p.mv}`).join();
+      check('ПОПРАВКА ЖУРНАЛА ПРОВЕРОК: ЗАМЕНЯЕТ ПОЛЫ СВОЕЙ ПРОВЕРКИ, ТОЛЬКО ДОБАВЛЯЕТ, НЕ ПИШЕТСЯ НА ПРОЙДЕННУЮ И БЕЗ ОСНОВАНИЯ (bugs/151)',
+        floors === '2737@850,2767@850,2797@850,2805@860' && /снимает пол 2805@860/.test(dropRefused ?? '') && /не проваленная/.test(passRefused ?? '') && /без основания/.test(noWhy ?? ''),
+        `полы ${floors} · ${dropRefused} · ${passRefused} · ${noWhy}`);
+    } finally { rmSync(cDir, { recursive: true, force: true }); }
   }
 
   return { ok: results.every((r) => r.ok), results };
@@ -1513,6 +1596,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       '  --step … --range-margins lo-hi:мВ[,…]                     надбавка поверх полосы на диапазон частот сетки (бисекция, plans/106); только вверх',
       '  --plan [--minutes N]                                      смесь нагрузок, без карты',
       '  --hits <сэмплер.jsonl> […]                                карта посещений по записанной телеметрии, без карты',
+      '  --reattribute <seq> [--write]                             полы проваленной проверки по нынешнему правилу; --write — поправка в журнал',
       '  --compare --stock <захваты.json,…> --mode <захваты.json,…>  таблица выгоды по записанным захватам, без карты',
       '  --replay <захват.json> [--stock …]                        послепроверочная половина над записью; журнал в песочнице',
       '  --selftest                                                самопроверка, без карты',
@@ -1524,6 +1608,18 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     for (const x of r.results) console.log(`${x.ok ? '✅' : '❌'} ${x.what}${x.got ? ' — ' + x.got : ''}`);
     console.log(`\n${r.results.filter((x) => x.ok).length}/${r.results.length} зелёных`);
     process.exit(r.ok ? 0 : 1);
+  } else if (process.argv.includes('--reattribute')) {
+    // bugs/151: npm run validate -- --reattribute <seq> [--write] — a failed check's floors by today's rule; --write appends the correction.
+    const seq = Number(process.argv[process.argv.indexOf('--reattribute') + 1]);
+    const cs = await import('./curve-store.mjs');
+    const journal = openValidateJournal();
+    let r; try { r = reattributeCheck(readJournal(journal).records, seq, { rowsOf: (id) => cs.loadSnapshot({ id })?.frequencies ?? null }); } catch (e) { console.error(`ОТКАЗ: ${e.message}`); process.exit(2); }
+    const show = (a) => (a ? `${spanText(a)} (${a.by ?? '—'}) · пол: ${(a.points ?? []).map((p) => `${p.mhz}@${p.voltageMv}`).join(', ') || 'нет'}` : 'нет');
+    console.log(`seq ${seq} · было: ${show(r.old)}\nseq ${seq} · по нынешнему правилу: ${show(r.now)}`);
+    if (process.argv.includes('--write')) {
+      try { writeCheckCorrection(journal, { seq, failureAt: r.now, why: `переприписано правилом bugs/151 (${r.now?.by ?? '—'})`, at: new Date().toISOString() }); } catch (e) { console.error(`ОТКАЗ: ${e.message}`); process.exit(2); }
+      console.log('поправка записана в журнал проверок');
+    } else console.log('(без --write журнал не тронут)');
   } else if (process.argv.includes('--hits')) {
     // The visit map of a RECORDED sampler file — offline; the band boundaries are `[AI]` and this is how
     // they get refined (researches/39 §4 п. 2): what a real load actually visited.
