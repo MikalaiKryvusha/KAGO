@@ -43,7 +43,7 @@ import { readJournal, harvestFromJournal, orphanIntents, corrections, LINE, RUNG
 import { loadFacts, effectiveCurve, CURVE_PATH, JOURNAL_PATH } from '../automation-engine/lib/curve-map.mjs';
 import { ORACLE_DATE, FUSE_OFF_POST_MHZ } from './mark-unwatched-rows.mjs';
 import { cornersOf } from './curve-editor.mjs';
-import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV } from '../automation-engine/config.mjs';
+import { MODE_BANDS, TUNE_FLOOR_MHZ, MARGIN_DESCENT_STEP_MV } from '../automation-engine/config.mjs';
 import { bandOf, checkFailureFloors, openValidateJournal } from '../automation-engine/lib/mode-validate.mjs';
 import { CURVE_TAGS, validateCurveDoc, saveCurveDoc, curvePath } from '../automation-engine/lib/curve-store.mjs';
 import { loadGrid } from '../automation-engine/lib/card-grids.mjs';
@@ -236,7 +236,9 @@ export function trendModel({ stockAt, grid, anchors }) {
   const upFloorMv = edgeFloorMv(hi, grid) + EXTRAPOLATION_FLOOR_MV;
   const rawAt = (mhz) => {
     const stock = stockAt(mhz);
-    let d = depthAt(mhz);
+    // plans/107: a trend predicting an OVERvolt (depth < 0, below ~1770 MHz on this card) is clamped to 0 — the curve
+    // never stood above stock anyway (min with stock); the clamp lets a negative margin start FROM stock there.
+    let d = Math.max(0, depthAt(mhz));
     let origin = edge.has(mhz) ? 'edge' : 'interpolated';
     let v;
     if (mhz < lo.mhz) { d = Math.min(d, lo.stockMv - edgeFloorMv(lo, grid)); origin = 'extrapolated-down'; v = stock - d; }
@@ -298,7 +300,8 @@ export function buildRows({ ladder, stockAt, grid, anchors, credible, maxMhz }) 
 // shifted to touch the most demanding edge, with the extrapolation rules of R5). So margin 0 IS experiment
 // №2's curve, every known edge floor honoured and the worst one touched; +30 (Ф2's start) stands 30 mV
 // above that. NEGATIVE margins (`plans/105`, level 2 of the owner's «Вся кривая -> полоса -> точка», 25.09) are
-// allowed in the LOAD bands only (`config.NEGATIVE_MARGIN_FROM_MHZ`): there every row stands above a known
+// allowed in every band above the tuning floor (`config.TUNE_FLOOR_MHZ`, the owner's 1200 MHz, plans/107; until 17.10 the load
+// bands from 2700 only); rows under the floor stay stock. In the load bands every row stands above a known
 // failure + two grid steps, and that floor — not a margin constant — is where the descent ends
 // (`exhaustedBands`). Going under a KNOWN failure stays the Ф5 probe's business (a new anchor), by the owner's word.
 //
@@ -332,8 +335,8 @@ export function bandsRefusal(bands = BANDS) {
   return bad === -1 ? null : `полоса ${bands[bad].label}: начало ${bands[bad].loMhz} не стыкуется с концом предыдущей ${bands[bad - 1]?.hiMhz ?? '—'}`;
 }
 
-/** May this band's margin go below the touching trend? Only a LOAD band (`config.NEGATIVE_MARGIN_FROM_MHZ`, plans/105). */
-export const negativeMarginAllowed = (band) => band.loMhz >= NEGATIVE_MARGIN_FROM_MHZ;
+/** May this band's margin go below the touching trend? Every band reaching above the tuning floor (`config.TUNE_FLOOR_MHZ`, plans/107). */
+export const negativeMarginAllowed = (band) => band.hiMhz > TUNE_FLOOR_MHZ;
 
 /**
  * A margin vector is one whole number of millivolts per band; below 0 only in a load band — anything else
@@ -346,7 +349,7 @@ export function marginRefusal(margins, bands = BANDS) {
   const bad = margins.findIndex((m, i) => !Number.isInteger(m) || (m < 0 && !negativeMarginAllowed(bands[i])));
   if (bad === -1) return null;
   return `полоса ${bands[bad].label}: запас «${margins[bad]}» — нужно целое число мВ`
-    + (Number.isInteger(margins[bad]) ? ` ≥ 0 (ниже тренда — только полосы от ${NEGATIVE_MARGIN_FROM_MHZ} МГц)` : '');
+    + (Number.isInteger(margins[bad]) ? ` ≥ 0 (ниже тренда — только полосы выше ${TUNE_FLOOR_MHZ} МГц)` : '');
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -425,7 +428,9 @@ export function bandedCurve({ ladder, stockAt, grid, anchors, credible = [], max
     const rangeMv = rangeMvAt(mhz, rangeMargins);                   // plans/106 Ш1: applied after the failure floors, below
     // A negative margin never undercuts the owner's extrapolation floor above the top edge (for m ≥ 0 this is a no-op).
     const target = origin === 'extrapolated-up' ? Math.max(v + marginMv, upFloorMv) : v + marginMv;
-    return { mhz, voltageMv: Math.min(onGridUp(grid, target), stock), stockVoltageMv: stock, origin, band: bands[band].id, marginMv, rangeMv, trendMv: Math.round(v * 10) / 10 };
+    // plans/107: under the owner's tuning floor (1200 MHz) a row is stock, whatever the margin.
+    const voltageMv = mhz < TUNE_FLOOR_MHZ ? stock : Math.min(onGridUp(grid, target), stock);
+    return { mhz, voltageMv, stockVoltageMv: stock, origin, band: bands[band].id, marginMv, rangeMv, trendMv: Math.round(v * 10) / 10 };
   });
   const failRaises = raiseToFailures(rows, credible, grid);
   let monotoneRaises = raiseToMonotone(rows);
@@ -619,17 +624,20 @@ export function selfTest() {
     && bc.rows.some((b) => b.mhz === r.mhz && b.voltageMv === r.voltageMv)
     && Object.keys(r).sort().join() === 'editedAt,mhz,provenBy,stockVoltageMv,tags,voltageMv'), doc.frequencies.map((r) => r.mhz + ':' + r.tags).join(' '));
   // plans/105: a negative margin is no longer «bad» as such — it is bad BELOW the load bands (the next block).
-  check('ПЛОХОЙ ВЕКТОР ЗАПАСА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', marginRefusal([-10, 30, 30, 30, 30, 30, 30]) !== null && marginRefusal([30, 30, 30, 30, 30, 30, 2.5]) !== null
+  check('ПЛОХОЙ ВЕКТОР ЗАПАСА ОТКЛОНЯЕТСЯ ПО ИМЕНИ', marginRefusal([30, 30, 30, 30, 30, 30, 2.5]) !== null
     && marginRefusal([30, 30, 30, 30, 30, 30, 30]) === null && /запасов 3, полос 7/.test(threw ?? ''), threw ?? 'не отклонил');
 
   // ---- plans/105 level 2: the margin below the trend. Mutation addressees, named BEFORE the run:
-  //   MN1 allow a negative margin in every band            → «НИЖЕ ТРЕНДА — ТОЛЬКО НАГРУЗОЧНЫЕ ПОЛОСЫ»
+  //   MN1 allow a negative margin in every band            → «НИЖЕ ТРЕНДА — ПОЛОСЫ ВЫШЕ 1200…» (plans/107: the band set under test
+  //       carries a band wholly under the tuning floor — the real bands have none since the owner's 1200 MHz)
   //   MN2 drop raiseToFailures from bandedCurve             → «ОТРИЦАТЕЛЬНЫЙ ЗАПАС НЕ ПРОБИВАЕТ ИЗВЕСТНЫЙ ОТКАЗ…»
   //   MN3 exhaustedBands never says «exhausted»             → «ИСЧЕРПАНИЕ ПОЛОСЫ…»
   //   MN4 the margin undercuts the «top edge + 25» floor     → «…ВЫШЕ ВЕРХНЕГО КРАЯ НИЖЕ «КРАЙ + 25 мВ»»
-  const belowTrend = marginRefusal([0, 0, -10, 0, 0, 0, 0]);
-  check('НИЖЕ ТРЕНДА — ТОЛЬКО НАГРУЗОЧНЫЕ ПОЛОСЫ', /только полосы от 2700/.test(belowTrend ?? '') && marginRefusal([0, 0, 0, -10, -20, -10, -10]) === null
-    && BANDS.map(negativeMarginAllowed).join() === 'false,false,false,true,true,true,true', belowTrend ?? 'B3 ниже тренда не отклонена');
+  // plans/107 (the owner, 17.10: «до 1200 можно тюнить» · «мегагерц»): every real band reaches above 1200 MHz; a band wholly under it is refused.
+  const lowBands = [{ id: 'L0', loMhz: -Infinity, hiMhz: 1200, label: 'ниже 1200' }, { id: 'L1', loMhz: 1200, hiMhz: Infinity, label: 'от 1200' }];
+  const underFloor = marginRefusal([-10, -10], lowBands);
+  check('НИЖЕ ТРЕНДА — ПОЛОСЫ ВЫШЕ 1200 МГц; ПОЛОСА ЦЕЛИКОМ НИЖЕ 1200 — ОТКАЗ ПО ИМЕНИ', /только полосы выше 1200/.test(underFloor ?? '') && marginRefusal([0, -10], lowBands) === null
+    && marginRefusal([-10, -10, -10, -10, -20, -10, -10]) === null && BANDS.map(negativeMarginAllowed).every(Boolean), underFloor ?? 'полоса ниже 1200 не отклонена');
   // Edges INSIDE the load bands (the real card's shape: 13 of 14 edges lie in 2745…3030), so B4–B6 rows are
   // interpolated and stand on failure floors, not on the extrapolation rule.
   const loadFx = anchorsFrom({
@@ -645,7 +653,7 @@ export function selfTest() {
   check('ОТРИЦАТЕЛЬНЫЙ ЗАПАС НЕ ОПУСКАЕТ ВЫШЕ ВЕРХНЕГО КРАЯ НИЖЕ «КРАЙ + 25 мВ»', deep.rows.filter((r) => r.origin === 'extrapolated-up').every((r) => r.voltageMv >= Math.min(r.stockVoltageMv, upFloor)),
     `пол ${upFloor} · ${deep.rows.filter((r) => r.origin === 'extrapolated-up').map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
   const ex = exhaustedBands({ ...lArgs, margins: [0, 30, 0, -200, -200, -200, 0] });
-  check('ИСЧЕРПАНИЕ ПОЛОСЫ: УПЁРШАЯСЯ В ПОЛЫ — ДА, СО СВОИМ ЗАПАСОМ НАД НИМИ — НЕТ', ex[0] === true && ex[1] === false && ex.slice(3, 6).every(Boolean),
+  check('ИСЧЕРПАНИЕ ПОЛОСЫ: УПЁРШАЯСЯ В ПОЛЫ — ДА, СО СВОИМ ЗАПАСОМ НАД НИМИ — НЕТ', ex[0] === false && ex[1] === false && ex.slice(3, 6).every(Boolean) /* plans/107: B1 at 0 now has room below the trend */,
     `исчерпаны: ${ex.map((x, i) => `${BANDS[i].id}=${x ? 'да' : 'нет'}`).join(' ')}`);
   // Judge F1 (2026-10-17) · mutation MF1, named before the run: restore «skip when the floor is above stock» → this block red.
   const nearStock = bandedCurve({ ...bArgs, credible: [...credible, { mhz: 2800, mv: stockAt(2800) - 5, kind: 'проверка режима' }], margins: [0, 0, 0, 0, 0, 0, 0] });
@@ -686,6 +694,25 @@ export function selfTest() {
     /2790 МГц нет на сетке карты — ближайшие 2700 \/ 2795/.test(refusals106.offLadder) && /только поднимает/.test(refusals106.down) && /перекрываются/.test(refusals106.overlap)
     && /выше максимума карты 3090/.test(refusals106.aboveMax) && /начало выше конца/.test(refusals106.reversed) && refusals106.good === null,
     JSON.stringify(refusals106));
+  // ---- plans/107 Ш1: the low range down to the owner's 1200 MHz. Mutation addressees, named BEFORE the run:
+  //   MLF1 the tuning floor ignored (rows under 1200 follow the margin) → «НИЖЕ 1200 МГц — СТОК…»
+  //   MLF2 the trend depth not clamped at 0                            → «НИЗ: ЗАПАС НИЖЕ ТРЕНДА…»
+  // A ladder reaching low: the fixture trend (edges at 2300/2700) predicts an OVERvolt under ~2000 MHz, like the card's (~1770).
+  const lowLadder = [600, 900, 1192, 1200, 1500, 1800, 2000, 2150, 2300, 2500, 2700, 2900, 3000];
+  const lowGrid = []; for (let v = 600; v <= 1100; v += 5) lowGrid.push(v);
+  const lowStock = (m) => 700 + 5 * Math.round((m - 600) / 50);
+  const lowFx = anchorsFrom({ passes: [{ mhz: 2300, mv: 850 }, { mhz: 2700, mv: 860 }], fails: [{ mhz: 2300, mv: 845, kind: 'hung' }, { mhz: 2700, mv: 855, kind: 'hung' }], grid: lowGrid, stockAt: lowStock });
+  const lowArgs = { ladder: lowLadder, stockAt: lowStock, grid: lowGrid, anchors: lowFx.anchors, credible: lowFx.credible, maxMhz: 3090 };
+  const lowDeep = bandedCurve({ ...lowArgs, margins: [-20, -20, -20, -10, -10, -10, 0] });
+  check('НИЖЕ 1200 МГц — СТОК ПРИ ЛЮБОМ ЗАПАСЕ (слово владельца 17.10 «до 1200 можно тюнить»)',
+    lowDeep.rows.filter((r) => r.mhz < 1200).length === 3 && lowDeep.rows.every((r) => r.mhz >= 1200 || r.voltageMv === r.stockVoltageMv),
+    lowDeep.rows.filter((r) => r.mhz < 1500).map((r) => `${r.mhz}: ${r.voltageMv} (сток ${r.stockVoltageMv})`).join(' · '));
+  const lowModel = trendModel({ stockAt: lowStock, grid: lowGrid, anchors: lowFx.anchors });
+  const overvolt = lowLadder.filter((m) => m >= 1200 && m < 2157 && lowModel.rawAt(m).v >= lowStock(m));
+  check('НИЗ: ЗАПАС НИЖЕ ТРЕНДА ЛОЖИТСЯ ОТ СТОКА ТАМ, ГДЕ ТРЕНД ПРЕДСКАЗЫВАЛ ПЕРЕНАПРЯЖЕНИЕ (1200…2157: сток − 20 мВ)',
+    overvolt.length >= 2 && overvolt.every((m) => lowDeep.rows.find((r) => r.mhz === m)?.voltageMv === Math.min(lowStock(m), onGridUp(lowGrid, lowStock(m) - 20))
+      || lowDeep.rows.find((r) => r.mhz === m)?.voltageMv > lowStock(m) - 20) && lowDeep.rows.some((r) => overvolt.includes(r.mhz) && r.voltageMv === r.stockVoltageMv - 20),
+    `предсказывал перенапряжение: ${overvolt.join(' ')} · ${lowDeep.rows.filter((r) => r.mhz >= 1200 && r.mhz < 2157).map((r) => `${r.mhz}: ${r.voltageMv}/${r.stockVoltageMv}`).join(' · ')}`);
   let parseBad = null; try { parseRangeMargins('3037-3075'); } catch (e) { parseBad = e.message; }
   const parsed = parseRangeMargins('3037-3075:+10, 2962-2977:5');
   check('ДИАПАЗОН: ЗАПИСЬ «НАЧАЛО-КОНЕЦ:мВ» ЧИТАЕТСЯ, НЕПОЛНАЯ ОТКЛОНЯЕТСЯ ПО ИМЕНИ',

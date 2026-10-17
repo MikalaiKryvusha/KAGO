@@ -1,7 +1,7 @@
 # Plan 107 — the low range: tune 1200…2157 MHz (and the bands up to 2700 below the trend), leave everything under 1200 at stock
 
 > **Created:** 2026-10-17 18:1x (session 110, on the owner's word) · **Parent:** `plans/101_EPIC…` (Ф2 deepening), `plans/105`
-> (level 2) · **Status:** 🔲 planned 2026-10-17; Ш1–Ш2 offline, Ш3 at the card with the owner · **Outbound:** —
+> (level 2) · **Status:** ⏸ SHELVED 2026-10-17 18:1x by the owner («согласен» to the agent's honest estimate: 0,5–1,5 W, no noise or temperature gain — GOAL.md); Ш1 ✅ done (capability kept), Ш2–Ш3 not started · **Outbound:** —
 
 ## Goal vector (Achieve)
 
@@ -41,7 +41,7 @@ flowchart TD
 
 ## Steps
 
-- [ ] **Ш1. Builder** (offline): `config.TUNE_FLOOR_MHZ = 1200` (the owner's word, one home); `trendModel.rawAt` clamps the depth at
+- [x] **Ш1. Builder** (offline) — ✅ 2026-10-17 18:1x: blocks «НИЖЕ 1200 МГц — СТОК…», «НИЗ: ЗАПАС НИЖЕ ТРЕНДА…» (MLF1/MLF2 red on target); old-rule blocks rewritten; today's curve `4215c7` byte-identical; real dry run −10 in B1–B3 → `3c58c9` (area 5,68 %). Was: `config.TUNE_FLOOR_MHZ = 1200` (the owner's word, one home); `trendModel.rawAt` clamps the depth at
   ≥ 0 (a trend that predicts an OVERvolt below ~1770 MHz is meaningless — today min(stock) hides it, so the clamp changes no
   curve); `bandedCurve`: a row under the floor is stock; `negativeMarginAllowed` → «the band reaches above `TUNE_FLOOR_MHZ`»
   (B1…B7). Blocks + mutations; `4215c7` byte-identical for today's margins.

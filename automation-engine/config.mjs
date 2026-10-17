@@ -1229,14 +1229,13 @@ export const MODE_BANDS = Object.freeze([
 ].map(Object.freeze));
 
 /**
- * THE LOAD BANDS — the only bands whose margin may go BELOW the touching trend (`plans/105`, level 2 of the
- * owner's «Вся кривая -> полоса -> точка», 2026-09-25). `[AI]` 2026-09-27, revisable: the card lives there under
- * game and burn (the accepted 25.09 check: B5 49 % · B6 14 % · B7 22 % of the time) and 13 of the 14 edges lie
- * there, so the builder's «known failure + two grid steps» floor stands under their rows; the bands below are
- * crossed at idle and in transitions, give no watts back, and idle after a write is where the proved 08.09 death
- * came (researches/36) — they keep a margin ≥ 0.
+ * THE TUNING FLOOR — no frequency under it ever leaves stock; every band reaching above it may go BELOW the touching
+ * trend (`plans/107`). The owner, 2026-10-17 18:1x (`GOAL.md` → «⬇️ НИЖНИЙ ДИАПАЗОН»): «до 1200 можно тюнить» ·
+ * «мегагерц». It replaces the agent's `[AI]` rule of 2026-09-27 «below the trend — only the bands from 2700 MHz», whose
+ * reason (the proved 08.09 death came at idle after a write, researches/36) is kept by construction: idle (P8,
+ * 200…600 MHz) lies under 1200 MHz, i.e. on stock rows.
  */
-export const NEGATIVE_MARGIN_FROM_MHZ = 2700;
+export const TUNE_FLOOR_MHZ = 1200;
 
 /** One step of the margin descent after a passed check, mV — `[AI]`, researches/39 §6 («шаг спуска запаса 10 мВ»). */
 export const MARGIN_DESCENT_STEP_MV = 10;
@@ -1354,7 +1353,7 @@ export default Object.freeze({
   PLATEAU_LOAD_UTILIZATION_PCT,
   SILENT_COLD_FAN_CEILING_PCT,
   MODE_BANDS,
-  NEGATIVE_MARGIN_FROM_MHZ,
+  TUNE_FLOOR_MHZ,
   MARGIN_DESCENT_STEP_MV,
   RATCHET_GRID_STEPS,
   MIN_BAND_DWELL_S,

@@ -58,7 +58,7 @@ import { openJournal, appendLine, readJournal, orphanIntents, LINE } from './swe
 import { parseSampleTime } from './hardware-mon.mjs';
 import { driverEventsInWindow, momentOf } from './driver-voice.mjs';
 import { queryFaults } from './event-logger.mjs';
-import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS, FAILURE_ATTRIBUTION_WINDOW_MS, TDR_DELAY_MS } from '../config.mjs';
+import { MODE_BANDS, TUNE_FLOOR_MHZ, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS, FAILURE_ATTRIBUTION_WINDOW_MS, TDR_DELAY_MS } from '../config.mjs';
 // bugs/149: the stall signature («busy at a fraction of the power drawn a moment before») — the archive's own numbers, one home each.
 import { POWER_COLLAPSE_RATIO, POWER_ESTABLISHED_MW } from './fuse.mjs';
 import { LOAD_UTIL_PCT } from '../../tools/power-collapse-floor.mjs';
@@ -346,12 +346,12 @@ export function ratchetMvByBand(rows, grid, { steps = RATCHET_GRID_STEPS, bands 
 export function nextMargins({ margins, floors = null, verdict, visited = [], failureBand = null, failureAt = null, ratchetMv, stepMv = MARGIN_DESCENT_STEP_MV, bands = MODE_BANDS }) {
   const m = [...margins];
   // The floor of a band's descent: its ratchet floor; below the trend (margin < 0) only a LOAD band may go
-  // (`config.NEGATIVE_MARGIN_FROM_MHZ`, plans/105) — the builder's failure floors end its descent there.
-  const f = floors ? [...floors] : bands.map((b) => (b.loMhz >= NEGATIVE_MARGIN_FROM_MHZ ? -Infinity : 0));
+  // (`config.TUNE_FLOOR_MHZ`, plans/107) — the builder's failure floors end its descent there.
+  const f = floors ? [...floors] : bands.map((b) => (b.hiMhz > TUNE_FLOOR_MHZ ? -Infinity : 0));
   const changes = [];
   if (verdict === CHECK_VERDICT.PASSED) {
     for (const i of visited) {
-      const to = Math.max(f[i], bands[i].loMhz >= NEGATIVE_MARGIN_FROM_MHZ ? -Infinity : 0, m[i] - stepMv);
+      const to = Math.max(f[i], bands[i].hiMhz > TUNE_FLOOR_MHZ ? -Infinity : 0, m[i] - stepMv);
       if (to !== m[i]) changes.push({ band: i, from: m[i], to, why: 'проверка пройдена, полоса посещена — спуск на шаг' });
       m[i] = to;
     }
@@ -1069,11 +1069,13 @@ export async function selfTest() {
   const noBand = nextMargins({ margins, verdict: CHECK_VERDICT.FAILED, failureBand: null, ratchetMv: r10 });
   check('СБОЙ БЕЗ ПОЛОСЫ ПОДНИМАЕТ ВСЕ ПОЛОСЫ (ОСТОРОЖНАЯ СТОРОНА)', noBand.margins.join() === '40,40,40,40,40,40,50' && noBand.changes.length === 7, noBand.margins.join());
   check('НЕИЗВЕСТНЫЙ ВЕРДИКТ НИЧЕГО НЕ ДВИГАЕТ', nextMargins({ margins, verdict: CHECK_VERDICT.UNKNOWN, visited: [4], ratchetMv: r10 }).margins.join() === margins.join());
-  check('СПУСК НЕ УХОДИТ НИЖЕ НУЛЯ', nextMargins({ margins: [5, 0, 0, 0, 0, 0, 0], verdict: CHECK_VERDICT.PASSED, visited: [0, 1], ratchetMv: r10 }).margins.slice(0, 2).join() === '0,0');
+  // plans/107: only a band wholly under the tuning floor (1200 MHz) stops at 0; the real bands all reach above it.
+  const lowB = [{ id: 'L0', loMhz: -Infinity, hiMhz: 1200, label: 'ниже 1200' }, { id: 'L1', loMhz: 1200, hiMhz: Infinity, label: 'от 1200' }];
+  check('СПУСК: ПОЛОСА ЦЕЛИКОМ НИЖЕ 1200 МГц НЕ УХОДИТ НИЖЕ НУЛЯ, ВЫШЕ — УХОДИТ', nextMargins({ margins: [5, 5], verdict: CHECK_VERDICT.PASSED, visited: [0, 1], ratchetMv: [10, 10], bands: lowB }).margins.join() === '0,-5');
   // plans/105 level 2 · mutation MN5 (named before the run): a 0 floor for every band again → this block red.
   const below = nextMargins({ margins: [0, 0, 0, 0, 0, 0, 0], verdict: CHECK_VERDICT.PASSED, visited: [0, 4, 6], ratchetMv: r10 });
   const belowFail = nextMargins({ margins: below.margins, floors: below.floors, verdict: CHECK_VERDICT.FAILED, failureBand: 4, ratchetMv: r10 });
-  check('НИЖЕ ТРЕНДА СПУСКАЕТСЯ ТОЛЬКО НАГРУЗОЧНАЯ ПОЛОСА, И ХРАПОВИК СТАВИТ ЕЙ ПОЛ', below.margins.join() === '0,0,0,0,-10,0,-10'
+  check('НИЖЕ ТРЕНДА СПУСКАЕТСЯ ПОСЕЩЁННАЯ ПОЛОСА (С 17.10 И НИЖНЯЯ — plans/107), И ХРАПОВИК СТАВИТ ЕЙ ПОЛ', below.margins.join() === '-10,0,0,0,-10,0,-10'
     && belowFail.margins[4] === 0 && belowFail.floors[4] === 0, `спуск ${below.margins.join()} · после сбоя в B5 ${belowFail.margins.join()} · пол ${belowFail.floors.join()}`);
   const grid = []; for (let v = 800; v < 1000; v += 5) grid.push(v); for (let v = 1000; v <= 1100; v += 10) grid.push(v);
   const rm = ratchetMvByBand([{ band: 'B5', voltageMv: 900 }, { band: 'B7', voltageMv: 1020 }], grid);
@@ -1399,10 +1401,10 @@ export async function selfTest() {
       && realStep.candidate.stamp.driver === '616.92' && realStep.candidate.qualified === false && /−30/.test(realStep.candidate.draft.candidate), `${writes.join(' | ')} · ${realStep.candidate?.draft?.candidate}`);
     writes.length = 0;
     await prepareStep({ mode: 'optimised', margins: marginsA, deps: deps({ docExists: () => true }) });
-    let refusedB3 = null; try { await prepareStep({ mode: 'optimised', margins: [0, 0, -10, 0, 0, 0, 0], deps: deps() }); } catch (e) { refusedB3 = e.message; }
+    let refusedB3 = null; try { await prepareStep({ mode: 'optimised', margins: [0, 0, 2.5, 0, 0, 0, 0], deps: deps() }); } catch (e) { refusedB3 = e.message; }
     let refusedStock = null; try { await prepareStep({ mode: 'stock-default', margins: marginsA, deps: deps() }); } catch (e) { refusedStock = e.message; }
-    check('ШАГ: ТОТ ЖЕ ДОКУМЕНТ НЕ ПЕРЕПИСЫВАЕТСЯ; ЗАПАС НИЖЕ ТРЕНДА ВНЕ НАГРУЗОЧНЫХ ПОЛОС И ЗАВОДСКОЙ РЕЖИМ ОТКЛОНЯЮТСЯ ПО ИМЕНИ',
-      !writes.some((w) => w.startsWith('doc:')) && writes.length === 2 && /только полосы от 2700/.test(refusedB3 ?? '') && /только у optimised/.test(refusedStock ?? ''), `${writes.join(' | ')} · ${refusedB3} · ${refusedStock}`);
+    check('ШАГ: ТОТ ЖЕ ДОКУМЕНТ НЕ ПЕРЕПИСЫВАЕТСЯ; ДРОБНЫЙ ЗАПАС И ЗАВОДСКОЙ РЕЖИМ ОТКЛОНЯЮТСЯ ПО ИМЕНИ',
+      !writes.some((w) => w.startsWith('doc:')) && writes.length === 2 && /нужно целое число мВ/.test(refusedB3 ?? '') && /только у optimised/.test(refusedStock ?? ''), `${writes.join(' | ')} · ${refusedB3} · ${refusedStock}`);
 
     // P106-AC1 (plans/106 Ш1): the range surcharge rides the step. Mutation addressees, named BEFORE the run:
     //   MS1 prepareStep drops rangeMargins from the builder's args  → this block red (nothing raised, the name still carries it)
