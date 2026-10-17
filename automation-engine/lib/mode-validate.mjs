@@ -42,6 +42,7 @@
 //   bugs/147 (2026-10-17, session 109):
 //   MV20 the game stage drops its own timeout (inherits 900 s again)   → «НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА…»
 //   MV21 modesValidated counts the last check of ANY curve (the first edition) → «МЕТРИКА: УПАВШАЯ ПРОВЕРКА КРИВОЙ-КАНДИДАТА…»
+//   MV22 gameStageRecords takes every stage, not only the game ones   → «ВЫГОДА ПО ПРОВЕРКАМ: БЕРУТСЯ ТОЛЬКО ПРОБЫ СТУПЕНЕЙ ИГРЫ…»
 //
 // [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
@@ -839,6 +840,43 @@ export async function captureGroup(files) {
   return { loaded: s.loaded, fps: median(fps), n: s.counts.loaded };
 }
 
+// plans/105 Ш12 (2026-10-17, session 109): the table from the CHECKS themselves (runs/validate/<moment>/), not from separate
+// graphics captures — a passed check already holds the game passes and their telemetry. Only the samples INSIDE the game
+// stages count: the owner's criteria for the modes are said of a game (FPS ≥ 95 %, «сильно ниже 300 Вт», fan ≤ 60 %), and
+// the burn stages of the mix sit at the power limit by design — pooling them would describe the burn, not the play.
+// A stage's window is [end of the previous stage (or the check's start), its own end] — the executor runs them back to back.
+// [NOT-TESTED] beyond hygiene and the recorded checks: block «ВЫГОДА ПО ПРОВЕРКАМ…», mutation MV22.
+
+/** The telemetry records (raw `{ i, t, sample }` lines) that fall inside the GAME stages of one check's `result`, and those stages' FPS. */
+export function gameStageRecords(result, records) {
+  const windows = []; const fps = [];
+  let prev = result?.fromMs;
+  for (const s of result?.stages ?? []) {
+    const end = s.endedAtMs ?? prev;
+    if (s.kind === MIX_STAGE.GAME && Number.isFinite(prev) && Number.isFinite(end)) { windows.push([prev, end]); if (Number.isFinite(s.fps)) fps.push(s.fps); }
+    prev = end;
+  }
+  const inGame = records.filter((r) => { if (!(r?.i >= 0) || !r.t) return false; const ms = parseSampleTime(r.t); return ms !== null && windows.some(([a, b]) => ms >= a && ms <= b); });
+  return { records: inGame, fps, windows: windows.length };
+}
+
+/** A group of passed CHECK directories as one side of the table: game-stage samples pooled, FPS = median of the stages' FPS. */
+export async function checkGroup(dirs) {
+  const { summarizeSamples } = await import('./power-baseline.mjs');
+  const recs = []; const fps = []; const drivers = new Set(); const verdicts = [];
+  for (const d of dirs) {
+    const result = JSON.parse(readFileSync(join(d, 'result.json'), 'utf8'));
+    const lines = readFileSync(join(d, 'mon.jsonl'), 'utf8').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const meta = lines.find((r) => r.meta)?.meta;
+    if (meta?.driver_version) drivers.add(meta.driver_version);
+    verdicts.push(result.verdict?.verdict ?? '—');
+    const g = gameStageRecords(result, lines);
+    recs.push(...g.records); fps.push(...g.fps);
+  }
+  const s = summarizeSamples(recs);
+  return { loaded: s.loaded, fps: median(fps), n: s.counts.loaded, drivers: [...drivers], verdicts };
+}
+
 /** @param {{loaded: object, fps: number|null, fpsSpreadPct?: number|null}} stock  @param mode — the same shape */
 export function benefitRows({ stock, mode }) {
   const val = (side, key) => (key === 'fps' ? side.fps ?? null : side.loaded?.[key]?.median ?? null);
@@ -1163,6 +1201,17 @@ export async function selfTest() {
   const mv2 = modesValidated([I(1, 'optimised', 'snapB', [30, 30, 30, 30, 20, 30, 30]), V(1, 'passed')], { profiles: profs, modes: MODES });
   const line = renderValidatedLine(mv2);
   check('СТРОКА МЕТРИКИ: ЧИСЛО, ЗАПАС ПО ПОЛОСАМ И ЧЕСТНОЕ «НЕ ОТСЛЕЖИВАЕТСЯ»', line.startsWith('РЕЖИМОВ ПРОВЕРЕНО 1/4 (optimised)') && line.includes('+30/+30/+30/+30/+20/+30/+30') && line.includes('прибором не отслеживается'), line);
+  // Ш12 (session 109): the table from a check takes the GAME stages' samples only — a burn at the power limit must not leak in.
+  {
+    const T = (ms) => { const d = new Date(ms); const p = (n, w = 2) => String(n).padStart(w, '0'); return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`; };
+    const t0 = new Date(2026, 9, 17, 12, 0, 0).getTime();
+    const res = { fromMs: t0, stages: [{ kind: MIX_STAGE.IDLE, endedAtMs: t0 + 10_000 }, { kind: MIX_STAGE.GAME, endedAtMs: t0 + 20_000, fps: 56 },
+      { kind: MIX_STAGE.BURN, endedAtMs: t0 + 30_000 }, { kind: MIX_STAGE.GAME, endedAtMs: t0 + 40_000, fps: 58 }] };
+    const R = (sec, w) => ({ i: sec, t: T(t0 + sec * 1000), sample: { 'power.draw.instant': w, 'utilization.gpu': 99 } });
+    const g = gameStageRecords(res, [{ i: -1, meta: {} }, R(5, 30), R(15, 250), R(25, 300), R(35, 249)]);
+    check('ВЫГОДА ПО ПРОВЕРКАМ: БЕРУТСЯ ТОЛЬКО ПРОБЫ СТУПЕНЕЙ ИГРЫ И ИХ FPS — ПРОЖИГ И ПРОСТОЙ НЕ ПОДМЕШИВАЮТСЯ',
+      g.records.map((r) => r.sample['power.draw.instant']).join() === '250,249' && g.fps.join() === '56,58' && g.windows === 2, JSON.stringify(g.records.map((r) => r.i)));
+  }
   // Session 109: a FAILED check of a candidate curve after a pass of the mode's own curve demotes nothing, and its margins are not the mode's.
   const mv3 = modesValidated([I(1, 'optimised', 'snapB', [0, 0, 0, -10, -10, -10, -10]), V(1, 'passed'), I(2, 'optimised', 'snapCand', [0, 0, 0, -10, -20, -10, -10]), V(2, 'failed')], { profiles: profs, modes: MODES });
   const line3 = renderValidatedLine(mv3);
@@ -1429,11 +1478,18 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     else console.log('\n(повтор; боевой журнал проверок не тронут; песочница удалена — `--out <папка>` сохранит отчёт)');
     } finally { rmSync(box, { recursive: true, force: true }); }
   } else if (process.argv.includes('--compare')) {
-    // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json).
+    // --compare --stock <capture.json,…> --mode <capture.json,…> — graphics capture records (runs/graphics/*.json);
+    // --compare --stock-check <dir,…> --mode-check <dir,…> — passed CHECKS (runs/validate/<moment>/), game stages only (Ш12).
+    const sc = listAfter('--stock-check'); const mc = listAfter('--mode-check');
     const sf = listAfter('--stock'); const mf = listAfter('--mode');
-    if (!sf.length || !mf.length) { console.error('ОШИБКА: --compare --stock <захват.json,…> --mode <захват.json,…>'); process.exit(2); }
-    const stock = await captureGroup(sf); const mode = await captureGroup(mf);
-    console.log(`ВЫГОДА ПРОТИВ СТОКА — медианы под нагрузкой (проб: сток ${stock.n} · режим ${mode.n}); карта не трогается`);
+    const byChecks = sc.length > 0 || mc.length > 0;
+    if (byChecks ? (!sc.length || !mc.length) : (!sf.length || !mf.length)) { console.error('ОШИБКА: --compare --stock <захват.json,…> --mode <захват.json,…> | --compare --stock-check <каталог,…> --mode-check <каталог,…>'); process.exit(2); }
+    const stock = byChecks ? await checkGroup(sc) : await captureGroup(sf); const mode = byChecks ? await checkGroup(mc) : await captureGroup(mf);
+    console.log(`ВЫГОДА ПРОТИВ СТОКА — медианы под нагрузкой${byChecks ? ' в ступенях игры проверок' : ''} (проб: сток ${stock.n} · режим ${mode.n}); карта не трогается`);
+    if (byChecks) {
+      console.log(`драйвер: сток ${stock.drivers.join(', ') || '—'} · режим ${mode.drivers.join(', ') || '—'} · вердикты: сток ${stock.verdicts.join(', ')} · режим ${mode.verdicts.join(', ')}`);
+      if (stock.drivers.join() !== mode.drivers.join()) console.log('⚠️ стороны сняты на РАЗНЫХ драйверах — таблица предварительная, сток переснять на драйвере режима');
+    }
     console.log('величина · сток · режим · разница');
     const f1 = (x) => (x === null ? '—' : (Math.round(x * 10) / 10).toString().replace('.', ','));
     for (const r of benefitRows({ stock, mode })) console.log(`${r.label} · ${f1(r.stock)} · ${f1(r.mode)} · ${r.delta === null ? '—' : (r.delta > 0 ? '+' : '') + f1(r.delta)}${r.deltaPct === null ? '' : ` (${r.deltaPct > 0 ? '+' : ''}${f1(r.deltaPct)} %)`}`);
