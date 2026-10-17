@@ -1258,11 +1258,11 @@ export const MIN_BAND_DWELL_S = 30;
 
 /**
  * LEVEL 3 of the owner's «Вся кривая -> полоса -> точка» (2026-09-25; `plans/105` Ш2): a failed check is
- * attributed to a FREQUENCY — the LOWEST frequency the card delivered within this window before the failing
- * moment. `[AI]` 2026-10-17, revisable: the sampler writes every 500 ms, so 2 s holds four samples; the
- * lowest of them is the conservative side — the builder's failure floor then covers every frequency above
- * it, and a miss downward (flooring a frequency the card was not at, while the guilty one stays low) is
- * impossible by construction.
+ * attributed to the SPAN of frequencies the card delivered within this window before the failing moment, and every
+ * frequency of the span becomes a failure point at its own curve voltage (`mode-validate.attributeFailure`).
+ * `[AI]` 2026-10-17, revisable: the sampler writes every 500 ms, so 2 s holds four samples. ✏️ The first edition took
+ * the LOWEST frequency alone and called it the side that «cannot miss downward» — false (the session-108 judge, F2):
+ * the lowest frequency carries the lowest voltage, so its floor barely bit the load rows.
  */
 export const FAILURE_ATTRIBUTION_WINDOW_MS = 2000;
 

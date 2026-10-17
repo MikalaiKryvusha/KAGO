@@ -255,7 +255,8 @@ function raiseToFailures(rows, credible, grid) {
   for (const r of rows) {
     for (const f of credible) {
       const need = nextStep(grid, nextStep(grid, f.mv));
-      if (f.mhz <= r.mhz && r.voltageMv < need && need <= r.stockVoltageMv) { r.voltageMv = need; failRaises++; }
+      const to = Math.min(need, r.stockVoltageMv); // a floor above stock lands ON stock, never skipped (judge F1, 2026-10-17)
+      if (f.mhz <= r.mhz && r.voltageMv < to) { r.voltageMv = to; failRaises++; }
     }
   }
   return failRaises;
@@ -587,6 +588,10 @@ export function selfTest() {
   const ex = exhaustedBands({ ...lArgs, margins: [0, 30, 0, -200, -200, -200, 0] });
   check('ИСЧЕРПАНИЕ ПОЛОСЫ: УПЁРШАЯСЯ В ПОЛЫ — ДА, СО СВОИМ ЗАПАСОМ НАД НИМИ — НЕТ', ex[0] === true && ex[1] === false && ex.slice(3, 6).every(Boolean),
     `исчерпаны: ${ex.map((x, i) => `${BANDS[i].id}=${x ? 'да' : 'нет'}`).join(' ')}`);
+  // Judge F1 (2026-10-17) · mutation MF1, named before the run: restore «skip when the floor is above stock» → this block red.
+  const nearStock = bandedCurve({ ...bArgs, credible: [...credible, { mhz: 2800, mv: stockAt(2800) - 5, kind: 'проверка режима' }], margins: [0, 0, 0, 0, 0, 0, 0] });
+  const r2800 = nearStock.rows.find((r) => r.mhz === 2800);
+  check('ОТКАЗ У САМОГО СТОКА ПОДНИМАЕТ СТРОКУ ДО СТОКА, А НЕ ПРОПУСКАЕТСЯ', r2800?.voltageMv === r2800?.stockVoltageMv, `2800: ${r2800?.voltageMv} при стоке ${r2800?.stockVoltageMv} и отказе ${stockAt(2800) - 5}`);
   return results;
 }
 

@@ -30,11 +30,12 @@
 //   MV10 the real rollback forgets the applied clock lock     → the same block
 //   MV11 the card is touched although the sampler never came up → «ИСПОЛНИТЕЛЬ: СЭМПЛЕР НЕ ПОДНЯЛСЯ…»
 //   plans/105 Ш2–Ш3 (2026-10-17):
-//   MV12 failureFrequency takes the LAST sample, not the lowest in the window → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ ПРИПИСАН НАИМЕНЬШЕЙ…»
+//   MV12 failureSpan collapses to the lowest frequency (the first edition)  → «…ПРОСТОЙ В ОКНЕ НЕ ПРЯЧЕТ…» + «…ПОЛ НА ВЕСЬ РАЗБРОС…»
 //   MV13 curve-proposal.withCheckFailures returns `credible` alone  → «УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЬ ПОДНИМАЕТ ОКРЕСТНОСТЬ СБОЯ…»
-//   MV14 nextMargins ratchets the band of a frequency-attributed failure → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ С ЧАСТОТОЙ И НАПРЯЖЕНИЕМ НЕ ДВИГАЕТ…»
+//   MV14 nextMargins ratchets the band of a failure with points        → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ С ТОЧКАМИ НЕ ДВИГАЕТ…»
 //   MV15 prepareStep saves the document before the dry-run return → «ШАГ: СУХОЙ ПРОГОН НИЧЕГО НЕ ПИШЕТ…»
-//   MV16 runCheck drops failureAt from the verdict record          → «ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ ЧАСТОТУ И НАПРЯЖЕНИЕ СНИМКА»
+//   MV16 runCheck drops failureAt from the verdict record          → «ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ РАЗБРОС И ТОЧКИ СНИМКА…»
+//   MV17 attributeFailure attributes a LOAD failure too             → «УРОВЕНЬ ЧАСТОТЫ: СБОЙ НАГРУЗКИ ЧАСТОТЕ НЕ ПРИПИСЫВАЕТСЯ…»
 //
 // [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
@@ -118,26 +119,31 @@ export function bandAt(samples, atMs, bands = MODE_BANDS) {
 }
 
 // -------------------------------------------------------------------------------------------------
-// plans/105 Ш2 — LEVEL 3, the frequency: a failure is attributed to the frequency the card delivered
+// plans/105 Ш2 — LEVEL 3, the frequency: a failure is attributed to the frequencies the card delivered
 // -------------------------------------------------------------------------------------------------
 //
 // The owner, 25.09: «А если будет зависать? но из-за одно точки? как ты её будешь искать? Чтобы другие ещё поднять,
-// а эту наоборот снизить?» · «Вся кривая -> полоса -> точка». A failed check becomes ONE MORE KNOWN FAILURE (f, V):
-// f = the LOWEST delivered frequency within `FAILURE_ATTRIBUTION_WINDOW_MS` before the failing moment (the sampler
-// writes every 500 ms, so the guilty frequency is not known exactly — the lowest is the side that cannot miss
-// downward), V = the voltage the check's own snapshot serves f with. The builder already keeps every row at f' ≥ f
-// at or above «failure + two grid steps» (`curve-proposal.raiseToFailures`), so the neighbourhood of the failure
-// rises and every other frequency keeps descending — no new mechanism, one more input to an existing floor.
-// [NOT-TESTED] on the card — hygiene: the blocks «УРОВЕНЬ ЧАСТОТЫ…» of the selftest, mutations MV12–MV14.
+// а эту наоборот снизить?» · «Вся кривая -> полоса -> точка». A failed check becomes KNOWN FAILURES under the curve:
+// the sampler writes every 500 ms, so WHICH frequency failed is not known — only the SPAN the card delivered within
+// `FAILURE_ATTRIBUTION_WINDOW_MS` before the failing moment. Every frequency of that span (its ends and every curve
+// row between) becomes a failure point at the voltage the check's own snapshot served it with; the builder floors each
+// at «+ two grid steps» for f' ≥ f (`curve-proposal.raiseToFailures`). The union is the envelope «V(f) + 2 steps for
+// every f the window could hold» — never less than the guilty frequency needs, whichever it was.
+// ✏️ 2026-10-17, the judge of session 108 (F2): the first edition took the LOWEST frequency and ITS voltage, calling it
+// «the side that cannot miss downward». It was the opposite: the lowest frequency is the lowest voltage, so its floor
+// barely bit — a load failure with an idle sample in the window raised a few idle rows and none of the load rows.
+// A LOAD failure is NOT attributed at all: its moment is the stage's END, after the load already died, so the window
+// sees the idle that followed; it keeps the band ratchet (`nextMargins`).
+// [NOT-TESTED] on the card — hygiene: the blocks «УРОВЕНЬ ЧАСТОТЫ…» of the selftest, mutations MV12–MV16.
 
-/** The lowest frequency delivered in [atMs − window, atMs]; the last sample before `atMs` when the window is empty; null without samples. */
-export function failureFrequency(samples, atMs, windowMs = FAILURE_ATTRIBUTION_WINDOW_MS) {
+/** The span of delivered frequencies in [atMs − window, atMs] — { loMhz, hiMhz }; the last sample before `atMs` when the window is empty; null without one. */
+export function failureSpan(samples, atMs, windowMs = FAILURE_ATTRIBUTION_WINDOW_MS) {
   if (!Number.isFinite(atMs)) return null;
   const inWindow = samples.filter((s) => s.ms <= atMs && s.ms >= atMs - windowMs).map((s) => s.mhz);
-  if (inWindow.length) return Math.min(...inWindow);
+  if (inWindow.length) return { loMhz: Math.min(...inWindow), hiMhz: Math.max(...inWindow) };
   let last = null;
   for (const s of samples) { if (s.ms <= atMs) last = s; else break; }
-  return last ? last.mhz : null;
+  return last ? { loMhz: last.mhz, hiMhz: last.mhz } : null;
 }
 
 /**
@@ -151,17 +157,45 @@ export function curveVoltageAt(rows, mhz) {
   return (sorted.find((r) => r.mhz >= mhz) ?? sorted.at(-1) ?? null)?.voltageMv ?? null;
 }
 
+/** Every frequency a span could have failed at — its two ends and every curve row between — with the curve's voltage there. */
+export function failurePoints(rows, span) {
+  if (!span || !Array.isArray(rows) || rows.length === 0) return [];
+  const fs = new Set([span.loMhz, span.hiMhz]);
+  for (const r of rows) if (Number.isFinite(r?.mhz) && r.mhz > span.loMhz && r.mhz < span.hiMhz) fs.add(r.mhz);
+  return [...fs].sort((a, b) => a - b).map((mhz) => ({ mhz, voltageMv: curveVoltageAt(rows, mhz) })).filter((p) => Number.isFinite(p.voltageMv));
+}
+
+/**
+ * The journal's `failureAt` of one failure: { loMhz, hiMhz, points } — `points` null when the curve is unknown (no
+ * snapshot: a stock check); the whole field null for a LOAD failure (its moment is not the failing one) or without a
+ * durable sample. Only `points` reach the builder.
+ */
+export function attributeFailure({ samples, failure, rows = null }) {
+  if (!failure || failure.cls === FAILURE_CLASS.LOAD) return null;
+  const span = failureSpan(samples, failure.atMs);
+  if (!span) return null;
+  const points = failurePoints(rows, span);
+  return { ...span, points: points.length ? points : null };
+}
+
 /**
  * The failures the CHECK journal knows, in the builder's shape ({ mhz, mv, … } — `curve-proposal.failures`'s
- * form): verdict records whose `failureAt` carries both a frequency and a voltage. A failure the instrument could
- * not attribute (no durable sample, no snapshot) is NOT here — it is the band ratchet's business (`nextMargins`).
+ * form): every point of every failed check's `failureAt`. A failure the instrument could not attribute (a LOAD
+ * failure, no durable sample, no snapshot) is NOT here — it is the band ratchet's business (`nextMargins`).
+ * Known limit (judge F3, 2026-10-17): a floor is permanent and carries no driver stamp — by design of the ratchet
+ * (ЗАКАЗ.md §3: a failure is never descended through again); a floor recorded in error is withdrawn by a correction
+ * line in the journal, the way the sweep journal's are (`sweep-journal.corrections`) — not yet built for the check.
  */
 export function checkFailureFloors(records) {
   return checkRecords(records)
-    .filter((r) => r.state === LINE.VERDICT && r.verdict === CHECK_VERDICT.FAILED && Number.isFinite(r.failureAt?.mhz) && Number.isFinite(r.failureAt?.voltageMv))
-    .map((r) => ({ mhz: r.failureAt.mhz, mv: r.failureAt.voltageMv, seq: r.seq, at: r.at ?? null, kind: `проверка режима: ${r.failure?.cls ?? 'сбой'}`, decidedBy: 'mode-check', from: 'выданная (проверка режима)', orderedMhz: null }))
+    .filter((r) => r.state === LINE.VERDICT && r.verdict === CHECK_VERDICT.FAILED && Array.isArray(r.failureAt?.points))
+    .flatMap((r) => r.failureAt.points.filter((p) => Number.isFinite(p?.mhz) && Number.isFinite(p?.voltageMv))
+      .map((p) => ({ mhz: p.mhz, mv: p.voltageMv, seq: r.seq, at: r.at ?? null, kind: `проверка режима: ${r.failure?.cls ?? 'сбой'}`, decidedBy: 'mode-check', from: 'выданная (проверка режима)', orderedMhz: null })))
     .sort((a, b) => a.mhz - b.mhz || a.mv - b.mv);
 }
+
+/** «2865 МГц» or «2700…2900 МГц». */
+const spanText = (a) => (a.loMhz === a.hiMhz ? `${a.loMhz} МГц` : `${a.loMhz}…${a.hiMhz} МГц`);
 
 // -------------------------------------------------------------------------------------------------
 // Ш5 — the verdict
@@ -200,7 +234,7 @@ export function verdictOf({ samples = [], driverEvents = [], stages = [], stallM
   if (failures.length === 0 && driverEvents === null) return { verdict: CHECK_VERDICT.UNKNOWN, why: 'голос драйвера не прочитан — пройденной проверку назвать нельзя', failures, failure: null };
   if (failures.length === 0) return { verdict: CHECK_VERDICT.PASSED, why: 'драйвер молчал, нагрузки живы, телеметрия без разрывов', failures, failure: null };
   const first = failures[0];
-  return { verdict: CHECK_VERDICT.FAILED, why: first.why, failures, failure: { ...first, band: bandAt(samples, first.atMs, bands), mhz: failureFrequency(samples, first.atMs) } };
+  return { verdict: CHECK_VERDICT.FAILED, why: first.why, failures, failure: { ...first, band: bandAt(samples, first.atMs, bands) } };
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -223,7 +257,7 @@ export function ratchetMvByBand(rows, grid, { steps = RATCHET_GRID_STEPS, bands 
 /**
  * The next margin vector.
  *   PASSED  → every VISITED band descends one step, never below its floor or 0.
- *   FAILED with a frequency AND its voltage (`failureAt`, plans/105 level 3) → NO band moves: the failure is a known failure now
+ *   FAILED with failure POINTS (`failureAt.points`, plans/105 level 3) → NO band moves: the failure is a known failure now
  *             (`checkFailureFloors`), and the builder's floor raises its neighbourhood alone — «эту наоборот снизить,
  *             другие ещё поднять»; the band's other frequencies keep their margin and keep descending.
  *   FAILED without a frequency → the failure's band rises by its ratchet and is FLOORED there; an unknown band (a
@@ -242,10 +276,10 @@ export function nextMargins({ margins, floors = null, verdict, visited = [], fai
       if (to !== m[i]) changes.push({ band: i, from: m[i], to, why: 'проверка пройдена, полоса посещена — спуск на шаг' });
       m[i] = to;
     }
-  } else if (verdict === CHECK_VERDICT.FAILED && Number.isFinite(failureAt?.mhz) && Number.isFinite(failureAt?.voltageMv)) {
-    // Without the voltage the builder cannot see the failure (`checkFailureFloors`) — then the band ratchet below holds.
-    const i = bandOf(failureAt.mhz, bands);
-    changes.push({ band: i, from: m[i], to: m[i], why: `сбой приписан частоте ${failureAt.mhz} МГц при ${failureAt.voltageMv} мВ — запас полосы не меняется, пол построителя поднимет окрестность этой частоты` });
+  } else if (verdict === CHECK_VERDICT.FAILED && Array.isArray(failureAt?.points) && failureAt.points.length > 0) {
+    // Without points the builder cannot see the failure (`checkFailureFloors`) — then the band ratchet below holds.
+    const i = bandOf(failureAt.hiMhz, bands);
+    changes.push({ band: i, from: m[i], to: m[i], why: `сбой приписан частотам ${spanText(failureAt)} (точек пола ${failureAt.points.length}) — запас полосы не меняется, пол построителя поднимет их окрестность` });
   } else if (verdict === CHECK_VERDICT.FAILED) {
     const targets = Number.isInteger(failureBand) && failureBand >= 0 ? [failureBand] : m.map((_, i) => i);
     for (const i of targets) {
@@ -278,7 +312,7 @@ export function writeCheckIntent(journal, { mode, candidate = null, snapshot = n
 
 /** The verdict that closes an intent. */
 export function writeCheckVerdict(journal, { seq, verdict, failure = null, failureAt = null, hits = null, at, why = '' }, io = {}) {
-  // `failureAt` = { mhz, voltageMv } — plans/105 level 3; `checkFailureFloors` hands it to the builder.
+  // `failureAt` = { loMhz, hiMhz, points: [{ mhz, voltageMv }] | null } — plans/105 level 3; `checkFailureFloors` hands the points to the builder.
   const rec = { state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict, failure, failureAt, hits, why, at };
   appendLine(journal, rec, io);
   return rec;
@@ -289,20 +323,20 @@ export function writeCheckVerdict(journal, { seq, verdict, failure = null, failu
  * FAILED/death, and the band is the one the LAST durable sample of that check's telemetry names
  * (ЗАКАЗ.md §4). `readSamples(path)` is injected so the rule is provable without a card.
  */
-export function deathVerdicts(records, { readSamples = (p) => parseSamples(readFileSync(p, 'utf8')).samples, voltageAt = null, bands = MODE_BANDS } = {}) {
-  // `voltageAt(snapshotId, mhz)` — the voltage the check's snapshot served the death's frequency with (plans/105 Ш2);
+export function deathVerdicts(records, { readSamples = (p) => parseSamples(readFileSync(p, 'utf8')).samples, rowsOf = null, bands = MODE_BANDS } = {}) {
+  // `rowsOf(snapshotId)` — the check's snapshot rows, for the failure points of the death's span (plans/105 Ш2);
   // injected so the rule is provable without files; null → the death keeps its band ratchet only.
   return orphanIntents(checkRecords(records)).map((intent) => {
     let samples = [];
     try { samples = intent.telemetryPath ? readSamples(intent.telemetryPath) : []; } catch { samples = []; }
     const last = samples.at(-1) ?? null;
-    const mhz = last ? failureFrequency(samples, last.ms) : null;
-    let voltageMv = null;
-    try { voltageMv = mhz !== null && voltageAt && intent.snapshot ? voltageAt(intent.snapshot, mhz) : null; } catch { voltageMv = null; }
+    let rows = null;
+    try { rows = rowsOf && intent.snapshot ? rowsOf(intent.snapshot) : null; } catch { rows = null; }
+    const failureAt = last ? attributeFailure({ samples, failure: { cls: FAILURE_CLASS.DEATH, atMs: last.ms }, rows }) : null;
     return {
       seq: intent.seq, mode: intent.mode, verdict: CHECK_VERDICT.FAILED,
-      failureAt: mhz !== null ? { mhz, voltageMv: Number.isFinite(voltageMv) ? voltageMv : null } : null,
-      failure: { cls: FAILURE_CLASS.DEATH, atMs: last?.ms ?? null, band: last ? bandOf(last.mhz, bands) : null, lastMhz: last?.mhz ?? null, mhz, why: last ? `незакрытое намерение; последняя долговечная проба ${last.mhz} МГц` : 'незакрытое намерение; долговечных проб нет — полоса неизвестна' },
+      failureAt,
+      failure: { cls: FAILURE_CLASS.DEATH, atMs: last?.ms ?? null, band: last ? bandOf(last.mhz, bands) : null, lastMhz: last?.mhz ?? null, why: last ? `незакрытое намерение; последняя долговечная проба ${last.mhz} МГц` : 'незакрытое намерение; долговечных проб нет — полоса неизвестна' },
     };
   });
 }
@@ -529,12 +563,12 @@ export async function runCheck({ journal, mode, candidate = null, snapshot = nul
   const events = seams.driverEvents(startedMs, endedMs);
   const v = verdictOf({ samples, driverEvents: events, stages: stages.map((s) => ({ ...s, name: s.name })) });
   const hits = hitMap(samples, { periodMs });
-  // plans/105 level 3: the failure's frequency and the voltage THIS check's curve served it with (the snapshot seam).
+  // plans/105 level 3: the failure's span and its points on THIS check's curve (the snapshot seam).
   let failureAt = null;
-  if (v.failure && Number.isFinite(v.failure.mhz)) {
-    let voltageMv = null;
-    try { voltageMv = seams.curveVoltageAt ? await seams.curveVoltageAt(v.failure.mhz) : null; } catch { voltageMv = null; }
-    failureAt = { mhz: v.failure.mhz, voltageMv: Number.isFinite(voltageMv) ? voltageMv : null };
+  if (v.failure) {
+    let rows = null;
+    try { rows = seams.snapshotRows ? await seams.snapshotRows() : null; } catch { rows = null; }
+    failureAt = attributeFailure({ samples, failure: v.failure, rows });
   }
   const why = rollback?.ok === false ? `${v.why} · ⚠️ ОТКАТ НЕ ПОДТВЕРЖДЁН: ${rollback.why}` : v.why;
   writeCheckVerdict(journal, { seq: intent.seq, verdict: v.verdict, failure: v.failure, failureAt, hits: hits.map((h) => ({ id: h.id, seconds: h.seconds })), at: atIso(), why });
@@ -643,11 +677,11 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
     },
     readSamples: (path) => parseSamples(readFileSync(path, 'utf8')),
     driverEvents: (fromMs, toMs) => realDriverEvents(fromMs, toMs),
-    // plans/105 Ш2: the voltage the candidate's own snapshot serves a frequency with; null for a curve-less (stock) profile.
-    curveVoltageAt(mhz) {
+    // plans/105 Ш2: the candidate's own snapshot rows (failure points); null for a curve-less (stock) profile.
+    snapshotRows() {
       const id = profile?.settings?.curveSnapshot;
       if (!id || !L.loadSnapshot) return null;
-      return curveVoltageAt(L.loadSnapshot({ id })?.frequencies, mhz);
+      return L.loadSnapshot({ id })?.frequencies ?? null;
     },
   };
 }
@@ -676,9 +710,11 @@ export function renderCheckReport(r) {
   L.push(`Окно: ${hms(r.fromMs)} … ${hms(r.toMs)} · кандидат: ${r.candidate ?? '—'} · снимок: ${r.snapshot ?? '—'} · запас по полосам: ${r.margins ? r.margins.map(signedMv).join('/') : '—'}`, '');
   L.push('## Вердикт', '', `**${VERDICT_WORD[r.verdict.verdict] ?? r.verdict.verdict}** — ${r.verdict.why}`);
   if (r.verdict.failure) L.push('', `Первый сбой: ${r.verdict.failure.cls} · полоса ${band(r.verdict.failure.band)} · ${hms(r.verdict.failure.atMs)} · ${r.verdict.failure.why}`);
-  if (r.verdict.failure) L.push('', r.failureAt && Number.isFinite(r.failureAt.voltageMv)
-    ? `Отказ приписан частоте: **${r.failureAt.mhz} МГц при ${r.failureAt.voltageMv} мВ** (наименьшая выданная за ${FAILURE_ATTRIBUTION_WINDOW_MS / 1000} с до сбоя) — построитель поднимет её окрестность`
-    : `Отказ частоте НЕ приписан (${r.failureAt ? `частота ${r.failureAt.mhz} МГц, напряжение снимка неизвестно` : 'долговечной пробы нет'}) — действует храповик полосы`);
+  if (r.verdict.failure) L.push('', r.failureAt?.points
+    ? `Отказ приписан частотам **${spanText(r.failureAt)}** (выданные за ${FAILURE_ATTRIBUTION_WINDOW_MS / 1000} с до сбоя): точек пола ${r.failureAt.points.length}, напряжения снимка ${r.failureAt.points[0].voltageMv}…${r.failureAt.points.at(-1).voltageMv} мВ — построитель поднимет их окрестность`
+    : r.failureAt ? `Отказ частотам ${spanText(r.failureAt)} НЕ приписан — кривая снимка неизвестна; действует храповик полосы`
+    : r.verdict.failure.cls === FAILURE_CLASS.LOAD ? 'Отказ частоте НЕ приписан — сбой нагрузки, его момент — конец ступени; действует храповик полосы'
+    : 'Отказ частоте НЕ приписан — долговечной пробы нет; действует храповик полосы');
   if (r.rollback) L.push('', `Откат: ${r.rollback.ok ? 'подтверждён' : '⚠️ НЕ ПОДТВЕРЖДЁН — ' + (r.rollback.why ?? '')}`);
   L.push('', '## Карта посещений', '', '| полоса | секунд | доля | посещена |', '|---|---|---|---|');
   const visited = new Set(r.hits ? visitedBands(r.hits) : []);
@@ -913,8 +949,8 @@ export async function selfTest() {
         runStage: async (s) => { calls.push(`stage:${s.kind}`); if (s.kind === opts.throwAt) throw new Error('нагрузка упала'); return { ok: s.kind !== opts.failAt, why: 'код 3', endedAtMs: 10000 }; },
         rollback: async () => { calls.push('rollback'); if (opts.rollbackThrows) throw new Error('нет ответа'); return { ok: true }; },
         readSamples: () => ({ samples: samples20, periodMs: 1000 }),
-        driverEvents: () => [],
-        curveVoltageAt: async () => (opts.noVoltage ? null : 880),
+        driverEvents: () => (opts.driverAt ? [{ atMs: opts.driverAt, id: 153 }] : []),
+        snapshotRows: async () => (opts.noRows ? null : [{ mhz: 2850, voltageMv: 880 }, { mhz: 2900, voltageMv: 900 }]),
       };
       const r = await runCheck({ journal: j, mode: 'optimised', plan: smokePlan, telemetryPath: join(exDir, 'mon.jsonl'), seams, atIso: () => '2026-09-25T01:40:00+03:00' });
       return { r, calls };
@@ -927,8 +963,11 @@ export async function selfTest() {
     check('ИСПОЛНИТЕЛЬ: СМЕСЬ ВСТАЁТ НА ПЕРВОЙ ПАДАЮЩЕЙ СТУПЕНИ, ОТКАТ ВСЁ РАВНО', b.r.verdict.verdict === CHECK_VERDICT.FAILED && b.r.verdict.failure.cls === FAILURE_CLASS.LOAD
       && !b.calls.includes('stage:burn') && b.calls.at(-2) === 'rollback', b.calls.join(' '));
     const bRec = readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1);
-    check('ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ ЧАСТОТУ И НАПРЯЖЕНИЕ СНИМКА', bRec?.failureAt?.mhz === 2850 && bRec?.failureAt?.voltageMv === 880 && b.r.failureAt?.mhz === 2850
-      && renderCheckReport(b.r).includes('2850 МГц при 880 мВ') && a.r.failureAt === null, JSON.stringify(bRec?.failureAt));
+    const g = await run({ driverAt: 10000 });
+    const gRec = readJournal(j).records.filter((x) => x.state === LINE.VERDICT).at(-1);
+    check('ИСПОЛНИТЕЛЬ: СБОЙ ПИШЕТ В ЖУРНАЛ РАЗБРОС И ТОЧКИ СНИМКА; СБОЙ НАГРУЗКИ — БЕЗ НИХ', gRec?.failureAt?.points?.map((p) => `${p.mhz}@${p.voltageMv}`).join() === '2850@880'
+      && g.r.failureAt?.loMhz === 2850 && renderCheckReport(g.r).includes('Отказ приписан частотам **2850 МГц**') && bRec?.failureAt === null
+      && renderCheckReport(b.r).includes('сбой нагрузки') && a.r.failureAt === null, `${JSON.stringify(gRec?.failureAt)} · нагрузка ${JSON.stringify(bRec?.failureAt)}`);
     const c = await run({ throwAt: MIX_STAGE.GAME });
     check('ИСПОЛНИТЕЛЬ: ИСКЛЮЧЕНИЕ В НАГРУЗКЕ — СБОЙ, А НЕ ПАДЕНИЕ ПРИБОРА; ОТКАТ СДЕЛАН', c.r.verdict.verdict === CHECK_VERDICT.FAILED && c.calls.includes('rollback'), c.r.verdict.why);
     const d = await run({ applyOk: false });
@@ -1050,30 +1089,38 @@ export async function selfTest() {
   // ---- plans/105 Ш2: LEVEL 3, the frequency. Mutation addressees MV12–MV16 are named in the header.
   {
     const fw = [S(-600, 2700), S(0, 2880), S(500, 2880), S(1000, 2865), S(1500, 2880), S(2000, 2895)];
-    const fq = failureFrequency(fw, 2000);
-    const rowsV = [{ mhz: 2880, voltageMv: 890 }, { mhz: 2850, voltageMv: 870 }, { mhz: 2865, voltageMv: 880 }];
-    check('УРОВЕНЬ ЧАСТОТЫ: СБОЙ ПРИПИСАН НАИМЕНЬШЕЙ ВЫДАННОЙ ЧАСТОТЕ ЗА 2 С, ПРОБА ДО ОКНА НЕ СЧИТАЕТСЯ', fq === 2865
-      && failureFrequency([S(0, 2800), S(5000, 2900)], 4000) === 2800 && failureFrequency([], 100) === null
-      && verdictOf({ samples: fw, driverEvents: [{ atMs: 2000, id: 153 }] }).failure.mhz === 2865,
-      `окно → ${fq} · пустое окно → ${failureFrequency([S(0, 2800), S(5000, 2900)], 4000)}`);
+    const sp = failureSpan(fw, 2000);
+    const rowsV = [{ mhz: 2880, voltageMv: 890 }, { mhz: 2850, voltageMv: 870 }, { mhz: 2865, voltageMv: 880 }, { mhz: 2895, voltageMv: 895 }];
+    check('УРОВЕНЬ ЧАСТОТЫ: РАЗБРОС ВЫДАННЫХ ЧАСТОТ ЗА 2 С, ПРОБА ДО ОКНА НЕ СЧИТАЕТСЯ', sp?.loMhz === 2865 && sp?.hiMhz === 2895
+      && failureSpan([S(0, 2800), S(5000, 2900)], 4000)?.hiMhz === 2800 && failureSpan([], 100) === null, JSON.stringify(sp));
     check('УРОВЕНЬ ЧАСТОТЫ: НАПРЯЖЕНИЕ СНИМКА — СТРОКИ НАИМЕНЬШЕЙ ЧАСТОТЫ ≥ f', curveVoltageAt(rowsV, 2860) === 880 && curveVoltageAt(rowsV, 2865) === 880
-      && curveVoltageAt(rowsV, 3000) === 890 && curveVoltageAt([], 2860) === null, `${curveVoltageAt(rowsV, 2860)} · ${curveVoltageAt(rowsV, 2865)} · ${curveVoltageAt(rowsV, 3000)}`);
+      && curveVoltageAt(rowsV, 3000) === 895 && curveVoltageAt([], 2860) === null, `${curveVoltageAt(rowsV, 2860)} · ${curveVoltageAt(rowsV, 2865)} · ${curveVoltageAt(rowsV, 3000)}`);
+    // The judge's case (F2): a failure under load with an idle sample in the window — the LOAD frequency must be under the floor.
+    const idleIn = attributeFailure({ samples: [S(0, 2900), S(500, 2900), S(1000, 1500), S(1500, 2900)], failure: { cls: FAILURE_CLASS.DRIVER, atMs: 1500 },
+      rows: [{ mhz: 1500, voltageMv: 750 }, { mhz: 2000, voltageMv: 800 }, { mhz: 2900, voltageMv: 890 }, { mhz: 3000, voltageMv: 950 }] });
+    check('УРОВЕНЬ ЧАСТОТЫ: ПРОСТОЙ В ОКНЕ НЕ ПРЯЧЕТ ЧАСТОТУ НАГРУЗКИ — ТОЧКИ ПОКРЫВАЮТ ВЕСЬ РАЗБРОС', idleIn?.loMhz === 1500 && idleIn?.hiMhz === 2900
+      && idleIn.points.map((p) => `${p.mhz}@${p.voltageMv}`).join() === '1500@750,2000@800,2900@890', JSON.stringify(idleIn));
+    const loadF = attributeFailure({ samples: fw, failure: { cls: FAILURE_CLASS.LOAD, atMs: 2000 }, rows: rowsV });
+    const noRows = attributeFailure({ samples: fw, failure: { cls: FAILURE_CLASS.TELEMETRY_GAP, atMs: 2000 }, rows: null });
+    check('УРОВЕНЬ ЧАСТОТЫ: СБОЙ НАГРУЗКИ ЧАСТОТЕ НЕ ПРИПИСЫВАЕТСЯ (МОМЕНТ — КОНЕЦ СТУПЕНИ); БЕЗ СНИМКА — РАЗБРОС БЕЗ ТОЧЕК', loadF === null && noRows?.points === null && noRows?.hiMhz === 2895,
+      `нагрузка ${JSON.stringify(loadF)} · без снимка ${JSON.stringify(noRows)}`);
     const m0 = [0, 0, 0, -10, -10, -10, -10];
-    const lvl3 = nextMargins({ margins: m0, verdict: CHECK_VERDICT.FAILED, failureBand: 4, failureAt: { mhz: 2865, voltageMv: 880 }, ratchetMv: r10 });
-    const noV = nextMargins({ margins: m0, verdict: CHECK_VERDICT.FAILED, failureBand: 4, failureAt: { mhz: 2865, voltageMv: null }, ratchetMv: r10 });
-    check('УРОВЕНЬ ЧАСТОТЫ: СБОЙ С ЧАСТОТОЙ И НАПРЯЖЕНИЕМ НЕ ДВИГАЕТ ЗАПАС ПОЛОСЫ; БЕЗ НАПРЯЖЕНИЯ — ХРАПОВИК ПОЛОСЫ', lvl3.margins.join() === m0.join() && lvl3.floors.join() === nextMargins({ margins: m0, verdict: CHECK_VERDICT.UNKNOWN, ratchetMv: r10 }).floors.join()
-      && /2865 МГц при 880 мВ/.test(lvl3.changes[0]?.why ?? '') && noV.margins[4] === 0 && noV.floors[4] === 0, `с частотой ${lvl3.margins.join()} · без напряжения ${noV.margins.join()}`);
+    const pts = { loMhz: 2865, hiMhz: 2865, points: [{ mhz: 2865, voltageMv: 880 }] };
+    const lvl3 = nextMargins({ margins: m0, verdict: CHECK_VERDICT.FAILED, failureBand: 4, failureAt: pts, ratchetMv: r10 });
+    const noV = nextMargins({ margins: m0, verdict: CHECK_VERDICT.FAILED, failureBand: 4, failureAt: { loMhz: 2865, hiMhz: 2865, points: null }, ratchetMv: r10 });
+    check('УРОВЕНЬ ЧАСТОТЫ: СБОЙ С ТОЧКАМИ НЕ ДВИГАЕТ ЗАПАС ПОЛОСЫ; БЕЗ ТОЧЕК — ХРАПОВИК ПОЛОСЫ', lvl3.margins.join() === m0.join() && lvl3.floors.join() === nextMargins({ margins: m0, verdict: CHECK_VERDICT.UNKNOWN, ratchetMv: r10 }).floors.join()
+      && /2865 МГц/.test(lvl3.changes[0]?.why ?? '') && noV.margins[4] === 0 && noV.floors[4] === 0, `с точками ${lvl3.margins.join()} · без точек ${noV.margins.join()}`);
     const deathRecs = [{ state: LINE.INTENT, kind: CHECK_KIND, seq: 9, mode: 'optimised', snapshot: 'snapX', telemetryPath: 'x.jsonl' }];
-    const dv = deathVerdicts(deathRecs, { readSamples: () => fw, voltageAt: (id, mhz) => (id === 'snapX' ? curveVoltageAt(rowsV, mhz) : null) });
-    check('УРОВЕНЬ ЧАСТОТЫ: СМЕРТЬ С ДОЛГОВЕЧНОЙ ПРОБОЙ ПОЛУЧАЕТ ЧАСТОТУ И НАПРЯЖЕНИЕ СВОЕГО СНИМКА', dv[0]?.failureAt?.mhz === 2865 && dv[0]?.failureAt?.voltageMv === 880
+    const dv = deathVerdicts(deathRecs, { readSamples: () => fw, rowsOf: (id) => (id === 'snapX' ? rowsV : null) });
+    check('УРОВЕНЬ ЧАСТОТЫ: СМЕРТЬ С ДОЛГОВЕЧНОЙ ПРОБОЙ ПОЛУЧАЕТ РАЗБРОС И ТОЧКИ СВОЕГО СНИМКА', dv[0]?.failureAt?.loMhz === 2865 && dv[0]?.failureAt?.points?.map((p) => p.mhz).join() === '2865,2880,2895'
       && deathVerdicts(deathRecs, { readSamples: () => [] })[0].failureAt === null, JSON.stringify(dv[0]?.failureAt));
     const floors = checkFailureFloors([
-      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 1, verdict: CHECK_VERDICT.FAILED, failure: { cls: 'driver-voice' }, failureAt: { mhz: 2865, voltageMv: 880 } },
-      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 2, verdict: CHECK_VERDICT.FAILED, failureAt: { mhz: 2900, voltageMv: null } },
-      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 3, verdict: CHECK_VERDICT.PASSED, failureAt: { mhz: 2800, voltageMv: 860 } },
-      { state: LINE.VERDICT, seq: 4, verdict: CHECK_VERDICT.FAILED, failureAt: { mhz: 2700, voltageMv: 850 } },
+      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 1, verdict: CHECK_VERDICT.FAILED, failure: { cls: 'driver-voice' }, failureAt: pts },
+      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 2, verdict: CHECK_VERDICT.FAILED, failureAt: { loMhz: 2900, hiMhz: 2900, points: null } },
+      { state: LINE.VERDICT, kind: CHECK_KIND, seq: 3, verdict: CHECK_VERDICT.PASSED, failureAt: { loMhz: 2800, hiMhz: 2800, points: [{ mhz: 2800, voltageMv: 860 }] } },
+      { state: LINE.VERDICT, seq: 4, verdict: CHECK_VERDICT.FAILED, failureAt: { loMhz: 2700, hiMhz: 2700, points: [{ mhz: 2700, voltageMv: 850 }] } },
     ]);
-    check('УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЮ ИДУТ ТОЛЬКО СБОИ ПРОВЕРОК С ЧАСТОТОЙ И НАПРЯЖЕНИЕМ', floors.length === 1 && floors[0].mhz === 2865 && floors[0].mv === 880, JSON.stringify(floors));
+    check('УРОВЕНЬ ЧАСТОТЫ: ПОСТРОИТЕЛЮ ИДУТ ТОЛЬКО ТОЧКИ СБОЕВ ПРОВЕРОК', floors.length === 1 && floors[0].mhz === 2865 && floors[0].mv === 880, JSON.stringify(floors));
 
     // P105-AC4 on the builder itself: a failure at 2865 MHz / 880 mV raises rows ≥ 2865 to 880 + two grid steps and nothing below.
     const cp = await import('../../tools/curve-proposal.mjs');
@@ -1090,6 +1137,15 @@ export async function selfTest() {
       raised.length > 0 && raised.every((f) => f >= 2865) && withC.rows.every((r) => r.mhz < 2865 || r.voltageMv >= Math.min(r.stockVoltageMv, need))
       && withC.rows.every((r, i) => r.mhz >= 2865 || r.voltageMv === baseC.rows[i].voltageMv),
       `поднято: ${raised.join(' ')} · ${withC.rows.filter((r) => r.mhz >= 2850 && r.mhz <= 2950).map((r) => r.mhz + '@' + r.voltageMv).join(' ')}`);
+    // The span on the builder: every row inside the span stands ≥ its own failed voltage + two steps (or stock) — the envelope.
+    const span = { loMhz: 2615, hiMhz: 2900 };
+    const spanFloors = checkFailureFloors([{ state: LINE.VERDICT, kind: CHECK_KIND, seq: 5, verdict: CHECK_VERDICT.FAILED, failure: { cls: 'telemetry-gap' },
+      failureAt: { ...span, points: failurePoints(baseC.rows, span) } }]);
+    const spanC = cp.bandedCurve({ ...argsA, credible: cp.withCheckFailures(fx.credible, spanFloors) });
+    const up2 = (v) => g5.find((g) => g > (g5.find((x) => x > v) ?? v)) ?? v;
+    const notCovered = spanC.rows.filter((r, i) => r.mhz >= span.loMhz && r.voltageMv < Math.min(r.stockVoltageMv, up2(baseC.rows[Math.min(i, baseC.rows.findIndex((b) => b.mhz >= Math.min(r.mhz, span.hiMhz)))].voltageMv)));
+    check('УРОВЕНЬ ЧАСТОТЫ: ПОЛ НА ВЕСЬ РАЗБРОС — КАЖДАЯ ЧАСТОТА РАЗБРОСА И ВЫШЕ НЕ НИЖЕ СВОЕГО НАПРЯЖЕНИЯ СБОЯ + 2 ШАГА', spanFloors.length > 2 && notCovered.length === 0,
+      `точек ${spanFloors.length} · не покрыто: ${notCovered.map((r) => r.mhz + '@' + r.voltageMv).join(' ') || 'ничего'}`);
 
     // P105-AC5 (Ш3): one step = one command; the dry run writes nothing; the real one writes document → snapshot → candidate, in that order.
     const cs = await import('./curve-store.mjs');
@@ -1138,10 +1194,10 @@ export async function runSelfTest() {
  */
 async function closeDeathsFirst(journal, dry) {
   const cs = await import('./curve-store.mjs');
-  const voltageAt = (id, mhz) => curveVoltageAt(cs.loadSnapshot({ id })?.frequencies, mhz);
-  const deaths = deathVerdicts(readJournal(journal).records, { voltageAt });
+  const rowsOf = (id) => cs.loadSnapshot({ id })?.frequencies ?? null;
+  const deaths = deathVerdicts(readJournal(journal).records, { rowsOf });
   for (const d of deaths) {
-    const at = d.failureAt ? ` · частота ${d.failureAt.mhz} МГц${Number.isFinite(d.failureAt.voltageMv) ? ` при ${d.failureAt.voltageMv} мВ` : ''}` : '';
+    const at = d.failureAt ? ` · частоты ${spanText(d.failureAt)}${d.failureAt.points ? ` (точек пола ${d.failureAt.points.length})` : ''}` : '';
     console.log(`🔴 НЕЗАКРЫТОЕ НАМЕРЕНИЕ seq ${d.seq} (${d.mode}) — это СМЕРТЬ машины во время проверки: ${d.failure.why}; полоса ${d.failure.band === null ? 'неизвестна' : MODE_BANDS[d.failure.band].label}${at}`);
     if (!dry) writeCheckVerdict(journal, { seq: d.seq, verdict: d.verdict, failure: d.failure, failureAt: d.failureAt, at: new Date().toISOString(), why: `закрыто при следующем запуске: ${d.failure.why}` });
   }

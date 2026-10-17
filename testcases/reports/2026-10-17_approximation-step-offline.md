@@ -1,7 +1,7 @@
 # Test run report — level 3 «the frequency» and the one-command step (plans/105 Ш2–Ш4), offline
 
 **Created:** 2026-10-17 13:14 +03:00 · **Run by:** the agent (Claude Opus 5.5), session 108 ·
-**Version/build:** working tree on top of `9ff72f2` (the Ш2–Ш4 commit of 2026-10-17)
+**Version/build:** `30567a5` (Ш2–Ш4) and the judge-fix commit on top of it (✏️ the first edition named the parent `9ff72f2` as «the Ш2–Ш4 commit» — judge F5)
 
 ## 1. Work
 
@@ -49,6 +49,23 @@ Functional run: the step command walked on the REAL builder data and the REAL ca
 - **the 30-second smoke is not 30 seconds**: `planMix({ minutes: 0.5 })` gives 66 s by plan (nine stages, each ≥ 5 s, transitions ≥ 2 cycles; a Q2RTX pass ~11 s on top) against the owner's «смоук на 30 секунд» (25.09). Not changed here — the mix's floors (idle at both ends, transitions) are its reason to exist; named in `plans/105` as an open fork before the evening.
 - `'+' + m` printed a negative margin as «+-10» in three places (the candidate's draft line, the check report, the metric line) — fixed in the same step (`signedMv`); S3, no bug document.
 - standing falsehood in `STATUS.md`: «`bugs/141` — live witness obtained 27.09 (stock via CLI, code 0)». The bug's own text says the stock check passed BEFORE the fix too (a curve-less profile never imports `curve-store`), so that run is not a witness of the fix — corrected where it stood.
+
+### Addendum 2026-10-17 ~13:40 +03:00 — the independent judge, and what it changed
+
+An adversarial verifier (a clean subagent) confirmed claims 1–8 as coded (it re-ran the dry step and found the journal's
+size/mtime and `curves/` · `profiles/` · `runs/validate/` unchanged; reproduced MV13, MV15; 55/0/2852) and REFUTED the
+design of level 3 in two places:
+- **F2** — «the lowest frequency of the window» was the LEAST conservative choice (lowest frequency = lowest voltage): a
+  load failure with an idle sample in the window floored a few idle rows and none of the load rows; a LOAD failure is
+  stamped at the stage's end, after the load died. Fixed: the whole span of the window, every frequency at its own
+  snapshot voltage (`failureSpan` · `failurePoints` · `attributeFailure`); LOAD failures are not attributed (band ratchet).
+- **F1** — `raiseToFailures` skipped a failure whose floor is above stock, so the failed voltage stayed and nothing moved.
+  Fixed: the row lands on stock. Byte-identical builder output on the real data for `--margin 0`, `--margin 30` and
+  `--band-margins 0,0,0,-30,-30,-30,-30` (no current failure is near stock).
+- F3 (floors permanent, no driver stamp) — kept by design of the ratchet (ЗАКАЗ.md §3), named in `checkFailureFloors`;
+  F4 (`nextMargins` has no caller outside the selftest — the operator steps the margins) — named; F5 — this header.
+After the fix: validate selftest 57/57 · builder 36/36 · mutations MV12 · MV14 · MV16 · MV17 · MF1 each red on its own
+block, files restored byte-exact · `npm run check` 0 · `selftest:all` 55 suites, 0 red, 2856 green blocks.
 
 ## 6. Traces
 
