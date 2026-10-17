@@ -38,6 +38,14 @@
 </p>
 
 <p align="center"><sub>Every number above is read from the bench's own records (<code>runs/graphics/*.json</code>), two runs per state, alternated. Redraw it with <code>node tools/build-comparison-card.mjs</code>.</sub></p>
+
+<p align="center">
+  <img src="assets/area/area-en-1.png" width="900" alt="Area won under the factory frequency → voltage curve: 125.3 V·MHz, 5.11 %, a mean undervolt of 43.1 mV">
+  <img src="assets/area/area-en-2.png" width="900" alt="The factory curve and ours, and the area won in each frequency band">
+</p>
+
+<p align="center"><sub>⚖️ Optimised on 2026-10-17. Read from the curve the mode stands on; redraw with <code>node tools/build-area-card.mjs</code>.</sub></p>
+
 **KAGO is a Node.js orchestrator that undervolts an NVIDIA GPU on Windows — automatically, with a measured safety margin, and without installing a single third-party GUI.**
 
 <p align="center">
@@ -354,6 +362,14 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
 </p>
 
 <p align="center"><sub>Каждое число выше прочитано из записей прибора (<code>runs/graphics/*.json</code>), по два замера на состояние, чередованием. Перерисовать: <code>node tools/build-comparison-card.mjs</code>.</sub></p>
+
+<p align="center">
+  <img src="assets/area/area-ru-1.png" width="900" alt="Площадь, выигранная под заводской кривой «частота → напряжение»: 125,3 В·МГц, 5,11 %, в среднем −43,1 мВ">
+  <img src="assets/area/area-ru-2.png" width="900" alt="Заводская кривая и наша, выигрыш по полосам частот">
+</p>
+
+<p align="center"><sub>⚖️ Optimised на 17.10.2026. Числа — из кривой, на которой стоит режим; перерисовать: <code>node tools/build-area-card.mjs</code>.</sub></p>
+
 **KAGO — оркестратор на Node.js, который сам подбирает андервольтинг для видеокарты NVIDIA под Windows: с измеренным запасом надёжности и без единого стороннего GUI в зависимостях.**
 
 <p align="center">
