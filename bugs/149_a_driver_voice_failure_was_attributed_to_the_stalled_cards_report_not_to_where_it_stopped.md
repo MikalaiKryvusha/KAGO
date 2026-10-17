@@ -55,6 +55,18 @@ TDR lag) and `telemetry-gap` (the sampler's own gap moment) do not take the voic
 Re-attribution of all four failed checks in `runs/validate/journal.jsonl` (seq 16, 18, 19, 23) with the fixed rule: spans
 unchanged — no floor in the journal was laid by this defect.
 
+## Second face — 17.10 17:41, a stall with NO power drop (check seq 26, curve 90f679)
+
+200-ms telemetry `runs/use/2026-10-17T17-40-09-validate-90f679-200ms.csv`: 17:41:21.49 wake from P3 (1095 MHz) straight into the
+Q2RTX load — 3037 MHz / 261 W · 22.11–22.51 2895 MHz / 249 W · **23.12 2902 MHz / 250.99 W / 99 % / 73 °C and then IDENTICAL to the
+digit for 110 s** (frozen telemetry — the stale view of a wedged engine, netdata Xid 43) · the check's own sampler (`mon.jsonl`)
+wrote its last sample at 22.76 · the first `153` at **17:41:41 — 18 s after the freeze**, not 2. The power-collapse rule saw
+nothing (power froze high); the attribution fell to the widened window, which was EMPTY of check samples and took the last one
+(2895 @890) — right here, but by the fallback. Not acted on (named, deliberately): counting the sampler's tail silence as a
+`telemetry-gap` failure would date it right (22.76), but its 2-s window holds the idle samples before the wake (1095…3037) and the
+envelope would floor the whole curve between — worse than today. The honest rule for a wake-into-load stall is «samples under load
+before the silence» — a design question for after the card day, with this record as its fixture.
+
 ## Decisions made without the owner
 
 - `[AI]` the stall rule over a widened window (FORK line at `attributeFailure`, `researches/41`).
