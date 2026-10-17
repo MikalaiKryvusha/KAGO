@@ -20,7 +20,7 @@ states); data and machine — his card, his curve, his profiles; path — the sh
 
 ## 3. Runs
 
-Chain script `cmp2-chain.mjs` (scratchpad), log `runs/graphics/cmp2-chain.log` (+ the two aborted logs beside it).
+Chain script — `tools/cmp-chain.mjs` (run from the scratchpad as `cmp2-chain.mjs` that evening, moved into the repo at the closing, same flow), log `runs/graphics/cmp2-chain.log` (+ the two aborted logs beside it).
 
 | # | Moment | Command | Exit / outcome |
 |---|---|---|---|

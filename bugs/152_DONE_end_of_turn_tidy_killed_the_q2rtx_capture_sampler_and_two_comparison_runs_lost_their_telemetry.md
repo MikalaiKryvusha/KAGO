@@ -1,6 +1,6 @@
 # Bug 152 — the end-of-turn tidy killed the Q2RTX capture's sampler, and two comparison runs lost their telemetry
 
-**Status:** 🔧 fix pending verification · **Severity:** S2 (two runs lost: ~14 min of the owner's machine, the stock leg twice)
+**Status:** ✅ DONE 2026-10-17 23:4x (witnessed on the real path) · **Severity:** S2 (two runs lost: ~14 min of the owner's machine, the stock leg twice)
 **Version/build:** `tools/tidy.mjs` before this fix, driver 617.42 · **When/context:** 2026-10-17 21:43 and 21:59, session 112, the
 honest stock comparison (attics open), chain `cmp2-chain.mjs` launched detached (`Start-Process -WindowStyle Hidden`)
 **Fixing:** this session
@@ -43,9 +43,14 @@ re-check) → red (22:28).
 **Guards:**
 - `node tools/tidy.mjs --selftest` → block «bugs/152: идущий ЗАХВАТ Q2RTX…». THREAT: tidy kills a live capture's sampler.
   PROVED-AGAINST: MTD2 — the graphics-load marker line removed → that block alone red (2026-10-17 22:02). GAP: a NEW sampler parent
-  must be added by hand (the inventory comment is the list). ON-REAL-PATH: NOT YET — the cmp2 run from 22:02 across the agent's turn ends.
+  must be added by hand (the inventory comment is the list). ON-REAL-PATH: 2026-10-17 22:08–23:19 — the stock, 🚀, ❄️ and ⚖️ captures kept 1378 · 1274 · 1550 · 1352 loaded samples across dozens of turn ends; the 🚀 capture started at 22:33:27, in the exact race window that killed run 4 (after fix 3).
 - `node automation-engine/lib/hardware-mon.mjs --selftest` (3 blocks, `selftest:all` id `sampler`). PROVED-AGAINST: the try/catch
-  removed → block «ОДНА ПЛОХАЯ ПРОБА» red (21:58). ON-REAL-PATH: NOT YET.
+  removed → block «ОДНА ПЛОХАЯ ПРОБА» red (21:58). ON-REAL-PATH: the hardened loop ran in all four cmp2 captures with 0 error rows — no bad probe occurred, so its catch branch is still unwitnessed live.
+
+## ✅ STATUS: DONE (2026-10-17 23:4x +03:00)
+
+Hygiene: `node tools/tidy.mjs --selftest` 24/24 · `node automation-engine/lib/hardware-mon.mjs --selftest` 3/3 · `npm run selftest:all` 56 sets, 0 red.
+Functional run: four Q2RTX captures on the owner's card through his shortcuts, the agent's turn ending repeatedly during each — telemetry complete (report `testcases/reports/2026-10-17_cmp2_stock_comparison.md`).
 
 TWINS: searched `spawn(process.execPath, [MON` and `hardware-mon` across `automation-engine/lib` and `tools` — spawners: graphics-load,
 power-baseline (both fixed here), mode-validate and vf-step (already markers), fuse (child of engine, a marker); curve-store only

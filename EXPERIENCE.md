@@ -118,6 +118,7 @@
 > | `field-dropped-in-rebuild` | a field or section silently lost when an artifact was regenerated |
 > | `agent-decision-worn-as-owner-word` | an agent's own choice, carrier or reading recorded under the owner's name or an interview address that does not say it (added 2026-09-18, EXP-0284; origin #55) |
 > | `blind-read-as-empty` | a data source that FAILED (a missing tool, a refused query) is read as «nothing there», and a guard built on it lets everything through (added 2026-09-26, EXP-0300; `bugs/143`) |
+> | `tidy-kills-live-run` | the end-of-turn cleanup takes a child of a LIVE run (a sampler, a page server) for a leftover and kills it (added 2026-10-17, EXP-0311; `bugs/21` · `bugs/150` · `bugs/152`) |
 > | `release-text-over-owner-word` | a fetched text (a release, a template) is taken over the owner's own word the agent keeps, instead of putting the collision to him (added 2026-10-17, EXP-0304) |
 >
 > The `#tags` are **trigger-tags**: before a task, grep by the task's tags and QUOTE the relevant
@@ -127,6 +128,19 @@
 > Skill: `/experience` (capture a lesson · recall relevant lessons).
 
 ## Entries
+
+### EXP-0311 · 2026-10-17 · ❌→✅ · #tidy #stop-hook #sampler #toctou #detached-run #s2
+class: tidy-kills-live-run
+mechanized: node tools/tidy.mjs --selftest (blocks «bugs/150…», «bugs/152: идущий ЗАХВАТ Q2RTX…», «bugs/152 гонка…»; mutations MTD1–MTD3)
+**Context:** the honest stock comparison ran as a detached chain of 12-min Q2RTX captures while the agent kept ending turns.
+**Result:** ❌→✅ three captures lost their sampler seconds after a turn end: tidy did not know `graphics-load --capture` as a run, and
+then — with the marker added — decided «run in flight?» on one process snapshot and picked samplers from a later one (`bugs/152`).
+The first diagnosis («a probe threw») was read from the code and refuted by the next death leaving no error row.
+**Lesson:** a cleanup that kills by pattern must judge ownership on the SAME snapshot it kills from, and every new long-lived spawner
+of a sampler joins its marker list the day it is born. The tell is timing: a child dying seconds after the agent's message.
+**Repro:** during any live capture run `node tools/tidy.mjs` (no `--apply`) → it must print «ПРОГОН В РАБОТЕ — НЕ ТРОГАЮ НИЧЕГО».
+**Trigger:** adding a tool that spawns `hardware-mon` (or any process tidy kills) → add its marker in `runInFlight` + a selftest block.
+**Not for:** samplers whose parent really died — those are leftovers and tidy should take them.
 
 ### EXP-0310 · 2026-10-17 · ❌→✅ · #attribution #telemetry-gap #twins #power-model #cabinet-heat #s2
 class: twins-missed
