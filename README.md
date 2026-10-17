@@ -275,12 +275,12 @@ from a rendered comparison: Microsoft's Fluent Emoji 3D (MIT), shipped in `asset
 
 The shortcuts already sit on the desktop, and the shell around them is proven: every click ends in
 a verified state — applied and re-read to agreement, or refused with nothing written. **`Optimised`
-was qualified on the previous graphics driver**; its numbers are the ones in the image above, measured
-by two alternated runs per state. After the driver update it waits for a new check and stays off until
-then: a write proven on one driver is not applied on another. **`Max Perfomance` and `Silent Cold` still ship as refusing
-drafts** — `Max Perfomance` has now been measured (the image above) but its acceptance is not
-closed, and `Silent Cold` has no ceiling yet: its clock cap is being chosen by the fan speed it
-lands on (target 40–50 %), which is a measurement nobody has taken on top of the tuned curve.
+and `Max Perfomance` are checked whole on the current graphics driver (617.42, 2026-10-17)**: one
+curve — this die's silicon model plus a margin per frequency band, raised exactly at the frequencies
+that once failed — at 250 W and at 300 W, each through a four-minute mix of game, burn, load steps,
+idle and wake-ups with the driver's own error channel silent throughout. **`Silent Cold` still ships
+as a refusing draft**: its clock cap is chosen by the fan speed it settles at (target 40–50 %), and
+that measurement on top of the tuned curve comes next.
 A double-click on a draft refuses out loud rather than apply an unproven undervolt. Beyond the shell,
 what has been proven on this hardware: the driver gives writes back (power limit and clock lock,
 each re-read to stability and rolled back); the card's power↔performance curve is measured across
@@ -698,12 +698,12 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 Ярлыки уже лежат на рабочем столе, и оболочка вокруг них доказана: каждый клик заканчивается
 проверенным состоянием — применено и перечитано до совпадения, либо отказано, не записав ничего.
-**`Optimised` прошёл приёмку на прежнем драйвере видеокарты** — его числа те, что на картинке выше,
-сняты двумя чередующимися замерами на каждое состояние. После обновления драйвера режим ждёт новой
-проверки и до неё не включается: запись, доказанная на одном драйвере, на другом не применяется. **`Max Perfomance` и `Silent Cold`
-по-прежнему отгружены честными черновиками:** `Max Perfomance` теперь измерен (та же картинка), но
-приёмка его не закрыта, а у `Silent Cold` ещё нет потолка — его подбирают по оборотам вентилятора, на
-которые режим садится (цель 40…50 %), и этого замера поверх тюнинг-кривой ещё никто не делал.
+**`Optimised` и `Max Perfomance` проверены целиком на нынешнем драйвере видеокарты (617.42, 17.10.2026)**:
+одна кривая — модель кремния этого кристалла плюс запас по полосам частот, поднятый ровно на тех
+частотах, что однажды сбоили, — при 250 Вт и при 300 Вт, каждый четырёхминутной смесью игры, прожига,
+скачков нагрузки, простоя и пробуждений, при молчащем канале ошибок самого драйвера. **`Silent Cold`
+пока отгружен честным черновиком**: его потолок частоты подбирается по оборотам вентилятора, на
+которых режим устанавливается (цель 40…50 %), и этот замер поверх тюнинг-кривой — следующий.
 Двойной клик по черновику отказывает вслух, вместо того чтобы применить недоказанный андервольт. Что на
 этом железе доказано помимо оболочки: драйвер отдаёт записи назад (потолок мощности и фиксация
 частоты, каждая перечитана до устойчивости и откачена); кривая мощность↔производительность снята по
