@@ -128,6 +128,13 @@
 
 ## Entries
 
+### EXP-0307 · 2026-10-17 · ❌→✅ · #sampler #stop-hook #tidy #background-recording #guessed-cause #s3-one-line
+**A background `hardware-mon` recording dies at the END OF EVERY AGENT TURN — the `Stop` hook's `tools/tidy.mjs --apply` removes
+all samplers by design (`tidy.mjs:230-234`); I first wrote «one failed sample kills the recording» into `bugs/148` from an exit
+code — the timestamps (each death = a turn end) were the observation that refuted it.** A recording must live inside one turn
+(stay in turn, `Monitor`); across turns only a non-sampler watch (driver voice via `npm run events`) survives.
+**Trigger:** a long telemetry recording started with `run_in_background` · a sampler «exited» without its `ГОТОВО` line.
+
 ### EXP-0306 · 2026-10-17 · ❌→✅ · #deepening #candidate-vs-accepted #metric #inherited-timeout #driver-reset #s2
 class: claim-wider-than-observation
 **Context / did / result:** one deepening smoke (2800–2900 at −20, a CANDIDATE curve) failed with a driver reset and broke two
