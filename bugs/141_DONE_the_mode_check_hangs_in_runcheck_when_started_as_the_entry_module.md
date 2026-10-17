@@ -92,3 +92,14 @@ curve-store. Reproduced as a 3-file control in scratch (TLA + cycle → exit 13;
 ## Links
 
 `plans/103` (Ф2) · `automation-engine/lib/mode-validate.mjs` · EXP-0294
+
+## ✅ STATUS: DONE (2026-10-17 14:13 +03:00, session 108)
+
+ON-REAL-PATH: the first CLI checks of a profile WITH a snapshot — `npm run validate -- --step --mode optimised … --minutes 4`
+at 14:08:56 (snapshot `2026-10-17T14-08-57`) — reached apply within a second and ran to the verdict (PASSED, report
+`runs/validate/2026-10-17T14-08-57/`); five more `--step` checks followed the same path. Twins: none live (Fix, item 4).
+Hygiene: `validate --selftest` (block «ЦИКЛ ИМПОРТА…», MV141). Functional run: the six checks above, read live.
+
+## Decisions made without the owner (closing)
+
+- `[AI]` Closed on the `--step` path, which applies through the same `checkCommand`/`makeCardSeams` as `--mode --candidate`.

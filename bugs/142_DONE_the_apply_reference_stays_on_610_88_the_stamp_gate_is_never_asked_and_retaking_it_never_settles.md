@@ -80,3 +80,21 @@ it in the commit that lands the 616.92 reference, then re-check Optimised (`plan
 ## Links
 
 `bugs/97` · `bugs/98` · `bugs/136` · `plans/103` · commit `40e2c86`
+
+## ✅ STATUS: DONE (2026-10-17 14:29 +03:00, session 108, the owner at the machine)
+
+- **Reference retaken on 616.92** — `npm run curve -- --take-reference` 14:06:53: P0 · 79 °C · 299 W · load 100 %; the chunked
+  `--sustain` load held the regime (the 28.09 fix, first live witness) and ended by itself; 8 reads, 0 points moved, spread 0 MHz;
+  `nvlddmkm` 0 events in the window; monotone (0 inversions; the 610.88 reference had 2 — `bugs/136` for this table). Commit `12bbfad`.
+- **The stamp gate is armed on the production path** (`profile-manager.resolveProfileCurve`: no injected loader and no stamp →
+  the card's own stamp, read-only) — same commit; `profile --selftest` 90/0.
+- **Optimised re-checked on the new reference** — 4-minute check PASSED 14:08:57 (trend + 0) and 14:22:08 (the accepted curve);
+  the ⚖️ shortcut applied it 14:29:23 (61 of 128 offsets ours, 250 W).
+- Hygiene: `profile --selftest` 90/0 · `check` 0. Functional run: the capture and two checks above, read live.
+- Not observed: which base the shortcut's apply used is not written to any log — by the code it is the 616.92 reference (stamp
+  matches); named, not claimed.
+
+## Decisions made without the owner
+
+- `[AI]` Armed the stamp gate in the same commit as the reference (the plan's order); the old reference stays as
+  `runs/reference-table-610.88.json` for rollback.
