@@ -93,3 +93,16 @@
 `bugs/133` (где аномалия впервые вылезла числом −668) · `bugs/97` (две таблицы карты) ·
 `bugs/47` · R14b · `plans/98` (ворота передачи — они судят документ, а этот тикет судит ОПОРУ; это
 разные артефакты, и путать их нельзя)
+
+## Session 109 — 2026-10-17 16:4x: two retakes, both monotone; the guard is a fork, not taken
+
+- **Evidence:** the reference was retaken twice under the worst-case regime — 616.92 (17.10 14:06, `12bbfad`, «монотонна») and
+  617.42 (17.10 15:33, `a76e09b`). On 617.42 the 127 working points are monotone (the 128th is the service entry 515 mV / 405 MHz,
+  the same in every reference); the defect points of 31.08 now read 765/770/775/785/790 mV → 1035/1177/1312/1455/1590 MHz — the
+  live table's even ≈140-MHz step, no 1980 MHz excursion; 1020/1025 mV → 2715/2730 MHz, no drop. Hypothesis 1 (a transient or a
+  capture defect of the 31.08 recording) is the consistent one; the defective file itself is gone from use (`runs/reference-table-610.88.json`).
+- **Why still open:** S1 closes with a guard, and the obvious one — `validateReferenceTable` refusing a non-monotone reference —
+  is a FORK: R12 records that the card's FACTORY table may carry its own inversions, and a refusal on those would block every
+  apply (the guard-causes-the-regression trap of R12/R13). Before writing it: read whether this card's live table ever carries an
+  inversion (`npm run nvapi -- --curve`, read-only, at idle and under load), then refuse only an inversion the live table does not
+  carry at the moment of capture. Fixing: next offline session.
