@@ -58,11 +58,41 @@ import { fileURLToPath as entryPath } from 'node:url';
  */
 async function main(argv) {
 
+// ДВА ЯЗЫКА — слово владельца 2026-10-17 23:4x: «на английский переведи, и на README и на релиз ноутсы вверху каждого
+// языкового раздела на соотв языке ставим её». Без `--lang` собираются оба кадра; код один, меняется только словарь T.
+const langAt = argv.indexOf('--lang');
+if (langAt < 0) {
+  const ru = await main([...argv, '--lang', 'ru']);
+  const en = await main([...argv, '--lang', 'en']);
+  return ru || en;
+}
+const LANG = argv[langAt + 1] === 'en' ? 'en' : 'ru';
+const T = LANG === 'en' ? {
+  dec: '.', hz: 'Hz', bench: 'built-in timedemo', driver: 'driver', output: 'output', measured: 'What we measured',
+  tagline: 'An automated framework for GPU optimisation and undervolting',
+  h1: 'Optimisation delivered! 🏆', status: 'A delivered product · four modes against stock',
+  pendingHead: 'All four modes checked ✅',
+  pendingBody: 'Medians over 12 minutes of play, the card at its thermal plateau, stock and the modes under the same conditions.',
+  sub: { stock: 'as from the factory', mp: 'full power', opt: 'everyday', silent: 'silence' },
+  rows: { fps: ['Frames', 'FPS'], w: ['Power', 'W'], t: ['Temperature', '°C'], fan: ['Fan', '%'], clk: ['Core clock', 'MHz'] },
+} : {
+  dec: ',', hz: 'Гц', bench: 'встроенный таймдемо', driver: 'драйвер', output: 'вывод', measured: 'Что измерено',
+  tagline: 'Автоматический фреймворк оптимизации и андервольтинга GPU',
+  // Заголовок — слово владельца 2026-10-17 23:3x: «это больше не ПЕРВЫЕ РЕЗУЛЬТАТЫ. Это Прауд оф достижение» · «сделали
+  // оптимизацию!» · «доставленный продукт». Английская строка — перевод по смыслу, не калька.
+  h1: 'Сделали оптимизацию! 🏆', status: 'Доставленный продукт · четыре режима против стока',
+  pendingHead: 'Все четыре режима проверены ✅',
+  pendingBody: 'Медианы за 12 минут игры, карта на тепловом плато, сток и режимы — в одинаковых условиях.',
+  sub: { stock: 'как с завода', mp: 'полная мощность', opt: 'ежедневный', silent: 'тишина' },
+  rows: { fps: ['Кадры', 'FPS'], w: ['Мощность', 'Вт'], t: ['Температура', '°C'], fan: ['Вентилятор', '%'], clk: ['Частота ядра', 'МГц'] },
+};
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RUNS = join(ROOT, 'runs', 'graphics');
 const OUT_DIR = join(ROOT, 'assets');
-const HTML = join(OUT_DIR, 'comparison-9x16.html');
-const PNG = join(OUT_DIR, 'comparison-9x16.png');
+const STEM = LANG === 'en' ? 'comparison-9x16-en' : 'comparison-9x16';
+const HTML = join(OUT_DIR, `${STEM}.html`);
+const PNG = join(OUT_DIR, `${STEM}.png`);
 
 // ВЕРСИЯ ЧИТАЕТСЯ ИЗ МАНИФЕСТА, А НЕ ВПИСЫВАЕТСЯ. Номер, набранный руками внутри картинки, — ровно (KAIF-VERSION-OK: ниже — история чужого инцидента, а не заявление о версии)
 // тот дефект, за который заплатил соседний KAIF: релиз 2.3 уехал на GitHub с логотипом, на котором
@@ -91,12 +121,18 @@ const SCALE = 2;                       // итог — 2160×3840
 // VBIOS (`gfx --spread`), и он их принял — иначе карточку рисовать было бы нельзя.
 // ⚠️ ИМЕНА РЕЖИМОВ ПИШУТСЯ КАК ИХ НАЗВАЛ ВЛАДЕЛЕЦ, БЕЗ СОКРАЩЕНИЙ. «Max Perf.» — обрубок, а имя
 // режима это бренд: канон отгружает «Max Perfomance» именно так, вместе с его орфографией.
+// 🔄 2026-10-17 23:2x (сессия 112) — НАБОР ЗАМЕНЁН честным сравнением со стоком при ОТКРЫТЫХ антресолях:
+// `cmp2-*`, по ОДНОЙ записи на режим, но каждая — 60 проходов таймдемо до теплового плато (12–14 мин), между
+// режимами 5 мин простоя, кривая 6ea8d6, драйвер 617.42. Пара здесь заменена длиной: разброс кадров ВНУТРИ
+// записи — 0,8…4,0 % (у 🚀 это ровный рост 59,0 → 60,4 к плато, а не шум), и пол прибора по кадрам и ваттам
+// остаётся измеренным (ниже). ❄️ Silent Cold перестал быть «в разработке» — проверен 17.10, колонка своя.
 const COLUMNS = [
-  { key: 'stock', title: 'Stock Default', sub: 'как с завода', labels: ['stock_c', 'stock_d'] },
-  { key: 'opt', title: 'Optimised', sub: 'ежедневный', labels: ['opt83_a', 'opt83_b'] },
+  { key: 'stock', title: 'Stock Default', sub: T.sub.stock, labels: ['cmp2-stock'] },
   // «полная мощность» — слово владельца 2026-09-01 вместо прежнего «весь запас»: он попросил текст
   // агрессивнее, и это его витрина.
-  { key: 'mp', title: 'Max Perfomance', sub: 'полная мощность', labels: ['mp83_a', 'mp83_b'] },
+  { key: 'mp', title: 'Max Perfomance', sub: T.sub.mp, labels: ['cmp2-max'] },
+  { key: 'opt', title: 'Optimised', sub: T.sub.opt, labels: ['cmp2-opt'] },
+  { key: 'silent', title: 'Silent Cold', sub: T.sub.silent, labels: ['cmp2-silent'] },
 ];
 
 // Строки таблицы: что берём из записи и как показываем.
@@ -111,14 +147,14 @@ const COLUMNS = [
 // Где своего замера пола нет (градусы, обороты, частота) — работает разброс пары, и это честнее
 // молчания: занижённый порог показывает разницу, завышенный её скрыл бы.
 const ROWS = [
-  { what: 'Кадры', unit: 'FPS', pick: (r) => r.fps?.median, digits: 1, better: 'up', floorPct: 0.90 },
-  { what: 'Мощность', unit: 'Вт', pick: (r) => r.medians?.loaded?.['power.draw.instant']?.median, digits: 0, better: 'down', floorPct: 0.65 },
-  { what: 'Температура', unit: '°C', pick: (r) => r.medians?.loaded?.['temperature.gpu']?.median, digits: 0, better: 'down' },
-  { what: 'Вентилятор', unit: '%', pick: (r) => r.medians?.loaded?.['fan.speed']?.median, digits: 0, better: 'down' },
+  { what: T.rows.fps[0], unit: T.rows.fps[1], pick: (r) => r.fps?.median, digits: 1, better: 'up', floorPct: 0.90 },
+  { what: T.rows.w[0], unit: T.rows.w[1], pick: (r) => r.medians?.loaded?.['power.draw.instant']?.median, digits: 0, better: 'down', floorPct: 0.65 },
+  { what: T.rows.t[0], unit: T.rows.t[1], pick: (r) => r.medians?.loaded?.['temperature.gpu']?.median, digits: 0, better: 'down' },
+  { what: T.rows.fan[0], unit: T.rows.fan[1], pick: (r) => r.medians?.loaded?.['fan.speed']?.median, digits: 0, better: 'down' },
   // ЧАСТОТА НЕ КРАСИТСЯ — слово владельца 2026-09-01. И это не только вкус: частота сама по себе не
   // выигрыш для читателя (факт 25 этого проекта: 6 % частоты покупают 1 % кадров), поэтому цветом её
   // подавать значило бы выдавать внутреннюю величину за пользу.
-  { what: 'Частота ядра', unit: 'МГц', pick: (r) => r.medians?.loaded?.['clocks.gr']?.median, digits: 0, better: 'up', plain: true },
+  { what: T.rows.clk[0], unit: T.rows.clk[1], pick: (r) => r.medians?.loaded?.['clocks.gr']?.median, digits: 0, better: 'up', plain: true },
 ];
 
 /** Запись прибора по метке. Нет записи — ПАДАЕМ: карточка без замера не рисуется. */
@@ -143,7 +179,7 @@ function pairValue(labels, pick) {
 }
 
 const fmt = (v, digits) => (v === null || v === undefined ? '—'
-  : Number(v).toFixed(digits).replace('.', ','));
+  : Number(v).toFixed(digits).replace('.', T.dec));
 
 /** Типографика против некрасивых переносов — просьба владельца, дословно. */
 function typo(s) {
@@ -201,7 +237,7 @@ const fpsOpt = pairValue(COLUMNS.find((c) => c.key === 'opt').labels, (r) => r.f
 const fpsMp = pairValue(COLUMNS.find((c) => c.key === 'mp').labels, (r) => r.fps?.median).value;
 const dropVsMp = Number.isFinite(fpsOpt) && Number.isFinite(fpsMp) && fpsMp ? ((fpsOpt - fpsMp) / fpsMp) * 100 : null;
 const dropSaid = dropVsMp === null ? '—'
-  : `${dropVsMp > 0 ? '+' : '−'}${Math.abs(dropVsMp).toFixed(1).replace('.', ',')}${NB}%`;
+  : `${dropVsMp > 0 ? '+' : '−'}${Math.abs(dropVsMp).toFixed(1).replace('.', T.dec)}${NB}%`;
 const stamp = record(COLUMNS[1].labels[0]);
 const demo = stamp.demo ?? 'timedemo';
 // ─── ИМЯ ИГРЫ И ИМЯ ПРОГОНА — ПО-ЧЕЛОВЕЧЕСКИ (слово владельца 2026-09-01) ─────────────────────
@@ -214,7 +250,7 @@ const demo = stamp.demo ?? 'timedemo';
 // ⚠️ СВЯЗЬ С ЗАПИСЬЮ ПРОВЕРЯЕТСЯ, А НЕ ПОДРАЗУМЕВАЕТСЯ: если прибор однажды начнёт гонять другую
 // демозапись, красивое имя игры станет ложью. Поэтому сверка ниже краснеет на несовпадении.
 const GAME = 'Quake II RTX';
-const BENCH = 'встроенный таймдемо';
+const BENCH = T.bench;
 const DEMO_EXPECTED = 'q2demo1.dm2';
 if (demo !== DEMO_EXPECTED) {
   throw new Error(`запись прибора гоняла демо «${demo}», а карточка подписана как «${GAME} · ${BENCH}» `
@@ -228,7 +264,7 @@ const driver = stamp.gpu?.driver ?? '?';
 // только глазом, а на витрину смотрит посторонний.
 const g = stamp.desktopGeometry ?? {};
 const geometry = Number.isFinite(g.width) && Number.isFinite(g.height)
-  ? `${g.width}×${g.height}${Number.isFinite(g.refreshHz) ? ` @ ${g.refreshHz} Гц` : ''}`
+  ? `${g.width}×${g.height}${Number.isFinite(g.refreshHz) ? ` @ ${g.refreshHz} ${T.hz}` : ''}`
   : '—';
 
 // ─── ВЁРСТКА ──────────────────────────────────────────────────────────────────────────────────
@@ -239,21 +275,27 @@ const geometry = Number.isFinite(g.width) && Number.isFinite(g.height)
 // увидел зелёное «−0,3 %» на ваттах Max Perfomance: «если выигрыш в ватах отсутствует - то не крась
 // и не считай проценты». Значит разница тоньше разброса пары не печатается ВООБЩЕ — ни цветом, ни
 // числом: процент, который меньше собственного шума прибора, сообщает не результат, а шум.
+// Пустое место ВМЕСТО процента — той же высоты, что строка процента: иначе ячейка без него центрирует число ниже
+// соседей (слово владельца 17.10: «где проценты убрал — опустились цифры, поровняй с другими по высоте»).
+const DELTA_SLOT = `<span class="d">${NB}</span>`;
 const deltaHtml = (d) => {
-  if (!d || !d.meaningful) return '';
+  if (!d || !d.meaningful) return DELTA_SLOT;
+  // Красный процент не печатается — слово владельца 2026-10-17 23:4x: «уберём проценты… не минусовые, а красные ·
+  // из частоты холодного и из кадров» · «просто не пишем процент». Само число в ячейке остаётся.
+  if (!d.good) return DELTA_SLOT;
   return `<span class="d ${d.good ? 'good' : 'bad'}">${d.pct > 0 ? '+' : '−'}`
-    + `${Math.abs(d.pct).toFixed(1).replace('.', ',')}${NB}%</span>`;
+    + `${Math.abs(d.pct).toFixed(1).replace('.', T.dec)}${NB}%</span>`;
 };
 
 const rowsHtml = data.map((r) => `
       <tr>
         <td class="what">${typo(r.what)}</td>
         ${COLUMNS.map((c) => `<td class="num ${r.plain ? 'plain' : c.key}">${fmt(r.cells[c.key].value, r.digits)}<span class="u">${NB}${r.unit}</span>`
-    + `${c.key === 'stock' ? '' : deltaHtml(r.deltas[c.key])}</td>`).join('')}
+    + `${c.key === 'stock' ? DELTA_SLOT : deltaHtml(r.deltas[c.key])}</td>`).join('')}
       </tr>`).join('');
 
 const html = `<!doctype html>
-<html lang="ru"><head><meta charset="utf-8">
+<html lang="${LANG}"><head><meta charset="utf-8">
 <style>
   @page { size: ${WIDTH}px ${HEIGHT}px; margin: 0 }
   * { box-sizing: border-box; margin: 0; padding: 0 }
@@ -287,22 +329,28 @@ const html = `<!doctype html>
   .status { font-size: 34px; color: #c9d1d9; font-weight: 600; margin-top: 12px }
   .card { font-size: 27px; color: #7d8590; margin-top: 20px; line-height: 1.4 }
   table { width: 100%; border-collapse: collapse; margin-top: 34px; table-layout: fixed }
-  col.what { width: 28% } col.n { width: 24% }
-  th, td { border: 2px solid #30363d; padding: 38px 16px; text-align: right; white-space: nowrap }
+  col.what { width: 22% } col.n { width: 19.5% }
+  th, td { border: 2px solid #30363d; padding: 44px 10px; text-align: right; white-space: nowrap }
   /* ЗАГОЛОВОК КОЛОНКИ ПЕРЕНОСИТСЯ, А НЕ УПИРАЕТСЯ В РАМКУ: имя режима сокращать нельзя (это бренд),
      значит уступает вёрстка. В неразрывном виде Max Perfomance уезжал за границу кадра. */
   th { background: #161b22; font-size: 27px; color: #e6edf3; font-weight: 700; text-align: right; padding: 22px 16px; white-space: normal; line-height: 1.2 }
-  th.what, td.what { text-align: left; font-size: 36px; color: #c9d1d9; white-space: normal }
+  th.what, td.what { text-align: left; font-size: 31px; color: #c9d1d9; white-space: normal }
   /* Подписи колонок — ярче и своим цветом у каждой (слово владельца: «эти текста ярче, красивее»).
      Цвет не украшение: он же стоит на числах этой колонки, поэтому подпись и число читаются парой. */
   th span { display: block; font-size: 24px; font-weight: 600; margin-top: 8px; white-space: normal; letter-spacing: .02em }
   th.col-stock span { color: #c9d1d9 }
   th.col-opt span { color: #58a6ff }
   th.col-mp span { color: #f0883e }
-  td.num { font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.05 }
+  th.col-silent span { color: #56d4dd }
+  /* Четыре колонки режимов вместо трёх (17.10): кегль числа 52 → 44, иначе «2745 МГц» не встаёт в колонку. */
+  td.num { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.05 }
   /* Единицы измерения ярче: серый терялся рядом с крупным числом (слово владельца — «текущий серый
      теряется, незаметен»). Единица — часть числа, а не служебная подпись. */
-  td.num .u { font-size: 28px; font-weight: 600; color: #b6c2cd }
+  /* Единица — В ОДНОЙ строке с числом (слово владельца 17.10: «единицы попереносились на вторую строку — отобрались
+     от цифры, почини»); неразрывный пробел между ними ставит шаблон ячейки. */
+  td.num .u { font-size: 24px; font-weight: 600; color: #b6c2cd }
+  td.silent { color: #56d4dd }
+  td.silent .u { color: #8fe3ea }
   td.opt { color: #58a6ff }
   td.opt .u { color: #79b8f3 }
   /* Max Perfomance — свой цвет, как у его подписи: колонка и её число читаются парой. */
@@ -313,7 +361,7 @@ const html = `<!doctype html>
   span.d.noise { color: #6e7681; font-weight: 600 }
   /* Автоматический верхний отступ прижимает блок к низу кадра: после того как владелец убрал мелкий
      подвал, внизу оставалась пустая полоса, а 9:16 без подвала должен быть уравновешен. */
-  .pending { margin-top: auto; font-size: 30px; color: #c9d1d9; border-left: 7px solid #388bfd;
+  .pending { margin-top: auto; padding-top: 4px; font-size: 30px; color: #c9d1d9; border-left: 7px solid #388bfd;
              padding-left: 26px; line-height: 1.45 }
   .pending b { color: #58a6ff; font-weight: 700 }
   footer { margin-top: auto; font-size: 24px; color: #7d8590; line-height: 1.55; border-top: 2px solid #30363d; padding-top: 24px }
@@ -325,21 +373,21 @@ const html = `<!doctype html>
     <img src="${LOGO_SRC}" alt="">
     <div class="name">KAGO <span>${VERSION}</span></div>
   </div>
-  <div class="tagline">${typo('Автоматический фреймворк оптимизации и андервольтинга GPU')}</div>
+  <div class="tagline">${typo(T.tagline)}</div>
   <div class="pill">github.com/MikalaiKryvusha/KAGO</div>
-  <h1>Первые результаты движка KAGO 🚀</h1>
-  <div class="status">${typo('Работы продолжаются 🛠')}</div>
-  <div class="card">${typo(`${gpu} · драйвер ${driver}`)}<br>${typo(`${GAME} · ${BENCH} · вывод ${geometry}`)}</div>
+  <h1>${T.h1}</h1>
+  <div class="status">${typo(T.status)}</div>
+  <div class="card">${typo(`${gpu} · ${T.driver} ${driver}`)}<br>${typo(`${GAME} · ${BENCH} · ${T.output} ${geometry}`)}</div>
 
   <table>
     <colgroup><col class="what">${COLUMNS.map(() => '<col class="n">').join('')}</colgroup>
     <tr>
-      <th class="what">Что измерено</th>
+      <th class="what">${T.measured}</th>
       ${COLUMNS.map((c) => `<th class="col-${c.key}">${typo(c.title)}<span>${typo(c.sub)}</span></th>`).join('')}
     </tr>${rowsHtml}
   </table>
 
-  <div class="pending"><b>❄️ Silent Cold — ${typo('профиль в разработке.')}</b><br>${typo('Профиль для максимальной тишины почти без потерь производительности GPU.')}</div>
+  <div class="pending"><b>${typo(T.pendingHead)}</b><br>${typo(T.pendingBody)}</div>
 </body></html>`;
 
 // ─── ПОЧЕМУ У КАРТОЧКИ НЕТ ПОДВАЛА С МЕЛКИМ ТЕКСТОМ ───────────────────────────────────────────

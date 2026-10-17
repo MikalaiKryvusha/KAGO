@@ -1,19 +1,10 @@
-<a id="english"></a>
+<a name="english"></a>
 
 <p align="center">
-  <img src="assets/logo/kago-logo.png" width="360" alt="KAGO — a graphite chip carrying a snowflake and a flame">
+  <img src="assets/logo/kago-logo.png" width="200" alt="KAGO — a graphite chip carrying a snowflake and a flame">
 </p>
 
-# KAGO — Krinik Automated GPU Orchestrator
-
-<h3 align="center">Made by a gamer, for gamers. ❤️</h3>
-
-<h3 align="center">An automated GPU optimisation tool.</h3>
-
-<p align="center">
-  Gets the most out of your graphics card — extending its life and bringing quiet to the room.<br>
-  Raises performance, lowers heat output.
-</p>
+<h2 align="center">KAGO</h2>
 
 <p align="center">
   <a href="#english"><img src="https://img.shields.io/badge/English-2C7BE5?style=for-the-badge" alt="English"></a>
@@ -21,323 +12,205 @@
   <a href="#russian"><img src="https://img.shields.io/badge/Русский-C0392B?style=for-the-badge" alt="Русский"></a>
 </p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.9.2-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9.2)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2011-2C7BE5.svg?style=flat-square)](#5-requirements)
-[![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-requirements)
-[![Built with KAIF](https://img.shields.io/badge/Built%20with-KAIF%202.9-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
-
-<p align="center"><strong>Version 0.9.2</strong> · 2026-09-01</p>
+<p align="center"><b>Krinik Automated GPU Orchestrator</b><br>
+Made by a gamer, for gamers. ❤️</p>
 
 <p align="center">
-  <a href="#1-general">General</a> · <a href="#2-where-the-project-actually-is">Status</a> · <a href="#3-the-method">The method</a> · <a href="#4-the-four-modes">Modes</a> · <a href="#5-requirements">Requirements</a> · <a href="#6-built-with-kaif">KAIF</a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-FF1A8C.svg" alt="License: MIT"></a>
+  <a href="#en-4"><img src="https://img.shields.io/badge/platform-Windows_11-2C7BE5.svg" alt="platform: Windows 11"></a>
+  <a href="#en-4"><img src="https://img.shields.io/badge/GPU-NVIDIA_GeForce-76B900.svg" alt="GPU: NVIDIA GeForce"></a>
+  <a href="#en-4"><img src="https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg" alt="Node.js 18 or newer"></a>
+  <a href="#en-2"><img src="https://img.shields.io/badge/modes_tested-4_of_4-3FB950.svg" alt="modes tested: 4 of 4"></a>
+  <a href="https://github.com/MikalaiKryvusha/KAGO/releases/latest"><img src="https://img.shields.io/badge/release-0.9.3-E67E22.svg" alt="release: 0.9.3"></a>
+  <a href="https://github.com/MikalaiKryvusha/KAIF"><img src="https://img.shields.io/badge/framework-KAIF_2.9-8E44AD.svg" alt="framework: KAIF 2.9"></a>
+</p>
+
+[Читать по-русски →](#russian)
+
+**KAGO undervolts an NVIDIA graphics card on Windows. It builds the voltage curve for your particular chip, tests each
+mode as a whole under a game and a stress burn, and puts four modes on desktop shortcuts — with no third-party GUI.**
+
+An automated GPU optimisation tool. It gets the most out of your graphics card — extending its life and bringing quiet to
+the room. It raises performance and lowers heat output. One click puts the card on a lower voltage; another click, or
+simply a reboot, brings it back to the factory state.
+
+<p align="center">
+  <img src="assets/comparison-9x16-en.png" width="420" alt="KAGO 0.9.3 — the four modes against stock under Quake II RTX: frames, watts, temperature, fan and core clock">
 </p>
 
 <p align="center">
-  <img src="assets/comparison-9x16.png" width="420" alt="KAGO 0.9.2 — measured comparison of stock and the modes under a game: frames, watts, temperature, fan and core clock">
+  <a href="https://github.com/MikalaiKryvusha/KAGO/releases/latest"><img src="https://img.shields.io/badge/Download-v0.9.3-E67E22?style=for-the-badge" alt="Download KAGO 0.9.3"></a>
 </p>
 
-<p align="center"><sub>Every number above is read from the bench's own records (<code>runs/graphics/*.json</code>), two runs per state, alternated. Redraw it with <code>node tools/build-comparison-card.mjs</code>.</sub></p>
+<p align="center">Windows 11, Node.js 18 or newer, administrator rights. Every version: <a href="https://github.com/MikalaiKryvusha/KAGO/releases">Releases</a>.</p>
+
+Sections: [1 What it does](#en-1) · [2 The four modes and what they give](#en-2) · [3 How it works](#en-3) · [4 Install and first run](#en-4) · [5 Commands](#en-5) · [6 Project map](#en-6) · [7 Status and plans](#en-7) · [8 Author and licence](#en-8).
+
+<a name="en-1"></a>
+### 1. What it does
+
+1. Builds a frequency → voltage curve for **this specific chip**. Silicon differs from card to card — between five cards of
+   one model the lowest safe voltage varies by up to 70 mV — so KAGO ships the method, never someone else's numbers.
+2. Tests a mode **as a whole**, not one frequency at a time: four minutes of a path-traced game, a stress burn at the power
+   limit, sharp load steps, idle, and wake-ups from deep idle, while listening to the driver's own error channel.
+3. Raises the margin exactly where the card failed: a failure is traced to its frequency band, and that band gets more
+   voltage before the next test. Tuning narrows from the whole curve to a band, then to a single frequency.
+4. Puts four modes on the desktop: 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold and 🔄 Stock Default. Every click
+   ends in a verified state: the mode is applied and read back until two readings agree — or it is refused and nothing
+   is written to the card.
+5. Remembers the last mode you clicked and re-applies it at logon through the same checks. A tray icon shows which mode
+   is live.
+6. Keeps **the factory state as the default**: a mode lives in the card's volatile memory. A crash or a reboot brings the
+   card back to stock, and you do nothing.
+7. Never drives the card above its own maximum clock (this chip: 3090 MHz) and binds every mode to the driver and VBIOS
+   it was proven on: after a driver update a mode will not apply until it is tested again.
+8. Needs no MSI Afterburner and no other third-party GUI: the card is driven through the driver's own `nvidia-smi` and
+   through KAGO's own NVAPI bridge, written in Node.js.
+
+<a name="en-2"></a>
+### 2. The four modes and what they give
+
+All four modes stand on **one** voltage curve. A mode is that curve plus one setting: the power limit, and for Silent
+Cold a frequency ceiling as well. None of them pins the clock — the card still boosts and still drops to idle speeds.
+
+| Mode | What it is for | Power limit | Frequency ceiling |
+|---|---|---|---|
+| 🚀 **Max Perfomance** | everything into speed; the fans may spin as fast as they like | 300 W | the card's own maximum |
+| ⚖️ **Optimised** | almost Max Perfomance frames, quieter and cooler | 250 W | the card's own maximum |
+| ❄️ **Silent Cold** | the most frames that keep the fans at 40–50 % once the game settles | 250 W | about 2.2 GHz |
+| 🔄 **Stock Default** | the factory card in one click: power limit, clocks and the whole curve | factory | — |
+
+Measured against stock under the same load and in the same room:
+
+| | 🔄 Stock | 🚀 Max Perfomance | ⚖️ Optimised | ❄️ Silent Cold |
+|---|---|---|---|---|
+| Frames, FPS | 55.3 | **60.3** (+9.0 %) | **56.4** (+1.9 %) | 49.2 |
+| Power, W | 300 | 291 (−3.0 %) | **250** (−16.8 %) | **197** (−34.5 %) |
+| GPU temperature, °C | 77 | 76 | **69** | **62** |
+| Fan speed, % | 81 | 76 | **62** | **47** |
+| Core clock, MHz | 2745 | 3007 | 2820 | 2235 |
+
+<sub>GeForce RTX 5070 Ti, driver 617.42, 2026-10-17. Quake II RTX timedemo at 3840 × 2160, 60 passes per state —
+about twelve minutes, until temperature and fans settle — with five minutes of idle between states.</sub>
 
 <p align="center">
-  <img src="assets/area/area-en-1.png" width="900" alt="Area won under the factory frequency → voltage curve: 125.3 V·MHz, 5.11 %, a mean undervolt of 43.1 mV">
+  <img src="assets/area/area-en-1.png" width="900" alt="Area won under the factory frequency → voltage curve: 120.8 V·MHz, 4.93 %, a mean undervolt of 41.5 mV, the deepest 175 mV">
   <img src="assets/area/area-en-2.png" width="900" alt="The factory curve and ours, and the area won in each frequency band">
 </p>
 
-<p align="center"><sub>⚖️ Optimised on 2026-10-17. Read from the curve the mode stands on; redraw with <code>node tools/build-area-card.mjs</code>.</sub></p>
-
-**KAGO is a Node.js orchestrator that undervolts an NVIDIA GPU on Windows — automatically, with a measured safety margin, and without installing a single third-party GUI.**
-
-<p align="center">
-  <img src="assets/dashboard/sweep-dashboard.png" width="900" alt="KAGO run dashboard: the card with its live readouts on the left, the search progress on the right">
-</p>
-
-<p align="center">
-  <sub><b>The run dashboard.</b> The card carries its own readouts; the column reports the search.
-  The window is fed by the run's pulse: when the run goes quiet for longer than it promised, the
-  state line turns red and names the rung that was on the card at that moment. One click swaps the
-  card for the tuning curve itself — stock, our line, the rungs that survived the stress test, the
-  hang floors the engine honours, and the rung under test right now.</sub>
-</p>
-
----
-
-<a id="1-general"></a>
-
-## 1. General
-
-1. Undervolting trades voltage for heat and noise. Every graphics card ships with a **voltage
-   guardband** — a margin the vendor adds so the worst chip in the batch survives the worst
-   conditions. Your chip is not the worst one, and your room is not the worst room. Part of that
-   margin is yours to take back.
-2. Taking it back by hand means hours in a curve editor, one point at a time, with a stress test
-   between every change. KAGO does that loop instead of you and writes down what it found.
-3. **No third-party GUI is required, and none will be added.** The card is driven through the
-   driver's own command-line interface first, and through an in-house NVAPI bridge after that. MSI
-   Afterburner is not a dependency of this project.
-4. Four modes ship — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold, 🔄 Stock Default — each with
-   its own definition of optimal. Each is a desktop shortcut, and a tray icon shows which one is
-   live.
-5. **Factory state is the default.** Profiles live in the GPU's volatile memory. Crash the machine
-   or simply reboot — the card comes back stock, and you do nothing.
-
-### 1.1. Why this exists as a project rather than a forum post
-
-Silicon differs from chip to chip. Between five identical cards of one model, the lowest safe
-voltage varies by as much as 70 mV — so a profile copied from someone else's card is not a
-shortcut, it is a guess with your hardware as the stake. KAGO ships **the method**, never someone
-else's numbers.
-
----
-
-<a id="2-where-the-project-actually-is"></a>
-
-## 2. Where the project actually is
-
-> **2026-09-25 — the method was turned around.** Searching the voltage edge of every frequency through
-> a machine failure yielded 5 edges of 389 in six weeks. By the owner's decision the project is done
-> when the four modes are validated WHOLE — a curve from a model of this chip (the trend of the known
-> edges) plus a margin per frequency band, checked under a mixed load and a week of real use — while
-> deeper undervolting stays available step by step. Plan: [`MASTER_PLAN.md`](MASTER_PLAN.md), epic
-> [`plans/101`](plans/101_EPIC_turnaround_silicon_model_and_whole_mode_validation.md). The text below
-> describes the state before the turn.
-
-Four phases of six are closed, and the card has been measured. The research base, the architecture,
-**the test bench** and **KAGO's own bridge to the driver** are done; the card runs undervolted and comes
-back on command. **The owner-facing shell is on the desktop too:** four shortcuts apply through
-pre-registered elevated tasks, the last verified apply is remembered and re-applied at logon through
-the same gates, a passive tray icon shows the live mode (kill it — nothing happens to the card),
-and the three working modes refuse honestly until phase 6 qualifies their numbers —
-an unproven undervolt cannot be applied by a double-click. The search engine exists, judges a
-candidate by three different load shapes at once and takes the worst verdict — and **it has now found
-this card's edge on live silicon**: at the top of the range the card survives 870 mV and hangs the
-machine at 865, reproduced on two adjacent frequencies in independent sittings. A hang is survivable
-by design — the intent is written and `fsync`-ed before the first byte reaches the card, so the rung
-that killed the machine names itself on the next launch — but **since 2026-08-30 it is no longer
-called a normal path.** The owner's ruling: a hang is possible and tolerated, and it counts as OUR
-failure in the fuse and the oracle; every one of them owes a defect analysis, and their number per
-evening is a quality figure that must fall.
-
-**The undervolt is measured, not claimed.** With the whole voltage/frequency curve raised and nothing
-offered above the clock the card already delivered, it draws **7.71 W (5.6 %) less and runs 5 °C cooler at
-exactly the stock clock** — and no clock lock is used, so the card still boosts and still drops to idle
-speeds. One number from one pair of runs; two independent series are what will make it a result.
-
-**Every live sweep rides under an armed fuse — and here is exactly what that does and does not
-buy.** A deadman judge in its own process listens to millisecond liveness beats from a driver probe;
-N ms of silence — the threshold derived from a measured floor under load, not invented — and it
-kills the burn (0.26 ms, syscall), returns the card to factory voltage in a detached hand that
-verifies by read-back, and stops the sweep before the next rung. Rehearsed end-to-end against the
-death of the WRITER: trip at 61 ms, load gone, stock confirmed.
-
-🔴 **What it does NOT catch, stated plainly because it was paid for.** On 2026-08-30 the owner's
-machine hung mid-sweep and the fuse recorded **zero** trips. The judge is a process on the same OS:
-when the OS stops, the judge stops with it, and a deadman that shares fate with the patient cannot
-pronounce death. Everything it had been proved against was a *simulated process death* on the twin —
-and a twin cannot freeze its host, so that class was never merely untested, it was untestable on the
-stand where "proved" was pronounced. The prediction side is a different matter and is achievable:
-the machine recorded driver errors **110 seconds** before it died. Work is tracked in the blocking
-epic — a guard must now declare, next to itself, the threat it exists for, what it was actually
-proved against, and the gap between the two, or the build reddens. The card also
-has a **digital twin** (the owner's term): a virtual card derived from this card's own measured
-dictionaries, deep enough to burn rungs, find edges and die by the machine's real death profiles —
-the seam inventory and device port are done, and the sweep engine is being assembled onto it so
-fuses and sweeps can be drilled with zero risk to the real machine.
-
-The bench samples the card, loads it with KAGO's own CUDA workloads, watches the Windows event log,
-and returns a three-way verdict — PASS, SDC or CRASH — by comparing a run against a golden reference
-captured at stock. SDC is the one that matters: more than half of undervolting failures corrupt data
-before anything crashes, so "it did not fall over" is not a passing run. One command runs the whole
-phase-1 acceptance:
-
-```bash
-npm run phase1:accept
-```
-
-**KAGO writes to the card, and the way back is executed rather than promised.** One module owns every
-write; a profile is applied, re-read until two consecutive samples agree, and rolled back — the round
-trip has run on the live card. The card also has its own bridge now: KAGO talks to the NVIDIA driver
-API directly from Node, with no third-party GUI and no compiled binary, and reads the 128-point
-voltage/frequency curve.
-
-The measurement it produced first is the one that licenses every other number: the meter's **own**
-run-to-run spread, taken over ten stock runs in two independent series — **1.28 W (0.65 %)** on power.
-A difference thinner than that is not an effect, and the tool prints that sentence beside every delta it
-computes. The throughput half of that figure did not survive: measured across separate runs, the same
-stock workload varies **4.3 %**, so performance is judged on the delivered clock, which is exact.
-
-**And the load matters more than the meter.** A real path-traced game load drives this card to **300 W,
-99 % and 77 °C**. KAGO's original compute workload reached 137 W at the same reported utilization — half
-the envelope — and read *nothing* from VRAM, so memory faults were invisible to it by construction. That
-was the project's largest measured debt, and v0.9 pays it: the burn now holds the card at **305 W median
-with the driver reporting `sw_power_cap`**, moving **~5 TB through VRAM in ten seconds**, at 75 °C. The
-optimum turned out to be a *blend* — too little arithmetic and the cores stall on memory (207 W with more
-traffic than the winner), too much and the memory pipe drains (229 W). Every unit it loads folds its
-result into the same checksum, so a fault anywhere still moves the oracle's number.
-
-```bash
-npm run gpu:info
-```
+<a name="en-3"></a>
+### 3. How it works
 
 ```
-GPU            NVIDIA GeForce RTX 5070 Ti
-Driver / VBIOS 610.88 / 98.03.58.40.8b
-Power limit    300.00 W (default 300.00 W)
-Power range    250.00 … 300.00 W  → only 50 W of headroom
-Graphics clock 1050 MHz (max 3090 MHz)
-Temperature    52 °C   Perf state P5
-Memory clocks  405, 810, 7001, 13801, 14001 MHz
-Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (the edge search's space)
-               identical on all 4 full memory rungs — sweep the graphics clock once
-Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
-               This is the CLOCK grid. The VOLTAGE grid is 127 rungs, 450 … 1240 mV,
-               spaced 5 mV in 94 places and 10 mV in 32 — NOT uniform, read off the live curve.
+the curve:   the trend of the measured voltage edges of this chip  +  a margin per frequency band
+               → an immutable snapshot, stamped with the driver it was built on
+applying:    profile-manager — the only module that writes to the card
+               → NVAPI curve offsets, computed from the card's live table at that moment
+               → nvidia-smi power limit and a clock bound below the card's maximum
+             read back until two readings agree, otherwise roll back to factory
+testing:     game · burn · load steps · idle · wake-ups  →  telemetry sampler + the driver's error channel
+               → verdict → a failure raises the margin of its band (a ratchet: it never goes back down)
 ```
 
-That headroom line is the finding that shaped everything else. The driver will only move
-the power ceiling from 300 W down to 250 W — 50 W. The targets this project was built for need two
-to three times that, so power limiting alone was never going to be enough, and curve editing became
-mandatory. The full reasoning is in [`researches/01`](researches/01_gpu_control_paths.md); the
-roadmap is in [`MASTER_PLAN.md`](MASTER_PLAN.md); the current state is
-[`STATUS.md`](STATUS.md).
+1. **A model of the chip instead of a hunt for every edge.** The first method searched the voltage edge of each of the
+   389 frequencies by crashing the machine at each one: six weeks gave 5 edges. All 14 edges measured so far lie on one
+   line — `depth = −295.8 + 0.1674 · f`, scatter 4.9 mV — so the curve is that trend plus a margin per band, and the edge
+   search is now used only to push further down.
+2. **Frequencies, not table points.** The curve is stored as "frequency → voltage", which does not shift with
+   temperature; the per-point offsets the hardware wants are computed at the moment of applying. That is also why the
+   Silent Cold ceiling is "about 2.2 GHz": the curve caps it at 2205 MHz, and under the game the warm card runs at 2235.
+3. **A failure is evidence, not the end of a run.** The test writes its intent to disk and `fsync`s it before the first
+   byte reaches the card; a test the machine did not survive is closed on the next launch, at the band where the last
+   telemetry sample was taken.
+4. **Its own bench.** The Quake II RTX timedemo as the game load, KAGO's own CUDA burn that holds the card at its 300 W
+   ceiling and moves terabytes through VRAM, a separate telemetry sampler, and a plateau detector — a comparison counts
+   only once temperature and fans have settled. The tables and pictures on this page are drawn straight from the
+   bench's records.
 
----
+<a name="en-4"></a>
+### 4. Install and first run
 
-<a id="3-the-method"></a>
+**What you need:** Windows 11, an NVIDIA GeForce card with a current driver, Node.js 18 or newer, administrator rights
+(the driver refuses clock and power writes without them).
 
-## 3. The method
+```powershell
+git clone https://github.com/MikalaiKryvusha/KAGO.git
+cd KAGO
+npm run gpu:info                 # read-only: the card, driver, VBIOS, power range, clock ladder
+npm run setup -- --install       # four desktop shortcuts, the apply tasks, the logon task and the tray
+```
 
-The naive recipe — *drop the voltage until it crashes, then step back one* — is what most guides
-teach, and it has two holes that measurements close.
+Everything `setup` creates outside the repository goes into a receipt **before** it is created, together with the
+command that removes it. To remove everything, run `npm run setup -- --uninstall`.
 
-**Hole one: a crash is not the first failure.** In a study of 57 programs across four GPU
-generations, more than half failed **silently** before they ever crashed: the card kept drawing
-frames and returning answers, and the answers were wrong. A test that only watches for crashes
-walks straight through the corruption zone without noticing.
+> ⚠️ **The modes in `profiles/` are measured on the author's RTX 5070 Ti.** On another card or another driver they will
+> not apply — that is the stamp check doing its job. For another card the method is the same, but its curve has to be
+> measured and built for that chip; today that takes the edge probe and the curve builder
+> (`node tools/curve-proposal.mjs`), not one button.
 
-**Hole two: the edge is a cliff, not a slope.** For one program, the error rate went from 3 % to
-90 % across two percent of voltage. Stopping at the last setting that passed leaves you standing on
-that cliff, where a warm afternoon or a heavier game is enough to push you off.
+> **Undervolting changes how your hardware is powered.** Done carelessly it costs a frozen screen, a failed run, or
+> corrupted output you do not notice for months. KAGO is built to make that unlikely and always reversible — and it is
+> still your card. MIT means no warranty, and that clause is not decoration.
 
-So KAGO does it differently:
+<a name="en-5"></a>
+### 5. Commands
 
-| Step | What happens |
+| Command | What it does |
 |---|---|
-| **Golden reference** | The workload set runs at stock, and its outputs are stored. Everything later is compared against them — not against "looks fine". |
-| **Three-way verdict** | Each trial ends as **PASS**, **SDC** (output changed, nothing crashed), or **CRASH** (driver TDR, WHEA, application death, BSOD). The middle column is the one that matters. |
-| **Bracket the edge** | Coarse descent to first failure, then a binary search to locate it at grid resolution. The search never dwells at a failing point. |
-| **Add the margin** | The shipped voltage sits **one grid step above the last stable rung** — above the voltage at which the frequency still worked, not above the failure point. The distinction matters: the edge is probabilistic, so the anchor is observed stability rather than an observed failure. |
-| **Diverse workloads** | Branchy code and arithmetic-dense code fail differently, and the lowest safe voltage varies by ~100 mV between programs. A point's threshold is the **worst** result across the whole set, never the first one found. |
-| **Transients, not just load** | Supply noise matters more than temperature here, so the hard test is rapid load changes — not a flat 100 % burn. |
-| **A burn that reaches the power limit** | The trial load holds the card **at its 300 W ceiling** and moves **terabytes through VRAM** — measured 305 W median, the driver reporting `sw_power_cap`, against 233 W and *zero* memory traffic for the earlier load. A voltage proved under a third of the electrical stress a game applies is proved against the wrong load. |
-| **Recorded against the frequency that actually ran** | A frequency cannot be ordered from the card: its own boost governor picks it, bounded by the curve, the power limit and temperature. Under a burn that reaches the power limit, the card answers a lower voltage by dropping the clock. So the tool **measures which frequency the card actually ran at** and records the voltage against that one. A verdict recorded against a frequency the burn never ran at is worse than no verdict. |
-| **Bind to the driver** | Every profile records the driver and VBIOS it was proved against. A driver update invalidates it until re-validated. |
+| `npm run gpu:info` | reads the card: model, driver, VBIOS, power range, clocks, temperature |
+| `npm run curve -- --progress` | how many modes have passed (of 4), the margin per band, the gain over stock |
+| `npm run profile -- --apply <mode>` · `--reset` · `--state` | apply a mode · restore factory settings · read power and clock |
+| `npm run validate -- --mode <mode> --candidate <profile> --minutes 4` | tests a whole mode — **writes to the card**, rolls back at the end |
+| `npm run gfx -- --capture --label <name> --runs 60` | the game bench with telemetry, run until the card settles |
+| `node automation-engine/lib/mode-validate.mjs --compare --stock <a> --mode <b>` | a mode's gain over stock, from two bench records |
+| `node tools/curve-proposal.mjs` | builds the curve from the measured edges: the trend plus a margin per band |
+| `npm run mon -- --seconds N --out <file>` | telemetry into a file, one sample every half second |
+| `npm run check` · `npm run selftest:all` | pre-commit checks · all offline tests |
 
-The measurements behind each of these are cited in
-[`researches/02`](researches/02_vmin_guardband_methodology.md).
+<a name="en-6"></a>
+### 6. Project map
 
----
+| Path | What lives there |
+|---|---|
+| `automation-engine/` | the orchestrator: the one module that writes to the card, the NVAPI bridge, mode testing, the bench, the shortcuts and the tray |
+| `tools/` | operator tools: the curve builder and editor, the area integral, the infographics, the pre-commit checks |
+| `profiles/` · `curves/` | the modes and the curve snapshots they stand on |
+| `workloads/` | KAGO's own CUDA burn and its checksums |
+| `assets/` | the logo, the icons, the infographics |
+| `researches/` · `plans/` · `bugs/` | the research behind the decisions, the plans, one document per defect |
 
-<a id="4-the-four-modes"></a>
+Where things are: [PROJECT_STRUCTURE_EXTERNAL_MAP.md](PROJECT_STRUCTURE_EXTERNAL_MAP.md); how they work:
+[PROJECT_ARCHITECTURE_INTERNAL_MAP.md](PROJECT_ARCHITECTURE_INTERNAL_MAP.md).
 
-## 4. The four modes
+<a name="en-7"></a>
+### 7. Status and plans
 
-The owner split the original two profiles into four modes, each with its own objective. One
-mechanism serves them all — the whole voltage/frequency curve is raised, and only the placement of
-the clock ceiling differs — and none of them locks the clock: the card still boosts and still drops
-to idle speeds.
+0.9.3: **all four modes have passed a whole-mode test** on driver 617.42 and are compared against stock under the same
+load. What remains is a week of everyday play: a failure during ordinary use goes into the test journal, raises its band,
+and the mode is tested again. Next: going deeper band by band, a tray menu with `Exit`, and the lower frequency range. The
+roadmap is [MASTER_PLAN.md](MASTER_PLAN.md), the current state is [STATUS.md](STATUS.md).
 
-**All four modes carry the SAME voltage vector.** The search produces one thing — «frequency → the
-lowest safe voltage, plus 10 mV» across the whole curve — and a mode is that one vector plus a single
-handle. Max Perfomance and Optimised are near twins: they differ by the power limit and nothing else.
+<a name="en-8"></a>
+### 8. Author and licence
 
-| | Objective | Voltage vector | Power limit | Frequency ceiling |
-|---|---|---|---|---|
-| 🚀 **Max Perfomance** | everything into speed; temperature is not a goal, fans may spin as fast as they like | the same | **300 W** | none beyond the card's own maximum |
-| ⚖️ **Optimised** | *"almost the same as Max Perfomance"* — but quiet (fans ≤ 60 %, ≈ 71 °C) and relatively cold, at FPS within 5 % | the same | **250 W** | none beyond the card's own maximum |
-| ❄️ **Silent Cold** | the MOST performance that keeps the fans at 40–50 % once the game settles — **48 %, 62 °C, measured** | the same | 250 W | **yes, 2205 MHz** |
-| 🔄 **Stock Default** | the factory card in one click — power limit, clocks and the whole curve | factory | factory | — |
+Author: **Mikalai Kryvusha aka KOT KRINIK** (Николай Кривуша, Кот Криник).
+[GitHub](https://github.com/MikalaiKryvusha) · [Instagram](https://www.instagram.com/kotkrinik/) · [YouTube](https://www.youtube.com/@kotkrinik)
 
-Two iron rules the owner set: **never drive the card above its own maximum** (this die: 3090 MHz —
-the vendor's 2452 MHz boost figure is a floor, not a ceiling), and **a profile is a vector of
-voltages, not a number of megahertz** — it was that second confusion which let a ceiling be deleted
-without anyone seeing the consequence.
+The project is **vibe-coded**: written together with an AI agent and run with [KAIF](https://github.com/MikalaiKryvusha/KAIF),
+a framework for working with AI agents. Icons: [Fluent Emoji 3D](https://github.com/microsoft/fluentui-emoji) by Microsoft
+(MIT). The game bench uses [Quake II RTX](https://github.com/NVIDIA/Q2RTX) by NVIDIA, installed separately.
 
-The prices are the owner's budgets, not inherited promises: the numbers this table will finally
-carry are measured on this die, and they are reported next to the meter's own run-to-run spread,
-because "no loss" measured with a blunt instrument is not a finding.
-
-The **fourth shortcut resets the card to factory settings**, and all four write the remembered
-state that is re-applied at logon — whichever you clicked last is what you come back to. The
-passive tray icon shows which mode is live and nothing else — no menu, no buttons, and killing it
-changes nothing on the card. The shortcuts and the tray wear one icon set, picked by the owner
-from a rendered comparison: Microsoft's Fluent Emoji 3D (MIT), shipped in `assets/icons/`.
-
-The shortcuts already sit on the desktop, and the shell around them is proven: every click ends in
-a verified state — applied and re-read to agreement, or refused with nothing written. **All four
-modes are checked whole on the current graphics driver (617.42, 2026-10-17)**: one curve — this
-die's silicon model plus a margin per frequency band, raised exactly at the frequencies that once
-failed — at 300 W, at 250 W, and at 250 W under a 2205 MHz ceiling, each through a four-minute mix of
-game, burn, load steps, idle and wake-ups with the driver's own error channel silent throughout.
-`Silent Cold`'s ceiling was picked by the fans: 2797 MHz kept them at 60–65 %, 2452 at 52 %, and
-2205 settles at 48 % after twelve minutes of path tracing. A week of ordinary use is the last witness.
-A double-click on a draft refuses out loud rather than apply an unproven undervolt. Beyond the shell,
-what has been proven on this hardware: the driver gives writes back (power limit and clock lock,
-each re-read to stability and rolled back); the card's power↔performance curve is measured across
-ten points; the meter's own spread is 1.28 W; and KAGO's own NVAPI bridge reads the 128-point
-voltage/frequency curve, whose voltage grid turned out to be 5 mV rather than the 6.25 mV folklore
-assumes.
+KAGO is licensed under [MIT](LICENSE).
 
 ---
 
-<a id="5-requirements"></a>
-
-## 5. Requirements
-
-- Windows 11
-- Node.js ≥ 18
-- An NVIDIA GPU with a current driver. Developed against a GeForce RTX 5070 Ti; the method is
-  general, the numbers are not.
-- Administrator rights — the driver refuses clock and power writes without them.
-
-> **Undervolting changes how your hardware is powered.** Done carelessly it costs you a frozen
-> screen, a failed benchmark run, or corrupted output you do not notice for months. KAGO is built to
-> make that unlikely and always reversible, and it is still your card. MIT means no warranty, and
-> that clause is not decoration.
-
----
-
-<a id="6-built-with-kaif"></a>
-
-## 6. Built with KAIF
-
-The project runs under [KAIF 2.9](https://github.com/MikalaiKryvusha/KAIF) — the author's framework
-for AI agents: external memory, autonomy made wider and better, and the discipline that keeps a
-claim of "it works" attached to an observation.
-
-## License
-
-MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
-
----
----
-
-<a id="russian"></a>
+<a name="russian"></a>
 
 <p align="center">
-  <img src="assets/logo/kago-logo.png" width="360" alt="KAGO — графитовый чип со снежинкой и пламенем">
+  <img src="assets/logo/kago-logo.png" width="200" alt="KAGO — графитовый чип со снежинкой и пламенем">
 </p>
 
-# KAGO — Криника Автоматизированный ГПУ Оркестратор
-
-<h3 align="center">Сделано геймером для геймеров. ❤️</h3>
-
-<h3 align="center">Автоматизированный инструмент оптимизации GPU.</h3>
-
-<p align="center">
-  Выжимает максимум из вашей видеокарты — продлевая ей жизнь, даруя тишину в комнате.<br>
-  Повышает производительность, снижает тепловыделение.
-</p>
+<h2 align="center">KAGO</h2>
 
 <p align="center">
   <a href="#english"><img src="https://img.shields.io/badge/English-2C7BE5?style=for-the-badge" alt="English"></a>
@@ -345,399 +218,193 @@ MIT © 2026 Mikalai Kryvusha (**KOT KRINIK**). See [LICENSE](LICENSE).
   <a href="#russian"><img src="https://img.shields.io/badge/Русский-C0392B?style=for-the-badge" alt="Русский"></a>
 </p>
 
-[![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-FF1A8C.svg?style=flat-square)](LICENSE)
-[![Версия](https://img.shields.io/badge/Версия-0.9.2-E67E22.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAGO/releases/tag/v0.9.2)
-[![Платформа](https://img.shields.io/badge/Платформа-Windows%2011-2C7BE5.svg?style=flat-square)](#5-что-нужно)
-[![Среда](https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg?style=flat-square)](#5-что-нужно)
-[![Собран на KAIF](https://img.shields.io/badge/Собран%20на-KAIF%202.9-8E44AD.svg?style=flat-square)](https://github.com/MikalaiKryvusha/KAIF)
-
-<p align="center"><strong>Версия 0.9.2</strong> · 2026-09-01</p>
+<p align="center"><b>Криника Автоматизированный ГПУ Оркестратор</b><br>
+Сделано геймером для геймеров. ❤️</p>
 
 <p align="center">
-  <a href="#1-общие-сведения">Общие сведения</a> · <a href="#2-где-проект-находится-на-самом-деле">Состояние</a> · <a href="#3-методика">Методика</a> · <a href="#4-четыре-режима">Режимы</a> · <a href="#5-что-нужно">Что нужно</a> · <a href="#6-собран-на-kaif">KAIF</a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-MIT-FF1A8C.svg" alt="лицензия: MIT"></a>
+  <a href="#ru-4"><img src="https://img.shields.io/badge/%D0%BF%D0%BB%D0%B0%D1%82%D1%84%D0%BE%D1%80%D0%BC%D0%B0-Windows_11-2C7BE5.svg" alt="платформа: Windows 11"></a>
+  <a href="#ru-4"><img src="https://img.shields.io/badge/GPU-NVIDIA_GeForce-76B900.svg" alt="GPU: NVIDIA GeForce"></a>
+  <a href="#ru-4"><img src="https://img.shields.io/badge/Node.js-%E2%89%A518-3DDC84.svg" alt="Node.js 18 и новее"></a>
+  <a href="#ru-2"><img src="https://img.shields.io/badge/%D1%80%D0%B5%D0%B6%D0%B8%D0%BC%D0%BE%D0%B2_%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%B5%D0%BD%D0%BE-4_%D0%B8%D0%B7_4-3FB950.svg" alt="режимов проверено: 4 из 4"></a>
+  <a href="https://github.com/MikalaiKryvusha/KAGO/releases/latest"><img src="https://img.shields.io/badge/%D1%80%D0%B5%D0%BB%D0%B8%D0%B7-0.9.3-E67E22.svg" alt="релиз: 0.9.3"></a>
+  <a href="https://github.com/MikalaiKryvusha/KAIF"><img src="https://img.shields.io/badge/%D1%84%D1%80%D0%B5%D0%B9%D0%BC%D0%B2%D0%BE%D1%80%D0%BA-KAIF_2.9-8E44AD.svg" alt="фреймворк: KAIF 2.9"></a>
+</p>
+
+[Read in English →](#english)
+
+**KAGO андервольтит видеокарту NVIDIA под Windows. Строит кривую напряжений под ваш конкретный кристалл, проверяет каждый
+режим целиком — игрой и стресс-прожигом — и кладёт четыре режима ярлыками на рабочий стол. Без сторонних GUI.**
+
+Автоматизированный инструмент оптимизации GPU. Выжимает максимум из вашей видеокарты — продлевая ей жизнь, даруя тишину
+в комнате. Повышает производительность, снижает тепловыделение. Один клик — и карта работает на пониженном напряжении;
+ещё один клик или просто перезагрузка — и она снова заводская.
+
+<p align="center">
+  <img src="assets/comparison-9x16.png" width="420" alt="KAGO 0.9.3 — четыре режима против стока под Quake II RTX: кадры, ватты, температура, вентилятор и частота ядра">
 </p>
 
 <p align="center">
-  <img src="assets/comparison-9x16.png" width="420" alt="KAGO 0.9.2 — измеренное сравнение стока и режимов под игрой: кадры, ватты, температура, вентилятор и частота ядра">
+  <a href="https://github.com/MikalaiKryvusha/KAGO/releases/latest"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-v0.9.3-E67E22?style=for-the-badge" alt="Скачать KAGO 0.9.3"></a>
 </p>
 
-<p align="center"><sub>Каждое число выше прочитано из записей прибора (<code>runs/graphics/*.json</code>), по два замера на состояние, чередованием. Перерисовать: <code>node tools/build-comparison-card.mjs</code>.</sub></p>
+<p align="center">Windows 11, Node.js 18 и новее, права администратора. Все версии: <a href="https://github.com/MikalaiKryvusha/KAGO/releases">Releases</a>.</p>
+
+Разделы: [1 Что умеет](#ru-1) · [2 Четыре режима и что они дают](#ru-2) · [3 Как устроено](#ru-3) · [4 Установка и первый запуск](#ru-4) · [5 Команды](#ru-5) · [6 Карта проекта](#ru-6) · [7 Состояние и планы](#ru-7) · [8 Автор и лицензия](#ru-8).
+
+<a name="ru-1"></a>
+### 1. Что умеет
+
+1. Строит кривую «частота → напряжение» под **этот конкретный кристалл**. Кремний у каждой карты свой: у пяти карт одной
+   модели самое низкое безопасное напряжение расходится до 70 мВ, поэтому KAGO отдаёт методику, а не чужие числа.
+2. Проверяет режим **целиком**, а не по одной частоте: четыре минуты игры с трассировкой лучей, стресс-прожиг на пределе
+   мощности, резкие скачки нагрузки, простой и пробуждения из глубокого простоя — и всё это время слушает собственный
+   канал ошибок драйвера.
+3. Поднимает запас ровно там, где карта сбоила: сбой приписывается своей полосе частот, и эта полоса получает больше
+   напряжения до следующей проверки. Настройка сужается от всей кривой к полосе, а от полосы — к отдельной частоте.
+4. Кладёт на рабочий стол четыре режима: 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold и 🔄 Stock Default. Каждый
+   клик кончается проверенным состоянием: режим применён и перечитан, пока два чтения не совпадут, — либо отклонён, и в
+   карту ничего не записано.
+5. Запоминает последний режим и восстанавливает его при входе в систему через те же проверки. Иконка в трее показывает,
+   какой режим сейчас включён.
+6. Держит **заводское состояние по умолчанию**: режим живёт в энергозависимой памяти карты. Упала система или просто
+   перезагрузились — карта снова стоковая, и делать ничего не надо.
+7. Никогда не гонит карту выше её собственного максимума (у этого экземпляра 3090 МГц) и привязывает каждый режим к
+   драйверу и VBIOS, на которых он проверен: после обновления драйвера режим не применяется, пока его не проверят заново.
+8. Обходится без MSI Afterburner и других сторонних GUI: картой управляют штатная утилита драйвера `nvidia-smi` и
+   собственный мост KAGO к NVAPI, написанный на Node.js.
+
+<a name="ru-2"></a>
+### 2. Четыре режима и что они дают
+
+Все четыре режима стоят на **одной** кривой напряжений. Режим — это та самая кривая плюс одна настройка: лимит мощности, а
+у Silent Cold ещё и потолок частоты. Ни один режим не фиксирует частоту — карта по-прежнему разгоняется и сбрасывается на
+простое.
+
+| Режим | Для чего | Лимит мощности | Потолок частоты |
+|---|---|---|---|
+| 🚀 **Max Perfomance** | всё в скорость; вентиляторы крутятся сколько угодно | 300 Вт | максимум самой карты |
+| ⚖️ **Optimised** | кадры почти как у Max Perfomance, но тише и холоднее | 250 Вт | максимум самой карты |
+| ❄️ **Silent Cold** | максимум кадров, при котором вентиляторы после прогрева держатся на 40…50 % | 250 Вт | около 2,2 ГГц |
+| 🔄 **Stock Default** | заводская карта в один клик: мощность, частоты и вся кривая | заводской | — |
+
+Замерено против стока под одной нагрузкой и в одной комнате:
+
+| | 🔄 Сток | 🚀 Max Perfomance | ⚖️ Optimised | ❄️ Silent Cold |
+|---|---|---|---|---|
+| Кадры, FPS | 55,3 | **60,3** (+9,0 %) | **56,4** (+1,9 %) | 49,2 |
+| Мощность, Вт | 300 | 291 (−3,0 %) | **250** (−16,8 %) | **197** (−34,5 %) |
+| Температура GPU, °C | 77 | 76 | **69** | **62** |
+| Обороты вентиляторов, % | 81 | 76 | **62** | **47** |
+| Частота ядра, МГц | 2745 | 3007 | 2820 | 2235 |
+
+<sub>GeForce RTX 5070 Ti, драйвер 617.42, 17.10.2026. Таймдемо Quake II RTX в 3840 × 2160, 60 проходов на состояние —
+около двенадцати минут, пока температура и вентиляторы не выйдут на плато, — между состояниями пять минут простоя.</sub>
 
 <p align="center">
-  <img src="assets/area/area-ru-1.png" width="900" alt="Площадь, выигранная под заводской кривой «частота → напряжение»: 125,3 В·МГц, 5,11 %, в среднем −43,1 мВ">
+  <img src="assets/area/area-ru-1.png" width="900" alt="Площадь, выигранная под заводской кривой «частота → напряжение»: 120,8 В·МГц, 4,93 %, в среднем −41,5 мВ, наибольший спуск −175 мВ">
   <img src="assets/area/area-ru-2.png" width="900" alt="Заводская кривая и наша, выигрыш по полосам частот">
 </p>
 
-<p align="center"><sub>⚖️ Optimised на 17.10.2026. Числа — из кривой, на которой стоит режим; перерисовать: <code>node tools/build-area-card.mjs</code>.</sub></p>
-
-**KAGO — оркестратор на Node.js, который сам подбирает андервольтинг для видеокарты NVIDIA под Windows: с измеренным запасом надёжности и без единого стороннего GUI в зависимостях.**
-
-<p align="center">
-  <img src="assets/dashboard/sweep-dashboard.png" width="900" alt="Дашборд прогона KAGO: слева видеокарта с показаниями, справа ход поиска края">
-</p>
-
-<p align="center">
-  <sub><b>Дашборд прогона.</b> Показания карты живут на самой карте, справа — ход поиска края.
-  Окно кормится пульсом прогона: если прогон молчит дольше, чем обещал, строка состояния краснеет и
-  называет ступень, которая была на карте в этот момент. Один щелчок меняет карту на саму
-  тюнинг-кривую — сток, нашу линию, ступени, выдержавшие стресс-тест, полы зависания, которые держит
-  движок, и ступень под тестом прямо сейчас.</sub>
-</p>
-
----
-
-<a id="1-общие-сведения"></a>
-
-## 1. Общие сведения
-
-1. Андервольтинг меняет напряжение на тепло и тишину. Каждая карта уезжает с завода с **запасом по
-   напряжению** — производитель закладывает его так, чтобы худший чип в партии выжил в худших
-   условиях. Ваш чип не худший, и комната у вас не худшая. Часть этого запаса можно забрать себе.
-2. Забирать руками — это часы в редакторе кривой, по одной частоте, со стресс-тестом после каждой
-   правки. KAGO проходит этот цикл вместо вас и записывает, что нашёл.
-3. **Сторонний GUI не нужен, и его тут не появится.** Картой управляет сначала штатная утилита
-   драйвера, а затем собственный мост к NVAPI. MSI Afterburner в зависимостях проекта нет.
-4. Режима четыре — 🚀 Max Perfomance, ⚖️ Optimised, ❄️ Silent Cold и 🔄 Stock Default, — и у каждого
-   свой критерий оптимальности. Каждый лежит ярлыком на рабочем столе, а иконка в трее показывает,
-   какой сейчас включён.
-5. **Заводское состояние — состояние по умолчанию.** Профиль живёт в энергозависимой памяти GPU.
-   Упала система, просто перезагрузились — карта вернулась стоковой, и делать для этого ничего
-   не надо.
-
-### 1.1. Почему это проект, а не пост на форуме
-
-Кремний у каждого чипа свой. У пяти одинаковых карт одной модели самое низкое безопасное напряжение
-расходится на 70 мВ — поэтому чужой профиль не короткий путь, а догадка, ставка в которой ваше
-железо. KAGO отдаёт **методику**, а не чужие числа.
-
----
-
-<a id="2-где-проект-находится-на-самом-деле"></a>
-
-## 2. Где проект находится на самом деле
-
-> **2026-09-25 — метод развёрнут.** Поиск края напряжения каждой частоты через отказ машины за шесть
-> недель дал 5 краёв из 389. По решению владельца работа окончена, когда четыре режима проверены
-> ЦЕЛИКОМ: кривая по модели этого кристалла (тренд известных краёв) плюс запас по полосам частот,
-> проверенная смесью нагрузок и неделей обычного пользования; углубление андервольта остаётся
-> доступным шаг за шагом. План — [`MASTER_PLAN.md`](MASTER_PLAN.md), эпик
-> [`plans/101`](plans/101_EPIC_turnaround_silicon_model_and_whole_mode_validation.md). Текст ниже
-> описывает состояние до разворота.
-
-Закрыты четыре фазы из шести, и карта измерена. Разведка, архитектура, **испытательный стенд** и
-**собственный мост KAGO к драйверу** готовы; карта работает с пониженным напряжением и возвращается по
-команде. **Оболочка для владельца тоже стоит:** четыре ярлыка применяют режим через заранее
-зарегистрированные повышенные задачи, последнее проверенное применение запоминается и
-восстанавливается при входе в систему через те же ворота, пассивная иконка в трее показывает
-активный режим (убьёте её — с картой не случится ничего), а три рабочих режима честно отказывают,
-пока фаза 6 не примет их числа, — недоказанный андервольт двойным кликом не применяется. Движок
-поиска написан, судит кандидата сразу тремя разными формами нагрузки и берёт худший вердикт — и
-**край этой карты он уже нашёл на живом кремнии**: наверху диапазона карта выдерживает 870 мВ и вешает
-машину на 865, воспроизведено на двух соседних частотах в независимых заходах. Зависание здесь
-**переживаемо по устройству** — намерение записывается и `fsync`-ится до первого байта в карту,
-поэтому ступень, убившая машину, называет себя сама на следующем запуске, — **но с 2026-08-30 оно
-больше не называется штатным путём.** Решение владельца: зависание возможно и допустимо, и оно
-считается НАШИМ провалом в предохранителе и оракуле; каждое требует разбора, а их число за вечер —
-показатель качества, который обязан падать.
-
-**Андервольт измерен, а не заявлен.** Когда вся кривая «напряжение — частота» поднята, а выше той частоты,
-которую карта и так выдавала, не предлагается ничего, она берёт **на 7,71 Вт (5,6 %) меньше и работает на
-5 °C холоднее при ровно стоковой частоте** — и никакой фиксации частоты при этом не применяется, так что
-карта по-прежнему разгоняется и по-прежнему сбрасывается на простое. Это одно число из одной пары
-прогонов; результатом его сделают две независимые серии.
-
-**Каждый живой прогон идёт под взведённым предохранителем — и вот что именно это даёт, а чего
-не даёт.** Судья-deadman в отдельном процессе слушает миллисекундные удары живости от пробы
-драйвера; N мс тишины — порог выведен из измеренного пола под нагрузкой, не выдуман — и он убивает
-прожиг (0,26 мс, сисколл), возвращает карте заводское напряжение отдельной рукой с проверкой
-чтением и останавливает развёртку до следующей ступени. Отрепетировано конец-в-конец против смерти
-ПИСАТЕЛЯ: трип на 61 мс, нагрузка снята, сток подтверждён.
-
-✅ **А 2026-08-31 08:12 он сработал ВПЕРВЫЕ НА ЖИВОЙ КАРТЕ, и цепь спасения отработала целиком:**
-тишина ударов 500,61 мс → прожиг убит → заводское напряжение возвращено и **подтверждено чтением
-(остаточных смещений 0)**. Машина осталась жива. До этого дня у предохранителя было наблюдение
-только на двойнике; теперь оно есть там, где ходит владелец.
-
-⚠️ **И тут же — честная поправка, сделанная тем же днём.** Сначала мы записали причину так: «карта
-сорвала закрепление частоты и ушла на 700 МГц выше заказанной». **Сверка трёх журналов ПО ВРЕМЕНИ
-это опровергла:** трип случился ДО прожига (рука спасения не нашла что убивать), а прожиг пошёл
-через три секунды ПОСЛЕ того, как та же рука обнулила кривую. То есть карта работала не на
-поднятой кривой, а на обнулённой. Ведущая гипотеза теперь другая и неприятнее: **спасение обнулило
-кривую под живой ступенью, и они делили драйвер** — 58,4 секунды там, где на свободной карте уходит
-1,9. Это дефект нашей машинерии, а не свойство кремния; заведён `bugs/88`, проверяется на двойнике.
-Мы оставляем обе редакции видимыми намеренно: цена объяснения, назначенного без замера, — это то,
-что проект платит и записывает, а не прячет.
-
-🔴 **Чего он НЕ ловит — сказано прямо, потому что за это заплачено.** 2026-08-30 машина владельца
-зависла посреди прогона, и предохранитель записал **ноль** трипов. Судья — процесс на той же ОС:
-встала ОС — встал судья, а deadman, делящий судьбу с пациентом, смерть пациента не констатирует.
-Всё, против чего он был доказан, — это *смоделированная смерть процесса* на двойнике, а двойник по
-построению не может заморозить свой хост: класс был не просто не проверен, он был недоказуем на том
-стенде, где произносилось слово «доказан». Сторона предсказания — другое дело, но её обещание пришлось
-исправить замером 31.08: **«за 110 секунд» оказалось временем до ПЕРЕЗАГРУЗКИ ВЛАДЕЛЬЦА**, а не до
-смерти машины (`Kernel-Power/41` штампуется при следующей загрузке). Настоящее окно между криком
-драйвера и последним `fsync`-нутым вздохом наших приборов — **0,134 секунды, и оно отрицательное**:
-сэмплер замолчал раньше, чем драйвер закричал. На другой смерти того же архива окно было настоящим
-и составило 28 секунд, поэтому канал драйвера всё же получил голос — но обещание теперь звучит
-измеримо: он успевает в двух смертях из четырёх. Работа идёт в блокирующем эпике —
-сторож обязан теперь объявить рядом с собой угрозу, против чего он доказан на самом деле и зазор
-между этими двумя, иначе сборка краснеет.
-
-🔴 **И самая крупная поправка, купленная 08.09 четырьмя смертями машины за день.** Предохранитель
-сторожит ПРОЖИГ. А машина, как выяснилось, умирает в ПАУЗЕ между прожигами — на записи следующего,
-более глубокого напряжения, до всякой нагрузки. Четыре смерти дня имеют в журнале упреждающей записи
-одну и ту же форму: прожиг прошёл, вердикт записан, следом записано намерение на 900…925 мВ — и
-смерть, вердикта нет; разрыв 2…10 секунд. Для одной из них это доказано двумя независимыми приборами
-(потактная запись показала, что прожиг после того намерения не стартовал ни разу, а дамп ядра назвал
-модуль — обращение по неверному адресу внутри драйвера NVIDIA); три остальные совпадают формой
-журнала, и свидетеля у них нет — это названо, а не замазано. **Механизм не назван: «смерть приходит
-после записи» ещё не значит «запись убивает».** Под этот вопрос построен новый прибор — чёрный ящик
-ЗАПИСИ, две строки на диск вокруг каждого обращения в драйвер: незакрытый вызов и есть отпечаток
-«ушёл и не вернулся». Прежде наш самый мелкий след был в восемьдесят раз крупнее искомого события,
-потому что одна ступень — это до 79 обращений подряд, а журнал писал одно намерение на всю ступень.
-
-⚠️ **Той же датой — цена поспешности, записанная как есть.** Разбирая смерть, агент принял НОРМАЛЬНЫЙ
-КОНЕЦ ПРОЖИГА за подпись смерти и починил ворота предохранителя «по этой подписи». Следующий живой
-прогон дал **девять аварийных спасений на девяти здоровых прожигах** и изготовил шесть краёв, которых
-нет; сторож физики покраснел на всех шести. Правка снята в тот же час, замер записан в батарею:
-на штатном конце прожига мощность падает ГЛУБЖЕ порога и держится ВДЕСЯТЕРО дольше уставки — то есть
-выглядит ровно как смерть, и различить их по глубине и длительности нельзя. Урок, вошедший в канон:
-**у признака отказа обязан быть парный замер на здоровом событии того же класса, иначе это не признак.**
-
-🔴 **09.09: машина зависла снова, и все ЧЕТЫРЕ входа оказались слепы ПО ПОСТРОЕНИЮ — это главное,
-что проект знает о своём предохранителе сегодня.** Смерть случилась на 3090 МГц / 900 мВ, между
-ступенями, до всякой нагрузки. Кольцо чёрного ящика говорит поимённо: вход 1 видел идеальные удары
-(зазор 0,01…2,4 мс — драйвер ОТВЕЧАЛ на опрос, встала карта); вход 2 не имел источника ни одного
-такта из 20 546 (прожига не было — нечему стучать); вход 3 к тому дню разоружён, потому что у его
-порога не осталось родословной. **Общий корень: ни один вход не спрашивает САМУ КАРТУ, считает ли
-она.** Три спрашивают наши процессы, четвёртый — драйвер о его показаниях.
-
-Из этого выросли две вещи. **Вход 4** — «карта перестала обновлять телеметрию»: единственная
-величина, которая ту смерть видела. Обе стороны измерены — здоровье 515 мс на 95 000 тактов
-настоящей работы против 44 726 мс одной площадкой в кольце смерти, разрыв в 87 раз; порог взят от
-потолка здоровья, а не из середины разрыва. И **матрица отказов** — перечисление сценариев, где для
-каждого записано, что видит каждый вход и кто обязан сработать; сценарий, которого не ловит никто,
-называется ДЫРОЙ вслух и роняет сборку. Она окупилась на первом же прогоне дважды: назвала дыру той
-смерти и тут же покраснела на трёх ЗДОРОВЫХ сценариях, поймав, что фикстуры держали мощность
-константой — то есть описывали мёртвую карту и называли её здоровой.
-
-⚠️ **И честная граница, названная в коде, а не в разговоре:** быстрее ~500 мс вход 4 не может по
-физике источника — карта не отдаёт число чаще. Обнаружение выходит ~1,5 с плюс полсекунды на руки.
-Владелец заказал МИЛЛИСЕКУНДЫ, и их даст только сигнал с самой карты: крошечное ядро, отправляемое
-каждые несколько миллисекунд независимо от прожига. Это отдельный эпик, и рядом с ним записано, что
-отраслевой стандарт (TDR Windows, ~2 с, в драйвере) решает другую задачу — он лечит драйвер, а не
-спасает ступень.
-
-**Этот пятый вход построен и измерен 9 сентября — он называется канарейкой.** Отдельный процесс со
-своим контекстом посылает карте ядро в один блок каждые 5 миллисекунд, ждёт ответа неблокирующим
-опросом и стучит судье, когда карта работу завершила. Поток создаётся с наивысшим приоритетом,
-который карта даёт (диапазон у неё спрошен: шесть уровней). На холостой карте доставлено 2001 удар
-из 2001 в каждом из трёх прогонов. Под настоящим горном, держащим карту на 300 ваттах, доставка та
-же — 18 001 из 18 001, — а **медиана паузы между ударами не сдвинулась вовсе: 5,000 миллисекунды
-против 5,000 на холостой.** Это и есть проверка приоритета: без него канарейка стояла бы в очереди
-за запусками горна по 280 миллисекунд.
-
-Из худшей паузы под полной нагрузкой — 11,3 миллисекунды — выведена уставка тем же правилом, каким
-выведен четвёртый вход: **34 миллисекунды против прежних полутора секунд, то есть в 44 раза
-быстрее.** Канарейка стоит прожигу 2,93 процента пропускной способности; контрольная сумма при этом
-совпала во всех прогонах, то есть вердикт стабильности не сдвинулся.
-
-И следствие, которое важнее самой цифры: **узкое место переехало с обнаружения на спасение.** Раньше
-глаза стоили полторы секунды против четверти секунды на руки — руки были мелочью. Теперь 34
-миллисекунды против 282: девять десятых времени спасения тратят руки. Заказанные миллисекунды
-достигнуты на входе и пока не достигнуты по всему пути. Уставка остаётся кандидатом: она снята за
-один вечер на одной форме нагрузки, а как ведёт себя опрос на действительно вставшей карте — ещё не
-наблюдалось, и до этого наблюдения вход не взводится.
-
-**Что из этого починено в ночь на 31.08 — три вещи, и границы каждой названы.** Чёрный ящик судьи
-пишет теперь **строку жизни раз в секунду** с немедленным сбросом на диск: после смерти без
-штатного закрытия на диске остаётся след последних секунд, тогда как 30 августа не осталось ничего.
-Тем же способом починена проба драйвера: её журнал писал только аномалии и потому **не отличал
-«аномалий не было» от «проба умерла»**. И у оракула появился **накопитель**: 30 августа он сообщил
-о подстое пять раз, и ни один сигнал не имел права ни на что повлиять — теперь три подстоя за
-прогон останавливают полосу, а два подстоя у самого стока (там, где андервольта нет вовсе, то есть
-речь о здоровье машины) останавливают её раньше. Порог не выдуман: за всю историю архива подстоев
-было пять, и все пять — в день смерти машины; на здоровых прогонах их ноль. 🔴 **Чего это НЕ
-означает:** сброс на диск доказан против смерти ПРОЦЕССА, а не машины — стенд не умеет убить ОС, и
-мутация, снимающая сброс, проходит зелёной. Доказано свойство «улика переживает отсутствие штатного
-закрытия», а не «улика переживает зависание хоста». Разница записана прямо в коде рядом со
-сторожем, а не только здесь. У карты есть и **цифровой двойник** (термин владельца): виртуальная карта, выведенная
-из измеренных словарей именно этого экземпляра, — достаточно глубокая, чтобы жечь ступени, находить
-края и умирать по настоящим профилям смертей этой машины; опись швов и порт устройства готовы,
-движок развёртки собирается на двойника, чтобы предохранители и развёртки репетировались с нулевым
-риском для живой машины.
-
-Стенд снимает телеметрию, грузит карту своими ядрами на CUDA, читает журнал Windows и выносит
-вердикт из трёх — PASS, SDC или CRASH, — сверяя прогон с эталоном, снятым на заводских настройках.
-Важен средний: больше половины отказов от андервольта портят данные раньше, чем что-нибудь упадёт,
-поэтому «не свалилось» — это не пройденный прогон. Вся приёмка первой фазы идёт одной командой:
-
-```bash
-npm run phase1:accept
-```
-
-**KAGO пишет в карту, и обратная дорога не обещана, а пройдена.** Записывает один-единственный
-модуль; профиль применяется, перечитывается до совпадения двух проб подряд и откатывается — круговой
-рейс прогнан на живой карте. И у карты теперь есть свой мост: KAGO разговаривает с драйвером NVIDIA
-напрямую из Node, без стороннего GUI и без единого скомпилированного бинарника, и читает кривую
-«напряжение — частота» из 128 точек.
-
-Первым же замером он выдал число, которое даёт право на все остальные: **собственный разброс прибора**
-между прогонами — десять стоковых прогонов двумя независимыми сериями, **1,28 Вт (0,65 %)** по мощности.
-Разница тоньше этой — не эффект, и инструмент печатает эту фразу рядом с каждой дельтой, которую считает.
-А вот половина этой цифры про производительность не выжила: между отдельными прогонами одна и та же
-стоковая нагрузка расходится на **4,3 %**, поэтому производительность судится по выданной частоте — она
-точна.
-
-**И нагрузка важнее прибора.** Настоящая игровая нагрузка с путевой трассировкой загоняет эту карту в
-**300 Вт, 99 % и 77 °C**. Прежняя вычислительная нагрузка KAGO давала 137 Вт при той же заявленной
-загрузке — половина конверта — и **не читала из видеопамяти ни байта**, то есть отказы памяти были ей
-невидимы по построению. Это был самый крупный измеренный долг проекта, и версия 0.9 его закрывает:
-прожиг держит карту на **305 Вт медианы при `sw_power_cap` от драйвера**, прогоняя **около 5 ТБ через
-видеопамять за десять секунд**, при 75 °C. Оптимум оказался *смесью*: мало арифметики — ядра стоят в
-ожидании памяти (207 Вт при трафике БОЛЬШЕМ, чем у победителя), много — сохнет конвейер памяти
-(229 Вт). Каждый нагруженный блок складывает результат в ту же контрольную сумму, поэтому отказ любого
-из них по-прежнему двигает число оракула.
-
-```bash
-npm run gpu:info
-```
+<a name="ru-3"></a>
+### 3. Как устроено
 
 ```
-GPU            NVIDIA GeForce RTX 5070 Ti
-Driver / VBIOS 610.88 / 98.03.58.40.8b
-Power limit    300.00 W (default 300.00 W)
-Power range    250.00 … 300.00 W  → only 50 W of headroom
-Graphics clock 1050 MHz (max 3090 MHz)
-Temperature    52 °C   Perf state P5
-Memory clocks  405, 810, 7001, 13801, 14001 MHz
-Clock ladder   1651 points total, 389 per full rung, 180 … 3090 MHz  (the edge search's space)
-               identical on all 4 full memory rungs — sweep the graphics clock once
-Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
-               This is the CLOCK grid. The VOLTAGE grid is 127 rungs, 450 … 1240 mV,
-               spaced 5 mV in 94 places and 10 mV in 32 — NOT uniform, read off the live curve.
+кривая:      тренд измеренных краёв напряжения этого кристалла  +  запас по полосам частот
+               → неизменяемый снимок со штампом драйвера, на котором он построен
+применение:  profile-manager — единственный модуль, который пишет в карту
+               → сдвиги кривой через NVAPI, посчитанные по живой таблице карты в этот момент
+               → лимит мощности и граница частоты ниже максимума карты через nvidia-smi
+             перечитывание до совпадения двух чтений, иначе откат к заводскому
+проверка:    игра · прожиг · скачки нагрузки · простой · пробуждения  →  сэмплер телеметрии + канал ошибок драйвера
+               → вердикт → сбой поднимает запас своей полосы (храповик: назад не опускается)
 ```
 
-Строка про запас и определила всё остальное. Потолок мощности драйвер двигает только с
-300 Вт до 250 Вт — на 50 Вт. Цели, ради которых проект затевался, требуют в два-три раза больше,
-так что одним потолком мощности их было не взять никогда, и правка кривой стала обязательной. Весь
-разбор — в [`researches/01`](researches/01_gpu_control_paths.md), дорожная карта — в
-[`MASTER_PLAN.md`](MASTER_PLAN.md), текущее состояние — в [`STATUS.md`](STATUS.md).
+1. **Модель кристалла вместо охоты за каждым краем.** Первый метод искал край напряжения каждой из 389 частот, доводя
+   машину до сбоя на каждой: за шесть недель — 5 краёв. Все 14 измеренных краёв легли на одну прямую —
+   `глубина = −295,8 + 0,1674 · f`, разброс 4,9 мВ, — поэтому кривая — это тренд плюс запас по полосам, а поиск края
+   теперь нужен только для того, чтобы опуститься ещё ниже.
+2. **Частоты, а не точки таблицы.** Кривая хранится как «частота → напряжение», а это от температуры не зависит; сдвиги,
+   которые нужны железу, считаются в момент применения. Поэтому и потолок Silent Cold — «около 2,2 ГГц»: кривая
+   ограничивает его на 2205 МГц, а под игрой прогретая карта работает на 2235.
+3. **Сбой — это улика, а не конец прогона.** Проверка пишет намерение на диск и делает `fsync` до того, как первый байт
+   уйдёт в карту; проверка, которую машина не пережила, закрывается при следующем запуске — в полосе, где снята последняя
+   проба телеметрии.
+4. **Свой стенд.** Таймдемо Quake II RTX как игровая нагрузка, собственный CUDA-прожиг, который держит карту на потолке
+   300 Вт и прогоняет терабайты через видеопамять, отдельный сэмплер телеметрии и детектор плато: сравнение засчитывается,
+   только когда температура и вентиляторы вышли на плато. Таблицы и картинки на этой странице нарисованы прямо из записей
+   стенда.
 
----
+<a name="ru-4"></a>
+### 4. Установка и первый запуск
 
-<a id="3-методика"></a>
+**Что нужно:** Windows 11, видеокарта NVIDIA GeForce со свежим драйвером, Node.js 18 и новее, права администратора (без
+них драйвер не примет запись частот и мощности).
 
-## 3. Методика
+```powershell
+git clone https://github.com/MikalaiKryvusha/KAGO.git
+cd KAGO
+npm run gpu:info                 # только чтение: карта, драйвер, VBIOS, диапазон мощности, лестница частот
+npm run setup -- --install       # четыре ярлыка на рабочем столе, задачи применения, задача при входе и трей
+```
 
-Наивный рецепт — «снижай напряжение, пока не упадёт, потом шаг назад» — ему учит большинство
-руководств, и в нём две дыры, которые закрываются измерениями.
+Всё, что `setup` создаёт вне репозитория, записывается в квитанцию **до** создания — вместе с командой, которая это
+удаляет. Чтобы убрать всё, запустите `npm run setup -- --uninstall`.
 
-**Дыра первая: крах — не первый отказ.** В исследовании 57 программ на четырёх поколениях карт
-больше половины отказывали **молча**, ещё до всякого краха: карта продолжала рисовать кадры и
-возвращать ответы, и ответы были неверные. Тест, который следит только за крахом, проходит зону
-порчи данных насквозь и не замечает её.
+> ⚠️ **Режимы в `profiles/` замерены на RTX 5070 Ti автора.** На другой карте или другом драйвере они не применятся — так
+> работает сверка штампа. Для другой карты методика та же, но кривую нужно замерить и построить под её кристалл; сегодня
+> для этого нужны зонд края и построитель кривой (`node tools/curve-proposal.mjs`), а не одна кнопка.
 
-**Дыра вторая: у края обрыв, а не склон.** У одной программы вероятность ошибки выросла с 3 % до
-90 % на двух процентах напряжения. Остановиться на последней прошедшей настройке — это встать
-ровно на обрыв, с которого хватит тёплого дня или игры потяжелее.
+> **Андервольтинг меняет то, как питается ваше железо.** Сделанный небрежно, он стоит зависшего экрана, сорванного
+> прогона или испорченных данных, которых вы полгода не заметите. KAGO построен так, чтобы это было маловероятно и всегда
+> обратимо, — и карта всё равно ваша. MIT означает отсутствие гарантий, и это не украшение текста.
 
-Поэтому KAGO делает иначе:
+<a name="ru-5"></a>
+### 5. Команды
 
-| Шаг | Что происходит |
+| Команда | Что делает |
 |---|---|
-| **Золотой эталон** | Набор нагрузок прогоняется на стоке, выходы сохраняются. Всё дальнейшее сравнивается с ними, а не с «вроде нормально». |
-| **Трёхзначный вердикт** | Каждая проба заканчивается как **PASS**, **SDC** (выход изменился, ничего не упало) или **CRASH** (сброс драйвера, WHEA, гибель приложения, BSOD). Средняя графа и есть главная. |
-| **Взять край в вилку** | Грубый спуск до первого сбоя, затем бинарный поиск края по сетке. На сбойном напряжении поиск не задерживается. |
-| **Добавить запас** | Отгружаемое напряжение стоит **на один шаг сетки выше последней стабильной ступени** — не выше порога сбоя, а выше того напряжения, на котором частота ещё работала. Разница существенна: край вероятностен, и якорем служит наблюдённая устойчивость, а не наблюдённый отказ. |
-| **Разные нагрузки** | Ветвистый код и счётный отказывают по-разному, а самое низкое безопасное напряжение гуляет между программами на ~100 мВ. Порог ЧАСТОТЫ — **худший** результат по всему набору, а не первый найденный. |
-| **Переходы, а не просто нагрузка** | Шум питания тут значит больше температуры, поэтому тяжёлый тест — это быстрая смена нагрузки, а не ровные 100 %. |
-| **Прожиг, упирающийся в предел мощности** | Испытательная нагрузка держит карту **на её потолке в 300 Вт** и гоняет **терабайты через видеопамять** — замерено 305 Вт медианы при `sw_power_cap` от драйвера, против 233 Вт и *нулевого* трафика памяти у прежней. Напряжение, доказанное при трети той электрической нагрузки, что даёт игра, доказано не тем. |
-| **Замер пишется на ту частоту, которая была** | Частоту у видеокарты заказать нельзя: её выбирает собственный регулятор буста, ограниченный кривой, пределом мощности и температурой. Под предельным прожигом карта отвечает на снижение напряжения снижением частоты. Поэтому инструмент **измеряет, на какой частоте карта реально шла**, и записывает напряжение против неё. Вердикт о частоте, на которой прожиг не шёл, хуже, чем отсутствие вердикта. |
-| **Привязка к драйверу** | Профиль записывает драйвер и VBIOS, на которых был доказан. Обновление драйвера делает его недействительным до перепроверки. |
+| `npm run gpu:info` | читает карту: модель, драйвер, VBIOS, диапазон мощности, частоты, температуру |
+| `npm run curve -- --progress` | сколько режимов прошло проверку (из 4), запас по полосам, выгода против стока |
+| `npm run profile -- --apply <режим>` · `--reset` · `--state` | применить режим · вернуть заводские настройки · прочитать мощность и частоту |
+| `npm run validate -- --mode <режим> --candidate <профиль> --minutes 4` | проверяет режим целиком — **пишет в карту**, в конце откатывает |
+| `npm run gfx -- --capture --label <имя> --runs 60` | игровой стенд с телеметрией, до выхода карты на плато |
+| `node automation-engine/lib/mode-validate.mjs --compare --stock <a> --mode <b>` | выгода режима против стока по двум записям стенда |
+| `node tools/curve-proposal.mjs` | строит кривую по измеренным краям: тренд плюс запас по полосам |
+| `npm run mon -- --seconds N --out <файл>` | телеметрия в файл, проба раз в полсекунды |
+| `npm run check` · `npm run selftest:all` | проверки перед коммитом · все офлайн-тесты |
 
-Измерения под каждым пунктом названы в
-[`researches/02`](researches/02_vmin_guardband_methodology.md).
+<a name="ru-6"></a>
+### 6. Карта проекта
 
----
+| Путь | Что там |
+|---|---|
+| `automation-engine/` | оркестратор: единственный модуль, который пишет в карту, мост к NVAPI, проверка режима, стенд, ярлыки и трей |
+| `tools/` | инструменты оператора: построитель и редактор кривой, интеграл площади, инфографика, проверки перед коммитом |
+| `profiles/` · `curves/` | режимы и снимки кривой, на которых они стоят |
+| `workloads/` | собственный CUDA-прожиг KAGO и его контрольные суммы |
+| `assets/` | логотип, иконки, инфографика |
+| `researches/` · `plans/` · `bugs/` | исследования, на которых стоят решения, планы, по документу на каждый дефект |
 
-<a id="4-четыре-режима"></a>
+Где что лежит: [PROJECT_STRUCTURE_EXTERNAL_MAP.md](PROJECT_STRUCTURE_EXTERNAL_MAP.md); как устроено:
+[PROJECT_ARCHITECTURE_INTERNAL_MAP.md](PROJECT_ARCHITECTURE_INTERNAL_MAP.md).
 
-## 4. Четыре режима
+<a name="ru-7"></a>
+### 7. Состояние и планы
 
-Владелец расщепил прежние два профиля на четыре режима, у каждого — свой критерий оптимальности.
-Механизм при этом один: поднимается вся кривая «напряжение — частота», а различает режимы только
-место потолка частоты. И ни один из них не фиксирует частоту — карта по-прежнему разгоняется и
-по-прежнему сбрасывается на простое.
+0.9.3: **все четыре режима прошли проверку целиком** на драйвере 617.42 и сравнены со стоком под одной нагрузкой. Осталась
+неделя обычной игры: сбой в повседневном пользовании идёт в журнал проверок, поднимает свою полосу, и режим проверяется
+заново. Дальше — углубление по полосам, меню трея с пунктом `Exit` и нижний диапазон частот. Дорожная карта —
+[MASTER_PLAN.md](MASTER_PLAN.md), текущее состояние — [STATUS.md](STATUS.md).
 
-**Все четыре режима несут ОДИН И ТОТ ЖЕ вектор напряжений.** Поиск даёт одну вещь — «частота →
-минимальное безопасное напряжение плюс 10 мВ» по всей кривой, — а режим это тот самый вектор плюс
-одна ручка. Max Perfomance и Optimised — почти близнецы: различает их лимит мощности и больше ничего.
+<a name="ru-8"></a>
+### 8. Автор и лицензия
 
-| | Цель | Вектор напряжений | Лимит мощности | Потолок частоты |
-|---|---|---|---|---|
-| 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе, вертушки крутятся сколько угодно | тот же | **300 Вт** | нет, кроме железного максимума карты |
-| ⚖️ **Optimised** | *«почти то же самое, что Max Perfomance»* — но тихо (вентиляторы ≤ 60 %, ≈ 71 °C) и относительно холодно, при FPS не ниже 95 % | тот же | **250 Вт** | нет, кроме железного максимума карты |
-| ❄️ **Silent Cold** | МАКСИМУМ производительности, при котором вентиляторы после прогрева игрой держатся на 40…50 % — **48 %, 62 °C, замерено** | тот же | 250 Вт | **есть, 2205 МГц** |
-| 🔄 **Stock Default** | заводская карта в одном клике — мощность, частоты и вся кривая | заводской | заводской | — |
+Автор: **Mikalai Kryvusha aka KOT KRINIK** (Николай Кривуша, Кот Криник).
+[GitHub](https://github.com/MikalaiKryvusha) · [Instagram](https://www.instagram.com/kotkrinik/) · [YouTube](https://www.youtube.com/@kotkrinik)
 
-Два железных правила владельца: **никогда не гнать карту выше её собственного максимума** (у этого
-экземпляра 3090 МГц — паспортные 2452 МГц это нижняя граница, а не потолок) и **профиль это вектор
-напряжений, а не число мегагерц** — именно вторая путаница позволила однажды молча удалить потолок,
-не увидев последствий.
+Проект — **вайбкод**: написан вместе с ИИ-агентом и ведётся по [KAIF](https://github.com/MikalaiKryvusha/KAIF),
+фреймворку работы с ИИ-агентами. Иконки — [Fluent Emoji 3D](https://github.com/microsoft/fluentui-emoji) от Microsoft
+(MIT). Игровой стенд использует [Quake II RTX](https://github.com/NVIDIA/Q2RTX) от NVIDIA, он ставится отдельно.
 
-Цены в таблице — бюджеты владельца, а не унаследованные обещания: числа, которые она в итоге понесёт,
-измеряются на этом кристалле и приводятся рядом с собственным разбросом прибора, потому что «потери
-нет», снятое тупым инструментом, находкой не является.
-
-**Четвёртый ярлык возвращает карту к заводским настройкам**, и все четыре записывают запомненное
-состояние, которое восстанавливается при входе в систему, — куда кликнули последним, туда и
-вернётесь. Пассивная иконка в трее показывает активный режим и больше ничего — ни меню, ни кнопок,
-а её гибель карту не трогает. Ярлыки и трей носят один набор иконок, выбранный владельцем по
-отрендеренному сравнению: Fluent Emoji 3D от Microsoft (MIT), едет в репозитории в `assets/icons/`.
-
-Ярлыки уже лежат на рабочем столе, и оболочка вокруг них доказана: каждый клик заканчивается
-проверенным состоянием — применено и перечитано до совпадения, либо отказано, не записав ничего.
-**Все четыре режима проверены целиком на нынешнем драйвере видеокарты (617.42, 17.10.2026)**:
-одна кривая — модель кремния этого кристалла плюс запас по полосам частот, поднятый ровно на тех
-частотах, что однажды сбоили, — при 300 Вт, при 250 Вт и при 250 Вт с потолком 2205 МГц, каждый
-четырёхминутной смесью игры, прожига, скачков нагрузки, простоя и пробуждений, при молчащем канале
-ошибок самого драйвера. Потолок `Silent Cold` подобран по вентиляторам: при 2797 МГц они держались на
-60–65 %, при 2452 — на 52 %, при 2205 устанавливаются на 48 % после двенадцати минут трассировки пути.
-Последний свидетель — неделя обычного пользования.
-Двойной клик по черновику отказывает вслух, вместо того чтобы применить недоказанный андервольт. Что на
-этом железе доказано помимо оболочки: драйвер отдаёт записи назад (потолок мощности и фиксация
-частоты, каждая перечитана до устойчивости и откачена); кривая мощность↔производительность снята по
-десяти точкам; собственный разброс прибора — 1,28 Вт; а свой мост к NVAPI читает кривую из 128
-точек, и шаг её сетки оказался **5 мВ**, а не 6,25 мВ, как гласит фольклор.
-
----
-
-<a id="5-что-нужно"></a>
-
-## 5. Что нужно
-
-- Windows 11
-- Node.js ≥ 18
-- Видеокарта NVIDIA со свежим драйвером. Разрабатывается на GeForce RTX 5070 Ti: методика общая,
-  числа — нет.
-- Права администратора: без них драйвер не примет запись частот и мощности.
-
-> **Андервольтинг меняет то, как питается ваше железо.** Сделанный небрежно, он стоит замёрзшего
-> экрана, сорванного прогона или испорченных данных, которых вы полгода не заметите. KAGO построен
-> так, чтобы это было маловероятно и всегда обратимо, — и карта всё равно ваша. MIT означает
-> отсутствие гарантий, и это не украшение текста.
-
----
-
-<a id="6-собран-на-kaif"></a>
-
-## 6. Собран на KAIF
-
-Проект живёт под [KAIF 2.9](https://github.com/MikalaiKryvusha/KAIF) — авторским фреймворком для
-ИИ-агентов: внешняя память, расширенная и улучшенная автономия и дисциплина, которая держит
-заявление «работает» привязанным к наблюдению.
-
-## Лицензия
-
-MIT © 2026 Николай Кривуша (**КОТ КРИНИК**). См. [LICENSE](LICENSE).
+KAGO распространяется по лицензии [MIT](LICENSE).
