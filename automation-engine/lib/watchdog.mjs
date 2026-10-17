@@ -92,6 +92,7 @@ export const DEFAULT_TTL_MS = 90_000;
 // =================================================================================================
 
 function nowMs() { return Date.now(); }
+let fireSeq = 0; // bugs/145: the per-process part of a fire report's name
 
 function localIso(ms) {
   const d = new Date(ms);
@@ -426,8 +427,15 @@ export async function guardLoop({ file = ARMED_FILE, pollMs = GUARD_POLL_MS, max
         // records is exactly the kind of forensics this project must never manufacture.
         const dir = path.dirname(path.resolve(file));
         fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, `fired-${String(nowMs())}.json`), `${JSON.stringify(report, null, 2)}\n`);
-      } catch { /* a report that cannot be written must not stop a reset that already ran */ }
+        // bugs/145 (2026-10-17, session 109): `fired-<ms>.json` alone collided — two fires inside one tick of the system clock
+        // (the selftest fires back to back) wrote one name, the second overwrote the first. pid + a per-process counter make
+        // the name unique; readers match the `fired-` prefix only.
+        fireSeq += 1;
+        fs.writeFileSync(path.join(dir, `fired-${String(nowMs())}-${process.pid}-${fireSeq}.json`), `${JSON.stringify(report, null, 2)}\n`);
+      } catch (e) {
+        // A report that cannot be written must not stop a reset that already ran — but it is said, not swallowed (bugs/145, hypothesis 2).
+        console.error(`сторож: отчёт срабатывания НЕ записан — ${e?.code ?? ''} ${e?.message ?? e}`);
+      }
       return { fired: true, reason: verdict.verdict, report };
     }
 
