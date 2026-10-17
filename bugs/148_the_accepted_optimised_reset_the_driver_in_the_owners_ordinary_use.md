@@ -1,6 +1,6 @@
 # Bug 148 — the accepted Optimised reset the driver in the owner's ordinary use (17.10 16:16, driver 617.42)
 
-**Status:** 🔴 OPEN — found 2026-10-17 16:41 +03:00 (session 109) by reading the card before a planned check: factory state where
+**Status:** 🔧 FIXED, PENDING THE WEEK OF USE — top band −10 → +10, 2026-10-17 16:51 (see the end); found 2026-10-17 16:41 +03:00 (session 109) by reading the card before a planned check: factory state where
 Optimised had been applied at 15:59; the driver log explains it. Waiting for the owner's word on what ran at 16:16.
 **Severity:** S1 — the ACCEPTED mode (4-minute check passed 15:36, on the shortcut since 15:59) failed on the owner's machine in
 ordinary use; the card fell back to factory silently (the owner was not told; `remembered-state` still says optimised).
@@ -71,3 +71,12 @@ At 16:42 the GPU clients were light: explorer, Chrome ×2, VS Code, NVIDIA Overl
   ✏️ Corrected 16:58: the first edition of this line guessed «one failed sample kills the whole recording» — false; the sampler
   is not at fault. Consequence: a telemetry recording lives only inside one agent turn; across turns only the driver-voice watch
   (a Monitor polling `npm run events`, not a sampler) survives.
+- **17:02–17:06 — Svarog load cycles under the new curve (the owner's word: «лучше бы тебе запускать игру и грузить сейв, чтобы
+  резкий скачок нагрузки воспроизвести»; «самый последний сейв грузи, наклоняй камеру и максимально отдаляй»):** the KUMM
+  session's recipe (`SvarogsDream/tools/run-game.sh`, `VIEW=far`, stop by the harness `kill`; saves left as the game wrote them —
+  the owner: «похуй на сохранения»), 3 cycles × (load the latest save → 30 s in the world, max zoom-out, pitch 12°). Telemetry
+  `nvidia-smi -lms 200` (not a `hardware-mon` sampler, so the end-of-turn tidy does not remove it):
+  `runs/use/2026-10-17T17-02-21-svarog-loads.csv` — 1303 samples, 647 above 2950 MHz, peak 3082 MHz, **2 jumps from deep idle
+  straight to the top within 200 ms** (17:04:38 900 → 3052 MHz; 17:06:07 292 → 3067 MHz) — the failing shape. `nvlddmkm` 0 events
+  17:02:21–17:06:52. With the earlier 16:54–16:57 and 16:58–17:05 runs (0 events) and the wake exam: the top band at +10 holds
+  every shape that failed at −10. **Status → 🔧 fixed, witness = ordinary use** (the week of use; the shortcut and autostart carry it).
