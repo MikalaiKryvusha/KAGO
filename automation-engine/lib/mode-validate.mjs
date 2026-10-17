@@ -43,6 +43,7 @@
 //   MV20 the game stage drops its own timeout (inherits 900 s again)   → «НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА…»
 //   MV21 modesValidated counts the last check of ANY curve (the first edition) → «МЕТРИКА: УПАВШАЯ ПРОВЕРКА КРИВОЙ-КАНДИДАТА…»
 //   MV22 gameStageRecords takes every stage, not only the game ones   → «ВЫГОДА ПО ПРОВЕРКАМ: БЕРУТСЯ ТОЛЬКО ПРОБЫ СТУПЕНЕЙ ИГРЫ…»
+//   MV23 the WAKE stage falls through to the burn branch           → «СМЕСЬ: СТУПЕНЬ ПРОБУЖДЕНИЙ ИДЁТ ЛЁГКИМ ПРОЖИГОМ…»
 //
 // [NOT-TESTED] on the card — hygiene (38 blocks, MV1–MV11 each red on target, 2026-09-25) and functional runs on
 // RECORDED data only (`--hits`, `--compare`, `--replay`, the 08.09 death); the card itself is Ш8's smoke. Functional runs:
@@ -399,19 +400,27 @@ export function deathVerdicts(records, { readSamples = (p) => parseSamples(readF
 // The executor that maps a stage onto the card (graphics-load · stress-tester · hardware-mon) is the
 // other half of Ш4 and is not in this file yet.
 
-export const MIX_STAGE = Object.freeze({ IDLE: 'idle', GAME: 'game', TRANSITIONS: 'transitions', BURN: 'burn' });
+export const MIX_STAGE = Object.freeze({ IDLE: 'idle', GAME: 'game', TRANSITIONS: 'transitions', BURN: 'burn', WAKE: 'wake' });
 const MIN_STAGE_S = 5;           // [AI] a stage shorter than one sampler window beat pair says nothing
 const MIN_TRANSITION_CYCLES = 2; // [AI] one cycle is a step, two are a transition pattern
+// bugs/148 (2026-10-17, session 109): the accepted Optimised died in ordinary use (a light Unity game) and was reproduced by
+// `stress --lowload` (1 s load / 9 s idle): the card sleeps to P8 and a burst wakes it straight to 3000+ MHz — a shape the mix
+// did not hold (its idles are short, its transitions never let the card reach P8). The WAKE stage is that shape; it comes right
+// after the first idle, the card cold as in the failure. Its time is taken from the game passes (360 → 240 s each) so the
+// canon stays 1180 s and the owner's «не более 5 минут» holds; ≥ 20 s keeps ≥ 2 wakes in a smoke.
+// [NOT-TESTED] on the card as a stage — the shape itself failed the old curve (16:45) and passed the new one (16:51–16:53).
+const MIN_WAKE_S = 20;
 
 export const CANONICAL_MIX = Object.freeze([
   { kind: MIX_STAGE.IDLE, seconds: 60, label: 'простой после записи' },
-  { kind: MIX_STAGE.GAME, seconds: 360, label: 'Q2RTX, демо в цикле' },
+  { kind: MIX_STAGE.WAKE, seconds: 240, label: 'пробуждения из простоя (1 с нагрузки / 9 с простоя)' },
+  { kind: MIX_STAGE.GAME, seconds: 240, label: 'Q2RTX, демо в цикле' },
   { kind: MIX_STAGE.TRANSITIONS, cycles: 10, onS: 5, offS: 5, label: 'переходы нагрузка ↔ простой' },
   { kind: MIX_STAGE.BURN, seconds: 60, level: 3, label: 'прожиг, уровень 3' },
   { kind: MIX_STAGE.BURN, seconds: 60, level: 2, label: 'прожиг, уровень 2' },
   { kind: MIX_STAGE.BURN, seconds: 60, level: 1, label: 'прожиг, уровень 1' },
   { kind: MIX_STAGE.BURN, seconds: 60, level: 0, label: 'прожиг, уровень 0' },
-  { kind: MIX_STAGE.GAME, seconds: 360, label: 'Q2RTX, демо в цикле' },
+  { kind: MIX_STAGE.GAME, seconds: 240, label: 'Q2RTX, демо в цикле' },
   { kind: MIX_STAGE.IDLE, seconds: 60, label: 'простой в конце' },
 ].map(Object.freeze));
 
@@ -426,7 +435,7 @@ export function planMix({ minutes = null } = {}) {
   const k = (minutes * 60) / canon;
   const stages = CANONICAL_MIX.map((s) => (s.kind === MIX_STAGE.TRANSITIONS
     ? { ...s, cycles: Math.max(MIN_TRANSITION_CYCLES, Math.round(s.cycles * k)) }
-    : { ...s, seconds: Math.max(MIN_STAGE_S, Math.round(s.seconds * k)) }));
+    : { ...s, seconds: Math.max(s.kind === MIX_STAGE.WAKE ? MIN_WAKE_S : MIN_STAGE_S, Math.round(s.seconds * k)) }));
   return { stages, totalS: stages.reduce((s, x) => s + stageSeconds(x), 0), requestedS: Math.round(minutes * 60) };
 }
 
@@ -715,6 +724,12 @@ export async function makeCardSeams({ profile, totalS, consent = 'проверк
           const run = await L.runTimedemo({ runs, timeoutMs: gameStageTimeoutMs(runs) });
           const ok = run.exitCode === 0 && !run.timedOut;
           return { ok, why: ok ? `FPS ${run.stats?.median ?? '—'}` : `игра: код ${run.exitCode}${run.timedOut ? ', таймаут' : ''}`, endedAtMs: L.nowMs(), fps: run.stats?.median ?? null };
+        }
+        if (stage.kind === MIX_STAGE.WAKE) {
+          // bugs/148: the wake shape — 1 s of load after 9 s of rest, again and again (the stress tester's `--lowload` duty).
+          const r = await L.stressTest({ name: 'sdc_fma', seconds: stage.seconds, lowload: true });
+          const ok = r.verdict !== 'CRASH' && r.verdict !== 'SDC';
+          return { ok, why: `пробуждения: ${r.verdict ?? 'сравнение не состоялось'}${r.reason ? ' — ' + r.reason : ''}`, endedAtMs: L.nowMs() };
         }
         const opts = stage.kind === MIX_STAGE.TRANSITIONS
           ? { name: 'furnace', args: L.FURNACE_LADDER[TRANSITIONS_LEVEL].args, seconds: stageSeconds(stage), transient: true, sustain: stage.onS }
@@ -1119,6 +1134,14 @@ export async function selfTest() {
     const g7 = await tSeams.runStage({ kind: MIX_STAGE.GAME, label: 'игра', seconds: 77 });
     check('НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА СВОИМ ТАЙМАУТОМ (1 проход — 63 с, 7 — 261 с), ТАЙМАУТ — СБОЙ СТУПЕНИ (bugs/147)',
       tmo.join() === '1:63000,7:261000' && g1.ok === false && /таймаут/.test(g1.why) && g7.ok === false, `${tmo.join(' ')} · ${g1.why}`);
+    // bugs/148: the WAKE stage runs the stress tester's low-load duty (sdc_fma, lowload), never a burn level; the canon holds it after the first idle.
+    const wk = [];
+    const wSeams = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, stressTest: async (o) => { wk.push(`${o.name}:${o.lowload === true}:${o.seconds}:${o.transient === true}`); return { verdict: 'PASS' }; } } });
+    const w = await wSeams.runStage({ kind: MIX_STAGE.WAKE, label: 'пробуждения', seconds: 20 });
+    const canonKinds = planMix().stages.map((s) => s.kind);
+    check('СМЕСЬ: СТУПЕНЬ ПРОБУЖДЕНИЙ ИДЁТ ЛЁГКИМ ПРОЖИГОМ (1/9 с), СРАЗУ ПОСЛЕ ПЕРВОГО ПРОСТОЯ, НЕ КОРОЧЕ 20 С (bugs/148)',
+      w.ok && wk.join() === 'sdc_fma:true:20:false' && canonKinds[1] === MIX_STAGE.WAKE && planMix({ minutes: 0.5 }).stages.find((s) => s.kind === MIX_STAGE.WAKE)?.seconds >= 20,
+      `${wk.join()} · ${canonKinds.slice(0, 3).join(' → ')}`);
     const throwing = await makeCardSeams({ profile: { settings: {} }, totalS: 10, lib: { ...fakeLib, apply: async () => { throw new Error('отказ до записи: stamp.driver'); } } });
     const factorySeams = await makeCardSeams({ profile: { settings: { curveRaiseAndCapMhz: null, curveRef: null, curveSnapshot: null } }, totalS: 10,
       lib: { ...fakeLib, resolveProfileCurve: async () => null, apply: async (be, p, o) => { log.push(`factory apply backend=${Boolean(o.curveBackend)}`); return { steps: [] }; } } });
