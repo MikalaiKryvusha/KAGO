@@ -128,6 +128,19 @@
 
 ## Entries
 
+### EXP-0305 · 2026-10-17 · ❌→✅ · #conservative-side #coupled-axes #judge-caught #attribution #s2
+class: conservative-on-one-axis
+**Context / did / result:** a mode-check failure had to be pinned to a frequency, the sampler being too coarse to know which. I
+took the LOWEST delivered frequency of the window as «the side that cannot miss downward» and wrote that into config and the
+plan. The independent judge refuted it in one scratch run: the floor is «failure VOLTAGE + 2 steps», and the lowest frequency
+carries the lowest voltage — an idle sample in the window floored a few idle rows and left the load rows at the failed voltage.
+**Lesson:** **«the conservative side» is judged on the quantity the rule ACTS on, not on the one I picked: when two axes are
+coupled (frequency ↔ the curve's voltage), take the envelope over the whole uncertainty (every candidate at its own value),
+never one end of one axis.**
+none-cheap: guarded now by «…ПРОСТОЙ В ОКНЕ НЕ ПРЯЧЕТ ЧАСТОТУ НАГРУЗКИ…» and «…ПОЛ НА ВЕСЬ РАЗБРОС…» (`validate --selftest`, MV12).
+**Trigger:** any «take the min/max to be safe» over an uncertain input that feeds a floor or a threshold of ANOTHER quantity.
+→ link: `plans/105` Ш2 · `testcases/reports/2026-10-17_approximation-step-offline.md` (addendum)
+
 ### EXP-0304 · 2026-10-17 · ❌→✅ · #kaif-update #owner-word-in-memory #release-text-is-data #ask-the-collision #s3-one-line
 class: release-text-over-owner-word
 **Context / did / result:** the KAIF 2.9 rule «answer mid-turn, then work on» contradicted the owner's word of 26.09 kept in my own
