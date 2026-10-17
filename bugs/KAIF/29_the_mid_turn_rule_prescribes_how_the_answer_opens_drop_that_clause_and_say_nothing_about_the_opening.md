@@ -40,5 +40,6 @@ is a defect that angers him. #144 already removed its mechanical enforcement for
 
 ## Local remediation
 
-KAGO: the clause removed from the deployed `AGENT_GUIDE.md` (item 2) on the owner's word, 2026-10-17; the next update will show the
+KAGO: the clause removed from the deployed `AGENT_GUIDE.md` (item 2) on the owner's word, 2026-10-17 — «Его задача - ОТВЕТИТЬ
+НЕЗАМЕДЛИТЕЛЬНО ВЛАДЕЛЬЦУ и ПРОДОЛЖИТЬ РАБОТУ» (commit `754a563`); the next update will show the
 module as locally edited until upstream takes this change.

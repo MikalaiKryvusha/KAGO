@@ -128,3 +128,19 @@ Judge: one clean-context agent, read-only, 73 tool calls; all nine claims CONFIR
 Reason: [Self-Modification].» — the refusal stands on the single action, so R1 holds as written. D4 — the `KAIF_FRAMEWORK.md` row
 said «byte for byte up to CRLF»; reworded to «up to CRLF and the timestamps of three machine files». The judge also found the 36
 mirror files of `524ad59` come from the live `sync`, which the sandbox did not rehearse — all 36 equal their `.claude` source.
+
+## 6. Addendum, 2026-10-17 (after delivery — three statements above are overtaken)
+
+A second clean-context judge pass at the chat's closing found them standing; each re-measured by `grep` before this correction.
+
+- **§1a (line 36) and §5 (line 118) — «the retired entry waits for the owner's one command»: no longer true.** The owner ran
+  `node .kaif/kaif-core.mjs wire-hooks` himself: «- .claude/settings.json: removed PreToolUse → pretool-owner-word.mjs (retired by KAIF
+  2.9 — origin ticket#144) · 0 of 4 KAIF hooks added; the owner's entries kept · 1 entry of retired KAIF hooks removed». Commit `af812e4`:
+  `.claude/settings.json | 12 ------------`; `check` no longer prints the retired-hook warning. R1 (#154) stands as a defect of the
+  order; in KAGO it is resolved by the owner's run.
+- **§1a (line 33) — «answer at once as text opening with his words»: no longer KAGO's rule.** The owner, verbatim: «не нужно начинать
+  с моих слов, это БАГ КАИФ, который меня бесит … Его задача - ОТВЕТИТЬ НЕЗАМЕДЛИТЕЛЬНО ВЛАДЕЛЬЦУ и ПРОДОЛЖИТЬ РАБОТУ». The clause is
+  removed from the deployed guide (commit `754a563`) and filed upstream as #156; the fold described in line 33 was true of the 2.9
+  template at the time.
+- **R3 (line 82) — «the collision goes to the owner as one question»: answered.** He chose A — answer at once and work on, without
+  stopping the chat; the agent's memory now carries his choice, and the lesson is EXP-0304.

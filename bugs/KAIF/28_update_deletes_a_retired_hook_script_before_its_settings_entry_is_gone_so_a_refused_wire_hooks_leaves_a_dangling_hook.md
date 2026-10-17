@@ -56,5 +56,6 @@ once the entry is gone; or (b) the update leaves the script in place and `wire-h
 
 ## Local remediation (per the "defect in KAIF itself" contour, if applied)
 
-KAGO: none taken by the agent (a stub would be a local file the next update must classify); the owner is given the one command
-`node .kaif/kaif-core.mjs wire-hooks` in the farewell and in the field report.
+KAGO: none taken by the agent (a stub would be a local file the next update must classify); the owner was given the one command
+`node .kaif/kaif-core.mjs wire-hooks` in the farewell and ran it himself the same day (2026-10-17): «1 entry of retired KAIF hooks
+removed» — commit `af812e4`, `.claude/settings.json | 12 ------------`. The dangling window lasted from the update to that run.
