@@ -1,6 +1,6 @@
 # Bug 141 — `npm run validate -- --mode …` hangs inside `runCheck` before the first write when started as the entry module; the same functions imported by a script run clean
 
-**Status:** 🔧 FIX PENDING LIVE WITNESS — cause found and fixed in code 2026-09-25 ≤ 20:07 (session 104, offline; commit
+**Status:** ✅ DONE 2026-10-17 14:13 (session 108, live witness — see «✅ STATUS: DONE» below) — cause found and fixed in code 2026-09-25 ≤ 20:07 (session 104, offline; commit
 `5bc3904` at 20:07:15 — ✏️ the first edition wrote «20:2x», ahead of the clock, EXP-0292 again, caught by the judge): an ESM
 import cycle under top-level await (details «Root cause»); guard block + mutation MV141; the live CLI run is the next card evening
 · twins searched 2026-10-17 — none live (Fix, item 4) · the 27.09 stock run is NOT the witness (Fix, item 5)

@@ -1,6 +1,6 @@
 # Bug 142 — the apply reference stays on driver 610.88: its R6 stamp gate is never asked, and retaking it on 616.92 never settles under load
 
-**Status:** 🔴 OPEN — observed 2026-09-25 on the live card (session 104); no fix yet
+**Status:** ✅ DONE 2026-10-17 14:29 (session 108) — see «✅ STATUS: DONE» below; observed 2026-09-25 on the live card (session 104)
 **Severity:** S2 — the curve every mode is computed against is a 610.88 recording; two 4-minute load runs lost at the owner's machine
 **Version/build:** HEAD `40e2c86` · **When/context:** card evening 2026-09-25, `plans/102` Ш8 п. 2б
 
