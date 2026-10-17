@@ -928,9 +928,8 @@ tool result — and the agent system signs its author (Claude Code: "The user se
    never a silent "not taken as permission". The mechanical half (`.kaif/hooks/`): the leading-word hook orders a stop on a leading "stop" (its
    firing mid-turn is observed on one system, promised by none); no hook stops the work on his other words (2.9 retired the two that did — #144).
    `/fable-judge` hunts "owner's word mid-turn ignored" and "parked and dropped".
-   In KAGO the retired gate was wired by the owner himself on 2026-09-26; KAIF 2.9 deleted its script, and its entry in
-   `.claude/settings.json` goes with `node .kaif/kaif-core.mjs wire-hooks` — the harness refuses that write to the agent
-   (Self-Modification, 2026-09-26 and 2026-10-17), so the owner runs it.
+   In KAGO the retired gate was wired by the owner himself on 2026-09-26; KAIF 2.9 deleted its script, and the owner removed
+   its entry with `node .kaif/kaif-core.mjs wire-hooks` on 2026-10-17 (the harness refuses that write to the agent as Self-Modification).
 
 ### The storefront — text a stranger reads
 
