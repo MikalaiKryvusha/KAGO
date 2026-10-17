@@ -63,3 +63,9 @@ At 16:42 the GPU clients were light: explorer, Chrome ×2, VS Code, NVIDIA Overl
   not a new contour) so the next step is judged on it; (2) the Svarog run under the new curve (the game was relaunched at 16:54 by
   the neighbour session; the driver is watched while it runs); (3) the earlier «wrong» top floors of `bugs/146` (14:17/14:19,
   attributed to 2985…3082) may have been RIGHT — the top fails on wake; item 2 of `bugs/146` is to be re-judged with this in hand.
+- **16:56 — Svarog under the new curve:** the game (relaunched 16:54 by the neighbour session) holds the card at **3037 MHz, ~50 %,
+  ~150 W for 78 % of samples** — Svarog lives in the TOP band, Q2RTX does not (2800–2900); that is why a GPU-light game found it.
+  No driver event 16:54–16:57. The 1-hour recorder (`hardware-mon --seconds 3600`) exited with code 1 at 16:56:46 after 1661
+  samples, no driver event, the card still in Optimised — its `ОШИБКА:` line went to a stderr that was not kept; restarted with
+  stderr kept (`runs/use/2026-10-17T16-57-optimised-2.jsonl`). The same sampler serves the mode check: one failed sample kills the
+  whole recording — to be read when it recurs (S3 until then).
