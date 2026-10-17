@@ -580,7 +580,9 @@ export function selfTest() {
   let threwProd = false;
   try { assertSandbox({ dir: VMIN_DIR }); } catch (e) { threwProd = /ПРОДАКШЕН/u.test(e.message); }
   ok('удалить ПРОДАКШЕН-хранилище — отказ', threwProd, true);
-  ok('а песочницу проверка пропускает', typeof assertSandbox({ dir: mkdtempSync(join(tmpdir(), 'kago-sb-')) }), 'string');
+  const sbDir = mkdtempSync(join(tmpdir(), 'kago-sb-'));
+  ok('а песочницу проверка пропускает', typeof assertSandbox({ dir: sbDir }), 'string');
+  rmSync(sbDir, { recursive: true, force: true }); // 2026-10-17: the probe directory was left in %TEMP% on every run
 
   // --- ЗАПИСЬ НАПЕРЁД (bugs/07). Ради чего она есть: ступень, повесившая машину, убивает процесс
   // вместе с собой и вердикта не оставляет. Метка, поставленная ДО попытки, переживает смерть — и

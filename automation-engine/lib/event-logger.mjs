@@ -63,7 +63,7 @@
 // Verified 2026-08-10 by observation — see the [TESTED] markers per function.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -258,16 +258,21 @@ export function queryFaults({ from, to, providers = config.FAULT_PROVIDERS, powe
     env: { ...process.env, KAGO_EVT_SPEC: specPath, KAGO_EVT_OUT: outPath },
   });
 
+  // The whole temp DIRECTORY goes, on every path (2026-10-17, session 109): unlinking the three files left the directory
+  // behind on every call — 44 `kago-evt-*` from one day, ~1000 found 25.09 — and the two refusals below left the files too.
+  const dropDir = () => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } };
   if (r.error && r.error.code === 'ENOENT') {
+    dropDir();
     throw new Error(`нет powershell.exe на PATH — журнал Windows читать нечем`);
   }
   if (!existsSync(outPath)) {
     const tail = String((r && r.stderr) || '').trim().split('\n').slice(-3).join(' ');
+    dropDir();
     throw new Error(`запрос к журналу не дал файла результата${tail ? `: ${tail}` : ''}`);
   }
 
   const blob = readNoBom(outPath);
-  try { for (const f of [specPath, scriptPath, outPath]) unlinkSync(f); } catch { /* best effort */ }
+  dropDir();
 
   // Split the blob back into per-provider sections by the marker the script wrote.
   const sections = [];

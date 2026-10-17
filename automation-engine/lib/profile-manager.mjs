@@ -55,7 +55,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync, rmSync as fsRmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 import {
@@ -2102,8 +2102,14 @@ async function cmdSelftest() {
   // the production directory fabricates forensics); injected probe and loader; fakeBackend as card.
   // ---------------------------------------------------------------------------------------------
 
+  // Every sandbox is removed when the process exits (2026-10-17, session 109): the blocks never cleaned up, and one battery run
+  // left 133 `kago-boot-*` directories in %TEMP% (~9500 found 25.09). On exit, not per block — a red block's sandbox stays
+  // readable until the suite is over, and the blocks have no common end to hook.
+  const bootDirs = [];
   const bootSandbox = () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'kago-boot-'));
+    if (bootDirs.length === 0) process.once('exit', () => { for (const d of bootDirs) { try { fsRmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } } });
+    bootDirs.push(dir);
     return { rem: path.join(dir, 'remembered-state.json'), jr: path.join(dir, 'boot-apply.jsonl') };
   };
   const journalLines = (jr) => {
