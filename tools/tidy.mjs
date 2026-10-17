@@ -146,6 +146,9 @@ export function runInFlight(nodeProcs, armed, isAlive) {
     ...ENGINE_CARD_WRITING_MODES.map((m) => new RegExp(`engine\\.mjs.*${m}`, 'u')),
     /vf-step\.mjs/u, /ladder-descent\.mjs/u, /thermal-ladder\.mjs/u,
     /fan-ladder\.mjs/u, /trap-suite\.mjs/u, /bench/u,
+    // `bugs/150`: the whole-mode check (epic 101, since 25.09) writes the card and owns its sampler — a real check carries
+    // `--candidate` or `--step`; the offline forms (`--plan`, `--hits`, `--compare`, `--replay`, `--selftest`) do not.
+    /mode-validate\.mjs.*--(?:candidate|step)\b/u,
   ];
   // Контур согласований — владельцу заданы вопросы, сервер ждёт его ответа с бесконечным
   // терпением. Убить его окно или сервер значит отобрать у владельца вопросы посреди ответа —
@@ -335,6 +338,17 @@ async function selfTest() {
     && isAbandonedTerminal('OpenConsole.exe -Embedding', null) === false
     && isAbandonedTerminal('"C:\\Windows\\System32\\OpenConsole.exe" -Embedding', 0) === true
     && isAbandonedTerminal('WindowsTerminal.exe', 2) === false);
+
+  // bugs/150 · mutation MTD1, named before the run: drop the mode-validate marker → this block red.
+  check('bugs/150: идущая ПРОВЕРКА РЕЖИМА (--step / --candidate) — прогон, её сэмплер не трогаем; сухая и офлайн-формы — нет',
+    runInFlight([P(30, 'node automation-engine/lib/mode-validate.mjs --step --mode optimised --band-margins 0,0,0,-10,-10,-10,10 --minutes 4')], null, alive).busy === true
+    && runInFlight([P(31, 'node automation-engine/lib/mode-validate.mjs --mode optimised --candidate profiles/x.json --minutes 4')], null, alive).busy === true
+    && [
+      'node automation-engine/lib/mode-validate.mjs --step --mode optimised --band-margins 0,0,0,0,0,0,0 --dry-run',
+      'node automation-engine/lib/mode-validate.mjs --compare --stock a.json --mode b.json',
+      'node automation-engine/lib/mode-validate.mjs --selftest',
+      'node automation-engine/lib/mode-validate.mjs --plan --minutes 4',
+    ].every((cmd, i) => runInFlight([P(40 + i, cmd)], null, alive).busy === false));
 
   check('посторонний node не делает машину занятой',
     runInFlight([P(2, 'node some/other/thing.mjs')], null, alive).busy === false);

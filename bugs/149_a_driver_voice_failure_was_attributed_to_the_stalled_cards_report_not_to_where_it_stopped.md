@@ -60,11 +60,14 @@ unchanged — no floor in the journal was laid by this defect.
 200-ms telemetry `runs/use/2026-10-17T17-40-09-validate-90f679-200ms.csv`: 17:41:21.49 wake from P3 (1095 MHz) straight into the
 Q2RTX load — 3037 MHz / 261 W · 22.11–22.51 2895 MHz / 249 W · **23.12 2902 MHz / 250.99 W / 99 % / 73 °C and then IDENTICAL to the
 digit for 110 s** (frozen telemetry — the stale view of a wedged engine, netdata Xid 43) · the check's own sampler (`mon.jsonl`)
-wrote its last sample at 22.76 · the first `153` at **17:41:41 — 18 s after the freeze**, not 2. The power-collapse rule saw
-nothing (power froze high); the attribution fell to the widened window, which was EMPTY of check samples and took the last one
-(2895 @890) — right here, but by the fallback. Not acted on (named, deliberately): counting the sampler's tail silence as a
-`telemetry-gap` failure would date it right (22.76), but its 2-s window holds the idle samples before the wake (1095…3037) and the
-envelope would floor the whole curve between — worse than today. The honest rule for a wake-into-load stall is «samples under load
+wrote its last sample at 22.76 — ✏️ **corrected 17:5x: NOT a stall signal** — that is the moment the agent's turn ended and the
+`Stop` hook's `tidy` removed the sampler (the same happened at 17:48:35 to the next check; `bugs/150`); the first edition of this
+line read it as «the sampler went silent 18 s before the voice» · the first `153` at **17:41:41 — 18 s after the freeze**, not 2. The power-collapse rule saw
+nothing (power froze high); the attribution fell to the widened window, which was EMPTY of check samples (tidy had removed the
+sampler) and took the last one (2895 @890) — right here, but by the fallback. Not acted on (named, deliberately): the frozen
+200-ms values are the real stall witness (from 23.12); a «frozen telemetry» rule would need the 200-ms series inside the check, and
+a 2-s window before a wake-into-load stall holds the idle samples before the wake (1095…3037) — the envelope would floor the whole
+curve between, worse than today. The honest rule for a wake-into-load stall is «samples under load
 before the silence» — a design question for after the card day, with this record as its fixture.
 
 ## Decisions made without the owner
