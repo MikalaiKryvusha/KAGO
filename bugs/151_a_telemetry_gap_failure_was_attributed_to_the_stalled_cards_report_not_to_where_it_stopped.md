@@ -47,6 +47,30 @@ lag `bugs/149` paid for). `bugs/149` §Twins named this class and judged it unaf
 Selftest block «МОЛЧАНИЕ СЭМПЛЕРА: СБОЙ ПРИПИСАН МОМЕНТУ ОСТАНОВКИ…» on the 20:04 numbers; block «ПОПРАВКА ЖУРНАЛА ПРОВЕРОК…»;
 mutations named in the suite header (MT4, MT5, MT6).
 
+```
+@guard telemetry-gap-stall-onset
+THREAT:         a check's telemetry-gap failure floors the stalled card's report and leaves the frequency that failed down
+PROVED-AGAINST: the 20:04 record's numbers in the selftest (2805 alone under the old rule → 2737…2805 now); MT4–MT6, each red
+GAP:            the onset signature is bugs/149's (0.412 / 150 W, one card); a gap with no power drop keeps the 2-s window
+ON-REAL-PATH:   2026-10-17 20:09 — the real journal corrected (`--reattribute 30 --write`), the step built curve d5b12a (2700–2800
+                raised ~10 mV), and the SAME check (Silent Cold, cap 2797, 4 min) PASSED at 20:14 with 153 s in 2700–2800
+                (runs/validate/2026-10-17T20-10-20) — the rows the old rule left down were the ones that failed
+```
+
+## Status
+
+- 2026-10-17 20:09 +03:00 — fix c925840, correction of seq 30 written; 20:14 — the re-check passed (above). Hygiene: selftest
+  66/66, `npm run check` 0. Functional run: the live check on the corrected floors — pass. Kept open one more failure: the class
+  is closed when a telemetry-gap failure is attributed by the new rule INSIDE a live check (not yet — only re-attributed).
+
+## Twins
+
+`TWINS: searched every failed check of runs/validate/journal.jsonl with --reattribute` — seq 30 is this defect (corrected
+2026-10-17 20:09, `--reattribute 30 --write`: 2805@860 → 2737…2805, ten points). seq 23 and 26: unchanged. seq 16, 18, 19 come
+out WIDER today, but mostly from the `bugs/146` step-diff rule applied retroactively (2707…2895 @850…885 join their points),
+not from this defect — that would lower-bound the 2700–2900 rows of every mode; NOT written, a separate decision. `death`: keeps
+the last durable sample (no gap, no voice — the machine is gone; the onset rule would need a sample after the stall).
+
 ## Decisions made without the owner
 
 - `[AI]` the correction may only add points (the ratchet's direction) — removing the wrong 2805 floor would need the owner's word.
