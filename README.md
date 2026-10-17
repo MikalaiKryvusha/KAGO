@@ -255,8 +255,8 @@ handle. Max Perfomance and Optimised are near twins: they differ by the power li
 |---|---|---|---|---|
 | 🚀 **Max Perfomance** | everything into speed; temperature is not a goal, fans may spin as fast as they like | the same | **300 W** | none beyond the card's own maximum |
 | ⚖️ **Optimised** | *"almost the same as Max Perfomance"* — but quiet (fans ≤ 60 %, ≈ 71 °C) and relatively cold, at FPS within 5 % | the same | **250 W** | none beyond the card's own maximum |
-| ❄️ **Silent Cold** | the MOST performance that fits under the temperature fans hold at 40 % — **59 °C, measured** | the same | 250 W | **yes, ~2800 MHz** |
-| 🔄 **Stock Default** | factory power limit and clocks in one click; the curve reset in this shortcut is being fixed | factory | factory | — |
+| ❄️ **Silent Cold** | the MOST performance that keeps the fans at 40–50 % once the game settles — **48 %, 62 °C, measured** | the same | 250 W | **yes, 2205 MHz** |
+| 🔄 **Stock Default** | the factory card in one click — power limit, clocks and the whole curve | factory | factory | — |
 
 Two iron rules the owner set: **never drive the card above its own maximum** (this die: 3090 MHz —
 the vendor's 2452 MHz boost figure is a floor, not a ceiling), and **a profile is a vector of
@@ -274,13 +274,13 @@ changes nothing on the card. The shortcuts and the tray wear one icon set, picke
 from a rendered comparison: Microsoft's Fluent Emoji 3D (MIT), shipped in `assets/icons/`.
 
 The shortcuts already sit on the desktop, and the shell around them is proven: every click ends in
-a verified state — applied and re-read to agreement, or refused with nothing written. **`Optimised`
-and `Max Perfomance` are checked whole on the current graphics driver (617.42, 2026-10-17)**: one
-curve — this die's silicon model plus a margin per frequency band, raised exactly at the frequencies
-that once failed — at 250 W and at 300 W, each through a four-minute mix of game, burn, load steps,
-idle and wake-ups with the driver's own error channel silent throughout. **`Silent Cold` still ships
-as a refusing draft**: its clock cap is chosen by the fan speed it settles at (target 40–50 %), and
-that measurement on top of the tuned curve comes next.
+a verified state — applied and re-read to agreement, or refused with nothing written. **All four
+modes are checked whole on the current graphics driver (617.42, 2026-10-17)**: one curve — this
+die's silicon model plus a margin per frequency band, raised exactly at the frequencies that once
+failed — at 300 W, at 250 W, and at 250 W under a 2205 MHz ceiling, each through a four-minute mix of
+game, burn, load steps, idle and wake-ups with the driver's own error channel silent throughout.
+`Silent Cold`'s ceiling was picked by the fans: 2797 MHz kept them at 60–65 %, 2452 at 52 %, and
+2205 settles at 48 % after twelve minutes of path tracing. A week of ordinary use is the last witness.
 A double-click on a draft refuses out loud rather than apply an unproven undervolt. Beyond the shell,
 what has been proven on this hardware: the driver gives writes back (power limit and clock lock,
 each re-read to stability and rolled back); the card's power↔performance curve is measured across
@@ -678,8 +678,8 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 |---|---|---|---|---|
 | 🚀 **Max Perfomance** | всё в скорость; температура не цель вовсе, вертушки крутятся сколько угодно | тот же | **300 Вт** | нет, кроме железного максимума карты |
 | ⚖️ **Optimised** | *«почти то же самое, что Max Perfomance»* — но тихо (вентиляторы ≤ 60 %, ≈ 71 °C) и относительно холодно, при FPS не ниже 95 % | тот же | **250 Вт** | нет, кроме железного максимума карты |
-| ❄️ **Silent Cold** | МАКСИМУМ производительности, помещающийся под температуру, которую держат вентиляторы на 40 % — **59 °C, замерено** | тот же | 250 Вт | **есть, ~2800 МГц** |
-| 🔄 **Stock Default** | заводские мощность и частота в одном клике; сброс кривой в этом ярлыке — в починке | заводской | заводской | — |
+| ❄️ **Silent Cold** | МАКСИМУМ производительности, при котором вентиляторы после прогрева игрой держатся на 40…50 % — **48 %, 62 °C, замерено** | тот же | 250 Вт | **есть, 2205 МГц** |
+| 🔄 **Stock Default** | заводская карта в одном клике — мощность, частоты и вся кривая | заводской | заводской | — |
 
 Два железных правила владельца: **никогда не гнать карту выше её собственного максимума** (у этого
 экземпляра 3090 МГц — паспортные 2452 МГц это нижняя граница, а не потолок) и **профиль это вектор
@@ -698,12 +698,13 @@ Ladder step    7 MHz ×194, 8 MHz ×194 — measured on the 810 MHz memory rung.
 
 Ярлыки уже лежат на рабочем столе, и оболочка вокруг них доказана: каждый клик заканчивается
 проверенным состоянием — применено и перечитано до совпадения, либо отказано, не записав ничего.
-**`Optimised` и `Max Perfomance` проверены целиком на нынешнем драйвере видеокарты (617.42, 17.10.2026)**:
+**Все четыре режима проверены целиком на нынешнем драйвере видеокарты (617.42, 17.10.2026)**:
 одна кривая — модель кремния этого кристалла плюс запас по полосам частот, поднятый ровно на тех
-частотах, что однажды сбоили, — при 250 Вт и при 300 Вт, каждый четырёхминутной смесью игры, прожига,
-скачков нагрузки, простоя и пробуждений, при молчащем канале ошибок самого драйвера. **`Silent Cold`
-пока отгружен честным черновиком**: его потолок частоты подбирается по оборотам вентилятора, на
-которых режим устанавливается (цель 40…50 %), и этот замер поверх тюнинг-кривой — следующий.
+частотах, что однажды сбоили, — при 300 Вт, при 250 Вт и при 250 Вт с потолком 2205 МГц, каждый
+четырёхминутной смесью игры, прожига, скачков нагрузки, простоя и пробуждений, при молчащем канале
+ошибок самого драйвера. Потолок `Silent Cold` подобран по вентиляторам: при 2797 МГц они держались на
+60–65 %, при 2452 — на 52 %, при 2205 устанавливаются на 48 % после двенадцати минут трассировки пути.
+Последний свидетель — неделя обычного пользования.
 Двойной клик по черновику отказывает вслух, вместо того чтобы применить недоказанный андервольт. Что на
 этом железе доказано помимо оболочки: драйвер отдаёт записи назад (потолок мощности и фиксация
 частоты, каждая перечитана до устойчивости и откачена); кривая мощность↔производительность снята по

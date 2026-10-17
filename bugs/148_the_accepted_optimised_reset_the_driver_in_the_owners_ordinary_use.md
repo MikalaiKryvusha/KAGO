@@ -100,3 +100,12 @@ telemetry) is the next card action, the owner's word pending.
 - The builder's Optimised curve with them is `90f679`: 3037…3075 990 → 1000 mV, every other row as `7b11e9`. NOT on the card —
   the next card act is its 4-min check (with the wake stage) → profile → shortcut, the owner present (Ш3/Ш4), under the machine
   lock agreed with the KUMM session.
+
+## Third face — 2026-10-17 21:08, a plateau capture under Q2RTX (session 111)
+
+The comparison capture `runs/graphics/cmp-opt.json` (curve `4215c7`, snapshot 2026-10-17T17-54-57, the computer in a CLOSED cabinet,
+card 73 °C, 250 W `sw_power_cap`): 21:08:40.37 2812 MHz 250 W → 40.87 3075 MHz **72 W at 100 %** (stall onset) → 21:08:43
+`nvlddmkm 153` ×3 → Q2RTX exit 1. Hotter than any check of the mode (checks ran 64…70 °C). Recorded in the check journal as a
+failure outside a check (seq 34, `observedIn: use`), attributed by the `bugs/149` rule to 2812…3082 MHz; the step built `6ea8d6`
+(2812+ raised 10–15 mV); Optimised and Max Perfomance re-checked on it — both PASSED (21:11 in the still-hot cabinet, 21:16).
+Witness of the fix: the next plateau captures (21:30 chain, cabinet doors open) and the week of use.

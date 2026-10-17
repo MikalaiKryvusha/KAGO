@@ -128,6 +128,22 @@
 
 ## Entries
 
+### EXP-0310 · 2026-10-17 · ❌→✅ · #attribution #telemetry-gap #twins #power-model #cabinet-heat #s2
+class: twins-missed
+mechanized: npm run validate -- --selftest (block «МОЛЧАНИЕ СЭМПЛЕРА: СБОЙ ПРИПИСАН МОМЕНТУ ОСТАНОВКИ…», mutations MT4–MT6)
+**Context:** ❄️ Silent Cold check 20:04 failed; the instrument floored 2805 MHz — the clock of an already STALLED card — while the GPU
+stopped at 2737. `bugs/149` had fixed the same lag for the driver's voice and its TWINS line judged the sampler-gap class unaffected.
+**Result:** ❌→✅ `bugs/151`: the gap is an alarm too (the OS freezes when TDR recovery starts, after the GPU stopped); one stall-onset
+rule for both classes; the old floor corrected by an add-only journal line; the same check passed on the corrected floors.
+**Lesson:** an «alarm-class» signal (driver voice, sampler silence, a watchdog firing) is timed BACK to the stall it reports; a twins
+search for such a fix asks of EVERY failure class «is its moment the fire or the alarm?» — not «does it read the voice?». Second,
+same session: pick a frequency ceiling from MEASURED power points on the mode's own curve — an f·V² scaling from stock anchors
+predicted 191 W at 2452 MHz, the card drew 218 W. Third: a closed cabinet raised stock to 91 % fan / 81 °C and put a hot Optimised
+over its edge (21:08) — comparisons between modes are taken under one, stated ambient.
+**Repro:** `npm run validate -- --reattribute <seq>` over every failed check after any change to `attributeFailure`.
+**Trigger:** fixing how ONE failure class is attributed → re-attribute the journal's failures of ALL classes and read the diff.
+**Not for:** a death (no sample after the stall exists — the last durable sample stays its moment).
+
 ### EXP-0309 · 2026-10-17 · ❌ · #backticks #node-e #bash #text-through-files #repeat-of-0288 #s3-one-line
 **Twice in one session `node -e "…"` inside bash double quotes carried a markdown code span (`` `4215c7` ``) — bash ran it as a
 command and the plan/STATUS got holes, exit 0 both times; caught only by reading back.** A document edit goes through the Edit tool

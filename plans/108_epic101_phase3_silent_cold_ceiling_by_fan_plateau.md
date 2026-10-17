@@ -67,7 +67,7 @@ acceptance «4/4» (the week of use aside).
 | 20:27–20:40 | 2205 | plateau capture 60 runs (`runs/graphics/silent-2205.json`) | **plateau 62 °C · fan 48 % · 180 W** · 2212 MHz · 47.7 FPS | ✅ in 40…50 % |
 
 The estimate «power ∝ f·V² from stock anchors» predicted 191 W at 2452 and was wrong (218 W measured): on this curve the Q2RTX
-power is close to linear in the delivered clock (218 W @ 2452 · 187 W @ 2212). Use measured points, not the V² model, to pick caps.
+power is close to linear in the delivered clock (218 W @ 2452 · 187 W @ 2227). Use measured points, not the V² model, to pick caps.
 
 ## Decisions made without the owner
 
