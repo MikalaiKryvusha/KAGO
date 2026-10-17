@@ -58,7 +58,10 @@ import { openJournal, appendLine, readJournal, orphanIntents, LINE } from './swe
 import { parseSampleTime } from './hardware-mon.mjs';
 import { driverEventsInWindow, momentOf } from './driver-voice.mjs';
 import { queryFaults } from './event-logger.mjs';
-import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS, FAILURE_ATTRIBUTION_WINDOW_MS } from '../config.mjs';
+import { MODE_BANDS, NEGATIVE_MARGIN_FROM_MHZ, MARGIN_DESCENT_STEP_MV, RATCHET_GRID_STEPS, MIN_BAND_DWELL_S, PULSE_STALL_MS, FAILURE_ATTRIBUTION_WINDOW_MS, TDR_DELAY_MS } from '../config.mjs';
+// bugs/149: the stall signature («busy at a fraction of the power drawn a moment before») — the archive's own numbers, one home each.
+import { POWER_COLLAPSE_RATIO, POWER_ESTABLISHED_MW } from './fuse.mjs';
+import { LOAD_UTIL_PCT } from '../../tools/power-collapse-floor.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
@@ -88,7 +91,7 @@ export function bandOf(mhz, bands = MODE_BANDS) {
 // Telemetry — the sampler's JSONL (`hardware-mon`): { i, t, sample: { 'clocks.gr', … } }
 // -------------------------------------------------------------------------------------------------
 
-/** Parse a sampler file's text into [{ ms, mhz }] in time order; a torn tail line is normal and skipped. */
+/** Parse a sampler file's text into [{ ms, mhz, w?, util? }] in time order; a torn tail line is normal and skipped. */
 export function parseSamples(text) {
   const out = [];
   let periodMs = null;
@@ -99,7 +102,9 @@ export function parseSamples(text) {
     if (!rec?.t || !rec?.sample) continue;
     const ms = parseSampleTime(rec.t);
     const mhz = Number(rec.sample['clocks.gr']);
-    if (ms !== null && Number.isFinite(mhz)) out.push({ ms, mhz });
+    // Power and load ride along for the stall onset (bugs/149); absent fields stay absent, never 0.
+    const w = rec.sample['power.draw.instant'] ?? rec.sample['power.draw']; const util = rec.sample['utilization.gpu'];
+    if (ms !== null && Number.isFinite(mhz)) out.push({ ms, mhz, ...(Number.isFinite(Number(w)) && w !== null ? { w: Number(w) } : {}), ...(Number.isFinite(Number(util)) && util !== null ? { util: Number(util) } : {}) });
   }
   out.sort((a, b) => a.ms - b.ms);
   return { samples: out, periodMs };
@@ -214,12 +219,42 @@ export function lastPassedSnapshot(records, mode, beforeSeq = Infinity) {
  */
 export function attributeFailure({ samples, failure, rows = null, baseRows = null }) {
   if (!failure || failure.cls === FAILURE_CLASS.LOAD) return null;
-  const span = failureSpan(samples, failure.atMs);
+  const { span, by } = failure.cls === FAILURE_CLASS.DRIVER ? driverFailureSpan(samples, failure.atMs) : { span: failureSpan(samples, failure.atMs), by: 'window' };
   if (!span) return null;
   const diff = stepDiffPoints(rows, baseRows);
   const byMhz = new Map([...failurePoints(rows, span), ...diff].map((p) => [p.mhz, p]));
   const points = [...byMhz.values()].sort((a, b) => a.mhz - b.mhz);
-  return { ...span, points: points.length ? points : null, stepPoints: diff.length };
+  return { ...span, by, points: points.length ? points : null, stepPoints: diff.length };
+}
+
+// bugs/149 (2026-10-17, session 110) — THE DRIVER SPEAKS AFTER THE OS'S TDR TIMEOUT, NOT WHEN THE GPU STOPPED. 17.10 16:45:
+// the card stalled at 3037 MHz (197 → 71 W under «100 %» at 14.94), the first `nvlddmkm 153` came at 17.09; the 2-s window
+// before the voice held only the stalled card's report (3075) and floored it, leaving 3037 down.
+// FORK: options <the 2-s window before the voice (as was) | the window widened by TdrDelay (4 s) | the stall onset in the
+//   samples — busy at a collapsed power — and the span from the last healthy sample to the voice, the widened window when no
+//   onset is seen> · price of error <a floor on the stalled report leaves the guilty rows down: another driver reset in use or
+//   in a check; a floor on the whole widened window raises healthy ramp rows the ratchet never gives back> · consulted
+//   <Microsoft «TDR registry keys» (TdrDelay — the preempt wait, default 2 s; recovery after it); hang diagnosis — a stuck
+//   engine pins utilization at 100 % while power sits flat (netdata, Xid 43); this project's archive — POWER_COLLAPSE_RATIO
+//   0.412, 7 deaths of 7, 0 false (fuse.mjs, bugs/117); researches/41>. Chosen: the third, `[AI]`.
+
+/** The first stalled sample in [atMs − TdrDelay − window, atMs]: busy (≥ LOAD_UTIL_PCT) at ≤ the collapse ratio of an established previous power — with that previous, last healthy sample. Null when none is seen. */
+export function stallOnset(samples, atMs, { tdrMs = TDR_DELAY_MS, windowMs = FAILURE_ATTRIBUTION_WINDOW_MS } = {}) {
+  if (!Number.isFinite(atMs)) return null;
+  for (let i = 1; i < samples.length; i++) {
+    const s = samples[i]; const p = samples[i - 1];
+    if (s.ms < atMs - tdrMs - windowMs || s.ms > atMs) continue;
+    if ([s.w, s.util, p.w].every(Number.isFinite) && s.util >= LOAD_UTIL_PCT && p.w * 1000 >= POWER_ESTABLISHED_MW && s.w <= POWER_COLLAPSE_RATIO * p.w) return { healthy: p, onset: s };
+  }
+  return null;
+}
+
+/** A driver-voice failure's span: last healthy sample → the voice when the stall onset is seen; else the window widened by TdrDelay. */
+export function driverFailureSpan(samples, atMs) {
+  const st = stallOnset(samples, atMs);
+  if (!st) return { span: failureSpan(samples, atMs, FAILURE_ATTRIBUTION_WINDOW_MS + TDR_DELAY_MS), by: 'tdr-window' };
+  const mhz = samples.filter((s) => s.ms >= st.healthy.ms && s.ms <= atMs).map((s) => s.mhz);
+  return { span: { loMhz: Math.min(...mhz), hiMhz: Math.max(...mhz), stallAtMs: st.onset.ms }, by: 'stall-onset' };
 }
 
 /**
@@ -355,9 +390,11 @@ export function writeCheckIntent(journal, { mode, candidate = null, snapshot = n
 }
 
 /** The verdict that closes an intent. */
-export function writeCheckVerdict(journal, { seq, verdict, failure = null, failureAt = null, hits = null, at, why = '' }, io = {}) {
+export function writeCheckVerdict(journal, { seq, verdict, failure = null, failureAt = null, hits = null, at, why = '', observedIn = null }, io = {}) {
   // `failureAt` = { loMhz, hiMhz, points: [{ mhz, voltageMv }] | null } — plans/105 level 3; `checkFailureFloors` hands the points to the builder.
-  const rec = { state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict, failure, failureAt, hits, why, at };
+  // `observedIn` (plans/106 Ш2): a failure seen OUTSIDE a check — { where: 'use', mode, snapshot, telemetryPath } — a lone verdict with no
+  // intent: it floors its points like any failed check, and `modesValidated` (which walks intents) never counts it as a check.
+  const rec = { state: LINE.VERDICT, kind: CHECK_KIND, seq, verdict, failure, failureAt, hits, why, at, ...(observedIn ? { observedIn } : {}) };
   appendLine(journal, rec, io);
   return rec;
 }
@@ -466,13 +503,13 @@ export function planMix({ minutes = null } = {}) {
  * refuses a draft without an explicit consent (profile-manager, «согласие черновика»), which the check
  * gives — the owner's click is never simulated.
  */
-export function candidateProfile(modeProfile, { snapshotId, stamp, takenAt, margins = null }) {
+export function candidateProfile(modeProfile, { snapshotId, stamp, takenAt, margins = null, rangeMargins = [] }) {
   return {
     name: `candidate-${modeProfile.mode}.local`, // = the file stem: profile-store refuses a name that differs from its file
     title: `${modeProfile.title} — кандидат проверки`,
     mode: modeProfile.mode,
     qualified: false,
-    draft: { candidate: `снимок ${snapshotId}${margins ? ` · запас по полосам ${margins.map(signedMv).join('/')}` : ''}`, source: 'эпик 101 Ф1 Ш2 (plans/102); проверка целого режима' },
+    draft: { candidate: `снимок ${snapshotId}${margins ? ` · запас по полосам ${margins.map(signedMv).join('/')}` : ''}${rangeMargins.length ? ` · диапазоны ${rangeMargins.map(rangeText).join(', ')}` : ''}`, source: 'эпик 101 Ф1 Ш2 (plans/102); проверка целого режима' },
     settings: { ...modeProfile.settings, curveRef: null, curveSnapshot: snapshotId },
     stamp: { driver: stamp.driver, vbios: stamp.vbios, takenAt },
     evidence: { 'КАНДИДАТ': `построен из профиля «${modeProfile.name}» заменой кривой на снимок ${snapshotId}; прожига нет — доказательство только проверка режима` },
@@ -497,10 +534,14 @@ export function candidateProfile(modeProfile, { snapshotId, stamp, takenAt, marg
 
 export const STEP_MODES = Object.freeze(['optimised', 'max-performance', 'silent-cold']);
 
-/** The step document's name: margins (negative → `n`), the card's driver, the rows' hash — `[a-z0-9-]` only. */
-export function stepDocName(margins, driver, rowsSha) {
-  return `model-bands-${margins.map((m) => (m < 0 ? `n${-m}` : String(m))).join('-')}-d${String(driver).replace(/\./g, '-')}-${String(rowsSha).slice(0, 6)}`;
+/** The step document's name: margins (negative → `n`), range surcharges (`r<lo>-<hi>p<mv>`, plans/106), the card's driver, the rows' hash — `[a-z0-9-]` only. */
+export function stepDocName(margins, driver, rowsSha, rangeMargins = []) {
+  const ranges = rangeMargins.map((r) => `-r${r.loMhz}-${r.hiMhz}p${r.mv}`).join('');
+  return `model-bands-${margins.map((m) => (m < 0 ? `n${-m}` : String(m))).join('-')}${ranges}-d${String(driver).replace(/\./g, '-')}-${String(rowsSha).slice(0, 6)}`;
 }
+
+/** `3037–3075 +10` — how a range surcharge is said in a plan, a candidate and a report. */
+export const rangeText = (r) => `${r.loMhz}–${r.hiMhz} ${signedMv(r.mv)}`;
 
 async function loadStepDeps() {
   const cp = await import('../../tools/curve-proposal.mjs');
@@ -525,7 +566,7 @@ async function loadStepDeps() {
  * band, which bands are exhausted, the document, and (not dry) the snapshot and the candidate. Throws by name on a
  * refused margin vector, a document the validator refuses, or a candidate the profile format refuses.
  */
-export async function prepareStep({ mode, margins, dry = false, deps = null }) {
+export async function prepareStep({ mode, margins, rangeMargins = [], dry = false, deps = null }) {
   if (!STEP_MODES.includes(mode)) throw new Error(`шаг не строится: режим «${mode}» — шаг приближения есть только у ${STEP_MODES.join(' · ')}`);
   const D = deps ?? await loadStepDeps();
   const why = D.marginRefusal(margins);
@@ -534,12 +575,19 @@ export async function prepareStep({ mode, margins, dry = false, deps = null }) {
   const p = D.propose();
   const stock = new Map(p.facts.rows.map((r) => [r.mhz, r.stockVoltageMv]));
   const ladder = p.facts.rows.map((r) => r.mhz);
-  const args = { ladder, stockAt: (m) => stock.get(m), grid: p.facts.grid, anchors: p.anchors, credible: p.credible, maxMhz: p.facts.card?.maxGraphicsMhz ?? Math.max(...ladder), margins };
-  const banded = D.bandedCurve(args);
+  const args = { ladder, stockAt: (m) => stock.get(m), grid: p.facts.grid, anchors: p.anchors, credible: p.credible, maxMhz: p.facts.card?.maxGraphicsMhz ?? Math.max(...ladder), margins, rangeMargins };
+  const banded = D.bandedCurve(args);                           // a bad range is refused here, by name (rangeMarginsRefusal)
   const exhausted = D.exhaustedBands(args);
+  // plans/106 Ш1: what the ranges did against the SAME bands without them — the rows they raised, and the rows ABOVE a range
+  // that monotonicity lifted with it. Printed before the card: a bisection whose «untouched» half moved is a confounded step.
+  const rangeEffect = rangeMargins.length === 0 ? null : (() => {
+    const plain = D.bandedCurve({ ...args, rangeMargins: [] }).rows;
+    const moved = banded.rows.map((r, i) => ({ mhz: r.mhz, from: plain[i].voltageMv, to: r.voltageMv, inRange: r.rangeMv > 0 })).filter((x) => x.from !== x.to);
+    return { raised: moved.filter((x) => x.inRange), carried: moved.filter((x) => !x.inRange) };
+  })();
   const { createHash } = await import('node:crypto');
   const rowsSha = createHash('sha256').update(banded.rows.map((r) => `${r.mhz}:${r.voltageMv}`).join(',')).digest('hex');
-  const docName = stepDocName(margins, card.driver, rowsSha);
+  const docName = stepDocName(margins, card.driver, rowsSha, rangeMargins);
   const takenAt = D.nowIso();
   const dataDriver = p.facts.stamp?.driver;
   const stamp = { ...p.facts.stamp, driver: card.driver, vbios: card.vbios ?? p.facts.stamp?.vbios, ...(dataDriver && dataDriver !== card.driver ? { dataDriver } : {}) };
@@ -548,13 +596,13 @@ export async function prepareStep({ mode, margins, dry = false, deps = null }) {
   if (refusals.length) throw new Error(`шаг не строится: документ кривой не прошёл валидатор — ${refusals.slice(0, 5).map((r) => `${r.field}: ${r.why}`).join(' · ')}`);
   const modeProfile = D.readModeProfile(mode);
   const candidateFile = D.candidateFile(mode);
-  const step = { mode, margins, card: { driver: card.driver, vbios: card.vbios }, docName, docExists: D.docExists(docName), perBand: banded.perBand, exhausted,
+  const step = { mode, margins, rangeMargins, rangeEffect, card: { driver: card.driver, vbios: card.vbios }, docName, docExists: D.docExists(docName), perBand: banded.perBand, exhausted,
     failRaises: banded.failRaises, monotoneRaises: banded.monotoneRaises, checkFloors: (p.checkFloors ?? []).length, candidateFile, dry, snapshotId: null };
   if (dry) return step;
   if (!step.docExists) D.saveCurveDoc(doc, { name: docName });
   const { snapshot } = D.takeSnapshot({ name: docName, nowIso: takenAt });
   step.snapshotId = D.snapshotIdFor(snapshot.takenAt);
-  const cand = candidateProfile(modeProfile, { snapshotId: step.snapshotId, stamp: card, takenAt, margins });
+  const cand = candidateProfile(modeProfile, { snapshotId: step.snapshotId, stamp: card, takenAt, margins, rangeMargins });
   const bad = D.validateProfile(cand, { fileName: candidateFile });
   if (bad.length) throw new Error(`кандидат не записан: ${bad.slice(0, 5).map((r) => `${r.field}: ${r.why}`).join(' · ')}`);
   D.writeCandidate(candidateFile, cand);
@@ -567,6 +615,12 @@ export function renderStepPlan(step) {
   const L = [`ШАГ ПРИБЛИЖЕНИЯ · режим ${step.mode} · запас по полосам ${step.margins.map(signedMv).join('/')} · карта: драйвер ${step.card.driver}`];
   L.push(`  отказов проверок режима под кривой (уровень частоты): ${step.checkFloors} · подъёмов к известным отказам ${step.failRaises} · монотонность ${step.monotoneRaises}`);
   for (const [i, b] of step.perBand.entries()) L.push(`  ${b.label}: запас ${signedMv(b.marginMv)} · глубина под стоком ${b.depthMinMv ?? '—'}…${b.depthMaxMv ?? '—'} мВ · ${step.exhausted[i] ? 'исчерпана (ещё шаг ничего не сдвинет)' : 'можно ниже'}`);
+  if (step.rangeEffect) {
+    const mv = (xs) => xs.map((x) => `${x.mhz}: ${x.from}→${x.to}`).join(' · ') || 'ничего';
+    L.push(`  надбавка диапазонов (plans/106): ${step.rangeMargins.map(rangeText).join(' · ')}`);
+    L.push(`    поднято в диапазонах против кривой полос: ${mv(step.rangeEffect.raised)}`);
+    L.push(`    ${step.rangeEffect.carried.length ? '⚠️ ' : ''}поднято монотонностью ВНЕ диапазонов: ${mv(step.rangeEffect.carried)}`);
+  }
   L.push(`  документ: curves/${step.docName}.json ${step.docExists ? '(уже есть — те же строки, переиспользуется)' : '(новый)'}`);
   L.push(step.dry ? '  СУХОЙ ПРОГОН: документ, снимок, кандидат, журнал и карта не тронуты.'
     : `  снимок: ${step.snapshotId} · кандидат: ${String(step.candidateFile).replace(/\\/g, '/')}`);
@@ -1349,6 +1403,46 @@ export async function selfTest() {
     let refusedStock = null; try { await prepareStep({ mode: 'stock-default', margins: marginsA, deps: deps() }); } catch (e) { refusedStock = e.message; }
     check('ШАГ: ТОТ ЖЕ ДОКУМЕНТ НЕ ПЕРЕПИСЫВАЕТСЯ; ЗАПАС НИЖЕ ТРЕНДА ВНЕ НАГРУЗОЧНЫХ ПОЛОС И ЗАВОДСКОЙ РЕЖИМ ОТКЛОНЯЮТСЯ ПО ИМЕНИ',
       !writes.some((w) => w.startsWith('doc:')) && writes.length === 2 && /только полосы от 2700/.test(refusedB3 ?? '') && /только у optimised/.test(refusedStock ?? ''), `${writes.join(' | ')} · ${refusedB3} · ${refusedStock}`);
+
+    // P106-AC1 (plans/106 Ш1): the range surcharge rides the step. Mutation addressees, named BEFORE the run:
+    //   MS1 prepareStep drops rangeMargins from the builder's args  → this block red (nothing raised, the name still carries it)
+    //   MS2 stepDocName ignores the ranges                          → this block red (the document name)
+    const rangeA = [{ loMhz: 2900, hiMhz: 2930, mv: 10 }];
+    const plainStep = await prepareStep({ mode: 'optimised', margins: marginsA, dry: true, deps: deps() });
+    const rangeStep = await prepareStep({ mode: 'optimised', margins: marginsA, rangeMargins: rangeA, dry: true, deps: deps() });
+    const planText = renderStepPlan(rangeStep);
+    const raisedIn = rangeStep.rangeEffect?.raised.map((x) => x.mhz) ?? [];
+    let refusedRange = null; try { await prepareStep({ mode: 'optimised', margins: marginsA, rangeMargins: [{ loMhz: 2901, hiMhz: 2930, mv: 10 }], dry: true, deps: deps() }); } catch (e) { refusedRange = e.message; }
+    check('ДИАПАЗОН В ШАГЕ: ПОДНЯТЫ ТОЛЬКО ЧАСТОТЫ ДИАПАЗОНА, ИМЯ ДОКУМЕНТА И ПЛАН ЕГО НАЗЫВАЮТ, СНОС МОНОТОННОСТЬЮ ВИДЕН, ЧАСТОТА ВНЕ СЕТКИ ОТКЛОНЕНА (P106-AC1)',
+      raisedIn.length > 0 && raisedIn.every((f) => f >= 2900 && f <= 2930)
+      && /^model-bands-0-0-0-n30-n30-n30-n30-r2900-2930p10-d616-92-[0-9a-f]{6}$/.test(rangeStep.docName) && rangeStep.docName !== plainStep.docName
+      && /надбавка диапазонов \(plans\/106\): 2900–2930 \+10/.test(planText) && /монотонностью ВНЕ диапазонов: /.test(planText)
+      && rangeStep.rangeEffect.carried.every((x) => x.mhz > 2930) && plainStep.rangeEffect === null
+      && /2901 МГц нет на сетке карты/.test(refusedRange ?? ''),
+      `${rangeStep.docName} · поднято ${raisedIn.join(' ')} · снос ${rangeStep.rangeEffect?.carried.map((x) => x.mhz).join(' ') || 'нет'} · ${refusedRange}`);
+
+    // bugs/149: the driver speaks after TdrDelay. The 17.10 16:45 record, numbers copied from runs/use/2026-10-17T16-42-56-optimised.jsonl
+    // (ms from 16:45:12.935; the voice at +4159). Mutation addressees, named BEFORE the run:
+    //   MT1 attributeFailure ignores the class (the old 2-s window for driver-voice) → «ГОЛОС ДРАЙВЕРА…» red (3075 alone)
+    //   MT2 the fallback window without TdrDelay                                     → «ГОЛОС ДРАЙВЕРА…» red (no-collapse case)
+    //   MT3 stallOnset drops the «busy» gate (util)                                  → «ГОЛОС ДРАЙВЕРА…» red (a load that ended)
+    const S4 = (ms, mhz, w, util) => ({ ms, mhz, w, util });
+    const stall = [S4(-500, 352, 27, 12), S4(0, 2857, 81, 24), S4(503, 2940, 82, 34), S4(1002, 3037, 196, 75), S4(1505, 3037, 197, 74), S4(2001, 3037, 71, 100),
+      S4(2500, 3075, 70, 100), S4(2997, 3075, 70, 100), S4(3510, 3075, 70, 100), S4(4007, 3075, 69, 100)];
+    const voice = 4159;
+    const atStall = attributeFailure({ samples: stall, failure: { cls: FAILURE_CLASS.DRIVER, atMs: voice }, rows: [{ mhz: 2940, voltageMv: 915 }, { mhz: 3037, voltageMv: 990 }, { mhz: 3075, voltageMv: 990 }] });
+    // No collapse: the card at 2900 at voice − 3.5 s, then idle — the error is NOT a stall; the widened window must still reach 2900.
+    const noStall = [S4(0, 2900, 250, 99), S4(500, 900, 40, 5), S4(1000, 600, 30, 3), S4(1500, 600, 30, 3), S4(2000, 600, 30, 3), S4(3000, 600, 30, 3), S4(3500, 600, 30, 3)];
+    const atNoStall = attributeFailure({ samples: noStall, failure: { cls: FAILURE_CLASS.DRIVER, atMs: 3500 } });
+    // A load that ENDED: power falls with the load (util low) — not a stall; the fallback window, not the onset rule.
+    const ended = [S4(0, 2800, 240, 98), S4(500, 2800, 241, 98), S4(1000, 2400, 60, 20), S4(1500, 1200, 30, 4), S4(4000, 600, 25, 2)];
+    const atEnded = driverFailureSpan(ended, 4000);
+    const atDeath = attributeFailure({ samples: stall, failure: { cls: FAILURE_CLASS.DEATH, atMs: 4007 } });
+    check('ГОЛОС ДРАЙВЕРА: СБОЙ ПРИПИСАН МОМЕНТУ ОСТАНОВКИ (ПОСЛЕДНЯЯ ЗДОРОВАЯ ПРОБА → ГОЛОС), БЕЗ ПРОВАЛА — ОКНУ, РАСШИРЕННОМУ НА TdrDelay; СМЕРТЬ — КАК БЫЛА (bugs/149)',
+      atStall?.by === 'stall-onset' && atStall.loMhz === 3037 && atStall.hiMhz === 3075 && atStall.stallAtMs === 2001 && atStall.points?.map((p) => `${p.mhz}@${p.voltageMv}`).join() === '3037@990,3075@990'
+      && atNoStall?.by === 'tdr-window' && atNoStall.hiMhz === 2900
+      && atEnded.by === 'tdr-window' && atDeath?.by === 'window' && atDeath.loMhz === 3075 && atDeath.hiMhz === 3075, // death: the old 2-s window, untouched
+      `остановка ${JSON.stringify(atStall)} · без провала ${JSON.stringify(atNoStall)} · конец нагрузки ${JSON.stringify(atEnded)} · смерть ${atDeath?.loMhz}…${atDeath?.hiMhz}`);
   }
 
   return { ok: results.every((r) => r.ok), results };
@@ -1414,6 +1508,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       '  --mode <режим> --candidate <профиль.json> --dry-run        план проверки; карта, журнал и файлы не трогаются',
       '  --step --mode <режим> --band-margins a,…,g [--minutes N]  ⚠️ ПИШЕТ В КАРТУ: шаг приближения — документ → снимок → кандидат → проверка (plans/105)',
       '  --step --mode <режим> --band-margins a,…,g --dry-run      план шага: запас и исчерпание по полосам, имя документа; ничего не пишет',
+      '  --step … --range-margins lo-hi:мВ[,…]                     надбавка поверх полосы на диапазон частот сетки (бисекция, plans/106); только вверх',
       '  --plan [--minutes N]                                      смесь нагрузок, без карты',
       '  --hits <сэмплер.jsonl> […]                                карта посещений по записанной телеметрии, без карты',
       '  --compare --stock <захваты.json,…> --mode <захваты.json,…>  таблица выгоды по записанным захватам, без карты',
@@ -1443,13 +1538,15 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     // plans/105 Ш3: npm run validate -- --step --mode <режим> --band-margins a,…,g [--minutes N] [--dry-run]
     const arg = (f) => { const i = process.argv.indexOf(f); return i === -1 ? null : process.argv[i + 1]; };
     const mode = arg('--mode'); const raw = arg('--band-margins'); const dry = process.argv.includes('--dry-run');
-    const minutesArg = arg('--minutes');
-    if (!mode || !raw) { console.error('ОШИБКА: --step --mode <режим> --band-margins a,b,c,d,e,f,g [--minutes N] [--dry-run]'); process.exit(2); }
+    const minutesArg = arg('--minutes'); const rawRanges = arg('--range-margins');
+    if (!mode || !raw) { console.error('ОШИБКА: --step --mode <режим> --band-margins a,b,c,d,e,f,g [--range-margins lo-hi:мВ,…] [--minutes N] [--dry-run]'); process.exit(2); }
     const margins = raw.split(',').map((x) => Number(x.trim()));
+    let rangeMargins = [];
+    if (rawRanges !== null) { try { rangeMargins = (await import('../../tools/curve-proposal.mjs')).parseRangeMargins(rawRanges ?? ''); } catch (e) { console.error(`ОШИБКА: ${e.message}`); process.exit(2); } }
     let plan; try { plan = planMix({ minutes: minutesArg === null ? null : Number(minutesArg) }); } catch (e) { console.error(`ОШИБКА: ${e.message}`); process.exit(2); }
     const journal = openValidateJournal();
     if (await closeDeathsFirst(journal, dry)) process.exit(dry ? 0 : 1);
-    let step; try { step = await prepareStep({ mode, margins, dry }); } catch (e) { console.error(`ОТКАЗ: ${e.message}`); process.exit(2); }
+    let step; try { step = await prepareStep({ mode, margins, rangeMargins, dry }); } catch (e) { console.error(`ОТКАЗ: ${e.message}`); process.exit(2); }
     console.log(renderStepPlan(step));
     process.exit(await checkCommand({ mode, profile: dry ? null : step.candidate, plan, dry, margins, journal }));
   } else if (process.argv.includes('--mode') && !process.argv.includes('--compare')) {

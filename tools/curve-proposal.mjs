@@ -349,6 +349,53 @@ export function marginRefusal(margins, bands = BANDS) {
     + (Number.isInteger(margins[bad]) ? ` ≥ 0 (ниже тренда — только полосы от ${NEGATIVE_MARGIN_FROM_MHZ} МГц)` : '');
 }
 
+// -------------------------------------------------------------------------------------------------
+// 3b. A margin on a SUB-RANGE of frequencies, over the band margin — plans/106 Ш1 (the bisection's lever)
+// -------------------------------------------------------------------------------------------------
+//
+// ANCHOR (plans/106 Ш1): «`curve-proposal.bandedCurve` takes `rangeMargins: [{ loMhz, hiMhz, mv }]` applied OVER the band
+// margin for rows inside the range» — refined the same session: over the row the band AND the failure floors give (the FORK
+// line in `bandedCurve`), so a row on a floor still rises by its surcharge. The owner's word (GOAL.md «🎯 ТОЧЕЧНО», 2026-10-17): «Сначала ты крупные полосы
+// поднимаешь, потом бисекция, и все ближе и ближе к тому, чтобы точечно тюнить отдельные частоты» — a band is the coarse
+// lever, a range is the fine one: half of a suspect band raised, the other half not, the reproducer decides.
+// The rules, `[AI]` (each a refusal by name, never a silent fix): a range is CLOSED [loMhz, hiMhz] and both ends are
+// frequencies of the card's ladder at or below its maximum (a typo like 3040 for 3037 is refused, not rounded); the
+// surcharge only RAISES (a whole number of mV > 0 — going deeper is the band margin's job, and the floors stay the
+// floors); ranges do not overlap (a frequency carries one surcharge, never a sum nobody ordered). A range is
+// independent of the band boundaries. Order: band curve → failure floors → monotonicity → the surcharge (grid up, never above
+// stock) → monotonicity again — so a row ABOVE a raised range may be lifted with it, counted in `monotoneRaises`, never hidden.
+// [NOT-TESTED] on the card — hygiene: «ДИАПАЗОН…» blocks below, mutations MR1–MR4.
+
+/** Why a list of range surcharges cannot be built on this ladder — or null. */
+export function rangeMarginsRefusal(ranges, ladder, maxMhz) {
+  if (!Array.isArray(ranges)) return 'диапазоны не заданы списком';
+  const onLadder = ladder.filter((m) => m <= maxMhz);
+  const near = (f) => { const lo = onLadder.filter((m) => m < f).at(-1); const hi = onLadder.find((m) => m > f); return [lo, hi].filter((x) => x !== undefined).join(' / '); };
+  for (const r of ranges) {
+    const name = `диапазон ${r?.loMhz}–${r?.hiMhz}`;
+    if (![r?.loMhz, r?.hiMhz, r?.mv].every(Number.isInteger)) return `${name}: границы и надбавка — целые числа`;
+    if (r.mv <= 0) return `${name}: надбавка «${r.mv}» — диапазон только поднимает, нужно целое число мВ > 0`;
+    if (r.loMhz > r.hiMhz) return `${name}: начало выше конца`;
+    if (r.hiMhz > maxMhz) return `${name}: конец выше максимума карты ${maxMhz} МГц`;
+    for (const f of [r.loMhz, r.hiMhz]) if (!onLadder.includes(f)) return `${name}: частоты ${f} МГц нет на сетке карты — ближайшие ${near(f)}`;
+  }
+  const sorted = [...ranges].sort((a, b) => a.loMhz - b.loMhz);
+  const clash = sorted.findIndex((r, i) => i > 0 && r.loMhz <= sorted[i - 1].hiMhz);
+  return clash === -1 ? null : `диапазоны ${sorted[clash - 1].loMhz}–${sorted[clash - 1].hiMhz} и ${sorted[clash].loMhz}–${sorted[clash].hiMhz} перекрываются`;
+}
+
+/** `3037-3075:+10,2962-2977:5` → [{ loMhz, hiMhz, mv }]; an unreadable item is refused by name. Ladder rules — `rangeMarginsRefusal`. */
+export function parseRangeMargins(raw) {
+  return String(raw).split(',').map((s) => s.trim()).filter(Boolean).map((s) => {
+    const m = /^(\d+)-(\d+):\+?(-?\d+)$/.exec(s);
+    if (!m) throw new Error(`диапазон «${s}» не прочитан — форма «начало-конец:мВ», например 3037-3075:10`);
+    return { loMhz: Number(m[1]), hiMhz: Number(m[2]), mv: Number(m[3]) };
+  });
+}
+
+/** The surcharge of one frequency: the mV of the range that holds it, or 0. */
+const rangeMvAt = (mhz, ranges) => ranges.find((r) => mhz >= r.loMhz && mhz <= r.hiMhz)?.mv ?? 0;
+
 /**
  * Which bands would NOT move if their margin went one more step down — every row of the band already
  * stands on a floor (a known failure + two grid steps, the band below through monotonicity, or stock).
@@ -365,8 +412,8 @@ export function exhaustedBands(args, stepMv = MARGIN_DESCENT_STEP_MV) {
   });
 }
 
-export function bandedCurve({ ladder, stockAt, grid, anchors, credible = [], maxMhz, margins, bands = BANDS }) {
-  const refusal = bandsRefusal(bands) ?? marginRefusal(margins, bands);
+export function bandedCurve({ ladder, stockAt, grid, anchors, credible = [], maxMhz, margins, rangeMargins = [], bands = BANDS }) {
+  const refusal = bandsRefusal(bands) ?? marginRefusal(margins, bands) ?? rangeMarginsRefusal(rangeMargins, ladder, maxMhz);
   if (refusal) throw new Error(`кривая с запасом по полосам не строится: ${refusal}`);
   if (anchors.length === 0) throw new Error('кривая с запасом по полосам не строится: нет ни одного края-опоры — модели не на чем стоять');
   const { fit, shift, rawAt, upFloorMv } = trendModel({ stockAt, grid, anchors });
@@ -375,18 +422,30 @@ export function bandedCurve({ ladder, stockAt, grid, anchors, credible = [], max
     const { v, origin } = rawAt(mhz);
     const band = bandOf(mhz, bands);
     const marginMv = margins[band];
+    const rangeMv = rangeMvAt(mhz, rangeMargins);                   // plans/106 Ш1: applied after the failure floors, below
     // A negative margin never undercuts the owner's extrapolation floor above the top edge (for m ≥ 0 this is a no-op).
     const target = origin === 'extrapolated-up' ? Math.max(v + marginMv, upFloorMv) : v + marginMv;
-    return { mhz, voltageMv: Math.min(onGridUp(grid, target), stock), stockVoltageMv: stock, origin, band: bands[band].id, marginMv, trendMv: Math.round(v * 10) / 10 };
+    return { mhz, voltageMv: Math.min(onGridUp(grid, target), stock), stockVoltageMv: stock, origin, band: bands[band].id, marginMv, rangeMv, trendMv: Math.round(v * 10) / 10 };
   });
   const failRaises = raiseToFailures(rows, credible, grid);
-  const monotoneRaises = raiseToMonotone(rows);
+  let monotoneRaises = raiseToMonotone(rows);
+  // FORK: options <the surcharge over «trend + band margin», before the floors | over the row after the failure floors | over the
+  //   FINISHED band curve (floors AND monotonicity), then monotonicity again> · price of error <a row held up by a failure floor
+  //   or by monotonicity from below ignores a surcharge smaller than its gap: a bisection step that changes nothing on the card,
+  //   a driver reset paid for it, and a false «this half is not guilty» — the second option fell into it in its own selftest>
+  //   · consulted <the owner: «точечно тюнить отдельные частоты» (GOAL.md «🎯 ТОЧЕЧНО», 2026-10-17); bugs/148 «✏️ Correction» —
+  //   the top band raise missed 3037…3075 for exactly this reason (check floors held them above the band)>. Chosen: the third,
+  //   `[AI]` (2026-10-17, plans/106 Ш1) — a range raises its rows by at least its mV over the curve the same bands give without
+  //   it (grid up, never above stock); rows below a range never move, rows above may be carried by monotonicity (counted).
+  let rangeRaises = 0;
+  for (const r of rows) if (r.rangeMv > 0) { const to = Math.min(onGridUp(grid, r.voltageMv + r.rangeMv), r.stockVoltageMv); if (to > r.voltageMv) { r.voltageMv = to; rangeRaises++; } }
+  if (rangeRaises) monotoneRaises += raiseToMonotone(rows);
   const perBand = bands.map((b, i) => {
     const in_ = rows.filter((r) => r.band === b.id);
     const depth = in_.map((r) => r.stockVoltageMv - r.voltageMv);
     return { id: b.id, label: b.label, marginMv: margins[i], rows: in_.length, atStock: in_.filter((r) => r.voltageMv === r.stockVoltageMv).length, depthMinMv: depth.length ? Math.min(...depth) : null, depthMaxMv: depth.length ? Math.max(...depth) : null };
   });
-  return { rows, failRaises, monotoneRaises, perBand, trend: { a: fit.a, b: fit.b, rmsMv: fit.rms, shiftMv: shift } };
+  return { rows, failRaises, rangeRaises, monotoneRaises, perBand, trend: { a: fit.a, b: fit.b, rmsMv: fit.rms, shiftMv: shift } };
 }
 
 /** The longest run of consecutive frequencies on ONE voltage — the owner's «полка», as a number. */
@@ -592,6 +651,45 @@ export function selfTest() {
   const nearStock = bandedCurve({ ...bArgs, credible: [...credible, { mhz: 2800, mv: stockAt(2800) - 5, kind: 'проверка режима' }], margins: [0, 0, 0, 0, 0, 0, 0] });
   const r2800 = nearStock.rows.find((r) => r.mhz === 2800);
   check('ОТКАЗ У САМОГО СТОКА ПОДНИМАЕТ СТРОКУ ДО СТОКА, А НЕ ПРОПУСКАЕТСЯ', r2800?.voltageMv === r2800?.stockVoltageMv, `2800: ${r2800?.voltageMv} при стоке ${r2800?.stockVoltageMv} и отказе ${stockAt(2800) - 5}`);
+
+  // ---- plans/106 Ш1: a surcharge on a sub-range (the bisection's lever). Mutation addressees, named BEFORE the run:
+  //   MR1 bandedCurve ignores rangeMargins (rangeMv = 0)        → «ДИАПАЗОН: НАДБАВКА ЛОЖИТСЯ НА КАЖДУЮ СТРОКУ ДИАПАЗОНА…»
+  //   MR2 the range is half-open (mhz < hiMhz)                  → «ДИАПАЗОН: НАДБАВКА ЛОЖИТСЯ НА КАЖДУЮ СТРОКУ ДИАПАЗОНА…»
+  //   MR3 rangeMarginsRefusal stops checking the ladder         → «ДИАПАЗОН: ЧАСТОТА ВНЕ СЕТКИ…»
+  //   MR4 the surcharge goes into the target, BEFORE the floors   → «ДИАПАЗОН НА ПОЛУ ОТКАЗА…»
+  // The range 2795…2895 crosses the B4/B5 boundary on purpose: a range does not care about bands.
+  const rng = { loMhz: 2795, hiMhz: 2895, mv: 20 };
+  const ranged = bandedCurve({ ...bArgs, margins: steps, rangeMargins: [rng] });
+  const inR = (r) => r.mhz >= rng.loMhz && r.mhz <= rng.hiMhz;
+  const topOfRange = Math.max(...ranged.rows.filter(inR).map((r) => r.voltageMv));
+  check('ДИАПАЗОН: НАДБАВКА ЛОЖИТСЯ НА КАЖДУЮ СТРОКУ ДИАПАЗОНА (≥ СТРОКА КРИВОЙ ПОЛОС + НАДБАВКА, ИЛИ СТОК), НИЖЕ — БЕЗ ИЗМЕНЕНИЙ, ВЫШЕ — ТОЛЬКО МОНОТОННОСТЬ',
+    ranged.rows.filter(inR).length === 3 && ranged.rangeRaises === 3
+    && ranged.rows.every((r, i) => !inR(r) || (r.rangeMv === rng.mv && r.voltageMv >= Math.min(r.stockVoltageMv, bc.rows[i].voltageMv + rng.mv)))
+    && ranged.rows.some((r, i) => inR(r) && r.voltageMv > bc.rows[i].voltageMv)
+    && ranged.rows.every((r, i) => r.mhz >= rng.loMhz || r.voltageMv === bc.rows[i].voltageMv)
+    && ranged.rows.every((r, i) => r.mhz <= rng.hiMhz || r.voltageMv === bc.rows[i].voltageMv || (r.voltageMv === topOfRange && bc.rows[i].voltageMv < topOfRange)),
+    ranged.rows.map((r, i) => `${r.mhz}: ${bc.rows[i].voltageMv}→${r.voltageMv}${r.rangeMv ? ` (+${r.rangeMv})` : ''}`).join(' · '));
+  // The real card's case (bugs/148 «✏️ Correction»): rows standing on a failure floor far above «trend + band margin».
+  const onFloor = bandedCurve({ ...lArgs, margins: [0, 0, 0, -200, -200, -200, -200], rangeMargins: [{ loMhz: 2795, hiMhz: 2895, mv: 10 }] });
+  check('ДИАПАЗОН НА ПОЛУ ОТКАЗА ВСЁ РАВНО ПОДНИМАЕТ СВОИ СТРОКИ НА НАДБАВКУ (ПОЛ НЕ ГЛОТАЕТ ШАГ БИСЕКЦИИ)',
+    deep.failRaises > 0 && onFloor.rows.every((r, i) => !(r.mhz >= 2795 && r.mhz <= 2895) || r.voltageMv >= Math.min(r.stockVoltageMv, deep.rows[i].voltageMv + 10)),
+    onFloor.rows.filter((r) => r.mhz >= 2700 && r.mhz <= 2950).map((r) => `${r.mhz}: ${deep.rows.find((d) => d.mhz === r.mhz).voltageMv}→${r.voltageMv}`).join(' · '));
+  const sameAsBands = bandedCurve({ ...bArgs, margins: steps, rangeMargins: [] }).rows.map((r) => r.voltageMv).join();
+  check('ДИАПАЗОН: БЕЗ ДИАПАЗОНОВ КРИВАЯ — РОВНО КРИВАЯ ПОЛОС', sameAsBands === bc.rows.map((r) => r.voltageMv).join());
+  const rr = (list) => rangeMarginsRefusal(list, bLadder, 3090) ?? '';
+  const refusals106 = {
+    offLadder: rr([{ loMhz: 2790, hiMhz: 2895, mv: 10 }]), down: rr([{ loMhz: 2795, hiMhz: 2895, mv: -10 }]),
+    overlap: rr([{ loMhz: 2795, hiMhz: 2895, mv: 10 }, { loMhz: 2895, hiMhz: 2950, mv: 10 }]), aboveMax: rr([{ loMhz: 3000, hiMhz: 3100, mv: 10 }]),
+    reversed: rr([{ loMhz: 2895, hiMhz: 2795, mv: 10 }]), good: rangeMarginsRefusal([rng, { loMhz: 2900, hiMhz: 2950, mv: 5 }], bLadder, 3090),
+  };
+  check('ДИАПАЗОН: ЧАСТОТА ВНЕ СЕТКИ, НАДБАВКА ВНИЗ, ПЕРЕКРЫТИЕ, ВЫШЕ МАКСИМУМА И ПЕРЕВЁРНУТЫЕ ГРАНИЦЫ ОТКЛОНЯЮТСЯ ПО ИМЕНИ',
+    /2790 МГц нет на сетке карты — ближайшие 2700 \/ 2795/.test(refusals106.offLadder) && /только поднимает/.test(refusals106.down) && /перекрываются/.test(refusals106.overlap)
+    && /выше максимума карты 3090/.test(refusals106.aboveMax) && /начало выше конца/.test(refusals106.reversed) && refusals106.good === null,
+    JSON.stringify(refusals106));
+  let parseBad = null; try { parseRangeMargins('3037-3075'); } catch (e) { parseBad = e.message; }
+  const parsed = parseRangeMargins('3037-3075:+10, 2962-2977:5');
+  check('ДИАПАЗОН: ЗАПИСЬ «НАЧАЛО-КОНЕЦ:мВ» ЧИТАЕТСЯ, НЕПОЛНАЯ ОТКЛОНЯЕТСЯ ПО ИМЕНИ',
+    JSON.stringify(parsed) === JSON.stringify([{ loMhz: 3037, hiMhz: 3075, mv: 10 }, { loMhz: 2962, hiMhz: 2977, mv: 5 }]) && /не прочитан/.test(parseBad ?? ''), `${JSON.stringify(parsed)} · ${parseBad}`);
   return results;
 }
 

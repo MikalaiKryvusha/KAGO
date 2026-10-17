@@ -92,3 +92,11 @@ Two explanations, not told apart: (1) the failure sat at 2962–2977 or 3082/309
 probabilistic and the 10 minutes since were luck. The chat claim «2950…3030 and 3082/3090 got +20 mV» was also false (+10…15 mV).
 Status stays 🔧, but «fixed» is NOT established — the frequency-level step (a floor at 3037…3075 from the 16:45 failure, 200-ms
 telemetry) is the next card action, the owner's word pending.
+
+## Session 110 — 2026-10-17 17:4x (offline)
+
+- The 16:45 failure is in the check journal (`plans/106` Ш2, seq 25, `observedIn: use`): floors 3037…3075 @990. The span is the
+  instrument's own, after `bugs/149` (the driver voice is TdrDelay late; the stall onset is the 197 → 71 W collapse at 3037).
+- The builder's Optimised curve with them is `90f679`: 3037…3075 990 → 1000 mV, every other row as `7b11e9`. NOT on the card —
+  the next card act is its 4-min check (with the wake stage) → profile → shortcut, the owner present (Ш3/Ш4), under the machine
+  lock agreed with the KUMM session.

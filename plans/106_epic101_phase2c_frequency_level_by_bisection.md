@@ -1,7 +1,7 @@
 # Plan 106 — the frequency level by BISECTION: from a failing band to the failing frequencies
 
 > **Created:** 2026-10-17 17:1x (session 109, on the owner's word) · **Parent:** `plans/101_EPIC…` (Ф2), `plans/105` (level 3) ·
-> **Status:** 🔲 planned 2026-10-17; Ш1–Ш2 offline, Ш3 at the card with the owner · **Outbound:** — 
+> **Status:** 🟡 Ш1 ✅ and Ш2 ✅ 2026-10-17 17:4x (session 110, offline); Ш3 at the card with the owner · **Outbound:** — 
 
 ## Goal vector (Achieve)
 
@@ -41,12 +41,25 @@ flowchart TD
 
 ## Steps
 
-- [ ] **Ш1. Range margins in the builder** (offline): `curve-proposal.bandedCurve` takes `rangeMargins: [{ loMhz, hiMhz, mv }]`
+- [x] **Ш1. Range margins in the builder** (offline): `curve-proposal.bandedCurve` takes `rangeMargins: [{ loMhz, hiMhz, mv }]`
   applied OVER the band margin for rows inside the range (a range is a sub-interval of the ladder, never crossing the card max);
   `validate --step --range-margins lo-hi:mv,…` passes them and names them in the document name; dry run prints them. Block + mutation.
-- [ ] **Ш2. The observed failure enters the journal** (offline): a one-off record of the 16:45 failure as a check verdict
+  ✅ 2026-10-17 17:3x. ✏️ Refined while building, `[AI]` (FORK line in `bandedCurve`): the surcharge is laid over the FINISHED band
+  curve (floors and monotonicity), then monotonicity again — «over the band margin» let a row on a failure floor swallow the step
+  (the selftest caught it twice). Ends must be ladder frequencies; raise only; no overlap. The dry run prints the rows raised and the
+  rows ABOVE a range carried by monotonicity — a bisection whose «untouched» half moved is a confounded step, so raise the UPPER half
+  first (monotonicity never moves rows below). Blocks: 4 in `proposal --selftest` (MR1–MR4), 1 in `validate --selftest` (MS1–MS2).
+  Real data: `--range-margins 3037-3075:10` → 3037…3075 990→1000, nothing carried; without a range the curve is `7b11e9` byte for byte.
+- [x] **Ш2. The observed failure enters the journal** (offline): a one-off record of the 16:45 failure as a check verdict
   (FAILED, `driver-voice`, `failureAt` = 3037…3075 from the recorded telemetry, rows of snapshot `2026-10-17T15-36-44`), marked
   `observedIn: 'use'` — the builder floors those rows (level 3, raise only).
+  ✅ 2026-10-17 17:4x — seq 25, floors 3037…3075 @990; `modesValidated` unchanged (Optimised still checked), 0 open intents. On the
+  way the instrument itself was wrong: it attributed a driver-voice failure to the 2 s before the voice, i.e. to the stalled card's
+  report (3075 alone) — the voice comes TdrDelay (2 s) after the stall. Fixed first (`bugs/149`, `researches/41`), and the span
+  3037…3075 is now the instrument's own answer, not a hand reading. The builder's curve with these floors is `90f679` — the same
+  rows as `--range-margins 3037-3075:10`: the floors ARE the point raise of the failing frequencies.
+  ⚠️ For Ш3: a floor is the ratchet — rows under it never go back down. Bisection INSIDE 3037…3075 is therefore off the table; what
+  is left to bisect is the rest of the top band (2950…3030, 3082/3090) on its way back to −10, should a failure follow.
 - [ ] **Ш3. Bisection at the card** (the owner present, ~6 min a step, ≤ 5 steps for the ~18 top rows; 1–3 driver resets are the
   price): first the reproducer's reliability on the OLD curve (wake exam 2×60 s + 3 Svarog loads), then halves by Ш1.
 - [ ] **Ш4. Close:** the found rows keep their margin, the rest of the top band back to −10 if it holds; 4-min check (with the wake

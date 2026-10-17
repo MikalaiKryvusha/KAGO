@@ -128,6 +128,14 @@
 
 ## Entries
 
+### EXP-0308 · 2026-10-17 · ❌→✅ · #attribution #tdr #driver-voice #floor-swallows-step #bisection #recon #s2
+**Two «the step does nothing» traps in one session, both caught by a selftest before the card: (1) a failure's moment is not
+its report — Windows speaks TdrDelay (2 s) after the GPU stops, so a window before the driver's voice sees the stalled card (16:45:
+3075 reported, 3037 failed; `bugs/149`, `researches/41`); (2) a surcharge laid BEFORE the floors is swallowed by any row a failure
+floor or monotonicity already holds higher — a bisection step that changes nothing on the card.** Lay a lever over the FINISHED
+curve; time an alarm-class signal back to the event it reports (the stall signature is in the samples: busy at a collapsed power).
+**Trigger:** attributing anything to «the moment the driver/OS said so» · adding a lever to a curve that has floors.
+
 ### EXP-0307 · 2026-10-17 · ❌→✅ · #sampler #stop-hook #tidy #background-recording #guessed-cause #s3-one-line
 **A background `hardware-mon` recording dies at the END OF EVERY AGENT TURN — the `Stop` hook's `tools/tidy.mjs --apply` removes
 all samplers by design (`tidy.mjs:230-234`); I first wrote «one failed sample kills the recording» into `bugs/148` from an exit

@@ -1266,6 +1266,15 @@ export const MIN_BAND_DWELL_S = 30;
  */
 export const FAILURE_ATTRIBUTION_WINDOW_MS = 2000;
 
+/**
+ * THE OS'S TDR TIMEOUT — how long after the GPU stops answering the driver speaks (`bugs/149`, `researches/41`).
+ * Source: Microsoft «TDR registry keys» — `TdrDelay`, the seconds the GPU may delay the scheduler's preempt request, default
+ * 2; recovery and the `nvlddmkm` report come only after it expires. This machine carries no `TdrDelay` value under
+ * `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers` (read 2026-10-17), so the default holds; observed 17.10 16:45 —
+ * power collapse 14.44…14.94, first `153` at 17.09 (2.15–2.65 s). A driver-voice failure is looked for this much EARLIER.
+ */
+export const TDR_DELAY_MS = 2000;
+
 /** Every constant in one object — what the phase-1 step 3.1 verification prints and audits. */
 export default Object.freeze({
   GUARDBAND_MIN_GRID_STEPS,
@@ -1350,4 +1359,5 @@ export default Object.freeze({
   RATCHET_GRID_STEPS,
   MIN_BAND_DWELL_S,
   FAILURE_ATTRIBUTION_WINDOW_MS,
+  TDR_DELAY_MS,
 });
