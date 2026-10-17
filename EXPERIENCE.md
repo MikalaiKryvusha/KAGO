@@ -128,6 +128,19 @@
 
 ## Entries
 
+### EXP-0306 · 2026-10-17 · ❌→✅ · #deepening #candidate-vs-accepted #metric #inherited-timeout #driver-reset #s2
+class: claim-wider-than-observation
+**Context / did / result:** one deepening smoke (2800–2900 at −20, a CANDIDATE curve) failed with a driver reset and broke two
+things that were not about it: the acceptance line fell 2/4 → 1/4 (the metric counted the mode's LAST check of ANY curve, so a
+failed candidate demoted the accepted Optimised standing on its own passed snapshot), and the rollback waited ~6 min for a game
+hung in the driver (the check's game stage inherited the 900-s launch timeout of the long graphics captures).
+**Lesson:** **an exploratory step must be unable to touch what is accepted: key every «is X validated» on the IDENTITY of the
+artifact X stands on (its snapshot), never on «the latest event of X's category»; and every stage that holds a rollback gets a
+timeout sized by ITS OWN measured length, not one inherited from another use of the same tool.**
+mechanized: blocks «МЕТРИКА: УПАВШАЯ ПРОВЕРКА КРИВОЙ-КАНДИДАТА…» (MV21) and «НАСТОЯЩИЕ ШВЫ: СТУПЕНЬ ИГРЫ ОГРАНИЧЕНА…» (MV20), `validate --selftest`.
+**Trigger:** a metric or status computed from «the last record of kind K» · a stage before a `finally` rollback that calls a tool with a default timeout.
+→ link: `bugs/147` · `bugs/146` · `runs/validate/2026-10-17T15-51-50/`
+
 ### EXP-0305 · 2026-10-17 · ❌→✅ · #conservative-side #coupled-axes #judge-caught #attribution #s2
 class: conservative-on-one-axis
 **Context / did / result:** a mode-check failure had to be pinned to a frequency, the sampler being too coarse to know which. I
