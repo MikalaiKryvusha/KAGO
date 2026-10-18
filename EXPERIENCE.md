@@ -129,6 +129,19 @@
 
 ## Entries
 
+### EXP-0312 · 2026-10-18 · ❌→✅ · #vendor-utility #gcc #boot-apply #fps-steps #foreground #fan-curve #thermal-model #s2
+class: blind-read-as-empty
+mechanized: none — a run discipline (`runs/quiet-card-background-2026-10-18.ps1` · `runs/q2rtx-foreground-2026-10-18.ps1`)
+**Context:** the owner installed GIGABYTE Control Center for LEDs and a fan curve; short 5-min checks of the modes followed.
+**Result:** ❌→✅ (1) GCC wrote a stock VF/power state at its every start, over KAGO's boot apply (`bugs/153`, repro 13:47) — the card sat on
+factory for hours while the remembered mode read «optimised»; (2) 5-min FPS jumped in ~2.5 % steps inside one run — gone once the
+background was quieted and q2rtx forced topmost: then 31–34 of 36 passes agree within ±0.1 FPS; (3) `T = Ta + P·(a + b/fan%)` fitted on 14
+plateaus (RMS 0.4 °C) predicted three held-out plateaus within 1 °C and designed the fan curve for «70 °C in ⚖️» on the first try.
+**Lesson:** after ANY new vendor GPU utility, read the curve offsets after its start — «applied» at logon is not «still applied».
+Mode FPS is compared only with the background quieted AND the game held in the foreground; temperature/fan survive the noise, frames don't.
+**Trigger:** the owner installs GPU/RGB software, or a mode's FPS disagrees with the same mode an hour earlier.
+**Not for:** thermal plateaus — those were stable through all the noise.
+
 ### EXP-0311 · 2026-10-17 · ❌→✅ · #tidy #stop-hook #sampler #toctou #detached-run #s2
 class: tidy-kills-live-run
 mechanized: node tools/tidy.mjs --selftest (blocks «bugs/150…», «bugs/152: идущий ЗАХВАТ Q2RTX…», «bugs/152 гонка…»; mutations MTD1–MTD3)
