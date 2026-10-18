@@ -46,3 +46,13 @@
   Run 10:39:52–10:56:01 `RUNS=25 PREFIX=gcc4 AIR_S=300 node tools/cmp-chain.mjs silent opt`:
   silent 49.1 FPS (spread 0.8 %) · 197 W · plateau 67 °C (−0.7 °C/min) · fan 35 % (+0.7 %/min) · 71 offsets;
   opt 56.8 FPS (spread 2.9 %) · 250 W · plateau 71 °C (0.0 °C/min) · fan 52 % (+1.0 %/min) · 60/60 offsets. `nvlddmkm` 0.
+- **Addendum — curve №5 + Silent Cold cap 2205 → 2302** (owner 11:00 saved 55 °C 0 · 73 °C 1999 · 80 °C 3000). Run 11:00:42–11:17:05
+  `PREFIX=gcc5 … silent opt`: silent 48.9 FPS (spread 4.4 %) · 191 W · plateau 66 °C · 35 %; opt 54.4 FPS (spread 1.5 %, below the usual
+  56–57 at a HIGHER clock 2872 — unexplained) · 250 W · plateau 71 °C · 55 %. `nvlddmkm` 0.
+  Owner ~11:10: «66°C, обороты 35% - поднимаем ограничение частоты холодного режима на 100 МГц» → `curveCapMhz` 2302 (ladder) →
+  `npm run validate -- --step --mode silent-cold --band-margins 0,0,0,-10,-10,-10,10 --minutes 4` 11:17:34–11:22:21 ПРОЙДЕНА
+  (`runs/validate/2026-10-18T11-17-34/report.md`, gap 585 ms, driver 0) → `profiles/silent-cold.json` snapshot 2026-10-18T11-17-34 →
+  `PREFIX=cap2302 … silent` 11:22:44–11:28:41: 48.9 FPS (spread 2.7 %) · 182 W · 2310 MHz · plateau 66 °C (+0.9 °C/min, started warm
+  at 43 °C with fans at 30 %) · 31 %. The +75 MHz delivered bought NO frames and LESS power; the last 50 loaded samples carry the
+  clock-event reason `gpu_idle` in both captures — the GPU waits on something else (CPU / frame pacing, cf. `bugs/113`): not explained.
+  ⚖️ re-applied by shortcut 11:28:53 (61 offsets, 250 W, two reads).
