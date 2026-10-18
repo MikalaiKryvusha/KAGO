@@ -18,10 +18,12 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const LOG = join(REPO, 'runs/graphics/cmp2-chain.log');
+const LOG = join(REPO, `runs/graphics/${process.env.PREFIX || 'cmp2'}-chain.log`);
 const DESK = 'C:/Users/krinik/Desktop';
 const LOCK = 'D:/work/ai_sandbox/_tools/machine-lock.mjs';
-const AIR_S = 300;      // the owner's word 17.10: «давать 5 минут проветриться антресоли после прошлого прогона»
+const AIR_S = Number(process.env.AIR_S || 300); // the owner's word 17.10: «давать 5 минут проветриться антресоли после прошлого прогона»
+const RUNS = String(process.env.RUNS || 60);    // 60 = to the plateau (17.10); the owner's short check 18.10: 25 ≈ 5 min
+const PREFIX = process.env.PREFIX || 'cmp2';     // label prefix, so a short run never overwrites the plateau records
 const SETTLE_S = 20;    // the apply task re-reads until stable; 20 s covers it with room
 const MODES = [
   { key: 'stock', profile: 'stock-default', lnk: '\u{1F504} Stock Default.lnk' },
@@ -42,7 +44,7 @@ const lock = (cmd, extra = []) => node([LOCK, cmd, '--who', 'kago', ...extra]);
 
 async function main(argv) {
   const modes = argv.length ? MODES.filter((m) => argv.includes(m.key)) : MODES;
-  log(`START chain: ${modes.map((m) => m.key).join(' -> ')}`);
+  log(`START chain: ${modes.map((m) => m.key).join(' -> ')} · runs ${RUNS} · air ${AIR_S}s · prefix ${PREFIX}`);
   const t = lock('take', ['--what', 'cmp2 stock comparison (Q2RTX plateau)', '--minutes', '80']);
   log(`LOCK take exit=${t.code} ${t.out.trim().split('\n').pop()}`);
   if (t.code !== 0) { log('ABORT: lock not taken'); return 3; }
@@ -62,10 +64,12 @@ async function main(argv) {
         if (n === 1) await sleep(3);
       }
       log(`CAPTURE ${m.key} begin`);
-      const c = node(['automation-engine/lib/graphics-load.mjs', '--capture', '--label', `cmp2-${m.key}`, '--profile', m.profile, '--runs', '60'], 30 * 60 * 1000);
+      const c = node(['automation-engine/lib/graphics-load.mjs', '--capture', '--label', `${PREFIX}-${m.key}`, '--profile', m.profile, '--runs', RUNS], 30 * 60 * 1000);
       log(`CAPTURE ${m.key} exit=${c.code} :: ${c.out.trim().split('\n').slice(-8).join(' | ')}`);
-      const a = node(['automation-engine/lib/thermal-ladder.mjs', '--analyze', `cmp2-${m.key}`]);
-      log(`PLATEAU ${m.key} :: ${a.out.trim().split('\n').filter((l) => l.includes('cmp2-')).join(' | ')}`);
+      const a = node(['automation-engine/lib/thermal-ladder.mjs', '--analyze', `${PREFIX}-${m.key}`]);
+      log(`PLATEAU ${m.key} :: ${a.out.trim().split('\n').filter((l) => l.includes(`${PREFIX}-`)).join(' | ')}`);
+      // Read the curve AFTER the load too: a foreign tool (GIGABYTE Control Center, 18.10) may overwrite the mode mid-run.
+      log(`READ3 ${m.key} after capture probe-offer :: ${node(['tools/probe-offer.mjs']).out.split('\n').filter((l) => /сдвиг/i.test(l)).join(' | ')}`);
       log(`DONE ${m.key}`);
     }
   } finally {
