@@ -41,3 +41,8 @@
   this save did NOT reset the V/F curve: 60 offsets, 250 W). Run 10:20:30–10:36:29 `RUNS=25 PREFIX=gcc3 AIR_S=300 node tools/cmp-chain.mjs silent opt`:
   silent 50.8 FPS (spread 1.3 %) · 198 W · plateau 70 °C (+0.5 °C/min) · fan 30 % (floor, flat) · 71 offsets;
   opt 56.4 FPS (spread 2.1 %) · 250 W · plateau 74 °C · fan 47 % (+0.9 %/min) · 60/60 offsets. `nvlddmkm` 0.
+- **Addendum — curve №4** (owner «охладить сильнее»; agent proposed 50 °C 0 · 70 °C 1650 · 80 °C 3000; GCC file saved 10:39:21 reads
+  56 °C 0 · 73 °C 1839 rpm / 61 % · 80 °C 3000 — tested as it stands; V/F curve not reset: 60 offsets, 250 W).
+  Run 10:39:52–10:56:01 `RUNS=25 PREFIX=gcc4 AIR_S=300 node tools/cmp-chain.mjs silent opt`:
+  silent 49.1 FPS (spread 0.8 %) · 197 W · plateau 67 °C (−0.7 °C/min) · fan 35 % (+0.7 %/min) · 71 offsets;
+  opt 56.8 FPS (spread 2.9 %) · 250 W · plateau 71 °C (0.0 °C/min) · fan 52 % (+1.0 %/min) · 60/60 offsets. `nvlddmkm` 0.
