@@ -40,3 +40,18 @@ Apply ⚖️ by shortcut → read offsets → close and restart `GCC.exe` → re
 ## Links
 
 `testcases/reports/2026-10-18_gcc_fan_curve_short_check.md` · `STATUS.md` → machine state
+
+## Repro — run 2026-10-18 13:46–13:48 (with the owner's machine free)
+
+⚖️ by shortcut → 13:47:04 read: 61 offsets · 250 W → `GCC.exe` started → 13:47:35 read: **0 offsets · 300 W** → 13:47:52 still 0 / 300.
+GCC log: device enumeration 13:47:1x. Hypothesis 1 CONFIRMED: GCC's start writes its own (stock) VF/power state over ours.
+
+## ✅ STATUS: DONE (2026-10-18 14:3x +03:00)
+
+Closed by removing the cause, on the owner's word «удалить бы GCC с компа. Он мне не нужен, после того как в карту настройки записаны по
+подсветке и вертушкам» — GCC uninstalled by its own wizard (the owner's hands, ~13:50), its 8 modules of 2026-10-18 by their declared
+QuietUninstallString (all exit 0, 13:51); ENE RGB HAL of 2024-07-30 left alone; the AMD `AmdTools64` driver installed the same morning left
+in place (kernel driver, not asked). Witness: the clean re-measure 13:52–14:34 kept every mode's offsets before/after each capture, and the
+fan curve №6 stayed in the card (stock 77 °C → 84 %).
+- Hygiene: none. Functional run: `testcases/reports/2026-10-18_clean_remeasure_fan_curve6.md`.
+- The CLASS stays open as a lesson, not a bug: any vendor GPU utility that applies an OC profile at start will overwrite KAGO's boot apply.
