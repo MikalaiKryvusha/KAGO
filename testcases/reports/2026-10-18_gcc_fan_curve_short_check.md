@@ -31,4 +31,9 @@
   2. silent: −4 % FPS at the same 2235 MHz vs 17.10 — cause not established (short run; power 177 vs 197 W).
   3. max: one sample at 100 % fan (09:15:23, 49 → 68 °C in 1 s) — zero-RPM spin-up, not a fault.
 - **Traces:** `runs/graphics/gcc-chain.log`, `runs/graphics/gcc-{stock,max,silent,opt}.json(l)`, `runs/graphics/gccoff-opt.json(l)`, GCC log `C:\Program Files\GIGABYTE\Control Center\logs\log_20261018.log`.
+- **Addendum — curve №2** (owner saved 09:58:52: 0 % ≤ 59 °C · 67 % / 1999 rpm @ 74 · 100 % @ 79; screenshot
+  `assets/fans/2026-10-18_gcc_fan_curve.png`). The save RESET the V/F curve to factory again (0 offsets at 09:59) → ⚖️ re-applied by
+  shortcut 09:59:33 (61 offsets, 250 W, two reads). Run 10:00:14–10:16:33 `RUNS=25 PREFIX=gcc2 AIR_S=300 node tools/cmp-chain.mjs silent opt`:
+  silent 49.9 FPS · 200 W · plateau 68 °C · fan 34 % (rising +1 %/min) · 71/71 offsets; opt 54.1 FPS median but spread 8.7 %
+  (52.1…56.8, normal ≈ 1 %) — a disturbed run, median not comparable · 250 W · plateau 72 °C · fan 52 % · 60/60 offsets. `nvlddmkm` 0.
 - **Verdict:** pass — 4/4 modes ran fault-free under the new fan curve; opt now meets its fan goal (50 % ≤ 60 %); silent is below its 40…50 % target band.
