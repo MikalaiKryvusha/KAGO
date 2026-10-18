@@ -56,3 +56,8 @@
   at 43 °C with fans at 30 %) · 31 %. The +75 MHz delivered bought NO frames and LESS power; the last 50 loaded samples carry the
   clock-event reason `gpu_idle` in both captures — the GPU waits on something else (CPU / frame pacing, cf. `bugs/113`): not explained.
   ⚖️ re-applied by shortcut 11:28:53 (61 offsets, 250 W, two reads).
+- **Addendum — 🚀 on curve №5** 11:33:20–11:38:20 `PREFIX=gcc5max … max`: 60.1 FPS (spread 3.2 %) · 300 W · plateau 76 °C · 77 % · 61/61 offsets; `nvlddmkm` 0.
+  ⚖️ re-applied 11:38:4x (61 offsets, 250 W, two reads).
+- **First thermal model (owner 11:3x: «Sweet Spot … в некотором термодинамическом приближении»)** — least squares over the 14 plateaus
+  of this report (P W, fan %, T °C): **T = 22.2 + P·(0.1411 + 3.013 / fan%)**, RMS 0.40 °C, worst residual 0.6 °C. Ta = 22.2 °C reads as the
+  room air. `[NOT-TESTED]` as a predictor: fitted on the same points, no held-out prediction yet; FPS(P) ≈ 49 @ 190 W · 56 @ 250 · 60 @ 300.
