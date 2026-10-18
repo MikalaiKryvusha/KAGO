@@ -69,3 +69,9 @@
     model at 283 W: 73.7 °C · 73 %. FPS is NOT comparable: below ⚖️ at a higher clock and an unsaturated power limit — the platform
     (CPU, cf. `bugs/113`) or the owner's Chrome (he reported opening it during the 11:33 max run) shaped the frames today.
   `nvlddmkm` 0. ⚖️ re-applied ~12:11. Verdict on the model: three held-out plateaus within 1 °C and 2 % fan.
+- **Why the frames disagree (agent's look at the per-pass FPS, 12:1x):** inside ONE run the FPS jumps between two levels at a constant
+  clock and power cap: cmp2-max (17.10) 59.0 → 60.4 at pass 24; gcc5max 60.1 → 58.5 at pass 16; gcc6-opt 56.8 → 58.1 at pass 10;
+  gcc6max wanders 56.2…58.3. A ~2.5 % step of the machine's state (not of the card) — the same size as the mode differences being
+  judged. All max runs carry only `sw_power_cap`, util 100 %; gcc6max nevertheless drew 283 W median at a 300 W limit — not explained.
+  → today's 5-min FPS cannot rank modes closer than ~3 %; temperature and fan are unaffected (the card sat at its power cap).
+  Owner 12:1x: «нужно будет все перемерить, сток и все режимы. Когда комп освободится».
