@@ -37,3 +37,7 @@
   silent 49.9 FPS · 200 W · plateau 68 °C · fan 34 % (rising +1 %/min) · 71/71 offsets; opt 54.1 FPS median but spread 8.7 %
   (52.1…56.8, normal ≈ 1 %) — a disturbed run, median not comparable · 250 W · plateau 72 °C · fan 52 % · 60/60 offsets. `nvlddmkm` 0.
 - **Verdict:** pass — 4/4 modes ran fault-free under the new fan curve; opt now meets its fan goal (50 % ≤ 60 %); silent is below its 40…50 % target band.
+- **Addendum — curve №3** (agent's points, owner set 73 °C → 1420; GCC saved 10:20:03 as 56 °C 0 · 73 °C 1420 rpm / 47 % · 82 °C 3000;
+  this save did NOT reset the V/F curve: 60 offsets, 250 W). Run 10:20:30–10:36:29 `RUNS=25 PREFIX=gcc3 AIR_S=300 node tools/cmp-chain.mjs silent opt`:
+  silent 50.8 FPS (spread 1.3 %) · 198 W · plateau 70 °C (+0.5 °C/min) · fan 30 % (floor, flat) · 71 offsets;
+  opt 56.4 FPS (spread 2.1 %) · 250 W · plateau 74 °C · fan 47 % (+0.9 %/min) · 60/60 offsets. `nvlddmkm` 0.
