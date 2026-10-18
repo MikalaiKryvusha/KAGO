@@ -61,3 +61,11 @@
 - **First thermal model (owner 11:3x: «Sweet Spot … в некотором термодинамическом приближении»)** — least squares over the 14 plateaus
   of this report (P W, fan %, T °C): **T = 22.2 + P·(0.1411 + 3.013 / fan%)**, RMS 0.40 °C, worst residual 0.6 °C. Ta = 22.2 °C reads as the
   room air. `[NOT-TESTED]` as a predictor: fitted on the same points, no held-out prediction yet; FPS(P) ≈ 49 @ 190 W · 56 @ 250 · 60 @ 300.
+- **Addendum — curve №6, designed by the model for ⚖️ = 70 °C** (owner: «давай на 70 ориентироваться при обычной игре»; proposed
+  55 °C 0 · 70 °C 1800 · 82 °C 3000; GCC saved 11:44:02 as 55 °C 0 · 70 °C 1805 / 60 % · 81 °C 3000). First HELD-OUT test of the model:
+  - silent (cap 2302) 11:44:17–11:50:00: 50.9 FPS (spread 0.3 %) · 199 W · plateau 65 °C · 39 % — model at 199 W: 65.1 °C · 40 %;
+  - opt 11:55–12:00:09: 58.0 FPS (spread 3.0 %) · 250 W · plateau 70 °C (−0.8 °C/min) · 58 % — model: 70 °C · 60 %;
+  - max (AIR_FIRST) 12:05–12:10:26: 57.7 FPS (spread 3.7 %) · 283 W (below its 300 W limit) · 3007 MHz · plateau 74 °C · 72 % —
+    model at 283 W: 73.7 °C · 73 %. FPS is NOT comparable: below ⚖️ at a higher clock and an unsaturated power limit — the platform
+    (CPU, cf. `bugs/113`) or the owner's Chrome (he reported opening it during the 11:33 max run) shaped the frames today.
+  `nvlddmkm` 0. ⚖️ re-applied ~12:11. Verdict on the model: three held-out plateaus within 1 °C and 2 % fan.
