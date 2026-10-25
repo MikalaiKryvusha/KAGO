@@ -4,9 +4,14 @@
 # and must never hold elevation (researches/07 §2).
 #
 # THE WHOLE CONTRACT (plan §4.5): display the ORCHESTRATOR's remembered state
-# (runs/shell/remembered-state.json — the last VERIFIED apply), refresh when the file changes,
-# and nothing else. No card polling, no telemetry, no menu, no buttons, no click actions. The
-# process owns no GPU handles and arms nothing: killing it changes nothing on the card (P3-AC4).
+# (runs/shell/remembered-state.json — the last VERIFIED apply), refresh when the file changes.
+# No card polling, no telemetry. The process owns no GPU handles and arms nothing: killing it
+# changes nothing on the card (P3-AC4).
+# С 2026-10-25 (`ЗАКАЗ.md` §11, слово владельца «выключение KAGO в трее · смену режимов через трей · по ПКМ»):
+# подпись берётся из runs/shell/card-status.json (что на карте на самом деле, «не проверен на драйвере N»,
+# ошибка), а ПКМ открывает меню: режимы — запуск ТЕХ ЖЕ задач \KAGO\apply-* через COM планировщика (без
+# процесса консоли и без элевации трея), «Закрыть KAGO» — выход трея до следующего входа. Карту трей
+# по-прежнему не трогает сам.
 #
 # ENCODING IS LOAD-BEARING: this file is UTF-8 WITH BOM. PowerShell 5.1 reads a BOM-less file as
 # ANSI (cp1251 on this machine — the dossier row), which would mojibake every Russian tooltip
@@ -29,6 +34,13 @@ $ErrorActionPreference = 'Stop'
 # hard-coded (EXP-0025) — and the selftest passes its own sandbox paths to every function.
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $StateFile = Join-Path $RepoRoot 'runs\shell\remembered-state.json'
+# ЧТО НА КАРТЕ НА САМОМ ДЕЛЕ (`ЗАКАЗ.md` §11, 25.10) — пишут вход и клик при КАЖДОМ исходе. Запомненное
+# состояние — выбор владельца и при отказе не меняется; 22–25.10 трей по нему рисовал ⚖️ при заводских 300 Вт.
+$CardStatusFile = Join-Path $RepoRoot 'runs\shell\card-status.json'
+$ProfilesDir = Join-Path $RepoRoot 'profiles'
+# Режимы меню по ПКМ — те же задачи `\KAGO\apply-*`, что у ярлыков на столе (они и несут права администратора;
+# трей остаётся без элевации). Порядок — как на столе.
+$MenuModes = @('max-performance', 'optimised', 'silent-cold', 'factory')
 $PidFile = Join-Path $RepoRoot 'runs\shell\tray.pid'
 $LogFile = Join-Path $RepoRoot 'runs\shell\tray.log'
 
@@ -104,6 +116,36 @@ function Read-TrayStateStable([string]$path) {
     $r = Read-TrayState $path
   }
   return $r
+}
+
+# Файл состояния карты: $null, если его нет или он не читается (тогда трей живёт по запомненному, как раньше).
+function Read-CardStatus([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  try { $s = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch { return $null }
+  if (-not ($s.profile -is [string]) -or -not $s.profile) { return $null }
+  return $s
+}
+
+# Состояние карты главнее запомненного, если оно НЕ СТАРШЕ его: клик пишет оба файла (запомненное первым),
+# вход — только состояние карты. Старый файл состояния после свежего клика не перебивает клик.
+function Get-TrayFaceWithStatus([string]$statePath, [string]$statusPath) {
+  $read = Read-TrayStateStable $statePath
+  $st = Read-CardStatus $statusPath
+  $useStatus = $false
+  if ($st) {
+    if (-not (Test-Path -LiteralPath $statePath)) { $useStatus = $true }
+    else { $useStatus = ((Get-Item -LiteralPath $statusPath).LastWriteTimeUtc -ge (Get-Item -LiteralPath $statePath).LastWriteTimeUtc) }
+  }
+  if (-not $useStatus) { return Get-TrayFace $read }
+  if ($st.error) {
+    return @{ key = 'problem'; tooltip = (Limit-Tooltip 'KAGO: ОШИБКА — стоит заводской режим'); balloon = "$($st.error)"; current = 'factory' }
+  }
+  $key = if ($FACES.ContainsKey($st.profile)) { $st.profile } else { 'unknown' }
+  $label = if ($st.title) { $st.title } else { $st.profile }
+  if ($st.untestedDriver) {
+    return @{ key = $key; tooltip = (Limit-Tooltip "KAGO: $label · не проверен на драйвере $($st.untestedDriver)"); balloon = "$label включён, но на драйвере $($st.untestedDriver) режим ещё не проверялся."; current = $st.profile }
+  }
+  return @{ key = $key; tooltip = (Limit-Tooltip "KAGO: $label"); current = $st.profile }
 }
 
 # read result → which face to show and what the tooltip says. No file = nothing was ever
@@ -235,6 +277,30 @@ function Invoke-SelfTest {
     $fallback = Resolve-FaceIcon @{ color = 'Gray'; glyph = 'STOP'; ico = (Join-Path $sandbox 'no-such.ico') }
     $ok = ($fallback -is [System.Drawing.Icon])
     $blocks += @{ name = 'нет .ico — откат на рисованное лицо, трей жив'; ok = $ok }
+
+    # 12–15 — ЗАКАЗ.md §11 (25.10): состояние карты главнее запомненного, если оно не старше.
+    $rem = Join-Path $sandbox 'remembered.json'
+    $st = Join-Path $sandbox 'card-status.json'
+    [System.IO.File]::WriteAllText($rem, '{"profile":"optimised","title":"⚖️ Optimised"}', $utf8)
+    (Get-Item -LiteralPath $rem).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(-5)
+    [System.IO.File]::WriteAllText($st, '{"profile":"optimised","title":"⚖️ Optimised","untestedDriver":"621.01","error":null}', $utf8)
+    $face = Get-TrayFaceWithStatus $rem $st
+    $ok = ($face.key -eq 'optimised' -and $face.tooltip -like '*не проверен на драйвере 621.01*' -and $face.balloon)
+    $blocks += @{ name = 'карта новее отметки — лицо режима, подпись «не проверен на драйвере 621.01»'; ok = $ok }
+
+    [System.IO.File]::WriteAllText($st, '{"profile":"factory","title":null,"untestedDriver":null,"error":"«optimised» не включён: stamp.driver"}', $utf8)
+    $face = Get-TrayFaceWithStatus $rem $st
+    $ok = ($face.key -eq 'problem' -and $face.tooltip -like '*ОШИБКА*заводской*' -and $face.current -eq 'factory')
+    $blocks += @{ name = 'отказ на входе — лицо ошибки, подпись «ОШИБКА — стоит заводской режим» (не ⚖️ при 300 Вт)'; ok = $ok }
+
+    (Get-Item -LiteralPath $st).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(-10)
+    $face = Get-TrayFaceWithStatus $rem $st
+    $ok = ($face.key -eq 'optimised' -and $face.tooltip -eq 'KAGO: ⚖️ Optimised')
+    $blocks += @{ name = 'состояние карты СТАРШЕ свежего клика — побеждает клик (запомненное)'; ok = $ok }
+
+    $face = Get-TrayFaceWithStatus $rem (Join-Path $sandbox 'no-status.json')
+    $ok = ($face.key -eq 'optimised')
+    $blocks += @{ name = 'файла состояния карты нет — трей живёт по запомненному, как раньше'; ok = $ok }
   } finally {
     Remove-Item -Recurse -Force -LiteralPath $sandbox -ErrorAction SilentlyContinue
   }
@@ -290,23 +356,75 @@ $notify = New-Object System.Windows.Forms.NotifyIcon
 $script:shownKey = $null
 $script:shownText = $null
 $script:lastStamp = $null
+$script:modeItems = @{}
 
 function Update-Tray {
-  $stamp = Get-FileStamp $StateFile
+  $stamp = (Get-FileStamp $StateFile) + '|' + (Get-FileStamp $CardStatusFile)
   if ($stamp -eq $script:lastStamp) { return }
   $script:lastStamp = $stamp
-  $face = Get-TrayFace (Read-TrayStateStable $StateFile)
+  $face = Get-TrayFaceWithStatus $StateFile $CardStatusFile
+  foreach ($m in $script:modeItems.Keys) { $script:modeItems[$m].Checked = ($m -eq $face.current) }
   if ($face.key -eq $script:shownKey -and $face.tooltip -eq $script:shownText) { return }
   $notify.Icon = $script:icons[$face.key]
   $notify.Text = $face.tooltip
+  $firstShow = ($null -eq $script:shownKey)
   $script:shownKey = $face.key
   $script:shownText = $face.tooltip
   Write-TrayLog $LogFile "state -> $($face.key) [$($face.tooltip)]"
+  # Ошибка и «не проверен» — всплывающим сообщением, один раз на смену (владелец: «пишет в трее»).
+  if ($face.balloon) {
+    $icon = if ($face.key -eq 'problem') { [System.Windows.Forms.ToolTipIcon]::Error } else { [System.Windows.Forms.ToolTipIcon]::Warning }
+    $text = $face.balloon
+    $show = { $notify.ShowBalloonTip(8000, 'KAGO', $text, $icon) }.GetNewClosure()
+    if ($firstShow) { $script:pendingBalloon = $show } else { & $show }
+  }
 }
 
+# Режим по ПКМ — запуск задачи `\KAGO\apply-<режим>` через COM планировщика: та же дорога, что у ярлыка,
+# права администратора несёт задача, консоль не рождается (bugs/17, bugs/39 — ни одного мелькающего окна).
+function Start-ModeTask([string]$mode) {
+  try {
+    $svc = New-Object -ComObject Schedule.Service
+    $svc.Connect()
+    $null = $svc.GetFolder('\KAGO').GetTask("apply-$mode").Run($null)
+    Write-TrayLog $LogFile "menu -> apply-$mode started"
+  } catch {
+    Write-TrayLog $LogFile "menu -> apply-$mode FAILED: $($_.Exception.Message)"
+    $notify.ShowBalloonTip(8000, 'KAGO', "Режим не запущен: $($_.Exception.Message)", [System.Windows.Forms.ToolTipIcon]::Error)
+  }
+}
+
+function Get-ModeTitle([string]$mode) {
+  try {
+    $p = [System.IO.File]::ReadAllText((Join-Path $ProfilesDir "$mode.json"), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($p.title) { return [string]$p.title }
+  } catch {}
+  return $mode
+}
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+foreach ($m in $MenuModes) {
+  $item = New-Object System.Windows.Forms.ToolStripMenuItem (Get-ModeTitle $m)
+  $item.Tag = $m
+  $item.Add_Click({ param($sender, $e) Start-ModeTask ([string]$sender.Tag) })
+  $null = $menu.Items.Add($item)
+  $script:modeItems[$m] = $item
+}
+$null = $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+$exitItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Закрыть KAGO (до следующего входа)'
+$exitItem.Add_Click({
+  Write-TrayLog $LogFile "menu -> exit (pid=$PID)"
+  $notify.Visible = $false
+  [System.Windows.Forms.Application]::Exit()
+})
+$null = $menu.Items.Add($exitItem)
+$notify.ContextMenuStrip = $menu
+
 try {
+  $script:pendingBalloon = $null
   Update-Tray
   $notify.Visible = $true
+  if ($script:pendingBalloon) { & $script:pendingBalloon }
   Write-TrayLog $LogFile "icon visible, face=$($script:shownKey)"
 
   $timer = New-Object System.Windows.Forms.Timer

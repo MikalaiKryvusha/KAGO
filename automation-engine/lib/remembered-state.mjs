@@ -85,6 +85,29 @@ export function readRememberedState(filePath = REMEMBERED_STATE_PATH) {
 }
 
 /**
+ * ЧТО НА КАРТЕ НА САМОМ ДЕЛЕ — второй файл для трея (`ЗАКАЗ.md` §11, 25.10).
+ *
+ * Запомненное состояние — это ВЫБОР владельца, и при отказе на входе оно не переписывается (восстановление
+ * не новое решение). Трей, показывавший только его, 22–25.10 рисовал ⚖️ при заводских 300 Вт: владелец
+ * «и в трее пишет, что включен режим!!». Этот файл пишется при КАЖДОМ исходе применения — у входа и у
+ * клика — и говорит, что стоит на карте: какой режим, проверен ли он на этом драйвере, была ли ошибка.
+ * Трей берёт его, когда он не старше запомненного состояния.
+ *
+ *   { profile, title, untestedDriver: '621.01' | null, error: 'текст' | null, writtenAt }
+ *   error ≠ null  ⇒ на карте заводской режим (применитель откатил или ничего не писал).
+ *
+ * [NOT-TESTED]
+ */
+export const CARD_STATUS_PATH = path.join(SHELL_RUNS_DIR, 'card-status.json');
+
+export function writeCardStatus({ profile, title = null, untestedDriver = null, error = null }, filePath = CARD_STATUS_PATH) {
+  const record = { profile, title, untestedDriver, error, writtenAt: localIso() };
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, JSON.stringify(record, null, 2) + '\n');
+  return record;
+}
+
+/**
  * One journal line per boot-apply run — P3-AC2's meter. APPEND, never overwrite: the series of the
  * owner's natural logons IS the acceptance evidence, and a journal that keeps only the last line
  * cannot count to five.

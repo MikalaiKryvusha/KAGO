@@ -74,6 +74,8 @@ import {
   appendBootIntent,
   readBootJournal,
   bootLoopBreaker,
+  CARD_STATUS_PATH,
+  writeCardStatus,
 } from './remembered-state.mjs';
 import {
   PROFILES_DIR,
@@ -81,6 +83,7 @@ import {
   listProfileFiles,
   validateProfile,
   checkStamp,
+  untestedDriverOf,
   isFactoryProfile,
   requiresQualification,
   probeCard,
@@ -1577,8 +1580,18 @@ export async function bootApply({
   // РАЗЖАТИЕ ДИСКОВ ПРИ ВХОДЕ В СИСТЕМУ (`plans/30` §2.6, AC10). Шов, как и всё здесь: набор гоняет
   // его без единой команды PowerShell.
   disarmDisksFn = null,
+  // ЧТО НА КАРТЕ — для трея (`ЗАКАЗ.md` §11). Рядом с журналом, а не по умолчанию в боевой папке:
+  // набор передаёт журнал из песочницы, и файл состояния карты обязан уйти туда же (EXP-0025).
+  cardStatusPath = path.join(path.dirname(journalPath), path.basename(CARD_STATUS_PATH)),
 } = {}) {
   const journal = (record) => { appendBootJournal(record, journalPath); return record; };
+  // Запись для трея не имеет права уронить вход: её отказ — строка в журнале, не исключение.
+  const cardStatus = (s) => {
+    try { writeCardStatus(s, cardStatusPath); } catch (e) {
+      appendBootJournal({ verdict: 'card-status-unwritten', remembered: s.profile ?? null, detail: `файл состояния карты не записан: ${e?.message ?? e}` }, journalPath);
+    }
+  };
+  const failed = (remembered, error) => cardStatus({ profile: 'factory', title: null, untestedDriver: null, error: remembered ? `«${remembered}» не включён: ${error}` : error });
 
   // ─── ДИСКИ РАЗЖИМАЮТСЯ ПЕРВЫМИ, ДО ЛЮБОЙ РАБОТЫ С КАРТОЙ ────────────────────────────────────────
   //
@@ -1608,9 +1621,11 @@ export async function bootApply({
 
   const { state, problem } = readRememberedState(rememberedPath);
   if (problem) {
+    failed(null, 'файл запомненного режима нечитаем');
     return { code: 1, record: journal({ verdict: 'remembered-unreadable', remembered: null, detail: `${problem} — на карту не записано ничего, заводское состояние стоит по физике` }) };
   }
   if (!state) {
+    cardStatus({ profile: 'factory', title: null, untestedDriver: null, error: null });
     return { code: 0, record: journal({ verdict: 'no-remembered-state', remembered: null, detail: 'запомненного состояния нет — заводское по физике, записей ноль' }) };
   }
 
@@ -1625,12 +1640,14 @@ export async function bootApply({
     if (i < retries - 1) await sleep(retryIntervalMs);
   }
   if (!card) {
+    failed(state.profile, 'драйвер не ответил при входе');
     return { code: 1, record: journal({ verdict: 'driver-gave-up', remembered: state.profile, probeAttempts, detail: `драйвер не ответил за ${probeAttempts} попыток: ${probeError?.message} — записей ноль, заводское состояние стоит по физике` }) };
   }
 
   const b = backend ?? nvidiaSmiBackend();
   const { profile, refusals } = loadProfileByName(state.profile, card);
   if (refusals.length) {
+    failed(state.profile, refusals.map((r) => r.field).join(', '));
     return {
       code: 1,
       record: journal({
@@ -1642,6 +1659,7 @@ export async function bootApply({
 
   if (isFactoryProfile(profile) && !requiresQualification(profile)) {
     const s = readState(b);
+    cardStatus({ profile: state.profile, title: state.title ?? null, untestedDriver: null, error: null });
     if (Math.abs(s.powerLimitW - s.powerDefaultW) < WATT_EPSILON) {
       return { code: 0, record: journal({ verdict: 'factory-by-physics', remembered: state.profile, probeAttempts, powerLimitW: s.powerLimitW, detail: 'запомнено заводское, карта заводская — записей ноль' }) };
     }
@@ -1661,6 +1679,7 @@ export async function bootApply({
   // делаем, иначе каждый вход в систему повторял бы смерть.
   const breaker = bootLoopBreaker(readJournalFn(journalPath), state.profile);
   if (breaker.blocked) {
+    failed(state.profile, 'прошлый вход с этим режимом не закончился — машина падала');
     return {
       code: 1,
       record: journal({
@@ -1679,8 +1698,12 @@ export async function bootApply({
     writeIntentFn({ remembered: state.profile }, journalPath);
     // СОГЛАСИЕ ИМЕНОВАНО: по журналу видно, что это было восстановление, а не решение человека.
     const r = await apply(b, profile, { card, timing, curve: wantCurve, curveBackend, consent: 'восстановление при входе в систему' });
-    return { code: 0, record: journal({ verdict: 'applied', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, detail: `применено и перечитано: ${r.after.powerLimitW} Вт / ${r.after.clockMhz} МГц` }) };
+    // Драйвер новее отметки (`ЗАКАЗ.md` §11): режим стоит, трей и журнал говорят «не проверен».
+    const untested = untestedDriverOf(profile, card);
+    cardStatus({ profile: state.profile, title: profile.title ?? state.title ?? null, untestedDriver: untested, error: null });
+    return { code: 0, record: journal({ verdict: 'applied', remembered: state.profile, probeAttempts, powerLimitW: r.after.powerLimitW, untestedDriver: untested, detail: `применено и перечитано: ${r.after.powerLimitW} Вт / ${r.after.clockMhz} МГц${untested ? ` · НЕ ПРОВЕРЕН на драйвере ${untested} (доказан на ${profile.stamp.driver})` : ''}` }) };
   } catch (e) {
+    failed(state.profile, e.refusals ? 'отказ до записи' : 'запись не удалась, откат к заводскому');
     if (e.refusals) {
       return { code: 1, record: journal({ verdict: 'degraded-to-factory', remembered: state.profile, probeAttempts, detail: `применитель отказал ДО записи, заводское стоит: ${e.message.split('\n').join(' · ')}` }) };
     }
@@ -2020,10 +2043,12 @@ async function cmdSelftest() {
     }
   });
 
-  block('штамп с чужого драйвера -> отказ ДО первой записи (P2-AC5)', async () => {
+  // R6 25.10 (`ЗАКАЗ.md` §11): отказ теперь — только для карты СТАРЕЕ отметки; 595.71 при карте 610.88
+  // стал «не проверен» и принимается, поэтому блок ведёт отметку 699.99 (новее карты).
+  block('штамп с драйвера новее карты -> отказ ДО первой записи (P2-AC5, R6 25.10)', async () => {
     const b = fakeBackend();
     const p = silentColdFixture();
-    p.stamp.driver = '595.71';
+    p.stamp.driver = '699.99';
     try {
       await apply(b, p, { card: SELFTEST_CARD, timing: FAST });
       return 'профиль с чужим штампом применён';
@@ -2215,6 +2240,51 @@ async function cmdSelftest() {
     const r = await bootApply(bootOpts(b, sb, { loadProfileByName: () => ({ profile: factoryFixture(), refusals: [] }) }));
     if (r.record.verdict !== 'factory-restored') return `вердикт ${r.record.verdict}`;
     if (b._state.powerLimitW !== 300 || b._state.lockedTo !== null) return `карта не заводская: ${b._state.powerLimitW} Вт, фиксация ${b._state.lockedTo}`;
+    return null;
+  });
+
+  // ═══ R6 25.10 — НОВЫЙ ДРАЙВЕР И ФАЙЛ СОСТОЯНИЯ КАРТЫ ДЛЯ ТРЕЯ (`ЗАКАЗ.md` §11) ═══════════════════
+  const cardStatusOf = (sb) => {
+    try { return JSON.parse(fsReadFileSync(path.join(path.dirname(sb.jr), 'card-status.json'), 'utf8')); } catch { return null; }
+  };
+  block('R6 25.10 вход: карта НОВЕЕ отметки -> режим применён, журнал и файл трея говорят «не проверен на драйвере»', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const p = silentColdFixture();
+    p.stamp.driver = '595.71';                       // карта-фикстура 610.88 — новее отметки
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: (name, card) => ({ profile: p, refusals: checkStamp(p, card) }) }));
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict}: ${r.record.detail}`;
+    if (r.record.untestedDriver !== '610.88') return `журнал не назвал драйвер без проверки: ${JSON.stringify(r.record.untestedDriver)}`;
+    if (!/НЕ ПРОВЕРЕН на драйвере 610\.88/u.test(r.record.detail)) return `деталь журнала молчит: ${r.record.detail}`;
+    const st = cardStatusOf(sb);
+    if (!st) return 'файл состояния карты не записан в песочницу';
+    if (st.untestedDriver !== '610.88' || st.error !== null || st.profile !== 'silent-cold') return `файл трея: ${JSON.stringify(st)}`;
+    return null;
+  });
+
+  block('R6 25.10 вход: профиль ОТВЕРГНУТ -> заводское, файл трея несёт ошибку', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const p = silentColdFixture();
+    p.stamp.driver = '699.99';                       // карта СТАРЕЕ отметки — отказ
+    const r = await bootApply(bootOpts(b, sb, { loadProfileByName: (name, card) => ({ profile: p, refusals: checkStamp(p, card) }) }));
+    if (r.record.verdict !== 'degraded-to-factory') return `вердикт ${r.record.verdict}`;
+    if (b.writes.length !== 0) return `на карту писали: ${b.writes.join(', ')}`;
+    const st = cardStatusOf(sb);
+    if (!st || st.profile !== 'factory' || !st.error || !st.error.includes('silent-cold')) return `файл трея: ${JSON.stringify(st)}`;
+    return null;
+  });
+
+  block('R6 25.10 вход: отметка = карта -> применён, файл трея БЕЗ пометки «не проверен»', async () => {
+    const sb = bootSandbox();
+    const b = fakeBackend();
+    writeRememberedState({ profile: 'silent-cold' }, sb.rem);
+    const r = await bootApply(bootOpts(b, sb));
+    const st = cardStatusOf(sb);
+    if (r.record.verdict !== 'applied') return `вердикт ${r.record.verdict}`;
+    if (!st || st.untestedDriver !== null || st.error !== null) return `файл трея: ${JSON.stringify(st)}`;
     return null;
   });
 
@@ -3523,7 +3593,26 @@ async function main(argv) {
 
   const ap = argOf('--apply');
   if (ap) {
-    const profile = mustLoad(ap, card);
+    // НЕ ВКЛЮЧИЛОСЬ — ЗАВОДСКОЙ РЕЖИМ И ОШИБКА В ТРЕЕ (`ЗАКАЗ.md` §11, слово владельца 25.10: «если установить
+    // не получилось - пусть ставит дефолтный режим - и пишет в трее об ошике»). Сброс — тот же полный
+    // `resetToFactory`, что у ярлыка 🔄; его собственный сбой не глушит исходную ошибку.
+    // [NOT-TESTED] на живой карте.
+    const fallBackToFactory = async (why) => {
+      try {
+        const cb = nvapiCurveBackend();
+        try { await resetToFactory(backend, { curveBackend: cb }); } finally { cb.close(); }
+      } catch (e) { why += ` · сброс к заводскому тоже не прошёл: ${e?.message ?? e}`; }
+      writeCardStatus({ profile: 'factory', title: null, untestedDriver: null, error: `«${ap}» не включён: ${why}` });
+      console.error(`НЕ ВКЛЮЧЕНО «${ap}»: ${why} — карта сброшена к заводскому, трей покажет ошибку.`);
+    };
+    const loaded = loadProfileFile(profilePath(ap), card);
+    if (loaded.refusals.length) {
+      console.error(`ОТКАЗ профиль «${ap}»:`);
+      for (const r of loaded.refusals) console.error(`    ${r.field}: ${r.why}`);
+      if (!argv.includes('--witness')) await fallBackToFactory(`отказ до записи: ${loaded.refusals.map((r) => r.field).join(', ')}`);
+      return 1;
+    }
+    const profile = loaded.profile;
     // THE WITNESS PATH (`plans/11` §4.4, P6-AC4). An acceptance run needs the mode ON the card, and the
     // mode is a DRAFT until that run judges it — a circle the qualification gate cannot break by
     // itself. This flag is the one way out, and every property of it is chosen so it stays one:
@@ -3584,8 +3673,13 @@ async function main(argv) {
       // значило бы потерять именно то, что различает (`plans/28`, слово владельца 2026-08-23).
       const consent = witness && isDraft ? 'приёмочный прогон (--witness)' : 'клик владельца';
       r = await apply(backend, profile, { card, curveBackend, curve: effCurve, consent });
+    } catch (e) {
+      if (curveBackend) { try { curveBackend.close(); } catch { /* закрывается ниже по процессу */ } }
+      if (witness && isDraft) throw e;
+      await fallBackToFactory(e.refusals ? `отказ до записи: ${e.message.split('\n')[0]}` : `запись не удалась: ${e.message.split('\n')[0]}`);
+      return 1;
     } finally {
-      if (curveBackend) curveBackend.close();
+      if (curveBackend) { try { curveBackend.close(); } catch { /* уже закрыт */ } }
     }
     printState(r.before, 'ДО      ');
     for (const s of r.steps) console.log(`  ${s}`);
@@ -3601,6 +3695,9 @@ async function main(argv) {
     // apply above — a throw has already exited.
     const rec = writeRememberedState({ profile: profile.name, title: profile.title ?? null, stamp: profile.stamp ?? null });
     console.log(`ЗАПОМНЕНО для автозагрузки: «${rec.profile}» (${REMEMBERED_STATE_PATH})`);
+    const untested = untestedDriverOf(profile, card);
+    writeCardStatus({ profile: profile.name, title: profile.title ?? null, untestedDriver: untested, error: null });
+    if (untested) console.log(`⚠️  НЕ ПРОВЕРЕН на драйвере ${untested}: режим доказан на ${profile.stamp.driver} (ЗАКАЗ.md §11). Трей так и пишет.`);
     // РУКА ВЛАДЕЛЬЦА СНИМАЕТ БЛОКИРОВКУ ПРЕРЫВАТЕЛЯ. Если прошлое восстановление этого режима
     // умерло вместе с машиной, в журнале лежит осиротевшее намерение, и загрузка больше его не
     // трогает. Владелец, применивший режим ЗАНОВО и своей рукой, тем самым говорит «пробуем ещё» —
@@ -3633,6 +3730,7 @@ async function main(argv) {
     const factory = loadProfileFile(profilePath('factory')).profile;
     const rec = writeRememberedState({ profile: 'factory', title: factory?.title ?? 'заводское состояние', stamp: null });
     console.log(`ЗАПОМНЕНО для автозагрузки: «${rec.profile}» (${REMEMBERED_STATE_PATH})`);
+    writeCardStatus({ profile: 'factory', title: rec.title, untestedDriver: null, error: null });
     return 0;
   }
 

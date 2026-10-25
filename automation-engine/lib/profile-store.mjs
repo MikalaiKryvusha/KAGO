@@ -528,7 +528,7 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
         out.push(refuse('settings.curveRef', `документа кривой «${ref}» нет: профиль ссылается на замер, которого не существует`));
       } else if (Array.isArray(r.problems) && r.problems.length) {
         out.push(refuse('settings.curveRef', `документ кривой «${ref}» сам не проходит валидатор: ${r.problems.slice(0, 3).map((p) => `${p.field} — ${p.why}`).join('; ')}`));
-      } else if (card && r.doc?.stamp && (r.doc.stamp.driver !== card.driver || r.doc.stamp.vbios !== card.vbios)) {
+      } else if (card && r.doc?.stamp && !curveStampUsable(r.doc.stamp, card)) {
         out.push(refuse('settings.curveRef', `кривая «${ref}» снята на драйвере ${r.doc.stamp.driver} / VBIOS ${r.doc.stamp.vbios}, `
           + `а карта сейчас ${card.driver} / ${card.vbios} — по R6 недействительна до перепроверки`));
       }
@@ -571,7 +571,7 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
         out.push(refuse('settings.curveSnapshot', `снимка «${snap}» нет на диске: профиль указывает на заморозку, которой не существует`));
       } else if (Array.isArray(r.problems) && r.problems.length) {
         out.push(refuse('settings.curveSnapshot', `снимок «${snap}» сам не проходит валидатор: ${r.problems.slice(0, 3).map((p) => `${p.field} — ${p.why}`).join('; ')}`));
-      } else if (card && r.doc?.stamp && (r.doc.stamp.driver !== card.driver || r.doc.stamp.vbios !== card.vbios)) {
+      } else if (card && r.doc?.stamp && !curveStampUsable(r.doc.stamp, card)) {
         out.push(refuse('settings.curveSnapshot', `снимок «${snap}» заморозил кривую, снятую на драйвере ${r.doc.stamp.driver} / VBIOS ${r.doc.stamp.vbios}, `
           + `а карта сейчас ${card.driver} / ${card.vbios} — по R6 недействителен до перепроверки`));
       }
@@ -686,19 +686,60 @@ export function validateProfile(profile, { fileName = null, card = null, resolve
 }
 
 /**
+ * R6, РЕДАКЦИЯ 25.10 (`ЗАКАЗ.md` §11, слово владельца: «пытался применить профиль даже на более новый
+ * драйвер … если применение сработало - пусть профиль стоит, но пусть в трее пишет, что не протестировано»).
+ * Сверка одной отметки драйвера с картой — три ответа:
+ *   'same'     — отметка = карта;
+ *   'newer'    — на карте драйвер НОВЕЕ отметки: пробуем, режим стоит «не проверен на драйвере N»;
+ *   'refuse'   — драйвер СТАРЕЕ отметки или номер не читается как версия: отказ, как прежде.
+ * VBIOS сюда не входит — его расхождение остаётся отказом всегда (другая прошивка = другая карта).
+ * Сравнение по числам через точку: «621.01» > «617.42», «610.100» > «610.99».
+ * [NOT-TESTED] на живой карте; самопроверка — блоки «R6 25.10» ниже и в profile-manager.
+ */
+export function driverVerdict(stamped, live) {
+  if (String(stamped) === String(live)) return 'same';
+  const parse = (v) => (/^\d+(\.\d+)*$/u.test(String(v)) ? String(v).split('.').map(Number) : null);
+  const a = parse(stamped);
+  const b = parse(live);
+  if (!a || !b) return 'refuse';
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (y !== x) return y > x ? 'newer' : 'refuse';
+  }
+  return 'same';
+}
+
+/** Документ кривой (опора снимка или рабочий документ) годен для карты: VBIOS тот же, драйвер тот же или новее. */
+export function curveStampUsable(docStamp, card) {
+  if (String(docStamp.vbios) !== String(card.vbios)) return false;
+  return driverVerdict(docStamp.driver, card.driver) !== 'refuse';
+}
+
+/**
+ * Драйвер, на котором профиль НЕ проверен, — или null. Для трея и журнала: режим применён, но доказан
+ * на старшем по времени драйвере (`ЗАКАЗ.md` §11).
+ */
+export function untestedDriverOf(profile, card) {
+  if (isFactoryProfile(profile) || !profile?.stamp?.driver || !card?.driver) return null;
+  return driverVerdict(profile.stamp.driver, card.driver) === 'newer' ? String(card.driver) : null;
+}
+
+/**
  * R6 as a pure function: does this profile's stamp still describe the card in front of us?
  * The applier calls it BEFORE any write and refuses naming the field that differs (P2-AC5).
+ * С 25.10 драйвер НОВЕЕ отметки — не отказ (`driverVerdict`); VBIOS — по-прежнему строго.
  */
 export function checkStamp(profile, card) {
   if (isFactoryProfile(profile)) return [];
   const stamp = profile?.stamp;
   if (!stamp || typeof stamp !== 'object') return [refuse('stamp', 'штампа нет — сверять нечего')];
   const out = [];
-  const pairs = [['driver', card.driver], ['vbios', card.vbios]];
-  for (const [k, live] of pairs) {
-    if (stamp[k] !== undefined && String(stamp[k]) !== String(live)) {
-      out.push(refuse(`stamp.${k}`, `профиль доказан на ${stamp[k]}, карта сейчас ${live} — профиль недействителен до перепроверки (R6)`));
-    }
+  if (stamp.driver !== undefined && driverVerdict(stamp.driver, card.driver) === 'refuse') {
+    out.push(refuse('stamp.driver', `профиль доказан на ${stamp.driver}, карта сейчас ${card.driver} — драйвер старее отметки или не читается, профиль недействителен до перепроверки (R6)`));
+  }
+  if (stamp.vbios !== undefined && String(stamp.vbios) !== String(card.vbios)) {
+    out.push(refuse('stamp.vbios', `профиль доказан на ${stamp.vbios}, карта сейчас ${card.vbios} — профиль недействителен до перепроверки (R6)`));
   }
   return out;
 }
@@ -1103,11 +1144,30 @@ function cmdSelftest() {
       expect: ['settings.powerLimitWatts'],
       alsoMustSay: ['250', '300'],
     },
+    // R6 РЕДАКЦИЯ 25.10 (`ЗАКАЗ.md` §11). Прежний блок брал отметку 595.71 при карте 610.88 — то есть карту
+    // НОВЕЕ отметки, а это с 25.10 по слову владельца не отказ, а «не проверен». Отказ остаётся для карты
+    // СТАРЕЕ отметки (отметка 699.99) — блок разведён на два, и каждый сторожит свою сторону.
     {
-      what: 'штамп с чужого драйвера -> отказ R6 с обеими версиями',
-      profile: (() => { const p = measuredFixture(); p.stamp.driver = '595.71'; return p; })(),
+      what: 'R6 25.10: отметка НОВЕЕ драйвера карты -> отказ с обеими версиями',
+      profile: (() => { const p = measuredFixture(); p.stamp.driver = '699.99'; return p; })(),
       expect: ['stamp.driver'],
-      alsoMustSay: ['595.71', '610.88'],
+      alsoMustSay: ['699.99', '610.88'],
+    },
+    {
+      what: 'R6 25.10: отметка СТАРЕЕ драйвера карты (595.71 при 610.88) -> принят, режим «не проверен»',
+      profile: (() => { const p = measuredFixture(); p.stamp.driver = '595.71'; return p; })(),
+      expect: [],
+    },
+    {
+      what: 'R6 25.10: другой VBIOS при любом драйвере -> отказ',
+      profile: (() => { const p = measuredFixture(); p.stamp.driver = '595.71'; p.stamp.vbios = '98.03.00.00.00'; return p; })(),
+      expect: ['stamp.vbios'],
+    },
+    {
+      what: 'R6 25.10: снимок кривой со старшего драйвера (595.71) -> принят; с младшего (699.99) -> отказ',
+      profile: (() => { const p = measuredFixture(); p.stamp.driver = '595.71'; p.settings.curveRef = null; p.settings.curveRaiseAndCapMhz = null; p.settings.curveSnapshot = '2026-10-17T21-11-39'; return p; })(),
+      resolveSnapshot: () => ({ doc: { stamp: { driver: '699.99', vbios: '98.03.58.40.8b' } }, problems: [] }),
+      expect: ['settings.curveSnapshot'],
     },
     {
       what: 'min больше max -> отказ',
@@ -1419,6 +1479,24 @@ function cmdSelftest() {
       if (unexpected) console.log(`       ожидалось принятие, получены отказы: ${text}`);
       if (wordsMissing.length) console.log(`       в тексте отказа не хватает: ${wordsMissing.join(', ')}`);
       if (text) console.log(`       фактически: ${text}`);
+    }
+  }
+  // ─── R6 25.10 — сравнение версий и «не проверен на драйвере N» (`ЗАКАЗ.md` §11) ────────────────
+  {
+    const cases = [
+      ['driverVerdict 617.42 → 621.01 = newer', driverVerdict('617.42', '621.01'), 'newer'],
+      ['driverVerdict 621.01 → 617.42 = refuse', driverVerdict('621.01', '617.42'), 'refuse'],
+      ['driverVerdict 610.99 → 610.100 = newer (числа, не строки)', driverVerdict('610.99', '610.100'), 'newer'],
+      ['driverVerdict равные = same', driverVerdict('621.01', '621.01'), 'same'],
+      ['driverVerdict не версия = refuse', driverVerdict('beta', '621.01'), 'refuse'],
+      ['untestedDriverOf: карта новее отметки → её драйвер', untestedDriverOf({ name: 'x', mode: 'optimised', stamp: { driver: '617.42' } }, { driver: '621.01' }), '621.01'],
+      ['untestedDriverOf: та же версия → null', untestedDriverOf({ name: 'x', mode: 'optimised', stamp: { driver: '621.01' } }, { driver: '621.01' }), null],
+      ['curveStampUsable: новее и тот же VBIOS → да', curveStampUsable({ driver: '617.42', vbios: 'v' }, { driver: '621.01', vbios: 'v' }), true],
+      ['curveStampUsable: другой VBIOS → нет', curveStampUsable({ driver: '617.42', vbios: 'v' }, { driver: '621.01', vbios: 'w' }), false],
+    ];
+    for (const [what, got, want] of cases) {
+      if (got === want) console.log(`OK   R6 25.10: ${what}`);
+      else { failed++; console.log(`ПРОВАЛ R6 25.10: ${what} — получено ${JSON.stringify(got)}`); }
     }
   }
   // ─── ИНВАРИАНТ ОТГРУЖАЕМЫХ РЕЖИМОВ: ЗАМОК — ГРАНИЦА, А НЕ ПИН (`plans/83` Ш3) ─────────────────
