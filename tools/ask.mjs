@@ -31,7 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTOUR = resolve(ROOT, '.kaif', 'tools', 'contour', 'review.mjs');
 // The same defaults the old contour used (tools/review.mjs:85-86); a machine overrides them by KAGO_VOICE_TOOL / KAGO_VOICE.
-const VOICE_TOOL = process.env.KAGO_VOICE_TOOL || 'F:\\KLAS\\tools\\voice-say.mjs';
+const VOICE_TOOL = process.env.KAGO_VOICE_TOOL || 'F:\\krinik_tts\\voice-say.mjs';
 const VOICE = process.env.KAGO_VOICE || 'eugene';
 
 /** The child's environment: an explicit KAIF_VOICE_TOOL / KAIF_VOICE of the caller wins; otherwise KAGO's voice. */
