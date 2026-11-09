@@ -48,6 +48,8 @@
 | **Engine.ini Conan** | уже правлен другим агентом (резервные копии q6…q8b). **Дальность прорисовки удвоена:** `r.ViewDistanceScale=2.0`, `foliage.LODDistanceScale=2.0`, `grass.CullDistanceScale=2.0`, `r.StaticMeshLODDistanceScale=0.75` **[ФАКТ]** | **это добавляет процессору работы** в игре, которая и так упирается в процессор (§3, строка 2) |
 | Настройки Conan | `DLSSFrameGen=0` (выключено), `NvidiaReflex=1`, лимит 141 FPS, `sg.ViewDistanceQuality=4`, `sg.FoliageQuality=4`, `sg.ShadowQuality=4`; в файле стоит разрешение 1280×720 при оконном полноэкранном режиме **[ФАКТ]** | Frame Generation — самый большой неиспользованный рычаг |
 
+> ✏️ **Поправка 2026-11-09 15:0x (сессия 115):** утверждение строки «Системный A2000» о «старой прошивке с известной ошибкой энергосбережения (APST)» НЕ подтвердилось: описание S5Z42109 в Kingston SSD Manager — только «drive unresponsive on Linux» и «compatibility with Asus Armoury Crate». Прошивка поставлена 09.11 15:05, активна после выключения 15:10 (STATUS).
+
 ---
 
 ## 2. Как читать таблицу

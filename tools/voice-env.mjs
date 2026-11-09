@@ -3,7 +3,7 @@
 // темп 1,08, бас +6 дБ, без среза высоких — всё одним файлом в D:/work/ai_sandbox/tools/silero_tts/say.py (правила — VOICE_RULES.md там же).
 // Владелец: «финальный голос и звук … Вот его бери себе и во все проекты Николая». Контур не играет своих писков (KAIF_VOICE_BEEPS=embedded).
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TTS = process.env.KAGO_VOICE_DIR || 'D:/work/ai_sandbox/tools/silero_tts';
@@ -19,4 +19,10 @@ export function voiceEnv(env = process.env) {
   const out = { ...env };
   for (const [k, v] of Object.entries(VOICE_DEFAULTS)) out[k] = env[k.replace(/^KAIF_/, 'KAGO_')] || v;
   return out;
+}
+
+// Запуск напрямую — показать голос KAGO (библиотека; сторож входа, bugs/95).
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  if (process.argv.slice(2).includes('--help')) { console.log("node tools/voice-env.mjs — print KAGO voice env (library for say.mjs / ask.mjs)"); process.exit(0); }
+  console.log(JSON.stringify({ VOICE_PY, VOICE_SAY, ...VOICE_DEFAULTS }, null, 2));
 }

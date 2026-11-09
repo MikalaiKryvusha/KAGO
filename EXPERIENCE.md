@@ -129,6 +129,18 @@
 
 ## Entries
 
+### EXP-0313 · 2026-11-09 · ❌→✅ · #ram-timings #testmem5 #stability-criterion #bsod #step-size #s2
+class: progress-meter-read-as-done
+mechanized: none — the owner's rule in memory (`long-test-check-every-20-min`) + STATUS criterion line; TM5 has no CLI to read
+**Context:** CPU/RAM tuning of the owner's 5700G with 4×8 GB single-rank (2 DIMMs per channel, unknown ICs).
+**Result:** ❌→✅ (1) 11 secondary timings changed at once → BSOD 0x133 twice, dump corrupt (no culprit); half the step on every timing booted and
+passed — latency 109 → 89–90 ns; (2) I declared TestMem5 «passed» twice when its «Осталось» counter hit 0:00:00 at ~1.7 of the program — the owner
+saw «21 of 31»; the program's real end is the green «Тестирование закончено» (here 2 cycles, 1:47).
+**Lesson:** on 2-DPC boards with unknown chips change timings in half steps, never the whole aggressive set; a stress test passes only on ITS OWN
+end marker (or the cycle counter), never on an estimated-time counter.
+**Trigger:** any memory/CPU stability test the agent stops or reads by eye.
+**Not for:** latency measurements — `tools/mem-latency.mjs` medians were stable to ±1 ns once background load was steady.
+
 ### EXP-0312 · 2026-10-18 · ❌→✅ · #vendor-utility #gcc #boot-apply #fps-steps #foreground #fan-curve #thermal-model #s2
 class: blind-read-as-empty
 mechanized: none — a run discipline (`runs/quiet-card-background-2026-10-18.ps1` · `runs/q2rtx-foreground-2026-10-18.ps1`)

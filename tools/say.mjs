@@ -8,13 +8,21 @@
 // Читать строку «soft voice:» и код выхода (0 — прозвучало). Голосовой вызов запускать фоном (правило 5 VOICE_RULES).
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { voiceEnv, VOICE_PY, VOICE_SAY } from './voice-env.mjs';
 
-const args = process.argv.slice(2);
-const first = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--voice');
-if (!first) { console.error('usage: node tools/say.mjs voice/<stamp>_<meaning>.txt | "<phrase>" --play'); process.exit(1); }
-const isFile = /\.txt$/i.test(first) && existsSync(first);
-const pyArgs = ['-I', VOICE_SAY, ...(isFile ? ['--file', first] : [first])];
-if (args.includes('--no-play')) pyArgs.push('--no-play');
-const r = spawnSync(VOICE_PY, pyArgs, { stdio: 'inherit', env: voiceEnv(), timeout: 180000 });
-process.exit(r.status ?? 3);
+/** Озвучить; argv — аргументы после имени скрипта. Ничего не делает при импорте (сторож входа, bugs/95). */
+export function main(args) {
+  const first = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--voice');
+  if (!first) { console.error('usage: node tools/say.mjs voice/<stamp>_<meaning>.txt | "<phrase>" --play'); return 1; }
+  const isFile = /\.txt$/i.test(first) && existsSync(first);
+  const pyArgs = ['-I', VOICE_SAY, ...(isFile ? ['--file', first] : [first])];
+  if (args.includes('--no-play')) pyArgs.push('--no-play');
+  const r = spawnSync(VOICE_PY, pyArgs, { stdio: 'inherit', env: voiceEnv(), timeout: 180000 });
+  return r.status ?? 3;
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  if (process.argv.slice(2).includes('--help')) { console.log("node tools/say.mjs voice/<YYYY-MM-DD_HH-MM-SS>_<meaning>.txt | \"<phrase>\" --play [--no-play] — KAGO voice (machine say.py, Glass); exit 0 = spoken"); process.exit(0); }
+  process.exit(main(process.argv.slice(2)));
+}

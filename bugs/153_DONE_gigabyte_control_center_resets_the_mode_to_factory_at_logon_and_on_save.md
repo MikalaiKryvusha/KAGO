@@ -1,6 +1,6 @@
 # Bug 153 — GIGABYTE Control Center resets the applied mode to factory (at logon, and on some saves)
 
-**Status:** 🔴 OPEN · **Severity:** S2 (the owner silently runs on factory instead of his mode; no hardware harm)
+**Status:** ✅ DONE 2026-10-18 (GCC removed — see «STATUS: DONE» below) · **Severity:** S2 (the owner silently runs on factory instead of his mode; no hardware harm)
 **Version/build:** KAGO 0.9.3 · driver 617.42 · GCC installed 2026-10-18 08:50 · **When/context:** session 113, 2026-10-18
 **Fixing:** after the owner's choice (keep GCC / drop it from autostart / uninstall) — a decision about HIS app, not ours
 
