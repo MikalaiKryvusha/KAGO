@@ -31,12 +31,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTOUR = resolve(ROOT, '.kaif', 'tools', 'contour', 'review.mjs');
 // The same defaults the old contour used (tools/review.mjs:85-86); a machine overrides them by KAGO_VOICE_TOOL / KAGO_VOICE.
-const VOICE_TOOL = process.env.KAGO_VOICE_TOOL || 'F:\\krinik_tts\\voice-say.mjs';
-const VOICE = process.env.KAGO_VOICE || 'eugene';
+// 2026-11-09: the soft voice (KUMM field settings → KAIF 2.10 №156, voice-soft.mjs): lead silence + beeps + voice in ONE file, the
+// Silero tool of the machine as its renderer. The machine's user environment carries KAIF_VOICE_TOOL=<raw Silero tool> — that one must
+// NOT win here any more (it gave separate beeps, a clipped first tone and a long gap); KAGO_VOICE_TOOL still overrides.
+// One voice for KAGO — tools/voice-env.mjs (also behind tools/say.mjs).
+import { voiceEnv } from './voice-env.mjs';
+const VOICE_TOOL = voiceEnv().KAIF_VOICE_TOOL;
+const VOICE = voiceEnv().KAIF_VOICE;
 
-/** The child's environment: an explicit KAIF_VOICE_TOOL / KAIF_VOICE of the caller wins; otherwise KAGO's voice. */
+/** The child's environment: KAGO's soft voice (embedded beeps, KUMM settings, tempo 0.945). */
 export function contourEnv(env = process.env) {
-  return { ...env, KAIF_VOICE_TOOL: env.KAIF_VOICE_TOOL || VOICE_TOOL, KAIF_VOICE: env.KAIF_VOICE || VOICE };
+  return voiceEnv(env);
 }
 
 const HELP = [

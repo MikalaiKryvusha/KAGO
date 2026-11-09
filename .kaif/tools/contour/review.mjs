@@ -246,6 +246,10 @@ export function signalCall(root, rawPhrase, { quiet = null, log = console.log } 
     } catch { systemVoice(); }
   };
   // Beeps — through the sound card (I34), ASCII command, hard deadline DEF7; then the voice.
+  // KAIF_VOICE_BEEPS=embedded: the voice tool renders lead silence + beeps + voice as ONE file (voice-soft.mjs, KAIF 2.10 №156) —
+  // the contour plays no beeps of its own (backported to KAGO 2026-11-09: the separate beeps got their first tone clipped and left
+  // a long silence while the voice was still rendering; owner: «пики и голос нужно в один файл склеивать… и впереди тишины»).
+  if (process.env.KAIF_VOICE_BEEPS === 'embedded' && process.env.KAIF_VOICE_TOOL) { log('CALL: the voice tool renders the beeps itself (KAIF_VOICE_BEEPS=embedded).'); voice(); return; }
   if (IS_WIN) {
     const beep = spawn('powershell.exe',
       ['-NoProfile', '-Command', '[console]::beep(880,160);[console]::beep(660,160);[console]::beep(990,260)'],
